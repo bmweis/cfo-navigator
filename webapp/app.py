@@ -858,6 +858,54 @@ def _confidence_indicator_html(confident: object) -> str:
             f'Claude confidence: {value}</p>')
 
 
+def _citations_list_html(citations: list, cap: int | None = None, empty_note: str = "") -> str:
+    """Render a field's API-verified citation list (Citations-API grounding
+    fix, Phase 1b — see linklib.citations, linklib.enrich.
+    generate_tool_agent_taxonomy) as a compact "Sources" list of numbered
+    links, matching the visual pattern of FP&A Buddy's own cited-answer
+    source list (`.ask-src-list` on `/tools/fpa-buddy`) — pill-style links,
+    adapted here with inline styles since that CSS class is scoped to the
+    Ask page's own `<style>` block, not sitewide.
+
+    `citations` is the FULL list from Library.get_entity_citations —
+    already deduped by url and in first-use order. `cap`, when given,
+    slices to the first N entries for public display (decision: 5 sources,
+    drop the rest, no "+N more" indicator) — the admin view passes no cap,
+    so a reviewer always sees everything before deciding whether to
+    publish. Renders nothing (not even the "Sources" label) when empty and
+    no `empty_note` is given — a field with zero citations either wasn't
+    grounded at all (low_confidence) or is hand-written text (a human edit
+    clears the sidecar table — see update_tool_agent_taxonomy), and both
+    cases already have their own separate signal without this list also
+    implying something went wrong. `empty_note`, when given, is shown
+    instead of nothing — for the admin view, where explicitly confirming
+    "no citations recorded" is more useful than silence.
+
+    Shared across every field this grounding fix extends to (Agent
+    taxonomy first; Description and Community profile in later phases) —
+    not agent-taxonomy-specific despite shipping alongside it first."""
+    shown = citations[:cap] if cap is not None else citations
+    if not shown:
+        if not empty_note:
+            return ""
+        return (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
+                f'{_esc(empty_note)}</p>')
+    items = "".join(
+        f'<li style="font-size:12px;"><a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener" '
+        f'style="display:inline-flex;align-items:center;gap:5px;background:var(--seafoam-wash);'
+        f'color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;">'
+        f'[{c.get("n")}] {_esc(c.get("title") or c.get("url") or "source")}</a></li>'
+        for c in shown if c.get("url")
+    )
+    if not items:
+        return ""
+    return (f'<div style="margin-top:8px;">'
+            f'<div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;'
+            f'color:var(--muted);margin-bottom:3px;">Sources</div>'
+            f'<ul style="margin:0;padding-left:0;list-style:none;display:flex;flex-wrap:wrap;gap:6px;">'
+            f'{items}</ul></div>')
+
+
 def _ai_drafted_field_names(form) -> set[str]:
     """The submitted ai_drafted_fields hidden input (see markAiDrafted in the
     edit-form JS), parsed into a set of field names — shared by
@@ -6396,6 +6444,9 @@ def tools_software_profile(request: Request, slug: str):
         tool = lib.get_tool_by_slug(slug)
         competitors = lib.list_tool_competitors(tool["id"]) if tool else []
         feature_links = lib.list_tool_feature_links_with_details(tool["id"]) if tool else []
+        agent_taxonomy_citations = (
+            lib.get_entity_citations("tool", tool["id"], "agent_taxonomy") if tool else []
+        )
     finally:
         lib.close()
     if not tool:
@@ -6458,15 +6509,23 @@ def tools_software_profile(request: Request, slug: str):
     agent_taxonomy_block = ""
     _at_note = (tool.get("agent_taxonomy_note") or "").strip()
     _at_unverified = bool(tool.get("agent_taxonomy_needs_verification"))
+    # Public citation list, capped at 5 (first-use order, already deduped
+    # by url) — Citations-API grounding fix, Phase 1b. Shown alongside the
+    # note in both visibility branches below: a signed-in admin deciding
+    # whether to verify an unverified note benefits from seeing sources
+    # too, not just a public visitor once the note is live.
+    _at_citations_html = _citations_list_html(agent_taxonomy_citations, cap=5)
     if _at_note and not _at_unverified:
         agent_taxonomy_block = f"""<div class="tp-card">
   <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy</h2>
   <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
+  {_at_citations_html}
 </div>"""
     elif _at_note and _at_unverified and authed:
         agent_taxonomy_block = f"""<div class="tp-card">
   <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy <span class="tp-verify">unverified&mdash;hidden from visitors until reviewed</span></h2>
   <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
+  {_at_citations_html}
 </div>"""
     elif authed and not _at_note:
         agent_taxonomy_block = _profile_admin_nudge("Agent taxonomy not yet generated.")
@@ -11950,7 +12009,7 @@ def _oc_form_fields(values: dict) -> str:
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="One line describing the piece, shown on its card">
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tag label *</label>
       <input name="tag_label" required maxlength="40" value="{_esc(values.get('tag_label', ''))}"
@@ -11963,8 +12022,6 @@ def _oc_form_fields(values: dict) -> str:
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
         placeholder="e.g. Read the framework">
     </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
       <input name="date_label" maxlength="50" value="{_esc(values.get('date_label', ''))}"
@@ -12012,19 +12069,41 @@ def _oc_form_fields(values: dict) -> str:
   </div>"""
 
 
-def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_label: str) -> str:
+def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_label: str,
+                   show_preview: bool = False) -> str:
     error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
-    return f"""<div class="page page-form">
+    # Preview links to the row's currently-persisted slug (values["slug"] is
+    # sourced straight from the DB row on the normal GET-edit path) — never
+    # an unsaved edit, and never shown on the Add form at all (show_preview
+    # defaults False there), since there's nothing to preview before Save.
+    # Disabled, not hidden, when body_md is blank: a card-metadata-only row
+    # has no /thought-leadership/<slug> page to 404 into, so the link would
+    # be dead — a muted non-link with an explanatory title (same
+    # disabled+title convention as .tool-intro-btn elsewhere) beats either
+    # a broken link or silently vanishing the affordance.
+    if show_preview:
+        if values.get("body_md"):
+            preview_html = (f'<a href="/thought-leadership/{_esc(values.get("slug", ""))}" target="_blank" '
+                             f'rel="noopener" class="btn btn-ghost" style="margin-left:10px;">Preview &rarr;</a>')
+        else:
+            preview_html = ('<span class="btn btn-ghost" style="margin-left:10px;color:var(--muted);'
+                             'border-color:var(--line);cursor:not-allowed;" '
+                             'title="Add body content first — a card-metadata-only piece has no page of its own to preview.">'
+                             'Preview &rarr;</span>')
+    else:
+        preview_html = ""
+    return f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original content</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
-<form method="post" action="{action}" style="display:grid;gap:20px;">
+<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_oc_form_fields(values)}
   <div>
     <button type="submit" class="btn">{_esc(submit_label)}</button>
     <a href="/admin/original-content" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    {preview_html}
   </div>
 </form>
 </div>"""
@@ -12207,7 +12286,7 @@ def admin_original_content_edit(request: Request, item_id: int):
     # the same class of bug CLAUDE.md's "Speaking &amp; Events" fix covers.
     return HTMLResponse(_page(f"Edit {it['title']}—Admin", "",
                               _oc_form_page(f"Edit {it['title']}", f"/admin/original-content/{item_id}/edit",
-                                           values, "", "Save changes"),
+                                           values, "", "Save changes", show_preview=True),
                               authed=True))
 
 
@@ -12223,10 +12302,14 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
             raise HTTPException(status_code=404, detail="Original content piece not found")
 
         def _reject(message: str):
+            # v["slug"] here is the just-submitted (rejected, unsaved) form
+            # value, not necessarily the persisted one — fine in practice,
+            # since a reject only fires when some other field failed
+            # validation, and the common case leaves slug unchanged anyway.
             return HTMLResponse(_page(
                 f"Edit {v['title']}—Admin", "",
                 _oc_form_page(f"Edit {v['title']}", f"/admin/original-content/{item_id}/edit",
-                             v, message, "Save changes"),
+                             v, message, "Save changes", show_preview=True),
                 authed=True), status_code=400)
 
         if not v["title"]:
@@ -14246,6 +14329,8 @@ def _run_tool_research(tool_id: int) -> bool:
                 needs_verification=int(result.agent_taxonomy_needs_verification),
                 ai_confident=int(result.confident),
             )
+            lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
+                                     result.citations, model=result.model)
             wrote_anything = True
         if wrote_anything or result.cost_usd:
             lib.record_enrichment_cost(None, result.model, result.input_tokens,
@@ -14361,6 +14446,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         )
         latest_differentiation_review = (
             lib.get_latest_narrative_review("tool", "differentiation", tool_id) if tool else None
+        )
+        agent_taxonomy_citations = (
+            lib.get_entity_citations("tool", tool_id, "agent_taxonomy") if tool else []
         )
     finally:
         lib.close()
@@ -14702,6 +14790,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
           placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
         {_taxonomy_verify_action}
+        {_citations_list_html(agent_taxonomy_citations,
+                               empty_note="No citations recorded for this draft (hand-written, "
+                                          "or drafted with no page content to ground on).")}
         {_taxonomy_confidence_html}
         {_taxonomy_review_line_html}
       </div>
@@ -18968,14 +19059,16 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 #   - tool_name_dedupe_decisions is Toolbox — Software's duplicate-merge
 #     log; dedupe_decisions (no "tool_name_" prefix) is the unrelated
 #     Library archive-dedupe log and stays under Library/Archive.
-#   - field_reviews, narrative_review_log, and matchmaker_questions are all
-#     genuinely shared between Toolbox — Software and Toolbox —
-#     Communities (field_reviews/narrative_review_log track AI-drafted
-#     narrative fields on both entity types; matchmaker_questions serves
-#     both a software-find quiz and a communities-find quiz via a `kind`
-#     column) — splitting them into either Toolbox bucket would be
-#     arbitrary, so they sit in Site utilities & system alongside the
-#     other audit/log tables instead.
+#   - field_reviews, narrative_review_log, entity_citations, and
+#     matchmaker_questions are all genuinely shared between Toolbox —
+#     Software and Toolbox — Communities (field_reviews/narrative_review_log
+#     track AI-drafted narrative fields on both entity types;
+#     entity_citations holds their API-verified citations the same way,
+#     entity_type='tool' today and 'community' joining in Phase 3;
+#     matchmaker_questions serves both a software-find quiz and a
+#     communities-find quiz via a `kind` column) — splitting any of them
+#     into either Toolbox bucket would be arbitrary, so they sit in Site
+#     utilities & system alongside the other audit/log tables instead.
 _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Users & auth", ["users", "password_reset_requests", "read_later"]),
     ("Toolbox — Software", ["tools", "tool_categories", "tool_leads", "tool_audit_log",
@@ -18994,7 +19087,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
-                                  "narrative_review_log", "matchmaker_questions"]),
+                                  "narrative_review_log", "entity_citations", "matchmaker_questions"]),
 ]
 
 

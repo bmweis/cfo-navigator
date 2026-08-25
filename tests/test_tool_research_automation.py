@@ -379,3 +379,153 @@ def test_edit_page_no_verified_by_line_when_never_verified(env):
     _login(client)
     r = client.get(f"/tools/software/{tool_slug}/edit")
     assert "Verified by" not in r.text
+
+
+# -- Citations-API grounding fix, Phase 1b: entity_citations storage/render -
+
+def test_run_tool_research_persists_citations(env, monkeypatch):
+    """_run_tool_research writes AgentTaxonomyResult.citations to the shared
+    entity_citations table via Library.set_entity_citations."""
+    citations = [{"n": 1, "title": "Homepage", "url": "https://runway.com", "type": "tool_page"}]
+    _mock_generate_tool_agent_taxonomy(monkeypatch, result=enrich.AgentTaxonomyResult(
+        agent_taxonomy_note="Uses an agent called Aura.",
+        agent_taxonomy_needs_verification=False, confident=True,
+        low_confidence=False, citations=citations,
+        model="claude-opus-4-8", input_tokens=500, output_tokens=300, cost_usd=0.02,
+    ))
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.close()
+
+    assert env._run_tool_research(tool_id) is True
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    assert lib.get_entity_citations("tool", tool_id, "agent_taxonomy") == citations
+    lib.close()
+
+
+def test_entity_citations_defaults_empty_when_never_set(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    assert lib.get_entity_citations("tool", tool_id, "agent_taxonomy") == []
+    lib.close()
+
+
+def test_entity_citations_upsert_replaces_not_accumulates(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
+                             [{"n": 1, "title": "Old", "url": "https://old.example", "type": "tool_page"}],
+                             model="claude-opus-4-8")
+    lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
+                             [{"n": 1, "title": "New", "url": "https://new.example", "type": "tool_page"}],
+                             model="claude-opus-4-8")
+    citations = lib.get_entity_citations("tool", tool_id, "agent_taxonomy")
+    assert len(citations) == 1
+    assert citations[0]["url"] == "https://new.example"
+    lib.close()
+
+
+def test_update_tool_agent_taxonomy_clears_stale_citations(env):
+    """A human hand-editing the note (the admin edit-form save path) has no
+    citation trace to keep — entity_citations must clear, not keep pointing
+    at sources for text a person just overwrote."""
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(tool_id, "AI-drafted note.", needs_verification=1)
+    lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
+                             [{"n": 1, "title": "Homepage", "url": "https://runway.com", "type": "tool_page"}],
+                             model="claude-opus-4-8")
+    lib.update_tool_agent_taxonomy(tool_id, "Brian's hand-edited note.")
+    assert lib.get_entity_citations("tool", tool_id, "agent_taxonomy") == []
+    assert lib.get_tool(tool_id)["agent_taxonomy_note"] == "Brian's hand-edited note."
+    lib.close()
+
+
+def test_profile_page_renders_citation_sources_for_verified_note(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Uses an agent called Aura.", needs_verification=0)
+    lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
+                             [{"n": 1, "title": "Homepage", "url": "https://runway.com", "type": "tool_page"}],
+                             model="claude-opus-4-8")
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/{tool_slug}")
+    assert r.status_code == 200
+    assert "Sources" in r.text
+    assert "[1] Homepage" in r.text
+    assert 'href="https://runway.com"' in r.text
+
+
+def test_profile_page_caps_citations_at_five(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Uses several agents.", needs_verification=0)
+    citations = [
+        {"n": i, "title": f"Page {i}", "url": f"https://runway.com/p{i}", "type": "tool_page"}
+        for i in range(1, 8)   # 7 real citations
+    ]
+    lib.set_entity_citations("tool", tool_id, "agent_taxonomy", citations, model="claude-opus-4-8")
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/{tool_slug}")
+    assert r.status_code == 200
+    for i in range(1, 6):
+        assert f"[{i}] Page {i}" in r.text
+    for i in range(6, 8):
+        assert f"[{i}] Page {i}" not in r.text   # dropped, no "+N more" indicator
+
+
+def test_profile_page_no_sources_section_when_no_citations(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Hand-written, no citations.", needs_verification=0)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/{tool_slug}")
+    assert r.status_code == 200
+    assert r.text.count(">Sources<") == 0
+
+
+def test_edit_page_shows_no_citations_recorded_note(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Drafted note.", needs_verification=1)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{tool_slug}/edit")
+    assert "No citations recorded for this draft" in r.text
+
+
+def test_edit_page_shows_full_uncapped_citation_list_next_to_verify_action(env):
+    """Explicit requirement: the admin sees every source on the SAME view as
+    the Mark verified button, before deciding to publish — not truncated
+    the way the public page's 5-source cap is."""
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Drafted note.", needs_verification=1)
+    citations = [
+        {"n": i, "title": f"Page {i}", "url": f"https://runway.com/p{i}", "type": "tool_page"}
+        for i in range(1, 8)   # more than the public 5-source cap
+    ]
+    lib.set_entity_citations("tool", tool_id, "agent_taxonomy", citations, model="claude-opus-4-8")
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{tool_slug}/edit")
+    for i in range(1, 8):
+        assert f"[{i}] Page {i}" in r.text   # all 7, uncapped
+    # Both the citation list and the "Mark verified" action live inside the
+    # same #gen-host-tool-taxonomy block on this one page.
+    taxonomy_block = r.text.split('id="gen-host-tool-taxonomy"')[1].split("</div>\n    </div>")[0]
+    assert "Mark verified" in taxonomy_block
+    assert "[1] Page 1" in taxonomy_block
