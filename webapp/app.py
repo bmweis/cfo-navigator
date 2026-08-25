@@ -11391,6 +11391,27 @@ _OC_HACKATHON_CSS = (
 # viewport is too narrow for one.
 _OC_GER_CSS = (
     '.oc-body .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}'
+    # Post-merge follow-up bug, found live: the wrapper's own inline style
+    # (background:#fff;border:1px solid var(--line);border-radius:12px —
+    # copied verbatim from the retired bespoke page) bounds a white
+    # bordered card with zero padding, meant to fit the table flush against
+    # its edges — but _OC_ARTICLE_CSS's generic `.oc-body table{margin:1.5em
+    # 0}` rule (written for markdown-generated tables, which have no
+    # wrapper of their own to own that spacing) still applies here too,
+    # since `.ger-table`'s own CSS never resets `margin`. The table ends up
+    # sitting 21px inset from the wrapper's border on all four sides,
+    # inside the wrapper's own bounded white box — reading as an
+    # unintentional blank margin, not a design choice, confirmed by
+    # measuring the actual gap (21px, matching the table's computed
+    # margin exactly) rather than guessed at. `.ns-table`'s wrapper never
+    # showed this because it has no background/border of its own to reveal
+    # the same inherited margin against — the gap is identically present
+    # there too, just invisible. Fixed by resetting the table's own margin
+    # to 0, so the wrapper (which already carries the correct outer
+    # spacing via its own `margin:0 0 32px` inline style) is the single
+    # source of the box's outer edge, same as the original bespoke page
+    # before a generic table rule existed to fight it.
+    '.oc-body .ger-table{margin:0;}'
     '.oc-body .ger-table th{background:var(--navy);color:#fff;}'
     '.oc-body .ger-table th:nth-child(1),.oc-body .ger-table td:nth-child(1){white-space:nowrap;width:1%;}'
     '.oc-body .ger-table th:nth-child(2),.oc-body .ger-table td:nth-child(2){white-space:nowrap;}'
