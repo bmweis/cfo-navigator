@@ -1055,6 +1055,35 @@ CREATE TABLE IF NOT EXISTS field_reviews (
     PRIMARY KEY (entity_type, entity_id, field_name)
 );
 
+-- Citations-API grounding fix, Phase 1b (2026-08) — API-verified citations
+-- for an AI-drafted narrative field, shared across entity types/fields
+-- rather than a *_citations column per field (a per-field column would
+-- have needed migrating off when Description/Community profile joined in
+-- Phase 2/3 — see CLAUDE.md's grounding-fix plan). Mirrors field_reviews'
+-- shape immediately above: a composite natural key, upsert-on-write (a
+-- fresh draft REPLACES the row wholesale — this is current state, not an
+-- append-only log the way narrative_review_log is, since there's only
+-- ever one live citation set per field at a time). citations_json holds
+-- the FULL deduped-by-url list, uncapped — a 5-source display cap is
+-- applied only at public-render time (Library.get_entity_citations always
+-- returns everything; the caller slices). model + generated_at are the
+-- generation run reference (no separate run/log table — Brian's explicit
+-- call, since nothing else in this codebase has a run-id concept to
+-- reference instead). entity_type is 'tool' today (Phase 1b: Agent
+-- taxonomy, field_name='agent_taxonomy'); 'community' joins in Phase 3
+-- (one row per community holds the whole shared profile-draft citation
+-- set — field_name='community_profile' — not one row per profile field,
+-- per the "one shared citation set per profile draft" decision).
+CREATE TABLE IF NOT EXISTS entity_citations (
+    entity_type    TEXT NOT NULL,
+    entity_id      INTEGER NOT NULL,
+    field_name     TEXT NOT NULL,
+    citations_json TEXT NOT NULL DEFAULT '[]',
+    model          TEXT NOT NULL DEFAULT '',
+    generated_at   TEXT NOT NULL,
+    PRIMARY KEY (entity_type, entity_id, field_name)
+);
+
 -- Phase G: explicit "Mark verified" audit trail for the *public-facing*
 -- unverified badge on AI-drafted narrative fields (Agent taxonomy note here;
 -- Description, Differentiation, and the Community profile draft join it in
@@ -2679,6 +2708,44 @@ class Library:
             (entity_type, entity_id),
         ).fetchall()
         return {r["field_name"]: {"reviewed_at": r["reviewed_at"], "reviewed_by": r["reviewed_by"]} for r in rows}
+
+    # -- Citations-API grounding fix, Phase 1b — entity_citations ----------------
+    # See that table's schema comment for the full shape/reasoning.
+
+    def set_entity_citations(self, entity_type: str, entity_id: int, field_name: str,
+                              citations: list[dict], model: str = "") -> None:
+        """Upsert the FULL, deduped-by-url citation list for one AI-drafted
+        field — a fresh draft replaces whatever was here before (current
+        state, not an append-only log). `citations` is already deduped/
+        ordered by the caller (linklib.citations.extract_citations does
+        this); a 5-source display cap is applied only at public-render
+        time, never here — this table always holds everything so the admin
+        view can show the full list. Pass an empty list to clear (e.g. a
+        human hand-edited the field and its prior AI citations no longer
+        apply — see update_tool_agent_taxonomy)."""
+        self.conn.execute(
+            """INSERT INTO entity_citations (entity_type, entity_id, field_name, citations_json, model, generated_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(entity_type, entity_id, field_name)
+               DO UPDATE SET citations_json=excluded.citations_json, model=excluded.model,
+                             generated_at=excluded.generated_at""",
+            (entity_type, entity_id, field_name, json.dumps(citations or []), model, _now()),
+        )
+        self.conn.commit()
+
+    def clear_entity_citations(self, entity_type: str, entity_id: int, field_name: str) -> None:
+        """Shorthand for set_entity_citations(..., [], model='') — used
+        wherever a human edit invalidates a field's prior AI citations."""
+        self.set_entity_citations(entity_type, entity_id, field_name, [], model="")
+
+    def get_entity_citations(self, entity_type: str, entity_id: int, field_name: str) -> list[dict]:
+        """The full, uncapped citation list for one field, or [] if it was
+        never grounded (hand-written, or drafted with nothing to cite)."""
+        row = self.conn.execute(
+            "SELECT citations_json FROM entity_citations WHERE entity_type=? AND entity_id=? AND field_name=?",
+            (entity_type, entity_id, field_name),
+        ).fetchone()
+        return json.loads(row["citations_json"]) if row else []
 
     # -- Narrative-field "Mark verified" audit trail (Phase G) — distinct from
     # field_reviews above; see the narrative_review_log schema comment for why
@@ -4451,13 +4518,18 @@ class Library:
         A human editing/saving this field is itself a confirmation, so this
         always clears agent_taxonomy_needs_verification — same convention the
         retired tool_features rows used to follow (editing a row implied
-        review)."""
+        review). Also clears entity_citations (Citations-API grounding fix,
+        Phase 1b) — a hand-typed note has no citation trace to keep, and
+        leaving a prior AI draft's citations attached to text a human just
+        overwrote would misattribute the human's own words as
+        machine-grounded."""
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
             "updated_at=? WHERE id=?",
             (agent_taxonomy_note.strip(), _now(), tool_id),
         )
         self.conn.commit()
+        self.clear_entity_citations("tool", tool_id, "agent_taxonomy")
 
     def set_tool_agent_taxonomy_draft(self, tool_id: int, agent_taxonomy_note: str,
                                       needs_verification: int = 1,

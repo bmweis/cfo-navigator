@@ -351,6 +351,7 @@ Cost figures are computed from **real API token usage** at call time
 | `community_gap_submissions` | Gap-collection (Phase 5): the native replacement for the old `/community` page's Google Form, folded into the live directory rather than a separate parked page. Submitted at `POST /tools/communities/gap`, triaged at `/admin/community-gaps` (mirrors `/admin/ask-feedback`'s layout). No login required — anyone can submit. Also doubles (Phase 7) as the log for every completed Recommender quiz at `/tools/communities/find` — same table, distinguished by `submission_type` rather than a second table, since a zero/thin recommender result is the same kind of gap signal as a zero-result directory search. Doubles a third way (best-fit weighting) for the quiz's optional "What matters most to you?" step: a visitor's checked values, logged only when they set at least one (never on a skip), for Brian's own aggregate insight into what finance leaders say matters most — not shown to other visitors. Doubles a fourth way as the per-listing correction report from `POST /tools/communities/correct`, since it's the same kind of free-text triage signal, just about factual accuracy on one specific listing rather than a gap in the directory. | `current_communities`/`gaps`/`looking_for` (free text, the visitor's own words — always `''` on a `submission_type='recommender'` or `'weight_preferences'` row, since neither collects free text; on a `'correction'` row, only `gaps` is populated, holding the correction report itself), `search_context_json` (on a `'gap'` row: directory search/filter state at submission time, built client-side from JS-only filter state and carried through a hidden form field; on a `'recommender'` row: the quiz answers plus `result_count`; on a `'weight_preferences'` row: `{"weights": {dimension_key: [chosen values]}}`; always `''` on a `'correction'` row, since it isn't a directory search), `viewed_community_ids_json` (server-computed at submission from `community_profile_views`, not client-supplied), `closest_community_id` (nullable, no FK — always `NULL` on a recommender/weight_preferences row; always populated on a `'correction'` row, since a correction is always about one specific listing), `email` (nullable), `reviewed`, `submission_type` (added by migration — `'gap'`\|`'recommender'`\|`'weight_preferences'`\|`'correction'`, defaults `'gap'` so every pre-existing row keeps its meaning) |
 | `community_profile_views` | Session-scoped, no-login view tracking for `/tools/communities/{slug}`: which profile pages a visitor opened before (maybe) submitting the gap form above. Keyed by an anonymous `cfo_visitor` cookie (`webapp/app.py`, 30-day TTL, not signed — the first anonymous-session primitive in the codebase; everything else, e.g. `read_later`, requires a logged-in `user_id`). No cleanup job for stale sessions yet — rows are small and carry no PII. | `session_id` + `community_id` (composite PK, dedups repeat views), `viewed_at` |
 | `field_reviews` | Review-status audit trail for every AI-drafted field on Software/Communities profiles — the standing principle that AI drafts a first pass into the edit form and nothing publishes without Brian reviewing and saving it. One generic table rather than a `{field}_reviewed_at`/`_by` column pair per field, since there are 15+ generatable fields across two record types (Software's `description`/`summary`/`competitive_differentiation`, Communities' full narrative profile) and more likely to come later. Written by `Library.record_field_review`, called from an edit-submit route whenever the submitted form's `ai_drafted_fields` hidden input names a field — that input is populated client-side by `markAiDrafted()` inside each Generate button's success handler (`_MARK_AI_DRAFTED_JS`, shared across every generate-button script), never inferred from content after the fact. Read by `Library.list_field_reviews` for a future "last reviewed" admin display. Cleaned up on delete alongside `tools`/`communities` rows, no SQL-level FK (same pattern as `community_profiles`). | `entity_type` (`'tool'`\|`'community'`), `entity_id`, `field_name` (composite PK), `reviewed_at`, `reviewed_by` (stored even though there's only one admin today, so the schema doesn't need revisiting if that changes) |
+| `entity_citations` | Citations-API grounding fix, Phase 1b (2026-08) — the API-verified citation set for one AI-drafted, grounded field, shared across entity types/fields rather than a `*_citations` column per field (a per-field column would have needed migrating off when Description/Community profile joined in Phase 2/3). Composite natural key, upsert-on-write (current state, not an append-only log the way `narrative_review_log` is — a fresh draft replaces the row wholesale). `citations_json` always holds the FULL deduped-by-url list, uncapped; a 5-source display cap is a render-time-only slice (`webapp.app._citations_list_html(cap=5)` on the public profile page; the admin edit page passes no cap, rendered next to the "Mark verified" action so a reviewer sees every source before publishing). Written by `Library.set_entity_citations` (direct write, not COALESCE'd — a fresh draft's citations always replace a stale prior draft's) from `webapp.app._run_tool_research` alongside every fresh `agent_taxonomy_note` draft; cleared by `Library.clear_entity_citations`, called from `update_tool_agent_taxonomy` when a human hand-edits the field (no citation trace to keep). `entity_type='tool'`/`field_name='agent_taxonomy'` today; `'community'`/`'community_profile'` joins in Phase 3 as one shared row per profile draft (not per-field), per the "one shared citation set per profile" decision. | `entity_type`, `entity_id`, `field_name` (composite PK), `citations_json` (`[{n, title, url, type}]`, `'[]'` default), `model` + `generated_at` (the generation run reference — no separate run/log table, since nothing else in this codebase has a run-id concept to reference instead) |
 **Phase P column rename.** `tools.differentiation_note`/`differentiation_needs_verification`
 were renamed to `competitive_differentiation`/`competitive_differentiation_needs_verification`
 (the table above already reflects the new names) to match the Software edit
@@ -1816,8 +1817,72 @@ Details worth knowing:
   that can't accept inline `[n]` markers in its output: `enrich.py`'s
   Agent taxonomy grounding fix (Phase 1b, not yet built) drafts strict
   JSON, where splicing a marker into a field value would corrupt the
-  parse — see that module's docstring. Nothing in `enrich.py` imports this
-  module yet.
+  parse — see that module's docstring.
+- **Agent taxonomy grounding fix, Phase 1b (2026-08) — the first real
+  `enrich.py` caller of `linklib/citations.py`.**
+  `generate_tool_agent_taxonomy` no longer flattens
+  `_fetch_taxonomy_grounding`'s fetched pages into one plain-text prompt
+  string; each page now rides as its own real Citations-API `document`
+  block (`linklib.citations.make_document_block`, `sent_docs[i]["type"] =
+  "tool_page"`). The model's `document_index` citations are mechanically
+  verified by the API, not self-reported the way `confident` still is —
+  the two are independent facts, same relationship
+  `agent_taxonomy_ai_confident` already has to
+  `agent_taxonomy_needs_verification`. **Settles Phase 1a's open
+  `inject_markers` question**: this response is strict JSON
+  (`{"summary": ..., "confident": ...}`), and the Citations API is
+  explicitly documented as incompatible with structured output (`output_
+  config.format`, 400 error) — confirmed against current Anthropic docs
+  before building, not assumed — and mechanically has no attachment point
+  on a `tool_use.input` field either (citations only ever attach to `text`
+  content blocks). So `extract_citations(..., inject_markers=False)` is
+  used here: the concatenated raw text comes back completely untouched
+  (safe to `json.loads()`), while the citation list is still collected
+  separately — deterministic parsing, not a second model call (a second
+  pass would just reintroduce self-reported citations under a different
+  name).
+  **Storage: one shared `entity_citations` table, not a per-field column**
+  — `entity_type`/`entity_id`/`field_name` composite key (mirrors
+  `field_reviews`' shape), `citations_json` (the FULL deduped-by-url list,
+  UNCAPPED — a display cap is applied only at render time, never in
+  storage), `model` + `generated_at` as the generation run reference (no
+  separate run/log table — deliberate call, since nothing else in this
+  codebase has a run-id concept to hang one off of). Chosen over a
+  `tools.agent_taxonomy_citations` column specifically so Phase 2
+  (Description) and Phase 3 (Community profile) don't have to migrate off
+  a per-field column later — every future grounded field reuses the same
+  table with a different `field_name`. `Library.set_entity_citations`
+  writes directly (not COALESCE'd, unlike `agent_taxonomy_ai_confident`) —
+  a fresh draft's citations should always replace a stale prior draft's,
+  never blend with it. `Library.update_tool_agent_taxonomy` (the human
+  hand-edit path) calls `clear_entity_citations` — a hand-typed note has
+  no citation trace to keep, and leaving a prior AI draft's sources
+  attached to text a person just overwrote would misattribute the human's
+  own words as machine-grounded.
+  **Rendering, and the standing review-gate rule**: citations never
+  bypass the existing review gate — they only ever render alongside the
+  note in whichever visibility branch the note itself is already in
+  (verified → public; unverified/low-confidence → admin-only, same
+  publish gate the Abacum-fix bullet above describes). Public profile
+  page (`/tools/software/{slug}`'s Agent taxonomy card): a "Sources" list
+  capped at 5 (first-use order, already deduped by url — decision:
+  truncate silently, no "+N more" indicator). Admin edit page
+  (`/tools/software/{slug}/edit`): the FULL uncapped list, rendered inside
+  the same `#gen-host-tool-taxonomy` block as the "Mark verified"
+  button/badge — an explicit requirement, confirmed before building rather
+  than assumed, since a reviewer deciding whether to publish needs to see
+  every source, not just the 5 a visitor would eventually see.
+  `webapp/app.py`'s `_citations_list_html(citations, cap=None,
+  empty_note="")` is the one shared renderer for both call sites (and every
+  future grounded field) — `cap=5` on the public page, no cap on the admin
+  page, matching FP&A Buddy's own cited-answer source-list visual pattern
+  (`.ask-src-list`) adapted with inline styles since that CSS class is
+  scoped to the Ask page's own `<style>` block, not sitewide.
+  Description (Phase 2) and Community profile (Phase 3, one shared
+  citation set per profile draft rather than per-field) are next;
+  Competitive differentiation stays deferred (Phase 4) pending a decision
+  on whether it gains real fetched competitor content to ground on, since
+  today it has none.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything
