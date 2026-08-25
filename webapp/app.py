@@ -3489,7 +3489,7 @@ def finops_ai_hackathon(request: Request):
 
 <div class="tool-prose">
 <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Playbook</p>
-<h1 style="margin:0 0 8px;">Sail, Don't Row</h1>
+<h1 style="margin:0 0 8px;">Sail, don't row</h1>
 <p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">A playbook for running an AI hackathon with your finance team</p>
 <p style="color:var(--muted);font-size:14px;margin:0 0 36px;">By Brian Weisberg &middot; June 2026</p>
 
@@ -3788,7 +3788,7 @@ def finops_ai_hackathon(request: Request):
 </div>
 
 </div>"""
-    return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Sail, don't row: AI hackathon playbook—Brian Weisberg", "Thought leadership", body, role=_role(request)))
 
 
 @app.get("/netsuite-mcp")
@@ -6049,8 +6049,8 @@ async def library_submit(request: Request):
 _TOOLBOX_TILES = (
     ("/tools/software", "Software", _ICON_WRENCH,
      "A searchable, filterable directory of the software high-growth finance teams actually "
-     "use&mdash;try the Software Matchmaker if you&rsquo;re not sure where to start, plus a Warm "
-     "Intro button for the vendors I know well.",
+     "use&mdash;try the Software matchmaker if you&rsquo;re not sure where to start, plus a warm "
+     "intro button for the vendors I know well.",
      "The software high-growth finance teams actually use."),
     ("/tools/resources", "Resources", _ICON_CHART,
      "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks "
@@ -6058,7 +6058,7 @@ _TOOLBOX_TILES = (
      "The benchmarking sources I actually rely on."),
     ("/tools/communities", "Communities", _ICON_PEOPLE,
      "CFO and finance communities worth joining: peer groups, associations, and Slack "
-     "channels&mdash;searchable and filterable, with a Community Matchmaker if you&rsquo;re unsure "
+     "channels&mdash;searchable and filterable, with a Community matchmaker if you&rsquo;re unsure "
      "which one fits.",
      "CFO and finance communities worth joining."),
     ("/tools/fpa-buddy", "FP&amp;A Buddy", _ICON_BRAIN,
@@ -6216,9 +6216,9 @@ def tools_directory(request: Request, warn: str = ""):
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
 Not sure which tool's for you? {(
-    '<a href="/tools/software/find" style="font-weight:500;">Software Matchmaker &rarr;</a>'
+    '<a href="/tools/software/find" style="font-weight:500;">Software matchmaker &rarr;</a>'
     if is_member else
-    '<a href="/login?next=%2Ftools%2Fsoftware%2Ffind" style="font-weight:500;">Sign in for access to Software Matchmaker &rarr;</a>'
+    '<a href="/login?next=%2Ftools%2Fsoftware%2Ffind" style="font-weight:500;">Sign in for access to Software matchmaker &rarr;</a>'
 )}</p>
 
 <input id="tool-search" type="search" placeholder="Search tools…"
@@ -6949,7 +6949,7 @@ def tools_software_find(request: Request):
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
-<h1 style="margin-bottom:6px;">Software Matchmaker</h1>
+<h1 style="margin-bottom:6px;">Software matchmaker</h1>
 <p style="color:var(--muted);margin:0 0 24px;">Tell us what you're trying to solve and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
 
 <div id="mm-thread"></div>
@@ -7120,7 +7120,7 @@ document.addEventListener('keydown', function(e) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
 });
 </script>"""
-    resp = HTMLResponse(_page("Software Matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page("Software matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
     _set_visitor_cookie(request, resp, session_id)
     return resp
 
@@ -7781,9 +7781,9 @@ def tools_communities(request: Request):
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
 groups, associations, and Slack channels. Not sure which community's for you? {(
-    '<a href="/tools/communities/find" style="font-weight:500;">Community Matchmaker &rarr;</a>'
+    '<a href="/tools/communities/find" style="font-weight:500;">Community matchmaker &rarr;</a>'
     if is_member else
-    '<a href="/login?next=%2Ftools%2Fcommunities%2Ffind" style="font-weight:500;">Sign in for access to Community Matchmaker &rarr;</a>'
+    '<a href="/login?next=%2Ftools%2Fcommunities%2Ffind" style="font-weight:500;">Sign in for access to Community matchmaker &rarr;</a>'
 )}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
@@ -8647,7 +8647,7 @@ def tools_communities_find(request: Request):
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
-<h1 style="margin-bottom:6px;">Community Matchmaker</h1>
+<h1 style="margin-bottom:6px;">Community matchmaker</h1>
 <p style="color:var(--muted);margin:0 0 24px;">Tell us what you're looking for and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
 
 <div id="mm-thread"></div>
@@ -8818,7 +8818,7 @@ document.addEventListener('keydown', function(e) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
 });
 </script>"""
-    resp = HTMLResponse(_page("Community Matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page("Community matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
     _set_visitor_cookie(request, resp, session_id)
     return resp
 
@@ -11751,7 +11751,7 @@ _TL_FEATURED_CARDS = (
      "calculator.",
      "Read the framework"),
     ("/thought-leadership/ai-hackathon-playbook", "Playbook", "var(--seafoam-deep)",
-     "Sail, Don&rsquo;t Row",
+     "Sail, don&rsquo;t row",
      "How to run an AI hackathon with your finance team&mdash;the full format, facilitation mechanics, and "
      "how to make it stick.",
      "Read the playbook"),

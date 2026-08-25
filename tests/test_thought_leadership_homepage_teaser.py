@@ -51,7 +51,7 @@ def test_homepage_has_one_consolidated_thought_leadership_section(env):
     assert 'href="/thought-leadership"' in html
     # The 3 flagship pieces, using the shared _tl_fcard/.tl-card treatment.
     assert "The Growth Engine Ratio" in html
-    assert "Sail, Don&rsquo;t Row" in html
+    assert "Sail, don&rsquo;t row" in html
     assert "Connecting Claude to NetSuite" in html
     assert 'class="tl-card"' in html
     # Sail Don't Row correction: real playbook copy/link, not the design

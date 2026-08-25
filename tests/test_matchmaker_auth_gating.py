@@ -57,7 +57,7 @@ def test_software_matchmaker_link_gated_signed_out(env):
     c = _client(env)
     html = c.get("/tools/software").text
     assert 'href="/login?next=%2Ftools%2Fsoftware%2Ffind"' in html
-    assert "Sign in for access to Software Matchmaker" in html
+    assert "Sign in for access to Software matchmaker" in html
     assert 'href="/tools/software/find"' not in html
 
 
@@ -72,7 +72,7 @@ def test_community_matchmaker_link_gated_signed_out(env):
     c = _client(env)
     html = c.get("/tools/communities").text
     assert 'href="/login?next=%2Ftools%2Fcommunities%2Ffind"' in html
-    assert "Sign in for access to Community Matchmaker" in html
+    assert "Sign in for access to Community matchmaker" in html
     assert 'href="/tools/communities/find"' not in html
 
 

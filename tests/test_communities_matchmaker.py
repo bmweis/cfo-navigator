@@ -106,7 +106,7 @@ def test_find_page_renders_without_login(env):
     c = _client(appmod)
     r = c.get("/tools/communities/find")
     assert r.status_code == 200
-    assert "Community Matchmaker" in r.text
+    assert "Community matchmaker" in r.text
     assert "cfo_visitor" not in r.text  # cookie is httponly, never in the page body
 
 
