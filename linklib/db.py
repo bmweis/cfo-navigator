@@ -4277,7 +4277,19 @@ class Library:
                  approved: int = 0, advisor: int = 0,
                  promoted: int = 0, vendor_email: str = "",
                  warm_intro_enabled: int = 0, vendor_name: str = "",
-                 summary: str = "") -> int:
+                 summary: str = "",
+                 description_needs_verification: int = 0,
+                 description_ai_confident: Optional[int] = None) -> int:
+        # description_needs_verification/description_ai_confident (Citations-API
+        # grounding fix, Phase 2): a brand-new tool created straight from a
+        # Generate-description draft used to have no way to record either —
+        # add_tool() simply didn't accept them, so a fresh AI draft on the
+        # "Add software" form silently landed as needs_verification=0/
+        # ai_confident=NULL regardless of what the model actually reported.
+        # Default 0/None (not drafted) so every OTHER existing caller
+        # (public /tools/submit, seed scripts, tests) is unaffected — only
+        # the admin new-tool submit route passes an explicit value, mirroring
+        # update_tool's own explicit-int convention at its one real caller.
         dup = self._find_tool_by_normalized_url(url)
         if dup:
             raise DuplicateURLError("software entry", dup["id"], dup["name"], dup["slug"])
@@ -4298,12 +4310,13 @@ class Library:
         cur = self.conn.execute(
             """INSERT INTO tools (name, slug, description, url, categories_json,
                approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email,
-               warm_intro_enabled, vendor_name, summary)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               warm_intro_enabled, vendor_name, summary,
+               description_needs_verification, description_ai_confident)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, description.strip(), url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
              promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip(),
-             summary.strip()),
+             summary.strip(), description_needs_verification, description_ai_confident),
         )
         self.conn.commit()
         return cur.lastrowid

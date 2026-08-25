@@ -216,6 +216,7 @@ class ToolDescriptionDraft:
     summary: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
     confident: bool = False   # the model's own self-reported certainty (see prompt above)
+    citations: list = field(default_factory=list)   # Citations-API grounding fix, Phase 2
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -230,7 +231,18 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
     grounding; when that fetch comes back empty, `low_confidence=True`
     flags the draft as based on the model's own knowledge rather than the
     live page, so the caller can warn whoever reviews it. Never infers
-    acquisition status — see rule 4 above."""
+    acquisition status — see rule 4 above.
+
+    Citations-API grounding fix, Phase 2: single-page grounding (unlike
+    Agent taxonomy's multi-page nav crawl) — the one fetched page, when
+    non-empty, rides as a real Citations-API `document` block instead of
+    being flattened into the prompt, so `citations` reflects what the
+    model actually cited, mechanically verified by the API. `confident`
+    is a separate, independently-checkable self-report, as before.
+    `inject_markers=False` since this response is strict JSON — see
+    generate_tool_agent_taxonomy's docstring for why. `citations` is empty
+    when the fetch failed (`low_confidence=True`), since there's nothing
+    to cite."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -241,11 +253,22 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
     from . import extract
     page = extract.fetch_page(url)
     low_confidence = not bool(page.content.strip())
-    content_block = (
-        f"Page content (fetched from the URL):\n{page.content[:15000]}" if not low_confidence
-        else "(Could not fetch page content — draft from your own knowledge of this "
-             "company/product if you have it, keeping to the rules above.)"
-    )
+    doc_blocks: list[dict] = []
+    sent_docs: list[dict] = []
+    if low_confidence:
+        content_block = ("(Could not fetch page content — draft from your own knowledge of this "
+                          "company/product if you have it, keeping to the rules above.)")
+    else:
+        content_block = ""
+        body = page.content.strip()[:15000]
+        doc_blocks.append(make_document_block(name, body))
+        sent_docs.append({"title": name, "url": url, "type": "tool_page"})
+
+    prompt = _TOOL_DESC_PROMPT.format(name=name, url=url, content_block=content_block)
+    # Documents (when any) ride first, the drafting instructions last — same
+    # ordering as generate_tool_agent_taxonomy, so citations resolve against
+    # what was actually sent.
+    message_content = (doc_blocks + [{"type": "text", "text": prompt}]) if doc_blocks else prompt
 
     try:
         client = Anthropic()
@@ -253,10 +276,10 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
             model=model,
             max_tokens=_checked_max_tokens(1600),  # room for an 8-12 sentence description, plus
                               # headroom for Opus 5's on-by-default adaptive thinking
-            messages=[{"role": "user",
-                       "content": _TOOL_DESC_PROMPT.format(name=name, url=url, content_block=content_block)}],
+            messages=[{"role": "user", "content": message_content}],
         )
-        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        # inject_markers=False: strict JSON — see generate_tool_agent_taxonomy.
+        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=False)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
 
@@ -272,7 +295,7 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
             description=str(data.get("description", "")).strip(),
             summary=str(data.get("summary", "")).strip(),
             low_confidence=low_confidence, confident=bool(data.get("confident")),
-            model=model,
+            citations=citations, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:
