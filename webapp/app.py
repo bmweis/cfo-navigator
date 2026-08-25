@@ -11950,7 +11950,7 @@ def _oc_form_fields(values: dict) -> str:
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="One line describing the piece, shown on its card">
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tag label *</label>
       <input name="tag_label" required maxlength="40" value="{_esc(values.get('tag_label', ''))}"
@@ -11963,8 +11963,6 @@ def _oc_form_fields(values: dict) -> str:
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
         placeholder="e.g. Read the framework">
     </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
       <input name="date_label" maxlength="50" value="{_esc(values.get('date_label', ''))}"
@@ -12012,19 +12010,41 @@ def _oc_form_fields(values: dict) -> str:
   </div>"""
 
 
-def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_label: str) -> str:
+def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_label: str,
+                   show_preview: bool = False) -> str:
     error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
-    return f"""<div class="page page-form">
+    # Preview links to the row's currently-persisted slug (values["slug"] is
+    # sourced straight from the DB row on the normal GET-edit path) — never
+    # an unsaved edit, and never shown on the Add form at all (show_preview
+    # defaults False there), since there's nothing to preview before Save.
+    # Disabled, not hidden, when body_md is blank: a card-metadata-only row
+    # has no /thought-leadership/<slug> page to 404 into, so the link would
+    # be dead — a muted non-link with an explanatory title (same
+    # disabled+title convention as .tool-intro-btn elsewhere) beats either
+    # a broken link or silently vanishing the affordance.
+    if show_preview:
+        if values.get("body_md"):
+            preview_html = (f'<a href="/thought-leadership/{_esc(values.get("slug", ""))}" target="_blank" '
+                             f'rel="noopener" class="btn btn-ghost" style="margin-left:10px;">Preview &rarr;</a>')
+        else:
+            preview_html = ('<span class="btn btn-ghost" style="margin-left:10px;color:var(--muted);'
+                             'border-color:var(--line);cursor:not-allowed;" '
+                             'title="Add body content first — a card-metadata-only piece has no page of its own to preview.">'
+                             'Preview &rarr;</span>')
+    else:
+        preview_html = ""
+    return f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original content</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
-<form method="post" action="{action}" style="display:grid;gap:20px;">
+<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;">
 {_oc_form_fields(values)}
   <div>
     <button type="submit" class="btn">{_esc(submit_label)}</button>
     <a href="/admin/original-content" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    {preview_html}
   </div>
 </form>
 </div>"""
@@ -12207,7 +12227,7 @@ def admin_original_content_edit(request: Request, item_id: int):
     # the same class of bug CLAUDE.md's "Speaking &amp; Events" fix covers.
     return HTMLResponse(_page(f"Edit {it['title']}—Admin", "",
                               _oc_form_page(f"Edit {it['title']}", f"/admin/original-content/{item_id}/edit",
-                                           values, "", "Save changes"),
+                                           values, "", "Save changes", show_preview=True),
                               authed=True))
 
 
@@ -12223,10 +12243,14 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
             raise HTTPException(status_code=404, detail="Original content piece not found")
 
         def _reject(message: str):
+            # v["slug"] here is the just-submitted (rejected, unsaved) form
+            # value, not necessarily the persisted one — fine in practice,
+            # since a reject only fires when some other field failed
+            # validation, and the common case leaves slug unchanged anyway.
             return HTMLResponse(_page(
                 f"Edit {v['title']}—Admin", "",
                 _oc_form_page(f"Edit {v['title']}", f"/admin/original-content/{item_id}/edit",
-                             v, message, "Save changes"),
+                             v, message, "Save changes", show_preview=True),
                 authed=True), status_code=400)
 
         if not v["title"]:
