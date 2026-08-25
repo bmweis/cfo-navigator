@@ -2549,6 +2549,40 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   (`test_growth_engine_ratio_table_wrap_has_no_visible_gap`) asserting the
   fixed CSS rule renders in the response.
 
+- **Original Content admin — width fix + Preview link.** `/admin/original-content/{id}/edit`
+  (and `/admin/original-content/new`) rendered in `.page-form` (640px) — the
+  same tier used for one-column public-facing forms like `/contact` — even
+  though every other admin data-management page (`/admin/tools/software`,
+  `/admin/original-content`'s own list view) uses the wider `.page-admin`
+  (1500px). Investigated first: the list page itself was already correctly on
+  `.page-admin` — only the add/edit form was narrow, contrary to this task's
+  initial premise that both pages needed the fix. Switched the form page to
+  `.page-admin` too, with the `<form>` element itself capped at
+  `max-width:900px` so single-line inputs (Title, Slug, Teaser) don't stretch
+  to the full 1500px container — the width discipline here is "match the
+  page shell" rather than "let text inputs run the full container." With that
+  headroom, the two separate 2-column field grids (Tag label/Link label, then
+  Date label/Display order) merged into a single
+  `repeat(auto-fit,minmax(190px,1fr))` row (not a hardcoded `repeat(4,1fr)`,
+  per the standing CSS-Grid-blowout lesson — Phase P above) — all four fields
+  render on one line at desktop width and collapse gracefully on narrower
+  viewports. A "Preview →" link/button was added next to Save/Cancel on the
+  edit form only (never the Add form — `_oc_form_page`'s new `show_preview`
+  parameter defaults `False`), linking to `/thought-leadership/{slug}` (the
+  row's currently-persisted slug, not an unsaved edit) with `target="_blank"`
+  — no new rendering logic needed, since Phase 2's `GET /thought-leadership/{slug}`
+  route already serves a `status='draft'` row at its canonical URL for an
+  active admin session. When `body_md` is blank (a card-metadata-only row,
+  which 404s at that route per Phase 2's own guard), the link renders instead
+  as a disabled, non-clickable `<span>` with a `title` tooltip explaining why
+  — same `.tool-intro-btn:disabled` muted-color/`cursor:not-allowed`
+  convention used elsewhere, chosen over hiding the affordance entirely so an
+  admin editing a metadata-only row still sees the option exists and why it's
+  off. Verified live: 4-field row confirmed on one line via matching
+  `getBoundingClientRect()` y-coordinates; Preview link's `href`/`target`
+  confirmed correct for a row with body content; the disabled state's `title`
+  text confirmed correct for a row without.
+
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On
   `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat
