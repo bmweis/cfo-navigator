@@ -63,6 +63,25 @@ def env(monkeypatch):
             fah_row["link_label"], _FAH_BODY_MD, "live", fah_row["featured_home"],
             _FAH_DATE_LABEL, _sort_key(_FAH_DATE_LABEL), fah_row["display_order"],
         )
+    # /thought-leadership/growth-engine-ratio — same situation, same fix, as
+    # of Original Content Phase 4c (its own bespoke route retired; the live
+    # calculator moved to the new standalone
+    # /thought-leadership/growth-engine-calculator route, which needs no DB
+    # row at all — it stays a bespoke Python route, so it's already 200
+    # with no seeding, same as any other hand-built page).
+    from scripts.migrate_growth_engine_ratio_content import BODY_MD as _GER_BODY_MD, DATE_LABEL as _GER_DATE_LABEL
+    ger_row = lib.get_original_content_by_slug("growth-engine-ratio")
+    if ger_row is None:
+        lib.add_original_content("growth-engine-ratio", "The Growth Engine Ratio",
+                                 tag_label="Framework", link_label="Read the framework",
+                                 body_md=_GER_BODY_MD, status="live", featured_home=True,
+                                 date_label=_GER_DATE_LABEL, sort_key=_sort_key(_GER_DATE_LABEL))
+    else:
+        lib.update_original_content(
+            ger_row["id"], ger_row["slug"], ger_row["title"], ger_row["teaser"], ger_row["tag_label"],
+            ger_row["link_label"], _GER_BODY_MD, "live", ger_row["featured_home"],
+            _GER_DATE_LABEL, _sort_key(_GER_DATE_LABEL), ger_row["display_order"],
+        )
     lib.close()
     yield appmod
     if os.path.exists(db):
@@ -96,6 +115,7 @@ PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           # this static 200-only list — covered separately in
           # tests/test_community_profiles.py.
           "/thought-leadership/growth-engine-ratio",
+          "/thought-leadership/growth-engine-calculator",
           "/thought-leadership/netsuite-mcp",
           "/thought-leadership/ai-hackathon-playbook",
           # Sail, Don't Row is fully playable signed-out, and the per-rank

@@ -210,30 +210,49 @@ def test_double_hyphen_slug_rejected(env):
     assert "lowercase letters" in r.text
 
 
-@pytest.mark.parametrize("reserved", ["growth-engine-ratio"])
-def test_slug_colliding_with_bespoke_route_rejected(env, reserved):
+def test_no_reserved_slugs_remain(env):
+    """Original Content Phase 4c retired growth-engine-ratio's bespoke
+    route — the last of the three original bespoke /thought-leadership/*
+    pieces (netsuite-mcp in 4a, ai-hackathon-playbook in 4b,
+    growth-engine-ratio in 4c). _OC_RESERVED_SLUGS is now genuinely empty;
+    the parametrized test_slug_colliding_with_bespoke_route_rejected this
+    test replaces had no reserved slug left to parametrize against, so it
+    was removed rather than left with an empty parametrize list."""
+    import webapp.app as appmod
+    assert appmod._OC_RESERVED_SLUGS == set()
+
+
+def test_growth_engine_calculator_not_reserved(env):
+    """The new standalone /thought-leadership/growth-engine-calculator
+    route (Phase 4c) was never part of the original_content system and
+    never will be — there's no slug collision to guard against, so it's
+    deliberately NOT added to _OC_RESERVED_SLUGS. An admin creating a piece
+    with this exact slug succeeds normally (it just won't be reachable at
+    /thought-leadership/growth-engine-calculator, since that URL is served
+    by the standalone bespoke route, not the catch-all — a real but
+    accepted quirk, not something this form is responsible for guarding
+    against)."""
     c = _admin_client(env)
     form = dict(VALID_FORM)
-    form["slug"] = reserved
-    r = c.post("/admin/original-content/new", data=form)
-    assert r.status_code == 400
-    assert "own page paths" in r.text
+    form["slug"] = "growth-engine-calculator"
+    r = c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    assert r.status_code == 303
     lib = env._lib()
     try:
-        assert lib.get_original_content_by_slug(reserved) is None
+        assert lib.get_original_content_by_slug("growth-engine-calculator") is not None
     finally:
         lib.close()
 
 
-@pytest.mark.parametrize("freed_slug", ["netsuite-mcp", "ai-hackathon-playbook"])
+@pytest.mark.parametrize("freed_slug", ["netsuite-mcp", "ai-hackathon-playbook", "growth-engine-ratio"])
 def test_retired_bespoke_slugs_no_longer_reserved(env, freed_slug):
     """Original Content Phase 4a retired the netsuite-mcp bespoke route,
-    and Phase 4b retired ai-hackathon-playbook's — both slugs are
-    ordinary, admin-editable slugs now, not a collision with anything.
-    (A pre-existing row with this slug, from the Phase 1 seed, would
-    still trip the plain duplicate-slug check — this test uses a fresh
-    DB with no such row, to isolate the reserved-slug behavior
-    specifically.)"""
+    Phase 4b retired ai-hackathon-playbook's, and Phase 4c retired
+    growth-engine-ratio's — all three slugs are ordinary, admin-editable
+    slugs now, not a collision with anything. (A pre-existing row with this
+    slug, from the Phase 1 seed, would still trip the plain duplicate-slug
+    check — this test uses a fresh DB with no such row, to isolate the
+    reserved-slug behavior specifically.)"""
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["slug"] = freed_slug
