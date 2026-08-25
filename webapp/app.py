@@ -2685,7 +2685,7 @@ def growth_engine_calculator(request: Request):
 
 <div class="tool-prose">
 <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Calculator</p>
-<h1 style="margin:0 0 8px;">Growth Engine Ratio Calculator</h1>
+<h1 style="margin:0 0 8px;">Growth Engine Ratio calculator</h1>
 <p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
   Plug in your own quarterly numbers below to see where your ratio lands against the benchmark tiers.
   Haven't read the framework yet? Start with <a href="/thought-leadership/growth-engine-ratio">the full article</a>

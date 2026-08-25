@@ -219,6 +219,10 @@ concentrated in public directory/product chrome, admin chrome, `<title>` tab str
 subheadings, which stay a case-by-case editorial call rather than a mechanical sweep) is in
 progress, phase by phase, as its own multi-PR body of work.
 
+The sitewide sentence-case sweep is complete as of Aug 2026 (Phases A–E); in-article
+subheadings were hand-edited via admin rather than swept mechanically, per the
+case-by-case note above.
+
 ---
 
 ## 4. The graffiti/street-art accent layer (restrained — accents only)
