@@ -2234,6 +2234,98 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   bespoke — separate, not-yet-scoped phases (4b/4c), and per the Phase 4
   investigation, GER's port specifically still needs a decision on what
   happens to the calculator before it can proceed the same way.
+- **Original Content, Phase 4b — "Sail, Don't Row" (the AI hackathon
+  playbook) ported the same way, plus two real specificity bugs the
+  process caught before shipping.** Same hybrid approach as Phase 4a:
+  prose became real markdown (12 H2 sections); the page's designed
+  elements — the 2×2 value/effort matrix, the Inspire→Sleep→Build
+  flowchart (including its `<640px` vertical-arrow variant), the
+  Ship/Iterate/Park verdict tier strip, the resource-link list, the
+  6-step phase track (used twice), and the Notion intake-form template
+  box — were kept as raw HTML in `body_md` using their original `.fah-*`
+  classes verbatim, moved into a new `_OC_HACKATHON_CSS` constant scoped
+  under `.oc-body` exactly like `_OC_NETSUITE_MCP_CSS`. Confirmed dead and
+  deliberately NOT carried forward: `.fah-verdicts`/`.fah-verdict`/
+  `.fah-v-*`, `.fah-pull`, and `.fah-motif` — defined in the retired
+  route's own `<style>` block but never referenced by any element in its
+  body. `scripts/migrate_hackathon_playbook_content.py` follows Phase 4a's
+  exact script shape (dry-run default, `--apply`, write-then-read-back).
+  **Two real bugs surfaced by the screenshot-diff verification step,
+  neither visible from reading the code — both fixed before the route was
+  touched:**
+  1. **A double-escape bug, the third known instance of this pattern**
+     (see "Speaking &amp; Events" and the Phase 3 admin-edit-page `<title>`
+     tag elsewhere in this doc): the row's `title` was seeded (Phase 1)
+     as `"Sail, Don&rsquo;t Row"` — pre-escaped for `_tl_fcard()`'s raw
+     `<h3>` insertion, the call site Phase 1 was built for. Phase 2's
+     `_original_content_article_body()` correctly calls `_esc()` on
+     `title` for the real `<h1>` (needed for genuinely plain-text
+     admin-typed titles), which double-escaped this one, rendering the
+     literal text `Sail, Don&rsquo;t Row` in the browser. Fixed by adding
+     `TITLE = "Sail, Don't Row"` (plain, matching the retired route's own
+     `<h1>` text byte-for-byte) to the migration script rather than
+     reusing `row["title"]` — a deliberate, documented side effect: since
+     the homepage/`/thought-leadership` flagship cards render straight
+     from this same DB row via `_oc_featured_cards_html`/`_tl_fcard()`
+     (not the frozen, unimported `_TL_FEATURED_CARDS` tuple), fixing the
+     stored title also changes those cards from the curly entity to a
+     straight apostrophe — `tests/test_thought_leadership_homepage_teaser.py`'s
+     fixture was updated to apply this same title fix after its Phase-1
+     seed, so the suite models actual post-migration production state
+     rather than silently drifting stale the moment the migration ships.
+     Phase 4a's netsuite-mcp migration never touched `title`, so it never
+     needed an equivalent fixture update.
+  2. **Two CSS specificity gaps, found only by comparing real bounding
+     boxes (`element.bounding_box()`), not screenshots** — a full-page
+     screenshot glance looked fine even with a ~110px real height
+     difference buried in one repeated component. First: `.fah-body h3`/
+     `.fah-template h3` never declared their own `line-height` on the
+     original bespoke page, relying on `body{font:16px/1.65 ...}`'s
+     sitewide inheritance — but `_OC_ARTICLE_CSS`'s shared
+     `.oc-body h1,h2,h3...{line-height:1.3}` rule (written for real prose
+     section headings) matches these same in-card h3 tags too, and an
+     explicit declaration always wins over inheritance regardless of
+     specificity, collapsing each step/field-card title by 6px and
+     compounding across every repeated card in the phase track and intake
+     form. Fixed by restating the original's effective `1.65` directly on
+     both selectors. Second, smaller and easy to miss precisely because it
+     runs the opposite direction: `.fah-body p`/`.fah-tier p` are each only
+     one class + a tag on the original page, so they already lose their
+     own `line-height`/`margin-bottom` to the sitewide
+     `.article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px}`
+     rule there (two classes always outranks one) — a pre-existing quirk
+     of the original page's own CSS. Prefixing every selector with
+     `.oc-body` for scoping (this whole file's convention) incidentally
+     gave exactly these two selectors a second class, tying the sitewide
+     rule's specificity; since the article's own `<style>` tag loads after
+     the sitewide one, the tie then resolved the *opposite* way, so the
+     port's declared values won where the original's never did. Fixed by
+     dropping `line-height`/`margin-bottom` from both ported selectors so
+     they lose to the sitewide rule again, same as the live original —
+     matching the page's actual rendered behavior rather than "fixing" a
+     CSS quirk the live site never showed. (`.fah-template p`, `.fah-r-desc`,
+     `.fah-flow-caption` were checked too and already lose to the same
+     sitewide rule on both pages without any change, since none of them
+     ever declared `line-height`/`margin-bottom` in the first place.)
+     Phase 4a's near-identical `.ns-body h3`/`.ns-qr h3` selectors have the
+     same latent line-height gap and were not audited or touched here,
+     since NetSuite MCP is out of scope for this PR — worth a follow-up
+     check there. Post-fix, every `.bounding_box()` comparison across the
+     matrix, flowchart (both the desktop and `<640px` vertical-arrow
+     variants), tier strip, resource list, template box, and both phase
+     tracks matched to within 1-2px (subpixel/rounding), and every cropped
+     screenshot pair was visually confirmed identical at desktop
+     (1280px), mobile portrait (390×844), and mobile landscape (844×390),
+     with zero horizontal overflow at any width. Only after that
+     confirmed parity did the bespoke `finops_ai_hackathon()` route get
+     deleted — the `/finops-ai-hackathon` 301 redirect stays (its target
+     is still real, just served by the catch-all now);
+     `"ai-hackathon-playbook"` came out of `_OC_RESERVED_SLUGS`, leaving
+     only `"growth-engine-ratio"` reserved. The closing bio blurb's
+     `/play` easter-egg link ("Sail, Don't Row is also a game") carried
+     over verbatim into `body_md`. Growth Engine Ratio remains the one
+     fully bespoke page left — still blocked on Brian's decision about
+     its live JS calculator, per the Phase 4 investigation.
 
 - **Original Content, Phase 5 — cleanup: a double-escape fix landed, two
   proposed rollback-file deletions turned out NOT to be safe and were left

@@ -3396,407 +3396,6 @@ def finops_ai_hackathon_redirect(request: Request):
     return RedirectResponse(target, status_code=301)
 
 
-@app.get("/thought-leadership/ai-hackathon-playbook", response_class=HTMLResponse)
-def finops_ai_hackathon(request: Request):
-    body = """<div class="page page-full article-atlantic">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
-<style>
-  /* Base pull-quote/callout/warning styling lives in the shared .article-*
-     classes (Phase 6b) — these are just this page's few pre-existing spacing
-     overrides, composed alongside the shared class (class="article-pull
-     fah-pull") so this page's rendering is unchanged from before extraction. */
-  .fah-callout{margin:28px 0;}
-  .fah-callout li{margin-bottom:5px;}
-  .fah-warn{padding:18px 22px;margin:24px 0;}
-  .fah-warn-title{margin-bottom:8px;}
-  /* Quote breakout (width refinement, this phase): only Quotes widen beyond
-     the body-copy column — CTA/Tip/Warning boxes stay at body-copy width
-     (mostly multi-line instructional prose, where a wide box reads as an
-     odd second column). 1040px is a middle ground between the 760px
-     .tool-prose column and the page's full working width. See BRAND.md's
-     Callout taxonomy entry for the centering math and the box-vs-quote
-     width reasoning. */
-  .fah-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}
-  /* Phase track */
-  .fah-track{display:flex;flex-direction:column;gap:0;margin:28px 0;}
-  .fah-step{display:flex;gap:18px;position:relative;}
-  .fah-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}
-  .fah-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}
-  .fah-body{padding-bottom:26px;flex:1;}
-  .fah-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}
-  .fah-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}
-  .fah-tag{display:inline-block;font:600 11px var(--font-body);letter-spacing:.05em;color:var(--muted);border:1px solid var(--line-strong);border-radius:5px;padding:2px 8px;margin-top:4px;}
-  /* 2x2 Matrix */
-  .fah-matrix{margin:28px 0;}
-  .fah-matrix-label{text-align:center;font:700 11px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
-  .fah-matrix-grid{display:grid;grid-template-columns:28px 1fr 1fr;grid-template-rows:1fr 1fr 28px;gap:0;height:280px;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}
-  .fah-m-y{writing-mode:vertical-rl;transform:rotate(180deg);font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:1/3;grid-column:1;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}
-  .fah-m-x{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:3;grid-column:2/4;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}
-  .fah-q{padding:16px 18px;font-size:13px;line-height:1.45;display:flex;flex-direction:column;border:1px solid var(--line);}
-  .fah-q-label{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;}
-  .fah-q-star{background:var(--navy);color:#fff;}.fah-q-star .fah-q-label{color:rgba(255,255,255,.75);}
-  .fah-q-b{background:var(--navy-wash);color:var(--ink-soft);}.fah-q-b .fah-q-label{color:var(--muted);}
-  .fah-q-c{background:#fff;color:var(--muted);}.fah-q-c .fah-q-label{color:var(--line-strong);}
-  /* Verdict chips */
-  .fah-verdicts{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0;}
-  .fah-verdict{padding:10px 18px;border-radius:8px;font-size:14px;}
-  .fah-v-ship{background:var(--navy);color:#fff;}
-  .fah-v-iterate{background:var(--coral-wash);color:var(--coral-deep);border:1px solid var(--coral-light);}
-  .fah-v-park{background:var(--surface-2);color:var(--muted);border:1px solid var(--line-strong);}
-  .fah-v-label{font:700 11px var(--font-body);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
-  /* Resource links */
-  .fah-resources{display:flex;flex-direction:column;gap:0;margin:20px 0;border-top:1px solid var(--line-strong);}
-  .fah-resource{display:flex;align-items:flex-start;gap:14px;padding:14px 4px;text-decoration:none;color:inherit;border-bottom:1px solid var(--line);}
-  .fah-resource:hover{background:var(--navy-wash);}
-  .fah-r-icon{font-size:18px;flex-shrink:0;margin-top:1px;}
-  .fah-r-title{font:600 15px var(--font-head);color:var(--navy);margin-bottom:2px;}
-  .fah-r-desc{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}
-  .fah-r-src{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-top:3px;}
-  /* Notion template box */
-  .fah-template{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:26px 30px;margin:28px 0;}
-  .fah-template-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;display:flex;align-items:center;gap:8px;}
-  .fah-template h3{font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin:18px 0 6px;}
-  .fah-template h3:first-of-type{margin-top:0;}
-  .fah-template p,.fah-template li{font-size:14px;color:var(--ink-soft);}
-  .fah-template ul{padding-left:18px;margin:0 0 8px;}
-  .fah-template li{margin-bottom:4px;}
-  /* Tier strip */
-  .fah-tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:22px 0;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}
-  .fah-tier{padding:18px 16px;}
-  .fah-tier:not(:last-child){border-right:1px solid var(--line);}
-  .fah-tier-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px;}
-  .fah-tier p{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}
-  .fah-t-ship{background:var(--navy);}.fah-t-ship .fah-tier-title{color:#fff;}.fah-t-ship p{color:rgba(255,255,255,.8);}
-  .fah-t-iter{background:var(--coral-wash);}.fah-t-iter .fah-tier-title{color:var(--coral-deep);}
-  .fah-t-park{background:var(--surface-2);}.fah-t-park .fah-tier-title{color:var(--muted);}
-  /* Inspire -> Sleep -> Build flowchart: a process sequence, not a quotable
-     idea, so it gets a lightweight CSS-only boxes-and-arrows visual instead
-     of pull-quote styling. No charting dependency needed for three linear
-     steps — see BRAND.md's Callout taxonomy entry. */
-  .fah-flow{display:flex;align-items:center;gap:10px;margin:24px 0 10px;}
-  .fah-flow-step{flex:1;background:var(--navy-wash);border:1px solid var(--line);border-radius:10px;padding:16px 14px;text-align:center;font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);}
-  .fah-flow-arrow{flex:0 0 auto;font-size:20px;color:var(--muted);}
-  .fah-flow-arrow-v{display:none;}
-  .fah-flow-caption{font-size:14px;color:var(--ink-soft);text-align:center;margin:0 0 24px;}
-  @media(max-width:640px){
-    .fah-flow{flex-direction:column;}
-    .fah-flow-arrow-h{display:none;}
-    .fah-flow-arrow-v{display:inline;}
-  }
-  /* Sailboat SVG motif */
-  .fah-motif{text-align:center;margin:32px 0 24px;}
-  @media(max-width:640px){
-    .fah-matrix-grid{height:220px;}
-    .fah-tiers{grid-template-columns:1fr;}
-    .fah-tier:not(:last-child){border-right:none;border-bottom:1px solid var(--line);}
-    .fah-verdicts{flex-direction:column;}
-  }
-</style>
-
-<div class="tool-prose">
-<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Playbook</p>
-<h1 style="margin:0 0 8px;">Sail, Don't Row</h1>
-<p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">A playbook for running an AI hackathon with your finance team</p>
-<p style="color:var(--muted);font-size:14px;margin:0 0 36px;">By Brian Weisberg &middot; June 2026</p>
-
-<p>There are two ways to approach the AI moment in finance. The first is to row harder: one-off solutions, manual handoffs, each person finding their own tool at their own pace. Exhausting. Doesn't scale. The second is to sail: build the infrastructure deliberately, rig it carefully, and let the conditions do the work. The difference isn't capability. It's intention.</p>
-
-<p>A hackathon is how a finance team learns to sail. It creates protected time and a low-stakes space to learn something hard together—as a team, where nobody has to already know the answer. The builds you ship at the end are real, but they're a byproduct. The point is the skill that stays when everyone goes home.</p>
-
-<p>I've run one of these with my own finance and ops team, and this is the format distilled—what worked, why it worked, and how to run it yourself.</p>
-
-<div class="article-callout fah-callout">
-  <div class="article-callout-title">Before any piece of work, two questions</div>
-  <ol>
-    <li>Is this worth doing?</li>
-    <li>And am I sailing or rowing?</li>
-  </ol>
-  <p style="margin-top:10px;">Rowing isn't inherently bad. The point is being intentional about when you go manual and when you build something repeatable. Ad-hoc has a way of becoming permanent ad-hoc.</p>
-</div>
-
-<h2>Why a hackathon—and why now</h2>
-<p>AI adoption in finance doesn't happen on its own. It gets crowded out by the close, the board deck, the forecast update. There's always something more urgent. Left to find the time on their own, most teams never do.</p>
-
-<p>A hackathon fixes that by force. It carves out protected time and makes <em>exploring together</em> the actual assignment. The format works for three reasons:</p>
-<ul style="padding-left:22px;margin:0 0 20px;">
-  <li style="margin-bottom:10px;"><strong>Psychological safety.</strong> When everyone is learning at the same time, in the same room, there's no expert to defer to and no reason to hide. Half-formed ideas get air.</li>
-  <li style="margin-bottom:10px;"><strong>Time-boxing as a feature.</strong> The constraint—ninety minutes to build something shippable—focuses effort better than a two-week sprint with no end in sight. Done is better than perfect.</li>
-  <li style="margin-bottom:10px;"><strong>Compounding returns.</strong> A team that has learned something together learns faster next time. The first hackathon is the hardest. Run it annually and it becomes a flywheel.</li>
-</ul>
-
-<p>The goal isn't to automate the whole finance function. It's to close the gap between your team's potential and its current velocity—on purpose, together, in a way that compounds.</p>
-
-<h2>The method behind it: design thinking</h2>
-<p>Before the mechanics, the philosophy. The prioritization format I use: post-its, dot stickers, a 2×2. It isn't a team-building exercise. It's the application of a specific method: design thinking.</p>
-
-<p>Design thinking is a problem-solving approach that starts with the people experiencing the problem, not with the solution. It works in two modes:</p>
-
-<ul style="padding-left:22px;margin:0 0 20px;">
-  <li style="margin-bottom:10px;">Diverge first. Everyone generates ideas independently, without talking.</li>
-  <li style="margin-bottom:10px;">Then converge.</li>
-</ul>
-
-<p>The separation matters—if you skip the silent step and just go around the room, the first voice anchors every other answer.</p>
-
-<p>The other half is the ground rule going in: <strong>no bad ideas.</strong> No judgment, no evaluating while generating. The only requirement is a clear persona and use case: a real person with a real problem, not a vague wish. That's what makes people comfortable putting the half-formed thing on the wall—which is exactly where the good ones tend to start.</p>
-
-<p>This method started in product design but works anywhere you need a group to surface and prioritize ideas without the usual political drag. A few examples of what it looks like at scale:</p>
-
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--line-strong);border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;margin:20px 0;">
-  <div style="background:#fff;padding:18px 16px;">
-    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Airbnb</div>
-    <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">Early growth</div>
-    <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Bookings were flat. They visited hosts, looked at listings, and realized photos were terrible. One non-technical intervention. The insight came from observing the problem directly.</p>
-  </div>
-  <div style="background:#fff;padding:18px 16px;">
-    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">IBM</div>
-    <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">Enterprise shift</div>
-    <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Flipped the order: start with what the customer needs, then figure out the technology. Built internal design studios. Retrained thousands. Outputs improved. So did relationships.</p>
-  </div>
-  <div style="background:#fff;padding:18px 16px;">
-    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Google</div>
-    <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">20% rule</div>
-    <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Structured diverge time with real stakes attached. Gmail, Google News, and AdSense all started there. The roadmap never would have produced them.</p>
-  </div>
-</div>
-
-<p style="font-size:14px;color:var(--muted);margin:0 0 8px;">Three resources worth sending as pre-reading before you run this:</p>
-<div class="fah-resources">
-  <a href="https://www.nngroup.com/articles/design-thinking/" target="_blank" rel="noopener" class="fah-resource">
-    <span class="fah-r-icon">📖</span>
-    <div><div class="fah-r-title">Design Thinking 101</div><p class="fah-r-desc">Covers the six phases and why this isn't just a brainstorming session with a fancier name.</p><div class="fah-r-src">Nielsen Norman Group</div></div>
-  </a>
-  <a href="https://www.nngroup.com/articles/diverge-converge/" target="_blank" rel="noopener" class="fah-resource">
-    <span class="fah-r-icon">🔀</span>
-    <div><div class="fah-r-title">The Diverge-and-Converge Technique</div><p class="fah-r-desc">Why you split ideation from prioritization, and what goes wrong when you don't.</p><div class="fah-r-src">Nielsen Norman Group</div></div>
-  </a>
-  <a href="https://www.nngroup.com/articles/dot-voting/" target="_blank" rel="noopener" class="fah-resource">
-    <span class="fah-r-icon">🟢</span>
-    <div><div class="fah-r-title">Dot Voting</div><p class="fah-r-desc">How many dots to give, when to rerun a vote, and the failure modes to watch for—especially the person who campaigns out loud before the stickers go up.</p><div class="fah-r-src">Nielsen Norman Group</div></div>
-  </a>
-  <a href="https://designthinking.ideo.com/" target="_blank" rel="noopener" class="fah-resource">
-    <span class="fah-r-icon">💡</span>
-    <div><div class="fah-r-title">IDEO Design Thinking</div><p class="fah-r-desc">The original source—where the method came from, with toolkits and examples across industries.</p><div class="fah-r-src">IDEO</div></div>
-  </a>
-</div>
-
-<h2>Before you arrive: the setup</h2>
-<p>The single biggest mistake in running a hackathon is walking into the room cold. If the first thing you do is ask "so what should we build?"—you'll spend half your time generating half-baked ideas and the other half convincing people to try something. Do the intake work before you're in a room together.</p>
-
-<div class="article-callout fah-callout">
-  <div class="article-callout-title">Async intake—1–2 weeks before the event</div>
-  <ul>
-    <li>Set up a simple intake form (Notion works well) with these fields: <strong>problem statement</strong> (one sentence), <strong>who it hurts</strong>, <strong>type</strong> (automation / visibility / missing skill / analysis), <strong>impact and feasibility</strong> (a first guess), and <strong>definition of done</strong>.</li>
-    <li>Ask specific questions. <em>"What do you do every week that feels like copy-paste?"</em> gets better answers than <em>"What problems do you have?"</em></li>
-    <li>Make it frictionless. Let people dump free text if that's easier—you or an AI agent can structure it afterward. The goal is honest input, not a polished pitch.</li>
-    <li>Optional: use AI to auto-fill the structured fields from each submission, then have people review and correct. That task itself is a small AI adoption moment.</li>
-  </ul>
-</div>
-
-<p>Also before the event: get your integrations connected. If you're building with Claude or another AI assistant, make sure it's linked to the systems you actually use—NetSuite, Notion, Google Drive, Slack. Spending build time on setup is demoralizing. Arrive ready to build.</p>
-
-<p>Consider sending the design thinking pre-reads (linked above) a few days out. Not required, but teams that arrive with the method in their heads move faster once they're in the room.</p>
-
-<h2>Day zero: from problems to priorities</h2>
-<p>This is the framing session—the day (or half-day) before the build. Its job is to turn a backlog of submitted problems into a ranked shortlist of sprint candidates. Here's the full sequence:</p>
-
-<div class="fah-track">
-  <div class="fah-step">
-    <div class="fah-num">1</div>
-    <div class="fah-body">
-      <h3>Transcribe to post-its</h3>
-      <p>During a break, the facilitator writes each submitted problem onto a physical sticky note—one problem per note. This forces a human edit pass. You spot duplicates, catch problems that are really the same thing framed twice, and produce something the whole room can see simultaneously. Keep laptops closed for the rest of this session.</p>
-      <span class="fah-tag">⏱ 15–20 min · facilitator only · done during a break</span>
-    </div>
-  </div>
-  <div class="fah-step">
-    <div class="fah-num">2</div>
-    <div class="fah-body">
-      <h3>Live additions + clustering</h3>
-      <p>Give the room a few minutes to add anything not submitted async. Then cluster: pull duplicate or overlapping stickies together before voting. Facilitator-led, fast—group what's obviously similar and move on. Don't debate the clusters. Debate costs time and anchors thinking before the vote.</p>
-      <span class="fah-tag">⏱ 10–15 min · whole team</span>
-    </div>
-  </div>
-  <div class="fah-step">
-    <div class="fah-num">3</div>
-    <div class="fah-body">
-      <h3>Silent dot voting</h3>
-      <p>Everyone gets five dot stickers. You can stack all five on one idea or spread them across five. <strong>No talking while voting.</strong> Silence prevents the loudest voice from anchoring the group—the most common failure mode in group prioritization. Once votes are tallied, log totals back into your intake database so the prioritization is permanent.</p>
-      <span class="fah-tag">⏱ 5–10 min · whole team · silence required</span>
-    </div>
-  </div>
-  <div class="fah-step">
-    <div class="fah-num">4</div>
-    <div class="fah-body">
-      <h3>The 2×2: value vs. effort</h3>
-      <p>With vote tallies as a guide, place stickies on a 2×2 grid together as a team. <strong>Value</strong> on the vertical axis. <strong>Effort</strong> on the horizontal—and effort means all-in effort: time, skill required, data access, dependencies. Facilitator guides, team places. The conversation happens around placement, not around lobbying for ideas.</p>
-    </div>
-  </div>
-</div>
-
-<div class="fah-matrix">
-  <div class="fah-matrix-label">Value vs. Effort—how to sort your ideas</div>
-  <div class="fah-matrix-grid">
-    <div class="fah-m-y">Value &uarr;</div>
-    <div class="fah-q fah-q-star">
-      <div class="fah-q-label">&#10022; Sprint targets</div>
-      <div style="font-size:13px;line-height:1.45;">High value, achievable in 90 min. These are your hackathon finalists. Pick 3–4, pair up, build.</div>
-    </div>
-    <div class="fah-q fah-q-b">
-      <div class="fah-q-label">Scope &amp; own</div>
-      <div style="font-size:13px;line-height:1.45;color:var(--ink-soft);">High value, high effort. Real initiatives—not hackathon material. Each gets a named owner and goes on the roadmap.</div>
-    </div>
-    <div class="fah-q fah-q-c">
-      <div class="fah-q-label" style="color:var(--line-strong);">Intentionally skip</div>
-      <div style="font-size:13px;line-height:1.45;color:var(--line-strong);">Low value, low effort. Name it explicitly. Agree to leave it alone.</div>
-    </div>
-    <div class="fah-q fah-q-c">
-      <div class="fah-q-label" style="color:var(--line-strong);">Intentionally skip</div>
-      <div style="font-size:13px;line-height:1.45;color:var(--line-strong);">Low value, high effort. Clear no.</div>
-    </div>
-    <div class="fah-m-x">Effort &rarr;</div>
-  </div>
-</div>
-
-<div class="article-warn fah-warn">
-  <div class="article-warn-title fah-warn-title">Name what you're skipping</div>
-  <p>Things that "fall off the list" have a way of coming back. Things you've explicitly decided to skip don't. For every idea below the line: name it, say it out loud, agree to leave it alone. <em>"Intentionally skipping"</em> and <em>"fell off the list"</em> are not the same thing.</p>
-</div>
-
-<div class="fah-track" style="margin-top:24px;">
-  <div class="fah-step">
-    <div class="fah-num">5</div>
-    <div class="fah-body">
-      <h3>Two final cuts: when, and whether it's ready</h3>
-      <p>Sort the upper-right survivors two ways. First, <strong>timing:</strong> Build (do it at the hackathon), Later (worth doing, not this week), Even Later (needs scoping first). Second, <strong>readiness:</strong> can you touch this right now, or does it have a dependency, a data question, an unknown to resolve? A high-value idea that isn't ready to build isn't a sprint candidate—it's a scoping task. Naming that distinction keeps you honest.</p>
-      <span class="fah-tag">⏱ 10–15 min · whole team</span>
-    </div>
-  </div>
-  <div class="fah-step">
-    <div class="fah-num">6</div>
-    <div class="fah-body">
-      <h3>Assign pairs</h3>
-      <p>Match people to Build-ready ideas. Pairs, not solo work—two people per build keeps momentum up when one gets stuck. Assign 1–2 floaters (ideally including yourself if you're the leader) who stay unattached and circulate to unblock teams during the sprint.</p>
-      <span class="fah-tag">⏱ 5 min · facilitator-led</span>
-    </div>
-  </div>
-</div>
-
-<h2>Protect the gap: inspire, sleep, build</h2>
-<p>Here's the sequencing decision that separates a good hackathon from a great one: <strong>don't build on the framing day.</strong></p>
-
-<p>The framing session is dense with new thinking—a full backlog processed, clustered, voted on, and prioritized. Ending there, inspired rather than rushed, gives that thinking time to settle. People go home with a problem in their head. They think about it in the shower. They wake up with the approach half-formed. That overnight processing is doing real work.</p>
-
-<div class="fah-flow">
-  <div class="fah-flow-step">Inspire</div>
-  <div class="fah-flow-arrow"><span class="fah-flow-arrow-h">&rarr;</span><span class="fah-flow-arrow-v">&darr;</span></div>
-  <div class="fah-flow-step">Sleep</div>
-  <div class="fah-flow-arrow"><span class="fah-flow-arrow-h">&rarr;</span><span class="fah-flow-arrow-v">&darr;</span></div>
-  <div class="fah-flow-step">Build</div>
-</div>
-<p class="fah-flow-caption">That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method.</p>
-
-<p>Add one more step on the morning of the build day before anyone opens a laptop: <strong>15–20 minutes of inspiration.</strong> Show examples of what other finance teams have actually built with AI. Real demos, not slides. Actual workflows someone is using. Then, and this is the move worth stealing, clear the votes and run a second idea-generation round from scratch. The second round is almost always better than the first. People arrive with new angles, sharper problem statements, and sometimes a completely different sense of what they want to build.</p>
-
-<h2>The build day</h2>
-<p>The build sprint is simple by design. Complexity is the enemy of shipping.</p>
-
-<div class="article-callout fah-callout">
-  <div class="article-callout-title">Build day structure</div>
-  <ul>
-    <li><strong>Morning reboot (15–20 min):</strong> Inspiration videos, second idea-generation round, confirm pairs and targets.</li>
-    <li><strong>Sprint #1 (90 min):</strong> Pairs build. Floaters circulate. No whole-group check-ins until time's called—mid-sprint interruptions break flow.</li>
-    <li><strong>Optional midpoint (45 min in):</strong> 5-minute pulse check per team. Not a demo—just calibration. Are you stuck? Do you need to scope down?</li>
-    <li><strong>Demos + verdicts:</strong> Regroup as a full team. Each pair demos what they built or learned. 10 minutes per team, 2 minutes for the verdict decision. Every demo gets a verdict and a named owner before the next team starts.</li>
-  </ul>
-</div>
-
-<p>The constraint (90 minutes) is the point. It forces scope decisions early. A team that's trying to build the perfect reconciliation engine will fail. A team that's trying to build a working prototype of one slice of that engine will ship something. "Done enough to demo" is the bar.</p>
-
-<p>What floaters actually do: when a pair is stuck on a tool behavior, a data question, or scope creep, the floater doesn't solve the problem for them. They ask one question: <em>"What's the smallest thing you could build that would prove this works?"</em> That's usually enough to unblock.</p>
-
-<h2>Closing with verdicts and owners</h2>
-<p>The close is where most hackathons fail. Teams demo, everyone claps, and then... nothing. The builds sit in a Notion database for three months and quietly become shelf-ware. What prevents that is a discipline: <strong>every demo gets a verdict and a named owner before the room empties.</strong></p>
-
-<div class="fah-tiers">
-  <div class="fah-tier fah-t-ship">
-    <div class="fah-tier-title">Ship</div>
-    <p>Push it to production now. It's working, it's useful, it's ready. Assign an owner whose job is to not let it die.</p>
-  </div>
-  <div class="fah-tier fah-t-iter">
-    <div class="fah-tier-title">Iterate</div>
-    <p>Another pass before it's ready. Assign an owner and a target date. <em>Iterate without a date is just Park with extra steps.</em></p>
-  </div>
-  <div class="fah-tier fah-t-park">
-    <div class="fah-tier-title">Park</div>
-    <p>Not the right moment—but documented for later. This is a legitimate verdict. Honor it by writing down why.</p>
-  </div>
-</div>
-
-<p>The Park verdict deserves more credit than it gets. It's not failure—it's intellectual honesty. Naming why something isn't ready (wrong timing, missing data, dependency on something else) is more useful than letting it die quietly. A well-documented Park can become a Ship six months later when the conditions change.</p>
-
-<p>The goal is at least one thing in production before anyone gets on a plane. Aim for that. It changes the energy of the room and sets the bar for everything that follows.</p>
-
-<h2>The operating system: a Notion setup that compounds</h2>
-<p>The post-its get the attention. They're not what makes this work. What makes it work is the underlying system—one intake database, one page per idea, a structured record that outlives the event.</p>
-
-<div class="fah-template">
-  <div class="fah-template-title">📋 Hackathon intake form—fields that matter</div>
-  <h3>Submission name</h3>
-  <p>A 3–6 word label. Forces clarity before anyone has read the full submission.</p>
-  <h3>Problem statement</h3>
-  <p>One sentence. The constraint is the discipline—a problem that needs "and" is really two problems. Split it.</p>
-  <h3>Who it hurts</h3>
-  <p>A specific person or role. "The team" is not a persona. "The controller on every close" is.</p>
-  <h3>Type</h3>
-  <p>Automation / visibility / missing skill / analysis / ops plumbing. Useful for spotting patterns—if half the submissions are "I can't see X," that's a signal.</p>
-  <h3>Impact + feasibility</h3>
-  <p>A first guess, not a commitment. You'll refine it during the 2×2.</p>
-  <h3>Definition of done</h3>
-  <p>Describe the two-minute demo. What does success look like when someone watches it work? This field does more work than any other.</p>
-</div>
-
-<p>The move worth stealing: <strong>one page per idea.</strong> Not just a row in a table—an actual page that becomes the full record. What the team submitted, live notes from the build, what they learned, what broke, what to do next. The page carries the idea through the event and becomes searchable institutional knowledge.</p>
-
-<p>Without this, the hackathon produces prototypes. With it, it produces compounding assets. The next person who picks up a similar problem starts from the answer, not from scratch.</p>
-
-<p>Two database views worth setting up: an <strong>effort × value matrix</strong> (the digital twin of your sticky-note 2×2, auto-sorted by vote count) and a <strong>groups board</strong> by theme. The groups view is useful for spotting when one area—say, month-end close—quietly dominates the shortlist, which is usually a signal worth paying attention to.</p>
-
-<h2>After: building the AI Lab</h2>
-<p>The hackathon is a beginning, not a destination. What makes it compound over time is institutionalizing what you learned: a shared space—call it the AI Lab, call it whatever fits your culture—where builds live and can be forked.</p>
-
-<p>The operating model is simple:</p>
-<ul style="padding-left:22px;margin:0 0 20px;">
-  <li style="margin-bottom:8px;">Build something useful → document it → drop it in the Lab.</li>
-  <li style="margin-bottom:8px;">Find something someone else built → fork it → adapt it to your context.</li>
-  <li style="margin-bottom:8px;">Review the Lab quarterly. What's still in use? What needs updating? What opened up new possibilities?</li>
-</ul>
-
-<p>Run the hackathon again next year. The format gets easier the second time—the setup is faster, people know what to expect, and the ideas are sharper because everyone has spent a year noticing problems worth solving. The first one is the hardest. The flywheel needs one good push.</p>
-
-<div class="article-callout fah-callout">
-  <div class="article-callout-title">What good looks like when you leave</div>
-  <ul>
-    <li>3–4 working prototypes, each with a verdict and a named owner</li>
-    <li>A prioritized backlog in Notion for everything that didn't get built—with owners on anything that moves forward</li>
-    <li>At least one thing in production before anyone leaves</li>
-    <li>A shared Lab space where builds live and can be forked</li>
-    <li>A date on the calendar for the next one</li>
-  </ul>
-</div>
-
-<p>The teams that get the most out of AI aren't the ones with the best tools. They're the ones that got good at using them—together, on purpose, through deliberate practice. A hackathon is how you start that. Sail, don't row.</p>
-
-<div style="border-top:1px solid var(--line-strong);margin-top:48px;padding-top:24px;">
-  <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
-  <p style="font-size:12px;color:var(--muted);margin:14px 0 0;">&#9973; Made it this far? <a href="/play">Sail, Don&rsquo;t Row</a> is also a game.</p>
-</div>
-</div>
-
-</div>"""
-    return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
-
-
 @app.get("/netsuite-mcp")
 def netsuite_mcp_redirect(request: Request):
     target = "/thought-leadership/netsuite-mcp"
@@ -11769,6 +11368,113 @@ _OC_NETSUITE_MCP_CSS = (
     '}'
 )
 
+# Original Content Phase 4b — the ported ai-hackathon-playbook page's own
+# .fah-* CSS, same treatment as _OC_NETSUITE_MCP_CSS above: moved out of the
+# retired route's <style> block, every selector rescoped under .oc-body.
+# Deliberately NOT carried forward: .fah-verdicts/.fah-verdict/.fah-v-*,
+# .fah-pull, and .fah-motif — confirmed dead in the source page (defined in
+# its <style> block, never actually used by any element in its body), so
+# porting them would just be dead CSS living in a second place.
+#
+# .fah-body h3 and .fah-template h3 carry an explicit line-height:1.65 that
+# the original bespoke route never needed to state (verified via a live
+# screenshot-diff catch during this port): the retired page's own
+# body{font:16px/1.65 ...} rule was the only line-height these small
+# in-card h3s ever inherited. _OC_ARTICLE_CSS's shared
+# ".oc-body h1,h2,h3...{line-height:1.3}" rule (written for real prose
+# section headings) matches these same h3 tags too and, being an explicit
+# declaration, wins over the inherited 1.65 regardless of specificity —
+# collapsing each step/field card's title down 6px and letting the whole
+# .fah-track/.fah-template stack drift ~30-110px shorter than the original
+# over enough repeated cards. Fixed by restating the original 1.65 directly
+# on these two selectors, which is real Original Content Phase 4b
+# discovery — Phase 4a's near-identical .ns-body h3/.ns-qr h3 selectors
+# have the same latent gap and were not audited or touched here, since
+# NetSuite MCP is explicitly out of scope for this PR; worth a follow-up
+# check there.
+#
+# A second, related specificity gap surfaced by the same diff pass:
+# .fah-body p and .fah-tier p are each only one class + a tag on the
+# original bespoke page (e.g. ".fah-body p"), so on the LIVE original page
+# they already lose their own line-height/margin-bottom to the sitewide
+# ".article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px}"
+# rule (two classes + a tag always outranks one, regardless of source
+# order) — a pre-existing quirk of the original page's own CSS, not
+# something this port introduced. Prefixing every selector with .oc-body
+# for scoping (this file's whole convention) incidentally added a second
+# class to exactly these two selectors, tying the sitewide rule's
+# specificity — and since this article's own <style> tag loads after the
+# sitewide one, the tie then resolved the OPPOSITE way here, so the port's
+# line-height/margin-bottom actually applied where the original's never
+# did. Fixed by dropping line-height and margin-bottom from both ported
+# selectors (margin-top/left/right on .fah-tier p are kept — those never
+# collided) so both naturally lose to the sitewide rule again, reproducing
+# the original's actual rendered spacing rather than fighting the cascade
+# for a "more correct" result the live page never showed. (.fah-template p,
+# .fah-r-desc, and .fah-flow-caption were checked too and already lose to
+# the same sitewide rule on both pages — they never declared
+# line-height/margin-bottom in the first place, so no fix was needed
+# there.)
+_OC_HACKATHON_CSS = (
+    '.oc-body .fah-callout{margin:28px 0;}'
+    '.oc-body .fah-callout li{margin-bottom:5px;}'
+    '.oc-body .fah-warn{padding:18px 22px;margin:24px 0;}'
+    '.oc-body .fah-warn-title{margin-bottom:8px;}'
+    '.oc-body .fah-track{display:flex;flex-direction:column;gap:0;margin:28px 0;}'
+    '.oc-body .fah-step{display:flex;gap:18px;position:relative;}'
+    '.oc-body .fah-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}'
+    '.oc-body .fah-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}'
+    '.oc-body .fah-body{padding-bottom:26px;flex:1;}'
+    '.oc-body .fah-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;line-height:1.65;}'
+    '.oc-body .fah-body p{font-size:15px;color:var(--ink-soft);}'
+    '.oc-body .fah-tag{display:inline-block;font:600 11px var(--font-body);letter-spacing:.05em;color:var(--muted);border:1px solid var(--line-strong);border-radius:5px;padding:2px 8px;margin-top:4px;}'
+    '.oc-body .fah-matrix{margin:28px 0;}'
+    '.oc-body .fah-matrix-label{text-align:center;font:700 11px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}'
+    '.oc-body .fah-matrix-grid{display:grid;grid-template-columns:28px 1fr 1fr;grid-template-rows:1fr 1fr 28px;gap:0;height:280px;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}'
+    '.oc-body .fah-m-y{writing-mode:vertical-rl;transform:rotate(180deg);font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:1/3;grid-column:1;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}'
+    '.oc-body .fah-m-x{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:3;grid-column:2/4;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}'
+    '.oc-body .fah-q{padding:16px 18px;font-size:13px;line-height:1.45;display:flex;flex-direction:column;border:1px solid var(--line);}'
+    '.oc-body .fah-q-label{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;}'
+    '.oc-body .fah-q-star{background:var(--navy);color:#fff;}.oc-body .fah-q-star .fah-q-label{color:rgba(255,255,255,.75);}'
+    '.oc-body .fah-q-b{background:var(--navy-wash);color:var(--ink-soft);}.oc-body .fah-q-b .fah-q-label{color:var(--muted);}'
+    '.oc-body .fah-q-c{background:#fff;color:var(--muted);}.oc-body .fah-q-c .fah-q-label{color:var(--line-strong);}'
+    '.oc-body .fah-resources{display:flex;flex-direction:column;gap:0;margin:20px 0;border-top:1px solid var(--line-strong);}'
+    '.oc-body .fah-resource{display:flex;align-items:flex-start;gap:14px;padding:14px 4px;text-decoration:none;color:inherit;border-bottom:1px solid var(--line);}'
+    '.oc-body .fah-resource:hover{background:var(--navy-wash);}'
+    '.oc-body .fah-r-icon{font-size:18px;flex-shrink:0;margin-top:1px;}'
+    '.oc-body .fah-r-title{font:600 15px var(--font-head);color:var(--navy);margin-bottom:2px;}'
+    '.oc-body .fah-r-desc{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}'
+    '.oc-body .fah-r-src{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-top:3px;}'
+    '.oc-body .fah-template{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:26px 30px;margin:28px 0;}'
+    '.oc-body .fah-template-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;display:flex;align-items:center;gap:8px;}'
+    '.oc-body .fah-template h3{font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin:18px 0 6px;line-height:1.65;}'
+    '.oc-body .fah-template h3:first-of-type{margin-top:0;}'
+    '.oc-body .fah-template p,.oc-body .fah-template li{font-size:14px;color:var(--ink-soft);}'
+    '.oc-body .fah-template ul{padding-left:18px;margin:0 0 8px;}'
+    '.oc-body .fah-template li{margin-bottom:4px;}'
+    '.oc-body .fah-tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:22px 0;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}'
+    '.oc-body .fah-tier{padding:18px 16px;}'
+    '.oc-body .fah-tier:not(:last-child){border-right:1px solid var(--line);}'
+    '.oc-body .fah-tier-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px;}'
+    '.oc-body .fah-tier p{font-size:13px;color:var(--ink-soft);margin-top:0;margin-left:0;margin-right:0;}'
+    '.oc-body .fah-t-ship{background:var(--navy);}.oc-body .fah-t-ship .fah-tier-title{color:#fff;}.oc-body .fah-t-ship p{color:rgba(255,255,255,.8);}'
+    '.oc-body .fah-t-iter{background:var(--coral-wash);}.oc-body .fah-t-iter .fah-tier-title{color:var(--coral-deep);}'
+    '.oc-body .fah-t-park{background:var(--surface-2);}.oc-body .fah-t-park .fah-tier-title{color:var(--muted);}'
+    '.oc-body .fah-flow{display:flex;align-items:center;gap:10px;margin:24px 0 10px;}'
+    '.oc-body .fah-flow-step{flex:1;background:var(--navy-wash);border:1px solid var(--line);border-radius:10px;padding:16px 14px;text-align:center;font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);}'
+    '.oc-body .fah-flow-arrow{flex:0 0 auto;font-size:20px;color:var(--muted);}'
+    '.oc-body .fah-flow-arrow-v{display:none;}'
+    '.oc-body .fah-flow-caption{font-size:14px;color:var(--ink-soft);text-align:center;margin:0 0 24px;}'
+    '@media(max-width:640px){'
+    '.oc-body .fah-flow{flex-direction:column;}'
+    '.oc-body .fah-flow-arrow-h{display:none;}'
+    '.oc-body .fah-flow-arrow-v{display:inline;}'
+    '.oc-body .fah-matrix-grid{height:220px;}'
+    '.oc-body .fah-tiers{grid-template-columns:1fr;}'
+    '.oc-body .fah-tier:not(:last-child){border-right:none;border-bottom:1px solid var(--line);}'
+    '}'
+)
+
 
 def _original_content_article_body(row: dict) -> str:
     """The shared article shell for an admin-authored piece — matches the
@@ -11785,7 +11491,7 @@ def _original_content_article_body(row: dict) -> str:
     body_html = _render_original_content_markdown(row["body_md"] or "")
     return f"""<div class="page page-full article-atlantic">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
-<style>{_OC_ARTICLE_CSS}{_OC_NETSUITE_MCP_CSS}</style>
+<style>{_OC_ARTICLE_CSS}{_OC_NETSUITE_MCP_CSS}{_OC_HACKATHON_CSS}</style>
 <div class="tool-prose">
 {tag_html}
 <h1 style="margin:0 0 8px;">{_esc(row["title"])}</h1>
@@ -12216,10 +11922,13 @@ def admin_thought_leadership_delete(request: Request, item_id: int):
 # unreachable (the literal route always wins registration order over the
 # GET /thought-leadership/{slug} catch-all), so it's rejected here rather
 # than silently accepted and never actually reachable. "netsuite-mcp" was
-# removed from this set in Original Content Phase 4a — its bespoke route
-# was retired and the slug is now served by the catch-all like any other
-# original_content row, so it no longer needs reserving.
-_OC_RESERVED_SLUGS = {"growth-engine-ratio", "ai-hackathon-playbook"}
+# removed from this set in Original Content Phase 4a, and
+# "ai-hackathon-playbook" in Phase 4b — both bespoke routes were retired
+# and their slugs are now served by the catch-all like any other
+# original_content row, so neither needs reserving any more. Only
+# "growth-engine-ratio" remains bespoke (its live JS calculator is a
+# separate, not-yet-scoped phase).
+_OC_RESERVED_SLUGS = {"growth-engine-ratio"}
 _OC_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 

@@ -22,8 +22,21 @@ def _seed_flagship_original_content(appmod):
     Content Phase 1). This test file exercises homepage/thought-leadership
     rendering as it looks post-migration, not the pre-seed empty-table
     state — a fresh test DB otherwise has zero flagship cards, since seeding
-    is a manual, run-by-hand migration now, not automatic schema setup."""
+    is a manual, run-by-hand migration now, not automatic schema setup.
+
+    Also applies the one later-phase change this file's assertions actually
+    depend on: Original Content Phase 4b's ai-hackathon-playbook title fix
+    (scripts/migrate_hackathon_playbook_content.py). That migration only
+    touches the ai-hackathon-playbook row (title/body_md/date_label), and
+    the flagship homepage/thought-leadership cards render straight from
+    the DB row's own title (_oc_featured_cards_html/_tl_fcard, not the
+    frozen _TL_FEATURED_CARDS tuple) — so leaving this fixture pinned to
+    the pre-4b title would silently drift from what production actually
+    shows once that migration is applied there. Phase 4a's netsuite-mcp
+    migration needed no equivalent here since it never touched that row's
+    title, only its body_md."""
     from scripts.migrate_original_content import planned_rows
+    from scripts.migrate_hackathon_playbook_content import TITLE as HACKATHON_TITLE
     lib = appmod._lib()
     try:
         for r in planned_rows():
@@ -32,6 +45,12 @@ def _seed_flagship_original_content(appmod):
                 r["body_md"], r["status"], r["featured_home"], r["date_label"], r["sort_key"],
                 r["display_order"],
             )
+        row = lib.get_original_content_by_slug("ai-hackathon-playbook")
+        lib.update_original_content(
+            row["id"], row["slug"], HACKATHON_TITLE, row["teaser"], row["tag_label"],
+            row["link_label"], row["body_md"], row["status"], row["featured_home"],
+            row["date_label"], row["sort_key"], row["display_order"],
+        )
     finally:
         lib.close()
 
@@ -72,7 +91,13 @@ def test_homepage_has_one_consolidated_thought_leadership_section(env):
     assert 'href="/thought-leadership"' in html
     # The 3 flagship pieces, using the shared _tl_fcard/.tl-card treatment.
     assert "The Growth Engine Ratio" in html
-    assert "Sail, Don&rsquo;t Row" in html
+    # Straight apostrophe, not the curly &rsquo; entity — Phase 4b's
+    # double-escape fix (the row's stored title is now the real,
+    # unescaped "Sail, Don't Row", matching the retired bespoke page's
+    # own <h1> byte-for-byte; _tl_fcard() renders title raw, so the old
+    # pre-escaped value used to render literally as "&rsquo;" text).
+    assert "Sail, Don't Row" in html
+    assert "Sail, Don&rsquo;t Row" not in html
     assert "Connecting Claude to NetSuite" in html
     assert 'class="tl-card"' in html
     # Sail Don't Row correction: real playbook copy/link, not the design

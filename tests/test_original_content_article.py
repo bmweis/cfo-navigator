@@ -197,19 +197,16 @@ def test_bespoke_literal_routes_win_over_catch_all_even_on_slug_collision(env):
 
 
 def test_bespoke_pages_unaffected_by_new_catch_all(env):
-    """Spot-check the two remaining bespoke pages still load exactly as
+    """Spot-check the one remaining bespoke page still loads exactly as
     before — the new catch-all must not intercept or otherwise change
-    them. netsuite-mcp is no longer bespoke as of Original Content Phase
-    4a (its route was retired, the slug now goes through the catch-all
-    like any other original_content row) — covered separately below."""
+    it. netsuite-mcp (Phase 4a) and ai-hackathon-playbook (Phase 4b) are
+    no longer bespoke — both routes were retired, and their slugs now go
+    through the catch-all like any other original_content row — covered
+    separately below."""
     c = _client(env)
     ger = c.get("/thought-leadership/growth-engine-ratio")
     assert ger.status_code == 200
     assert "The Growth Engine Ratio" in ger.text
-
-    hackathon = c.get("/thought-leadership/ai-hackathon-playbook")
-    assert hackathon.status_code == 200
-    assert "Sail, Don&rsquo;t Row" in hackathon.text or "Sail, Don't Row" in hackathon.text
 
 
 def test_netsuite_mcp_now_served_by_catch_all(env):
@@ -226,8 +223,13 @@ def test_netsuite_mcp_now_served_by_catch_all(env):
     assert "Ported content." in r.text
 
 
-def test_other_bespoke_slug_collisions_also_lose_to_literal_routes(env):
-    _add(env, slug="ai-hackathon-playbook", title="Fake Hackathon",
-         body_md="fake", status="live")
-    c = _client(env)
-    assert "Fake Hackathon" not in c.get("/thought-leadership/ai-hackathon-playbook").text
+def test_ai_hackathon_playbook_now_served_by_catch_all(env):
+    """Original Content Phase 4b — ai-hackathon-playbook's bespoke route
+    was retired the same way netsuite-mcp's was in Phase 4a; it's now an
+    ordinary original_content row, reachable through the catch-all."""
+    _add(env, slug="ai-hackathon-playbook", title="Sail, Don't Row",
+         body_md="Ported hackathon content.", status="live")
+    r = _client(env).get("/thought-leadership/ai-hackathon-playbook")
+    assert r.status_code == 200
+    assert "Sail, Don't Row" in r.text
+    assert "Ported hackathon content." in r.text
