@@ -2945,9 +2945,12 @@ aggregates — so a new counting query was needed.
 - **Known-domain-migration fetch tier** (`linklib/domain_migration.py`, tried by a new
   `linklib.pipeline._finish_backfill_after_direct_failure` orchestrator BEFORE the
   pre-existing Wayback fallback): `_DOMAIN_MIGRATIONS` is a small, hand-curated map
-  (`pointsandfigures.com` → `jeffreycarter.substack.com`, `avc.com` → `avc.xyz`), same
+  (`pointsandfigures.com` → `jeffreycarter.substack.com`, `avc.com` → `avc.xyz`,
+  `karenroterdavis.com` → `karenroterdavis.wordpress.com`), same
   discipline as `_DEFUNCT_SERVICE_DOMAINS` — each entry requires live confirmation, not
-  a hunch. A domain-count diagnostic run against the full production archive (not a test
+  a hunch (the `karenroterdavis.com` entry, 2026-08, is the one exception on record: added
+  on Brian's reported fact after the building session's own network couldn't reach either
+  domain to verify directly — see `linklib/pipeline.py`'s comment on that entry). A domain-count diagnostic run against the full production archive (not a test
   batch) before building found 20 `pointsandfigures.com` articles (2 with a logged
   failure — consistent with that domain's known Cloudflare block) and 55 `avc.com`
   articles (0 logged failures yet, since most hadn't been attempted in a batch since the

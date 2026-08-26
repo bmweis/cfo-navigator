@@ -321,6 +321,7 @@ def test_find_migrated_url_network_error_returns_none(monkeypatch):
 def test_domain_migration_target_detection():
     assert pl._domain_migration_target("https://pointsandfigures.com/2020/01/01/x/") == "jeffreycarter.substack.com"
     assert pl._domain_migration_target("https://www.avc.com/2020/01/x.html") == "avc.xyz"
+    assert pl._domain_migration_target("https://karenroterdavis.com/2020/01/01/x/") == "karenroterdavis.wordpress.com"
     assert pl._domain_migration_target("https://example.com/normal") == ""
 
 

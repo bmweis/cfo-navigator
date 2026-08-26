@@ -7962,7 +7962,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         if text == _NEEDS_VERIFICATION:
             return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
         verify = ' <span class="comm-verify">unverified&mdash;hidden from visitors</span>' if unverified else ""
-        return f'<td class="cc-cell">{_esc(text)}{verify}</td>'
+        return f'<td class="cc-cell" style="white-space:pre-wrap;">{_esc(text)}{verify}</td>'
 
     def _profile_row(label: str, values: list) -> str:
         if not any((v or "").strip() for v in values):
@@ -8444,7 +8444,7 @@ def tools_community_profile(request: Request, slug: str):
         verdict_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_profile_verify}</div>
-  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(_display_profile['verdict_summary'])}</p>
+  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;">{_esc(_display_profile['verdict_summary'])}</p>
 </div>"""
     elif authed:
         verdict_block = (f'<div style="margin-bottom:22px;">'
@@ -8467,7 +8467,7 @@ def tools_community_profile(request: Request, slug: str):
         sections = "".join(
             f"""<div style="margin-bottom:16px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
-  <p style="margin:0;">{_esc(_display_profile[key])}</p>
+  <p style="margin:0;white-space:pre-wrap;">{_esc(_display_profile[key])}</p>
 </div>"""
             for label, key in fields
             if (_display_profile.get(key) or "").strip()
