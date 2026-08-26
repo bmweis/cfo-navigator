@@ -377,13 +377,16 @@ def test_admin_edit_page_shows_empty_note_when_no_citations(app_module):
     assert "No citations recorded for this draft" in r.text
 
 
-def test_community_profile_renders_publicly_regardless_of_needs_review(app_module):
-    """Confirms the missing publish gate noted in Phase 0: unlike tools'
-    Agent taxonomy Abacum-fix gate, the Community profile has no such gate
-    — an unreviewed (needs_review=1) draft still renders to a public
-    visitor. Pinned as intentional current behavior (a known follow-up,
-    same as Description's own equivalent test), not something this phase
-    changes."""
+def test_community_profile_hidden_from_public_when_unreviewed(app_module):
+    """Superseded by the Description/Community profile publish-gate
+    follow-up (see CLAUDE.md): the Community profile now gets the same
+    Abacum-fix publish gate Agent taxonomy already had, gating the entire
+    drafted profile at once — an unreviewed (needs_review=1) draft is
+    hidden from a public visitor. Was
+    test_community_profile_renders_publicly_regardless_of_needs_review,
+    which pinned the old no-gate behavior as a deliberate, flagged
+    follow-up; rewritten now that the follow-up has shipped. See
+    tests/test_review_state_publish_gates.py for the full gate coverage."""
     lib = Library(os.environ["LINKLIB_DB"])
     community_id = _add_community(lib)
     lib.upsert_community_profile(community_id, ideal_member="An unreviewed AI-drafted ideal member.",
@@ -394,4 +397,4 @@ def test_community_profile_renders_publicly_regardless_of_needs_review(app_modul
     client = _client(app_module)   # no login — a signed-out public visitor
     r = client.get(f"/tools/communities/{slug}")
     assert r.status_code == 200
-    assert "An unreviewed AI-drafted ideal member." in r.text
+    assert "An unreviewed AI-drafted ideal member." not in r.text
