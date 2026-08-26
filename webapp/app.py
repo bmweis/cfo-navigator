@@ -62,6 +62,7 @@ from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.manual_review_csv import parse_manual_review_corrections_csv
 from linklib.purge_csv import parse_purge_confirmations_csv, MAX_PURGE_PER_RUN
+from linklib.library_delete_csv import parse_library_delete_csv, MAX_DELETE_PER_RUN
 from linklib.extract import _MIN_CONTENT_WORDS
 from linklib.pipeline import ingest_url
 from linklib import backup
@@ -16411,6 +16412,12 @@ _READER_SHELL_CSS = """
    the markup comment in rrRenderArticle for why: icon-only in a row of
    icon-only buttons read as easy to miss during live testing. */
 .rr-find-toggle{display:flex;align-items:center;gap:6px;padding:4px 12px;}
+/* Same labeled-not-icon-only treatment as .rr-find-toggle, plus destructive
+   coloring — matches the coral/#b91c1c convention every other permanent-
+   delete button on this site already uses (see the admin delete buttons
+   throughout webapp/app.py), not a new color invented for this one. */
+.rr-delete-toggle{display:flex;align-items:center;gap:6px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;}
+.rr-delete-toggle:hover{background:#fef2f2;}
 .rr-find-bar{display:none;align-items:center;gap:6px;padding:8px 20px;border-bottom:1px solid var(--line);
   background:var(--surface-2);position:sticky;top:53px;z-index:4;}
 .rr-find-bar.rr-find-open{display:flex;}
@@ -16875,6 +16882,12 @@ var RR_ICON_SEARCH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none
 // Tag glyph for the reader toolbar — the collapsed state of the inline tag
 // editor, matching Instapaper's own toolbar tag affordance.
 var RR_ICON_TAG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4L12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"></path><circle cx="7.5" cy="7.5" r="1.3"></circle></svg>';
+// Trash glyph for "Remove from library" — one-off cleanup of a single saved
+// article straight from the reader pane's own toolbar, admin-only same as
+// the rest of the Reader (see reader_shell's _is_authed gate — there's no
+// separate admin check on this button since anyone in the Reader already is
+// an admin).
+var RR_ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>';
 // In-article find (a separate, article-scoped search — not the list search).
 var rrFindMatches = [];
 var rrFindIndex = -1;
@@ -16942,6 +16955,10 @@ function rrRenderArticle(d) {{
         // "+ Save" buttons already get (text, not just a glyph).
         '<button onclick="rrToggleFind()" title="Find in article" class="rr-find-toggle">' +
           RR_ICON_SEARCH + '<span>Find</span></button>' +
+        // Only for a saved article — there's nothing to remove from the
+        // library for a Feed/Read Later item that was never saved.
+        (isSaved ? '<button id="rr-delete-btn" onclick="rrDeleteCurrent()" title="Remove from library" ' +
+          'class="rr-delete-toggle">' + RR_ICON_TRASH + '<span>Remove</span></button>' : '') +
         '<a href="' + rrEsc(d.url) + '" target="_blank" rel="noopener" style="font-size:12px;">Original &rarr;</a>' +
       '</div>' +
     '</div>' +
@@ -17345,6 +17362,34 @@ async function rrToggleReadLaterCurrent() {{
       btn.innerHTML = !isOn ? '&#10003; Read later' : '&#128204; Read later';
     }}
   }} finally {{ btn.disabled = false; }}
+}}
+// Permanently removes the currently open article from the library. The
+// route (POST /library/{{id}}/delete) redirects on success rather than
+// returning JSON — fetch follows that redirect transparently, so r.ok is
+// still the right success check; no route change needed for this to work
+// from an AJAX context. Reuses the same delete mechanism (Library.
+// purge_article, via delete_article's full cascade — FTS, embeddings,
+// content_refetch_log, url_correction_log) the CSV bulk-delete tool at
+// /admin/library/bulk-delete uses, just reached one article at a time.
+async function rrDeleteCurrent() {{
+  if (!rrCurrent || !rrCurrent.id) return;
+  var title = rrCurrent.title || 'this article';
+  if (!confirm('Permanently remove \\u201c' + title + '\\u201d from the library? This can\\u2019t be undone.')) return;
+  var btn = document.getElementById('rr-delete-btn');
+  if (btn) btn.disabled = true;
+  var deletedId = rrCurrent.id;
+  try {{
+    var r = await fetch('/library/' + deletedId + '/delete', {{method: 'POST'}});
+    if (!r.ok) throw new Error('delete failed');
+    var row = document.querySelector('.rr-row[data-id="' + deletedId + '"]');
+    if (row) row.remove();
+    rrCurrent = null;
+    var pane = document.getElementById('rr-reader');
+    if (pane) pane.innerHTML = '<div class="rr-reader-empty"><div>Removed from the library.</div></div>';
+  }} catch (e) {{
+    alert('Could not remove this article. Please try again.');
+    if (btn) btn.disabled = false;
+  }}
 }}
 async function rrRemoveReadLater(btn) {{
   var url = btn.dataset.url;
@@ -18510,6 +18555,7 @@ _LIBRARY_TOOLS = [
     ("/admin/library/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
     ("/admin/library/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content—this is the material FP&A Buddy reads from, so depth here pays off there."),
     ("/admin/library/review-removals", "Remove content",   "Filter for content the enricher flagged as potentially off-target for this archive (e.g. podcasts, annual predictions, fund/LP content) and confirm or keep each one."),
+    ("/admin/library/bulk-delete",   "Bulk delete articles", "Permanently remove a specific list of articles you've already decided aren't needed&mdash;paste their URLs into the CSV template, mark <code>confirm_delete</code>, and re-upload. For a known list, not a scan&mdash;different from the &lt;60-word Purge tool under Reader content backfill. A single article can also be removed straight from its Reader toolbar."),
 ]
 
 # Software-directory admin, nested as its own sub-group inside CFO Toolbox
@@ -20745,7 +20791,8 @@ def admin_library(request: Request):
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
-        ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals"],
+        ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals",
+         "/admin/library/bulk-delete"],
         "Working with what's already saved.")
 
     archive_additions_html = _lib_section(
@@ -26295,6 +26342,294 @@ async def admin_backfill_content_purge_import_commit(request: Request):
         msg += (f' {len(skipped_ids)} row(s) skipped (no longer a purge candidate, or already gone): '
                 f'{", ".join(f"#{i}" for i in skipped_ids[:10])}{" …" if len(skipped_ids) > 10 else ""}')
     return RedirectResponse(f"/admin/library/backfill-content?msg={quote(msg)}", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Bulk delete (one-off cleanup batches, 2026-08) — same export/preview/commit
+# CSV round trip as the Purge tool above, applied to an arbitrary list of
+# URLs the admin already knows they want gone (a curated cleanup list), not
+# a computed candidate set the way Purge's <60-word scan is. The single-
+# article "Remove from library" action in the Reader toolbar
+# (POST /library/{article_id}/delete) and this bulk tool both delete through
+# Library.purge_article — one delete mechanism, two ways to reach it. See
+# linklib.library_delete_csv's module docstring for the confirm-marker
+# vocabulary and the MAX_DELETE_PER_RUN cap.
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/library/bulk-delete", response_class=HTMLResponse)
+def admin_library_bulk_delete(request: Request, msg: str = "", error: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
+                     f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<h1>Bulk delete articles</h1>
+<p style="color:var(--muted);margin:0 0 18px;max-width:70ch;">For a specific list of articles you've already decided
+aren't needed&mdash;permanently removes them by URL. Different from the Purge tool under
+<a href="/admin/library/backfill-content">Reader content backfill</a>, which only ever targets articles with
+essentially nothing saved for them; this tool has no scan of its own and only acts on URLs you provide. Removing a
+single article one at a time is also available straight from its toolbar in the <a href="/read">Reader</a>.</p>
+{banner}{error_banner}
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 24px;max-width:640px;">
+  <h3 style="font-size:14px;margin:0 0 10px;">1. Get the CSV template</h3>
+  <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">A blank template with the two required columns:
+  <code>url</code> and <code>confirm_delete</code>. Paste in the URLs you want gone, filling
+  <code>confirm_delete</code> with <code>yes</code> for each row to remove&mdash;leave it blank for a URL you're not
+  sure about yet.</p>
+  <a href="/admin/library/bulk-delete/template.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Download CSV template</a>
+
+  <h3 style="font-size:14px;margin:22px 0 10px;">2. Upload it back</h3>
+  <form method="post" action="/admin/library/bulk-delete/preview" enctype="multipart/form-data"
+        style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <input type="file" name="file" accept=".csv,text/csv" required>
+    <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Preview deletion</button>
+    <span style="font-size:12px;color:var(--muted);">Nothing is deleted until you confirm on the preview screen. Capped at {MAX_DELETE_PER_RUN} per run.</span>
+  </form>
+</div>
+</div>"""
+    return HTMLResponse(_page("Bulk delete articles—Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/library/bulk-delete/template.csv")
+def admin_library_bulk_delete_template(request: Request):
+    """Header-only CSV — there's no fixed candidate list to export the way
+    Purge has (any URL currently in the library is a valid target), so
+    "export" here means a blank starting point instead of pre-populated
+    rows."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    content = "url,confirm_delete\n"
+    return Response(
+        content=content, media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="bulk-delete-template.csv"'},
+    )
+
+
+@app.post("/admin/library/bulk-delete/preview")
+async def admin_library_bulk_delete_preview(request: Request, file: UploadFile = File(...)):
+    """Parses the uploaded CSV and shows exactly what would be permanently
+    deleted — nothing is written here. Each url is resolved against a FRESH
+    Library.get_article_by_url lookup at parse time (never trusting the
+    uploaded file's own title/word_count columns), same "whatever's in the
+    database now is authoritative" rule as Purge/manual-review. Confirmed
+    rows round-trip as hidden fields into the commit form below, plus a
+    required typed-count field — same second, independent guard as Purge's
+    commit screen."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    data = await file.read()
+
+    lib = _lib()
+    try:
+        def _resolve(url: str):
+            row = lib.get_article_by_url(url)
+            if row is None:
+                return None
+            return {"id": row["id"], "title": row.get("title") or "",
+                    "word_count": len((row.get("content") or "").split())}
+
+        try:
+            confirmed, skipped, errors = parse_library_delete_csv(data, _resolve)
+        except ValueError as e:
+            return RedirectResponse(f"/admin/library/bulk-delete?error={quote(str(e))}", status_code=303)
+    finally:
+        lib.close()
+
+    if not confirmed and not skipped and not errors:
+        return RedirectResponse(
+            f"/admin/library/bulk-delete?error={quote('The file had no data rows to import.')}", status_code=303)
+
+    hidden_fields = "".join(
+        f'<input type="hidden" name="article_id" value="{c["article_id"]}">'
+        f'<input type="hidden" name="url" value="{_esc(c["url"])}">'
+        for c in confirmed
+    )
+
+    confirmed_table_rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;">#{c['article_id']} {_esc(c['title']) or '<em>untitled</em>'}</td>
+  <td style="padding:8px 10px;font-size:12px;color:var(--muted);word-break:break-all;">{_esc(c['url'])}</td>
+  <td style="padding:8px 10px;font-size:13px;text-align:center;">{c['word_count']}</td>
+</tr>""" for c in confirmed) or (
+        '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--muted);">No rows confirmed for deletion.</td></tr>')
+
+    skipped_section = ""
+    if skipped:
+        skipped_rows_html = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{r['line']}</td>
+  <td style="padding:8px 10px;font-size:13px;word-break:break-all;">{_esc(r['url'])}</td>
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{_esc(r['reason'])}</td>
+</tr>""" for r in skipped)
+        skipped_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or marked no&mdash;not an error, nothing to do.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:400px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">URL</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why</th>
+    </tr></thead>
+    <tbody>{skipped_rows_html}</tbody>
+  </table>
+</div>"""
+
+    errors_section = ""
+    if errors:
+        errors_rows_html = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{r['line']}</td>
+  <td style="padding:8px 10px;font-size:13px;font-family:monospace;">{_esc(r['raw'])}</td>
+  <td style="padding:8px 10px;font-size:13px;color:#b91c1c;">{_esc(r['reason'])}</td>
+</tr>""" for r in errors)
+        errors_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be deleted&mdash;fix them in your CSV and re-upload if needed.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:480px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Raw row</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why it was skipped</th>
+    </tr></thead>
+    <tbody>{errors_rows_html}</tbody>
+  </table>
+</div>"""
+
+    n = len(confirmed)
+    confirm_button = (
+        f'<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;background:#b91c1c;border-color:#b91c1c;">'
+        f'Permanently delete {n} article{"s" if n != 1 else ""}</button>'
+        if confirmed else
+        '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to delete</button>'
+    )
+    count_confirm_field = (
+        f'<label style="display:flex;flex-direction:column;gap:4px;font-size:13px;">'
+        f'Type <strong>{n}</strong> to confirm'
+        f'<input type="text" name="confirm_count" required autocomplete="off"'
+        f' style="width:100px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;">'
+        f'</label>' if confirmed else ""
+    )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/library/bulk-delete" style="font-size:13px;color:var(--muted);">&larr; Bulk delete articles</a></p>
+<h1>Preview bulk delete</h1>
+<p style="color:var(--muted);margin:0 0 6px;">Nothing has been deleted yet. Review the rows below carefully&mdash;this is permanent.</p>
+<p style="color:var(--muted);margin:0 0 18px;">A fresh off-site backup is taken automatically right before the delete runs, in addition to the regular nightly one.</p>
+
+<h3 style="font-size:14px;margin:0 0 10px;">Confirmed for deletion ({n})</h3>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+  <table style="width:100%;border-collapse:collapse;min-width:560px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">URL</th>
+      <th style="padding:8px 10px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Words</th>
+    </tr></thead>
+    <tbody>{confirmed_table_rows}</tbody>
+  </table>
+</div>
+
+<form method="post" action="/admin/library/bulk-delete/commit" style="margin:14px 0 8px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+  {hidden_fields}
+  {count_confirm_field}
+  {confirm_button}
+  <a href="/admin/library/bulk-delete" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+</form>
+{skipped_section}
+{errors_section}
+</div>"""
+    return HTMLResponse(_page("Preview bulk delete—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/library/bulk-delete/commit")
+async def admin_library_bulk_delete_commit(request: Request):
+    """Executes the deletion the preview step showed. Two independent
+    guards before anything is deleted: (1) the typed confirm_count must
+    equal the number of article_id rows actually posted; (2) every
+    (article_id, url) pair is re-validated against a fresh
+    Library.get_article_by_url read (a row deleted or changed between
+    preview and commit is skipped, not deleted — same TOCTOU discipline as
+    Purge's commit route). A real off-site backup snapshot
+    (backup.backup_now, not the debounced maybe_backup) is taken
+    immediately before the delete loop, when backups are configured at
+    all; if that snapshot fails, the whole batch is aborted rather than
+    proceeding without a fresh net. Every deleted article is logged to
+    archive_audit_log (action='delete', detail='bulk-delete') via
+    Library.purge_article, which also write-then-read-back verifies each
+    delete actually took."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    article_ids_raw = form.getlist("article_id")
+    urls_raw = form.getlist("url")
+    confirm_count_raw = (form.get("confirm_count") or "").strip()
+
+    if not article_ids_raw:
+        return RedirectResponse(
+            f"/admin/library/bulk-delete?error={quote('No articles to delete—upload a CSV first.')}",
+            status_code=303)
+
+    if len(article_ids_raw) != len(urls_raw):
+        return RedirectResponse(
+            f"/admin/library/bulk-delete?error={quote('Malformed delete request.')}", status_code=303)
+
+    try:
+        article_ids = [int(x) for x in article_ids_raw]
+    except ValueError:
+        return RedirectResponse(
+            f"/admin/library/bulk-delete?error={quote('Malformed delete request.')}", status_code=303)
+
+    if confirm_count_raw != str(len(article_ids)):
+        return RedirectResponse(
+            f"/admin/library/bulk-delete?error="
+            f"{quote(f'Typed count ({confirm_count_raw!r}) did not match the {len(article_ids)} confirmed article(s)—nothing was deleted. Re-upload and try again.')}",
+            status_code=303)
+
+    if len(article_ids) > MAX_DELETE_PER_RUN:
+        # Defense in depth — parse_library_delete_csv already enforces this
+        # at preview time, but a hand-crafted POST shouldn't be able to
+        # bypass it.
+        return RedirectResponse(
+            f"/admin/library/bulk-delete?error="
+            f"{quote(f'{len(article_ids)} articles exceeds the {MAX_DELETE_PER_RUN}-per-run cap—nothing was deleted.')}",
+            status_code=303)
+
+    if backup.is_configured():
+        try:
+            backup.backup_now(DB_PATH)
+        except Exception as exc:
+            return RedirectResponse(
+                f"/admin/library/bulk-delete?error="
+                f"{quote(f'Pre-delete backup failed, so nothing was deleted: {exc}')}",
+                status_code=303)
+
+    lib = _lib()
+    deleted = 0
+    skipped_ids: list[int] = []
+    try:
+        for article_id, url in zip(article_ids, urls_raw):
+            current = lib.get_article_by_url(url)
+            if current is None or current["id"] != article_id:
+                skipped_ids.append(article_id)
+                continue
+            snapshot = lib.purge_article(article_id)
+            if snapshot is None:
+                skipped_ids.append(article_id)
+                continue
+            _log_archive_audit(lib, request, "delete", article_id,
+                               detail=f"bulk-delete: {snapshot['word_count']} words, {snapshot['url']}")
+            deleted += 1
+    finally:
+        lib.close()
+
+    msg = f'Deleted {deleted} article{"s" if deleted != 1 else ""}.'
+    if skipped_ids:
+        msg += (f' {len(skipped_ids)} row(s) skipped (already changed or gone since preview): '
+                f'{", ".join(f"#{i}" for i in skipped_ids[:10])}{" …" if len(skipped_ids) > 10 else ""}')
+    return RedirectResponse(f"/admin/library/bulk-delete?msg={quote(msg)}", status_code=303)
 
 
 def _backup_status_banner(backup_rows: list[dict]) -> str:
