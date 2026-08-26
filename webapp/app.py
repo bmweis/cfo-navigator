@@ -25332,11 +25332,34 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         url = r.get("article_url") or ""
         title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
                       if url else title)
+        # Detail (an HTTP-status/timeout description, a Wayback outcome
+        # trace, "accepted as final by admin override", etc.) gets its own
+        # column rather than sitting under the title — it's a distinct fact
+        # about the attempt, not part of the Article column, the same
+        # one-fact-per-column convention the other two tables on this page
+        # already use for reason/attempts/date.
         detail = _esc(r.get("detail") or "")
-        detail_html = f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;">{detail}</div>' if detail else ""
-        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}{detail_html}</td>'
-                f'<td style="padding:7px 12px;font-size:13px;color:{color};font-weight:500;">{label}</td>'
-                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{_esc((r.get("attempted_at") or "")[:19].replace("T", " "))}</td></tr>')
+        detail_html = f'<span style="font-size:12px;color:var(--muted);">{detail}</span>' if detail else ""
+        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}</td>'
+                f'<td style="padding:7px 12px;font-size:13px;color:{color};font-weight:500;white-space:nowrap;">{label}</td>'
+                f'<td style="padding:7px 12px;">{detail_html}</td>'
+                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r.get("attempted_at") or "")[:19].replace("T", " "))}</td></tr>')
+
+    # Shared header-cell style for the three backfill-content tables (this
+    # one, plus Needs manual review / Accepted as final below) — one pair of
+    # constants so all three stay in visual lockstep (same font/weight/case/
+    # tracking, same nowrap treatment on the columns that shouldn't wrap)
+    # rather than drifting apart as separate literals.
+    _th = "padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"
+    _th_nowrap = _th + "white-space:nowrap;"
+    # A literal, explicit width (not a percentage) on the Article column so
+    # it renders at the SAME absolute pixel width across all three separate
+    # <table> elements — each table auto-sizes its own columns independently,
+    # so matching a percentage alone doesn't guarantee that; a shared px
+    # value pinned on all three does. Anchored to Recent attempts' own
+    # natural width (the table with the fewest narrow nowrap columns
+    # crowding it), per Brian's ask.
+    _th_article = _th + "width:420px;"
 
     log_html = ""
     if log_rows:
@@ -25347,9 +25370,10 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Result</th>
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">When</th>
+      <th style="{_th_article}">Article</th>
+      <th style="{_th_nowrap}">Result</th>
+      <th style="{_th}">Detail</th>
+      <th style="{_th_nowrap}">When</th>
     </tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
@@ -25417,7 +25441,13 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         reason_html = f'{reason_label}<div style="font-size:11.5px;color:var(--muted);margin-top:2px;">{detail}</div>' if detail else reason_label
         title = _esc(r.get("title") or f'article #{r["article_id"]}')
         url = r.get("current_url") or ""
-        title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
+        # Duplicate titles in this queue are rare enough not to design around
+        # (see CLAUDE.md's UI-layout discipline) — the URL that used to sit on
+        # its own line under the title is dropped, with a `title` attribute
+        # as a lightweight fallback for the rare collision, not a rebuilt
+        # disambiguation UI.
+        title_html = (f'<a href="{_esc(url)}" target="_blank" title="{_esc(url)}" '
+                      f'style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
                       if url else title)
         last = _esc((r.get("last_attempted_at") or "")[:19].replace("T", " "))
         accept_form = (f'<form method="post" action="/admin/library/backfill-content/{r["article_id"]}/accept" '
@@ -25436,12 +25466,11 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         wayback_link = (f'<a href="https://web.archive.org/save/{_esc(url)}" target="_blank" '
                         f'rel="noopener" style="font-size:12px;white-space:nowrap;">Snapshot on Wayback &#8599;</a>'
                         if url else "")
-        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}'
-                f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-all;">{_esc(url)}</div></td>'
+        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}</td>'
                 f'<td style="padding:7px 12px;font-size:13px;">{reason_html}</td>'
-                f'<td style="padding:7px 12px;font-size:13px;text-align:center;">{r.get("attempt_count", 0)}</td>'
-                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{last}</td>'
-                f'<td style="padding:7px 12px;"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">{accept_form}{wayback_link}</div></td></tr>')
+                f'<td style="padding:7px 12px;font-size:13px;text-align:center;white-space:nowrap;">{r.get("attempt_count", 0)}</td>'
+                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);white-space:nowrap;">{last}</td>'
+                f'<td style="padding:7px 12px;white-space:nowrap;"><div style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;">{accept_form}{wayback_link}</div></td></tr>')
 
     def _accepted_row(r):
         labels = {"paywall": "Paywall", "bot-challenge": "Bot challenge",
@@ -25449,16 +25478,16 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         reason_label = _esc(labels.get(r.get("reason") or "", r.get("reason") or "unknown"))
         title = _esc(r.get("title") or f'article #{r["article_id"]}')
         url = r.get("current_url") or ""
-        title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
+        title_html = (f'<a href="{_esc(url)}" target="_blank" title="{_esc(url)}" '
+                      f'style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
                       if url else title)
         when = _esc((r.get("accepted_at") or "")[:19].replace("T", " "))
         undo_form = (f'<form method="post" action="/admin/library/backfill-content/{r["article_id"]}/unaccept">'
                      f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;white-space:nowrap;">Undo</button></form>')
-        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}'
-                f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-all;">{_esc(url)}</div></td>'
+        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}</td>'
                 f'<td style="padding:7px 12px;font-size:13px;">{reason_label}</td>'
-                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{when}</td>'
-                f'<td style="padding:7px 12px;">{undo_form}</td></tr>')
+                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);white-space:nowrap;">{when}</td>'
+                f'<td style="padding:7px 12px;white-space:nowrap;">{undo_form}</td></tr>')
 
     manual_review_html = ""
     if needs_review_rows:
@@ -25484,11 +25513,11 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last failure</th>
-      <th style="padding:7px 12px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Attempts</th>
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last attempt</th>
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"></th>
+      <th style="{_th_article}">Article</th>
+      <th style="{_th}">Last failure</th>
+      <th style="{_th_nowrap}text-align:center;">Attempts</th>
+      <th style="{_th_nowrap}">Last attempt</th>
+      <th style="{_th_nowrap}">Actions</th>
     </tr></thead>
     <tbody>{review_rows_html}</tbody>
   </table>
@@ -25507,10 +25536,10 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Reason it was flagged</th>
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Accepted</th>
-      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"></th>
+      <th style="{_th_article}">Article</th>
+      <th style="{_th}">Reason it was flagged</th>
+      <th style="{_th_nowrap}">Accepted</th>
+      <th style="{_th_nowrap}">Actions</th>
     </tr></thead>
     <tbody>{accepted_rows_html}</tbody>
   </table>
