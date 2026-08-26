@@ -2008,13 +2008,16 @@ Details worth knowing:
   taxonomy — public profile page (`/tools/software/{slug}`'s Description
   card) capped at 5; admin edit page's Description block, uncapped,
   alongside the existing `_narrative_verify_widget` verify action/badge.
-  **Deliberately does NOT add a publish gate** — unlike Agent taxonomy's
-  Abacum-fix gate (`agent_taxonomy_needs_verification` hides an unverified/
-  low-confidence note from public visitors entirely), Description has
-  never had one and this phase doesn't add one: an unverified or
-  low-confidence Description still renders publicly, with only a Sources
-  list added alongside it. Confirmed explicitly out of scope for this
-  phase rather than an oversight — flagged as a known follow-up.
+  **Deliberately does NOT add a publish gate in THIS phase** — unlike
+  Agent taxonomy's Abacum-fix gate (`agent_taxonomy_needs_verification`
+  hides an unverified/low-confidence note from public visitors entirely),
+  Description had never had one at this point and this phase doesn't add
+  one: an unverified or low-confidence Description still rendered
+  publicly here, with only a Sources list added alongside it. Confirmed
+  explicitly out of scope for this phase rather than an oversight —
+  flagged as a known follow-up. **Built in the "Description/Community
+  profile publish gates" bullet further down this section** — that
+  follow-up has since shipped.
   `entity_type='tool'`/`field_name='description'` in `entity_citations`;
   `summary` shares the row (drafted together, one Generate call, same
   "shares its verification status, not tracked separately" convention
@@ -2069,15 +2072,83 @@ Details worth knowing:
   sees every source before signing off" placement rule Description/Agent
   taxonomy use, just anchored to the one shared verify action instead of a
   per-field one.
-  **Deliberately does NOT add a publish gate** — same explicit,
-  out-of-scope-for-this-phase call Description's Phase 2 made: the
-  Community profile page has never gated an unreviewed
-  (`needs_review=1`) or low-confidence draft from public visitors, unlike
-  Agent taxonomy's Abacum-fix gate, and this phase doesn't add one — only
-  a Sources list. Flagged as a known follow-up in the PR, same as
-  Description's.
+  **Deliberately does NOT add a publish gate in THIS phase** — same
+  explicit, out-of-scope-for-this-phase call Description's Phase 2 made:
+  the Community profile page had never gated an unreviewed
+  (`needs_review=1`) or low-confidence draft from public visitors at this
+  point, unlike Agent taxonomy's Abacum-fix gate, and this phase doesn't
+  add one — only a Sources list. Flagged as a known follow-up in the PR,
+  same as Description's. **Built in the "Description/Community profile
+  publish gates" bullet further down this section** — that follow-up has
+  since shipped.
   No schema change — `entity_citations`'s table comment already
   anticipated this exact shape when it was written in Phase 1b.
+- **Description/Community profile publish gates (2026-08) — the two
+  follow-ups the two bullets above deliberately deferred, now built the
+  same way Agent taxonomy's Abacum-fix gate works.** A Phase 0 read-only
+  investigation confirmed the gate's shape first: `agent_taxonomy_
+  needs_verification` is read directly (never `agent_taxonomy_ai_
+  confident`, a separate permanent-display fact that never gates
+  anything), branches at each render site into three cases — verified
+  (renders plain), unverified+admin (renders with an inline "unverified—
+  hidden from visitors" label), unverified+public (falls into whatever
+  branch an empty field already uses) — and both new gates extend exactly
+  that pattern, no new mechanism.
+  **Description** (`tools.description_needs_verification`, `NOT NULL
+  DEFAULT 0` — covers both `description` and `summary`, drafted together)
+  gates: the profile page's hero subhead (`summary` or `description`) and
+  its Description card; the compare matrix's Description row, per-cell
+  (`_desc_cell`, mirroring `_agent_cell`); and the `/tools/software`
+  directory card, which the Phase 0 investigation flagged as a real,
+  distinct leak Agent taxonomy never had to handle — the card's `ALL_TOOLS`
+  JSON keeps the raw text regardless of verification state (the admin
+  Quick Edit panel needs it verbatim even when unverified), so gating
+  happens client-side instead: a `description_needs_verification` boolean
+  rides in each entry, and both the `.tool-desc` render and the search-
+  match string check it against the page's existing `AUTHED` global before
+  showing/matching the text. Verified live with a real headless-browser
+  session (anonymous visitor: blank card, search for drafted text returns
+  zero results; admin: full text plus an "Unverified—hidden from visitors"
+  label, search matches), per this repo's UI-testing standard.
+  **Community profile** (`community_profiles.needs_review`, `NOT NULL
+  DEFAULT 0`) gates the ENTIRE drafted profile at once, not per-field —
+  `needs_review` is already a single whole-profile flag (see the Phase G
+  PR 2 / confidence-indicator bullets elsewhere in this doc), and gating
+  only the 12 confidence-tracked narrative fields while leaving `founded_
+  year`/`cpe_eligible`/the Details card's Format contribution visible
+  would read as a half-reviewed page rather than a clean not-yet-reviewed
+  state — confirmed as the intended scope with Brian before building
+  (Phase 0 open question). Implemented as one `_display_profile` swap (the
+  real `profile` dict when verified or admin, `{}` when unverified+public)
+  that every downstream read — the "Bottom line" verdict callout, its
+  Sources citation list, the four grouped profile cards, and the
+  profile-sourced Details-card lines — reads from instead of `profile`
+  directly, so a public visitor sees exactly what they'd see if the
+  profile had never been drafted, and an admin sees every field labeled.
+  The compare matrix (`/tools/communities/compare`, which had no `authed`
+  variable at all before this) gates the same way per community, via a
+  `display_profiles` dict and a per-cell `_profile_cell` mirroring
+  Description/Agent taxonomy's compare-matrix pattern.
+  **Both columns are `NOT NULL DEFAULT 0`** (confirmed by attempting a raw
+  `UPDATE ... SET ...=NULL`, which SQLite itself rejects) — so there is no
+  real NULL row in production, and a legacy row predating either feature
+  already reads as `0`/verified with no migration needed. Every gate still
+  reads via `bool(row.get(...))` rather than a bare subscript, so a row
+  dict missing the key entirely (not reachable through any real DB read
+  today) degrades to the same verified behavior, covered by a monkeypatched
+  test in `tests/test_review_state_publish_gates.py`.
+  **Deferred, not built, and named together in the PR as one follow-up
+  item**: the software/community Chat Matchmakers
+  (`linklib/matchmaker.py`) feed raw `description`/`summary` into Claude's
+  context unfiltered by `description_needs_verification` — a synthesized
+  matchmaker answer could still surface unverified text through that
+  channel — and the `/tools/software` directory card's `ALL_TOOLS` JSON
+  still carries the raw, unverified `agent_taxonomy_note` text in page
+  source for search-matching purposes (pre-existing, since before this
+  PR) the same way it now carries unverified `description`/`summary` (new
+  in this PR) — both are UI/search-level gates, not data-removal, on a
+  payload only ever meant for a signed-in admin's Quick Edit panel to read
+  verbatim regardless of verification state.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything

@@ -420,12 +420,17 @@ def test_admin_edit_page_shows_empty_note_when_no_citations(app_module):
     assert "No citations recorded for this draft" in r.text
 
 
-def test_description_renders_publicly_regardless_of_needs_verification(app_module):
-    """Deliberate, out-of-scope-for-this-phase gap: unlike Agent taxonomy's
-    Abacum-fix publish gate, Description has no such gate — an unverified
-    draft still renders to a public visitor. This test pins that as
-    intentional current behavior, not an oversight, so a future change
-    doesn't silently add a gate without a deliberate decision."""
+def test_description_hidden_from_public_when_unverified(app_module):
+    """Superseded by the Description/Community profile publish-gate
+    follow-up (see CLAUDE.md): Description now gets the same Abacum-fix
+    publish gate Agent taxonomy already had — an unverified draft is
+    hidden from a public visitor. Was
+    test_description_renders_publicly_regardless_of_needs_verification,
+    which pinned the old no-gate behavior as a deliberate, flagged
+    follow-up; rewritten now that the follow-up has shipped, same as the
+    2026-08 confidence-indicator tests were renamed/rewritten when their
+    own pinned behavior changed. See tests/test_review_state_publish_gates.py
+    for the full gate coverage."""
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "An unverified AI-drafted description.", "https://runway.com", [],
                            approved=1, summary="Summary.",
@@ -436,4 +441,4 @@ def test_description_renders_publicly_regardless_of_needs_verification(app_modul
     client = _client(app_module)   # no login — a signed-out public visitor
     r = client.get(f"/tools/software/{slug}")
     assert r.status_code == 200
-    assert "An unverified AI-drafted description." in r.text
+    assert "An unverified AI-drafted description." not in r.text
