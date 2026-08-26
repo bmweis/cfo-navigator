@@ -25991,9 +25991,25 @@ async def admin_backfill_content_manual_review_import_commit(request: Request):
     Re-validates the article id/url pairing against the current DB state
     rather than trusting the hidden fields blindly, same discipline as
     /admin/overhead-spend/csv/commit — one bad row is skipped and counted,
-    not allowed to abort the batch."""
+    not allowed to abort the batch.
+
+    Each row is applied and committed independently (apply_article_url_
+    correction commits per row, not once for the whole batch), so a row
+    that fails after earlier rows already succeeded must not blow up the
+    whole request — earlier commits are already real and permanent by the
+    time a later row fails. articles.url is UNIQUE, so a corrected_url that
+    already belongs to a different article (a real, if uncommon, collision
+    — e.g. two rows independently correcting toward the same already-saved
+    piece) raises sqlite3.IntegrityError; caught here and reported per-row,
+    same as every other per-row failure mode, instead of taking down the
+    whole batch with a bare 500 (the original bug — see the commit that
+    added this comment). The bare `except Exception` below is a safety net
+    underneath that specific case, not the primary handler for it — it
+    exists so a future, unrelated DB error can't reproduce the same
+    silent-bare-500 experience."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    import sqlite3
     form = await request.form()
     article_ids = form.getlist("article_id")
     corrected_urls = form.getlist("corrected_url")
@@ -26017,7 +26033,20 @@ async def admin_backfill_content_manual_review_import_commit(request: Request):
             if not new_url:
                 failures.append(f"row {i + 1}: missing corrected_url")
                 continue
-            if lib.apply_article_url_correction(article_id, new_url, source="csv-import"):
+            try:
+                ok = lib.apply_article_url_correction(article_id, new_url, source="csv-import")
+            except sqlite3.IntegrityError:
+                owner = lib.conn.execute(
+                    "SELECT id FROM articles WHERE url=?", (new_url,)).fetchone()
+                owner_id = owner["id"] if owner else "?"
+                failures.append(
+                    f"row {i + 1}: corrected_url already belongs to article #{owner_id}")
+                continue
+            except Exception as e:
+                print(f"[manual-review-import] row {i + 1} (article #{article_id}) failed: {e}")
+                failures.append(f"row {i + 1}: failed—see logs")
+                continue
+            if ok:
                 applied += 1
             else:
                 failures.append(f"row {i + 1}: article #{article_id} not found")

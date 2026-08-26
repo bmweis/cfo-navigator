@@ -585,3 +585,61 @@ def test_manual_review_import_commit_alone_without_preview_still_requires_form_d
                   data={}, follow_redirects=False)
     assert resp.status_code == 303
     assert "error=" in resp.headers["location"]
+
+
+def test_manual_review_import_commit_url_collision_does_not_500_batch(env):
+    """Regression test for the bare-500 bug: a corrected_url that collides
+    with another article's already-saved URL (articles.url is UNIQUE) must
+    fail cleanly with a readable per-row message, while an earlier AND a
+    later clean row in the same batch both still commit — the collision
+    must not abort the whole request the way it did before this fix."""
+    lib = env._lib()
+    # Already independently saved — this is what the middle row will collide with.
+    existing_id = _seed(lib, url="https://k9ventures.com/2020/01/some-post",
+                        title="Existing K9 post")
+
+    before_id = _seed(lib, url="https://example.com/before", title="Before")
+    colliding_id = _seed(lib, url="https://exitround.com/post-2", title="Exitround post")
+    after_id = _seed(lib, url="https://example2.com/after", title="After")
+    for aid in (before_id, colliding_id, after_id):
+        for _ in range(Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD):
+            lib.log_content_refetch_attempt(aid, "failure", reason="bot-challenge")
+    lib.close()
+
+    c = _admin_client(env)
+    resp = c.post(
+        "/admin/library/backfill-content/manual-review/import/commit",
+        data={
+            "article_id": [str(before_id), str(colliding_id), str(after_id)],
+            "corrected_url": [
+                "https://www.example.com/before",
+                "https://k9ventures.com/2020/01/some-post",  # collides with existing_id
+                "https://www.example2.com/after",
+            ],
+        },
+        follow_redirects=False,
+    )
+    # No bare 500 — a normal redirect back to the admin page with a message,
+    # same shape as every other partial-failure batch.
+    assert resp.status_code == 303
+    assert "msg=" in resp.headers["location"]
+
+    lib2 = env._lib()
+    # The clean row BEFORE the collision committed.
+    assert lib2.get_article(before_id)["url"] == "https://www.example.com/before"
+    # The clean row AFTER the collision also committed — the loop kept going.
+    assert lib2.get_article(after_id)["url"] == "https://www.example2.com/after"
+    # The colliding row itself was left untouched, not silently dropped or
+    # half-applied — it stays exactly where it was, still flagged.
+    assert lib2.get_article(colliding_id)["url"] == "https://exitround.com/post-2"
+    assert colliding_id in lib2._manual_review_article_ids()
+    # The pre-existing article that owns the contested URL is unaffected.
+    assert lib2.get_article(existing_id)["url"] == "https://k9ventures.com/2020/01/some-post"
+    lib2.close()
+
+    # The redirect message names the collision with a readable reason.
+    from urllib.parse import unquote
+    location = resp.headers["location"]
+    msg = unquote(location.split("msg=", 1)[1])
+    assert f"already belongs to article #{existing_id}" in msg
+    assert "Applied 2 corrections" in msg
