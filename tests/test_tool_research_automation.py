@@ -48,7 +48,7 @@ def _mock_generate_tool_agent_taxonomy(monkeypatch, *, taxonomy="Uses an agent c
                                         taxonomy_confident=True, result=None):
     calls = []
 
-    def _fake(name, url, description="", model=""):
+    def _fake(name, url, description="", model="", voice_core=""):
         calls.append((name, url, description))
         if result is not None:
             return result
