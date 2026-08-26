@@ -301,13 +301,37 @@ def _normalize_date(s: str) -> str:
 
 
 def _extract_title(html: str) -> str:
+    """Best-effort page title: prefer the <title> tag, but fall back to
+    og:title/twitter:title meta tags when it's missing or blank.
+
+    Reproduced against real bookmarklet saves (2026-08): a site like Medium
+    server-renders the article body and its social meta tags (og:title,
+    twitter:title) for SEO/link-preview purposes, but leaves <title> empty
+    or a placeholder until client-side JS sets document.title on hydration
+    — a plain requests.get (no JS) never sees that update. Previously this
+    returned "" in that case, which linklib.pipeline.ingest_url then stored
+    the raw URL as the article's title. og:title/twitter:title are reliably
+    present even when <title> isn't, so they're tried next rather than
+    giving up. Returns "" only when none of the three are found — callers
+    (ingest_url) decide the URL fallback for that genuinely titleless case."""
     try:
         soup = BeautifulSoup(html, "html.parser")
-        tag = soup.find("title")
-        if tag:
-            return tag.get_text(strip=True)
     except Exception:
-        pass
+        return ""
+
+    tag = soup.find("title")
+    if tag:
+        text = tag.get_text(strip=True)
+        if text:
+            return text
+
+    for prop in ("og:title", "twitter:title"):
+        meta = soup.find("meta", attrs={"property": prop}) or soup.find("meta", attrs={"name": prop})
+        if meta:
+            content = (meta.get("content") or "").strip()
+            if content:
+                return content
+
     return ""
 
 
