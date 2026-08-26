@@ -46,11 +46,29 @@ def ingest_url(
     so the article participates in the same manual-review/backfill-scope
     machinery a failed Reader-backfill attempt would. The flag clears the
     moment content_html is later populated for real (set_article_content_html).
+
+    Bookmarklet title-extraction follow-up (2026-08): a direct fetch that
+    fails outright or fails the quality check against a recognized
+    Cloudflare-blocked host (medium.com and friends — see
+    linklib.medium_platform.is_recognized_blocked_host) never had a real
+    <title>/og:title/twitter:title or a real content pull to work from
+    either way — confirmed live via scripts/trace_medium_tier.py against a
+    real article that had been falling back to storing its own URL as the
+    title. In that specific case only, medium_recovery() is tried — the
+    same Exa-based recovery tier the Reader content backfill already uses,
+    reused as-is (see medium_recovery's own docstring). A hit replaces the
+    failed title/content with the recovered ones and stores the recovered
+    structured HTML via set_article_content_html, same as a successful
+    backfill run would; a miss (host not recognized, no EXA_API_KEY, Exa
+    disabled, or the tier itself came up empty) changes nothing — the
+    existing fetch-failure handling below runs exactly as it always has.
     """
     from .extract import fetch_page, assess_extraction_quality
 
     page_title = ""
     content = ""
+    content_html = ""
+    medium_source = ""
     quality_checked = False
     quality_ok = True
     quality_reason = ""
@@ -73,6 +91,15 @@ def ingest_url(
             quality_ok, quality_reason = assess_extraction_quality(
                 page.raw_html, content, page.blocked)
 
+        if not quality_ok:
+            recovered = medium_recovery(lib, url, page_title)
+            if recovered:
+                page_title = recovered["title"] or page_title
+                content = recovered["content"]
+                content_html = recovered["content_html"]
+                medium_source = recovered["source"]
+                quality_ok, quality_reason = True, ""
+
     art = Article(
         url=url,
         title=page_title or url,
@@ -82,6 +109,9 @@ def ingest_url(
         saved_at=datetime.now(timezone.utc).isoformat(),
     )
     article_id = lib.upsert(art)
+
+    if content_html:
+        lib.set_article_content_html(article_id, content_html)
 
     if quality_checked:
         # upsert() is write-once for content (existing["content"] or
@@ -97,6 +127,9 @@ def ingest_url(
             if not quality_ok:
                 lib.log_content_refetch_attempt(article_id, "failure",
                                                 reason=quality_reason, source="save")
+            elif medium_source:
+                lib.log_content_refetch_attempt(article_id, "success",
+                                                source=medium_source, detail=url)
 
     if do_enrich:
         from . import tagstyle
@@ -447,6 +480,103 @@ def _try_medium_platform(lib: Library, title: str, author: str,
     if not structured:
         return False, "", "", "", f"{fetch_note}; search-by-title: candidate had no extractable structure ({candidate_url})"
     return True, structured, candidate_url, "medium-search", f"{fetch_note}; search-by-title: hit (live-refetch, {candidate_url})"
+
+
+def _first_heading_text(html: str) -> str:
+    """Best-effort title recovered from Medium-tier structured HTML.
+    _try_medium_platform has no separate title field to hand back — Exa's
+    contents.text is plain body text — but paragraphs_html_from_text
+    classifies a short, Title-Case, punctuation-free leading line as a
+    heading (see that function's own docstring: "Medium's own in-article
+    section headers arrive this way"), and the article's own title is
+    almost always exactly that shape at the very top of the extracted
+    text, past the point the leading-chrome strip stopped. Returns the
+    first h1/h2/h3's text found, or "" if none — callers keep their own
+    existing title fallback in that case. Deliberately doesn't strip the
+    heading back out of the body: CLAUDE.md's Medium-platform tier notes
+    already flag occasional title/byline duplication inside a candidate's
+    own text as a known, accepted gap, not something this adds."""
+    from bs4 import BeautifulSoup
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return ""
+    tag = soup.find(["h1", "h2", "h3"])
+    if tag:
+        text = tag.get_text(strip=True)
+        if text:
+            return text
+    return ""
+
+
+def _plain_text_from_structured_html(html: str) -> str:
+    """Plain-text rendering of Medium-tier structured HTML, for the
+    ingest/search/enrichment pipeline's plain-text contract (see
+    extract._extract_content's own docstring on why `articles.content`
+    must stay plain text, never raw HTML). Block-joined the same way
+    extract._extract_content's own BS4 fallback path is, so paragraph
+    breaks survive as blank lines rather than collapsing into one line."""
+    from bs4 import BeautifulSoup
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return ""
+    blocks = [el.get_text(" ", strip=True)
+              for el in soup.find_all(["p", "h1", "h2", "h3", "li", "blockquote"])]
+    blocks = [b for b in blocks if b]
+    return "\n\n".join(blocks) if blocks else soup.get_text(" ", strip=True)
+
+
+def medium_recovery(lib: Library, url: str, title: str = "", author: str = "") -> Optional[dict]:
+    """Bookmarklet/Reader title-and-content-extraction follow-up (2026-08):
+    a direct fetch of a recognized Cloudflare-blocked host (medium.com and
+    friends — see linklib.medium_platform.is_recognized_blocked_host) never
+    gets real HTML back at all, so neither a <title>/og:title/twitter:title
+    extraction (extract._extract_title) nor a plain-text content pull has
+    anything real to work from — confirmed live against a real stuck
+    article via scripts/trace_medium_tier.py (medium-fetch, real structured
+    content pulled for the exact URL that had been falling back to storing
+    its own URL as the title).
+
+    Wraps the SAME Exa-based recovery tier the Reader content backfill
+    already uses for exactly this class of host (_try_medium_platform,
+    reused as-is — no changes to it or to linklib/medium_platform.py) so a
+    live save (linklib.pipeline.ingest_url) or a live Reader read
+    (webapp._resolve_reader_content) can recover too, not just the offline
+    backfill job. Gates on is_recognized_blocked_host itself (mirrors
+    _finish_backfill_after_direct_failure's own gating) so a non-blocked
+    host never spends an Exa call here — a caller doesn't need to
+    duplicate that check first.
+
+    Returns None on any miss: host not recognized, no EXA_API_KEY, Exa
+    disabled via the admin toggle, or the tier itself came up empty —
+    never raises, same best-effort contract as _try_medium_platform. On a
+    hit, returns a dict with:
+      - content_html: the tier's structured Reader HTML
+      - content: a plain-text rendering of the same HTML (see
+        _plain_text_from_structured_html) — NOT the raw Exa text, so a
+        caller storing this into articles.content gets the same
+        Medium-chrome-stripped, structure-normalized text the Reader
+        itself would show, not an unprocessed dump.
+      - title: a best-effort title from the structured HTML's own first
+        heading (see _first_heading_text) — "" if none found.
+      - candidate_url, source: passed through from _try_medium_platform
+        ('medium-fetch' | 'medium-search'), for a caller's own
+        content_refetch_log row or UI display.
+    """
+    from . import medium_platform
+    if not medium_platform.is_recognized_blocked_host(url):
+        return None
+    ok, structured, candidate_url, source, _note = _try_medium_platform(lib, title, author, url)
+    if not ok:
+        return None
+    return {
+        "content_html": structured,
+        "content": _plain_text_from_structured_html(structured),
+        "title": _first_heading_text(structured),
+        "candidate_url": candidate_url,
+        "source": source,
+    }
 
 
 def _finish_backfill_after_direct_failure(lib: Library, article: dict,
