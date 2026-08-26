@@ -4138,6 +4138,66 @@ class Library:
                ) WHERE rn=1 AND status='success' AND source='medium-fetch'"""
         ).fetchone()[0]
 
+    def _wayback_429_retry_ids(self) -> set[int]:
+        """Article ids whose most recent content_refetch_log attempt failed
+        specifically because the Wayback fallback itself was rate-limited
+        (HTTP 429) — see linklib.wayback's module docstring on archive.org's
+        unpredictable/broad 429s. `_finish_backfill_via_wayback` logs these
+        as an ordinary failure row (status='failure', reason=the original
+        direct-fetch reason, source='direct') with the Wayback outcome
+        folded into `detail` as `"...(wayback: HTTP 429)"` or
+        `"wayback: HTTP 429"` — there's no dedicated status/reason value for
+        this, so the only way to find them is this substring match on the
+        latest attempt's detail.
+
+        Deliberately keyed on the latest attempt's FAILURE REASON, not an
+        attempt count — distinct from _manual_review_article_ids(), whose
+        3-in-a-row threshold an article can cross well before or well after
+        landing here. An article rate-limited on Wayback may still be well
+        under that threshold and already eligible for the ordinary default-
+        scope sweep's next pass — but archive.org's 429s were observed
+        broadly and unpredictably (not a one-off), so nothing guarantees a
+        later ordinary pass ever revisits it before it accumulates enough
+        failures to fall into manual review anyway, where the only paths
+        back out (a URL correction, "Accept as final") don't fit a
+        transient rate-limit at all. This is the targeted fix: retry
+        exactly this set, once, on demand.
+
+        `a.content_html=''` guards against a stale/impossible state (the
+        latest logged attempt says failure but content_html is somehow
+        already populated) rather than assuming the log and the article
+        row can never disagree."""
+        rows = self.conn.execute(
+            """WITH latest AS (
+                 SELECT article_id, status, detail,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               )
+               SELECT a.id FROM articles a
+               JOIN latest l ON l.article_id = a.id AND l.rn = 1
+               WHERE l.status='failure' AND l.detail LIKE '%wayback: HTTP 429%'
+                 AND a.url!='' AND a.content_html=''"""
+        ).fetchall()
+        return {r[0] for r in rows}
+
+    def count_wayback_429_retry_candidates(self) -> int:
+        return len(self._wayback_429_retry_ids())
+
+    def list_wayback_429_retry_candidates(self, limit: int = 100000) -> list[dict]:
+        """Full article rows for _wayback_429_retry_ids(), ordered by id —
+        backs both the admin preview list and the retry sweep's own fetch
+        loop (linklib.pipeline.backfill_article_content expects a full
+        article dict, same shape articles_needing_content_backfill()'s rows
+        already provide)."""
+        ids = sorted(self._wayback_429_retry_ids())[:limit]
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT * FROM articles WHERE id IN ({placeholders}) ORDER BY id", ids
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
     # -- tools directory ---------------------------------------------------
 
     def _find_tool_by_normalized_url(self, url: str, exclude_id: int | None = None) -> sqlite3.Row | None:
