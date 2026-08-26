@@ -6552,6 +6552,12 @@ def tools_software_profile(request: Request, slug: str):
     # visitors — never to a public profile visitor, however plausible it
     # reads. Verified notes render exactly as before, with no badge at all
     # (a visible note is now itself the verified signal).
+    # white-space:pre-wrap (voice enforcement + structure pass, 2026-08): the
+    # generation prompt now asks for paragraph breaks and, where genuinely
+    # list-like, "- " bulleted lines instead of one dense block — a bare <p>
+    # collapses those newlines in HTML, so pre-wrap is what actually makes
+    # them visible. Purely a display change: an existing single-block note
+    # with no embedded newlines renders identically to before.
     agent_taxonomy_block = ""
     _at_note = (tool.get("agent_taxonomy_note") or "").strip()
     _at_unverified = bool(tool.get("agent_taxonomy_needs_verification"))
@@ -6564,13 +6570,13 @@ def tools_software_profile(request: Request, slug: str):
     if _at_note and not _at_unverified:
         agent_taxonomy_block = f"""<div class="tp-card">
   <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy</h2>
-  <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
+  <p style="margin:0;white-space:pre-wrap;">{_esc(tool['agent_taxonomy_note'])}</p>
   {_at_citations_html}
 </div>"""
     elif _at_note and _at_unverified and authed:
         agent_taxonomy_block = f"""<div class="tp-card">
   <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy <span class="tp-verify">unverified&mdash;hidden from visitors until reviewed</span></h2>
-  <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
+  <p style="margin:0;white-space:pre-wrap;">{_esc(tool['agent_taxonomy_note'])}</p>
   {_at_citations_html}
 </div>"""
     elif authed and not _at_note:
@@ -6765,9 +6771,11 @@ function submitIntroForm() {{
   <div>{screenshot_block}</div>
 </div>"""
 
+    # white-space:pre-wrap — see the identical comment on agent_taxonomy_block
+    # above; same reasoning applies to a structured Description draft.
     description_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Description</h2>
-  <p style="margin:0;">{_esc(tool['description'])}</p>
+  <p style="margin:0;white-space:pre-wrap;">{_esc(tool['description'])}</p>
   {_citations_list_html(description_citations, cap=5)}
 </div>"""
 
@@ -14500,8 +14508,11 @@ def _run_tool_research(tool_id: int) -> bool:
         if not tool:
             return False
         from linklib import enrich as enrich_mod
+        from linklib.agent import VOICE_CORE_DEFAULT
+        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
         result = enrich_mod.generate_tool_agent_taxonomy(
-            tool["name"], tool["url"], tool.get("description", ""), model=lib.get_enrich_model())
+            tool["name"], tool["url"], tool.get("description", ""), model=lib.get_enrich_model(),
+            voice_core=voice_core)
         if result is None:
             return False
         wrote_anything = False
@@ -15608,10 +15619,12 @@ async def admin_tools_generate_description(request: Request):
     lib = _lib()
     try:
         model = lib.get_enrich_model()
+        from linklib.agent import VOICE_CORE_DEFAULT
+        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
     finally:
         lib.close()
     from linklib.enrich import generate_tool_description
-    draft = generate_tool_description(name, url, model=model)
+    draft = generate_tool_description(name, url, model=model, voice_core=voice_core)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Description generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -15643,11 +15656,14 @@ def admin_tools_generate_differentiation(request: Request, tool_id: int):
             raise HTTPException(status_code=404, detail="Tool not found")
         competitor_names = [c["name"] for c in lib.list_tool_competitors(tool_id)]
         model = lib.get_enrich_model()
+        from linklib.agent import VOICE_CORE_DEFAULT
+        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
     finally:
         lib.close()
 
     from linklib.enrich import generate_tool_differentiation
-    draft = generate_tool_differentiation(tool["name"], tool["url"], tool.get("description", ""), competitor_names, model=model)
+    draft = generate_tool_differentiation(tool["name"], tool["url"], tool.get("description", ""), competitor_names,
+                                           model=model, voice_core=voice_core)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "

@@ -3258,6 +3258,40 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `tool_audit_log`/`tool_feature_links`/`entity_citations`/
   `feature_review_queue` schema-table rows for the cross-referenced write-up.
 
+- **CFO Toolbox voice enforcement + structure (2026-08) — the four
+  AI-generated Software directory fields now reference the DB-backed
+  `voice_core` setting, and Description/Agent taxonomy are instructed to
+  use paragraph breaks and bullets where genuinely list-like.** Investigated
+  first, per this pass's own instructions: `generate_tool_description`
+  (Description + Short summary), `generate_tool_agent_taxonomy`, and
+  `generate_tool_differentiation` (`linklib/enrich.py`) were all still on
+  prompt text with no voice reference at all — the same class of gap PR
+  #110 fixed for FP&A Buddy/LinkedIn drafting, just never extended here.
+  `voice_core` itself already covered the em-dash rule (the exact defect
+  originally observed in a generated Competitive differentiation callout)
+  but said nothing about paragraph/bullet structure — that instruction was
+  added directly in the generation prompts (`enrich._STRUCTURE_GUIDANCE`),
+  not by rewriting `voice_core`'s own copy, which stays Brian's to edit.
+  Each function takes an optional `voice_core: str = ""` param (enrich.py
+  has no `Library` handle of its own); the three `webapp/app.py` call sites
+  resolve `lib.get_setting("voice_core") or VOICE_CORE_DEFAULT` and pass it
+  in, same pattern `scripts/archive/import_community_profiles.py` already
+  used for `voice_rewrite_community_fields`. `"summary"` (a card/subhead
+  teaser) and Competitive differentiation (a deliberate 1-2 sentence
+  callout) are explicitly exempted from the structure instruction — both
+  stay a single continuous paragraph; differentiation still gets the voice
+  reference, since that's the field the spaced em dash was seen in. The
+  public profile page's Description and Agent taxonomy `<p>` tags gained
+  `white-space:pre-wrap` so a structured draft's breaks/bullets actually
+  render (a bare `<p>` collapses embedded newlines) — a pure display
+  change, invisible on any existing single-block record. Scoped to future
+  generations only: no existing stored field was regenerated, rewritten, or
+  reformatted by this PR. Brian's planned bulk regeneration across both
+  Software and Community profiles is separate, human-supervised work with
+  its own test-batch-first pass, not folded into this change. See
+  ARCHITECTURE.md's `/ask` sequence-diagram notes (the `voice_core`/
+  `voice_fpa_buddy` bullet) for the cross-referenced write-up.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 

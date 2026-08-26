@@ -1758,6 +1758,45 @@ Details worth knowing:
   first-person experience claims) on top for both generation and its own
   "FP&A Buddy answer" rubric. No caching — one indexed SELECT on an
   already-open connection is immaterial next to the Claude API round-trip.
+- **Voice enforcement + structure, CFO Toolbox Software fields (2026-08) —
+  the same `voice_core` DB-backed setting PR #110 wired into FP&A Buddy
+  (and, since, `linklib.matchmaker` and `voice_rewrite_community_fields`)
+  now also reaches `linklib/enrich.py`'s three Software-directory generation
+  functions: `generate_tool_description` (Description + Short summary),
+  `generate_tool_agent_taxonomy`, and `generate_tool_differentiation`.**
+  Before this, all three ran on prompt text with no voice reference at all —
+  the same class of gap PR #110 fixed elsewhere, confirmed by direct
+  inspection rather than assumed. Since `enrich.py` has no `Library` handle
+  of its own, each function takes an optional `voice_core: str = ""` param;
+  the three call sites in `webapp/app.py` (the two AJAX generate routes plus
+  `_run_tool_research`) resolve `lib.get_setting("voice_core") or
+  VOICE_CORE_DEFAULT` and pass it in — same resolve-at-the-caller pattern
+  `scripts/archive/import_community_profiles.py` already used for
+  `voice_rewrite_community_fields`. A bare `voice_core=""` (every pre-existing
+  test call site, and any future direct caller) falls back to
+  `VOICE_CORE_DEFAULT` inside `enrich._resolve_voice_core`, so nothing broke.
+  Description and Agent taxonomy also gained an explicit structure
+  instruction (`enrich._STRUCTURE_GUIDANCE`) — natural paragraph breaks
+  instead of one dense block, and a `"- "`-prefixed bulleted list only where
+  the content is genuinely list-like (e.g. several named agents) — since
+  `voice_core` itself covers tone/mechanics (including the em dash rule) but
+  says nothing about paragraph/list structure, and rewriting `voice_core`'s
+  own copy was out of scope (Brian's to own). `"summary"` and Competitive
+  differentiation are explicitly exempted from the structure guidance: both
+  are deliberately short (a card/subhead teaser; a 1-2 sentence callout) and
+  stay a single continuous paragraph. Competitive differentiation is the
+  field a spaced em dash was actually observed in, so it gets the voice
+  reference but no structure instruction. The public profile page's
+  Description and Agent taxonomy `<p>` tags gained `white-space:pre-wrap` so
+  a structured draft's paragraph breaks and bullet lines actually render —
+  previously a bare `<p>` collapsed any embedded newline; this has no visible
+  effect on an existing single-block record. Scoped to future generations
+  only — no existing stored `description`/`agent_taxonomy_note`/
+  `competitive_differentiation`/`summary` was regenerated, rewritten, or
+  reformatted by this change; that's a separate, human-supervised bulk
+  regeneration Brian plans to run later, test-batch-first, per the pattern
+  `scripts/enrich_agent_taxonomy.py`'s own cost-estimate-first convention
+  already established.
 - **Two to four API calls can happen per turn.** On follow-ups, a cheap Haiku
   call first rewrites e.g. *"what about at Series A?"* into a standalone
   search question so retrieval sees the conversation's subject. It's

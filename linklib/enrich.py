@@ -20,11 +20,39 @@ import logging
 import os
 from dataclasses import dataclass, field
 
+from .agent import VOICE_CORE_DEFAULT
 from .citations import extract_citations, make_document_block
 
 _logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-5")
+
+
+def _resolve_voice_core(voice_core: str) -> str:
+    """Same DB-backed-setting-with-fallback pattern as linklib.agent's
+    _build_system / linklib.matchmaker (PR #110): the caller resolves
+    ``lib.get_setting("voice_core")`` and passes it in (enrich.py has no
+    Library handle of its own), and an empty/unset value falls back to the
+    code-constant default here rather than at every call site."""
+    return (voice_core or "").strip() or VOICE_CORE_DEFAULT
+
+
+# Shared structure guidance for the AI-drafted Software directory fields
+# (Description, Agent taxonomy) that are long enough to read as one dense
+# block otherwise — voice_core covers tone/mechanics (including the em dash
+# rule) but says nothing about paragraph/list structure, so that instruction
+# lives here in the prompt template rather than in voice_core's own copy
+# (Brian's to edit, not this pass's to rewrite). Deliberately not prescriptive
+# about paragraph count or forcing bullets where the content isn't list-like.
+_STRUCTURE_GUIDANCE = (
+    "Structure the writing for readability, the way the site's own Business "
+    "summary copy reads: natural paragraph breaks (a blank line between "
+    "distinct ideas) instead of one dense block, and a short bulleted list "
+    "(each item on its own line, starting with \"- \") only where the "
+    "content is genuinely list-like—naming several distinct features, "
+    "capabilities, or named agents. Don't force a list where prose reads "
+    "more naturally, and don't pad length just to create more paragraphs."
+)
 
 # Version of the enrichment "rules" (the prompt below). Stored alongside each
 # article's enrichment so you can tell which ruleset produced a given summary,
@@ -200,6 +228,14 @@ Fields:
      itself. Say so honestly rather than defaulting to true — a reader
      relies on this to know whether the write-up is well-grounded.
 
+Voice guide — write both fields in this voice:
+{voice_core}
+
+{structure_guidance}
+"summary" is the exception to the structure guidance above: it's a short
+subhead/card teaser, always a single continuous paragraph, no line breaks
+or bullets — the structure guidance applies only to "description".
+
 Return STRICT JSON only (no prose, no markdown fences) with exactly these
 keys: "description", "summary", "confident".
 
@@ -223,7 +259,8 @@ class ToolDescriptionDraft:
     cost_usd: float = 0.0
 
 
-def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -> ToolDescriptionDraft | None:
+def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
+                               voice_core: str = "") -> ToolDescriptionDraft | None:
     """Draft a CFO Toolbox description (full profile-page write-up) plus a
     short summary (directory card / search) for a vendor from its name +
     URL, or None if the SDK/key is unavailable or the call fails. Fetches
@@ -242,7 +279,16 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
     `inject_markers=False` since this response is strict JSON — see
     generate_tool_agent_taxonomy's docstring for why. `citations` is empty
     when the fetch failed (`low_confidence=True`), since there's nothing
-    to cite."""
+    to cite.
+
+    Voice enforcement + structure (2026-08): `voice_core` is the caller's
+    already-resolved `lib.get_setting("voice_core") or VOICE_CORE_DEFAULT`
+    — same pattern PR #110 established for FP&A Buddy/matchmaker/voice
+    rewrite. Falls back to VOICE_CORE_DEFAULT itself if the caller passes
+    nothing, so every existing call site (and every test) keeps working
+    unchanged. Also instructs "description" (not "summary" — see the
+    prompt) to use paragraph breaks and, where genuinely list-like,
+    bullets — previously always one dense block regardless of length."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -264,7 +310,10 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         doc_blocks.append(make_document_block(name, body))
         sent_docs.append({"title": name, "url": url, "type": "tool_page"})
 
-    prompt = _TOOL_DESC_PROMPT.format(name=name, url=url, content_block=content_block)
+    prompt = _TOOL_DESC_PROMPT.format(
+        name=name, url=url, content_block=content_block,
+        voice_core=_resolve_voice_core(voice_core), structure_guidance=_STRUCTURE_GUIDANCE,
+    )
     # Documents (when any) ride first, the drafting instructions last — same
     # ordering as generate_tool_agent_taxonomy, so citations resolve against
     # what was actually sent.
@@ -318,6 +367,9 @@ Follow these rules exactly:
    similar adjective stacking. No exclamation points.
 4. One or two sentences. This is a callout, not a paragraph.
 
+Voice guide — write the callout in this voice:
+{voice_core}
+
 Vendor: {name} ({url})
 Description: {description}
 {competitors_block}
@@ -343,7 +395,8 @@ class ToolDifferentiationDraft:
 
 def generate_tool_differentiation(name: str, url: str, description: str,
                                    competitor_names: list[str] | None = None,
-                                   model: str = DEFAULT_MODEL) -> ToolDifferentiationDraft | None:
+                                   model: str = DEFAULT_MODEL,
+                                   voice_core: str = "") -> ToolDifferentiationDraft | None:
     """Draft the profile page's "Bottom line" callout — a first pass for
     Brian to review/edit in the admin edit form, never auto-saved (standing
     principle: AI drafts into the form, nothing publishes without an
@@ -351,7 +404,14 @@ def generate_tool_differentiation(name: str, url: str, description: str,
     plus its curated competitor list when available; `low_confidence=True`
     when there's no competitor context to compare against, since "how this
     differs" is weaker without something to differ from. Returns None if the
-    SDK/key is unavailable or the call fails."""
+    SDK/key is unavailable or the call fails.
+
+    Voice enforcement (2026-08): `voice_core` follows generate_tool_description's
+    same resolve-with-fallback contract — this is the field a spaced em dash
+    was actually observed in, so voice_core's existing unspaced-em-dash rule
+    now reaches this prompt. No structure guidance added here: the callout is
+    deliberately 1-2 sentences (rule 4 above), never long enough to need
+    paragraph/bullet structure."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -378,7 +438,8 @@ def generate_tool_differentiation(name: str, url: str, description: str,
                               # returning None on empty/unparseable output; fixed in PR 260)
             messages=[{"role": "user",
                        "content": _TOOL_DIFFERENTIATION_PROMPT.format(
-                           name=name, url=url, description=description, competitors_block=competitors_block)}],
+                           name=name, url=url, description=description, competitors_block=competitors_block,
+                           voice_core=_resolve_voice_core(voice_core))}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -606,6 +667,11 @@ described doesn't count as agentic — say so plainly rather than
 overstating it). If the documents give no genuine signal either way, say
 that rather than guessing, and set "confident" to false.
 
+Voice guide — write the summary in this voice:
+{voice_core}
+
+{structure_guidance}
+
 Return STRICT JSON only (no prose, no markdown fences) with exactly this
 shape:
 {{"summary": "...", "confident": true|false}}
@@ -681,7 +747,8 @@ def _build_taxonomy_documents(fetched: list[tuple[str, str, str]]
 
 
 def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
-                                 model: str = DEFAULT_MODEL) -> AgentTaxonomyResult | None:
+                                 model: str = DEFAULT_MODEL,
+                                 voice_core: str = "") -> AgentTaxonomyResult | None:
     """Draft an agent-taxonomy summary for a Software entry. Grounds on the
     homepage plus its real Product/Solutions-type nav pages
     (_fetch_taxonomy_grounding — falls back to guessed paths only if nav
@@ -706,7 +773,13 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     fact). When no page content could be fetched at all
     (`low_confidence=True`), no documents are sent and the model is told to
     draft from its own knowledge, same as before — `citations` is empty in
-    that case, since there's nothing to cite."""
+    that case, since there's nothing to cite.
+
+    Voice enforcement + structure (2026-08): `voice_core` follows
+    generate_tool_description's same resolve-with-fallback contract, and the
+    summary is instructed to use paragraph breaks / bullets where genuinely
+    list-like — most relevant here when several named agents need listing
+    (see the prompt's own "find and name ALL of them" instruction)."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -725,6 +798,7 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     prompt = _AGENT_TAXONOMY_PROMPT.format(
         name=name, url=url, description=description.strip() or "(none provided)",
         content_block=content_note,
+        voice_core=_resolve_voice_core(voice_core), structure_guidance=_STRUCTURE_GUIDANCE,
     )
     # Documents (when any) ride first, the drafting instructions last — same
     # ordering as linklib.agent.answer_question's user turn, so citations
