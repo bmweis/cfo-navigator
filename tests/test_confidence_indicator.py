@@ -42,7 +42,7 @@ def _mock_anthropic(monkeypatch, payload_json):
 def test_generate_tool_description_parses_confident_true(monkeypatch):
     from linklib import extract
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
-    _mock_anthropic(monkeypatch, '{"description": "A tool.", "summary": "Short.", "confident": true}')
+    _mock_anthropic(monkeypatch, "A tool.\n\nSUMMARY: Short.\n\nCONFIDENT: true")
     draft = enrich.generate_tool_description("Runway", "https://runway.com")
     assert draft is not None
     assert draft.confident is True
@@ -52,7 +52,7 @@ def test_generate_tool_description_parses_confident_true(monkeypatch):
 def test_generate_tool_description_parses_confident_false(monkeypatch):
     from linklib import extract
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Thin page text."))
-    _mock_anthropic(monkeypatch, '{"description": "A tool.", "summary": "Short.", "confident": false}')
+    _mock_anthropic(monkeypatch, "A tool.\n\nSUMMARY: Short.\n\nCONFIDENT: false")
     draft = enrich.generate_tool_description("Runway", "https://runway.com")
     assert draft is not None
     assert draft.confident is False
@@ -61,7 +61,7 @@ def test_generate_tool_description_parses_confident_false(monkeypatch):
 def test_generate_tool_description_defaults_confident_false_when_missing(monkeypatch):
     from linklib import extract
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
-    _mock_anthropic(monkeypatch, '{"description": "A tool.", "summary": "Short."}')   # no "confident" key
+    _mock_anthropic(monkeypatch, "A tool.\n\nSUMMARY: Short.")   # no CONFIDENT sentinel line
     draft = enrich.generate_tool_description("Runway", "https://runway.com")
     assert draft is not None
     assert draft.confident is False

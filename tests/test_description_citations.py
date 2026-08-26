@@ -25,12 +25,15 @@ def _mock_fetch_page(monkeypatch, content=""):
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content=content))
 
 
-def _mock_anthropic_citing(monkeypatch, payload_json, cited_document_indexes,
-                           input_tokens=200, output_tokens=150):
-    """Same shape as test_agent_taxonomy_enrichment's helper — a single text
-    block carrying a real (SDK-shaped) `citations` list referencing
-    document_index positions, plus the captured messages.create kwargs so a
-    test can assert on the document block actually sent."""
+def _mock_anthropic_citing(monkeypatch, blocks, input_tokens=200, output_tokens=150):
+    """blocks: list of (text, cited_document_indexes) — one SDK text block
+    per entry, each with its own `citations` list. Mirrors how the real
+    Citations API actually splits a response into separate blocks at
+    citation boundaries (a cited claim and an uncited trailing sentinel
+    line are different blocks, never one block carrying both) — a single
+    flat block would let inject_markers=True append a citation marker
+    after content that was never actually cited. Also captures the actual
+    messages.create kwargs so a test can assert on the document block sent."""
     captured = {}
 
     def _create(**kw):
@@ -41,14 +44,17 @@ def _mock_anthropic_citing(monkeypatch, payload_json, cited_document_indexes,
                 self.document_index = idx
 
         class _Block:
-            type = "text"
-            text = payload_json
-            citations = [_Citation(i) for i in cited_document_indexes]
+            def __init__(self, text, cited_indexes):
+                self.type = "text"
+                self.text = text
+                self.citations = [_Citation(i) for i in cited_indexes]
+
+        content = [_Block(text, cited) for text, cited in blocks]
         usage = types.SimpleNamespace(
             input_tokens=input_tokens, output_tokens=output_tokens,
             cache_creation_input_tokens=0, cache_read_input_tokens=0,
         )
-        return types.SimpleNamespace(content=[_Block()], usage=usage)
+        return types.SimpleNamespace(content=content, usage=usage)
     fake = types.SimpleNamespace(Anthropic=lambda *a, **k: types.SimpleNamespace(
         messages=types.SimpleNamespace(create=lambda **kw: _create(**kw))))
     monkeypatch.setitem(sys.modules, "anthropic", fake)
@@ -56,18 +62,21 @@ def _mock_anthropic_citing(monkeypatch, payload_json, cited_document_indexes,
     return captured
 
 
-DESC_JSON = """{
-    "description": "Runway is a financial planning platform for finance teams at growth-stage companies.",
-    "summary": "Runway is an FP&A platform for growth-stage finance teams.",
-    "confident": true
-}"""
+# Plain prose + trailing sentinel lines (SUMMARY, CONFIDENT) — see
+# CLAUDE.md's citation-tag-investigation follow-up; this stopped being a
+# JSON payload.
+DESC_BODY = "Runway is a financial planning platform for finance teams at growth-stage companies."
+DESC_TAIL = (
+    "\n\nSUMMARY: Runway is an FP&A platform for growth-stage finance teams.\n\n"
+    "CONFIDENT: true"
+)
 
 
 # -- generate_tool_description: real document-block grounding ----------------
 
 def test_generate_tool_description_sends_real_document_block(monkeypatch):
     _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
-    captured = _mock_anthropic_citing(monkeypatch, DESC_JSON, cited_document_indexes=[])
+    captured = _mock_anthropic_citing(monkeypatch, [(DESC_BODY + DESC_TAIL, [])])
 
     enrich.generate_tool_description("Runway", "https://runway.com")
 
@@ -82,25 +91,30 @@ def test_generate_tool_description_sends_real_document_block(monkeypatch):
 
 def test_generate_tool_description_returns_verified_citations_tagged_tool_page(monkeypatch):
     _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
-    _mock_anthropic_citing(monkeypatch, DESC_JSON, cited_document_indexes=[0])
+    _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
     draft = enrich.generate_tool_description("Runway", "https://runway.com")
     assert draft is not None
     assert len(draft.citations) == 1
     assert draft.citations[0]["url"] == "https://runway.com"
     assert draft.citations[0]["type"] == "tool_page"
-    # The stored fields are untouched plain text — no [n] markers spliced
-    # into the JSON output (that would have corrupted the parse entirely).
-    assert "[1]" not in draft.description
+    # The cited write-up gets a real [n] marker spliced in by
+    # extract_citations itself (inject_markers=True) — the new intended
+    # footnote rendering, not the old "citations are JSON-unsafe, never
+    # touch the text" behavior.
+    assert "[1]" in draft.description
     assert "financial planning platform" in draft.description
+    # The trailing sentinel lines are stripped out, not left dangling.
+    assert "SUMMARY" not in draft.description
+    assert "CONFIDENT" not in draft.description
 
 
-def test_generate_tool_description_json_still_parses_when_citations_present(monkeypatch):
-    """The real risk this fix introduces: citations enabled on a
-    strict-JSON response. Confirms json.loads still succeeds and both
-    fields (plus 'confident') still come through."""
+def test_generate_tool_description_confident_still_parses_when_citations_present(monkeypatch):
+    """The real risk this fix targets: citations enabled alongside trailing
+    SUMMARY/CONFIDENT sentinel lines. Confirms both sentinels still parse
+    correctly even with a real citation attached earlier in the response."""
     _mock_fetch_page(monkeypatch, "Homepage content.")
-    _mock_anthropic_citing(monkeypatch, DESC_JSON, cited_document_indexes=[0])
+    _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
     draft = enrich.generate_tool_description("Runway", "https://runway.com")
     assert draft is not None
@@ -112,7 +126,7 @@ def test_generate_tool_description_no_citations_when_low_confidence(monkeypatch)
     """No page content fetched at all → no document sent → nothing to
     cite, regardless of what the (mocked) response claims."""
     _mock_fetch_page(monkeypatch, "")
-    _mock_anthropic_citing(monkeypatch, DESC_JSON, cited_document_indexes=[0])
+    _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
     draft = enrich.generate_tool_description("Obscure Co", "https://obscure.example")
     assert draft is not None
@@ -199,7 +213,7 @@ def _login(client):
 
 def test_generate_description_route_returns_citations_and_model(app_module, monkeypatch):
     _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
-    _mock_anthropic_citing(monkeypatch, DESC_JSON, cited_document_indexes=[0])
+    _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
     client = _client(app_module)
     _login(client)
