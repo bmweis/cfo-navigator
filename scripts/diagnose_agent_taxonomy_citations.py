@@ -116,7 +116,7 @@ def _dump_parsed(enrich_mod, resp, sent_docs) -> None:
     note_text = note_text.strip()
     confident = sentinels.get("CONFIDENT", "").strip().lower() == "true"
 
-    print(f"\n  --- PARSED (what generate_tool_agent_taxonomy would actually store) ---")
+    print("\n  --- PARSED (what generate_tool_agent_taxonomy would actually store) ---")
     print(f"  confident: {confident} (raw sentinel value: {sentinels.get('CONFIDENT')!r})")
     print(f"  citations: {len(citations)}")
     for c in citations:
