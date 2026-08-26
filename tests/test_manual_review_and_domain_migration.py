@@ -322,6 +322,8 @@ def test_domain_migration_target_detection():
     assert pl._domain_migration_target("https://pointsandfigures.com/2020/01/01/x/") == "jeffreycarter.substack.com"
     assert pl._domain_migration_target("https://www.avc.com/2020/01/x.html") == "avc.xyz"
     assert pl._domain_migration_target("https://karenroterdavis.com/2020/01/01/x/") == "karenroterdavis.wordpress.com"
+    assert pl._domain_migration_target("https://calacanis.com/2020/01/01/x/") == "calacanis.substack.com"
+    assert pl._domain_migration_target("https://www.newageaccounting.ai/p/some-post") == "substack.newageaccounting.ai"
     assert pl._domain_migration_target("https://example.com/normal") == ""
 
 

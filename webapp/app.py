@@ -19084,6 +19084,23 @@ _SCRIPT_REGISTRY = [
      ["python -m scripts.trace_medium_tier --db /data/library.db --ids 437 142",
       "python -m scripts.trace_medium_tier --db /data/library.db --ids 437 142 --auto 3",
       "python -m scripts.trace_medium_tier --db /data/library.db --inspect-wayback --url \"https://example.com/x\""]),
+    ("diagnose_reader_backfill_failures.py", "scripts.diagnose_reader_backfill_failures", "Reusable diagnostic",
+     "Built for the Reader backfill's failure-cluster cleanup (2026-08): reports, for a small "
+     "hand-picked host list, every saved article's URL plus its most recent content_refetch_log "
+     "attempt, then issues a live bare-vs-www HEAD check per host to confirm or rule out a "
+     "www-prefix mismatch as the real cause (as opposed to a code-level fetcher normalization "
+     "bug — every host-matching function in this codebase already strips 'www.' before "
+     "comparing). Also reports bettereveryday.vc's saved-article scope (count, latest attempt, "
+     "whether any already have a url_correction_log entry) and lists bulk-delete candidates for "
+     "a given dead-host set (quora.com, twitter.com/x.com, thetechnologyletter.com, "
+     "gainsight.com) for review before feeding into the bulk-delete CSV tool. Read-only — never "
+     "writes to the database.",
+     "Recurring-manual — run again whenever a new failure-cluster investigation needs the same "
+     "www-mismatch-vs-genuine-block check, or a candidate list for a bulk delete.",
+     ["None required for --task www/bettereveryday/delete-candidates; needs real network egress "
+      "for the live HEAD check (railway ssh or a dev machine, not a sandboxed build session)."],
+     ["python -m scripts.diagnose_reader_backfill_failures --db library.db --task www --skip-live-check",
+      "railway run python -m scripts.diagnose_reader_backfill_failures --db /data/library.db --task all"]),
 ]
 
 

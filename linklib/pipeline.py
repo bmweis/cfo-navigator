@@ -310,10 +310,21 @@ def _defunct_service_domain(url: str) -> str:
 #     this dict's own "each entry requires a live confirmation, not a
 #     hunch" discipline, since that confirmation wasn't done the usual way
 #     this time.
+#   calacanis.com -> calacanis.substack.com
+#   newageaccounting.ai -> substack.newageaccounting.ai
+#     Reported by Brian (2026-08, Reader backfill failure-cluster cleanup):
+#     both blogs moved to Substack under these domains. Same caveat as
+#     karenroterdavis.com above — this session's outbound network is
+#     entirely egress-blocked (confirmed against unrelated, definitely-live
+#     hosts, not just these two), so neither the old nor the new domain
+#     could be fetched and inspected directly here. Added on Brian's
+#     reported fact, not a live check performed in this session.
 _DOMAIN_MIGRATIONS: dict[str, str] = {
     "pointsandfigures.com": "jeffreycarter.substack.com",
     "avc.com": "avc.xyz",
     "karenroterdavis.com": "karenroterdavis.wordpress.com",
+    "calacanis.com": "calacanis.substack.com",
+    "newageaccounting.ai": "substack.newageaccounting.ai",
 }
 
 
