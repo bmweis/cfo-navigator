@@ -226,6 +226,47 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   change to three consumers, not a label. **The note points at the cookie; the procedure
   for actually refreshing an expired one is `RUNBOOK.md` §5** — including the still-open
   question of the real per-domain cookie names, which no commit in the repo records.
+- **`LINKLIB_AUTH_COOKIES` split into one `LINKLIB_COOKIE_<DOMAIN>` env var per
+  domain (2026-08), and a full `LINKLIB_`-prefixed env var naming convention got
+  documented (`RUNBOOK.md` §6) in the same pass.** The single JSON blob had
+  already caused one silent-breakage near-miss — a hand-edited comma/semicolon
+  typo anywhere in it makes the whole thing fail to parse, and `_auth_cookies()`
+  catches that and returns `{}`, which reads downstream as "no cookies
+  configured at all" rather than "one domain's cookie is malformed." A
+  per-domain raw-string var can't have this failure mode: there's nothing to
+  parse, so a typo in one domain's value can't take another's down with it.
+  `linklib.extract._COOKIE_DOMAINS` (a small hand-maintained tuple, same
+  precedent as `feed.PAYWALLED_DOMAINS`) is the explicit registry of which
+  domains are checked — a deliberate choice over scanning `os.environ` for a
+  `LINKLIB_COOKIE_*` prefix and reverse-parsing the domain back out, since a
+  domain with both dots and hyphens isn't unambiguously reversible from its
+  normalized variable name. `_auth_cookies()` keeps its exact pre-split return
+  shape (`dict[domain -> cookie string]`), so every caller — `_cookie_for`,
+  `authcheck.check_auth_cookies` (which still derives its probe-domain list
+  from `_auth_cookies().keys()`), the admin cookie-status panel — is
+  unaffected by the split. **The feed table's Cookie column stopped being a
+  manually-ticked checkbox in the same PR**: it recorded a feed's declared
+  need for a cookie, not whether one was actually configured, and the two
+  could silently drift apart (the checkbox never read `LINKLIB_AUTH_COOKIES`
+  or its successor at all — see `_feed_form_fields`'s own former hint text,
+  "it changes nothing about how pages are fetched"). Replaced with a computed,
+  read-only indicator (`extract.has_configured_cookie(domain)`) checked live
+  against the host environment on every page load. The `has_paywall_cookie`
+  DB column and its write path in `Library.update_feed`/`add_feed` are left
+  in the schema, frozen at whatever value each row last had — a deliberate,
+  narrower non-destructive retirement than dropping the column outright, same
+  precedent as `screenshot_is_product`/`field_reviews`; removing it is a
+  separate future decision, not bundled into this migration. The old
+  `LINKLIB_AUTH_COOKIES` variable itself is not deleted from Railway as part
+  of this change — it's dead once the new variables are confirmed working,
+  but the rollback (a code revert makes it live again with zero Railway
+  edits) only holds while it's still set, so removing it from Railway is a
+  manual follow-up once the new variables are verified. Mostly Metrics'
+  cookie value migrated verbatim (untrimmed) — it's a paste-everything
+  cookie-jar dump with likely only 1-2 cookies actually carrying auth,
+  flagged as a real but separate follow-up: trimming it requires live-session
+  testing (log in, strip cookies one at a time, see when the paywall
+  reappears) that only Brian can do, not something derivable from source.
 - **The feeds page shows cookie HEALTH separately from the cookie DECLARATION.**
   The Cookie checkbox is static ("this feed needs one"); a summary panel under the
   page header is dynamic ("it still works / it expired / it could not be tested"),

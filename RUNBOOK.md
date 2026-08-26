@@ -324,17 +324,21 @@ Each domain reports one of three states:
 | **expired** | `got a preview/paywall — cookie missing or expired` | **This runbook.** |
 | **untested** | `no recent post found to test` | The probe found no post to check. Not a cookie failure—see 5.5. |
 
-The feed table's **Cookie** column is a separate, purely descriptive record of
-which feeds depend on a cookie. It drives nothing: it does not gate fetching and
-it is not what the probe reads. Treat a ticked box as documentation, and the
-panel above as the live signal.
+The feed table's **Cookie** column is a computed, read-only indicator—whether
+a subscriber cookie is currently configured for that feed's domain, checked
+live against the host environment. It drives nothing: it does not gate
+fetching and it is not what the probe reads. (Before 2026-08 this was a
+manually-ticked checkbox that recorded intent, not fact, and could silently
+drift from reality—see CLAUDE.md's Feeds-page Cookie-indicator note. It's
+gone now; there's nothing to tick.)
 
-> **Only domains listed in `LINKLIB_AUTH_COOKIES` are probed at all.** The
-> probe list comes from that variable's keys, not from
-> `feed.PAYWALLED_DOMAINS`. A paywalled feed with no cookie configured is
-> silently never checked—it just never returns full text. If a source you
-> expect to see is absent from the panel entirely, that's the reason, and the
-> fix is to add it in 5.3 rather than to refresh anything.
+> **Only domains in `linklib.extract._COOKIE_DOMAINS` are probed at all.**
+> That's a short, hand-maintained tuple, not `feed.PAYWALLED_DOMAINS`. A
+> paywalled feed whose domain isn't in `_COOKIE_DOMAINS` is silently never
+> checked—it just never returns full text. If a source you expect to see is
+> absent from the panel entirely, that's the reason, and the fix is to add
+> the domain to `_COOKIE_DOMAINS` (a code change) before configuring its
+> variable in 5.3.
 
 ### 5.2 Get a fresh cookie value
 
@@ -346,51 +350,70 @@ Do this in a normal browser profile where you're a paying subscriber.
 4. Under **Request Headers**, find `Cookie:` and copy **the entire value**—everything
    after `Cookie: `, semicolons and all.
 
-**Copy the whole header rather than hunting for the one session cookie.**
+**Copy the whole header rather than hunting for the one session cookie, if
+you're at all unsure which one carries the session.**
 `extract._cookie_for` sends the stored string as the `Cookie` header
 verbatim, so a full copy is both correct and the reason you don't need to
 know which individual cookie carries the session. This is also exactly what
 the expired banner tells you on screen—the two are deliberately the same
-procedure.
+procedure. If you'd rather copy the minimum cookie instead of the whole jar,
+DevTools → **Application** → **Cookies** → the domain lists them
+individually—a rough per-platform starting point: a **Substack** site's
+session cookie is typically `connect.sid`; a **beehiiv** site uses a signed
+JWT, usually under a name containing `token` or `session`. Treat these as a
+place to start looking, not a guarantee—fall back to the full-header copy
+above if the site doesn't work after copying just one cookie.
 
-> **On the specific cookie name—unconfirmed.** `extract._auth_cookies`'s
-> docstring shows `{"mostlymetrics.com": "substack.sid=..."}`, but treat that
-> as an illustrative example, not a verified fact: Mostly Metrics is a
-> **beehiiv** publication, not Substack, so `substack.sid` is unlikely to be
-> its real cookie name. A search of git history turns up only the commit that
-> introduced the feature (`43cd00b`), with no record of how the value was
-> originally obtained. Copying the full header (step 4) sidesteps the question
-> entirely. **If you do identify the real per-domain cookie names the next
-> time you run this, write them down here**—that's the gap this note marks.
-> DevTools → **Application** → **Cookies** → the domain lists them
-> individually if you want to look.
+> **On Mostly Metrics' specific cookie name—still unconfirmed.** A search of
+> git history turns up only the commit that introduced the feature
+> (`43cd00b`), with no record of how the value was originally obtained.
+> Copying the full header (step 4) sidesteps the question entirely. **If you
+> do identify the real cookie name the next time you run this, write it down
+> here**—that's the gap this note marks.
 
-### 5.3 Update `LINKLIB_AUTH_COOKIES`
+### 5.3 Update the domain's `LINKLIB_COOKIE_<DOMAIN>` variable
 
-One JSON object, domain → full `Cookie` header value:
+**One variable per domain, each holding a raw `Cookie` header value—no JSON,
+nothing to parse.** (Before 2026-08 every domain's cookie lived in one
+`LINKLIB_AUTH_COOKIES` JSON blob; a single hand-edited-JSON typo anywhere in
+it silently broke every domain's cookie at once, since a parse failure reads
+downstream as "nothing configured." Splitting it removes that failure mode
+entirely: there's nothing to parse, so a typo in one domain's value can't
+touch another's.)
 
-```json
-{"mostlymetrics.com":"cookie1=abc; cookie2=def","stratechery.com":"...","blog.publiccomps.com":"..."}
-```
+The variable name is the domain, normalized to `[A-Z0-9_]` and uppercased
+(`linklib.extract._cookie_env_var`)—dots and hyphens become underscores:
+
+| Domain | Variable |
+|---|---|
+| `mostlymetrics.com` | `LINKLIB_COOKIE_MOSTLYMETRICS_COM` |
+| `onlycfo.io` | `LINKLIB_COOKIE_ONLYCFO_IO` |
+
+See §6 below for the naming convention this follows, and for how to add a
+future domain.
 
 Key rules, from `_auth_cookies` and `_cookie_for`:
 
-- **Bare registrable domain.** No scheme, no path, no `www.`—the lookup
-  strips `www.` from the URL's host before matching.
-- Keys are lowercased and a leading `.` is stripped, so `.Example.com` and
-  `example.com` are equivalent.
+- **Bare registrable domain drives the variable name and the match.** No
+  scheme, no path, no `www.`—the lookup strips `www.` from the URL's host
+  before matching.
 - Subdomains match automatically (`host == dom or host.endswith("." + dom)`),
-  so `mostlymetrics.com` also covers `www.mostlymetrics.com`. But
-  `blog.publiccomps.com` is keyed as-is, because that's the host the feed
-  actually uses.
-- **The whole variable is one JSON object.** Editing one domain means editing
-  the object, not appending. Malformed JSON fails *silently*—`_auth_cookies`
-  catches the parse error and returns `{}`, which reads downstream as "no
-  cookies configured at all," and the panel disappears rather than turning
-  red. If the banner vanishes after an edit, suspect a JSON typo first.
+  so `LINKLIB_COOKIE_MOSTLYMETRICS_COM` also covers `www.mostlymetrics.com`.
+- **A domain must be listed in `linklib.extract._COOKIE_DOMAINS` before its
+  variable is ever read**—setting `LINKLIB_COOKIE_<DOMAIN>` for a domain not
+  in that tuple does nothing. Adding a new domain is a small code change
+  (append to `_COOKIE_DOMAINS`) plus setting its variable—see §6.
 
-In Railway: the `cfo-navigator` service → **Variables** → edit
-`LINKLIB_AUTH_COOKIES` → save.
+In Railway: the `cfo-navigator` service → **Variables** → add/edit the
+domain's `LINKLIB_COOKIE_<DOMAIN>` variable → save.
+
+**Rollback:** the old `LINKLIB_AUTH_COOKIES` variable is left in place,
+untouched, until the new per-domain variables are confirmed working (5.4).
+If something goes wrong, the fastest revert is a code rollback to the commit
+before this migration—`_auth_cookies()` reading the old blob again makes the
+old variable live immediately, no Railway variable edits needed either way.
+Once the new variables are confirmed working, `LINKLIB_AUTH_COOKIES` can be
+deleted from Railway; it's no longer read by anything.
 
 **Restart:** not something you have to think about. `_auth_cookies()` reads
 `os.environ` on every call with no caching, so a new value is picked up by the
@@ -418,3 +441,56 @@ OPML feed first, then falls back to the site's sitemap. Both coming up empty
 usually means the feed URL is wrong or the source was down at probe time.
 Check the feed in `/admin/library/feeds`, then re-check. The cookie may well
 be fine.
+
+---
+
+## 6. `LINKLIB_`-prefixed environment variable naming convention
+
+**When:** adding a new `LINKLIB_`-prefixed Railway variable, or renaming an
+existing one as part of the sequenced rename backlog opened by the 2026-08
+`LINKLIB_AUTH_COOKIES` split (each remaining rename is a separate,
+Brian-executed change—coordinated Railway edits plus a deploy each, not
+batched).
+
+**The convention** (derived from an audit of the ~18 `LINKLIB_`-prefixed
+variables actually read by the code as of 2026-08—see the git history for
+that investigation if you need the full inventory):
+
+```
+LINKLIB_<AREA>[_<SUBAREA>]_<SETTING-OR-TYPE>
+```
+
+General to specific, left to right, with a trailing suffix that names the
+value's role when there is an obvious one: `_MODEL` (`LINKLIB_ENRICH_MODEL`,
+`LINKLIB_CHAT_MODEL`, `LINKLIB_QUEUE_ENRICH_MODEL`), `_TOKEN`/`_KEY`
+(`LINKLIB_SAVE_TOKEN`, `LINKLIB_SECRET_KEY`), `_EMAIL`
+(`LINKLIB_CONTACT_EMAIL`, `LINKLIB_FROM_EMAIL`), `_BASE`
+(`LINKLIB_PUBLIC_BASE`), `_OPML` (`LINKLIB_SITES_OPML`), or a unit
+(`LINKLIB_CONTACT_RATE_LIMIT_PER_HOUR`, `LINKLIB_CONTACT_TIME_TRAP_SECONDS`).
+Almost every existing variable already fits this—it's a description of what
+was already the dominant pattern, not a new one invented from scratch.
+
+**For a *family* of per-instance variables** (one value per domain, per
+feed, per anything else with an unbounded set of instances), use
+`LINKLIB_<AREA>_<INSTANCE>`, where `<INSTANCE>` is the qualifier normalized
+to `[A-Z0-9_]` and uppercased (dots and hyphens become underscores). This is
+the pattern `LINKLIB_COOKIE_<DOMAIN>` follows (§5.3 above)—it's the
+reference case for this half of the convention. Pair it with an explicit,
+hand-maintained registry of the valid instances in code (`_COOKIE_DOMAINS`
+in `linklib/extract.py`, mirroring the existing `feed.PAYWALLED_DOMAINS`
+precedent), not a wildcard `os.environ` scan for the prefix—a domain
+containing both dots and hyphens isn't unambiguously reversible from its
+normalized variable name, so the registry is the source of truth for which
+instances exist, and the variable is only ever read for an instance already
+in it.
+
+**No other variable needed a rename to fit this convention** as of the
+2026-08 audit—`LINKLIB_AUTH_COOKIES` was the only one that broke the
+pattern (a single variable standing in for an unbounded family, rather than
+one variable per instance or a scalar setting), and it's fixed as of §5.3.
+Two dead variables were also found and are **not** part of any active
+convention: `LINKLIB_AUTHOR_TITLE` (`.env.example` only, leftover from the
+removed LinkedIn-drafting feature, never read by any code—safe to delete
+from `.env.example` whenever someone's next in that file) and
+`LINKLIB_QUEUE_EXCLUDE_CATEGORIES` (already correctly documented elsewhere
+as retired in favor of `feeds.exclude_from_queue`).

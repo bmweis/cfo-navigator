@@ -245,7 +245,7 @@ def test_moving_a_feed_between_sections_moves_it_in_the_opml(seeded, tmp_path):
 # Note on the current data: as of this writing NO feed in preferred_sites.opml
 # actually has a query string — Mostly Metrics is stored as the plain
 # https://www.mostlymetrics.com/feed, and its paywall is handled by a cookie
-# (LINKLIB_AUTH_COOKIES, applied in extract.fetch_page), not by a URL token.
+# (LINKLIB_COOKIE_MOSTLYMETRICS_COM, applied in extract.fetch_page), not by a URL token.
 # These tests therefore pin both: the real stored string, and a synthetic
 # tokenized URL that proves the guarantee holds if one is ever added.
 # ---------------------------------------------------------------------------
@@ -448,11 +448,11 @@ def test_startup_hook_seeds_the_tables(app_env):
 
 def test_subscriber_access_control_lives_on_the_feeds_page(monkeypatch, tmp_path):
     """Relocated from /admin/library: it probes a recent post per paywalled
-    source, so it belongs with feed management. Only renders when
-    LINKLIB_AUTH_COOKIES is configured."""
+    source, so it belongs with feed management. Only renders when at least
+    one LINKLIB_COOKIE_<DOMAIN> variable is configured."""
     import importlib
-    import json as _json
     import webapp.app as appmod
+    from linklib import extract as extract_mod
 
     opml = tmp_path / "sites.opml"
     shutil.copy(REPO_OPML, opml)
@@ -460,8 +460,7 @@ def test_subscriber_access_control_lives_on_the_feeds_page(monkeypatch, tmp_path
     monkeypatch.setenv("LINKLIB_SITES_OPML", str(opml))
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
-    monkeypatch.setenv("LINKLIB_AUTH_COOKIES",
-                       _json.dumps({"mostlymetrics.com": "substack.sid=x"}))
+    monkeypatch.setenv(extract_mod._cookie_env_var("mostlymetrics.com"), "substack.sid=x")
     importlib.reload(appmod)
 
     with _client(appmod) as client:

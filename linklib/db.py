@@ -7254,9 +7254,12 @@ class Library:
         whitespace — no normalization, no query-string handling. A feed URL can
         carry a subscriber token, and rewriting one silently breaks the feed.
 
-        `has_paywall_cookie` records only THAT this feed needs the cookie, not
-        where it lives — there is one mechanism (LINKLIB_AUTH_COOKIES) and the
-        page footnote says so once. It changes no fetch behaviour anywhere.
+        `has_paywall_cookie` is frozen historical data as of 2026-08 — the
+        admin checkbox that used to write it was replaced with a computed,
+        read-only indicator (`extract.has_configured_cookie`), so this
+        parameter only matters for a caller migrating old rows; the web app's
+        own add/edit routes no longer pass anything but the default. It never
+        changed fetch behaviour anywhere, before or after.
         """
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(display_order), -1) + 1 FROM feeds WHERE section_id = ?",

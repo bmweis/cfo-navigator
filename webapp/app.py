@@ -20904,8 +20904,8 @@ def _auth_cookie_controls(request: Request,
     per paywalled source to confirm that source's subscriber cookie still
     fetches full text — so it lives with feed management rather than on the
     Library hub, where it sat before the Feeds page existed. Only rendered
-    when LINKLIB_AUTH_COOKIES is set. Kicks a background re-check when the
-    stored status is missing or stale.
+    when at least one LINKLIB_COOKIE_<DOMAIN> var is set. Kicks a background
+    re-check when the stored status is missing or stale.
 
     Phase 1 removed the permanent green "Subscriber access" status box that
     used to sit on the Admin hub — the manual re-check trigger and the
@@ -20947,13 +20947,15 @@ def _auth_cookie_controls(request: Request,
     if not any_bad:
         return recheck_form, summary
 
-    refresh_steps = ("""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">To refresh an expired cookie:</p>
+    from linklib.extract import _cookie_env_var
+    stale_vars = ", ".join(f"<code>{_esc(_cookie_env_var(d))}</code>" for d in stale)
+    refresh_steps = (f"""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">To refresh an expired cookie:</p>
 <ol style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">
 <li>Log into the site.</li>
 <li>Open DevTools &rarr; <strong>Network</strong>, then reload.</li>
 <li>Click the request to the domain.</li>
 <li>Copy the full <code>Cookie:</code> header.</li>
-<li>Update <code>LINKLIB_AUTH_COOKIES</code> in Railway &rarr; Variables.</li>
+<li>Update {stale_vars} in Railway &rarr; Variables.</li>
 </ol>""")
 
     # Which domains are stale is already shown, in colour, in the summary
@@ -21369,6 +21371,36 @@ def _publish_feeds(lib) -> None:
     lib.write_opml(OPML_PATH)
 
 
+def _feed_cookie_readout(xml_url: str) -> str:
+    """Read-only line showing whether this feed's domain currently has a
+    subscriber cookie configured (LINKLIB_COOKIE_<DOMAIN>) — computed live,
+    not a stored declaration. Only rendered when a URL is already known (the
+    edit form), since the add form has nothing to compute against until
+    after the feed is saved. Replaces the old has_paywall_cookie checkbox,
+    which recorded that a feed *should* need a cookie but never reflected
+    whether one was actually configured — see CLAUDE.md's Feeds-page
+    Cookie-checkbox note."""
+    from linklib.extract import has_configured_cookie
+    domain = (urlsplit(xml_url).netloc or "").lower().split(":")[0]
+    if domain.startswith("www."):
+        domain = domain[4:]
+    if not domain:
+        return ""
+    configured = has_configured_cookie(domain)
+    color = "var(--seafoam-deep)" if configured else "var(--muted)"
+    label = "Cookie configured for this domain" if configured else "No cookie configured for this domain"
+    return (f'  <div>\n'
+            f'    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cookie</label>\n'
+            f'    <p style="font-size:14px;color:{color};margin:0;">{_esc(label)}</p>\n'
+            f'    <p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;">Computed live from whether <code>{_esc(_cookie_env_var_name(domain))}</code> is set in the host environment — not something you set here. See the footnote below the table for how to find and set the right cookie.</p>\n'
+            f'  </div>\n')
+
+
+def _cookie_env_var_name(domain: str) -> str:
+    from linklib.extract import _cookie_env_var
+    return _cookie_env_var(domain)
+
+
 def _feed_form_fields(sections: list, values: dict) -> str:
     """Shared field markup for the add-feed and edit-feed forms."""
     opts = "".join(
@@ -21382,7 +21414,7 @@ def _feed_form_fields(sections: list, values: dict) -> str:
     hint = "font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;"
     exclude_checked = " checked" if values.get("exclude_from_queue") else ""
     sub_checked = " checked" if values.get("has_active_subscription") else ""
-    cookie_checked = " checked" if values.get("has_paywall_cookie") else ""
+    cookie_readout = _feed_cookie_readout(values.get("xml_url", ""))
     return f"""  <div>
     <label style="{lab}">Feed URL *</label>
     <input type="url" name="xml_url" required value="{_esc(values.get('xml_url', ''))}"
@@ -21412,14 +21444,7 @@ def _feed_form_fields(sections: list, values: dict) -> str:
     </label>
     <p style="{hint}">Read it in the Reader, but never propose it into the archive queue. Set per feed, so one source in a section can be read-only without affecting the rest.</p>
   </div>
-  <div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">
-      <input type="checkbox" name="has_paywall_cookie" value="1"{cookie_checked}>
-      Cookie
-    </label>
-    <p style="{hint}">Tick this when the source's full text needs a subscriber cookie. There's one cookie mechanism for the whole app&mdash;<code>LINKLIB_AUTH_COOKIES</code> in the host environment&mdash;so this only records <em>that</em> a feed depends on it, never where it lives or what it is. It changes nothing about how pages are fetched.</p>
-  </div>
-  <div>
+{cookie_readout}  <div>
     <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">
       <input type="checkbox" name="has_active_subscription" value="1"{sub_checked}>
       Subscriber
@@ -21452,11 +21477,16 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     # Section is a per-row dropdown and read-only a per-row checkbox, both
     # posting on change, so a feed's grouping and its queue eligibility are
     # edited in place rather than through a section-level control.
+    from linklib.extract import has_configured_cookie
     feed_rows = ""
     for f in feeds:
         opts = "".join(
             f'<option value="{s["id"]}"{" selected" if s["id"] == f["section_id"] else ""}>'
             f'{_esc(s["name"])}</option>' for s in sections)
+        _cookie_domain = (urlsplit(f["xml_url"]).netloc or "").lower().split(":")[0]
+        if _cookie_domain.startswith("www."):
+            _cookie_domain = _cookie_domain[4:]
+        _cookie_configured = bool(_cookie_domain) and has_configured_cookie(_cookie_domain)
         feed_rows += f"""<tr class="ff-row">
   <td class="ff-name">{_esc(f['name'])}</td>
   <td class="ff-url"><a href="{_esc(f['xml_url'])}" target="_blank" rel="noopener">{_esc(f['xml_url'])}</a></td>
@@ -21473,10 +21503,11 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     </form>
   </td>
   <td class="ff-cookie">
-    <form method="post" action="/admin/library/feeds/{f['id']}/cookie" style="margin:0;">
-      <input type="checkbox" name="has_paywall_cookie" value="1" onchange="this.form.submit()"
-        aria-label="Cookie: {_esc(f['name'])}"{' checked' if f['has_paywall_cookie'] else ''}>
-    </form>
+    <span aria-label="Cookie for {_esc(f['name'])}: {'configured' if _cookie_configured else 'not configured'}"
+      title="Computed from whether a subscriber cookie is configured for this domain — not editable here."
+      style="color:{'var(--seafoam-deep)' if _cookie_configured else 'var(--muted)'};font-size:13px;">
+      {'&#10003; configured' if _cookie_configured else '&mdash;'}
+    </span>
   </td>
   <td class="ff-sub">
     <form method="post" action="/admin/library/feeds/{f['id']}/subscription" style="margin:0;">
@@ -21617,10 +21648,9 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
      meaning in both states, so an unchecked box still needs its label. */
   .ff-sub::before{{content:"Subscriber";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
-  /* Labelled unconditionally, same as Subscriber. This used to be a
-     badge-only cell, hidden when empty; it now holds a checkbox that carries
-     meaning in both states, so an unchecked box still needs its label and the
-     cell can no longer be hidden when unchecked. */
+  /* Labelled unconditionally, same as Subscriber. Holds a computed
+     configured/not-configured readout that carries meaning in both states
+     (see _feed_cookie_readout), so it can't be hidden when "not configured". */
   .ff-cookie::before{{content:"Cookie";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
 }}
@@ -21638,7 +21668,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
 <li><strong>Read only</strong> feeds stay live in the Reader but are never proposed into the <a href="/admin/library/queue">archive queue</a>. It's set per feed, so one source in a section can be read-only without affecting the rest.</li>
-<li><strong>Cookie</strong> marks a feed whose full text needs a subscriber cookie. There's one mechanism for the whole app: cookies live in <code>LINKLIB_AUTH_COOKIES</code> in the host environment, keyed by domain, and <code>extract.fetch_page</code> applies them automatically wherever they match. Ticking this box records the dependency so a source that quietly starts returning previews points at the right place to check (see <code>RUNBOOK.md</code> &sect;5 for refreshing an expired one). <strong>No cookie value is ever stored in this database</strong>, and the box changes nothing about how pages are fetched.</li>
+<li><strong>Cookie</strong> shows whether this feed's domain currently has a subscriber cookie configured &mdash; computed live from the host environment, not something you set here. Each domain's cookie lives in its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable, and <code>extract.fetch_page</code> applies it automatically wherever the domain matches (see <code>RUNBOOK.md</code> &sect;5 for finding and setting one). <strong>No cookie value is ever stored in this database</strong> &mdash; only the domain names checked are baked into the code.</li>
 <li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
 </ul>
 {banner}{error_banner}
@@ -21655,6 +21685,9 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     <tbody>{feed_rows}</tbody>
   </table>
 </div>
+<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.6;">
+<strong>Finding the right cookie in DevTools:</strong> log into the site, open DevTools &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> for that domain, and copy the minimum cookie that carries the session &mdash; not the whole jar. It varies by platform: a <strong>Substack</strong> site's session cookie is typically named <code>connect.sid</code>; a <strong>beehiiv</strong> site (e.g. Mostly Metrics) uses a signed JWT, usually under a name containing <code>token</code> or <code>session</code>. When in doubt, RUNBOOK.md &sect;5.2's fallback still works: copy the entire <code>Cookie:</code> request header instead of hunting for one name.
+</p>
 
 <h2 style="font-size:17px;margin:34px 0 4px;">Manage sections</h2>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Sections group feeds in the Reader's Sources rail. They carry no settings of their own: whether a source reaches the archive queue is set per feed in the table above. A section can only be removed once it's empty.</p>
@@ -21811,35 +21844,6 @@ async def admin_feeds_set_read_only(request: Request, feed_id: int):
     return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
 
 
-@app.post("/admin/library/feeds/{feed_id}/cookie")
-async def admin_feeds_set_cookie(request: Request, feed_id: int):
-    """Toggle the paywall-cookie flag from the table's checkbox.
-
-    Same narrowness as the read-only and subscription routes: one column,
-    never the URL. An unchecked box posts no field at all, which is the off
-    state.
-
-    This records a dependency; it does not create or remove one. Cookies are
-    applied by domain match inside extract.fetch_page, from
-    LINKLIB_AUTH_COOKIES, and nothing here changes that — so there's no OPML
-    rewrite and no cache to clear.
-    """
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    form = await request.form()
-    needs_cookie = bool(form.get("has_paywall_cookie"))
-    lib = _lib()
-    try:
-        feed = lib.get_feed(feed_id)
-        if not feed:
-            raise HTTPException(status_code=404, detail="feed not found")
-        lib.set_feed_paywall_cookie(feed_id, needs_cookie)
-        state = "marked as needing a subscriber cookie" if needs_cookie else "no longer marked as needing a cookie"
-        detail = f"{feed['name']} is {state}."
-    finally:
-        lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
-
 
 @app.post("/admin/library/feeds/{feed_id}/subscription")
 async def admin_feeds_set_subscription(request: Request, feed_id: int):
@@ -21920,9 +21924,6 @@ async def admin_feeds_new_submit(request: Request):
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
         "exclude_from_queue": bool(form.get("exclude_from_queue")),
-        # Records only THAT the feed needs the cookie; changes no fetch
-        # behaviour. See the column's migration comment in linklib/db.py.
-        "has_paywall_cookie": bool(form.get("has_paywall_cookie")),
         # Informational only — nothing reads it.
         "has_active_subscription": bool(form.get("has_active_subscription")),
     }
@@ -21949,9 +21950,11 @@ async def admin_feeds_new_submit(request: Request):
 
         name = values["name"] or probe.title or values["xml_url"]
         html_url = values["html_url"] or probe.html_url
+        # has_paywall_cookie is no longer admin-settable — it's a frozen,
+        # unread historical column (see CLAUDE.md's Feeds-page Cookie
+        # indicator note), so every new feed just takes the column default.
         lib.add_feed(int(values["section_id"]), name, values["xml_url"], html_url,
                      exclude_from_queue=values["exclude_from_queue"],
-                     has_paywall_cookie=values["has_paywall_cookie"],
                      has_active_subscription=values["has_active_subscription"])
         _publish_feeds(lib)
     finally:
@@ -21974,9 +21977,8 @@ def admin_feeds_edit(request: Request, feed_id: int):
     values = {"name": feed["name"], "xml_url": feed["xml_url"],
               "html_url": feed["html_url"], "section_id": feed["section_id"],
               "exclude_from_queue": bool(feed["exclude_from_queue"]),
-              # Round-tripped so a save that doesn't touch these fields can't
-              # clear them — update_feed writes both columns on every call.
-              "has_paywall_cookie": bool(feed["has_paywall_cookie"]),
+              # Round-tripped so a save that doesn't touch this field can't
+              # clear it — update_feed writes it on every call.
               "has_active_subscription": bool(feed["has_active_subscription"])}
     return HTMLResponse(_page("Edit feed—Library Admin", "Admin",
                               _feed_form_page(f'Edit {feed["name"]}',
@@ -21997,8 +21999,6 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
         "exclude_from_queue": bool(form.get("exclude_from_queue")),
-        # Records only THAT the feed needs the cookie — see the add route.
-        "has_paywall_cookie": bool(form.get("has_paywall_cookie")),
         # Informational only — see the add route.
         "has_active_subscription": bool(form.get("has_active_subscription")),
     }
@@ -22036,10 +22036,13 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
                 return _reject(probe.error)
             html_url = values["html_url"] or probe.html_url
 
+        # has_paywall_cookie is no longer admin-settable (see the add-route
+        # comment) — preserve the row's existing value rather than letting
+        # update_feed's default overwrite it with False on every save.
         lib.update_feed(feed_id, int(values["section_id"]), values["name"],
                         values["xml_url"], html_url,
                         exclude_from_queue=values["exclude_from_queue"],
-                        has_paywall_cookie=values["has_paywall_cookie"],
+                        has_paywall_cookie=bool(feed["has_paywall_cookie"]),
                         has_active_subscription=values["has_active_subscription"])
         _publish_feeds(lib)
         saved_name = values["name"]
