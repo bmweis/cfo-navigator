@@ -16417,7 +16417,7 @@ _READER_SHELL_CSS = """
    delete button on this site already uses (see the admin delete buttons
    throughout webapp/app.py), not a new color invented for this one. */
 .rr-delete-toggle{display:flex;align-items:center;gap:6px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;}
-.rr-delete-toggle:hover{background:#fef2f2;}
+.rr-delete-toggle:hover{background:#fee2e2;}
 .rr-find-bar{display:none;align-items:center;gap:6px;padding:8px 20px;border-bottom:1px solid var(--line);
   background:var(--surface-2);position:sticky;top:53px;z-index:4;}
 .rr-find-bar.rr-find-open{display:flex;}
