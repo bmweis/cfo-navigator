@@ -25324,7 +25324,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         detail = _esc(r.get("detail") or "")
         detail_html = f'<span style="font-size:12px;color:var(--muted);">{detail}</span>' if detail else ""
         return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}</td>'
-                f'<td style="padding:7px 12px;font-size:13px;color:{color};font-weight:500;">{label}</td>'
+                f'<td style="padding:7px 12px;font-size:13px;color:{color};font-weight:500;white-space:nowrap;">{label}</td>'
                 f'<td style="padding:7px 12px;">{detail_html}</td>'
                 f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r.get("attempted_at") or "")[:19].replace("T", " "))}</td></tr>')
 
@@ -25335,6 +25335,14 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     # rather than drifting apart as separate literals.
     _th = "padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"
     _th_nowrap = _th + "white-space:nowrap;"
+    # A literal, explicit width (not a percentage) on the Article column so
+    # it renders at the SAME absolute pixel width across all three separate
+    # <table> elements — each table auto-sizes its own columns independently,
+    # so matching a percentage alone doesn't guarantee that; a shared px
+    # value pinned on all three does. Anchored to Recent attempts' own
+    # natural width (the table with the fewest narrow nowrap columns
+    # crowding it), per Brian's ask.
+    _th_article = _th + "width:420px;"
 
     log_html = ""
     if log_rows:
@@ -25345,8 +25353,8 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="{_th}">Article</th>
-      <th style="{_th}">Result</th>
+      <th style="{_th_article}">Article</th>
+      <th style="{_th_nowrap}">Result</th>
       <th style="{_th}">Detail</th>
       <th style="{_th_nowrap}">When</th>
     </tr></thead>
@@ -25488,7 +25496,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="{_th}">Article</th>
+      <th style="{_th_article}">Article</th>
       <th style="{_th}">Last failure</th>
       <th style="{_th_nowrap}text-align:center;">Attempts</th>
       <th style="{_th_nowrap}">Last attempt</th>
@@ -25511,7 +25519,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="{_th}">Article</th>
+      <th style="{_th_article}">Article</th>
       <th style="{_th}">Reason it was flagged</th>
       <th style="{_th_nowrap}">Accepted</th>
       <th style="{_th_nowrap}">Actions</th>
