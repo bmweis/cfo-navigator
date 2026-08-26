@@ -108,6 +108,15 @@ _COMMUNITY_LOGO_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or 
 CONTACT_RATE_LIMIT_PER_HOUR = int(os.environ.get("LINKLIB_CONTACT_RATE_LIMIT_PER_HOUR", "5"))
 CONTACT_TIME_TRAP_SECONDS = float(os.environ.get("LINKLIB_CONTACT_TIME_TRAP_SECONDS", "3"))
 
+# Public Feature Taxonomy suggestion channel (FEATURE_TAXONOMY.md §9) reuses
+# /contact's exact spam-hardening shape (rate limit + honeypot + time-trap +
+# keyword auto-reject) but through its OWN endpoint-scoped rate-limit state —
+# never sharing _CONTACT_RATE_LOCK/_CONTACT_SUBMIT_TIMES, so a flood against
+# one form can't burn the other's budget. The time-trap threshold and the
+# spam-phrase list/checker (_is_contact_spam) are already generic enough to
+# reuse directly, unchanged.
+FEATURE_SUGGESTION_RATE_LIMIT_PER_HOUR = int(os.environ.get("LINKLIB_FEATURE_SUGGESTION_RATE_LIMIT_PER_HOUR", "5"))
+
 # One-time seed data for the `tool_categories` table (see _seed_toolbox).
 # Not read directly anywhere else — once seeded, the DB is the source of
 # truth and categories are managed at /admin/tools/software/categories. Consolidated
@@ -554,6 +563,29 @@ def _contact_rate_limited(ip: str) -> bool:
         if not limited:
             times.append(now)
         _CONTACT_SUBMIT_TIMES[ip] = times
+    return limited
+
+
+# Own rate-limit state for the public Feature Taxonomy suggestion channel —
+# same shape as _CONTACT_RATE_LOCK/_CONTACT_SUBMIT_TIMES above, deliberately
+# a separate dict/lock rather than sharing /contact's, so the two forms'
+# budgets can't starve each other.
+_FEATURE_SUGGESTION_RATE_LOCK = threading.Lock()
+_FEATURE_SUGGESTION_SUBMIT_TIMES: dict[str, list[float]] = {}
+
+
+def _feature_suggestion_rate_limited(ip: str) -> bool:
+    """True if `ip` has already hit FEATURE_SUGGESTION_RATE_LIMIT_PER_HOUR
+    suggestion-channel submissions in the trailing hour. Records this
+    attempt when it hasn't — same pattern as _contact_rate_limited."""
+    now = time.time()
+    cutoff = now - 3600
+    with _FEATURE_SUGGESTION_RATE_LOCK:
+        times = [t for t in _FEATURE_SUGGESTION_SUBMIT_TIMES.get(ip, []) if t > cutoff]
+        limited = len(times) >= FEATURE_SUGGESTION_RATE_LIMIT_PER_HOUR
+        if not limited:
+            times.append(now)
+        _FEATURE_SUGGESTION_SUBMIT_TIMES[ip] = times
     return limited
 
 
@@ -1855,11 +1887,23 @@ def _software_key_features_card(feature_links: list[dict]) -> str:
     next to each feature name, not a separate table column — plain-language
     feature names in a compact list read better than a table when there's
     no standalone/bundled distinction to carry per §6 of the rules doc (the
-    governed model only ever has native/add-on, never "unset")."""
+    governed model only ever has native/add-on, never "unset").
+
+    Public suggestion channel (§9): each feature row gets a small "flag"
+    trigger (openFeatureSuggest, defined alongside the shared modal built by
+    _feature_suggest_modal_html) that opens the shared modal pre-scoped to
+    that feature, defaulting to Flag mode. A card-level "propose a new
+    feature" link sits below the list, and below the coming-soon fallback
+    too — a category with no seeded list yet can still take a proposal."""
+    suggest_footer = ('<p class="tp-feature-suggest-cta">'
+                       '<button type="button" class="tp-link-btn" onclick="openFeatureSuggest(\'new_feature\',this)">'
+                       'Don&rsquo;t see a feature that should be here? Suggest one &rarr;</button></p>')
+
     if not feature_links:
-        return """<div class="tp-card">
+        return f"""<div class="tp-card">
   <h2 class="tp-card-h">Key features</h2>
   <p style="margin:0;color:var(--muted);">Coming soon&mdash;we&rsquo;re mapping this tool against our curated feature taxonomy.</p>
+  {suggest_footer}
 </div>"""
 
     def _tag(label: str, cls: str) -> str:
@@ -1870,7 +1914,14 @@ def _software_key_features_card(feature_links: list[dict]) -> str:
             _tag("Add-on", "tp-feature-tag-addon") if link["availability"] == "add_on" else "",
             _tag("AI", "tp-feature-tag-ai") if link["ai_enabled"] else "",
         ])
-        return f'<li>{_esc(_sentence_case_feature_name(link["feature_name"]))}{tags}</li>'
+        name = _sentence_case_feature_name(link["feature_name"])
+        flag_btn = (
+            f'<button type="button" class="tp-feature-flag-btn" title="Flag or suggest a change to this feature" '
+            f'data-feature-id="{link["feature_id"]}" data-feature-name="{_esc(name)}" '
+            f'data-category-id="{link["category_id"]}" '
+            f'onclick="openFeatureSuggest(\'flag\',this)">&#9873;</button>'
+        )
+        return f'<li>{_esc(name)}{tags}{flag_btn}</li>'
 
     categories: list[str] = []
     for link in feature_links:
@@ -1891,10 +1942,173 @@ def _software_key_features_card(feature_links: list[dict]) -> str:
     return f"""<div class="tp-card">
   <h2 class="tp-card-h">Key features</h2>
   {sections_html}
+  {suggest_footer}
 </div>
 <div class="tp-footnote" style="margin-top:8px;">
   <span>{_FEATURES_SOURCING_DISCLAIMER}</span>
 </div>"""
+
+
+# Guideline-summary copy shown inside the public suggestion modal, for the
+# two modes that require an articulation (Suggest a change / Propose a new
+# feature) — FEATURE_TAXONOMY.md §9: "the UI surfaces a plain-language
+# summary of the guidelines (§3-§5 ...) and requires the submitter to
+# articulate why their suggestion adheres and is worth a slot." Never shown
+# for a bare Flag, which requires no articulation at all. DRAFT COPY —
+# flagged for Brian's sign-off before merge, see the PR description.
+_FEATURE_SUGGEST_GUIDELINES_HTML = (
+    '<div class="tp-fs-guidelines">'
+    '<strong>Before you suggest this:</strong> features here describe the outcome a buyer gets, '
+    'not vendor branding or marketing language, and the list is curated on purpose&mdash;not every '
+    'capability a tool has belongs on it. Tell us why this earns a spot.'
+    '</div>'
+)
+
+
+# Shared JS for the public Feature Taxonomy suggestion modal — a plain
+# module-level *_JS constant (not inlined into the f-string below) so it's
+# covered by webapp.checks.script_syntax_problems / test_admin_js_syntax.py,
+# same convention as every other shared inline <script> block in this file.
+_FEATURE_SUGGEST_JS = """
+function openFeatureSuggest(mode, el) {
+  var featureId = '0', featureName = '';
+  if (el && el.dataset && el.dataset.featureId) {
+    featureId = el.dataset.featureId;
+    featureName = el.dataset.featureName || '';
+  }
+  document.getElementById('feature-suggest-form').reset();
+  document.getElementById('fs-feature-id').value = featureId;
+  document.getElementById('fs-ts').value = String(Date.now() / 1000);
+  var hasFeature = featureId && featureId !== '0';
+  document.getElementById('fs-tabs').style.display = hasFeature ? 'flex' : 'none';
+  var ctx = document.getElementById('fs-feature-context');
+  ctx.style.display = hasFeature ? 'block' : 'none';
+  document.getElementById('fs-feature-name-label').textContent = featureName;
+  setFeatureSuggestMode(hasFeature ? mode : 'new_feature');
+  document.getElementById('feature-suggest-overlay').classList.add('open');
+}
+function setFeatureSuggestMode(mode) {
+  document.getElementById('fs-mode').value = mode;
+  var sections = {
+    flag: 'fs-section-flag',
+    designation_change: 'fs-section-designation_change',
+    new_feature: 'fs-section-new_feature'
+  };
+  Object.keys(sections).forEach(function (m) {
+    var sec = document.getElementById(sections[m]);
+    var visible = (m === mode);
+    sec.style.display = visible ? 'block' : 'none';
+    sec.querySelectorAll('textarea[name="articulation"], input[name="new_feature_name"]').forEach(function (inp) {
+      inp.required = visible;
+    });
+    var tab = document.getElementById('fs-tab-' + m);
+    if (tab) tab.classList.toggle('active', visible);
+  });
+}
+function closeFeatureSuggest() {
+  document.getElementById('feature-suggest-overlay').classList.remove('open');
+}
+"""
+
+
+def _feature_suggest_modal_html(tool: dict, category_options: list[dict]) -> str:
+    """Shared modal for the public Feature Taxonomy suggestion channel
+    (FEATURE_TAXONOMY.md §9) — one instance per tool profile page, opened by
+    openFeatureSuggest() from either a per-feature flag button (mode
+    defaults to "flag", with a "Suggest a change" tab alongside it) or the
+    Key features card's "propose a new feature" footer link (no tabs — mode
+    is fixed to new_feature, since there's no feature in context). Submits
+    a plain POST to /tools/software/{slug}/suggest-feature — every
+    submission lands in feature_review_queue with source='public'
+    (Library.add_feature_review_queue_item), never a direct table write.
+    Reuses the sitewide .intro-overlay/.intro-modal chrome already built for
+    this same page's "Warm intro" modal — no new modal CSS, only new fields."""
+    cat_options_html = "".join(
+        f'<option value="{c["id"]}">{_esc(c["name"])}</option>' for c in category_options
+    )
+    return f"""
+<div class="intro-overlay" id="feature-suggest-overlay" onclick="if(event.target===this)closeFeatureSuggest()">
+  <div class="intro-modal">
+    <button class="intro-close" onclick="closeFeatureSuggest()" aria-label="Close">&times;</button>
+    <h2>Flag or suggest a feature</h2>
+    <p id="fs-feature-context" style="display:none;">Re: <strong id="fs-feature-name-label"></strong></p>
+    <div id="fs-tabs" style="display:none;gap:8px;margin:-8px 0 18px;">
+      <button type="button" id="fs-tab-flag" class="tp-fs-tab" onclick="setFeatureSuggestMode('flag')">Flag a claim</button>
+      <button type="button" id="fs-tab-designation_change" class="tp-fs-tab" onclick="setFeatureSuggestMode('designation_change')">Suggest a change</button>
+    </div>
+    <form method="post" id="feature-suggest-form" action="/tools/software/{_esc(tool.get('slug', ''))}/suggest-feature" style="display:grid;gap:16px;">
+      <input type="hidden" name="tool_id" value="{tool.get('id', 0)}">
+      <input type="hidden" name="feature_id" id="fs-feature-id" value="0">
+      <input type="hidden" name="mode" id="fs-mode" value="flag">
+      <input type="hidden" name="ts" id="fs-ts" value="">
+      <input type="text" name="website" tabindex="-1" autocomplete="off"
+        style="position:absolute;left:-9999px;width:1px;height:1px;" aria-hidden="true">
+
+      <div id="fs-section-flag">
+        <div class="intro-field">
+          <label for="fs-note">What&rsquo;s wrong or unclear? <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+          <textarea id="fs-note" name="note" rows="3" maxlength="1000" placeholder="e.g. this doesn't look right for this vendor anymore"></textarea>
+        </div>
+      </div>
+
+      <div id="fs-section-designation_change" style="display:none;">
+        <div class="intro-field">
+          <label for="fs-availability">Should this be&hellip;</label>
+          <select id="fs-availability" name="proposed_availability">
+            <option value="">No change</option>
+            <option value="native">Native (built in)</option>
+            <option value="add_on">Add-on (extra cost/module)</option>
+          </select>
+        </div>
+        <div class="intro-field" style="margin-top:12px;">
+          <label for="fs-ai-enabled">AI-enabled flag</label>
+          <select id="fs-ai-enabled" name="proposed_ai_enabled">
+            <option value="">No change</option>
+            <option value="1">Yes, this is AI-enabled</option>
+            <option value="0">No, this isn&rsquo;t AI-enabled</option>
+          </select>
+        </div>
+        {_FEATURE_SUGGEST_GUIDELINES_HTML}
+        <div class="intro-field" style="margin-top:12px;">
+          <label for="fs-articulation-change">Why should this change? <span style="font-weight:400;color:var(--muted);">(required)</span></label>
+          <textarea id="fs-articulation-change" name="articulation" rows="3" maxlength="1000"></textarea>
+        </div>
+      </div>
+
+      <div id="fs-section-new_feature" style="display:none;">
+        <div class="intro-field">
+          <label for="fs-category">Category</label>
+          <select id="fs-category" name="category_id">{cat_options_html}</select>
+        </div>
+        <div class="intro-field" style="margin-top:12px;">
+          <label for="fs-new-name">Feature name</label>
+          <input id="fs-new-name" type="text" name="new_feature_name" maxlength="120" placeholder="Outcome-focused, no vendor names">
+        </div>
+        <div class="intro-field" style="margin-top:12px;">
+          <label for="fs-new-definition">Short definition <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+          <textarea id="fs-new-definition" name="new_feature_definition" rows="2" maxlength="500"></textarea>
+        </div>
+        {_FEATURE_SUGGEST_GUIDELINES_HTML}
+        <div class="intro-field" style="margin-top:12px;">
+          <label for="fs-articulation-new">Why does this belong on the list? <span style="font-weight:400;color:var(--muted);">(required)</span></label>
+          <textarea id="fs-articulation-new" name="articulation" rows="3" maxlength="1000"></textarea>
+        </div>
+      </div>
+
+      <div class="intro-field">
+        <label for="fs-name">Your name</label>
+        <input id="fs-name" type="text" name="submitter_name" required maxlength="200" placeholder="Jane Smith">
+      </div>
+      <div class="intro-field">
+        <label for="fs-email">Email</label>
+        <input id="fs-email" type="email" name="submitter_email" required maxlength="200" placeholder="jane@company.com">
+      </div>
+
+      <button type="submit" class="btn" style="justify-self:start;">Submit</button>
+    </form>
+  </div>
+</div>
+<script>{_FEATURE_SUGGEST_JS}</script>"""
 
 
 def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
@@ -6538,7 +6752,7 @@ async def tools_software_find_chat(request: Request):
 
 
 @app.get("/tools/software/{slug}", response_class=HTMLResponse)
-def tools_software_profile(request: Request, slug: str):
+def tools_software_profile(request: Request, slug: str, suggested: str = "", suggest_error: str = ""):
     authed = _is_authed(request)   # admin sees the meta line, verification count, and Edit button
     is_member = _is_member(request)  # gates the Warm Intro button, same as the card
     lib = _lib()
@@ -6552,10 +6766,20 @@ def tools_software_profile(request: Request, slug: str):
         description_citations = (
             lib.get_entity_citations("tool", tool["id"], "description") if tool else []
         )
+        all_categories = lib.list_tool_categories() if tool else []
     finally:
         lib.close()
     if not tool:
         raise HTTPException(status_code=404, detail="Tool not found")
+
+    # Category options for the public suggestion modal's "Propose a new
+    # feature" mode — the tool's own categories when it has any recognized
+    # ones, falling back to every category so the picker is never empty.
+    _tool_cat_names = set(tool.get("categories") or [])
+    feature_suggest_category_options = (
+        [c for c in all_categories if c["name"] in _tool_cat_names] or all_categories
+    )
+    feature_suggest_modal_block = _feature_suggest_modal_html(tool, feature_suggest_category_options)
 
     # Whole-section-missing cases (Competitors/Bottom line/Agent taxonomy/
     # Features) get an admin-only nudge in their place rather than showing
@@ -6887,7 +7111,16 @@ function submitIntroForm() {{
 {f'<p style="font-size:13px;color:var(--muted);margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}
 {footnote_block}"""
 
+    _fs_banner = ""
+    if suggested == "1":
+        _fs_banner = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+                      'font-size:14px;margin:0 0 16px;">Thanks&mdash;your suggestion was submitted for review.</p>')
+    elif suggest_error:
+        _fs_banner = (f'<p style="background:#fef3c7;color:#92400e;border-radius:10px;padding:10px 16px;'
+                      f'font-size:14px;margin:0 0 16px;">{_esc(suggest_error)}</p>')
+
     body = f"""<div class="page page-full">
+{_fs_banner}
 {main_content}
 </div>
 <style>
@@ -6940,6 +7173,17 @@ function submitIntroForm() {{
 .tp-feature-tag-ai{{background:#fef3c7;color:#92400e;}}
 .tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
   background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+.tp-feature-flag-btn{{margin-left:auto;background:none;border:none;cursor:pointer;font-size:14px;
+  color:var(--muted);padding:2px 4px;line-height:1;}}
+.tp-feature-flag-btn:hover{{color:var(--navy);}}
+.tp-link-btn{{background:none;border:none;padding:0;cursor:pointer;font:inherit;color:var(--accent);
+  font-weight:500;}}
+.tp-feature-suggest-cta{{margin:10px 0 0;font-size:13.5px;}}
+.tp-fs-tab{{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 12px;
+  font-size:13px;cursor:pointer;color:var(--muted);}}
+.tp-fs-tab.active{{background:var(--navy-wash);color:var(--navy);border-color:var(--navy-wash);font-weight:600;}}
+.tp-fs-guidelines{{background:var(--bg);border-radius:8px;padding:10px 12px;font-size:12.5px;
+  line-height:1.5;color:var(--ink-soft);margin-top:12px;}}
 .tp-competitor-table{{width:100%;border-collapse:collapse;}}
 .tp-competitor-table td{{padding:9px 0;border-bottom:1px solid var(--line);vertical-align:middle;}}
 .tp-competitor-table tr:last-child td{{border-bottom:none;}}
@@ -6960,14 +7204,156 @@ function submitIntroForm() {{
 .intro-modal p{{font-size:14px;color:var(--muted);margin:0 0 20px;}}
 .intro-field{{display:grid;gap:6px;}}
 .intro-field label{{font-size:13px;font-weight:500;color:var(--navy);}}
-.intro-field input,.intro-field select{{width:100%;padding:9px 13px;border:1px solid var(--line);
-  border-radius:9px;font:inherit;font-size:14px;background:var(--bg);}}
+.intro-field input,.intro-field select,.intro-field textarea{{width:100%;padding:9px 13px;border:1px solid var(--line);
+  border-radius:9px;font:inherit;font-size:14px;background:var(--bg);resize:vertical;}}
 .intro-close{{position:absolute;top:16px;right:20px;background:none;border:none;font-size:20px;
   color:var(--muted);cursor:pointer;line-height:1;padding:4px 8px;border-radius:6px;}}
 .intro-close:hover{{background:var(--navy-wash);color:var(--ink);}}
 </style>
-{intro_modal_block}"""
+{intro_modal_block}
+{feature_suggest_modal_block}"""
     return HTMLResponse(_page(f"{tool['name']}—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+# ---------------------------------------------------------------------------
+# Public Feature Taxonomy suggestion channel (FEATURE_TAXONOMY.md §9). Reuses
+# /contact's exact spam-hardening shape (own rate-limit state, honeypot,
+# time-trap, the same keyword auto-reject) — see
+# _feature_suggestion_rate_limited/FEATURE_SUGGESTION_RATE_LIMIT_PER_HOUR
+# above. Every submission lands in feature_review_queue with source='public'
+# via Library.add_feature_review_queue_item — never a direct write to
+# category_features/tool_feature_links. Reviewed at
+# /admin/tools/software/feature-review-queue alongside 'admin'/'scan' entries.
+# ---------------------------------------------------------------------------
+
+@app.post("/tools/software/{slug}/suggest-feature")
+async def tools_software_suggest_feature(request: Request, slug: str):
+    form = await request.form()
+
+    # Rate limit first, before any other check, so a flood can't dodge the
+    # cap just by tripping the honeypot or time-trap instead (same ordering
+    # as /contact).
+    if _feature_suggestion_rate_limited(_client_ip(request)):
+        return RedirectResponse(
+            f"/tools/software/{slug}?suggest_error=Something+went+wrong+submitting+that.+Please+try+again+in+a+few+minutes.",
+            status_code=303,
+        )
+
+    # Honeypot: bots fill the hidden "website" field. Pretend success, drop silently.
+    if (form.get("website") or "").strip():
+        return RedirectResponse(f"/tools/software/{slug}?suggested=1", status_code=303)
+
+    # Time-trap: real visitors take at least a few seconds to fill the form.
+    try:
+        rendered_at = float(form.get("ts") or "")
+    except ValueError:
+        rendered_at = time.time()
+    if time.time() - rendered_at < CONTACT_TIME_TRAP_SECONDS:
+        return RedirectResponse(f"/tools/software/{slug}?suggested=1", status_code=303)
+
+    mode = (form.get("mode") or "").strip()
+    if mode not in ("flag", "designation_change", "new_feature"):
+        raise HTTPException(status_code=400, detail="Invalid submission.")
+
+    def _int_or_zero(v: str | None) -> int:
+        v = (v or "").strip()
+        return int(v) if v.lstrip("-").isdigit() else 0
+
+    tool_id = _int_or_zero(form.get("tool_id"))
+    feature_id = _int_or_zero(form.get("feature_id"))
+    submitter_name = (form.get("submitter_name") or "").strip()
+    submitter_email = (form.get("submitter_email") or "").strip()
+
+    # §9: "Submissions require submitter name (first and last) and email...
+    # name and email still required" — true for every mode, flag included.
+    if not (submitter_name and submitter_email and tool_id):
+        raise HTTPException(status_code=400, detail="Name, email, and tool are required.")
+
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+
+        if mode == "flag":
+            if not feature_id:
+                raise HTTPException(status_code=400, detail="Missing feature.")
+            feature = lib.get_category_feature(feature_id)
+            if not feature:
+                raise HTTPException(status_code=404, detail="Feature not found.")
+            note = (form.get("note") or "").strip()
+            if _is_contact_spam(note):
+                return RedirectResponse(f"/tools/software/{slug}?suggested=1", status_code=303)
+            # Flags require no articulation (§9) — the note itself, however
+            # short, is what a reviewer sees; nothing in the payload proposes
+            # a live-table change, so approve_feature_review_queue_item is
+            # never called for this item (see the admin-side "flag" branch
+            # of _feature_review_queue_item_card).
+            payload = {"category_id": feature["category_id"], "feature_id": feature_id, "links": []}
+            lib.add_feature_review_queue_item(
+                source="public", proposal_type="flag", payload=payload,
+                category_id=feature["category_id"], tool_id=tool_id,
+                articulation=note, submitter_name=submitter_name, submitter_email=submitter_email,
+            )
+
+        elif mode == "designation_change":
+            if not feature_id:
+                raise HTTPException(status_code=400, detail="Missing feature.")
+            feature = lib.get_category_feature(feature_id)
+            if not feature:
+                raise HTTPException(status_code=404, detail="Feature not found.")
+            articulation = (form.get("articulation") or "").strip()
+            if not articulation:
+                raise HTTPException(status_code=400, detail="Please explain why this should change.")
+            if _is_contact_spam(articulation):
+                return RedirectResponse(f"/tools/software/{slug}?suggested=1", status_code=303)
+            existing_link = lib.get_tool_feature_link(tool_id, feature_id) or {}
+            proposed_availability = (form.get("proposed_availability") or "").strip() \
+                or existing_link.get("availability", "native")
+            proposed_ai_raw = (form.get("proposed_ai_enabled") or "").strip()
+            proposed_ai = int(proposed_ai_raw) if proposed_ai_raw in ("0", "1") \
+                else int(existing_link.get("ai_enabled", 0))
+            payload = {
+                "category_id": feature["category_id"],
+                "feature_id": feature_id,
+                "links": [{
+                    "tool_id": tool_id, "availability": proposed_availability,
+                    "ai_enabled": proposed_ai, "verified_as_of": existing_link.get("verified_as_of", ""),
+                    "note": "", "source_url": "",
+                }],
+            }
+            lib.add_feature_review_queue_item(
+                source="public", proposal_type="designation_change", payload=payload,
+                category_id=feature["category_id"], tool_id=tool_id,
+                articulation=articulation, submitter_name=submitter_name, submitter_email=submitter_email,
+            )
+
+        else:  # new_feature
+            category_id = _int_or_zero(form.get("category_id"))
+            new_name = (form.get("new_feature_name") or "").strip()
+            new_definition = (form.get("new_feature_definition") or "").strip()
+            articulation = (form.get("articulation") or "").strip()
+            if not (category_id and new_name and articulation):
+                raise HTTPException(status_code=400, detail="Category, feature name, and articulation are required.")
+            if _is_contact_spam(articulation) or _is_contact_spam(new_definition):
+                return RedirectResponse(f"/tools/software/{slug}?suggested=1", status_code=303)
+            payload = {
+                "category_id": category_id,
+                "feature": {"name": new_name, "definition": new_definition, "pointer_note": ""},
+                "links": [{
+                    "tool_id": tool_id, "availability": "native", "ai_enabled": 0,
+                    "verified_as_of": "", "note": "", "source_url": "",
+                }],
+            }
+            lib.add_feature_review_queue_item(
+                source="public", proposal_type="new_feature", payload=payload,
+                category_id=category_id, tool_id=tool_id,
+                articulation=articulation, submitter_name=submitter_name, submitter_email=submitter_email,
+            )
+    finally:
+        lib.close()
+
+    return RedirectResponse(f"/tools/software/{slug}?suggested=1", status_code=303)
 
 
 @app.get("/tools/benchmarks")
@@ -10830,6 +11216,35 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
     payload = item["payload"]
     category = categories.get(item["category_id"])
     category_name = category["name"] if category else "(unknown category)"
+
+    # A "flag" proposal (public suggestion channel, §9) has no proposed
+    # change to apply — it's a report, not a draft — so it gets its own
+    # render branch entirely: no edit-as-approve form (there's nothing in
+    # payload["links"] to apply, and calling approve_feature_review_queue_item
+    # on it would silently no-op against tool_feature_links, which would
+    # read as "approved" when nothing actually happened). Just the flagged
+    # tool/feature, the visitor's note, and a Dismiss action.
+    if item.get("proposal_type") == "flag":
+        source_badge_bg = {"admin": "var(--navy-wash)", "scan": "var(--seafoam-wash)", "public": "#fef3c7"}.get(item["source"], "var(--bg)")
+        source_badge_fg = {"admin": "var(--navy)", "scan": "var(--seafoam-deep)", "public": "#92400e"}.get(item["source"], "var(--ink)")
+        tool = tools_by_id.get(item.get("tool_id"))
+        tool_label = tool["name"] if tool else f"(tool id={item.get('tool_id')})"
+        feature_id = payload.get("feature_id")
+        return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:16px;">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+    <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:{source_badge_bg};color:{source_badge_fg};border-radius:5px;padding:2px 9px;">{_esc(item['source'])}</span>
+    <span style="font-size:13px;color:var(--muted);">Flag/question &middot; {_esc(category_name)}</span>
+  </div>
+  <p style="margin:0 0 6px;font-size:14px;">{_esc(tool_label)} &mdash; feature id={feature_id}</p>
+  {f'<p style="font-size:13.5px;line-height:1.6;color:var(--ink);background:var(--bg);border-radius:8px;padding:10px 12px;margin:10px 0 0;">{_esc(item["articulation"])}</p>' if item.get("articulation") else '<p style="font-size:13.5px;color:var(--muted);margin:10px 0 0;">No note left&mdash;just flagged for review.</p>'}
+  {f'<p style="font-size:13px;color:var(--muted);margin:8px 0 0;">From {_esc(item["submitter_name"])} ({_esc(item["submitter_email"])})</p>' if item.get("submitter_name") else ''}
+  <form method="post" action="/admin/tools/software/feature-review-queue/{item['id']}/deny" style="margin:14px 0 0;display:flex;gap:6px;align-items:center;">
+    <input type="text" name="resolution_note" placeholder="Note (optional, shown as resolved)" maxlength="500"
+      style="flex:1;min-width:180px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;">
+    <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Dismiss</button>
+  </form>
+</div>"""
+
     feature = payload.get("feature") or {}
     is_new_feature = bool(feature.get("name"))
     feature_name = feature.get("name", "")
