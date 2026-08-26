@@ -5649,24 +5649,36 @@ def tools_directory(request: Request, warn: str = ""):
     # Serialize to JSON for client-side filtering
     import json as _json
     def _tool_entry(t: dict) -> dict:
+        # Description/Agent taxonomy publish gate, page-source leak fix: an
+        # unverified field's raw text used to ride into this JSON payload
+        # regardless of who was asking, relying on client JS to hide what
+        # was already sent — but the payload lands in page source either
+        # way, which a crawler indexes and any visitor can read via
+        # view-source, gate or no gate. The server already knows AUTHED
+        # when building this page, so an unverified field is now stripped
+        # to "" here for anyone who isn't signed in; admin Quick Edit still
+        # needs the raw text verbatim, so an authed response keeps it. The
+        # client-side render/search gates below are left in place as
+        # defense in depth — they're redundant for an anonymous visitor now
+        # (there's nothing left to hide) but still do real work for an
+        # authed admin, who does receive the raw text and the "unverified"
+        # badge.
+        desc_unverified = bool(t.get("description_needs_verification"))
+        taxonomy_unverified = bool(t.get("agent_taxonomy_needs_verification"))
+        strip_desc = desc_unverified and not authed
+        strip_taxonomy = taxonomy_unverified and not authed
         entry = {
             "id": t["id"],
             "name": t["name"],
-            "description": t["description"],
-            "summary": t.get("summary") or "",
+            "description": "" if strip_desc else t["description"],
+            "summary": "" if strip_desc else (t.get("summary") or ""),
             "url": t["url"],
             "slug": t["slug"],
             "logo_url": _tool_logo_url(t),
             "categories": t["categories"],
-            "agent_taxonomy_note": t.get("agent_taxonomy_note") or "",
-            # Description publish gate (Citations-API grounding fix
-            # follow-up, same Abacum-fabrication-finding pattern as Agent
-            # taxonomy): the raw description/summary text stays in this
-            # entry regardless — admin Quick Edit needs it verbatim even
-            # when unverified — but the client only renders/searches it for
-            # a signed-in admin while this is true. See filterTools() and
-            # the card-render function below.
-            "description_needs_verification": bool(t.get("description_needs_verification")),
+            "agent_taxonomy_note": "" if strip_taxonomy else (t.get("agent_taxonomy_note") or ""),
+            "description_needs_verification": desc_unverified,
+            "agent_taxonomy_needs_verification": taxonomy_unverified,
             "advisor": bool(t.get("advisor")),
             "promoted": bool(t.get("promoted")),
             # Only a computed boolean goes to every visitor — never the raw
@@ -6093,13 +6105,18 @@ function filtered() {{
       if (!hit) return false;
     }}
     if (!q) return true;
-    // Description publish gate: an unverified description/summary is never
+    // Description/Agent taxonomy publish gate: an unverified field is never
     // part of the public search-match text, same as it's never rendered on
     // the card — an admin's search still matches it (AUTHED skips the gate
-    // here the same way it skips the render gate above).
+    // here the same way it skips the render gate above). As of the
+    // page-source leak fix, ALL_TOOLS itself already has these fields
+    // stripped to '' for a non-admin response, so this check is now
+    // defense in depth rather than the only thing hiding the text.
     var descHiddenFromSearch = t.description_needs_verification && !AUTHED;
     var descMatchText = descHiddenFromSearch ? '' : (t.summary || '') + ' ' + t.description;
-    return (t.name + ' ' + descMatchText + ' ' + (t.categories || []).join(' ') + ' ' + (t.agent_taxonomy_note || '')).toLowerCase().indexOf(q) !== -1;
+    var taxonomyHiddenFromSearch = t.agent_taxonomy_needs_verification && !AUTHED;
+    var taxonomyMatchText = taxonomyHiddenFromSearch ? '' : (t.agent_taxonomy_note || '');
+    return (t.name + ' ' + descMatchText + ' ' + (t.categories || []).join(' ') + ' ' + taxonomyMatchText).toLowerCase().indexOf(q) !== -1;
   }});
 }}
 

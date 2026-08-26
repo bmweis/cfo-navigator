@@ -68,6 +68,19 @@ def _build_communities_context(lib: Library) -> str:
     blocks = []
     for c in communities:
         profile = lib.get_community_profile(c["id"]) or {}
+        # Publish-gate parity: `community_profiles.needs_review` gates the
+        # ENTIRE drafted profile at once on every public render site
+        # (webapp.app's `_profile_hidden`/`_display_profile` swap on the
+        # profile page and compare matrix — see CLAUDE.md's "Description/
+        # Community profile publish gates" note). The matchmaker feeds this
+        # same profile text into a Claude prompt whose synthesized answer
+        # goes out to any visitor, admin or not — so it's exactly the kind
+        # of public-facing surface that gate exists to cover, and gets the
+        # same whole-profile-or-nothing treatment rather than a per-field
+        # one (per-field would read as a half-reviewed profile, the same
+        # reasoning the original gate decision used).
+        profile_unverified = bool(profile.get("needs_review"))
+        display_profile = {} if profile_unverified else profile
         lines = [f"### {c['name']} (slug: {c['slug']})"]
         lines.append(_line("URL", c.get("url")))
         lines.append(_line("Who it's for", c.get("demographic")))
@@ -81,16 +94,16 @@ def _build_communities_context(lib: Library) -> str:
         lines.append(_line("Sponsorship", c.get("sponsorship_type")))
         lines.append(_line("Sponsor", c.get("sponsor_name")))
         lines.append(_line("Notes", c.get("notes")))
-        if profile:
-            lines.append(_line("Ideal member", profile.get("ideal_member")))
-            lines.append(_line("Not a fit for", profile.get("anti_fit")))
-            lines.append(_line("Value proposition", profile.get("value_prop")))
-            lines.append(_line("What it's actually like", profile.get("format_reality")))
-            lines.append(_line("Engagement level", profile.get("engagement_level")))
-            lines.append(_line("Application friction", profile.get("application_friction")))
-            lines.append(_line("Cost vs. value", profile.get("cost_value_verdict")))
-            lines.append(_line("Business model", profile.get("business_model")))
-            lines.append(_line("Founded", profile.get("founded_year")))
+        if display_profile:
+            lines.append(_line("Ideal member", display_profile.get("ideal_member")))
+            lines.append(_line("Not a fit for", display_profile.get("anti_fit")))
+            lines.append(_line("Value proposition", display_profile.get("value_prop")))
+            lines.append(_line("What it's actually like", display_profile.get("format_reality")))
+            lines.append(_line("Engagement level", display_profile.get("engagement_level")))
+            lines.append(_line("Application friction", display_profile.get("application_friction")))
+            lines.append(_line("Cost vs. value", display_profile.get("cost_value_verdict")))
+            lines.append(_line("Business model", display_profile.get("business_model")))
+            lines.append(_line("Founded", display_profile.get("founded_year")))
         blocks.append("".join(l for l in lines if l))
     return "\n".join(blocks)
 
@@ -120,9 +133,19 @@ def _build_software_context(lib: Library) -> str:
         lines = [f"### {t['name']} (slug: {t['slug']})"]
         lines.append(_line("URL", t.get("url")))
         lines.append(_line("Categories", ", ".join(t.get("categories") or [])))
-        lines.append(_line("What it does", t.get("summary") or t.get("description")))
-        lines.append(_line("How it differs from competitors", t.get("competitive_differentiation")))
-        lines.append(_line("Agent/automation taxonomy", t.get("agent_taxonomy_note")))
+        # Publish-gate parity, per-field (unlike the Communities profile
+        # swap above, these three fields each carry their own independent
+        # *_needs_verification flag on `tools` — see the Agent taxonomy
+        # publish gate and Description/Community profile publish gates
+        # notes in CLAUDE.md): an unverified field never enters the
+        # matchmaker's Claude context, the same reasoning as the directory
+        # card and profile page not rendering it to a public visitor.
+        if not t.get("description_needs_verification"):
+            lines.append(_line("What it does", t.get("summary") or t.get("description")))
+        if not t.get("competitive_differentiation_needs_verification"):
+            lines.append(_line("How it differs from competitors", t.get("competitive_differentiation")))
+        if not t.get("agent_taxonomy_needs_verification"):
+            lines.append(_line("Agent/automation taxonomy", t.get("agent_taxonomy_note")))
         if links:
             feature_bits = []
             for link in links:

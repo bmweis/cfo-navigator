@@ -133,16 +133,22 @@ def test_compare_shows_description_verification_flag_to_admin(env):
 
 
 # -- Description: /tools/software directory card -------------------------------
-# The card's ALL_TOOLS JSON payload keeps the raw description/summary text
-# regardless of verification state (the admin Quick Edit panel needs it
-# verbatim even when unverified) — only the visible .tool-desc render and the
-# client-side search-match string are gated, client-side, on AUTHED. So the
-# meaningful server-side assertion is that the gate flag and gating logic are
-# present and correctly computed; the actual DOM/search behavior for an
-# anonymous vs. admin visitor was verified live with Playwright during
-# development (see the PR description), consistent with this repo's own
-# testing-standard precedent for client-side-only behavior
-# (tests/test_play_route.py's module docstring).
+# The card's ALL_TOOLS JSON payload used to keep the raw description/summary/
+# agent_taxonomy_note text regardless of verification state, relying only on
+# client-side JS (AUTHED) to hide what had already been sent — a real leak,
+# since the JSON lands in page source either way, indexable by a crawler and
+# readable via view-source by anyone. Fixed (page-source leak fix, same PR as
+# the matchmaker context filter): the server already knows AUTHED when
+# building this page, so an unverified field is now stripped to "" in the
+# JSON itself for an anonymous/non-admin response — the admin Quick Edit
+# panel, which needs the raw text verbatim even when unverified, still gets
+# it because an authed response is never stripped. The client-side
+# render/search gates stay in place as defense in depth for the admin case
+# (there's nothing left to hide for anon now that the payload itself is
+# stripped) — the actual DOM/search behavior for each visitor type was
+# verified live with Playwright during development (see the PR description),
+# consistent with this repo's own testing-standard precedent for
+# client-side-only behavior (tests/test_play_route.py's module docstring).
 
 def test_directory_card_json_carries_description_verification_flag(env):
     from linklib.db import Library
@@ -161,6 +167,45 @@ def test_directory_card_json_carries_description_verification_flag(env):
     tools = {t["name"]: t for t in _json.loads(m.group(1))}
     assert tools["Runway"]["description_needs_verification"] is True
     assert tools["Datarails"]["description_needs_verification"] is False
+
+
+def test_directory_card_json_strips_unverified_text_for_anon_keeps_for_admin(env):
+    """The actual page-source leak fix: an unverified description/summary/
+    agent_taxonomy_note is stripped to "" in the JSON payload itself for an
+    anonymous response, not just hidden by client JS — and an authed
+    response still carries the raw text, since admin Quick Edit needs it."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = lib.add_tool(
+        "Runway", "A fabricated-sounding drafted description for Runway.",
+        "https://runway.com", ["FP&A"], approved=1,
+        summary="A drafted short summary.",
+        description_needs_verification=1,
+    )
+    lib.set_tool_agent_taxonomy_draft(
+        tid, "A drafted, unverified agent taxonomy note.", needs_verification=1,
+    )
+    lib.close()
+
+    import re, json as _json
+
+    anon = _client(env).get("/tools/software")
+    m = re.search(r"var ALL_TOOLS = (\[.*?\]);", anon.text)
+    tool = _json.loads(m.group(1))[0]
+    assert tool["description"] == ""
+    assert tool["summary"] == ""
+    assert tool["agent_taxonomy_note"] == ""
+    assert "fabricated-sounding" not in anon.text
+    assert "drafted, unverified agent taxonomy note" not in anon.text
+
+    client = _client(env)
+    _login(client)
+    admin = client.get("/tools/software")
+    m = re.search(r"var ALL_TOOLS = (\[.*?\]);", admin.text)
+    tool = _json.loads(m.group(1))[0]
+    assert tool["description"] == "A fabricated-sounding drafted description for Runway."
+    assert tool["summary"] == "A drafted short summary."
+    assert tool["agent_taxonomy_note"] == "A drafted, unverified agent taxonomy note."
 
 
 def test_directory_card_gates_visible_render_and_search_on_authed(env):
