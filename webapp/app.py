@@ -5444,6 +5444,14 @@ def tools_directory(request: Request, warn: str = ""):
             "logo_url": _tool_logo_url(t),
             "categories": t["categories"],
             "agent_taxonomy_note": t.get("agent_taxonomy_note") or "",
+            # Description publish gate (Citations-API grounding fix
+            # follow-up, same Abacum-fabrication-finding pattern as Agent
+            # taxonomy): the raw description/summary text stays in this
+            # entry regardless — admin Quick Edit needs it verbatim even
+            # when unverified — but the client only renders/searches it for
+            # a signed-in admin while this is true. See filterTools() and
+            # the card-render function below.
+            "description_needs_verification": bool(t.get("description_needs_verification")),
             "advisor": bool(t.get("advisor")),
             "promoted": bool(t.get("promoted")),
             # Only a computed boolean goes to every visitor — never the raw
@@ -5562,6 +5570,8 @@ Not sure which tool's for you? {(
    every card's description block occupies the same height. */
 .tool-desc{{font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;min-height:63px;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}}
+.tool-desc-verify{{display:block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:#92400e;margin:-8px 0 12px;}}
 .tool-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .tool-full-link{{font-size:12px;font-weight:600;color:var(--navy);white-space:nowrap;flex-shrink:0;}}
 .tool-compare-label{{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;}}
@@ -5698,6 +5708,13 @@ function renderTools(tools) {{
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
     var star = t.advisor ? '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' : '';
+    // Description publish gate (Citations-API grounding fix follow-up): an
+    // unverified/unreviewed description is never rendered or searchable
+    // for a public visitor, same Abacum-fabrication-finding pattern as the
+    // profile page and compare matrix. An admin still sees the text, with
+    // a small unverified label.
+    var descUnverified = !!t.description_needs_verification;
+    var descHiddenFromVisitor = descUnverified && !AUTHED;
     var cats = (t.categories || []).map(function(c) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
     }}).join('');
@@ -5792,7 +5809,8 @@ function renderTools(tools) {{
           ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-top:2px;">' + promotedBadge + star + '</div>'
           : '')
       + '</div>'
-      + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.summary || t.description) + '</p>'
+      + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(descHiddenFromVisitor ? '' : (t.summary || t.description)) + '</p>'
+      + (descUnverified && AUTHED ? '<span class="tool-desc-verify">Unverified&mdash;hidden from visitors</span>' : '')
       + '<div style="margin-top:auto;">'
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;min-height:24px;margin-bottom:10px;">'
       + '<div class="tool-cats">' + cats + '</div>' + fullProfileLink
@@ -5860,7 +5878,13 @@ function filtered() {{
       if (!hit) return false;
     }}
     if (!q) return true;
-    return (t.name + ' ' + (t.summary || '') + ' ' + t.description + ' ' + (t.categories || []).join(' ') + ' ' + (t.agent_taxonomy_note || '')).toLowerCase().indexOf(q) !== -1;
+    // Description publish gate: an unverified description/summary is never
+    // part of the public search-match text, same as it's never rendered on
+    // the card — an admin's search still matches it (AUTHED skips the gate
+    // here the same way it skips the render gate above).
+    var descHiddenFromSearch = t.description_needs_verification && !AUTHED;
+    var descMatchText = descHiddenFromSearch ? '' : (t.summary || '') + ' ' + t.description;
+    return (t.name + ' ' + descMatchText + ' ' + (t.categories || []).join(' ') + ' ' + (t.agent_taxonomy_note || '')).toLowerCase().indexOf(q) !== -1;
   }});
 }}
 
@@ -6157,8 +6181,25 @@ to compare them side by side. Check the box on any card, then use the compare ba
             + "".join('<td class="cc-cell cc-empty">Not documented yet</td>' for _ in tools) + "</tr>"
         )
 
+    def _desc_cell(t: dict) -> str:
+        text = (t.get("summary") or t.get("description") or "").strip()
+        unverified = bool(t.get("description_needs_verification"))
+        # Same publish gate as Agent taxonomy above, extended to Description
+        # (Citations-API grounding fix follow-up): a self-reported
+        # low-confidence/unreviewed draft is never shown to a public
+        # visitor, only an admin, clearly labeled as hidden.
+        if not text or (unverified and not _compare_authed):
+            return '<td class="cc-cell cc-empty">Not available yet</td>'
+        verify = ' <span class="cc-verify">unverified&mdash;hidden from visitors</span>' if unverified else ""
+        return f'<td class="cc-cell">{_esc(text)}{verify}</td>'
+
+    description_row = ""
+    if any((t.get("summary") or t.get("description") or "").strip() for t in tools):
+        description_row = (f'<tr><td class="cc-cell cc-label">{_esc("Description")}</td>'
+                            + "".join(_desc_cell(t) for t in tools) + "</tr>")
+
     other_rows = (
-        _row("Description", [t.get("summary") or t.get("description", "") for t in tools])
+        description_row
         + _row("How this differs", [t.get("competitive_differentiation", "") for t in tools])
     )
 
@@ -6744,7 +6785,16 @@ function submitIntroForm() {{
         action_row_parts.append(f'<a class="tp-admin-btn" href="/tools/software/{tool["slug"]}/edit">&#9998; Edit</a>')
     action_row = "".join(action_row_parts)
 
-    subhead = (tool.get("summary") or tool.get("description") or "").strip()
+    # Description publish gate (same Abacum-fabrication-finding pattern as
+    # Agent taxonomy above): an unreviewed/self-flagged-low-confidence
+    # description is never shown to a public visitor — an admin sees it,
+    # clearly labeled as hidden. Computed once here and reused by the
+    # hero subhead (below) and the Description card further down, since
+    # both are driven by the same description_needs_verification column.
+    _desc_unverified = bool(tool.get("description_needs_verification"))
+    _desc_hidden = _desc_unverified and not authed
+
+    subhead = "" if _desc_hidden else (tool.get("summary") or tool.get("description") or "").strip()
 
     # Header row: logo (F2) beside the name/subhead, same understated
     # monogram fallback as the directory cards and Competitors table when
@@ -6765,8 +6815,12 @@ function submitIntroForm() {{
   <div>{screenshot_block}</div>
 </div>"""
 
-    description_card = f"""<div class="tp-card">
-  <h2 class="tp-card-h">Description</h2>
+    description_card = ""
+    if not _desc_hidden:
+        _desc_verify = (' <span class="tp-verify">unverified&mdash;hidden from visitors until reviewed</span>'
+                         if _desc_unverified else "")
+        description_card = f"""<div class="tp-card">
+  <h2 class="tp-card-h">Description{_desc_verify}</h2>
   <p style="margin:0;">{_esc(tool['description'])}</p>
   {_citations_list_html(description_citations, cap=5)}
 </div>"""
@@ -7808,6 +7862,7 @@ async def tools_communities_submit(request: Request):
 # slug (same reasoning as /tools/communities/gap and /submit above).
 @app.get("/tools/communities/compare", response_class=HTMLResponse)
 def tools_communities_compare(request: Request, ids: str = ""):
+    authed = _is_authed(request)  # gates the community-profile publish gate below, same as the profile page
     id_list: list[int] = []
     for part in ids.split(","):
         part = part.strip()
@@ -7825,6 +7880,18 @@ def tools_communities_compare(request: Request, ids: str = ""):
         profiles = {c["id"]: (lib.get_community_profile(c["id"]) or {}) for c in communities}
     finally:
         lib.close()
+
+    # Community profile publish gate (Citations-API grounding fix
+    # follow-up, same whole-profile gate as /tools/communities/{slug}):
+    # needs_review=1 hides that community's ENTIRE profile draft from a
+    # public visitor here too, not just the fields it happens to have —
+    # display_profiles is what every row below reads from. An admin still
+    # sees every field, with an inline "unverified" label.
+    _profile_unverified_ids = {cid for cid, p in profiles.items() if p.get("needs_review")}
+    display_profiles = {
+        cid: ({} if (cid in _profile_unverified_ids and not authed) else p)
+        for cid, p in profiles.items()
+    }
 
     back_link = '<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>'
 
@@ -7879,12 +7946,30 @@ to compare them side by side. Check the box on any card, then use the compare ba
         + _row("Cost detail", [c.get("cost_note", "") for c in communities])
     )
 
+    def _profile_cell(text: str, unverified: bool) -> str:
+        text = (text or "").strip()
+        if not text:
+            return '<td class="cc-cell cc-empty">Not available yet</td>'
+        if text == _NEEDS_VERIFICATION:
+            return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
+        verify = ' <span class="comm-verify">unverified&mdash;hidden from visitors</span>' if unverified else ""
+        return f'<td class="cc-cell">{_esc(text)}{verify}</td>'
+
+    def _profile_row(label: str, values: list) -> str:
+        if not any((v or "").strip() for v in values):
+            return ""
+        cells = "".join(
+            _profile_cell(v, (c["id"] in _profile_unverified_ids) and authed)
+            for v, c in zip(values, communities)
+        )
+        return f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>{cells}</tr>'
+
     profile_rows = "".join(
-        _row(label, [profiles.get(c["id"], {}).get(key, "") for c in communities])
+        _profile_row(label, [display_profiles.get(c["id"], {}).get(key, "") for c in communities])
         for label, key in _COMMUNITY_PROFILE_PUBLIC_FIELDS
     )
-    founded_row = _row("Founded", [
-        str(profiles.get(c["id"], {}).get("founded_year") or "") for c in communities
+    founded_row = _profile_row("Founded", [
+        str(display_profiles.get(c["id"], {}).get("founded_year") or "") for c in communities
     ])
 
     body = f"""<div class="page page-grid">
@@ -8321,6 +8406,24 @@ def tools_community_profile(request: Request, slug: str):
   <p style="margin:0;">{_esc(notes_text) if notes_text else '<span style="color:var(--muted);font-style:italic;">No description yet.</span>'}</p>
 </div>"""
 
+    # Community profile publish gate (Citations-API grounding fix
+    # follow-up, same Abacum-fabrication-finding pattern as Agent taxonomy/
+    # Description): needs_review is a single whole-profile flag, not a
+    # per-field one, so this gates the ENTIRE drafted profile at once — the
+    # Bottom line callout, its Sources list, every grouped card below, and
+    # the profile-sourced Details-card lines (Founded/CPE eligible/the
+    # Format row's platform_type+meeting_format contribution) further
+    # down — rather than hiding some fields and leaving others visible,
+    # which would read as a half-reviewed page instead of a clean
+    # not-yet-reviewed state. An admin still sees every field, clearly
+    # labeled as hidden from visitors; a public visitor sees exactly what
+    # they'd see if the profile had never been drafted at all.
+    _profile_unverified = bool(profile.get("needs_review"))
+    _profile_hidden = _profile_unverified and not authed
+    _profile_verify = (' <span class="tp-verify">unverified&mdash;hidden from visitors until reviewed</span>'
+                        if (_profile_unverified and authed) else "")
+    _display_profile: dict = {} if _profile_hidden else profile
+
     # Whole-section-missing (Bottom line, and each Community Profile card
     # independently) gets an admin-only nudge rather than nothing at all —
     # same rule as Software's Competitors/Agent taxonomy/Features. A field
@@ -8328,11 +8431,11 @@ def tools_community_profile(request: Request, slug: str):
     # different case (Tier 2 below): shown to everyone as muted "No details
     # available" text, an honest "doesn't apply here," not a research gap.
     verdict_block = ""
-    if (profile.get("verdict_summary") or "").strip():
+    if (_display_profile.get("verdict_summary") or "").strip():
         verdict_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
-  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line</div>
-  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(profile['verdict_summary'])}</p>
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_profile_verify}</div>
+  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(_display_profile['verdict_summary'])}</p>
 </div>"""
     elif authed:
         verdict_block = (f'<div style="margin-bottom:22px;">'
@@ -8342,9 +8445,11 @@ def tools_community_profile(request: Request, slug: str):
     # right after the Bottom line callout, public-capped at 5. Empty when
     # the profile was never grounded (hand-written, or predates this
     # feature) — same "render nothing, not even the label" default as every
-    # other _citations_list_html public call site.
+    # other _citations_list_html public call site. Also part of the
+    # whole-profile publish gate above: hidden from a public visitor along
+    # with everything else the draft grounds.
     profile_citations_block = ""
-    _pc_html = _citations_list_html(profile_citations, cap=5)
+    _pc_html = "" if _profile_hidden else _citations_list_html(profile_citations, cap=5)
     if _pc_html:
         profile_citations_block = f'<div>{_pc_html}</div>'
 
@@ -8353,10 +8458,10 @@ def tools_community_profile(request: Request, slug: str):
         sections = "".join(
             f"""<div style="margin-bottom:16px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
-  <p style="margin:0;">{_esc(profile[key])}</p>
+  <p style="margin:0;">{_esc(_display_profile[key])}</p>
 </div>"""
             for label, key in fields
-            if (profile.get(key) or "").strip()
+            if (_display_profile.get(key) or "").strip()
         )
         if sections:
             # Tier 2: a field left empty within this otherwise-populated card
@@ -8368,10 +8473,10 @@ def tools_community_profile(request: Request, slug: str):
   <p style="margin:0;color:var(--muted);font-style:italic;">No details available.</p>
 </div>"""
                 for label, key in fields
-                if not (profile.get(key) or "").strip()
+                if not (_display_profile.get(key) or "").strip()
             )
             cards.append(f"""<div class="tp-card">
-  <h2 class="tp-card-h">{_esc(group_title)}</h2>
+  <h2 class="tp-card-h">{_esc(group_title)}{_profile_verify}</h2>
   {sections}{missing}
 </div>""")
         elif authed:
@@ -8398,7 +8503,11 @@ def tools_community_profile(request: Request, slug: str):
         sponsorship += f" ({community['sponsor_name']})"
     _detail_row("Sponsorship", sponsorship)
     fmt = community.get("format") or ""
-    extra_fmt_bits = [b for b in [profile.get("platform_type"), profile.get("meeting_format")] if (b or "").strip()]
+    # platform_type/meeting_format come from the gated community_profiles
+    # draft (_display_profile, not profile) — part of the same whole-profile
+    # publish gate above.
+    extra_fmt_bits = [b for b in [_display_profile.get("platform_type"), _display_profile.get("meeting_format")]
+                       if (b or "").strip()]
     if fmt and fmt != _NEEDS_VERIFICATION and extra_fmt_bits:
         fmt = f"{fmt} ({'; '.join(extra_fmt_bits)})"
     elif (not fmt or fmt == _NEEDS_VERIFICATION) and extra_fmt_bits:
@@ -8406,10 +8515,10 @@ def tools_community_profile(request: Request, slug: str):
     _detail_row("Format", fmt)
     geo_line = _community_geo_line(community)
     _detail_row("Reach", geo_line)
-    if profile.get("founded_year"):
-        _detail_row("Founded", str(profile["founded_year"]))
-    if (profile.get("cpe_eligible") or "").strip():
-        _detail_row("CPE eligible", profile["cpe_eligible"])
+    if _display_profile.get("founded_year"):
+        _detail_row("Founded", str(_display_profile["founded_year"]))
+    if (_display_profile.get("cpe_eligible") or "").strip():
+        _detail_row("CPE eligible", _display_profile["cpe_eligible"])
     details_card = ""
     if detail_rows:
         details_card = f"""<div class="tp-card">
