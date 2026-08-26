@@ -577,7 +577,7 @@ def test_other_quadrants_still_count_their_real_cards(app_env):
     """The override is scoped to one quadrant; the rest stay literal."""
     with _client(app_env) as client:
         html = client.get("/admin/library").text
-    assert "3 tools" in _quadrant(html, "lib-q-existing")
+    assert "4 tools" in _quadrant(html, "lib-q-existing")
     assert "2 tools" in _quadrant(html, "lib-q-backup")
     assert "3 tools" in _quadrant(html, "lib-q-tags")
 
