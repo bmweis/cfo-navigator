@@ -3028,6 +3028,29 @@ explainer text. Nothing else changed — this documents an existing manual
 trick in the UI so it isn't tribal knowledge, it doesn't make the trick
 smarter.
 
+### Bare-domain `www.` retry (2026-08)
+
+`scripts/diagnose_reader_backfill_failures.py` confirmed against production that
+`codingvc.com` refuses the connection at its bare domain while `www.codingvc.com`
+serves the identical page fine — a real fetcher gap (6 affected saved articles: ids
+182, 187, 190, 457, 993, 1476), not a URL/data-correction issue, since nothing about
+the stored URL is wrong.
+
+Fixed with a single-point change in `extract.fetch_page()` — confirmed by inventory
+before building that it's the sole low-level HTTP entry point every caller
+(`pipeline.py`, `enrich.py`, `queue.py`, `authcheck.py`, `webapp/app.py`) goes
+through, so there was no risk of duplicating the retry across call sites. A
+`requests.exceptions.ConnectionError` on the bare-domain attempt (DNS failure,
+connection refused, unreachable) now triggers exactly one retry against the same
+URL with a `www.` host prepended (`extract._with_www`), only when the URL doesn't
+already have one. **Deliberately scoped to connection-level failures only** — an
+`HTTPError` (403, 404, ...) is never retried this way, confirmed the same day that
+`inc.com` 403s identically on both the bare and www hosts, so that's a different
+problem this fix doesn't address. Sits underneath every existing fallback tier in
+`linklib/pipeline.py` (manual-review exclusion, domain-migration, Medium-platform,
+Wayback) — a bare-domain connection failure this retry resolves never reaches any
+of them, since `fetch_page()` itself now returns a successful `PageData`.
+
 ### Article purge flow (durability follow-up, 2026-08)
 
 A permanent-deletion escape hatch for the narrow set of articles with genuinely nothing
