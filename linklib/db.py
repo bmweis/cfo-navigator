@@ -3280,7 +3280,17 @@ class Library:
         if row is None:
             return False
         old_url = row[0] or ""
-        cur = self.conn.execute("UPDATE articles SET url=? WHERE id=?", (new_url, article_id))
+        try:
+            cur = self.conn.execute("UPDATE articles SET url=? WHERE id=?", (new_url, article_id))
+        except sqlite3.IntegrityError:
+            # new_url already belongs to a different article (articles.url is
+            # UNIQUE) — defensively roll back any implicit transaction this
+            # statement opened, then let the caller decide how to report it
+            # (webapp/app.py's CSV-import commit route reports it per-row and
+            # keeps processing the rest of the batch, rather than the whole
+            # request dying with a bare 500).
+            self.conn.rollback()
+            raise
         if cur.rowcount != 1:
             self.conn.rollback()
             return False
