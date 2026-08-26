@@ -1980,6 +1980,65 @@ Details worth knowing:
   `summary` shares the row (drafted together, one Generate call, same
   "shares its verification status, not tracked separately" convention
   `description_needs_verification` already uses for `summary`).
+- **Community profile grounding fix, Phase 3 (2026-08) — the third
+  `enrich.py` caller of `linklib/citations.py`, and the one place this
+  grounding fix covers a whole multi-field draft with ONE citation set
+  rather than one per field (decision 5, Phase 0 investigation).**
+  `generate_community_profile` drafts all 23 `COMMUNITY_PROFILE_FIELDS` in
+  a single Claude call from a single fetched page — same shape as
+  Description's Phase 2 grounding (one page, one `document` content block
+  when the fetch succeeds, `citations` empty when it doesn't), not Agent
+  taxonomy's multi-page nav crawl. Since every field in the draft comes
+  from that same one page in that same one call, there is exactly one
+  citation set to attach — stored as a single `entity_citations` row keyed
+  `entity_type='community'`, `field_name='community_profile'`
+  (`entity_id`=the community's id), covering the whole draft rather than
+  23 near-duplicate rows. `inject_markers=False`, same reasoning as
+  Description/Agent taxonomy (the response is strict JSON).
+  **Same stateless-AJAX structural shape as Description** — the Generate
+  route (`POST /admin/tools/communities/generate-profile`) is `{name, url,
+  existing}` only, no `community_id`, so citations travel through the
+  browser the same way: `markAiCitations()` (already generic from Phase 2)
+  populates the same `ai-drafted-citations`/`ai-drafted-citations-model`
+  hidden inputs, now added to the Community profile edit form too;
+  persistence happens at the submit route
+  (`admin_community_profile_submit`), reusing `_validate_citations_payload`
+  unmodified. Citations persist only when at least one of the 23
+  `_COMMUNITY_PROFILE_FIELD_IDS` is in the submitted `ai_drafted_fields`
+  (the same `profile_ai_drafted` boolean the route already computes for
+  `needs_review`); any other save clears the row via
+  `clear_entity_citations`.
+  **The one real behavioral difference from Description, flowing directly
+  from the one-row-per-draft decision**: a hand-edit to ANY of the 23
+  fields has to invalidate the whole shared set, not just its own field —
+  `generateCommunityProfile()`'s client-side one-time `input` listener
+  (mirroring `generateDescription()`'s single-field version) is attached
+  to every one of the 23 `cp-<field>` inputs/textareas after a successful
+  Generate, and each one's listener calls both `unmarkAiDrafted(field)` and
+  the same shared `clearAiCitations()`.
+  **Rendering: one "Sources" list per page, not per card.** Unlike Agent
+  taxonomy/Description (whose citations render inside the one card the
+  grounded field lives in), the Community profile's 23 fields are spread
+  across 5 card sections plus the "Bottom line" verdict callout — so
+  `_citations_list_html` is called exactly once per page on each side, not
+  once per card. Public profile page (`/tools/communities/{slug}`): capped
+  at 5, rendered once immediately after the "Bottom line" callout, before
+  the profile's card sections. Admin edit page
+  (`/admin/tools/communities/{id}/profile`, `_community_profile_form_fields`):
+  the full uncapped list, rendered once inside the same needs_review/"Mark
+  reviewed" block the verify action already lives in — same "a reviewer
+  sees every source before signing off" placement rule Description/Agent
+  taxonomy use, just anchored to the one shared verify action instead of a
+  per-field one.
+  **Deliberately does NOT add a publish gate** — same explicit,
+  out-of-scope-for-this-phase call Description's Phase 2 made: the
+  Community profile page has never gated an unreviewed
+  (`needs_review=1`) or low-confidence draft from public visitors, unlike
+  Agent taxonomy's Abacum-fix gate, and this phase doesn't add one — only
+  a Sources list. Flagged as a known follow-up in the PR, same as
+  Description's.
+  No schema change — `entity_citations`'s table comment already
+  anticipated this exact shape when it was written in Phase 1b.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything

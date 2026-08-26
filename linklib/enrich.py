@@ -926,6 +926,7 @@ class CommunityProfileDraft:
     cpe_eligible: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
     confidence: dict = field(default_factory=dict)   # {field_name: bool}, COMMUNITY_CONFIDENCE_FIELDS keys only
+    citations: list = field(default_factory=list)   # Citations-API grounding fix, Phase 3
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -943,7 +944,18 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     or admin-edited fields as context so a regenerate refines rather than
     starts from scratch. Never auto-saved — same review contract as the tool
     description draft. Returns None if the SDK/key is unavailable or the call
-    fails."""
+    fails.
+
+    Citations-API grounding fix, Phase 3: single-page grounding, same as
+    generate_tool_description — the one fetched page, when non-empty, rides
+    as a real Citations-API `document` block instead of being flattened into
+    the prompt, so `citations` reflects what the model actually cited,
+    mechanically verified by the API. Unlike Description/Agent taxonomy,
+    this is ONE citation set for the whole 23-field draft (decision 5,
+    Phase 0) — not per field — since every field is drafted from the same
+    single page in the same call. `inject_markers=False` since this response
+    is strict JSON. `citations` is empty when the fetch failed
+    (`low_confidence=True`), since there's nothing to cite."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -954,11 +966,16 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     from . import extract
     page = extract.fetch_page(url)
     low_confidence = not bool(page.content.strip())
-    content_block = (
-        f"Page content (fetched from the URL):\n{page.content[:15000]}" if not low_confidence
-        else "(Could not fetch page content — draft from your own knowledge of this "
-             "community if you have it, keeping to the rules above.)"
-    )
+    doc_blocks: list[dict] = []
+    sent_docs: list[dict] = []
+    if low_confidence:
+        content_block = ("(Could not fetch page content — draft from your own knowledge of this "
+                          "community if you have it, keeping to the rules above.)")
+    else:
+        content_block = ""
+        body = page.content.strip()[:15000]
+        doc_blocks.append(make_document_block(name, body))
+        sent_docs.append({"title": name, "url": url, "type": "community_page"})
     existing = existing or {}
     existing_lines = "\n".join(
         f"  {field}: {existing[field]}" for field in COMMUNITY_PROFILE_FIELDS
@@ -969,16 +986,22 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
         if existing_lines else ""
     )
 
+    prompt = _COMMUNITY_PROFILE_PROMPT.format(
+        name=name, url=url, existing_block=existing_block, content_block=content_block)
+    # Documents (when any) ride first, the drafting instructions last — same
+    # ordering as generate_tool_description, so citations resolve against
+    # what was actually sent.
+    message_content = (doc_blocks + [{"type": "text", "text": prompt}]) if doc_blocks else prompt
+
     try:
         client = Anthropic()
         resp = client.messages.create(
             model=model,
             max_tokens=_checked_max_tokens(6000),  # headroom for Opus 5's on-by-default adaptive thinking
-            messages=[{"role": "user",
-                       "content": _COMMUNITY_PROFILE_PROMPT.format(
-                           name=name, url=url, existing_block=existing_block, content_block=content_block)}],
+            messages=[{"role": "user", "content": message_content}],
         )
-        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        # inject_markers=False: strict JSON — see generate_tool_description.
+        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=False)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
 
@@ -1022,6 +1045,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             cpe_eligible=str(data.get("cpe_eligible") or "").strip(),
             low_confidence=low_confidence,
             confidence=_parse_community_confidence(data.get("confidence")),
+            citations=citations,
             model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )

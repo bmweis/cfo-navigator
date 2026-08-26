@@ -587,6 +587,41 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   that's ever decided worth doing. See ARCHITECTURE.md's Description
   grounding fix bullet and the `entity_citations` schema-table row for the
   full write-up.
+- **Citations-API grounding fix, Phase 3 (2026-08) — the Community profile
+  draft joins the grounding fix, as ONE shared citation set for all 23
+  drafted fields, not one row per field (decision 5, Phase 0
+  investigation).** Same stateless-AJAX structural shape as Description
+  (`generate_community_profile`'s Generate route is `{name, url, existing}`
+  only, no `community_id`), so citations travel through the browser the
+  same way — `markAiCitations()` (already generic from Phase 2) now also
+  populates the Community profile edit form's own
+  `ai-drafted-citations`/`ai-drafted-citations-model` hidden inputs, and
+  `_validate_citations_payload` is reused unmodified at the submit route.
+  Persist only when at least one of the 23 profile fields is in the
+  submitted `ai_drafted_fields` (the profile submit route's own existing
+  `profile_ai_drafted` boolean, already computed for `needs_review`); any
+  other save clears the row. **The one real behavioral difference from
+  Description, following directly from "one row per draft, not one per
+  field": a hand-edit to ANY of the 23 fields has to invalidate the whole
+  shared set**, so the client-side clear-on-edit guard Description built
+  for its single textarea is now attached to all 23 `cp-<field>` inputs
+  after a Generate call, each one clearing the same shared
+  `ai-drafted-citations` field. **Rendering is also one-per-page, not
+  one-per-card**, since the 23 fields spread across 5 card sections plus
+  the "Bottom line" verdict callout share one citation set: the public
+  profile page (`/tools/communities/{slug}`) renders a single capped-at-5
+  Sources list once, right after the Bottom line callout; the admin edit
+  page (`/admin/tools/communities/{id}/profile`) renders the full uncapped
+  list once, inside the same needs_review/"Mark reviewed" block the
+  profile's one shared verify action already lives in. **Deliberately does
+  not add a publish gate**, same explicit out-of-scope call Description's
+  Phase 2 made: the Community profile page has never hidden an unreviewed
+  or low-confidence draft from public visitors, and this phase doesn't
+  change that — flagged here as the same kind of known follow-up
+  Description's own bullet above flags. No schema change — `entity_citations`'s
+  table comment already described this exact shape when Phase 1b wrote it.
+  See ARCHITECTURE.md's Community profile grounding fix bullet for the
+  full write-up.
 - **Confidence indicator (2026-08) — genuine self-reported "Claude
   confidence: Yes/No" fields, tool Description/Competitive differentiation
   first, then extended to 12 of the Community profile draft's 23 fields.**
