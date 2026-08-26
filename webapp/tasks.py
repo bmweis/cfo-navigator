@@ -22,14 +22,44 @@ password reset) keep their numeric count.
 """
 from __future__ import annotations
 
+import threading
+import time
+
 from linklib.db import Library
 from webapp import checks as _checks
 
 DOT_ONLY_HREFS = frozenset({"/admin/contacts", "/admin/tools/software/leads"})
 
+# _failing_checks_count() badges /admin and /admin/library with the same
+# in-app check results /admin/checks itself computes live — but
+# _checks.run_all() re-lints the entire linklib/webapp/scripts tree with
+# pyflakes and spawns a node --check subprocess per shared <script> block
+# (2026-08 perf investigation: ~3.5s on a fresh dashboard render, with no
+# caching anywhere in the call chain, so every /admin or /admin/library
+# render paid this in full — a real cost in production and the single
+# biggest line item in the test suite's wall-clock time, since dozens of
+# tests render one of these two pages). Cached here with a short TTL, same
+# pattern as linklib.feed's per-feed cache — the check results only change
+# when the source code changes, which doesn't happen more than once every
+# few minutes even during active development, so a short TTL keeps the
+# badge close to live while eliminating the repeat cost. /admin/checks
+# itself is untouched and still calls run_all() directly on every view —
+# only the badge count is cached.
+_CHECKS_CACHE_TTL = 120  # seconds
+_checks_cache_lock = threading.Lock()
+_checks_cache: tuple[float, int] | None = None
+
 
 def _failing_checks_count() -> int:
-    return sum(1 for r in _checks.run_all() if r["where"] == "In-app" and r["ok"] is False)
+    global _checks_cache
+    now = time.time()
+    with _checks_cache_lock:
+        if _checks_cache is not None and now - _checks_cache[0] < _CHECKS_CACHE_TTL:
+            return _checks_cache[1]
+    count = sum(1 for r in _checks.run_all() if r["where"] == "In-app" and r["ok"] is False)
+    with _checks_cache_lock:
+        _checks_cache = (now, count)
+    return count
 
 
 def open_task_counts(lib: Library) -> dict[str, int]:
