@@ -15973,12 +15973,19 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
                              # fetch's own extract_reader_html() output. A cached
                              # article's plain-text `content` (pre-backfill) can't
                              # carry images/links either way.
-    content_via = "cache"   # 'cache' | 'direct' | 'wayback' — surfaced to the
-                             # reader pane so a Wayback-archived read is visibly
-                             # distinguishable from the live page, the same
-                             # reasoning content_refetch_log's `source` column
-                             # exists for the backfill tool's durable log (see
-                             # linklib.wayback's module docstring). Not persisted
+    content_via = "cache"   # 'cache' | 'direct' | 'wayback' | 'medium-fetch' |
+                             # 'medium-search' — surfaced to the reader pane so
+                             # a Wayback-archived read is visibly distinguishable
+                             # from the live page, the same reasoning
+                             # content_refetch_log's `source` column exists for
+                             # the backfill tool's durable log (see
+                             # linklib.wayback's module docstring). The reader
+                             # pane's JS only special-cases 'wayback' today (a
+                             # visible banner) — a medium-fetch/medium-search
+                             # read shows no banner, same as an ordinary
+                             # 'direct' read; only the Wayback case needed one,
+                             # since an archived snapshot can be stale in a way
+                             # a live-recovered fetch isn't. Not persisted
                              # anywhere — this is a live read, not a stored one.
 
     if cached_content_html:
@@ -16008,6 +16015,38 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
         except Exception:
             title = cached_title or url
             content = ""
+
+        if not content:
+            # Bookmarklet title-extraction follow-up (2026-08): a direct
+            # fetch of a recognized Cloudflare-blocked host (medium.com and
+            # friends — see linklib.medium_platform.is_recognized_blocked_
+            # host) never gets real HTML at all, so it never had a real
+            # title or content to work from either way — confirmed live via
+            # scripts/trace_medium_tier.py. Tried before the Wayback
+            # fallback below, same ordering linklib.pipeline.
+            # _finish_backfill_after_direct_failure uses and for the same
+            # reason (this tier's hit rate is strong; Wayback is currently
+            # unreliable — archive.org rate-limiting, see linklib.wayback's
+            # module docstring). Reuses linklib.pipeline.medium_recovery
+            # (itself a thin wrapper around the SAME _try_medium_platform
+            # the offline content backfill uses) — no new fetch mechanism.
+            # Best-effort and ephemeral, same as the Wayback fallback below:
+            # never persisted here, this is a live read, not a stored one.
+            from linklib import medium_platform as _medium_platform
+            if _medium_platform.is_recognized_blocked_host(url):
+                from linklib.pipeline import medium_recovery
+                mp_lib = _lib()
+                try:
+                    recovered = medium_recovery(
+                        mp_lib, url, cached_title or title, (article or {}).get("author", ""))
+                finally:
+                    mp_lib.close()
+                if recovered:
+                    content = recovered["content_html"]
+                    is_structured = True
+                    content_via = recovered["source"]
+                    if recovered["title"] and (not title or title == url):
+                        title = recovered["title"]
 
         if not content:
             # Direct fetch failed outright (bot-block, dead link, timeout —
