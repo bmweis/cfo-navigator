@@ -1970,6 +1970,26 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   automation, no tracking of whether a snapshot was taken. See
   ARCHITECTURE.md's "'Snapshot on Wayback' guidance link" section for the
   full write-up.
+- **Bare-domain `www.` retry (2026-08) — a narrow, single-point fix in
+  `extract.fetch_page()`.** `scripts/diagnose_reader_backfill_failures.py`
+  confirmed against production that codingvc.com refuses the connection at
+  its bare domain while www.codingvc.com serves the identical page fine (6
+  affected saved articles) — a real fetcher gap, not a URL/data-correction
+  issue, since nothing about the stored URL is wrong. Fixed once, inside
+  `fetch_page()` itself (the sole low-level HTTP entry point every caller —
+  `pipeline.py`, `enrich.py`, `queue.py`, `authcheck.py`, `webapp/app.py` —
+  goes through, confirmed by inventory before building rather than assumed):
+  a `requests.exceptions.ConnectionError` on the bare-domain attempt (DNS
+  failure, connection refused, unreachable) triggers exactly one retry
+  against the same URL with a `www.` host, only when the URL doesn't already
+  have one. **Deliberately scoped to connection-level failures only** — an
+  HTTP-status failure (403, 404, ...) is never retried this way, confirmed
+  the same day that inc.com 403s identically on both the bare and www hosts,
+  so that's a different problem this fix doesn't touch. No change to the
+  manual-review/domain-migration/Medium-platform/Wayback fallback tiers in
+  `linklib/pipeline.py` — this sits underneath all of them, so a bare-domain
+  connection failure that this retry resolves never even reaches those
+  tiers.
 - **Article purge flow (durability follow-up) — a permanent-deletion escape
   hatch for the narrow "genuinely nothing was ever saved" set, mirroring
   the manual-review corrected-URL CSV round trip exactly.**

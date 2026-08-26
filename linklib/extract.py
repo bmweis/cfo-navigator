@@ -220,6 +220,17 @@ def _page_data_from_html(html: str) -> PageData:
                     raw_html=html)
 
 
+def _with_www(url: str) -> str:
+    """Return `url` with a `www.` prefix added to its host, or "" if it
+    already has one (or the host can't be parsed) — used only by
+    fetch_page()'s bare-domain retry below."""
+    parts = urlsplit(url)
+    host = parts.netloc
+    if not host or host.lower().startswith("www."):
+        return ""
+    return parts._replace(netloc="www." + host).geturl()
+
+
 def fetch_page(url: str, timeout: int = 20) -> PageData:
     """Fetch a URL once and return both the page title and cleaned body text.
 
@@ -235,6 +246,19 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     for a request-layer failure (see _describe_fetch_error) — every existing
     caller already treats a failed fetch as "nothing usable" and ignores this
     field, so populating it changes nothing for them.
+
+    Bare-domain `www.` retry (2026-08): confirmed via
+    scripts/diagnose_reader_backfill_failures.py against production that
+    codingvc.com refuses the connection at its bare domain while
+    www.codingvc.com serves the same page fine — a real fetcher gap, not a
+    data/URL-correction issue, since nothing about the stored URL is wrong.
+    Scoped narrowly to connection-level failures only (DNS/refused/
+    unreachable — a requests.exceptions.ConnectionError that isn't an
+    HTTPError) — an HTTP-status failure (403, 404, ...) is never retried
+    this way, since that's not a www problem: confirmed the same day on
+    inc.com, which 403s identically on both the bare and www hosts. Only
+    fires when the URL doesn't already have a `www.` host, and only as a
+    fallback after the bare-domain attempt has already failed.
     """
     cookie = _cookie_for(url)
     headers = dict(_BROWSER_HEADERS)
@@ -244,6 +268,16 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
         resp = requests.get(url, headers=headers, timeout=timeout)
         resp.raise_for_status()
         html = resp.text
+    except requests.exceptions.ConnectionError as exc:
+        www_url = _with_www(url)
+        if not www_url:
+            return PageData(title="", content="", fetch_error=_describe_fetch_error(exc))
+        try:
+            resp = requests.get(www_url, headers=headers, timeout=timeout)
+            resp.raise_for_status()
+            html = resp.text
+        except Exception as retry_exc:
+            return PageData(title="", content="", fetch_error=_describe_fetch_error(retry_exc))
     except Exception as exc:
         return PageData(title="", content="", fetch_error=_describe_fetch_error(exc))
 
