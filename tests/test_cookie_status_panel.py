@@ -48,15 +48,22 @@ def _client(appmod):
 
 @pytest.fixture
 def app_env(monkeypatch, tmp_path):
-    """Boot with cookies configured, so the control renders at all."""
+    """Boot with cookies configured, so the control renders at all.
+
+    DOMAINS includes stratechery.com and blog.publiccomps.com purely as test
+    fixtures for exercising all three health states — patched into the real
+    _COOKIE_DOMAINS registry rather than assuming they're production entries.
+    """
+    from linklib import extract as extract_mod
+    monkeypatch.setattr(extract_mod, "_COOKIE_DOMAINS", DOMAINS)
+    for d in DOMAINS:
+        monkeypatch.setenv(extract_mod._cookie_env_var(d), "x=1")
     opml = tmp_path / "sites.opml"
     shutil.copy(REPO_OPML, opml)
     monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "app.db"))
     monkeypatch.setenv("LINKLIB_SITES_OPML", str(opml))
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
-    monkeypatch.setenv("LINKLIB_AUTH_COOKIES",
-                       json.dumps({d: "x=1" for d in DOMAINS}))
     import importlib
     import webapp.app as appmod
     importlib.reload(appmod)
@@ -228,14 +235,17 @@ def test_the_panel_sits_between_the_header_and_the_feed_table(app_env):
 
 
 def test_nothing_renders_when_no_cookies_are_configured(monkeypatch, tmp_path):
-    """The whole feature stays dormant until LINKLIB_AUTH_COOKIES is set."""
+    """The whole feature stays dormant until a LINKLIB_COOKIE_<DOMAIN> var is set."""
+    from linklib import extract as extract_mod
+    monkeypatch.setattr(extract_mod, "_COOKIE_DOMAINS", DOMAINS)
+    for d in DOMAINS:
+        monkeypatch.delenv(extract_mod._cookie_env_var(d), raising=False)
     opml = tmp_path / "sites.opml"
     shutil.copy(REPO_OPML, opml)
     monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "nocookie.db"))
     monkeypatch.setenv("LINKLIB_SITES_OPML", str(opml))
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
-    monkeypatch.delenv("LINKLIB_AUTH_COOKIES", raising=False)
     import importlib
     import webapp.app as appmod
     importlib.reload(appmod)

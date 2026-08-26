@@ -1,4 +1,5 @@
-"""Health checks for the subscriber-auth cookies (LINKLIB_AUTH_COOKIES).
+"""Health checks for the subscriber-auth cookies (LINKLIB_COOKIE_<DOMAIN>, per
+linklib.extract._COOKIE_DOMAINS).
 
 A paid-newsletter cookie eventually expires; when it does, fetches quietly fall
 back to previews and the Ask corpus stops getting full text. To make that

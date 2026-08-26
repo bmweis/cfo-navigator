@@ -12,7 +12,6 @@ Otherwise it falls back to a crude BeautifulSoup text pull.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 from dataclasses import dataclass
@@ -46,24 +45,59 @@ _BROWSER_HEADERS = {
 }
 
 
-def _auth_cookies() -> dict[str, str]:
-    """Per-domain auth cookies for fetching subscriber-only content (e.g. paid
-    Substacks). Set LINKLIB_AUTH_COOKIES to a JSON object mapping a domain to its
-    Cookie header value, kept in the host env so the secret never touches the repo:
+# Domains with a subscriber cookie configured for full-text fetching (e.g. paid
+# Substacks/beehiivs). Each domain's cookie value lives in its own env var,
+# LINKLIB_COOKIE_<DOMAIN> (see _cookie_env_var below), never in the codebase —
+# only the domain names themselves are checked in. Add a domain here, and set
+# its env var in the host, to configure a new one.
+#
+# 2026-08: replaced a single LINKLIB_AUTH_COOKIES JSON blob (one var covering
+# every domain) after a hand-edited-JSON typo silently broke every domain's
+# cookie at once — a comma/semicolon slip anywhere in the blob makes the whole
+# thing fail to parse, and _auth_cookies() caught that error and returned {},
+# which reads downstream as "no cookies configured at all" rather than "one
+# domain's cookie is malformed." A per-domain var can't have this failure mode:
+# each is one raw string, nothing to parse, so a typo in one domain's cookie
+# can't take another domain's down with it.
+_COOKIE_DOMAINS = (
+    "mostlymetrics.com",
+    "onlycfo.io",
+)
 
-        {"mostlymetrics.com": "substack.sid=...", "lookingforleverage.com": "..."}
 
-    The full text is fetched only as enrichment/search input — the served surface
-    stays summaries + citations, same as every other article.
+def _cookie_env_var(domain: str) -> str:
+    """LINKLIB_COOKIE_<DOMAIN>, with the domain's dots/hyphens normalized to
+    underscores and uppercased — e.g. mostlymetrics.com -> LINKLIB_COOKIE_MOSTLYMETRICS_COM.
     """
-    raw = (os.environ.get("LINKLIB_AUTH_COOKIES") or "").strip()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-        return {str(k).lower().lstrip("."): str(v) for k, v in data.items() if k and v}
-    except Exception:
-        return {}
+    return "LINKLIB_COOKIE_" + re.sub(r"[^A-Za-z0-9]", "_", domain).upper()
+
+
+def _auth_cookies() -> dict[str, str]:
+    """Per-domain auth cookies for fetching subscriber-only content, sourced
+    from one env var per domain in _COOKIE_DOMAINS (LINKLIB_COOKIE_<DOMAIN>,
+    a raw Cookie header string — no JSON, nothing to parse). Kept in the host
+    env so no secret ever touches the repo. Same return shape as before this
+    was split from a single LINKLIB_AUTH_COOKIES blob (domain -> cookie
+    string), so every caller — _cookie_for, authcheck.check_auth_cookies, the
+    admin cookie-status panel — is unaffected by this change.
+
+    The full text is fetched only as enrichment/search input — the served
+    surface stays summaries + citations, same as every other article.
+    """
+    result: dict[str, str] = {}
+    for domain in _COOKIE_DOMAINS:
+        value = (os.environ.get(_cookie_env_var(domain)) or "").strip()
+        if value:
+            result[domain] = value
+    return result
+
+
+def has_configured_cookie(domain: str) -> bool:
+    """True if `domain` (or a parent of it) has a subscriber cookie configured
+    right now. Used by the admin Feeds page to show a computed, read-only
+    indicator instead of a manually-ticked checkbox that could drift from
+    reality — see CLAUDE.md's feeds-page Cookie-checkbox note."""
+    return bool(_cookie_for(f"https://{domain}"))
 
 
 def _cookie_for(url: str) -> str:
@@ -239,7 +273,7 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     follow-up investigation confirmed the previous identifiable bot string
     provided no benefit against real 403s, so there's no reason to keep
     declaring it). For domains with a configured auth cookie
-    (LINKLIB_AUTH_COOKIES), the same browser headers are sent plus the cookie,
+    (LINKLIB_COOKIE_<DOMAIN>, per _COOKIE_DOMAINS), the same browser headers are sent plus the cookie,
     so subscriber-only full text is fetched instead of a preview. `blocked`
     flags a response that still looks paywalled — the signal that a
     configured cookie is missing or expired. `fetch_error` carries the reason

@@ -26,7 +26,7 @@ def lib(tmp_path):
 
 @pytest.fixture(autouse=True)
 def cookie_env(monkeypatch):
-    monkeypatch.setenv("LINKLIB_AUTH_COOKIES", '{"mostlymetrics.com": "substack.sid=AAA"}')
+    monkeypatch.setenv(extract._cookie_env_var("mostlymetrics.com"), "substack.sid=AAA")
 
 
 def test_ok_when_full_text_returned(lib, monkeypatch):
@@ -61,7 +61,7 @@ def test_unknown_when_no_post_found(lib, monkeypatch):
 
 
 def test_no_cookies_means_empty(lib, monkeypatch):
-    monkeypatch.delenv("LINKLIB_AUTH_COOKIES", raising=False)
+    monkeypatch.delenv(extract._cookie_env_var("mostlymetrics.com"), raising=False)
     assert authcheck.check_auth_cookies(lib, "ignored.opml") == {}
 
 

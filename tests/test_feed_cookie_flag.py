@@ -191,24 +191,31 @@ def test_no_cookie_value_can_reach_the_database(seeded):
 # Admin page rendering
 # ---------------------------------------------------------------------------
 
-def test_feed_table_has_a_cookie_column_with_a_checkbox(app_env):
+def test_feed_table_has_a_cookie_column_with_no_checkbox(app_env):
+    """2026-08: the Cookie column is a computed, read-only indicator now —
+    there is nothing left for an admin to tick."""
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
     assert ">Cookie</th>" in html
-    assert 'name="has_paywall_cookie"' in html
+    assert 'name="has_paywall_cookie"' not in html
 
 
-def test_cookie_cell_is_a_plain_checkbox_like_its_neighbours(app_env):
-    """No badge, no icon, no separate hover element — the lock badge was a
-    leftover from the free-text era, where it triggered the per-row tooltip."""
+def test_cookie_cell_has_no_input_or_form(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
-    assert "ff-cookie-badge" not in html
-    assert "ff-cookie-form" not in html
-    assert '<td class="ff-cookie">' in html
+    start = html.index('<td class="ff-cookie">')
+    end = html.index("</td>", start)
+    cell = html[start:end]
+    assert "<input" not in cell
+    assert "<form" not in cell
 
 
-def test_every_row_has_a_cookie_checkbox_and_only_paywalled_ones_are_ticked(app_env):
+def test_every_row_shows_a_computed_cookie_indicator(app_env, monkeypatch):
+    """One indicator per row; only the domain with a configured env var reads
+    as configured."""
+    from linklib import extract as extract_mod
+    monkeypatch.setattr(extract_mod, "_COOKIE_DOMAINS", ("mostlymetrics.com",))
+    monkeypatch.setenv(extract_mod._cookie_env_var("mostlymetrics.com"), "sid=1")
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
         lib = app_env._lib()
@@ -216,15 +223,17 @@ def test_every_row_has_a_cookie_checkbox_and_only_paywalled_ones_are_ticked(app_
             feeds = lib.list_feeds()
         finally:
             lib.close()
-    expected = sum(1 for f in feeds if f["has_paywall_cookie"])
-    assert 0 < expected < len(feeds)
-    assert html.count('name="has_paywall_cookie"') == len(feeds)
-    assert html.count('aria-label="Cookie:') == len(feeds)
+    assert html.count('class="ff-cookie"') == len(feeds)
+    assert html.count("configured") >= 1
+    mm_start = html.index("Mostly Metrics")
+    span_start = html.index('aria-label="Cookie for', mm_start)
+    assert "not configured" not in html[span_start:span_start + 120]
 
 
-def test_cookie_checkbox_is_labelled_like_read_only_and_subscriber(app_env):
-    """All three boolean columns use the same aria-label shape and carry no
-    per-row title, so one doesn't read differently from the others."""
+def test_cookie_indicator_has_its_own_aria_label_shape(app_env):
+    """Deliberately different from Read only/Subscriber's aria-label — this is
+    a computed fact, not a per-row control, so it isn't held to the same
+    "boolean checkbox" labelling convention."""
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
         lib = app_env._lib()
@@ -232,15 +241,54 @@ def test_cookie_checkbox_is_labelled_like_read_only_and_subscriber(app_env):
             name = lib.list_feeds()[0]["name"]
         finally:
             lib.close()
-    for label in ("Read only", "Cookie", "Subscriber"):
+    for label in ("Read only", "Subscriber"):
         assert f'aria-label="{label}: {name}"' in html
+    assert f'aria-label="Cookie for {name}:' in html
 
 
 def test_footnote_explains_the_column_once(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
-    assert "<strong>Cookie</strong> marks a feed whose full text needs" in html
+    assert "<strong>Cookie</strong> shows whether this feed's domain currently has a subscriber cookie configured" in html
     assert "No cookie value is ever stored in this database" in html
+
+
+def test_cookie_route_is_gone(app_env):
+    """The old POST .../cookie toggle route was removed along with the
+    checkbox it served — there's nothing left for it to write."""
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = lib.list_feeds()[0]
+        finally:
+            lib.close()
+        resp = client.post(f"/admin/library/feeds/{feed['id']}/cookie",
+                           data={"has_paywall_cookie": "1"}, follow_redirects=False)
+    assert resp.status_code in (404, 405)
+
+
+def test_has_paywall_cookie_column_is_frozen_but_still_present(app_env):
+    """Non-destructive retirement: the column stays in the schema and keeps
+    whatever value it last had, but nothing writes it from the admin UI
+    anymore."""
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = [f for f in lib.list_feeds() if f["has_paywall_cookie"]][0]
+        finally:
+            lib.close()
+        fid = feed["id"]
+        client.post(f"/admin/library/feeds/{fid}/edit", data={
+            "name": "Renamed Again", "xml_url": feed["xml_url"],
+            "html_url": feed["html_url"], "section_id": str(feed["section_id"]),
+        }, follow_redirects=False)
+        lib = app_env._lib()
+        try:
+            after = lib.get_feed(fid)
+        finally:
+            lib.close()
+    assert after["has_paywall_cookie"] == 1
+    assert after["name"] == "Renamed Again"
 
 
 def test_no_free_text_note_field_remains(app_env):
@@ -252,53 +300,17 @@ def test_no_free_text_note_field_remains(app_env):
         assert 'name="paywall_cookie_note"' not in html
 
 
-def test_cookie_row_toggle_posts_and_persists(app_env):
+def test_edit_form_shows_a_computed_readout_not_a_checkbox(app_env):
     with _client(app_env) as client:
         lib = app_env._lib()
         try:
-            feed = [f for f in lib.list_feeds() if not f["has_paywall_cookie"]][0]
-        finally:
-            lib.close()
-        fid = feed["id"]
-        resp = client.post(f"/admin/library/feeds/{fid}/cookie",
-                           data={"has_paywall_cookie": "1"}, follow_redirects=False)
-        assert resp.status_code == 303
-
-        lib = app_env._lib()
-        try:
-            after = lib.get_feed(fid)
-        finally:
-            lib.close()
-    assert after["has_paywall_cookie"] == 1
-    assert after["xml_url"] == feed["xml_url"]
-
-
-def test_row_toggle_unchecked_clears_it(app_env):
-    with _client(app_env) as client:
-        lib = app_env._lib()
-        try:
-            feed = [f for f in lib.list_feeds() if f["has_paywall_cookie"]][0]
-        finally:
-            lib.close()
-        fid = feed["id"]
-        client.post(f"/admin/library/feeds/{fid}/cookie", data={},
-                    follow_redirects=False)
-        lib = app_env._lib()
-        try:
-            assert lib.get_feed(fid)["has_paywall_cookie"] == 0
-        finally:
-            lib.close()
-
-
-def test_edit_form_round_trips_the_cookie_flag(app_env):
-    with _client(app_env) as client:
-        lib = app_env._lib()
-        try:
-            feed = [f for f in lib.list_feeds() if f["has_paywall_cookie"]][0]
+            feed = lib.list_feeds()[0]
         finally:
             lib.close()
         html = client.get(f"/admin/library/feeds/{feed['id']}/edit").text
-    assert 'name="has_paywall_cookie" value="1" checked' in html
+    assert 'name="has_paywall_cookie"' not in html
+    assert ("Cookie configured for this domain" in html
+            or "No cookie configured for this domain" in html)
 
 
 def test_editing_a_feed_without_touching_the_cookie_flag_keeps_it(app_env):
