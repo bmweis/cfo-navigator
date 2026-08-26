@@ -265,9 +265,22 @@ def _defunct_service_domain(url: str) -> str:
 #     began) — the domain move itself is still independently confirmed by
 #     direct observation, just not yet exercised against a real failing
 #     article in this codebase.
+#   karenroterdavis.com -> karenroterdavis.wordpress.com
+#     Reported by Brian (2026-08): karenroterdavis.com has moved to
+#     karenroterdavis.wordpress.com. Unlike the two entries above, this
+#     session couldn't independently live-verify it the same way — the old
+#     domain didn't resolve at all from this session's network (consistent
+#     with having moved off its own hosting), and the new domain was
+#     blocked outright by this session's egress proxy, so neither side
+#     could be fetched and inspected directly. Added on Brian's reported
+#     fact, not a live check performed in this session — flagged here per
+#     this dict's own "each entry requires a live confirmation, not a
+#     hunch" discipline, since that confirmation wasn't done the usual way
+#     this time.
 _DOMAIN_MIGRATIONS: dict[str, str] = {
     "pointsandfigures.com": "jeffreycarter.substack.com",
     "avc.com": "avc.xyz",
+    "karenroterdavis.com": "karenroterdavis.wordpress.com",
 }
 
 
