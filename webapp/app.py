@@ -25093,6 +25093,64 @@ def _content_backfill_job(limit: int, force: bool, host_suffixes: list[str] | No
         lib.close()
 
 
+def _wayback_429_retry_job() -> None:
+    """Background thread: re-attempts backfill_article_content() for every
+    article whose latest content_refetch_log attempt failed specifically
+    because the Wayback fallback itself was rate-limited (HTTP 429) — see
+    Library._wayback_429_retry_ids's docstring for why these need a
+    dedicated sweep rather than waiting on the ordinary default-scope
+    backfill to get back to them.
+
+    Same job-state/stop/job_run_log shape as _content_backfill_job (reusing
+    that pattern was the obvious call — this is the same underlying
+    operation, `backfill_article_content`, just scoped to a different id
+    set) and the same _CONTENT_BACKFILL_DELAY_SEC pacing between fetches,
+    so this doesn't introduce a second, different rate-limit convention.
+    Idempotent and safe to re-run: the scope is re-derived from
+    content_refetch_log fresh at the top of each run, so an article that
+    already recovered (its latest attempt is now 'success') simply isn't
+    in the next run's list — nothing here re-processes an already-good
+    article. Admin-triggered only, not scheduled — see the
+    /admin/library/backfill-content page's "Retry Wayback rate-limited
+    articles" panel."""
+    _job_set("wayback_429_retry", running=True, stop_requested=False,
+             done=0, total=0, ok=0, failed=0, error="", stopped=False)
+    lib = _lib()
+    run_id = lib.start_job_run("wayback_429_retry")
+    try:
+        from linklib import pipeline as _pl
+
+        rows = lib.list_wayback_429_retry_candidates()
+        total = len(rows)
+        _job_set("wayback_429_retry", total=total)
+        ok_count = 0
+        failed_count = 0
+        for i, row in enumerate(rows):
+            if _job_get("wayback_429_retry").get("stop_requested"):
+                _job_set("wayback_429_retry", running=False, stopped=True,
+                         done=i, ok=ok_count, failed=failed_count)
+                lib.finish_job_run(run_id, "stopped",
+                                   summary=f"stopped after {i}/{total} — {ok_count} succeeded, {failed_count} failed")
+                return
+            ok, _reason = _pl.backfill_article_content(lib, row)
+            if ok:
+                ok_count += 1
+            else:
+                failed_count += 1
+            _job_set("wayback_429_retry", done=i + 1, ok=ok_count, failed=failed_count)
+            if i < total - 1:
+                time.sleep(_CONTENT_BACKFILL_DELAY_SEC)
+        backup.maybe_backup(DB_PATH)
+        _job_set("wayback_429_retry", running=False, done=total, ok=ok_count, failed=failed_count)
+        lib.finish_job_run(run_id, "success",
+                           summary=f"{ok_count}/{total} succeeded, {failed_count} failed")
+    except Exception as exc:
+        _job_set("wayback_429_retry", running=False, error=str(exc))
+        lib.finish_job_run(run_id, "failure", error=str(exc))
+    finally:
+        lib.close()
+
+
 @app.get("/admin/library/backfill-content", response_class=HTMLResponse)
 def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     if not _is_authed(request):
@@ -25116,6 +25174,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         migration_count = lib.count_migration_content()
         medium_search_count = lib.count_medium_search_content()
         medium_fetch_count = lib.count_medium_fetch_content()
+        wayback_429_count = lib.count_wayback_429_retry_candidates()
         log_rows = lib.list_content_refetch_log(limit=50)
     finally:
         lib.close()
@@ -25231,6 +25290,57 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <tbody>{rows_html}</tbody>
   </table>
   </div>
+</div>"""
+
+    # Wayback-429 retry sweep: a small, separate panel/job/poll trio,
+    # deliberately parallel to (not merged into) the main content-backfill
+    # form above — see Library._wayback_429_retry_ids's docstring for what
+    # this targets and why it needs its own sweep rather than waiting on
+    # the ordinary default-scope run above to get back to it.
+    wb429_job = _job_get("wayback_429_retry")
+    wb429_running = wb429_job.get("running", False)
+    wb429_done = wb429_job.get("done", 0)
+    wb429_total = wb429_job.get("total", 0)
+    wb429_ok = wb429_job.get("ok", 0)
+    wb429_failed = wb429_job.get("failed", 0)
+    wb429_error = wb429_job.get("error", "")
+    wb429_stopped = wb429_job.get("stopped", False)
+
+    wb429_status_html = ""
+    if wb429_running:
+        wb429_pct = round(wb429_done / wb429_total * 100) if wb429_total else 0
+        wb429_status_html = f"""
+<div id="wb429-job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:14px;">
+  <div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:6px;">Wayback retry sweep in progress&hellip;</div>
+  <div style="font-size:13px;color:var(--muted);">{wb429_done} / {wb429_total} processed &middot; {wb429_ok} succeeded &middot; {wb429_failed} failed</div>
+  <div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">
+    <div style="background:#2563eb;height:8px;width:{wb429_pct}%;transition:width .3s;"></div>
+  </div>
+  <form method="post" action="/admin/library/backfill-content/wayback-429/stop" style="margin-top:12px;">
+    <button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button>
+  </form>
+</div>"""
+    elif wb429_error:
+        wb429_status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#b91c1c;">Error: {_esc(wb429_error)}</div>'
+    elif wb429_stopped:
+        wb429_status_html = f'<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#92400e;">Stopped after {wb429_done} / {wb429_total} &mdash; {wb429_ok} succeeded, {wb429_failed} failed. Safe to press Start again&mdash;an article that already recovered won&rsquo;t be re-attempted.</div>'
+    elif wb429_done and not wb429_running:
+        wb429_status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#065f46;">Done&mdash;{wb429_ok} succeeded, {wb429_failed} failed out of {wb429_done} processed.</div>'
+
+    wb429_disable = ('disabled style="opacity:.5;cursor:not-allowed;"'
+                      if wb429_running or wayback_429_count == 0 else "")
+    wayback_429_html = f"""
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:20px 0;">
+  <div style="font-weight:600;font-size:15px;margin-bottom:6px;">Retry Wayback rate-limited articles</div>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">archive.org&rsquo;s own Availability API has been observed to rate-limit (HTTP 429) broadly and unpredictably (see linklib/wayback.py)&mdash;not a per-article problem, and not something the ordinary sweep above knows to revisit once the rate limit clears. This re-attempts, once, exactly the articles whose last recorded failure was a Wayback 429&mdash;the same three-tier fetch (direct &rarr; migration/Medium &rarr; Wayback) as the ordinary sweep, same {_CONTENT_BACKFILL_DELAY_SEC}s pacing, same logging. Never touches an article whose latest attempt succeeded or failed a different way.</p>
+  <div id="wb429-poll-container">{wb429_status_html}</div>
+  {_job_run_banner("wayback_429_retry")}
+  <form id="wb429-form" method="post" action="/admin/library/backfill-content/wayback-429/start" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px;">
+    <button type="submit" class="btn" style="font-size:14px;padding:9px 22px;" {wb429_disable}>
+      Retry {wayback_429_count:,} article{"s" if wayback_429_count != 1 else ""} now
+    </button>
+    <span style="font-size:13px;color:var(--muted);">Runs server-side&mdash;you can leave this page.</span>
+  </form>
 </div>"""
 
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
@@ -25537,6 +25647,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   </form>
 </div>
 
+{wayback_429_html}
 {manual_review_html}
 {accepted_html}
 {purge_html}
@@ -25573,6 +25684,38 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   document.getElementById('content-backfill-form').addEventListener('submit', function() {{
     setTimeout(function() {{ poll(); }}, 2000);
   }});
+}})();
+(function() {{
+  var reloadOnDone = false;
+  function poll() {{
+    fetch('/admin/library/backfill-content/wayback-429/status').then(r => r.json()).then(function(s) {{
+      var container = document.getElementById('wb429-poll-container');
+      if (!container) return;
+      var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
+      if (s.running) {{
+        reloadOnDone = true;
+        container.innerHTML = '<div id="wb429-job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:14px;">'
+          + '<div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:6px;">Wayback retry sweep in progress&hellip;</div>'
+          + '<div style="font-size:13px;color:var(--muted);">' + s.done + ' / ' + s.total + ' processed &middot; ' + s.ok + ' succeeded &middot; ' + s.failed + ' failed</div>'
+          + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
+          + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div>'
+          + '<form method="post" action="/admin/library/backfill-content/wayback-429/stop" style="margin-top:12px;">'
+          + '<button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button></form></div>';
+        setTimeout(poll, 3000);
+      }} else if (reloadOnDone) {{
+        window.location.reload();
+      }} else if (s.error) {{
+        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
+      }}
+    }}).catch(function() {{ setTimeout(poll, 4000); }});
+  }}
+  if ({str(wb429_running).lower()}) {{ reloadOnDone = true; setTimeout(poll, 3000); }}
+  var wb429Form = document.getElementById('wb429-form');
+  if (wb429Form) {{
+    wb429Form.addEventListener('submit', function() {{
+      setTimeout(function() {{ poll(); }}, 2000);
+    }});
+  }}
 }})();
 </script>"""
     return HTMLResponse(_page("Reader content backfill—Admin", "Admin", body, authed=True))
@@ -25611,6 +25754,39 @@ def admin_backfill_content_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
     return JSONResponse(_job_get("content_backfill"))
+
+
+@app.post("/admin/library/backfill-content/wayback-429/start")
+def admin_backfill_content_wayback_429_start(request: Request):
+    """Admin-triggered only, deliberately not scheduled — see
+    Library._wayback_429_retry_ids's docstring and _wayback_429_retry_job's
+    docstring for why. This is a real network operation against an
+    external service (archive.org) plus, on any success, a real DB write —
+    the same reasoning every other admin-triggered fetch/backfill action on
+    this page already follows."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if _job_get("wayback_429_retry").get("running"):
+        return RedirectResponse("/admin/library/backfill-content?running=1", status_code=303)
+    t = threading.Thread(target=_wayback_429_retry_job, daemon=True)
+    t.start()
+    return RedirectResponse("/admin/library/backfill-content", status_code=303)
+
+
+@app.post("/admin/library/backfill-content/wayback-429/stop")
+def admin_backfill_content_wayback_429_stop(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if _job_get("wayback_429_retry").get("running"):
+        _job_set("wayback_429_retry", stop_requested=True)
+    return RedirectResponse("/admin/library/backfill-content", status_code=303)
+
+
+@app.get("/admin/library/backfill-content/wayback-429/status")
+def admin_backfill_content_wayback_429_status(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401)
+    return JSONResponse(_job_get("wayback_429_retry"))
 
 
 @app.post("/admin/library/backfill-content/{article_id}/accept")
