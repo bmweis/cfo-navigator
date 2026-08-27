@@ -2149,6 +2149,79 @@ Details worth knowing:
   in this PR) — both are UI/search-level gates, not data-removal, on a
   payload only ever meant for a signed-in admin's Quick Edit panel to read
   verbatim regardless of verification state.
+- **Citation-tag investigation + generation-path fix (2026-08) — supersedes
+  Phase 1b/2's `inject_markers=False` decision for Agent taxonomy and
+  Description; Community profile (Phase 3) is unchanged and still on the
+  old contract.** A throwaway one-off regeneration script
+  (`scripts/regen_ai_drafted_fields.py`, run once via `railway ssh`, never
+  a permanent feature) surfaced literal `(cite index="D-S">...</cite>`
+  pseudo-tag text baked into public `agent_taxonomy_note`/`description`
+  fields on 5 of 5 sampled tools with fetched source pages, editor-facing
+  asides ("the provided pages," "worth flagging for a directory reader"),
+  and a memory-drafted note shipped live with no fetch-failure signal
+  anywhere (Coupa). Root-caused by a live diagnostic call
+  (`scripts/diagnose_agent_taxonomy_citations.py`, read-only — no write
+  calls, confirmed by grepping it for `lib.`), then confirmed against a
+  reproduction of the actual bug shape checked out from `origin/main` at
+  the time: `.citations` came back empty (the real Citations API never
+  fired) on the calls that showed tags, `stop_reason` was `end_turn` (not
+  truncation), and Anthropic's own docs confirm citations and structured
+  output are mutually incompatible ("citations require interleaving
+  citation blocks with text output... incompatible with the strict JSON
+  schema constraints of structured outputs"). The `inject_markers=False`
+  strict-JSON contract Phase 1b/2 chose to keep citations technically
+  legal alongside a JSON response left the model with no clean, API-backed
+  way to signal a cited claim inside a single JSON string — free to
+  improvise its own pseudo-XML tag notation instead, with nothing anywhere
+  in the pipeline recognizing or rejecting it.
+  **The fix drops the JSON contract entirely for these two fields — plain
+  prose, real `inject_markers=True` citations (the same pattern
+  `agent.py`'s FP&A Buddy has trusted since Phase 1a), `confident` (and,
+  for Description, `summary`) recovered from trailing `"KEY: value"`
+  sentinel lines via a new `linklib.enrich._split_trailing_sentinels`
+  rather than `json.loads`.** A real, disclosed side effect of dropping
+  `json.loads` as the parsing boundary: the whole class of truncation-
+  driven `JSONDecodeError` failures the investigation also found (Opus 5's
+  adaptive thinking exhausting `max_tokens` before any visible output)
+  can't recur here — a missing or malformed sentinel degrades to a safe
+  default (`confident=False`) instead of losing the entire draft.
+  `entity_citations`/`set_entity_citations`/`clear_entity_citations` and
+  every caller downstream of `ToolDescriptionDraft`/`AgentTaxonomyResult`
+  (the script, both admin AJAX routes, `_run_tool_research`,
+  `_citations_list_html`, the public/admin publish-gate branches) are
+  completely unchanged — the citations list's shape never moved, only how
+  it's produced. The four new prompt rules closing the gaps the
+  investigation found (no markdown emphasis syntax, no editor-facing
+  address, no review-scores/testimonials/logos/reported-results) apply to
+  both fields; Community profile's own prompt already had an equivalent
+  no-markdown rule (rule 7) but not the other three.
+  **Verified two ways, deliberately not conflated**: `tests/
+  citations_fixtures/enrich_sentinel_fixtures.py` +
+  `tests/test_enrich_sentinel_parsing.py` (28 cases, written against the
+  spec before the implementation was wired to it) prove the deterministic
+  parsing side — including `OLD_BUG_REPRODUCTION_CASE`, Datarails' actual
+  production shape run through the post-fix code and, for comparison,
+  through `origin/main`'s pre-fix code loaded from a separate module path:
+  the tags leak through in BOTH versions (no code-level filter can safely
+  strip an unbounded, unknown bad-output pattern after the fact — the fix
+  is preventative, at the prompt level, not corrective), with one verified
+  side benefit — the new code can no longer mistake a stray `"confident":
+  true"` JSON key for the new `CONFIDENT:` sentinel the way the old code
+  did. What no unit test can prove — whether the new prompt actually stops
+  the model from reverting to the old shape live — is `scripts/
+  diagnose_agent_taxonomy_citations.py`'s job: extended to print the fully
+  parsed result (via the same `extract_citations`/`_split_trailing_
+  sentinels` calls the real functions make, not a reimplementation) plus
+  an explicit `REGRESSION CHECK: PASS/FAIL` line, run post-merge against
+  the deployed fix before any bulk regeneration touches the rest of the
+  ~73 tools the throwaway script never reached.
+  **Community profile (`generate_community_profile`) is explicitly NOT
+  touched by this fix** — confirmed to have the identical vulnerable shape
+  (document block + citations enabled + `inject_markers=False` + strict
+  JSON), just never exercised by the throwaway script's run (communities
+  were untouched). Committed as the next PR, not an indefinite follow-up —
+  a materially bigger rewrite (23 fields + a 12-key confidence object in
+  one response, vs. one or two prose fields).
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything
