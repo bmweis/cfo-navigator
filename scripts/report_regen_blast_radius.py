@@ -18,7 +18,7 @@ in the citation-tag investigation that the throwaway script's actual run
 never touched communities (see the `generate_community_profile`-was-never-
 exercised finding in CLAUDE.md).
 
-Prints three sections:
+Prints four sections:
   1. Per-field failure list straight from the log — status="failure" rows,
      with their logged `detail`, so a re-run can be scoped to exactly
      what's still missing.
@@ -32,6 +32,15 @@ Prints three sections:
      citations) and markdown bold ("**", banned by the new D1 prompt
      rules), both tells of the old prompt shape even when no literal
      pseudo-citation tag survived.
+  4. Deduplicated summary — the real "needs regeneration" picture: the
+     union of distinct tool IDs across sections 1-3 combined (a tool
+     counted once even if it shows up in more than one section, or more
+     than once within one section — e.g. both a failure AND a pollution
+     hit on different fields), broken out per field (how many distinct
+     tools need description vs. agent_taxonomy vs.
+     competitive_differentiation vs. more than one), since the raw
+     21+75+25 counts overcount whenever the same tool appears in more
+     than one section or more than one field.
 
 ------------------------------------------------------------------------
 THIS SCRIPT MAKES NO WRITE CALLS OF ANY KIND.
@@ -127,8 +136,15 @@ def main() -> int:
     print(f"\nDB (read-only lookups): {db_path}")
     lib = Library(db_path)
     try:
-        pollution_hits: list[tuple[int, str, str, str]] = []   # (id, name, field, matched substring)
-        legacy_shape_hits: list[tuple[int, str, str, str]] = []  # (id, name, field, kind)
+        # (id, name, display_label, base_field, detail) — display_label is
+        # "field (column)" for section 2/3's existing per-row printout;
+        # base_field is the plain log field name ("description",
+        # "agent_taxonomy", "competitive_differentiation"), used by
+        # section 4's dedup below so "description (description)" and
+        # "description (summary)" collapse back to one logical field
+        # instead of counting as two.
+        pollution_hits: list[tuple[int, str, str, str, str]] = []
+        legacy_shape_hits: list[tuple[int, str, str, str, str]] = []
 
         # Cache tool rows so a tool with multiple successful fields is
         # only fetched once.
@@ -150,25 +166,67 @@ def main() -> int:
                     continue
                 hits = [s for s in _FORBIDDEN_SUBSTRINGS if s in text]
                 if hits:
-                    pollution_hits.append((tool_id, name, f"{field} ({col})", ", ".join(hits)))
+                    pollution_hits.append((tool_id, name, f"{field} ({col})", field, ", ".join(hits)))
                 if " — " in text:
-                    legacy_shape_hits.append((tool_id, name, f"{field} ({col})", "spaced em dash"))
+                    legacy_shape_hits.append((tool_id, name, f"{field} ({col})", field, "spaced em dash"))
                 if "**" in text:
-                    legacy_shape_hits.append((tool_id, name, f"{field} ({col})", "markdown bold (**)"))
+                    legacy_shape_hits.append((tool_id, name, f"{field} ({col})", field, "markdown bold (**)"))
 
         print(f"\n{'=' * 70}\n2. CITE-TAG POLLUTION ({len(pollution_hits)}) — "
               f"successfully-overwritten rows still carrying a forbidden substring\n{'=' * 70}")
         if not pollution_hits:
             print("  (none)")
-        for tool_id, name, field, hits in pollution_hits:
-            print(f"  [tool {tool_id}] {name} — {field}: {hits}")
+        for tool_id, name, label, _base_field, hits in pollution_hits:
+            print(f"  [tool {tool_id}] {name} — {label}: {hits}")
 
         print(f"\n{'=' * 70}\n3. LEGACY-SHAPE ROWS ({len(legacy_shape_hits)}) — "
               f"spaced em dash or markdown bold, no literal tag required\n{'=' * 70}")
         if not legacy_shape_hits:
             print("  (none)")
-        for tool_id, name, field, kind in legacy_shape_hits:
-            print(f"  [tool {tool_id}] {name} — {field}: {kind}")
+        for tool_id, name, label, _base_field, kind in legacy_shape_hits:
+            print(f"  [tool {tool_id}] {name} — {label}: {kind}")
+
+        # -- Section 4: deduplicated summary ---------------------------
+        # (tool_id, base_field) -> name, for every distinct hit across all
+        # three sections combined — a plain set union, so a tool appearing
+        # in more than one section (e.g. a failure on one field AND a
+        # pollution hit on another) or more than once within one section
+        # (e.g. both description and summary polluted) still counts once
+        # per (tool, field), and once per tool overall.
+        affected: dict[tuple[int, str], str] = {}
+        for r in failures:
+            affected[(r["entity_id"], r.get("field", "?"))] = r.get("name", "?")
+        for tool_id, name, _label, base_field, _detail in pollution_hits:
+            affected[(tool_id, base_field)] = name
+        for tool_id, name, _label, base_field, _detail in legacy_shape_hits:
+            affected[(tool_id, base_field)] = name
+
+        distinct_tool_ids = sorted({tid for tid, _field in affected})
+        by_field: dict[str, set[int]] = {}
+        for (tid, field) in affected:
+            by_field.setdefault(field, set()).add(tid)
+        fields_per_tool: dict[int, set[str]] = {}
+        for (tid, field) in affected:
+            fields_per_tool.setdefault(tid, set()).add(field)
+        multi_field_tools = {tid: fields for tid, fields in fields_per_tool.items() if len(fields) > 1}
+
+        print(f"\n{'=' * 70}\n4. DEDUPLICATED SUMMARY — real \"needs regeneration\" count\n{'=' * 70}")
+        print(f"  Distinct tools needing regeneration (any field): {len(distinct_tool_ids)}")
+        print(f"  Distinct (tool, field) pairs: {len(affected)}  "
+              f"(raw section 1+2+3 counts were {len(failures)}+{len(pollution_hits)}+{len(legacy_shape_hits)} "
+              f"= {len(failures) + len(pollution_hits) + len(legacy_shape_hits)}, which double-counts a tool "
+              f"hit by more than one check on the same field, and doesn't collapse per-tool at all)")
+        print("\n  By field (distinct tools):")
+        for field in sorted(by_field):
+            print(f"    {field}: {len(by_field[field])}")
+        print(f"\n  Tools needing more than one field regenerated: {len(multi_field_tools)}")
+        for tid in sorted(multi_field_tools):
+            print(f"    [tool {tid}] {affected.get((tid, sorted(multi_field_tools[tid])[0]), '?')} — "
+                  f"{sorted(multi_field_tools[tid])}")
+        print("\n  Full list (tool_id, name):")
+        for tid in distinct_tool_ids:
+            name = next((n for (t, _f), n in affected.items() if t == tid), "?")
+            print(f"    [tool {tid}] {name}")
 
         print(f"\n{'=' * 70}\nDone. No writes were made — this script only read library.db "
               f"and {args.log_file!r}.\n{'=' * 70}")
