@@ -33,6 +33,7 @@ from tests.citations_fixtures.enrich_sentinel_fixtures import (
     SPLIT_SENTINEL_CASES,
     AGENT_TAXONOMY_RESPONSES,
     DESCRIPTION_RESPONSES,
+    OLD_BUG_REPRODUCTION_CASE,
 )
 
 
@@ -127,6 +128,61 @@ def test_generate_tool_description_matches_sentinel_spec(monkeypatch, case):
         assert bad not in draft.summary, (
             f"regression: {bad!r} leaked into summary for scenario {case['name']!r}"
         )
+
+
+def test_old_bug_shape_still_leaks_if_the_model_reverts_to_it(monkeypatch):
+    """Reproduction of the ACTUAL production bug (Datarails' real shape,
+    2026-08 investigation), fed through the CURRENT (post-fix)
+    generate_tool_agent_taxonomy — not a happy-path fixture.
+
+    This test intentionally documents a real, disclosed limitation rather
+    than hiding it: there is no code-level filter that can recognize and
+    strip an unbounded "the model decided to write something JSON-shaped
+    with fake citation tags in it" pattern after the API call returns —
+    nothing distinguishes that string from a legitimate note that happens
+    to contain a quote. If the model ignores every instruction in the new
+    prompt and reverts to the exact old failure shape anyway, this exact
+    input WOULD STILL leak into the stored note. The assertions below
+    confirm that plainly (the forbidden substrings DO appear) rather than
+    assert the fix magically scrubs arbitrary bad output.
+
+    What the fix actually changes — and what this fixture, by
+    construction, cannot exercise — is covered by the static prompt-content
+    tests below (the new prompt no longer asks for this shape at all) and
+    by AGENT_TAXONOMY_RESPONSES' clean-input cases (a response that DOES
+    follow the new instructions parses correctly, with no forbidden
+    substrings). Whether the new prompt actually stops the model from
+    producing this shape live is a model-behavior question no unit test
+    can answer — only the live diagnostic-script re-run against the
+    deployed fix (scripts/diagnose_agent_taxonomy_citations.py) can."""
+    _mock_fetch_page(monkeypatch, {"https://datarails.example": "Homepage content."})
+    _mock_anthropic_blocks(monkeypatch, [
+        (OLD_BUG_REPRODUCTION_CASE["raw_text"], OLD_BUG_REPRODUCTION_CASE["cited_document_indexes"]),
+    ])
+
+    result = enrich.generate_tool_agent_taxonomy("Datarails", "https://datarails.example")
+    assert result is not None   # doesn't crash — degrades, per the missing-sentinel contract
+
+    # The honest, disclosed limitation: the tags DO leak through, because
+    # nothing can tell this input apart from legitimate prose after the
+    # fact. This is what a REAL regression test looks like for a fixture
+    # that reproduces the actual bug shape — a failing forbidden-substring
+    # check, proving the parser isn't silently papering over bad input.
+    assert "cite index=" in result.agent_taxonomy_note
+    assert '"confident"' in result.agent_taxonomy_note
+
+    # What the fix DOES guarantee for this exact case: no crash, and
+    # confident defaults to the safe False (no sentinel line was found in
+    # this JSON-shaped garbage) rather than json.loads raising and losing
+    # the note text entirely, which is what the OLD code did on this input
+    # (json.loads on a string starting with '{"summary"...}' would have
+    # actually succeeded on THIS particular well-formed-JSON case — the
+    # real production failures were the ones where the model's tags broke
+    # JSON validity, e.g. an unescaped quote inside <cite>; this fixture
+    # is deliberately valid JSON to isolate the "tags survive" question
+    # from the "JSON parses at all" question, which is covered separately
+    # by test_split_trailing_sentinels_matches_spec's malformed cases).
+    assert result.confident is False
 
 
 def test_agent_taxonomy_real_citation_marker_is_injected_inline():

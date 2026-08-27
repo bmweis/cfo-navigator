@@ -197,6 +197,54 @@ AGENT_TAXONOMY_RESPONSES = [
 # the cited write-up and the uncited SUMMARY/CONFIDENT tail are separate
 # blocks, matching real API citation-boundary splitting.
 
+# -- reproduction of the ACTUAL production bug (2026-08 investigation) -------
+# Not a happy-path fixture: this is the real observed shape — a JSON blob
+# with literal pseudo-citation tags embedded inside the "summary" string
+# value (Datarails' actual production text, reproduced here) — fed through
+# the CURRENT (post-fix) generate_tool_agent_taxonomy to answer one
+# specific question: does the fix make this shape structurally impossible
+# to store, or does it just stop asking the model to produce it?
+#
+# Answer, stated plainly rather than papered over: it's the latter. There
+# is no code-level filter that can recognize and strip an unbounded,
+# unknown "the model decided to write something JSON-shaped with fake tags
+# in it" pattern after the fact — nothing after the API call could tell
+# that string apart from a legitimate long note that happens to contain a
+# quote. If the model ignores every instruction in the new prompt and
+# reverts to the old failure shape anyway, THIS EXACT INPUT WOULD STILL
+# LEAK INTO THE STORED NOTE. tests/test_enrich_sentinel_parsing.py's
+# corresponding test asserts exactly that — a failing regression check on
+# this fixture, not a passing one — specifically so this limitation is
+# visible and tested rather than silently assumed away.
+#
+# What the fix actually changes, and what the OLD_BUG_REPRODUCTION_CASE
+# genuinely cannot exercise: the prompt no longer asks for the shape that
+# produced this in the first place (test_agent_taxonomy_prompt_no_longer_
+# requests_json / test_prompt_bans_editor_facing_address etc. — the static
+# prompt-content assertions), and citations are real now (inject_markers=
+# True) instead of citations-vs-strict-JSON forcing the model to improvise
+# its own tag notation. Whether that actually stops the model from
+# producing this shape live is a model-behavior question no unit test can
+# answer — only the live diagnostic-script re-run against the deployed fix
+# can.
+OLD_BUG_REPRODUCTION_CASE = {
+    "name": "old_json_plus_cite_tag_shape_still_leaks_if_model_reverts",
+    # Datarails' actual production shape, reproduced: a JSON object whose
+    # "summary" value has literal (cite index="D-S">...</cite> tags baked
+    # into the string, with no real API citation metadata attached to the
+    # block at all (matching the diagnostic script's own observed
+    # .citations: none for this failure mode).
+    "raw_text": (
+        '{"summary": "Datarails (cite index=\\"1-1\\">is an FP&A platform '
+        'for Excel-based finance teams</cite>. (cite index=\\"1-8\\">It '
+        'integrates directly with existing Excel models</cite>.", '
+        '"confident": true}'
+    ),
+    "cited_document_indexes": [],   # matches production: the real API citation
+                                      # mechanism never fired for this failure mode
+}
+
+
 DESCRIPTION_RESPONSES = [
     {
         "name": "clean_grounded",
