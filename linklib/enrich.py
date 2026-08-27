@@ -477,8 +477,19 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=_checked_max_tokens(1600),  # room for an 8-12 sentence description, plus
-                              # headroom for Opus 5's on-by-default adaptive thinking
+            max_tokens=_checked_max_tokens(3000),  # was 1600, predating the citation-tag fix's
+                              # move to verbose prose + paragraph/bullet structure guidance + a
+                              # trailing sentinel block (see CLAUDE.md's citation-tag investigation
+                              # bullets) — that ceiling only cleared MIN_GENERATE_MAX_TOKENS by 400
+                              # tokens, nowhere near enough margin for Opus 5's adaptive thinking
+                              # (max_tokens caps thinking + response together — see PR 260's note on
+                              # MIN_GENERATE_MAX_TOKENS above) to absorb on a content-rich page: a
+                              # live spot-check (2026-08) found 6 of 7 sampled tools truncating mid-
+                              # response, correlating with richer source content giving the model
+                              # more to reason about before writing. Raised to real parity-plus-
+                              # margin over Agent taxonomy's working 2000-token ceiling, empirically
+                              # verified clean against the worst-truncating tools (Concourse, Coupa,
+                              # GoClose) via --sample before this was considered resolved.
             messages=[{"role": "user", "content": message_content}],
         )
         # inject_markers=True: real citations now surface as genuine [n]

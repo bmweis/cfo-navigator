@@ -3623,6 +3623,62 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Expensify, Concourse, Datarails, Coupa, Maxima, Ode — the tools with
   specific, already-diagnosed defects from the original incident) via
   `railway ssh`, full output reviewed, before the full 157-tool run.
+- **Blast-radius spot-check findings (2026-08) — the `--sample` preview
+  (21 real calls: description/agent_taxonomy/competitive_differentiation
+  ×7 tools) confirmed the citation-tag fix holds clean (zero pollution,
+  real `[n]` markers, no editor-facing asides) and surfaced a real,
+  more urgent bug: Description was truncating mid-response on 6 of 7
+  sampled tools (Concourse, Coupa, Expensify, Datarails, GoClose, Maxima
+  — only Ode, presumably the thinnest source page, finished under
+  budget).** Root-caused against the codebase's own prior incident with
+  this exact failure class — `MIN_GENERATE_MAX_TOKENS`'s own comment
+  documents `generate_tool_differentiation`'s original `max_tokens=400`
+  once let Opus 5's adaptive thinking (which shares the same budget as
+  the visible response) consume the *entire* allowance, PR 260. Description's
+  1600-token ceiling predates the citation-tag fix's move to verbose
+  prose + paragraph/bullet structure guidance + a trailing sentinel
+  block — it was never revisited when the format changed, and cleared
+  the 1200-token floor by only 400 tokens, nowhere near enough margin
+  to absorb adaptive-thinking variance on a content-rich page (which is
+  exactly what correlated with the truncation: richer source content
+  gives the model more to reason about before it starts writing).
+  Truncation effect varied — description prose cut off mid-sentence on
+  some, `SUMMARY` truncated mid-word or came back blank on others — and
+  in every case `CONFIDENT` fell through to its safe-fallback default
+  of `False` since the parser's backward scan never reached that
+  sentinel, silently marking well-grounded content as low-confidence
+  for a truncation reason unrelated to actual grounding quality.
+  **Fix: raised to 3000** (real parity-plus-margin over Agent
+  taxonomy's working 2000-token ceiling, which showed no truncation in
+  the same sample) — deliberately **not** a reorder-the-sentinels-first
+  fix (would only protect `CONFIDENT`/`SUMMARY`, not the actual worse
+  defect of a truncated public-facing description, and would need new
+  leading-sentinel parsing code the trailing-only `_split_trailing_sentinels`
+  wasn't built for) and **not** a two-call split (doubles cost — the
+  15K-char grounding page would be sent twice — and latency, to solve
+  what's fundamentally a budget-sizing problem, not an inherent
+  content-type conflict). To be verified empirically via a `--sample`
+  re-run against the three worst-truncating tools (Concourse, Coupa,
+  GoClose) before this is considered closed, per the same
+  local/live-verification split every fix in this investigation has
+  followed. **Separately flagged, explicitly deferred (not urgent,
+  already on the post-157-run follow-up list)**: `generate_tool_differentiation`
+  was never brought into the D1 no-reported-results/testimonials content
+  rules, since it predates the citation-tag fix and has no citations
+  mechanism of its own to have motivated including it — the same sample
+  surfaced exactly that gap (Maxima's differentiation cited a vendor-
+  reported stat). **Two catalog decisions, unrelated to the code fix**:
+  Klarity/Within (real-world rebrand, not a code bug — see the earlier
+  bullet) and Ode (a services/consulting firm, not a software product —
+  "Ode doesn't ship AI agents. It's a services firm," per its own
+  generated profile) are both being deleted from the Toolbox; neither is
+  in `scripts/seed_tools.py` (confirmed by direct grep, not assumed), so
+  neither deletion needs a seed-file removal to stay durable across a
+  deploy. Concourse is staying — real distinction from Klarity/Ode: it
+  ships a defined roster of named, purpose-built agents customers
+  configure and run themselves (not a bespoke-build services engagement);
+  the "ex-CFOs and forward-deployed engineers" language in its profile
+  describes onboarding support, not the core offering.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
