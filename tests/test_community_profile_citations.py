@@ -31,12 +31,14 @@ def _mock_fetch_page(monkeypatch, content=""):
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content=content))
 
 
-def _mock_anthropic_citing(monkeypatch, payload_json, cited_document_indexes,
-                           input_tokens=200, output_tokens=150):
-    """Same shape as test_description_citations's helper — a single text
-    block carrying a real (SDK-shaped) `citations` list referencing
-    document_index positions, plus the captured messages.create kwargs so a
-    test can assert on the document block actually sent."""
+def _mock_anthropic_citing(monkeypatch, blocks, input_tokens=200, output_tokens=150):
+    """blocks: list of (text, cited_document_indexes) — one SDK text block
+    per entry, each with its own `citations` list. Mirrors how the real
+    Citations API actually splits a response into separate blocks at
+    citation boundaries (a cited claim and uncited surrounding structure
+    are different blocks, never one block carrying both). Also captures
+    the actual messages.create kwargs so a test can assert on the document
+    block actually sent."""
     captured = {}
 
     def _create(**kw):
@@ -47,14 +49,17 @@ def _mock_anthropic_citing(monkeypatch, payload_json, cited_document_indexes,
                 self.document_index = idx
 
         class _Block:
-            type = "text"
-            text = payload_json
-            citations = [_Citation(i) for i in cited_document_indexes]
+            def __init__(self, text, cited_indexes):
+                self.type = "text"
+                self.text = text
+                self.citations = [_Citation(i) for i in cited_indexes]
+
+        content = [_Block(text, cited) for text, cited in blocks]
         usage = types.SimpleNamespace(
             input_tokens=input_tokens, output_tokens=output_tokens,
             cache_creation_input_tokens=0, cache_read_input_tokens=0,
         )
-        return types.SimpleNamespace(content=[_Block()], usage=usage)
+        return types.SimpleNamespace(content=content, usage=usage)
     fake = types.SimpleNamespace(Anthropic=lambda *a, **k: types.SimpleNamespace(
         messages=types.SimpleNamespace(create=lambda **kw: _create(**kw))))
     monkeypatch.setitem(sys.modules, "anthropic", fake)
@@ -62,44 +67,100 @@ def _mock_anthropic_citing(monkeypatch, payload_json, cited_document_indexes,
     return captured
 
 
-PROFILE_JSON = """{
-    "ideal_member": "Seed-stage operator CFOs.",
-    "anti_fit": "Public-company controllers.",
-    "value_prop": "Peer benchmarking and tactical playbooks.",
-    "format_reality": "Monthly virtual roundtables.",
-    "engagement_level": "Moderate—active in Slack, quieter at events.",
-    "sponsor_relationship_note": "Sponsors present but not intrusive.",
-    "business_model": "Dues-funded, gated peer group.",
-    "application_friction": "Light vetting, most qualified applicants get in.",
-    "cost_value_verdict": "Worth it for the network alone.",
-    "notable_members": null,
-    "founded_year": 2019,
-    "public_criticism": null,
-    "verdict_summary": "Best for seed-stage operator CFOs, not for public-company controllers.",
-    "stage_focus": "Growth-stage",
-    "jobs_program": "No",
-    "team_or_individual": "Individual",
-    "seniority_band": "CFO and VP Finance only",
-    "primary_purpose": "Peer learning",
-    "resources_included": "Templates, benchmarking data",
-    "platform_type": "Slack",
-    "meeting_format": "Virtual",
-    "event_style": "Intimate small-group",
-    "cpe_eligible": "No",
-    "confidence": {
-        "ideal_member": true, "anti_fit": true, "value_prop": true, "business_model": true,
-        "format_reality": true, "engagement_level": false, "sponsor_relationship_note": true,
-        "application_friction": true, "cost_value_verdict": true, "notable_members": false,
-        "public_criticism": false, "verdict_summary": true
-    }
-}"""
+# Plain prose + labeled blocks — see CLAUDE.md's citation-tag-investigation
+# follow-up; this stopped being a JSON payload. PROFILE_BODY is the cited
+# first field, PROFILE_TAIL the rest (uncited) — split the same way the
+# merged Description/Agent taxonomy fix's fixtures are, matching real
+# citation-boundary block splitting.
+PROFILE_BODY = "IDEAL_MEMBER:\nSeed-stage operator CFOs."
+PROFILE_TAIL = """
+
+ANTI_FIT:
+Public-company controllers.
+
+VALUE_PROP:
+Peer benchmarking and tactical playbooks.
+
+FORMAT_REALITY:
+Monthly virtual roundtables.
+
+ENGAGEMENT_LEVEL:
+Moderate, active in Slack, quieter at events.
+
+SPONSOR_RELATIONSHIP_NOTE:
+Sponsors present but not intrusive.
+
+BUSINESS_MODEL:
+Dues-funded, gated peer group.
+
+APPLICATION_FRICTION:
+Light vetting, most qualified applicants get in.
+
+COST_VALUE_VERDICT:
+Worth it for the network alone.
+
+NOTABLE_MEMBERS:
+None publicly reported.
+
+FOUNDED_YEAR:
+2019
+
+PUBLIC_CRITICISM:
+None reported.
+
+VERDICT_SUMMARY:
+Best for seed-stage operator CFOs, not for public-company controllers.
+
+STAGE_FOCUS:
+Growth-stage
+
+JOBS_PROGRAM:
+No
+
+TEAM_OR_INDIVIDUAL:
+Individual
+
+SENIORITY_BAND:
+CFO and VP Finance only
+
+PRIMARY_PURPOSE:
+Peer learning
+
+RESOURCES_INCLUDED:
+Templates, benchmarking data
+
+PLATFORM_TYPE:
+Slack
+
+MEETING_FORMAT:
+Virtual
+
+EVENT_STYLE:
+Intimate small-group
+
+CPE_ELIGIBLE:
+No
+
+CONFIDENCE:
+IDEAL_MEMBER: true
+ANTI_FIT: true
+VALUE_PROP: true
+BUSINESS_MODEL: true
+FORMAT_REALITY: true
+ENGAGEMENT_LEVEL: false
+SPONSOR_RELATIONSHIP_NOTE: true
+APPLICATION_FRICTION: true
+COST_VALUE_VERDICT: true
+NOTABLE_MEMBERS: false
+PUBLIC_CRITICISM: false
+VERDICT_SUMMARY: true"""
 
 
 # -- generate_community_profile: real document-block grounding ---------------
 
 def test_generate_community_profile_sends_real_document_block(monkeypatch):
     _mock_fetch_page(monkeypatch, "Chief is a private membership network for senior executive women.")
-    captured = _mock_anthropic_citing(monkeypatch, PROFILE_JSON, cited_document_indexes=[])
+    captured = _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY + PROFILE_TAIL, [])])
 
     enrich.generate_community_profile("Chief", "https://chief.com")
 
@@ -114,25 +175,25 @@ def test_generate_community_profile_sends_real_document_block(monkeypatch):
 
 def test_generate_community_profile_returns_verified_citations_tagged_community_page(monkeypatch):
     _mock_fetch_page(monkeypatch, "Chief is a private membership network for senior executive women.")
-    _mock_anthropic_citing(monkeypatch, PROFILE_JSON, cited_document_indexes=[0])
+    _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
     draft = enrich.generate_community_profile("Chief", "https://chief.com")
     assert draft is not None
     assert len(draft.citations) == 1
     assert draft.citations[0]["url"] == "https://chief.com"
     assert draft.citations[0]["type"] == "community_page"
-    # The stored fields are untouched plain text — no [n] markers spliced
-    # into the JSON output (that would have corrupted the parse entirely).
-    assert "[1]" not in draft.ideal_member
-    assert draft.ideal_member == "Seed-stage operator CFOs."
+    # The cited field gets a real [n] marker spliced in by extract_citations
+    # itself (inject_markers=True) — the new intended footnote rendering.
+    assert "[1]" in draft.ideal_member
+    assert "Seed-stage operator CFOs." in draft.ideal_member
 
 
-def test_generate_community_profile_json_still_parses_when_citations_present(monkeypatch):
-    """The real risk this fix introduces: citations enabled on a
-    strict-JSON response with 23 fields. Confirms json.loads still succeeds
-    and the fields (plus per-field confidence) still come through."""
+def test_generate_community_profile_confidence_still_parses_when_citations_present(monkeypatch):
+    """The real risk this fix targets: citations enabled alongside the
+    trailing CONFIDENCE: block. Confirms the sentinel block still parses
+    correctly even with a real citation attached earlier in the response."""
     _mock_fetch_page(monkeypatch, "Homepage content.")
-    _mock_anthropic_citing(monkeypatch, PROFILE_JSON, cited_document_indexes=[0])
+    _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
     draft = enrich.generate_community_profile("Chief", "https://chief.com")
     assert draft is not None
@@ -145,7 +206,7 @@ def test_generate_community_profile_no_citations_when_low_confidence(monkeypatch
     """No page content fetched at all → no document sent → nothing to
     cite, regardless of what the (mocked) response claims."""
     _mock_fetch_page(monkeypatch, "")
-    _mock_anthropic_citing(monkeypatch, PROFILE_JSON, cited_document_indexes=[0])
+    _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
     draft = enrich.generate_community_profile("Obscure Community", "https://obscure.example")
     assert draft is not None
@@ -187,7 +248,7 @@ def _add_community(lib):
 
 def test_generate_profile_route_returns_citations_and_model(app_module, monkeypatch):
     _mock_fetch_page(monkeypatch, "Chief is a private membership network for senior executive women.")
-    _mock_anthropic_citing(monkeypatch, PROFILE_JSON, cited_document_indexes=[0])
+    _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
     client = _client(app_module)
     _login(client)

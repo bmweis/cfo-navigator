@@ -21,11 +21,12 @@ from linklib import enrich
 from linklib.db import Library
 
 
-def _mock_anthropic(monkeypatch, payload_json):
+def _mock_anthropic(monkeypatch, payload_text):
     def _create(**kw):
         class _Block:
             type = "text"
-            text = payload_json
+            text = payload_text
+            citations = []
         usage = types.SimpleNamespace(
             input_tokens=100, output_tokens=80,
             cache_creation_input_tokens=0, cache_read_input_tokens=0,
@@ -37,26 +38,71 @@ def _mock_anthropic(monkeypatch, payload_json):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
 
 
-PROFILE_JSON = """{
-  "ideal_member": "Seed-stage operator CFOs.", "anti_fit": "Late-stage teams.",
-  "value_prop": "Peer benchmarking.", "format_reality": "Monthly virtual.",
-  "engagement_level": "High.", "sponsor_relationship_note": "No sponsors.",
-  "business_model": "Dues-funded.", "application_friction": "Light vetting.",
-  "cost_value_verdict": "Worth it.", "notable_members": null,
-  "founded_year": 2019, "public_criticism": null,
-  "verdict_summary": "Best for seed-stage CFOs.",
-  "stage_focus": "Seed", "jobs_program": "No", "team_or_individual": "Individual",
-  "seniority_band": "CFO only", "primary_purpose": "Peer learning",
-  "resources_included": "Benchmarking data", "platform_type": "Slack",
-  "meeting_format": "Virtual", "event_style": "Small-group", "cpe_eligible": "No",
-  "confidence": {
-    "ideal_member": true, "anti_fit": true, "value_prop": false,
-    "business_model": true, "format_reality": true, "engagement_level": false,
-    "sponsor_relationship_note": true, "application_friction": true,
-    "cost_value_verdict": false, "notable_members": true,
-    "public_criticism": true, "verdict_summary": false
-  }
-}"""
+# Plain-prose labeled-block format (post citation-fix) — replaces the old
+# strict-JSON payload. Values mirror the old PROFILE_JSON fixture's content
+# exactly, including the two null-placeholder fields (notable_members,
+# public_criticism), which the plain-prose prompt represents as a literal
+# "None reported."/"None publicly reported." word rather than JSON `null`.
+PROFILE_TEXT = """IDEAL_MEMBER:
+Seed-stage operator CFOs.
+ANTI_FIT:
+Late-stage teams.
+VALUE_PROP:
+Peer benchmarking.
+FORMAT_REALITY:
+Monthly virtual.
+ENGAGEMENT_LEVEL:
+High.
+SPONSOR_RELATIONSHIP_NOTE:
+No sponsors.
+BUSINESS_MODEL:
+Dues-funded.
+APPLICATION_FRICTION:
+Light vetting.
+COST_VALUE_VERDICT:
+Worth it.
+NOTABLE_MEMBERS:
+None reported.
+FOUNDED_YEAR:
+2019
+PUBLIC_CRITICISM:
+None publicly reported.
+VERDICT_SUMMARY:
+Best for seed-stage CFOs.
+STAGE_FOCUS:
+Seed
+JOBS_PROGRAM:
+No
+TEAM_OR_INDIVIDUAL:
+Individual
+SENIORITY_BAND:
+CFO only
+PRIMARY_PURPOSE:
+Peer learning
+RESOURCES_INCLUDED:
+Benchmarking data
+PLATFORM_TYPE:
+Slack
+MEETING_FORMAT:
+Virtual
+EVENT_STYLE:
+Small-group
+CPE_ELIGIBLE:
+No
+CONFIDENCE:
+IDEAL_MEMBER: true
+ANTI_FIT: true
+VALUE_PROP: false
+BUSINESS_MODEL: true
+FORMAT_REALITY: true
+ENGAGEMENT_LEVEL: false
+SPONSOR_RELATIONSHIP_NOTE: true
+APPLICATION_FRICTION: true
+COST_VALUE_VERDICT: false
+NOTABLE_MEMBERS: true
+PUBLIC_CRITICISM: true
+VERDICT_SUMMARY: false
+"""
 
 
 # -- linklib.enrich: confidence dict parsing --------------------------------
@@ -64,7 +110,7 @@ PROFILE_JSON = """{
 def test_generate_community_profile_parses_confidence_dict(monkeypatch):
     from linklib import extract
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
-    _mock_anthropic(monkeypatch, PROFILE_JSON)
+    _mock_anthropic(monkeypatch, PROFILE_TEXT)
 
     draft = enrich.generate_community_profile("Acme Circle", "https://acme.example")
     assert draft is not None
@@ -78,7 +124,7 @@ def test_generate_community_profile_parses_confidence_dict(monkeypatch):
 def test_generate_community_profile_defaults_missing_confidence_to_false(monkeypatch):
     from linklib import extract
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
-    _mock_anthropic(monkeypatch, '{"ideal_member": "X", "verdict_summary": "Y"}')   # no "confidence" key at all
+    _mock_anthropic(monkeypatch, "IDEAL_MEMBER:\nX\nVERDICT_SUMMARY:\nY\n")   # no CONFIDENCE: block at all
 
     draft = enrich.generate_community_profile("Acme Circle", "https://acme.example")
     assert draft is not None

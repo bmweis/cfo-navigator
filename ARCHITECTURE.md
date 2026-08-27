@@ -2222,6 +2222,104 @@ Details worth knowing:
   were untouched). Committed as the next PR, not an indefinite follow-up —
   a materially bigger rewrite (23 fields + a 12-key confidence object in
   one response, vs. one or two prose fields).
+- **Citation-tag fix, Community profile follow-up (2026-08) — the committed
+  next PR from the bullet above; `generate_community_profile` now shares
+  the same plain-prose/real-citations contract, closing the last
+  `inject_markers=False` holdout.** Same root cause, same fix shape (drop
+  the JSON contract, `inject_markers=True`, the same four new D1 prompt
+  rules) — but 23 fields in one response instead of one or two meant the
+  existing `_split_trailing_sentinels` parser (a backward scan for a short
+  tail of `KEY: value` lines) wasn't enough on its own. New
+  `linklib.enrich._parse_labeled_blocks(text, keys, terminal_key=None)` is
+  a forward-scanning, order-tolerant parser for `FIELD_NAME:`-headed
+  multi-line body blocks: it walks the response line by line, opening a
+  new field whenever a line matches `^KEY:` for a key in `keys`, and
+  appending every subsequent line to that field's body until the next
+  recognized header. `_split_trailing_sentinels` is unchanged and still
+  does the actual work for the 12-key confidence block's own body, once
+  `_parse_labeled_blocks` has isolated it as the `"confidence"` field.
+  **`terminal_key="confidence"` is the one genuinely new mechanism, and
+  it exists to prevent real data corruption, not just to simplify
+  parsing**: the `CONFIDENCE:` block's 12 sub-key lines (`IDEAL_MEMBER:
+  true`, etc.) share literal names with 12 of the 23 top-level fields —
+  without a hard stop, `_parse_labeled_blocks` would keep recognizing
+  headers past `CONFIDENCE:` and treat a sub-key line as a fresh top-level
+  field, silently overwriting the real, already-parsed `ideal_member`
+  narrative text with the literal string `"true"`. Passing
+  `terminal_key="confidence"` tells the parser to stop all further header
+  recognition the moment it opens the `CONFIDENCE:` block and just
+  consume every remaining line as that block's body. **Proven load-bearing,
+  not just present**, via a matched positive/negative test pair in
+  `tests/test_community_profile_sentinel_parsing.py`:
+  `test_terminal_key_protects_data_integrity_not_just_formatting` (with the
+  guard, real fields survive uncorrupted) and
+  `test_without_terminal_key_the_collision_would_actually_corrupt_data` (the
+  identical input, parsed *without* `terminal_key`, asserted to actually
+  corrupt `ideal_member` — a negative control proving the guard does real
+  work, not decoration).
+  A response with no recognized field header at all (`_parse_labeled_blocks`
+  returns `{}`) is treated as a hard failure — `generate_community_profile`
+  returns `None` — deliberately stricter than Description/Agent taxonomy's
+  "some text beats none" tolerance, because `upsert_community_profile` is a
+  full replace of all 23 `community_profiles` columns on every save: silently
+  persisting an all-empty draft wouldn't just carry forward stale text, it
+  would blank the community's entire profile outright.
+  **Two smaller correctness fixes landed in the same pass, both found while
+  building the fixtures rather than assumed away:** (1)
+  `_parse_community_confidence`'s old logic compared `bool(raw.get(...))`,
+  which is `True` for any non-empty string including the literal text
+  `"false"` — a real Python footgun once confidence values started arriving
+  as plain-text sentinel strings instead of JSON booleans. Fixed to compare
+  the raw value against the literal string `"true"` (case-insensitive), with
+  a dedicated regression test
+  (`test_confidence_string_false_does_not_evaluate_truthy`). (2) The old
+  JSON prompt stored `null` for "unknown" on several fields
+  (`notable_members`, `public_criticism`, and most of the short
+  factual/categorical fields), normalized to `""` at parse time
+  (`data.get(f) or ""`); plain text has no `null`, so the new prompt asks
+  the model for a literal placeholder phrase instead
+  (`"Unclear"`/`"None reported"`/`"None publicly reported"`). A new
+  `_field_or_placeholder_empty` helper coerces those phrases back to `""`
+  at parse time (case-insensitive, tolerant of a trailing period the model
+  might add out of habit) — restoring the original storage contract rather
+  than silently changing what an "unknown" field looks like in the DB.
+  Deliberately **not** applied to `cpe_eligible`, whose `"Unclear"` value
+  was already a real, literal answer in the *original* JSON prompt (not a
+  null-placeholder) — coercing it to `""` there would be a genuine
+  regression, not a fix.
+  **Verified the same two ways as the first fix, deliberately not
+  conflated**: `tests/citations_fixtures/community_profile_sentinel_fixtures.py`
+  + `tests/test_community_profile_sentinel_parsing.py` (21 cases, written
+  and confirmed failing against unwired code before the implementation
+  existed — including `COMMUNITY_OLD_BUG_REPRODUCTION_CASE`, a JSON blob
+  with an embedded pseudo-citation tag, asserted to parse to `None` under
+  the new code — stricter than the tool-side fix's "partial recovery,"
+  since nothing in a JSON blob matches the new `FIELD_NAME:` header format
+  at all) prove the deterministic parsing side. Every pre-existing test that
+  mocked `generate_community_profile`'s old JSON contract
+  (`tests/test_community_profile_citations.py`,
+  `tests/test_community_confidence_indicator.py`) was rewritten to the new
+  plain-prose format and to the same realistic multi-block response mocking
+  (`_mock_anthropic_citing(monkeypatch, blocks)`, one SDK text block per
+  citation boundary — mirroring how the real Citations API actually splits
+  a response, not one block carrying an entire cited-and-uncited response
+  the way the original single-block mocks did) established for the first
+  fix; `tests/test_enrich_community_profiles.py` needed no changes, since it
+  mocks `generate_community_profile` at the function level rather than the
+  Claude API. What no unit test can prove — whether the new prompt actually
+  stops the model from reverting to the old shape live — is the job of a
+  new sibling script, `scripts/diagnose_community_profile_citations.py`
+  (a genuine sibling to `diagnose_agent_taxonomy_citations.py`, not an
+  extension of it — the response shape is different enough, per Brian's
+  explicit call, to justify a separate script rather than branching one
+  script two ways): it makes the raw Anthropic call directly, dumps every
+  content block's `.text`/`.citations`, then prints the fully parsed result
+  (all 23 fields, the 12-key confidence dict, and the citation list) via the
+  exact same `extract_citations`/`_parse_labeled_blocks`/
+  `_split_trailing_sentinels`/`_parse_community_confidence` calls the real
+  function makes, plus an explicit `REGRESSION CHECK: PASS/FAIL` line — for
+  Brian's post-merge `railway ssh` verification against real communities,
+  same convention as the first fix's diagnostic re-run.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything

@@ -99,6 +99,67 @@ def _split_trailing_sentinels(text: str, keys: list[str]) -> tuple[str, dict[str
     return remaining, found
 
 
+_LABELED_BLOCK_HEADER_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*)$")
+
+
+def _parse_labeled_blocks(text: str, keys: list[str], terminal_key: str | None = None) -> dict[str, str]:
+    """Forward, order-tolerant parser for a response made of several
+    labeled multi-line blocks — the Community profile generalization of
+    ``_split_trailing_sentinels`` (which only handles a trailing tail of
+    one-line pairs; several Community profile fields are genuinely
+    multi-sentence prose that can't be forced onto one line). A line
+    matching one of ``keys`` (case-insensitively, e.g. "IDEAL_MEMBER:")
+    opens a new block; everything until the next recognized header (or end
+    of text) is that key's body, trimmed. A key not found in the text is
+    simply absent from the returned dict — same defensive contract as
+    ``_split_trailing_sentinels``.
+
+    ``terminal_key``, when given, is a header that — once matched — ends
+    header recognition entirely: every remaining line becomes that key's
+    body verbatim, with no further scanning. This is NOT a formatting
+    nicety. Community profile's CONFIDENCE: block contains 12 sub-key
+    lines ("IDEAL_MEMBER: true", "ANTI_FIT: false", ...) that share their
+    names with 12 of the 23 top-level fields. Without ``terminal_key``,
+    "IDEAL_MEMBER: true" inside CONFIDENCE:'s own body would be mistaken
+    for a fresh top-level ``ideal_member`` header, silently overwriting
+    the real narrative text parsed earlier in the same response — a data-
+    integrity bug, not a cosmetic one, since a corrupted field looks
+    exactly like a successfully-parsed one. ``generate_community_profile``
+    calls this with ``terminal_key="confidence"``, since CONFIDENCE: is
+    always the prompt's last requested section — the sub-parse of its own
+    body happens in a second, separate pass via ``_split_trailing_sentinels``,
+    which is safe precisely because it's scoped to only that block's text.
+    """
+    wanted = {k.upper() for k in keys}
+    terminal = terminal_key.upper() if terminal_key else None
+    lines = text.split("\n")
+    found: dict[str, list[str]] = {}
+    current: str | None = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _LABELED_BLOCK_HEADER_RE.match(line.strip())
+        key = m.group(1).upper() if m else None
+        if m and key in wanted:
+            current = key
+            found[current] = []
+            rest_of_line = m.group(2).strip()
+            if rest_of_line:
+                found[current].append(rest_of_line)
+            if current == terminal:
+                # Header recognition stops here — everything remaining
+                # (verbatim, including lines that look like other headers)
+                # belongs to this block alone.
+                found[current].extend(lines[i + 1:])
+                break
+            i += 1
+            continue
+        if current is not None:
+            found[current].append(line)
+        i += 1
+    return {k.lower(): "\n".join(v).strip() for k, v in found.items()}
+
+
 # Shared structure guidance for the AI-drafted Software directory fields
 # (Description, Agent taxonomy) that are long enough to read as one dense
 # block otherwise — voice_core covers tone/mechanics (including the em dash
@@ -1030,82 +1091,104 @@ Write about the community named below. Follow these rules exactly:
    "vibrant," "world-class," or similar adjective stacking. No exclamation points.
 2. Ground every claim in the page content provided below (or your own knowledge,
    if the page content is unavailable) — never invent specifics you can't support.
-3. `founded_year` must be a four-digit integer or null — only if you're confident
-   of the year.
-4. `notable_members` must be null unless you know of PUBLICLY reported members or
-   alumni — never guess or infer private membership from indirect signals.
-5. `public_criticism` is a drawback that's actually been reported or is visible
+3. FOUNDED_YEAR must be a four-digit integer, or the literal word "Unclear" —
+   only give a year if you're confident of it.
+4. NOTABLE_MEMBERS must be "None publicly reported" unless you know of
+   PUBLICLY reported members or alumni — never guess or infer private
+   membership from indirect signals.
+5. PUBLIC_CRITICISM is a drawback that's actually been reported or is visible
    from the page/your knowledge (e.g. pay-to-play concerns, inconsistent chapter
-   quality) — null if you don't know of any, never a fabricated nitpick.
-6. `verdict_summary` is one short sentence in the shape "Best for X, not for Y."
-7. Every prose field (see below) is 2-5 plain-prose sentences, no markdown, no
-   quotes — budget and depth are not a constraint here, so use the page
-   content below thoroughly rather than settling for a thin one-liner.
-8. `seniority_band`/`primary_purpose`/`resources_included`/`platform_type`/
-   `meeting_format`/`event_style` are short factual/categorical values (a
+   quality) — "None reported" if you don't know of any, never a fabricated nitpick.
+6. VERDICT_SUMMARY is one short sentence in the shape "Best for X, not for Y."
+7. Every prose field (see below) is 2-5 plain-prose sentences — budget and
+   depth are not a constraint here, so use the page content below thoroughly
+   rather than settling for a thin one-liner.
+8. SENIORITY_BAND/PRIMARY_PURPOSE/RESOURCES_INCLUDED/PLATFORM_TYPE/
+   MEETING_FORMAT/EVENT_STYLE are short factual/categorical values (a
    phrase, not a paragraph) — deliberately brief, distinct from the prose
    fields above.
-9. `cpe_eligible` must be one of "Yes", "No", or "Unclear", optionally with a
+9. CPE_ELIGIBLE must be one of "Yes", "No", or "Unclear", optionally with a
    short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)") —
    never guess "Yes" without a specific reason to believe it.
-10. For the "confidence" object below: for EACH of its twelve keys, report
-    true only if the page content (or your own knowledge) gave you a real,
-    specific basis for that field's answer; false if you had to draft it
-    thin, generic, or largely inferred. Judge each key independently — a
-    community's `value_prop` can be well-grounded while its `notable_members`
-    is a guess, and the confidence for each should reflect that, not a single
-    blanket judgment repeated twelve times.
+10. In the CONFIDENCE: block at the very end, for EACH of its twelve lines,
+    report true only if the page content (or your own knowledge) gave you a
+    real, specific basis for that field's answer; false if you had to draft
+    it thin, generic, or largely inferred. Judge each independently — a
+    community's VALUE_PROP can be well-grounded while its NOTABLE_MEMBERS
+    is a guess, and the confidence for each should reflect that, not a
+    single blanket judgment repeated twelve times.
+11. Write directly to the CFO Toolbox reader. Never reference "the page
+    content," "the provided page," or your own research process — if the
+    page is thin or ambiguous, simply write around it rather than
+    narrating that in the text.
+12. Never mention review scores, star ratings, testimonials, awards,
+    sponsor/customer logos, or a community's self-reported/marketing
+    results (member counts, revenue figures, named-company case-study
+    numbers). This is a factual, opinionated read, not a pitch.
 
-Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
+Write your response as plain prose only — no JSON, no markdown syntax (no
+**bold**, no _italics_, no # headings), no quotes, no markdown code fences.
+Structure it as exactly 23 labeled blocks, each starting with the field's
+name in capital letters followed by a colon, on its own line, then the
+field's value on the following line(s) — in this exact order:
 
-  "ideal_member": who this community is actually for.
-  "anti_fit": who should probably skip it.
-  "value_prop": the primary thing members get out of it.
-  "format_reality": the actual cadence and mix of in-person vs. virtual.
-  "engagement_level": how much active participation membership expects or rewards.
-  "sponsor_relationship_note": whether sponsor presence (if any) reads as
-     value-add or a sales funnel for members — a qualitative read, distinct from
-     the factual sponsor name/sponsorship type recorded elsewhere.
-  "business_model": how the community structurally sustains itself, e.g. a
-     gated, dues-funded peer group insulated from a sales pitch by design, vs.
-     a wide-funnel free-to-join community monetized via paid tiers, events, or
-     sponsorships. Distinct from sponsor_relationship_note above, which judges
-     whether a sponsor's presence feels value-add or salesy, not how the
-     community itself makes money.
-  "application_friction": the real barrier to entry, not just the access-model
-     label (e.g. "invite-only in name, but any VP with a LinkedIn intro gets in").
-  "cost_value_verdict": whether the price is justified by what members report
-     getting out of it.
-  "notable_members": publicly known alumni/members, or null.
-  "founded_year": four-digit year, or null.
-  "public_criticism": any visible/reported drawback, or null.
-  "verdict_summary": one short "best for X, not for Y" line.
-  "stage_focus": whether the community targets growth-stage, late-stage, or
-     public companies, or has no particular stage focus — or null if unclear.
-  "jobs_program": whether there's a FORMAL job-placement/transition program
-     (not just informal networking that happens to help with job searches) —
-     or null if unclear.
-  "team_or_individual": whether membership is individual-only, team/company-
-     based, or supports both — or null if unclear.
-  "seniority_band": who it targets by seniority (e.g. "CFO and VP Finance
-     only," "open to Controllers and up") — or null if unclear.
-  "primary_purpose": the community's main purpose in a few words, e.g.
-     "networking," "peer learning," or "both" — or null if unclear.
-  "resources_included": templates, benchmarking data, research, job boards,
-     etc. actually provided to members, or "No" if none — or null if unclear.
-  "platform_type": the technical platform members actually use, e.g. "Slack,"
-     "proprietary app," "in-person only" — or null if unclear.
-  "meeting_format": in-person, virtual, or hybrid cadence — or null if unclear.
-  "event_style": the feel of its events, e.g. "large-format conferences,"
-     "intimate small-group," "forum-only, no events" — or null if unclear.
-  "cpe_eligible": "Yes"/"No"/"Unclear", per rule 9 above.
-  "confidence": an object with exactly these twelve boolean keys, one per
-     the long-form/narrative fields above that carry real fabrication risk
-     (the short factual/categorical fields above are not included — see
-     rule 10): "ideal_member", "anti_fit", "value_prop", "business_model",
-     "format_reality", "engagement_level", "sponsor_relationship_note",
-     "application_friction", "cost_value_verdict", "notable_members",
-     "public_criticism", "verdict_summary".
+IDEAL_MEMBER: who this community is actually for.
+ANTI_FIT: who should probably skip it.
+VALUE_PROP: the primary thing members get out of it.
+FORMAT_REALITY: the actual cadence and mix of in-person vs. virtual.
+ENGAGEMENT_LEVEL: how much active participation membership expects or rewards.
+SPONSOR_RELATIONSHIP_NOTE: whether sponsor presence (if any) reads as
+  value-add or a sales funnel for members — a qualitative read, distinct from
+  the factual sponsor name/sponsorship type recorded elsewhere.
+BUSINESS_MODEL: how the community structurally sustains itself, e.g. a
+  gated, dues-funded peer group insulated from a sales pitch by design, vs.
+  a wide-funnel free-to-join community monetized via paid tiers, events, or
+  sponsorships. Distinct from SPONSOR_RELATIONSHIP_NOTE above, which judges
+  whether a sponsor's presence feels value-add or salesy, not how the
+  community itself makes money.
+APPLICATION_FRICTION: the real barrier to entry, not just the access-model
+  label (e.g. "invite-only in name, but any VP with a LinkedIn intro gets in").
+COST_VALUE_VERDICT: whether the price is justified by what members report
+  getting out of it.
+NOTABLE_MEMBERS: publicly known alumni/members, per rule 4 above.
+FOUNDED_YEAR: four-digit year, per rule 3 above.
+PUBLIC_CRITICISM: any visible/reported drawback, per rule 5 above.
+VERDICT_SUMMARY: one short "best for X, not for Y" line.
+STAGE_FOCUS: whether the community targets growth-stage, late-stage, or
+  public companies, or has no particular stage focus — or "Unclear."
+JOBS_PROGRAM: whether there's a FORMAL job-placement/transition program
+  (not just informal networking that happens to help with job searches) —
+  or "Unclear."
+TEAM_OR_INDIVIDUAL: whether membership is individual-only, team/company-
+  based, or supports both — or "Unclear."
+SENIORITY_BAND: who it targets by seniority (e.g. "CFO and VP Finance
+  only," "open to Controllers and up") — or "Unclear."
+PRIMARY_PURPOSE: the community's main purpose in a few words, e.g.
+  "networking," "peer learning," or "both" — or "Unclear."
+RESOURCES_INCLUDED: templates, benchmarking data, research, job boards,
+  etc. actually provided to members, or "No" if none, or "Unclear."
+PLATFORM_TYPE: the technical platform members actually use, e.g. "Slack,"
+  "proprietary app," "in-person only" — or "Unclear."
+MEETING_FORMAT: in-person, virtual, or hybrid cadence — or "Unclear."
+EVENT_STYLE: the feel of its events, e.g. "large-format conferences,"
+  "intimate small-group," "forum-only, no events" — or "Unclear."
+CPE_ELIGIBLE: "Yes"/"No"/"Unclear", per rule 9 above.
+CONFIDENCE: exactly twelve lines, one per the long-form/narrative fields
+  above that carry real fabrication risk (the short factual/categorical
+  fields above are not included — see rule 10), each in the form
+  "FIELD_NAME: true" or "FIELD_NAME: false":
+  IDEAL_MEMBER: true|false
+  ANTI_FIT: true|false
+  VALUE_PROP: true|false
+  BUSINESS_MODEL: true|false
+  FORMAT_REALITY: true|false
+  ENGAGEMENT_LEVEL: true|false
+  SPONSOR_RELATIONSHIP_NOTE: true|false
+  APPLICATION_FRICTION: true|false
+  COST_VALUE_VERDICT: true|false
+  NOTABLE_MEMBERS: true|false
+  PUBLIC_CRITICISM: true|false
+  VERDICT_SUMMARY: true|false
 
 Community name: {name}
 Community URL: {url}
@@ -1168,9 +1251,30 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     mechanically verified by the API. Unlike Description/Agent taxonomy,
     this is ONE citation set for the whole 23-field draft (decision 5,
     Phase 0) — not per field — since every field is drafted from the same
-    single page in the same call. `inject_markers=False` since this response
-    is strict JSON. `citations` is empty when the fetch failed
-    (`low_confidence=True`), since there's nothing to cite."""
+    single page in the same call. `citations` is empty when the fetch
+    failed (`low_confidence=True`), since there's nothing to cite.
+
+    Community profile citation fix (2026-08, see CLAUDE.md — the second
+    generate_*() rewritten this way, after Description/Agent taxonomy):
+    plain prose, not JSON — same incompatibility between citations and
+    strict-JSON output that motivated that fix. `inject_markers=True`
+    means real citations land as genuine `[n]` markers inline in whichever
+    field actually got cited. The response is parsed as 23 labeled blocks
+    (`FIELD_NAME:` header, body runs to the next header) via the new
+    `_parse_labeled_blocks`, with `terminal_key="confidence"` — the
+    CONFIDENCE: block's own 12 sub-key lines share names with 12 of the 23
+    top-level fields, so header recognition has to stop there entirely or
+    a line like "IDEAL_MEMBER: true" inside it would be mistaken for a
+    fresh top-level header and corrupt the real narrative text parsed
+    earlier (see `_parse_labeled_blocks`'s own docstring). The confidence
+    block's body is then parsed *separately*, via `_split_trailing_sentinels`
+    — safe once scoped to just that text. A response with literally no
+    recognized field headers at all (e.g. the model reverting fully to a
+    JSON blob) parses to nothing and is treated as a hard failure —
+    deliberately stricter than Description/Agent taxonomy's "some text
+    beats none," since `upsert_community_profile` is a full replace of all
+    23 columns: silently saving an all-empty draft wouldn't just carry
+    stale garbage forward, it would blank a community's entire profile."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -1215,10 +1319,50 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             max_tokens=_checked_max_tokens(6000),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": message_content}],
         )
-        # inject_markers=False: strict JSON — see generate_tool_description.
-        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=False)
-        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        data = json.loads(raw)
+        # inject_markers=True: real citations now surface as genuine [n]
+        # markers spliced into whichever field actually got cited — see
+        # the docstring above.
+        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=True)
+        raw = raw.strip().removeprefix("```").removesuffix("```").strip()   # defensive: a stray
+                          # code fence despite the instruction not to use one
+        blocks = _parse_labeled_blocks(raw, COMMUNITY_PROFILE_FIELDS + ["confidence"],
+                                        terminal_key="confidence")
+        if not blocks:
+            # No recognized field header anywhere in the response (e.g. the
+            # model reverted to a JSON blob) — nothing to safely save. See
+            # the docstring above for why this is stricter than Description/
+            # Agent taxonomy's "some text beats none."
+            raise ValueError("no recognized field headers in generate_community_profile response")
+
+        _, confidence_pairs = _split_trailing_sentinels(
+            blocks.get("confidence", ""), COMMUNITY_CONFIDENCE_FIELDS)
+
+        def _field(key: str) -> str:
+            return blocks.get(key, "").strip()
+
+        def _field_or_placeholder_empty(key: str) -> str:
+            """Same as _field, but coerces the model's null-placeholder
+            words ("Unclear", "None reported", "None publicly reported")
+            back to "" — the old JSON prompt used a real `null` for
+            "unknown" on this field, stored as "" via `data.get(f) or ""`;
+            plain text has no null, so the new prompt asks for a literal
+            word instead, and this restores the original storage contract
+            rather than silently changing it. NOT used for cpe_eligible,
+            whose "Unclear" was already a real, literal stored value in
+            the ORIGINAL prompt (rule 9), not a null-placeholder."""
+            value = _field(key)
+            # Tolerate a trailing period the model may add out of habit
+            # even to a short literal phrase ("None reported." vs "None
+            # reported") — the placeholder match shouldn't be defeated by
+            # punctuation the prompt never asked for either way.
+            normalized = value.strip().lower().rstrip(".")
+            return "" if normalized in _COMMUNITY_NULL_PLACEHOLDERS else value
+
+        founded_year_raw = _field("founded_year")
+        try:
+            founded_year = int(founded_year_raw) if founded_year_raw else None
+        except (TypeError, ValueError):
+            founded_year = None
 
         from .pricing import compute_cost
         usage = getattr(resp, "usage", None)
@@ -1228,38 +1372,32 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
         cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        founded_year = data.get("founded_year")
-        try:
-            founded_year = int(founded_year) if founded_year is not None else None
-        except (TypeError, ValueError):
-            founded_year = None
-
         return CommunityProfileDraft(
-            ideal_member=str(data.get("ideal_member", "")).strip(),
-            anti_fit=str(data.get("anti_fit", "")).strip(),
-            value_prop=str(data.get("value_prop", "")).strip(),
-            format_reality=str(data.get("format_reality", "")).strip(),
-            engagement_level=str(data.get("engagement_level", "")).strip(),
-            sponsor_relationship_note=str(data.get("sponsor_relationship_note", "")).strip(),
-            business_model=str(data.get("business_model", "")).strip(),
-            application_friction=str(data.get("application_friction", "")).strip(),
-            cost_value_verdict=str(data.get("cost_value_verdict", "")).strip(),
-            notable_members=str(data.get("notable_members") or "").strip(),
+            ideal_member=_field("ideal_member"),
+            anti_fit=_field("anti_fit"),
+            value_prop=_field("value_prop"),
+            format_reality=_field("format_reality"),
+            engagement_level=_field("engagement_level"),
+            sponsor_relationship_note=_field("sponsor_relationship_note"),
+            business_model=_field("business_model"),
+            application_friction=_field("application_friction"),
+            cost_value_verdict=_field("cost_value_verdict"),
+            notable_members=_field_or_placeholder_empty("notable_members"),
             founded_year=founded_year,
-            public_criticism=str(data.get("public_criticism") or "").strip(),
-            verdict_summary=str(data.get("verdict_summary", "")).strip(),
-            stage_focus=str(data.get("stage_focus") or "").strip(),
-            jobs_program=str(data.get("jobs_program") or "").strip(),
-            team_or_individual=str(data.get("team_or_individual") or "").strip(),
-            seniority_band=str(data.get("seniority_band") or "").strip(),
-            primary_purpose=str(data.get("primary_purpose") or "").strip(),
-            resources_included=str(data.get("resources_included") or "").strip(),
-            platform_type=str(data.get("platform_type") or "").strip(),
-            meeting_format=str(data.get("meeting_format") or "").strip(),
-            event_style=str(data.get("event_style") or "").strip(),
-            cpe_eligible=str(data.get("cpe_eligible") or "").strip(),
+            public_criticism=_field_or_placeholder_empty("public_criticism"),
+            verdict_summary=_field("verdict_summary"),
+            stage_focus=_field_or_placeholder_empty("stage_focus"),
+            jobs_program=_field_or_placeholder_empty("jobs_program"),
+            team_or_individual=_field_or_placeholder_empty("team_or_individual"),
+            seniority_band=_field_or_placeholder_empty("seniority_band"),
+            primary_purpose=_field_or_placeholder_empty("primary_purpose"),
+            resources_included=_field_or_placeholder_empty("resources_included"),
+            platform_type=_field_or_placeholder_empty("platform_type"),
+            meeting_format=_field_or_placeholder_empty("meeting_format"),
+            event_style=_field_or_placeholder_empty("event_style"),
+            cpe_eligible=_field("cpe_eligible"),   # "Unclear" is a real value here — never coerced
             low_confidence=low_confidence,
-            confidence=_parse_community_confidence(data.get("confidence")),
+            confidence=_parse_community_confidence(confidence_pairs),
             citations=citations,
             model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
@@ -1269,13 +1407,27 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
         return None
 
 
+# The old JSON prompt used a real `null` for "unknown" on several fields
+# (stored as "" via `data.get(f) or ""`); the plain-prose prompt asks the
+# model to write one of these literal words instead, coerced back to ""
+# at parse time — see _field_or_placeholder_empty above. Deliberately NOT
+# applied to cpe_eligible, whose "Unclear" is a real, literal stored value.
+_COMMUNITY_NULL_PLACEHOLDERS = {"unclear", "none reported", "none publicly reported"}
+
+
 def _parse_community_confidence(raw) -> dict:
-    """Coerce the model's "confidence" object into {field: bool}, defaulting
-    a missing/malformed key to False (needs review) rather than guessing
-    true — same safe-default convention as generate_tool_agent_taxonomy's
-    `not bool(data.get("confident"))`."""
+    """Coerce the model's confidence sentinel pairs into {field: bool},
+    defaulting a missing/malformed key to False (needs review) rather than
+    guessing true — same safe-default convention as
+    generate_tool_agent_taxonomy's `not bool(data.get("confident"))`.
+
+    `raw` is `_split_trailing_sentinels`'s output — {UPPERCASE_KEY: "true"
+    or "false" (or any other string)} — NOT a real dict of booleans (that
+    was the old json.loads-based contract). The real Python footgun this
+    guards against: `bool("false")` is `True`. Every value has to be
+    compared against the literal string "true", never just truthiness."""
     raw = raw if isinstance(raw, dict) else {}
-    return {f: bool(raw.get(f)) for f in COMMUNITY_CONFIDENCE_FIELDS}
+    return {f: raw.get(f.upper(), "").strip().lower() == "true" for f in COMMUNITY_CONFIDENCE_FIELDS}
 
 
 # Sentinel drafted into a listing field the model isn't confident about,
