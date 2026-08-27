@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 
 from .agent import VOICE_CORE_DEFAULT
@@ -35,6 +36,67 @@ def _resolve_voice_core(voice_core: str) -> str:
     Library handle of its own), and an empty/unset value falls back to the
     code-constant default here rather than at every call site."""
     return (voice_core or "").strip() or VOICE_CORE_DEFAULT
+
+
+_SENTINEL_LINE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*)$")
+
+
+def _split_trailing_sentinels(text: str, keys: list[str]) -> tuple[str, dict[str, str]]:
+    """Strip a trailing block of "KEY: value" sentinel lines off the end of
+    ``text`` and return (remaining_text, {KEY: value}).
+
+    Citation-tag investigation (2026-08, see CLAUDE.md): replaces
+    json.loads() as the parsing boundary for Description/Agent taxonomy's
+    plain-prose response, now that citations are real (inject_markers=True)
+    rather than JSON-wrapped — citations and strict JSON output are
+    incompatible at the API level (interleaved citation blocks can't satisfy
+    a single-string JSON schema), which is what let the model fall back to
+    writing its own literal pseudo-citation tags as text inside the JSON
+    string in the first place. A trailing "KEY: value" line is a much
+    smaller, more tolerant contract than a whole well-formed JSON object.
+
+    Scans backward from the end of ``text`` line by line: a contiguous run
+    of blank lines and "KEY: value" lines (KEY drawn from ``keys``, matched
+    case-insensitively, each key taken at most once) is consumed as the
+    sentinel block; the first line that's neither blank nor a recognized
+    sentinel (scanning backward) ends the block, and everything from there
+    forward is ``remaining_text``. Order-tolerant (the model can emit the
+    keys in any order) and defensive against a missing key — that key is
+    simply absent from the returned dict, and every caller applies its own
+    conservative default (``confident`` -> False), the same fallback
+    behavior an absent JSON key always had. Unlike json.loads, a malformed
+    or missing sentinel never raises — it degrades to "key not found," not
+    a hard parse failure, which is a deliberate improvement: the G1
+    truncation-driven JSONDecodeError failures Phase 0 diagnosed can't
+    recur here, since there's no single well-formed object required for the
+    substantive prose to still come through.
+    """
+    wanted = {k.upper() for k in keys}
+    lines = text.rstrip("\n").split("\n")
+    found: dict[str, str] = {}
+    cut = len(lines)
+    i = len(lines) - 1
+    while i >= 0:
+        line = lines[i].strip()
+        if not line:
+            cut = i
+            i -= 1
+            continue
+        m = _SENTINEL_LINE_RE.match(line)
+        key = m.group(1).upper() if m else None
+        if m and key in wanted:
+            # A duplicate of an already-captured key is still consumed (so
+            # it doesn't leak into the returned text as a stray sentinel
+            # line) — but the value already captured wins, since scanning
+            # backward means the first one found is the last one written.
+            if key not in found:
+                found[key] = m.group(2).strip()
+            cut = i
+            i -= 1
+            continue
+        break
+    remaining = "\n".join(lines[:cut]).strip()
+    return remaining, found
 
 
 # Shared structure guidance for the AI-drafted Software directory fields
@@ -212,32 +274,45 @@ Follow these rules exactly:
    or similar adjective stacking. No exclamation points.
 4. Do not mention or guess whether the company has been acquired by another company —
    leave that out entirely, even if you believe you know.
+5. Write directly to the CFO Toolbox reader. Never reference "the provided
+   pages," "the page content," "the documents," or your own research
+   process — if a source is thin, ambiguous, or contradictory, simply
+   write around it (omit the claim, or state plainly what's actually
+   known) rather than narrating the gap or the sourcing situation in the
+   text itself.
+6. Never mention review scores, star ratings, testimonials, awards,
+   customer logos, or a vendor's self-reported/marketing results (revenue
+   figures, review counts, named-customer case-study numbers). This is a
+   factual account of what the tool does, not a pitch.
 
-Fields:
-  "description": the full profile-page write-up — roughly 8-12 sentences
-     (about 150-300 words). Budget and depth are not a constraint here; use
-     the page content thoroughly rather than settling for a thin summary.
-     Every sentence should carry real information, not padding.
-  "summary": a short, standalone 2-3 sentence version (about 30-60 words)
-     for the directory card and search results — a proper condensed
-     rewrite someone could read on its own and understand what the tool is
-     and does, not just the description's opening sentences copy-pasted.
-  "confident": true if the page content below gave you a solid, specific
-     basis for both fields; false if you had to draft from thin/ambiguous
-     page content or from your own general knowledge rather than the page
-     itself. Say so honestly rather than defaulting to true — a reader
-     relies on this to know whether the write-up is well-grounded.
-
-Voice guide — write both fields in this voice:
+Voice guide — write both parts in this voice:
 {voice_core}
 
 {structure_guidance}
-"summary" is the exception to the structure guidance above: it's a short
-subhead/card teaser, always a single continuous paragraph, no line breaks
-or bullets — the structure guidance applies only to "description".
 
-Return STRICT JSON only (no prose, no markdown fences) with exactly these
-keys: "description", "summary", "confident".
+Write your response as plain prose in exactly three parts, in this order,
+with no JSON and no markdown code fences:
+
+1. The full profile-page write-up — roughly 8-12 sentences (about 150-300
+   words). Budget and depth are not a constraint here; use the page
+   content thoroughly rather than settling for a thin summary. Every
+   sentence should carry real information, not padding. No markdown
+   syntax (no **bold**, no _italics_, no # headings) — the one exception
+   is a short "- " bulleted list where the content is genuinely
+   list-like, per the structure guidance above.
+2. A blank line, then a line starting exactly with "SUMMARY:" followed on
+   the same line by a short, standalone 2-3 sentence version (about 30-60
+   words) for the directory card and search results — a proper condensed
+   rewrite someone could read on its own and understand what the tool is
+   and does, not just the write-up's opening sentences copy-pasted.
+   Always a single continuous paragraph on one line, no line breaks or
+   bullets, and no citation markers.
+3. A blank line, then a line starting exactly with "CONFIDENT:" followed
+   by "true" if the page content below gave you a solid, specific basis
+   for both parts, or "false" if you had to draft from thin/ambiguous
+   page content or from your own general knowledge rather than the page
+   itself. Say so honestly rather than defaulting to true — a reader
+   relies on this to know whether the write-up is well-grounded.
 
 Tool name: {name}
 Tool URL: {url}
@@ -276,10 +351,28 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
     being flattened into the prompt, so `citations` reflects what the
     model actually cited, mechanically verified by the API. `confident`
     is a separate, independently-checkable self-report, as before.
-    `inject_markers=False` since this response is strict JSON — see
-    generate_tool_agent_taxonomy's docstring for why. `citations` is empty
-    when the fetch failed (`low_confidence=True`), since there's nothing
-    to cite.
+    `citations` is empty when the fetch failed (`low_confidence=True`),
+    since there's nothing to cite.
+
+    Citation-tag investigation follow-up (2026-08, see CLAUDE.md): the
+    response is plain prose, not JSON — citations and the API's own
+    structured-output feature are mutually incompatible (Anthropic's own
+    docs: citations require interleaving citation blocks with text output,
+    which a single-string JSON schema can't accommodate), and asking for
+    "strict JSON" as plain instruction text (rather than the API's real
+    structured-output parameter) left the model free to invent its own
+    pseudo-citation tag syntax inside the JSON string when it wanted to
+    signal a cited claim with no clean way to do so. Dropping the JSON
+    contract removes that pressure and lets `inject_markers=True` do what
+    it already does for FP&A Buddy: a real cited span gets a genuine `[n]`
+    marker spliced in by `extract_citations` itself, mechanically, not by
+    the model. `summary`/`confident` are recovered from trailing
+    "SUMMARY: ..."/"CONFIDENT: true|false" sentinel lines via
+    `_split_trailing_sentinels` rather than JSON keys — deterministic
+    string parsing, and unlike `json.loads`, a missing or malformed
+    sentinel degrades to a safe default instead of failing the whole
+    draft (the G1 truncation-driven parse-failure class from the citation-
+    tag investigation can't recur here).
 
     Voice enforcement + structure (2026-08): `voice_core` is the caller's
     already-resolved `lib.get_setting("voice_core") or VOICE_CORE_DEFAULT`
@@ -327,10 +420,21 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
                               # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": message_content}],
         )
-        # inject_markers=False: strict JSON — see generate_tool_agent_taxonomy.
-        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=False)
-        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        data = json.loads(raw)
+        # inject_markers=True: real citations now surface as genuine [n]
+        # markers spliced into the text by extract_citations itself, not
+        # left for the model to signal on its own — see the docstring above.
+        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=True)
+        raw = raw.strip().removeprefix("```").removesuffix("```").strip()   # defensive: a stray
+                          # code fence despite the instruction not to use one
+        body_text, sentinels = _split_trailing_sentinels(raw, ["SUMMARY", "CONFIDENT"])
+        description_text = body_text.strip()
+        if not description_text:
+            # Degenerate case: essentially nothing came back (the old
+            # json.loads("") "Expecting value" failure's equivalent) — no
+            # usable draft to return.
+            raise ValueError("empty description after parsing")
+        summary_text = sentinels.get("SUMMARY", "").strip()
+        confident = sentinels.get("CONFIDENT", "").strip().lower() == "true"
 
         from .pricing import compute_cost
         usage = getattr(resp, "usage", None)
@@ -341,9 +445,9 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
         return ToolDescriptionDraft(
-            description=str(data.get("description", "")).strip(),
-            summary=str(data.get("summary", "")).strip(),
-            low_confidence=low_confidence, confident=bool(data.get("confident")),
+            description=description_text,
+            summary=summary_text,
+            low_confidence=low_confidence, confident=confident,
             citations=citations, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
@@ -665,16 +769,37 @@ helps but a human stays in the loop, or no real agent framing at all
 (generic "AI-powered" marketing language without actual agent behavior
 described doesn't count as agentic — say so plainly rather than
 overstating it). If the documents give no genuine signal either way, say
-that rather than guessing, and set "confident" to false.
+that rather than guessing, and end with CONFIDENT: false (see the format
+instructions below).
+
+Additional rules:
+- Write directly to the CFO Toolbox reader. Never reference "the provided
+  pages," "the page content," "the documents," or your own research
+  process — if a source is thin, contradictory, or missing, simply write
+  around it (omit the claim, or say plainly that no agent framing is
+  evident) rather than narrating the gap or your sourcing situation in
+  the text itself.
+- Plain prose only — no markdown syntax (no **bold**, no _italics_, no #
+  headings). The one exception is a short "- " bulleted list, one item
+  per line, when the content genuinely names several distinct agents or
+  capabilities.
+- Never mention review scores, star ratings, testimonials, awards,
+  customer logos, or a vendor's self-reported/marketing results (revenue
+  figures, review counts, case-study numbers). This is a factual account
+  of agent behavior, not a pitch.
 
 Voice guide — write the summary in this voice:
 {voice_core}
 
 {structure_guidance}
 
-Return STRICT JSON only (no prose, no markdown fences) with exactly this
-shape:
-{{"summary": "...", "confident": true|false}}
+Write your response as plain prose only — no JSON, no markdown code
+fences, no preamble. End your response with exactly one line, after a
+blank line, in this exact form:
+
+CONFIDENT: true
+
+(or CONFIDENT: false if the documents gave no genuine signal either way)
 
 Product name: {name}
 Product URL: {url}
@@ -779,7 +904,20 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     generate_tool_description's same resolve-with-fallback contract, and the
     summary is instructed to use paragraph breaks / bullets where genuinely
     list-like — most relevant here when several named agents need listing
-    (see the prompt's own "find and name ALL of them" instruction)."""
+    (see the prompt's own "find and name ALL of them" instruction).
+
+    Citation-tag investigation follow-up (2026-08, see CLAUDE.md and
+    generate_tool_description's own matching docstring note): the response
+    is plain prose with a trailing "CONFIDENT: true|false" sentinel line,
+    not JSON — citations and the API's structured-output feature can't
+    coexist, and a plain-instruction "strict JSON" contract left the model
+    free to invent its own pseudo-citation tag text inside the JSON string
+    when a real citation had nowhere clean to go. `inject_markers=True`
+    means a real cited span now gets a genuine `[n]` marker spliced in by
+    `extract_citations` itself. `confident` is recovered via
+    `_split_trailing_sentinels`, which degrades to a safe default on a
+    missing/malformed sentinel rather than failing the whole draft the way
+    `json.loads` used to on a truncated response."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -812,16 +950,21 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
             max_tokens=_checked_max_tokens(2000),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": message_content}],
         )
-        # inject_markers=False: this response is strict JSON, and splicing a
-        # [n] marker into the middle of the "summary" string would corrupt
-        # it — see linklib.citations.extract_citations's docstring. `raw` is
-        # therefore a plain concatenation, safe to json.loads(); `citations`
-        # is collected the same way regardless, already deduped by
-        # document_index (== deduped by url in practice, since each fetched
-        # page has its own distinct URL).
-        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=False)
-        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        data = json.loads(raw)
+        # inject_markers=True: real citations now surface as genuine [n]
+        # markers spliced into the note text by extract_citations itself —
+        # see the docstring above. `citations` is collected the same way
+        # regardless, already deduped by document_index (== deduped by url
+        # in practice, since each fetched page has its own distinct URL).
+        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=True)
+        raw = raw.strip().removeprefix("```").removesuffix("```").strip()   # defensive: a stray
+                          # code fence despite the instruction not to use one
+        note_text, sentinels = _split_trailing_sentinels(raw, ["CONFIDENT"])
+        note_text = note_text.strip()
+        if not note_text:
+            # Degenerate case: essentially nothing came back — no usable
+            # draft to return (the old json.loads("") failure's equivalent).
+            raise ValueError("empty agent taxonomy note after parsing")
+        confident = sentinels.get("CONFIDENT", "").strip().lower() == "true"
 
         from .pricing import compute_cost
         usage = getattr(resp, "usage", None)
@@ -831,12 +974,10 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
         cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        data = data if isinstance(data, dict) else {}
-
         return AgentTaxonomyResult(
-            agent_taxonomy_note=str(data.get("summary") or "").strip(),
-            agent_taxonomy_needs_verification=not bool(data.get("confident")),
-            confident=bool(data.get("confident")),
+            agent_taxonomy_note=note_text,
+            agent_taxonomy_needs_verification=not confident,
+            confident=confident,
             low_confidence=low_confidence, citations=citations, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )

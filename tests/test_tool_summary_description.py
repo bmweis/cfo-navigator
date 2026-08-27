@@ -114,11 +114,12 @@ def _mock_fetch_page(monkeypatch, content=""):
 def test_generate_tool_description_parses_both_fields(monkeypatch):
     _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
     _mock_anthropic(monkeypatch,
-        '{"description": "Runway is a financial planning platform built for finance teams at '
-        'growth-stage companies. It centralizes headcount, revenue, and expense planning '
-        'into a single collaborative model.", '
-        '"summary": "Runway is an FP&A platform for growth-stage finance teams. It centralizes '
-        'headcount and revenue planning into one collaborative model."}')
+        "Runway is a financial planning platform built for finance teams at "
+        "growth-stage companies. It centralizes headcount, revenue, and expense planning "
+        "into a single collaborative model.\n\n"
+        "SUMMARY: Runway is an FP&A platform for growth-stage finance teams. It centralizes "
+        "headcount and revenue planning into one collaborative model.\n\n"
+        "CONFIDENT: true")
     draft = enrich.generate_tool_description("Runway", "https://runway.com")
     assert draft is not None
     assert "financial planning platform" in draft.description
@@ -129,7 +130,7 @@ def test_generate_tool_description_parses_both_fields(monkeypatch):
 
 def test_generate_tool_description_low_confidence_when_no_page_content(monkeypatch):
     _mock_fetch_page(monkeypatch, "")
-    _mock_anthropic(monkeypatch, '{"description": "A finance tool.", "summary": "A finance tool."}')
+    _mock_anthropic(monkeypatch, "A finance tool.\n\nSUMMARY: A finance tool.\n\nCONFIDENT: false")
     draft = enrich.generate_tool_description("Runway", "https://runway.com")
     assert draft is not None
     assert draft.low_confidence is True
@@ -249,7 +250,7 @@ def test_quick_edit_route_saves_summary(env):
 
 def test_generate_description_route_returns_summary(env, monkeypatch):
     _mock_fetch_page(monkeypatch, "Runway is an FP&A platform.")
-    _mock_anthropic(monkeypatch, '{"description": "A long description.", "summary": "A short summary."}')
+    _mock_anthropic(monkeypatch, "A long description.\n\nSUMMARY: A short summary.\n\nCONFIDENT: true")
     client = _client(env)
     _login(client)
     r = client.post("/admin/tools/software/generate-description", json={

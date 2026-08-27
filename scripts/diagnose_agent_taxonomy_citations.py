@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
-"""One-off, read-only diagnostic for Phase 0's A3 exception (regen-script
-citation-tag investigation, 2026-08). Runs generate_tool_agent_taxonomy's
-exact fetch + prompt-building steps for two named tools, but makes the raw
-Anthropic call itself (instead of going through generate_tool_agent_taxonomy)
-so the RAW response can be logged before linklib.citations.extract_citations
-ever touches it — every content block's type/.text/.citations, plus
-resp.stop_reason, for each tool.
+"""One-off, read-only diagnostic for the citation-tag investigation
+(2026-08, see CLAUDE.md). Originally Phase 0's A3 exception (what does the
+raw Anthropic response actually look like before linklib.citations.
+extract_citations touches it); now doubles as the acceptance check for the
+generation-path fix — since it imports enrich_mod._AGENT_TAXONOMY_PROMPT
+and calls enrich_mod._fetch_taxonomy_grounding/_build_taxonomy_documents
+directly rather than duplicating them, it automatically exercises whatever
+prompt/parsing shape generate_tool_agent_taxonomy currently has, live,
+without this script needing its own update every time that function
+changes. Runs the exact fetch + prompt-building steps for two named tools,
+but makes the raw Anthropic call itself (instead of going through
+generate_tool_agent_taxonomy) so the RAW response can be logged before
+extract_citations ever touches it — every content block's
+type/.text/.citations, plus resp.stop_reason — AND, since the
+citation-tag-investigation follow-up, the FINAL PARSED result
+(note/confident/citations) via the same extract_citations +
+_split_trailing_sentinels calls the real function makes, plus an explicit
+pass/fail check for the literal pseudo-citation-tag text the whole
+investigation started from.
 
 Run against:
   - Concourse  (had a populated Sources list AND raw tags in the text)
@@ -87,6 +99,38 @@ def _dump_response(name: str, resp) -> None:
             print("  .citations: none")
 
 
+_FORBIDDEN_SUBSTRINGS = ["cite index=", "<cite", '"confident"', '"summary"', "{\"description\"", "```"]
+
+
+def _dump_parsed(enrich_mod, resp, sent_docs) -> None:
+    """The final parsed result, via the SAME calls
+    generate_tool_agent_taxonomy itself makes (extract_citations then
+    _split_trailing_sentinels) — not a reimplementation, so this can't
+    silently drift from what the real function actually produces. Prints
+    an explicit PASS/FAIL for the literal pseudo-citation-tag text
+    (and a few other legacy-JSON-shape tells) the investigation exists to
+    close out."""
+    raw, citations = enrich_mod.extract_citations(resp.content, sent_docs, inject_markers=True)
+    raw = raw.strip().removeprefix("```").removesuffix("```").strip()
+    note_text, sentinels = enrich_mod._split_trailing_sentinels(raw, ["CONFIDENT"])
+    note_text = note_text.strip()
+    confident = sentinels.get("CONFIDENT", "").strip().lower() == "true"
+
+    print("\n  --- PARSED (what generate_tool_agent_taxonomy would actually store) ---")
+    print(f"  confident: {confident} (raw sentinel value: {sentinels.get('CONFIDENT')!r})")
+    print(f"  citations: {len(citations)}")
+    for c in citations:
+        print(f"    [{c['n']}] {c['title']!r} — {c['url']}")
+    print(f"  agent_taxonomy_note ({len(note_text)} chars):")
+    print("  " + note_text.replace("\n", "\n  "))
+
+    hits = [s for s in _FORBIDDEN_SUBSTRINGS if s in note_text]
+    if hits:
+        print(f"\n  REGRESSION CHECK: FAIL — found {hits!r} in the parsed note")
+    else:
+        print(f"\n  REGRESSION CHECK: PASS — none of {_FORBIDDEN_SUBSTRINGS!r} found in the parsed note")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=None, help="Path to library.db (defaults via LINKLIB_DB)")
@@ -159,6 +203,7 @@ def main() -> int:
                 messages=[{"role": "user", "content": message_content}],
             )
             _dump_response(tool["name"], resp)
+            _dump_parsed(enrich_mod, resp, sent_docs)
 
         print(f"\n{'=' * 70}\nDone. No writes were made — nothing in this run touched library.db, "
               f"entity_citations, or any log file.\n{'=' * 70}")

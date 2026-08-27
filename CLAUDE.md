@@ -3407,6 +3407,56 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   its own test-batch-first pass, not folded into this change. See
   ARCHITECTURE.md's `/ask` sequence-diagram notes (the `voice_core`/
   `voice_fpa_buddy` bullet) for the cross-referenced write-up.
+- **Citation-tag investigation + generation-path fix (2026-08) — a
+  throwaway one-off regeneration script surfaced literal
+  `(cite index="D-S">...</cite>` pseudo-tag text baked into public
+  Description/Agent taxonomy fields, plus editor-facing asides and a
+  memory-drafted note that shipped live with no fetch-failure signal.**
+  Investigated read-only first (Phase 0), then root-caused live: a
+  diagnostic script confirmed `.citations` came back empty on the calls
+  that showed tags (the real Citations API never fired) and
+  `stop_reason` was `end_turn`, not truncation — the model was writing
+  the tags itself, as literal text, because `generate_tool_description`/
+  `generate_tool_agent_taxonomy` asked for strict JSON while citations
+  were enabled, a combination Anthropic's own docs confirm is
+  incompatible ("citations require interleaving citation blocks with
+  text output... incompatible with the strict JSON schema constraints of
+  structured outputs") — the model had no clean, API-backed way to
+  signal a cited claim inside one JSON string and improvised its own tag
+  notation instead. Fixed by dropping the JSON contract for these two
+  fields entirely: plain prose, real `inject_markers=True` citations
+  (the same pattern `agent.py`'s FP&A Buddy already trusts), `confident`/
+  `summary` recovered from trailing `"KEY: value"` sentinel lines via a
+  new `linklib.enrich._split_trailing_sentinels` rather than
+  `json.loads` — which also closes the truncation-driven
+  `JSONDecodeError` failure class the investigation found (a missing/
+  malformed sentinel now degrades to a safe default instead of losing
+  the whole draft). Four new prompt rules close the gaps found (no
+  markdown emphasis syntax, no editor-facing address, no review-scores/
+  testimonials/logos/reported-results). `entity_citations` and every
+  caller downstream of the two drafts' dataclasses are unchanged — only
+  how the citations are produced moved, never their shape.
+  **Verified two ways, deliberately not conflated**: a golden-fixture
+  suite (`tests/citations_fixtures/enrich_sentinel_fixtures.py` +
+  `tests/test_enrich_sentinel_parsing.py`, written against the spec
+  before the implementation was wired to it) proves the deterministic
+  parsing — including a reproduction of the actual production bug shape
+  (Datarails' real text) run through both the post-fix code and, loaded
+  separately, `origin/main`'s pre-fix code: the tags leak through in
+  BOTH, confirmed rather than assumed, since no code-level filter can
+  safely strip an unbounded, unknown bad-output pattern after the fact —
+  the fix is preventative, at the prompt level, not corrective. What no
+  unit test can prove — whether the new prompt actually stops the model
+  from reverting to the old shape live — is
+  `scripts/diagnose_agent_taxonomy_citations.py`'s job (extended with a
+  `REGRESSION CHECK: PASS/FAIL` line), run post-merge against the
+  deployed fix before any bulk regeneration touches the rest of the ~73
+  tools the throwaway script never reached. **Community profile
+  (`generate_community_profile`) has the identical vulnerable shape,
+  just never exercised by the throwaway script's run — explicitly not
+  fixed in this pass, committed as the immediate next PR, not an
+  indefinite follow-up.** See ARCHITECTURE.md's matching bullet (under
+  the Citations-API grounding fix section) for the full write-up.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
