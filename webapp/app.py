@@ -9058,9 +9058,10 @@ def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None
          'No categories yet—<a href="/admin/tools/software/categories">add one</a> first.</p>'
 
 
-# Shared by /admin/tools/new, /admin/tools/{id}/edit, and the Quick Edit panel
-# on /tools — all three point a "Generate" button at the same stateless
-# endpoint, since it only needs a name + URL to draft a description.
+# Shared by /admin/tools/software/new, /tools/software/{slug}/edit, and the
+# Quick Edit panel on /tools — all three point a "Generate" button at the
+# same stateless endpoint, since it only needs a name + URL to draft a
+# description.
 # markAiDrafted: shared by every generate-button handler across both profile
 # edit forms — appends a field name to the #ai-drafted-fields hidden input
 # (comma-separated, deduped) so the edit-submit route knows which fields to

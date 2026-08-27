@@ -508,7 +508,8 @@ summary" button (renamed from "Refresh AI research," moved next to the
 Agent taxonomy field in the Phase 4 edit-page button reorg, then
 standardized to the "Generate summary" label shared by every AI-draft-into-
 field button on both the Software and Communities edit forms) on
-`/tools/software/{slug}/edit` (`POST /admin/tools/{id}/research/refresh`),
+`/tools/software/{slug}/edit` (`POST /admin/tools/software/{tool_id}/research/refresh`
+— moved here in the admin URL convention PR, see below),
 which runs the same `_run_tool_research` synchronously so the redirect can
 show a success/failure banner — for re-running after a vendor redesigns
 their site, or backfilling a tool added before this pipeline existed. The
@@ -4640,8 +4641,11 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     not who can reach it. Every other per-entry admin action (screenshot
     recapture, research refresh, agent-taxonomy verify, competitors,
     features, delete) stayed on its existing numeric-ID `/admin/tools/{id}/*`
-    sub-route and now redirects back to the new slug-based edit URL on
-    success.
+    sub-route at the time and redirected back to the new slug-based edit URL
+    on success. Those routes (except the legacy `tool_features` CRUD routes,
+    later deleted outright rather than moved — Phase 1b PR 2) all later
+    moved to `/admin/tools/software/{tool_id}/*` in the admin URL convention
+    PR — see "Admin URL convention, Phase 1b PR 1" below.
 - **Token auth in parallel**: `POST /save` is token-only
   (`X-Save-Token`/`?token=`) because the bookmarklet calls it cross-origin
   where the cookie can't be sent; member/admin APIs (`/ask`, `/api/search`,
