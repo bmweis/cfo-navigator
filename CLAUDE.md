@@ -3519,6 +3519,110 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   parsed fields and the 12-key confidence dict, for post-merge
   `railway ssh` verification. See ARCHITECTURE.md's matching bullet for
   the full write-up.
+- **Citation-tag investigation, blast-radius + re-run hardening (2026-08) —
+  the next steps after both generation-path fixes shipped.** A read-only
+  diagnostic confirmed both fixes working live on real tools/communities
+  (Concourse/GoClose for Description/Agent taxonomy; CFO Alliance/The F
+  Suite/Off The Ledger for Community profile — citation firing varies
+  legitimately per source, not a regression). `scripts/
+  report_regen_blast_radius.py` (new, read-only, zero write calls) then
+  answered the actual blast-radius question by cross-referencing the
+  throwaway `regen_ai_drafted_fields.py` run's own JSONL log against
+  current DB content, rather than a blind `id <= N` sweep — 84 tools
+  processed, 21 failures, 75 cite-tag-pollution rows, 25 legacy-shape
+  (spaced em dash/markdown bold) rows, with real overlap across all three
+  (e.g. Ordway hit by all three for different fields). A follow-up PR
+  added a deduplicated summary section (the real "needs regeneration"
+  count is the union across sections, not their sum) — confirmed live:
+  **76 distinct tools, 105 (tool, field) pairs** (agent_taxonomy 74,
+  description 28, competitive_differentiation 3), 27 tools needing 2+
+  fields, 2 needing all 3 (Ordway, Everest). **Brian's decision: full
+  re-run of all 157 approved tools, not just the 84 already touched** —
+  the cost delta is trivial regardless of scope (an estimate, not a
+  measured number — see below) and the catalog-consistency argument
+  (every tool on the identical current pipeline, no mixed-vintage rows to
+  reason about later) holds either way.
+  **`regen_ai_drafted_fields.py` itself was then hardened**, closing two
+  real gaps found along the way plus the two parity gaps the original
+  Phase 0 report's A1 flagged:
+  1. **`--ids`** (comma-separated, requires `--only tools` or `--only
+     communities` — a tool ID and a community ID are different ID spaces,
+     so allowing both at once would silently misapply the list) targets
+     specific items directly by ID, bypassing the approved-only list —
+     a non-approved targeted ID is still processed with a printed note,
+     never silently dropped.
+  2. **`--sample N`** closes a real gap in the original preview mode: it
+     only ever showed counts and a rough cost/time estimate, never actual
+     generated text — no way to eyeball whether a fix produces good output
+     before committing to `--apply`. `--sample N` makes N REAL generation
+     calls (costs real money, the one non-free thing about this mode) and
+     prints the FULL content of each, with zero DB writes; logged as a
+     third JSONL status, `"preview"`, so the resume logic
+     (`_load_done`, which only ever counted `"success"`) can't mistake a
+     preview draw for a completed regeneration.
+  3. **Real per-item logging**: every JSONL row now also carries
+     `input_tokens`/`output_tokens`/`cost_usd`/`citations_count`/
+     `low_confidence` — not just success/failure, the only two facts the
+     original log captured.
+  4. **Cost/spend logging closes a confirmed real gap**: the ORIGINAL
+     84-tool throwaway run never called `Library.record_enrichment_cost`
+     at all, so its real spend was never recorded anywhere and is now
+     permanently unrecoverable except by re-running — this is *why* the
+     $ estimate given to Brian for the full-vs-targeted decision above had
+     to be a labeled estimate (Opus 5's real per-token pricing combined
+     with each field's known `max_tokens` ceiling and grounding-fetch
+     shape, not a measured number) rather than a real historical figure.
+     Every real generation call the hardened script makes — in `--apply`
+     mode AND in `--sample` mode — now calls `record_enrichment_cost` the
+     moment a draft comes back, before any write/guard logic runs, since
+     the cost was already incurred at that point regardless of what
+     happens next.
+  5. **Empty-result guards** (Phase 0 report A1, first parity gap): the
+     script used to write `draft.description`/`result.agent_taxonomy_note`/
+     `draft.competitive_differentiation` unconditionally once the
+     generator returned non-`None`, unlike the live `_run_tool_research`
+     background job's own `if result.agent_taxonomy_note.strip():` guard.
+     Description/Agent taxonomy are now DEFENSIVE-only — both generators
+     already raise internally on a totally-empty parsed result as of the
+     citation-tag fix itself, so this should be unreachable there in
+     practice; the guard exists so the script's structure actually matches
+     the live route's, not just its outcome. **Competitive differentiation
+     is a REAL fix**: `generate_tool_differentiation` has no citations
+     mechanism at all (still strict JSON, untouched by the citation-tag
+     fix) and no internal empty-result protection — an empty result could
+     genuinely come back and, pre-hardening, would have silently blanked
+     the field.
+  6. **Citations-validation parity** (Phase 0 report A1, second parity
+     gap): Description's and the Community profile's citations now
+     round-trip through the same `_validate_citations_payload` (imported
+     from `webapp.app`) the live submit routes apply — both fields' real
+     Generate call is stateless AJAX with no entity id at draft time, so
+     their citations normally travel through the browser as a JSON
+     hidden-input value and get re-validated server-side (URL-scheme
+     check, title length cap, sequential renumbering) before persisting.
+     This script calls the generators directly, server-side, with no
+     browser round-trip — `draft.citations` is already well-typed Python,
+     not untrusted client JSON — but running it through the same
+     validation closes the parity gap defensively rather than assuming a
+     server-computed list can never need it. **Agent taxonomy's citations
+     are unchanged** — its live path (`_run_tool_research`) writes
+     `result.citations` directly with no validation call either, so the
+     script already matched it correctly there.
+  **Verified without spending real API money**: every new/changed
+  behavior (the empty-differentiation guard actually blocking a write and
+  preserving old content, `enrichment_cost` rows actually appearing for
+  both a successful and a guard-blocked call, the JSONL log carrying the
+  new cost fields, `--sample` mode printing full content while writing
+  nothing to the DB, and `_validate_citations_payload`'s round-trip
+  correctly dropping a malformed citation and renumbering the rest) was
+  smoke-tested against a temp DB with mocked `generate_*` functions —
+  zero real Claude calls, zero real spend, per this repo's own
+  CI-quota-exhaustion-era discipline of local verification over hoping a
+  real call happens to demonstrate the fix. Sequenced next: the
+  8-tool spot-check re-run (`--ids`, `--apply`, against GoClose, Klarity,
+  Expensify, Concourse, Datarails, Coupa, Maxima, Ode — the tools with
+  specific, already-diagnosed defects from the original incident) via
+  `railway ssh`, full output reviewed, before the full 157-tool run.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
