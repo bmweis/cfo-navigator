@@ -13685,22 +13685,23 @@ def admin_communities(request: Request, filter: str = ""):
       <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{review_badge}{gap_badge}
     </div>
   </td>
-  <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:190px;">{_esc(c['notes'] or '—')}</td>
+  <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
   <td data-col="communities:cost_band" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td data-col="communities:access" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
   <td data-col="communities:categories" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
   <td data-col="communities:sponsorship_type" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['sponsorship_type'] or '—')}</td>
-  <td data-col="communities:format" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:160px;">{_esc(c['format'] or '—')}</td>
+  <td data-col="communities:format" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
   <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
-  <td style="padding:10px 12px;min-width:290px;">
-    <div style="display:flex;flex-wrap:nowrap;align-items:center;gap:6px;">
-      <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
-      <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="text-align:center;">Profile</a>
+  <td style="padding:10px 12px;min-width:210px;">
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;flex-wrap:nowrap;align-items:center;gap:6px;">
+        <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
+        <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
+              onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
+          <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
+        </form>
+      </div>
       {mark_reviewed}
-      <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
-            onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
-        <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
-      </form>
     </div>
   </td>
 </tr>"""
@@ -13795,14 +13796,14 @@ def admin_communities(request: Request, filter: str = ""):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:250px;">Name</th>
-  <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;min-width:190px;">Short description</th>
+  <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;min-width:150px;">Short description</th>
   <th data-col="communities:cost_band" style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th data-col="communities:access" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th data-col="communities:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="communities:sponsorship_type" style="padding:10px 12px;text-align:left;font-size:13px;">Sponsorship type</th>
-  <th data-col="communities:format" style="padding:10px 12px;text-align:left;font-size:13px;min-width:160px;">Format</th>
+  <th data-col="communities:format" style="padding:10px 12px;text-align:left;font-size:13px;min-width:220px;">Format</th>
   <th data-col="communities:reach" style="padding:10px 12px;text-align:left;font-size:13px;">Reach</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:290px;">Actions</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:210px;">Actions</th>
 </tr></thead>
 <tbody id="communities-approved-tbody">{approved_rows}</tbody>
 </table>
