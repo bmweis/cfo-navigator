@@ -3679,6 +3679,42 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   configure and run themselves (not a bespoke-build services engagement);
   the "ex-CFOs and forward-deployed engineers" language in its profile
   describes onboarding support, not the core offering.
+- **Voice-core ampersand rule was too narrow — "T and E" instead of "T&E"
+  (2026-08, found in the max_tokens-fix spot-check's live review).**
+  Concourse's regenerated Agent taxonomy spelled out a standard finance
+  abbreviation the voice guide should have protected. Root cause: `VOICE_CORE_DEFAULT`'s
+  own "HARD MECHANICAL RULES" already had an ampersand rule — "Spell out
+  'and'; never '&' except in terms like FP&A" — but it hardcoded exactly
+  one exception. T&E (and, by the same narrowness, any other real
+  finance-shorthand term that legitimately uses '&') wasn't covered, so the
+  model correctly followed the letter of the rule and produced the wrong
+  result. Fixed by generalizing the exception from a single hardcoded term
+  to a stated principle — standard finance/business abbreviations that use
+  '&' as part of the term itself keep their normal form — with FP&A/T&E/R&D
+  as examples, not an exhaustive list. This is a `linklib.agent.VOICE_CORE_DEFAULT`
+  fix, not a field-specific prompt fix: `voice_core` is the single shared
+  source every generation surface resolves through
+  (`linklib.enrich._resolve_voice_core`, same PR #110 pattern FP&A Buddy/
+  LinkedIn drafting/tool-and-community generation all already share), so a
+  mechanical-rule fix here reaches every field in one place rather than
+  needing to be duplicated into `_TOOL_DESC_PROMPT`/`_AGENT_TAXONOMY_PROMPT`/
+  etc. individually. **Caveat that matters for whether this fix actually
+  takes effect live**: `_resolve_voice_core`/`_build_system` both read
+  `lib.get_setting("voice_core") or VOICE_CORE_DEFAULT` — if Brian's
+  production `settings` table already has a saved `voice_core` value (via
+  `/admin/voice`), this code-constant edit has no effect until that stored
+  value is updated too, since a non-empty DB value always wins over the
+  fallback. Checked whether the equivalent gap exists for A/R, A/P, and
+  similar slash-based shorthand (also flagged in the same live review): no
+  comparable narrow rule was found constraining those — the only over-narrow
+  mechanical rule in `voice_core` was this ampersand one — but the fix is
+  now a stated principle rather than a memorized exception, which should
+  generalize better if a similar case turns up in a future field. To be
+  verified empirically the same way as the `max_tokens` fix, before this is
+  considered closed: a single-tool `--apply` re-run against Concourse
+  (`--ids 10 --only tools`) confirming "T&E" renders correctly, rather than
+  trusting the wording change to hold across the full 157-tool catalog
+  untested.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
