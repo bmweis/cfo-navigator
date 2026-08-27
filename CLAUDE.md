@@ -3457,6 +3457,68 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   fixed in this pass, committed as the immediate next PR, not an
   indefinite follow-up.** See ARCHITECTURE.md's matching bullet (under
   the Citations-API grounding fix section) for the full write-up.
+- **Citation-tag fix, Community profile follow-up (2026-08) — the
+  committed next PR from the bullet above, same vulnerable shape, same
+  fix pattern, one real structural difference.** `generate_community_profile`
+  had the identical strict-JSON-plus-citations incompatibility, just never
+  exercised by the throwaway script's original run. Fixed the same way:
+  dropped the JSON contract, plain prose, real `inject_markers=True`
+  citations, same four new D1 prompt rules. The real difference from the
+  two-field fix is scale and shape — 23 fields in one response, not two,
+  so a single trailing-sentinel scan isn't enough. New
+  `linklib.enrich._parse_labeled_blocks(text, keys, terminal_key=None)`
+  is a forward-scanning, order-tolerant parser for `FIELD_NAME:`-headed
+  multi-line body blocks — `_split_trailing_sentinels` (the first fix's
+  parser) stays exactly as it was, reused only for the 12-key confidence
+  block's own body once `_parse_labeled_blocks` has isolated it.
+  **`terminal_key="confidence"` exists specifically to prevent a real data-
+  integrity bug, not just to simplify parsing**: the `CONFIDENCE:` block's
+  12 sub-key lines (e.g. `IDEAL_MEMBER: true`) share names with 12 of the
+  23 top-level fields, so without a hard stop, header recognition would
+  keep running past `CONFIDENCE:` and mistake a sub-key line for a fresh
+  top-level header, corrupting the real narrative text already parsed
+  earlier in the response. Verified as load-bearing, not just present, via
+  a matched positive/negative test pair
+  (`test_terminal_key_protects_data_integrity_not_just_formatting` /
+  `test_without_terminal_key_the_collision_would_actually_corrupt_data`) —
+  the negative control runs the exact same input through the parser
+  *without* `terminal_key` and asserts the corruption actually happens,
+  proving the guard isn't decorative. A response with literally no
+  recognized field header at all now parses to an empty `blocks` dict and
+  is treated as a hard failure (`generate_community_profile` returns
+  `None`) — deliberately stricter than Description/Agent taxonomy's "some
+  text beats none," since `upsert_community_profile` is a full replace of
+  all 23 `community_profiles` columns: silently saving an all-empty draft
+  wouldn't carry stale garbage forward, it would blank a community's
+  entire profile. Also fixed in the same pass, found while writing the
+  fixtures: `_parse_community_confidence`'s old `bool("false") == True`
+  Python footgun (any non-empty string is truthy) — now compares the raw
+  sentinel value against the literal string `"true"`. And a genuine
+  storage-semantics preservation issue: the old JSON prompt used a real
+  `null` for "unknown" on several fields (`notable_members`,
+  `public_criticism`, and the short factual fields), stored as `""`; plain
+  text has no `null`, so the new prompt asks for a literal placeholder word
+  instead (`"Unclear"`, `"None reported"`, `"None publicly reported"`), and
+  a new `_field_or_placeholder_empty` helper (tolerant of a trailing period
+  the model might add) coerces those words back to `""` at parse time —
+  restoring the original storage contract rather than silently changing it.
+  Deliberately NOT applied to `cpe_eligible`, whose `"Unclear"` was already
+  a real, literal stored value in the *original* prompt, not a
+  null-placeholder. **Verified the same two ways as the first fix**: a
+  golden-fixture suite
+  (`tests/citations_fixtures/community_profile_sentinel_fixtures.py` +
+  `tests/test_community_profile_sentinel_parsing.py`, written and confirmed
+  failing against unwired code before the implementation existed) plus a
+  reproduction of the old bug shape run through both pre- and post-fix
+  code, confirmed to still leak through unfixed code (proving the fix is
+  preventative, not a code-level filter). New sibling diagnostic
+  `scripts/diagnose_community_profile_citations.py` (not an extension of
+  the Agent taxonomy one — different enough response shape to justify a
+  separate script, per explicit direction) makes the raw API call directly
+  and prints the same `REGRESSION CHECK: PASS/FAIL` line, plus all 23
+  parsed fields and the 12-key confidence dict, for post-merge
+  `railway ssh` verification. See ARCHITECTURE.md's matching bullet for
+  the full write-up.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
