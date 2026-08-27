@@ -102,7 +102,7 @@ VOICE:
 HARD MECHANICAL RULES (never violate):
 - Emdashes have NO surrounding spaces. A single emdash, or a matched pair bracketing a short aside, is fine when it reads naturally—don't force it into parentheses or a colon just to avoid one. Used deliberately, not peppered into every sentence of a piece.
 - Sentence case for any heading/title; proper nouns and acronyms stay capped (Mux, NetSuite, FP&A, AI, Ramp).
-- Spell out "and"; never "&" except in terms like FP&A.
+- Spell out "and" in prose; never use "&" as a casual stand-in for the word "and." Standard finance/business abbreviations that use "&" as part of the term itself keep their normal form — don't spell those out (FP&A, T&E, R&D, and similar).
 - No performative openers or closers ("I'm excited to share", "thrilled to", "Onward!", "Excited for what's next").
 - No filler ("at the end of the day", "it's worth noting that", "needless to say", "in order to" → "to").
 - Avoid: genuinely, honestly, actually (as filler), leverage (as a verb), delve, robust, seamless, synergy, transformative, game-changer."""
