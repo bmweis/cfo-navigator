@@ -3,9 +3,11 @@ see CLAUDE.md and generate_tool_differentiation's own docstring). This
 field predates the citation-tag investigation's D1 content rules (no
 vendor-reported stats/proof-points, no testimonials, no editor-facing
 asides) — a blast-radius spot-check surfaced the gap live (a vendor-
-reported stat in a sampled Differentiation output for Scale AI). Two
-layers, mirroring tests/test_enrich_sentinel_parsing.py's own pattern for
-Description/Agent taxonomy:
+reported stat in a sampled Differentiation output for Maxima, attributing
+the stat to Scale AI as a third-party example named within Maxima's own
+text — not a Toolbox entry of its own). Two layers, mirroring
+tests/test_enrich_sentinel_parsing.py's own pattern for Description/Agent
+taxonomy:
 
 1. Pipeline-level fixtures (DIFFERENTIATION_RESPONSES) — a clean/compliant
    case, and an old-bug-reproduction case proving the fix is preventative
@@ -53,7 +55,7 @@ def test_generate_tool_differentiation_matches_exclusion_spec(monkeypatch, case)
     _mock_anthropic(monkeypatch, case["raw_response"])
 
     draft = enrich.generate_tool_differentiation(
-        "Scale AI", "https://scale.com", case["description"],
+        "Maxima", "https://maxima.example", case["description"],
         case["competitor_names"], voice_core="Test voice guide.",
     )
     assert draft is not None
