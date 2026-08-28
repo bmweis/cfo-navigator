@@ -146,44 +146,56 @@ def test_mobile_collapses_to_one_column_in_reading_order(env):
 
 def test_new_content_quadrant_holds_feeds_card_and_both_accordions(env):
     """Merged, but the two halves stay distinct: a _lib_card over the existing
-    accordion pattern, not one blended block."""
+    accordion pattern, not one blended block.
+
+    Read Later bookmarklet/Shortcut PR: a second capture-path pair (its own
+    "Saving to Read Later instead" label + two accordions) joined the
+    original Archive pair under the same quadrant, so the accordion count
+    went from 3 to 5 and the section label renamed from "Saving articles
+    from anywhere" to "Saving to the archive" (to read as a matched pair
+    with the new "Saving to Read Later instead" label below it)."""
     html = _library_html(env)
     quadrant = _quadrant(html, "lib-q-new")
     assert "New content" in quadrant
     assert 'href="/admin/library/feeds"' in quadrant
-    assert "Saving articles from anywhere" in quadrant
-    # 3 now: the collapsible quadrant itself plus bookmarklet + Share Sheet.
-    assert quadrant.count("<details") == 3
+    assert "Saving to the archive" in quadrant
+    assert "Saving to Read Later instead" in quadrant
+    # 5 now: the collapsible quadrant itself plus two bookmarklet + two
+    # Share Sheet accordions (Archive pair + Read Later pair).
+    assert quadrant.count("<details") == 5
     assert "border-radius:14px" in quadrant                   # the _lib_card box
 
 
 def test_saving_articles_is_a_muted_label_not_a_competing_heading(env):
     """It sat as a bold navy h3, reading like a section nested in a section and
     competing with the card headings right above it. Now a small muted eyebrow,
-    the same idiom the flow diagram's own label uses."""
+    the same idiom the flow diagram's own label uses. Checked for both capture
+    pairs' labels now that there are two."""
     html = _library_html(env)
     quadrant = _quadrant(html, "lib-q-new")
     assert "<h3" not in quadrant
-    label_at = quadrant.index("Saving articles from anywhere")
-    label = quadrant[label_at - 200:label_at]
-    assert "font-size:12px" in label
-    assert "color:var(--muted)" in label
-    assert "var(--navy)" not in label
+    for label_text in ("Saving to the archive", "Saving to Read Later instead"):
+        label_at = quadrant.index(label_text)
+        label = quadrant[label_at - 200:label_at]
+        assert "font-size:12px" in label
+        assert "color:var(--muted)" in label
+        assert "var(--navy)" not in label
 
 
 def test_token_warning_is_a_footnote_below_the_accordions(env):
     """Moved out of the inline flow and de-bolded: label, intro, accordions,
-    then the warning as caption-weight text."""
+    then the warning as caption-weight text. Now sits below all four
+    accordions (Archive pair + Read Later pair), not just the original two."""
     html = _library_html(env)
     quadrant = _quadrant(html, "lib-q-new")
 
-    label = quadrant.index("Saving articles from anywhere")
-    # Skip the quadrant's own <details> wrapper; the capture accordions are the
-    # two inside it.
+    label = quadrant.index("Saving to the archive")
+    # Skip the quadrant's own <details> wrapper; the capture accordions are
+    # the four inside it.
     first_accordion = quadrant.index("<details", quadrant.index("<details") + 1)
     warning = quadrant.index("If you ever rotate")
-    share_sheet_end = quadrant.index("</details>", quadrant.index("Share-Sheet shortcut"))
-    assert label < first_accordion < share_sheet_end < warning
+    read_later_shortcut_end = quadrant.rindex("</details>", 0, warning)
+    assert label < first_accordion < read_later_shortcut_end < warning
 
     footnote = quadrant[warning - 200:warning]
     assert "font-size:12.5px" in footnote
