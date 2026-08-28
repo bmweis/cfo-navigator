@@ -2669,12 +2669,23 @@ longer the only, or the primary, way to reach `/read`.
     and clears on Escape.
   - **Distraction-free reading** — a header toggle (outward/inward diagonal-
     arrow icon, immediately next to the close button, matching Instapaper's
-    own icon and placement) that collapses the middle list pane to a thin
-    sliver (title/source/live time-remaining, computed from reader-pane
-    scroll position; a duplicate collapse button sits above that content) and
-    lets the reader pane take the freed width. Keyed only to whether an
-    article is open, not to which quick view it came from, so it behaves
-    identically for Feed and Archive.
+    own icon and placement) that hides `.rr-rail` and `.rr-list-pane`
+    outright (and their resize handles) and lets the reader pane take the
+    freed width, full width, centered. **Corrected 2026-08** (Reader
+    cleanliness pass): the original version only shrank the list pane to a
+    220px "sliver" (title/source/live time-remaining) while leaving the left
+    rail fully visible on desktop — confirmed live as an actual bug against
+    real Instapaper reference screenshots, not the intended design: in
+    Instapaper's own expand view, BOTH the rail and the list disappear
+    completely, leaving just the centered reading pane with the sticky
+    action bar still visible and a collapse-back arrow in its top-left
+    corner. The sliver mechanism (`.rr-sliver`, `rrUpdateSliver`, the
+    scroll-driven time-remaining tracker) is removed entirely — the existing
+    `#rr-reader-expand` button in the sticky `.rr-reader-header` (it already
+    swapped between expand/collapse icons) doubles as that collapse-back
+    affordance, since there's no sliver left to click through. Keyed only to
+    whether an article is open, not to which quick view it came from, so it
+    behaves identically for Feed and Archive.
 - **Thousands separators** (`:,` format spec) added to every large-count
   render sitewide that was missing one — the Reader's quick-view badges and
   list-pane item counts (inherited the gap from the pre-merge Archive page),
@@ -2728,10 +2739,11 @@ query instead. The `699px` fallback (any orientation) is the hard floor
 below which 3 panes can't fit even at their own CSS min-widths
 (150+300+240px); only the smallest common landscape phones (iPhone
 SE-class, ~667px) fall under it and stay stacked in landscape too, correctly.
-In the forced-focus state, `.rr-shell.rr-focus-mode .rr-rail{display:none}`
-additionally hides the rail (untouched by desktop focus mode, which only
-collapses the list pane to a sliver) — without it, "distraction-free" on
-mobile would still mean scrolling past a full nav rail before the article.
+In the forced-focus state this reaches the same `.rr-shell.rr-focus-mode`
+rule desktop expand mode uses (see the corrected "Distraction-free reading"
+bullet above) — since 2026-08 that rule hides the rail on every viewport, not
+just mobile, so there's no separate mobile-only rail-hide rule to maintain
+here any more.
 
 ### Search placement: list-pane header, not the left rail
 
