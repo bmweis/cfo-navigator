@@ -564,6 +564,16 @@ Follow these rules exactly:
 3. No marketing language: no "powerful," "seamless," "best-in-class," or
    similar adjective stacking. No exclamation points.
 4. One or two sentences. This is a callout, not a paragraph.
+5. Never mention review scores, star ratings, testimonials, awards, customer
+   logos, or a vendor's self-reported/marketing results (revenue figures,
+   adoption or automation percentages, named-customer outcomes, review
+   counts, case-study numbers) as the basis for the comparison — even if
+   one appears in the description or competitor context below. This is a
+   factual comparison, not a pitch.
+6. Write directly to the reader. Never reference "the description above,"
+   "the competitor context," or your own research process — if there isn't
+   enough to compare, say so plainly in the callout itself rather than
+   narrating the gap.
 
 Voice guide — write the callout in this voice:
 {voice_core}
@@ -609,7 +619,29 @@ def generate_tool_differentiation(name: str, url: str, description: str,
     was actually observed in, so voice_core's existing unspaced-em-dash rule
     now reaches this prompt. No structure guidance added here: the callout is
     deliberately 1-2 sentences (rule 4 above), never long enough to need
-    paragraph/bullet structure."""
+    paragraph/bullet structure.
+
+    Content-exclusion rules follow-up (2026-08): this function predates the
+    citation-tag investigation's D1 content rules (no vendor-reported stats/
+    proof-points, no testimonials/review-scores/logos, no editor-facing
+    asides) — it was never brought into that fix because it has no
+    citations mechanism of its own to have motivated including it (JSON
+    output, unlike Description/Agent taxonomy's plain-prose + real-citations
+    contract; a Citations-API grounding mechanism for this field is still
+    deferred, per CLAUDE.md). A blast-radius spot-check surfaced exactly
+    this gap live (a vendor-reported stat — "closes two to three days
+    faster at over 98% automation" — in a sampled differentiation output),
+    so rules 5-6 above close it directly in the prompt, reusing
+    Description/Agent taxonomy's own reported-results/testimonials wording
+    and editor-facing-address ban, adapted for this field's short JSON
+    format and lack of a fetched-pages framing. Same limitation as that
+    fix: this is preventative (prompt-level), not corrective — nothing
+    after the API call can recognize and strip a vendor stat the model
+    decided to include anyway, since a legitimate factual claim and an
+    excluded marketing stat aren't mechanically distinguishable after the
+    fact. Rule 5 explicitly covers a stat surfacing from `description`
+    itself (a legacy, not-yet-regenerated description can still carry one
+    predating the Description-side fix)."""
     try:
         from anthropic import Anthropic
     except ImportError:

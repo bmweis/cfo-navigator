@@ -26,9 +26,12 @@ Private routes (require login cookie; API routes also accept a token):
     POST /ask                  FP&A Q&A
     POST /post                 Draft a LinkedIn post
     POST /feed/save            Save a feed item to the archive
-    POST /save                 Capture a link (token auth — used by bookmarklet)
+    POST /feed/read-later      Add/remove a feed item from the signed-in user's Read Later list
+    POST /save                 Capture a link into the Archive (token auth — used by bookmarklet)
+    POST /save-later           Capture a link into Read Later (token auth — used by its own bookmarklet)
     GET  /api/search           JSON search API
-    GET  /bookmarklet          One-click saver script
+    GET  /bookmarklet          One-click Archive saver script
+    GET  /read-later-bookmarklet  One-click Read Later saver script
     GET  /admin/contacts       View contact form submissions
 """
 from __future__ import annotations
@@ -320,27 +323,32 @@ async def _no_store_admin_pages(request: Request, call_next):
     return response
 
 
+_TOKEN_ONLY_SAVE_PATHS = {"/save", "/save-later"}
+
+
 @app.middleware("http")
 async def _save_cors(request: Request, call_next):
-    """CORS for /save only (2026-08 wrap-up sprint item 2) — the bookmarklet
-    runs on third-party pages (it POSTs cross-origin, where the login cookie
-    can't be sent — see /bookmarklet's own docstring), so the browser needs
-    real CORS headers on this one route or every request silently fails
-    with no server-side trace at all (Chrome's console shows "TypeError:
-    Failed to fetch", confirmed live from a real third-party origin — the
-    request never even reaches this app, so nothing here could have logged
-    it). A permissive `Access-Control-Allow-Origin: *` is safe specifically
-    for this route: /save already requires a valid save token to do
-    anything (see _check_token), so this is the same trust model as any
-    other bearer-token API, and it grants no cookie-authenticated access
-    (browsers never attach credentials to a `*`-origin CORS response).
-    Scoped to exactly this one path — no other route gets a CORS header,
-    since everything else on this site is same-origin cookie-authenticated
-    and has no reason to be called from a third-party page. A JSON POST body
-    (`Content-Type: application/json`) triggers a real preflight OPTIONS
-    request, so that has to be answered directly, not just the actual POST.
+    """CORS for the token-only capture routes (2026-08 wrap-up sprint item 2;
+    extended to /save-later alongside /save for the Read Later bookmarklet/
+    Shortcut pair) — the bookmarklet runs on third-party pages (it POSTs
+    cross-origin, where the login cookie can't be sent — see /bookmarklet's
+    own docstring), so the browser needs real CORS headers on these routes or
+    every request silently fails with no server-side trace at all (Chrome's
+    console shows "TypeError: Failed to fetch", confirmed live from a real
+    third-party origin — the request never even reaches this app, so nothing
+    here could have logged it). A permissive `Access-Control-Allow-Origin: *`
+    is safe specifically for these routes: both already require a valid save
+    token to do anything (see _check_token), so this is the same trust model
+    as any other bearer-token API, and it grants no cookie-authenticated
+    access (browsers never attach credentials to a `*`-origin CORS
+    response). Scoped to exactly these two paths — no other route gets a
+    CORS header, since everything else on this site is same-origin
+    cookie-authenticated and has no reason to be called from a third-party
+    page. A JSON POST body (`Content-Type: application/json`) triggers a real
+    preflight OPTIONS request, so that has to be answered directly, not just
+    the actual POST.
     """
-    if request.url.path == "/save":
+    if request.url.path in _TOKEN_ONLY_SAVE_PATHS:
         if request.method == "OPTIONS":
             return Response(status_code=204, headers={
                 "Access-Control-Allow-Origin": "*",
@@ -5765,7 +5773,7 @@ Not sure which tool's for you? {(
 
 <div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
+<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="tool-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -5798,13 +5806,17 @@ Not sure which tool's for you? {(
 #tool-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #tool-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #tool-pagination-label{{font-size:13px;color:var(--muted);}}
-.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
+.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;height:100%;}}
 /* Same fixed-to-N-lines technique as .tool-desc below, applied to the title:
    a long name (e.g. "Airbase (acquired by Paylocity)") used to wrap to a
-   second line and push that card's header row taller than its row siblings,
-   since the grid uses align-items:start rather than stretching cards to a
-   shared row height. Clamping to 2 lines with a matching min-height means
-   every card reserves the same header height regardless of name length. */
+   second line and push that card's header row taller than its content
+   below. #tool-grid now uses align-items:stretch (Aug 2026 fix — cards in
+   the same row render at matching heights, with the bottom action row
+   pinned via margin-top:auto below), so this clamp is no longer load-
+   bearing for row-height matching, but it's kept: without it, a 2-line
+   title still shifts every OTHER element inside that one card down by a
+   line versus a 1-line-title card in a different row, which reads as
+   inconsistent even though rows themselves now match. */
 .tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
   line-height:1.3;min-height:44px;margin-bottom:6px;letter-spacing:-0.01em;}}
@@ -7595,7 +7607,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 
 <div id="comm-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
+<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="comm-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -7629,7 +7641,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 #comm-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #comm-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #comm-pagination-label{{font-size:13px;color:var(--muted);}}
-.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
+.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;height:100%;}}
 .comm-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
 .comm-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 /* Same fixed-height technique as .tool-name/.tool-desc on the Software directory
@@ -15640,6 +15652,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" maxlength="600" rows="5"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('competitive_differentiation') or '')}</textarea>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Generated from the Description and competitor list already on this page&mdash;it doesn't fetch or research anything new. If you edit or regenerate the Description, this won't update on its own; run Generate summary again to pick up the change.</p>
     {_differentiation_verify_action}
     {_differentiation_confidence_html}
     {_differentiation_review_line_html}
@@ -19046,6 +19059,48 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         lib.close()
 
 
+@app.post("/save-later")
+async def save_later(request: Request, token: str | None = None):
+    """Token-gated capture into Read Later — the second bookmarklet/Shortcut
+    pair's endpoint, mirroring /save's auth exactly (same _check_token, same
+    JSON-or-form payload parsing) but writing into the per-user Read Later
+    list instead of the shared Archive.
+
+    Read Later (linklib/db.py's `read_later` table) is scoped by user_id, and
+    a token-only request has no session to read one from (_current_user_id
+    returns None for token-only access, by design — see its docstring). This
+    resolves the target list the same way the table's own one-time migration
+    already did for its pre-multi-user rows: the earliest admin account
+    (Library.default_admin_user_id), since that's Brian's own account and
+    this capture path exists for him alone. No article row is created and no
+    fetch/enrichment happens — add_read_later is a plain metadata insert, so
+    this is a much lighter write than /save's ingest_url. `title` is
+    optional (the bookmarklet sends `document.title`; a Shortcut may not) —
+    a missing title just shows as "(no title)" in the Reader's Read Later
+    view until the article is actually opened there."""
+    _check_token(token or request.headers.get("X-Save-Token"))
+    payload = {}
+    try:
+        payload = await request.json()
+    except Exception:
+        form = await request.form()
+        payload = dict(form)
+    url = (payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    title = (payload.get("title") or "").strip()
+    source = (payload.get("source") or "").strip()
+    lib = _lib()
+    try:
+        user_id = lib.default_admin_user_id()
+        if user_id is None:
+            raise HTTPException(status_code=503, detail="no admin account configured")
+        lib.add_read_later(user_id=user_id, url=url, title=title, source=source)
+        return JSONResponse({"ok": True})
+    finally:
+        lib.close()
+
+
 # Library management lives on its own page (/admin/library). Phase 6:
 # "Open Reader" was dropped from this list — it's not a management tool, and
 # it's reachable via a dedicated callout at the top of the page instead (see
@@ -21265,14 +21320,14 @@ def admin_library(request: Request):
     # capture-path accordions. Both halves keep their own shape — a _lib_card
     # and the existing accordion group — under one quadrant heading, rather
     # than being blended into a single undifferentiated block.
-    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus the two ways to save a page by hand.</p>
+    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
 <div style="margin-bottom:22px;">{_lib_card(
     "/admin/library/feeds", "Manage feeds",
     "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into "
     "sections, and set which ones are read-only. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
     "web search is restricted to.",
     _badge_for_href("/admin/library/feeds", task_counts.get("/admin/library/feeds", 0)))}</div>
-<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving articles from anywhere</div>
+<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving to the archive</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
@@ -21310,13 +21365,53 @@ def admin_library(request: Request):
 </div>
 </details>
 
-<p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working&mdash;the old copies embed the old values. Set them up again from the instructions above.</p>"""
+<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:22px 0 8px;">Saving to Read Later instead</div>
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Same idea, same no-login token, a second destination: these post to <code>/save-later</code> and land in the Reader's Read Later list instead of the archive&mdash;no enrichment, no tags, just a quick queue for something to read later.</p>
 
-    # 3, not the literal 1 card: Manage feeds plus the bookmarklet and
-    # Share-Sheet accordions. See _lib_quadrant's count_override note.
+<details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>Desktop&mdash;the bookmarklet</summary>
+<div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
+<p style="margin:0 0 10px;">Same mechanism as the archive bookmarklet above&mdash;an ordinary browser bookmark whose &ldquo;URL&rdquo; is a tiny program. Clicking it grabs the current page's address (and title) and saves it straight to Read Later&mdash;no prompt, one click.</p>
+<ol style="margin:0 0 10px;padding-left:20px;">
+  <li>Open <a href="/read-later-bookmarklet">/read-later-bookmarklet</a> (login-gated) and copy the <em>entire</em> snippet&mdash;click the text, <strong>Cmd+A</strong>, <strong>Cmd+C</strong>.</li>
+  <li>Show the bookmarks bar (<strong>Cmd+Shift+B</strong> in Chrome), right-click an empty spot on it &rarr; <strong>Add page&hellip;</strong></li>
+  <li>Name: <code>Save to Read Later</code>. URL: <strong>paste the snippet</strong>. Save.</li>
+  <li>On any article page, click it like a button &rarr; &ldquo;Saved to Read Later.&rdquo; It shows up right away under the Reader's Read Later view.</li>
+</ol>
+<p style="margin:0;color:var(--muted);font-size:13px;">It won't fire on browser-internal pages (new tab, chrome:// pages)&mdash;that's a browser rule. The snippet contains the save token in plaintext, so don't paste it anywhere public.</p>
+</div>
+</details>
+
+<details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>iPhone / iPad&mdash;Share-Sheet shortcut</summary>
+<div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
+<p style="margin:0 0 10px;">One-time setup in the <strong>Shortcuts</strong> app (~5 minutes); afterwards &ldquo;Save to Read Later&rdquo; appears in Safari's share sheet, alongside &ldquo;Save to CFO Library&rdquo; if you set that one up too.</p>
+<ol style="margin:0 0 10px;padding-left:20px;">
+  <li>Shortcuts app &rarr; <strong>+</strong> to create a new shortcut &rarr; rename it <code>Save to Read Later</code>.</li>
+  <li>Tap the shortcut's <strong>info (&#9432;)</strong> panel &rarr; turn on <strong>Show in Share Sheet</strong>. Under the accepted types, keep <strong>URLs</strong> and <strong>Safari web pages</strong>.</li>
+  <li>Add action <strong>&ldquo;Get URLs from Input&rdquo;</strong> (its input should be <em>Shortcut Input</em>).</li>
+  <li>Add action <strong>&ldquo;Get Contents of URL&rdquo;</strong> and expand its options:
+    <ul style="margin:4px 0;padding-left:18px;">
+      <li>URL: <code>{_esc(PUBLIC_BASE)}/save-later{'?token=' + _esc(SAVE_TOKEN) if SAVE_TOKEN else ''}</code></li>
+      <li>Method: <strong>POST</strong></li>
+      <li>Request Body: <strong>JSON</strong> &rarr; add a text field named <code>url</code> whose value is the <em>URLs</em> variable from step 3.</li>
+    </ul></li>
+  <li>Optional: add a second JSON text field named <code>title</code> (e.g. the <em>Name</em> output of a <strong>&ldquo;Get Details of Safari Web Page&rdquo;</strong> action) so the item shows a real title in the Reader right away, instead of &ldquo;(no title)&rdquo; until you open it.</li>
+  <li>Optional: add <strong>&ldquo;Show Notification&rdquo;</strong> saying &ldquo;Saved to Read Later&rdquo; so you get visible confirmation.</li>
+  <li>Use it: in Safari, tap <strong>Share &rarr; Save to Read Later</strong>. The article lands straight in the Reader's Read Later list, no queue.</li>
+</ol>
+<p style="margin:0;color:var(--muted);font-size:13px;">Read Later has no tags concept, so there's no tags field to add here&mdash;unlike the archive shortcut above.</p>
+</div>
+</details>
+
+<p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, all four snippets above stop working at once&mdash;they share the same token, and the old copies embed the old values. Set them up again from the instructions above.</p>"""
+
+    # 5, not the literal 1 card: Manage feeds plus the archive bookmarklet/
+    # Share-Sheet accordions and the Read Later bookmarklet/Share-Sheet
+    # accordions. See _lib_quadrant's count_override note.
     saving_articles_html = _lib_quadrant("New content", saving_articles_body,
                                          ["/admin/library/feeds"],
-                                         count_override=3)
+                                         count_override=5)
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -28512,6 +28607,32 @@ def bookmarklet(request: Request):
         "var u=location.href;"
         f"fetch('{PUBLIC_BASE}/save{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
         "body:JSON.stringify({url:u,tags:t})}).then(function(r){alert(r.ok?'Saved to archive':'Error saving');})"
+        ".catch(function(e){alert('Error saving: '+e);});"
+        "})();"
+    )
+    return js
+
+
+@app.get("/read-later-bookmarklet", response_class=PlainTextResponse)
+def read_later_bookmarklet(request: Request):
+    """The Read Later counterpart to /bookmarklet — same page, same
+    token-refreshed-per-request/login-gate/CORS story (see /bookmarklet's own
+    docstring and the _save_cors middleware above), posting to /save-later
+    instead of /save. No tags prompt: Read Later has no tags concept
+    (add_read_later takes no tags parameter), so this is a genuine one-click
+    save with no prompt() interrupting it — unlike the Archive bookmarklet,
+    which always asks for optional tags first. `document.title` rides along
+    so the Reader's Read Later view has something to show immediately rather
+    than falling back to "(no title)"."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    token_param = f"?token={SAVE_TOKEN}" if SAVE_TOKEN else ""
+    js = (
+        "javascript:(function(){"
+        "var u=location.href;"
+        "var ti=document.title;"
+        f"fetch('{PUBLIC_BASE}/save-later{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
+        "body:JSON.stringify({url:u,title:ti})}).then(function(r){alert(r.ok?'Saved to Read Later':'Error saving');})"
         ".catch(function(e){alert('Error saving: '+e);});"
         "})();"
     )
