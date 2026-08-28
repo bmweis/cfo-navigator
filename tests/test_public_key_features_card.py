@@ -115,3 +115,30 @@ def test_retired_feature_link_dropped_from_public_rendering(env):
     r = _client(env).get("/tools/software/rillet")
     assert "Coming soon" in r.text
     assert "Real-time ledger" not in r.text
+
+
+def test_suggest_cta_button_is_explicitly_left_aligned(env):
+    """Regression test for a mobile orientation bug: `.tp-link-btn` (the
+    "Suggest one" footer CTA on the Key features card) had no explicit
+    text-align, so it fell back to the browser's own UA default of
+    `text-align:center` for <button> elements. That default is invisible
+    whenever the button's shrink-to-fit box exactly matches its (unwrapped)
+    single-line text — which is what a wide landscape-mobile card produces —
+    but becomes visible the moment the text wraps across multiple lines
+    inside a wider box, which is what a narrow portrait-mobile card
+    produces. Confirmed live via Playwright: identical markup rendered
+    centered at 390x844 (portrait, text wraps) and left-aligned at 667x375
+    (landscape, text doesn't wrap) before this fix. Asserting the CSS rule
+    directly (rather than reproducing the live-render measurement here) is
+    what actually guards against a regression, since the bug is a missing
+    property, not a missing feature."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.add_tool("Ramp", "Spend", "https://ramp.com", ["Spend"], approved=1, summary="s")
+    lib.close()
+
+    r = _client(env).get("/tools/software/ramp")
+    assert "Key features" in r.text
+    idx = r.text.index(".tp-link-btn{")
+    rule = r.text[idx:r.text.index("}", idx)]
+    assert "text-align:left" in rule
