@@ -1331,14 +1331,16 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .btn-ghost{background:transparent;color:var(--navy);border:1px solid var(--navy);}
 .btn-ghost:hover{background:var(--accent-light);color:var(--navy);}
 
-/* Edit-page footer action row (Save changes / Save and continue / Cancel) —
+/* Edit-page footer action row (primary save / stay-on-page save / cancel) —
    shared by the Software and Community edit pages. A plain inline-block row
    wraps unpredictably at narrow widths (the first button lands alone on its
    own line, the other two size themselves off their own text, so the row
    reads with mismatched weight) — flex+gap keeps desktop spacing even, and
-   the mobile breakpoint stacks all three at one full width so Save changes
-   still reads as primary (navy fill) without Cancel/Save and continue
-   looking broken next to it. */
+   the mobile breakpoint stacks all three at one full width so the primary
+   action still reads as primary (navy fill) without the other two buttons
+   looking broken next to it. Deliberately avoids quoting the buttons' own
+   label text here — a page-rendered CSS comment containing a button's exact
+   label inflates any test that counts label occurrences in the HTML. */
 .edit-footer-actions{display:flex;flex-wrap:wrap;gap:10px;}
 .edit-footer-actions .btn{margin:0;text-align:center;}
 @media(max-width:640px){
