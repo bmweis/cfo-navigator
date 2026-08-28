@@ -3788,6 +3788,61 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   fix_spaced_em_dashes.py --apply` via `railway ssh`; re-running the
   blast-radius report afterward is the actual "0 legacy-shape rows"
   verification, not merely asserted here.
+- **Spaced-em-dash incident, closed — and `report_regen_blast_radius.py`
+  made log-independent (2026-08) after the incident's own verification
+  exposed the gap.** Brian ran the full sequence via `railway ssh`:
+  `fix_spaced_em_dashes.py` fixed 456/456 flagged fields, 0 failures, 0
+  read-back mismatches — but verification had to fall back to that
+  script's own preview/apply/read-back cycle rather than a blast-radius
+  re-run, because the JSONL log from the em-dash PR's own merge-triggered
+  redeploy never made it to the persistent volume (a fresh container on
+  merge; the log lived only in the old container's local filesystem). This
+  closes the full citation-tag-through-em-dash investigation: citation
+  pollution, the Community profile generator, Description truncation, the
+  ampersand rule, and spaced em dashes are all confirmed clean at full
+  catalog scale. **Fixed the log-fragility gap directly, not just noted
+  it**: `scripts/report_regen_blast_radius.py` now defaults to scanning
+  the full current `tools`/`community_profiles` catalog directly (every
+  row, `approved` or not — a pending tool's drafted content matters before
+  approval too) when no `--log-file` is passed, rather than requiring one
+  — pollution/legacy-shape are properties of what's actually stored right
+  now, not of any particular regen run, so a log was only ever a
+  scoping convenience, never a structural requirement. `--log-file`
+  still works exactly as before when passed (repeatable, same
+  dropped-SSH-session dedup), for the one thing DB-scan mode genuinely
+  can't reconstruct — per-attempt FAILURE detail, which needs real
+  attempt-status data no full-catalog scan has; that section prints "not
+  tracked in DB-scan mode" instead of a false zero. Implemented as the
+  "small, fairly mechanical change" it was scoped as: the existing
+  `_analyze`/`_print_sections`/`_print_dedup_summary` machinery is
+  untouched — DB-scan mode just synthesizes a `status="success"` row per
+  (entity, field) for every tool and every community with a profile row,
+  feeding the same pipeline the log-scoped path always used.
+- **`voice_core`/`voice_fpa_buddy`/`voice_matchmaker` visibility work,
+  scoped but not yet built (2026-08).** Deferred, then explicitly
+  unblocked once the em-dash incident closed. Agreed shape, all three
+  settings treated identically (not just `voice_core`, which merely
+  happened to be the one that caused the incident): each is seeded once
+  from its current code-default constant via a settings-flagged "has this
+  ever been seeded" gate — never an emptiness check, so a deliberate
+  clear-out stays cleared across deploys, same precedent as every other
+  seeding gate in this codebase (`_seed_toolbox`, the feed OPML seeding,
+  `paywall_cookie_notes_seeded`). Once seeded, the code-default constants
+  become seed-only references — not read at runtime by any resolution
+  path. Every resolution path for all three (`_resolve_voice_core` and its
+  as-yet-unnamed siblings, plus every `lib.get_setting(...) or DEFAULT`
+  call site in `webapp/app.py`) stops falling back silently: an empty
+  field refuses to draft (`None`/logged reason, matching the existing
+  `generate_*` error convention) rather than quietly substituting the code
+  default — explicitly chosen over keeping any fallback, since a silently
+  *degraded* generation (real voice guidance replaced by nothing) is a
+  different but equally invisible failure mode, not a solution to the
+  original "what's actually governing generation" ambiguity. Also
+  requires a visible banner on `/admin/voice` for the blocked state, and a
+  full inventory of every read of the three DEFAULT constants (not just
+  the fallback call sites — tests, doc comments, any other consumer)
+  before removing them as active runtime fallbacks. Scoped as its own PR,
+  not bundled into the log-independence fix above.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
