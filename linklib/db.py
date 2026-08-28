@@ -3739,6 +3739,22 @@ class Library:
         ).fetchone()
         return dict(row) if row else None
 
+    def default_admin_user_id(self) -> Optional[int]:
+        """The earliest-created admin account's id, or None if there isn't
+        one (local dev / break-glass-only setups with no real `users` row).
+
+        Same query and same "attribute it to the earliest admin" reasoning
+        as _migrate_read_later_user_scope's one-time backfill — this is the
+        live-request counterpart, used to resolve a user_id for a
+        token-authenticated write that has no session to read one from
+        (e.g. the Read Later bookmarklet/Shortcut, which posts with a save
+        token and no login cookie, so _current_user_id has nothing to work
+        with)."""
+        row = self.conn.execute(
+            "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+        ).fetchone()
+        return row[0] if row else None
+
     def set_user_active(self, user_id: int, active: bool) -> None:
         self.conn.execute("UPDATE users SET active=? WHERE id=?", (int(active), user_id))
         self.conn.commit()

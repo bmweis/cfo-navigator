@@ -26,9 +26,12 @@ Private routes (require login cookie; API routes also accept a token):
     POST /ask                  FP&A Q&A
     POST /post                 Draft a LinkedIn post
     POST /feed/save            Save a feed item to the archive
-    POST /save                 Capture a link (token auth — used by bookmarklet)
+    POST /feed/read-later      Add/remove a feed item from the signed-in user's Read Later list
+    POST /save                 Capture a link into the Archive (token auth — used by bookmarklet)
+    POST /save-later           Capture a link into Read Later (token auth — used by its own bookmarklet)
     GET  /api/search           JSON search API
-    GET  /bookmarklet          One-click saver script
+    GET  /bookmarklet          One-click Archive saver script
+    GET  /read-later-bookmarklet  One-click Read Later saver script
     GET  /admin/contacts       View contact form submissions
 """
 from __future__ import annotations
@@ -320,27 +323,32 @@ async def _no_store_admin_pages(request: Request, call_next):
     return response
 
 
+_TOKEN_ONLY_SAVE_PATHS = {"/save", "/save-later"}
+
+
 @app.middleware("http")
 async def _save_cors(request: Request, call_next):
-    """CORS for /save only (2026-08 wrap-up sprint item 2) — the bookmarklet
-    runs on third-party pages (it POSTs cross-origin, where the login cookie
-    can't be sent — see /bookmarklet's own docstring), so the browser needs
-    real CORS headers on this one route or every request silently fails
-    with no server-side trace at all (Chrome's console shows "TypeError:
-    Failed to fetch", confirmed live from a real third-party origin — the
-    request never even reaches this app, so nothing here could have logged
-    it). A permissive `Access-Control-Allow-Origin: *` is safe specifically
-    for this route: /save already requires a valid save token to do
-    anything (see _check_token), so this is the same trust model as any
-    other bearer-token API, and it grants no cookie-authenticated access
-    (browsers never attach credentials to a `*`-origin CORS response).
-    Scoped to exactly this one path — no other route gets a CORS header,
-    since everything else on this site is same-origin cookie-authenticated
-    and has no reason to be called from a third-party page. A JSON POST body
-    (`Content-Type: application/json`) triggers a real preflight OPTIONS
-    request, so that has to be answered directly, not just the actual POST.
+    """CORS for the token-only capture routes (2026-08 wrap-up sprint item 2;
+    extended to /save-later alongside /save for the Read Later bookmarklet/
+    Shortcut pair) — the bookmarklet runs on third-party pages (it POSTs
+    cross-origin, where the login cookie can't be sent — see /bookmarklet's
+    own docstring), so the browser needs real CORS headers on these routes or
+    every request silently fails with no server-side trace at all (Chrome's
+    console shows "TypeError: Failed to fetch", confirmed live from a real
+    third-party origin — the request never even reaches this app, so nothing
+    here could have logged it). A permissive `Access-Control-Allow-Origin: *`
+    is safe specifically for these routes: both already require a valid save
+    token to do anything (see _check_token), so this is the same trust model
+    as any other bearer-token API, and it grants no cookie-authenticated
+    access (browsers never attach credentials to a `*`-origin CORS
+    response). Scoped to exactly these two paths — no other route gets a
+    CORS header, since everything else on this site is same-origin
+    cookie-authenticated and has no reason to be called from a third-party
+    page. A JSON POST body (`Content-Type: application/json`) triggers a real
+    preflight OPTIONS request, so that has to be answered directly, not just
+    the actual POST.
     """
-    if request.url.path == "/save":
+    if request.url.path in _TOKEN_ONLY_SAVE_PATHS:
         if request.method == "OPTIONS":
             return Response(status_code=204, headers={
                 "Access-Control-Allow-Origin": "*",
@@ -5817,7 +5825,7 @@ Not sure which tool's for you? {(
 
 <div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
+<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="tool-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -5850,13 +5858,17 @@ Not sure which tool's for you? {(
 #tool-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #tool-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #tool-pagination-label{{font-size:13px;color:var(--muted);}}
-.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
+.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;height:100%;}}
 /* Same fixed-to-N-lines technique as .tool-desc below, applied to the title:
    a long name (e.g. "Airbase (acquired by Paylocity)") used to wrap to a
-   second line and push that card's header row taller than its row siblings,
-   since the grid uses align-items:start rather than stretching cards to a
-   shared row height. Clamping to 2 lines with a matching min-height means
-   every card reserves the same header height regardless of name length. */
+   second line and push that card's header row taller than its content
+   below. #tool-grid now uses align-items:stretch (Aug 2026 fix — cards in
+   the same row render at matching heights, with the bottom action row
+   pinned via margin-top:auto below), so this clamp is no longer load-
+   bearing for row-height matching, but it's kept: without it, a 2-line
+   title still shifts every OTHER element inside that one card down by a
+   line versus a 1-line-title card in a different row, which reads as
+   inconsistent even though rows themselves now match. */
 .tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
   line-height:1.3;min-height:44px;margin-bottom:6px;letter-spacing:-0.01em;}}
@@ -6099,7 +6111,12 @@ function renderTools(tools) {{
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">'
       + logoBox(t.name, t.logo_url, 32)
-      + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
+      // Name click goes to the internal profile page (matching Communities'
+      // .comm-name behavior) — not the vendor's external site. A curated
+      // directory's own primary click target should keep the visitor on our
+      // page; Visit (external, on the profile page) is a separate, unchanged
+      // action.
+      + '<a class="tool-name" href="/tools/software/' + esc(t.slug) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
       + '</div>'
       + (promotedBadge || star
           ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-top:2px;">' + promotedBadge + star + '</div>'
@@ -6857,9 +6874,12 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # single empty field inside an otherwise-populated section (see the
     # Community Profile cards further down), which shows muted text to
     # everyone instead of hiding.
-    # Competitors: a Logo/Name table rather than the old chip row (Phase F),
-    # moved up next to Bottom Line (see lower_band composition below) instead
-    # of sitting at the bottom of the right column. Competitors are always
+    # Competitors: a Logo/Name table rather than the old chip row (Phase F).
+    # It used to sit right below Bottom Line, both being "how does this
+    # stack up" content — Bottom Line itself moved up into the hero band
+    # (item 5, Aug 2026 UI pass), so Competitors is now the first thing in
+    # lower_band_left, ahead of sitting at the bottom of the right column.
+    # Competitors are always
     # full `tools` rows (list_tool_competitors joins tool_competitors back to
     # tools), never free text, so each row is a real profile link with its
     # own logo_path — the same _logo_box fallback as F2/F3 covers a
@@ -7117,6 +7137,16 @@ function submitIntroForm() {{
     # monogram fallback as the directory cards and Competitors table when
     # logo_path is still empty.
     tool_logo_url = _tool_logo_url(tool)
+    # Item 5 (Aug 2026 UI pass): Bottom Line moved up into the hero, right
+    # after the category pills and before the action row — was previously
+    # the first thing in lower_band_left, which meant crossing into a
+    # separate .tp-band (its own margin-top:22px) after the pills' own
+    # margin-top:14px, reading as an oddly large gap for two adjacent
+    # "about this tool" facts. Category pills moved up alongside it (were
+    # previously the last thing in hero_text, after the action row) so the
+    # two stay adjacent with only their own small margins between them,
+    # rather than splitting Bottom Line from its nearest context by the
+    # width of the whole Visit/Compare/Edit row.
     hero_text = f"""<div class="tp-header-row">
   {_logo_box(tool['name'], tool_logo_url, 56, radius=12)}
   <div>
@@ -7124,8 +7154,9 @@ function submitIntroForm() {{
     {f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
   </div>
 </div>
-<div class="tp-hero-actions">{action_row}</div>
-{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}"""
+{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}
+{differentiation_block}
+<div class="tp-hero-actions">{action_row}</div>"""
 
     top_band = f"""<div class="tp-band">
   <div>{hero_text}</div>
@@ -7156,8 +7187,9 @@ function submitIntroForm() {{
     # all, which is a wasted-whitespace regression, not a fix. Collapse to a
     # single full-width column whenever the right side would otherwise be
     # empty, rather than leaving a dead 1fr gap beside a full left column.
-    lower_band_left = f"""{differentiation_block}
-{competitors_block}
+    # Bottom Line (differentiation_block) moved into hero_text above (item 5,
+    # Aug 2026 UI pass) — no longer the first thing here.
+    lower_band_left = f"""{competitors_block}
 {description_card}
 {agent_taxonomy_block}"""
     if features_card.strip():
@@ -7242,8 +7274,20 @@ function submitIntroForm() {{
 .tp-feature-tag-ai{{background:#fef3c7;color:#92400e;}}
 .tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
   background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+/* Icon-weight fix (item 3, Aug 2026 UI pass): a flag on every row read as
+   visually heavy on a long feature list (e.g. NetSuite's ~13 rows) for an
+   action most visitors never use. Kept per-row (rather than collapsing to
+   one card-level "flag an issue" action) so a report still names WHICH
+   feature it's about — the modal this opens is pre-scoped with the
+   feature's own id/name specifically for that reason, and the existing
+   "Suggest one" footer link already covers the card-level, new-feature
+   case. Hidden at rest, revealed on row hover OR keyboard focus (not
+   hover-only) so it stays reachable without a mouse — a bare opacity
+   toggle, not display:none, so it's never removed from the tab order. */
 .tp-feature-flag-btn{{margin-left:auto;background:none;border:none;cursor:pointer;font-size:14px;
-  color:var(--muted);padding:2px 4px;line-height:1;}}
+  color:var(--muted);padding:2px 4px;line-height:1;opacity:0;transition:opacity .15s ease;}}
+.tp-feature-list li:hover .tp-feature-flag-btn,
+.tp-feature-list li:focus-within .tp-feature-flag-btn{{opacity:1;}}
 .tp-feature-flag-btn:hover{{color:var(--navy);}}
 .tp-link-btn{{background:none;border:none;padding:0;cursor:pointer;font:inherit;color:var(--accent);
   font-weight:500;}}
@@ -7642,7 +7686,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 
 <div id="comm-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
+<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="comm-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -7676,7 +7720,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 #comm-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #comm-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #comm-pagination-label{{font-size:13px;color:var(--muted);}}
-.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
+.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;height:100%;}}
 .comm-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
 .comm-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 /* Same fixed-height technique as .tool-name/.tool-desc on the Software directory
@@ -15746,6 +15790,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" maxlength="600" rows="5"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('competitive_differentiation') or '')}</textarea>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Generated from the Description and competitor list already on this page&mdash;it doesn't fetch or research anything new. If you edit or regenerate the Description, this won't update on its own; run Generate summary again to pick up the change.</p>
     {_differentiation_verify_action}
     {_differentiation_confidence_html}
     {_differentiation_review_line_html}
@@ -19169,6 +19214,48 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         lib.close()
 
 
+@app.post("/save-later")
+async def save_later(request: Request, token: str | None = None):
+    """Token-gated capture into Read Later — the second bookmarklet/Shortcut
+    pair's endpoint, mirroring /save's auth exactly (same _check_token, same
+    JSON-or-form payload parsing) but writing into the per-user Read Later
+    list instead of the shared Archive.
+
+    Read Later (linklib/db.py's `read_later` table) is scoped by user_id, and
+    a token-only request has no session to read one from (_current_user_id
+    returns None for token-only access, by design — see its docstring). This
+    resolves the target list the same way the table's own one-time migration
+    already did for its pre-multi-user rows: the earliest admin account
+    (Library.default_admin_user_id), since that's Brian's own account and
+    this capture path exists for him alone. No article row is created and no
+    fetch/enrichment happens — add_read_later is a plain metadata insert, so
+    this is a much lighter write than /save's ingest_url. `title` is
+    optional (the bookmarklet sends `document.title`; a Shortcut may not) —
+    a missing title just shows as "(no title)" in the Reader's Read Later
+    view until the article is actually opened there."""
+    _check_token(token or request.headers.get("X-Save-Token"))
+    payload = {}
+    try:
+        payload = await request.json()
+    except Exception:
+        form = await request.form()
+        payload = dict(form)
+    url = (payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    title = (payload.get("title") or "").strip()
+    source = (payload.get("source") or "").strip()
+    lib = _lib()
+    try:
+        user_id = lib.default_admin_user_id()
+        if user_id is None:
+            raise HTTPException(status_code=503, detail="no admin account configured")
+        lib.add_read_later(user_id=user_id, url=url, title=title, source=source)
+        return JSONResponse({"ok": True})
+    finally:
+        lib.close()
+
+
 # Library management lives on its own page (/admin/library). Phase 6:
 # "Open Reader" was dropped from this list — it's not a management tool, and
 # it's reachable via a dedicated callout at the top of the page instead (see
@@ -21388,14 +21475,14 @@ def admin_library(request: Request):
     # capture-path accordions. Both halves keep their own shape — a _lib_card
     # and the existing accordion group — under one quadrant heading, rather
     # than being blended into a single undifferentiated block.
-    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus the two ways to save a page by hand.</p>
+    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
 <div style="margin-bottom:22px;">{_lib_card(
     "/admin/library/feeds", "Manage feeds",
     "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into "
     "sections, and set which ones are read-only. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
     "web search is restricted to.",
     _badge_for_href("/admin/library/feeds", task_counts.get("/admin/library/feeds", 0)))}</div>
-<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving articles from anywhere</div>
+<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving to the archive</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
@@ -21433,13 +21520,53 @@ def admin_library(request: Request):
 </div>
 </details>
 
-<p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working&mdash;the old copies embed the old values. Set them up again from the instructions above.</p>"""
+<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:22px 0 8px;">Saving to Read Later instead</div>
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Same idea, same no-login token, a second destination: these post to <code>/save-later</code> and land in the Reader's Read Later list instead of the archive&mdash;no enrichment, no tags, just a quick queue for something to read later.</p>
 
-    # 3, not the literal 1 card: Manage feeds plus the bookmarklet and
-    # Share-Sheet accordions. See _lib_quadrant's count_override note.
+<details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>Desktop&mdash;the bookmarklet</summary>
+<div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
+<p style="margin:0 0 10px;">Same mechanism as the archive bookmarklet above&mdash;an ordinary browser bookmark whose &ldquo;URL&rdquo; is a tiny program. Clicking it grabs the current page's address (and title) and saves it straight to Read Later&mdash;no prompt, one click.</p>
+<ol style="margin:0 0 10px;padding-left:20px;">
+  <li>Open <a href="/read-later-bookmarklet">/read-later-bookmarklet</a> (login-gated) and copy the <em>entire</em> snippet&mdash;click the text, <strong>Cmd+A</strong>, <strong>Cmd+C</strong>.</li>
+  <li>Show the bookmarks bar (<strong>Cmd+Shift+B</strong> in Chrome), right-click an empty spot on it &rarr; <strong>Add page&hellip;</strong></li>
+  <li>Name: <code>Save to Read Later</code>. URL: <strong>paste the snippet</strong>. Save.</li>
+  <li>On any article page, click it like a button &rarr; &ldquo;Saved to Read Later.&rdquo; It shows up right away under the Reader's Read Later view.</li>
+</ol>
+<p style="margin:0;color:var(--muted);font-size:13px;">It won't fire on browser-internal pages (new tab, chrome:// pages)&mdash;that's a browser rule. The snippet contains the save token in plaintext, so don't paste it anywhere public.</p>
+</div>
+</details>
+
+<details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>iPhone / iPad&mdash;Share-Sheet shortcut</summary>
+<div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
+<p style="margin:0 0 10px;">One-time setup in the <strong>Shortcuts</strong> app (~5 minutes); afterwards &ldquo;Save to Read Later&rdquo; appears in Safari's share sheet, alongside &ldquo;Save to CFO Library&rdquo; if you set that one up too.</p>
+<ol style="margin:0 0 10px;padding-left:20px;">
+  <li>Shortcuts app &rarr; <strong>+</strong> to create a new shortcut &rarr; rename it <code>Save to Read Later</code>.</li>
+  <li>Tap the shortcut's <strong>info (&#9432;)</strong> panel &rarr; turn on <strong>Show in Share Sheet</strong>. Under the accepted types, keep <strong>URLs</strong> and <strong>Safari web pages</strong>.</li>
+  <li>Add action <strong>&ldquo;Get URLs from Input&rdquo;</strong> (its input should be <em>Shortcut Input</em>).</li>
+  <li>Add action <strong>&ldquo;Get Contents of URL&rdquo;</strong> and expand its options:
+    <ul style="margin:4px 0;padding-left:18px;">
+      <li>URL: <code>{_esc(PUBLIC_BASE)}/save-later{'?token=' + _esc(SAVE_TOKEN) if SAVE_TOKEN else ''}</code></li>
+      <li>Method: <strong>POST</strong></li>
+      <li>Request Body: <strong>JSON</strong> &rarr; add a text field named <code>url</code> whose value is the <em>URLs</em> variable from step 3.</li>
+    </ul></li>
+  <li>Optional: add a second JSON text field named <code>title</code> (e.g. the <em>Name</em> output of a <strong>&ldquo;Get Details of Safari Web Page&rdquo;</strong> action) so the item shows a real title in the Reader right away, instead of &ldquo;(no title)&rdquo; until you open it.</li>
+  <li>Optional: add <strong>&ldquo;Show Notification&rdquo;</strong> saying &ldquo;Saved to Read Later&rdquo; so you get visible confirmation.</li>
+  <li>Use it: in Safari, tap <strong>Share &rarr; Save to Read Later</strong>. The article lands straight in the Reader's Read Later list, no queue.</li>
+</ol>
+<p style="margin:0;color:var(--muted);font-size:13px;">Read Later has no tags concept, so there's no tags field to add here&mdash;unlike the archive shortcut above.</p>
+</div>
+</details>
+
+<p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, all four snippets above stop working at once&mdash;they share the same token, and the old copies embed the old values. Set them up again from the instructions above.</p>"""
+
+    # 5, not the literal 1 card: Manage feeds plus the archive bookmarklet/
+    # Share-Sheet accordions and the Read Later bookmarklet/Share-Sheet
+    # accordions. See _lib_quadrant's count_override note.
     saving_articles_html = _lib_quadrant("New content", saving_articles_body,
                                          ["/admin/library/feeds"],
-                                         count_override=3)
+                                         count_override=5)
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -24039,14 +24166,14 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 {datalist}
 
 <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 4px;">Monthly spend by category</h3>
     <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Last 12 months.</p>
     {monthly_chart_html}
     <div style="margin-top:10px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">See full history &amp; edit &rarr;</a></div>
   </div>
 
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
     <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
       <div>
@@ -24054,7 +24181,16 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <!-- auto-fit/minmax, not a hardcoded 1fr 1fr (CSS Grid blowout — see
+           CLAUDE.md's Phase P note): a native <input type="date"> has a
+           fixed intrinsic rendering minimum (~160px in Chromium) that
+           doesn't shrink below that regardless of width:100%, so a rigid
+           1fr/1fr track forced this whole card — and therefore the page —
+           to overflow horizontally on real phone widths (measured: 320px
+           through 414px). minmax(140px,1fr) lets the pair collapse to one
+           stacked column instead of squeezing below each input's own
+           floor. -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;">
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
@@ -24080,12 +24216,18 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </form>
   </div>
 
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 8px;">Upload CSV</h3>
     <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Batch-import charges instead of typing each one in. Columns: <code>vendor, date, amount, category, note</code> (header row required; category and note optional). Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. You'll get a preview to check before anything is saved. <a href="/admin/overhead-spend/csv/template" style="color:var(--navy);">Download a template &darr;</a></p>
     <form method="post" action="/admin/overhead-spend/csv/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+      <!-- width:100%/max-width:100% on the file input: a bare <input
+           type="file"> has its own intrinsic rendering width (the native
+           "Choose File" button + filename text) that doesn't shrink on its
+           own, which forced this specific card ~6px past a 320px viewport
+           even after the fixes above — this constrains it to the card's
+           own (already-shrinkable) width instead. -->
       <input type="file" name="file" accept=".csv,text/csv" required
-        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);width:100%;max-width:100%;box-sizing:border-box;">
       <div><button type="submit" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;">Preview import</button></div>
     </form>
   </div>
@@ -24097,7 +24239,18 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 <p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong> &mdash; model choice directly affects the Enrichment row below. <a href="/admin/system/model" style="color:var(--accent);">Change it &rarr;</a></p>
 
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
-  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;">
+  <!-- min-width:0 on both flex items below (same pattern as .tp-band>div
+       elsewhere in this file): without it, a flex item's automatic minimum
+       width is based on its content's min-content size, and that
+       recurses right through the overflow-x:auto table wrappers below to
+       their tables' own min-width:400px/320px — forcing this WHOLE ROW,
+       and therefore the page, wider than the viewport on a real phone,
+       rather than letting the intended per-table horizontal scroll
+       actually contain it. This was the real, page-wide overflow found
+       while investigating item 4; the Date/Amount grid fix above (Add a
+       charge) is a real, separate blowout of the same class but wasn't
+       the dominant cause once measured directly. -->
+  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;min-width:0;">
     <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
       <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_total:.2f}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:2px;">Estimated usage, all time</div>
@@ -24122,7 +24275,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </div>
   </div>
 
-  <div style="flex:1 1 460px;">
+  <div style="flex:1 1 460px;min-width:0;">
     <h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;min-width:320px;">
@@ -28635,6 +28788,32 @@ def bookmarklet(request: Request):
         "var u=location.href;"
         f"fetch('{PUBLIC_BASE}/save{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
         "body:JSON.stringify({url:u,tags:t})}).then(function(r){alert(r.ok?'Saved to archive':'Error saving');})"
+        ".catch(function(e){alert('Error saving: '+e);});"
+        "})();"
+    )
+    return js
+
+
+@app.get("/read-later-bookmarklet", response_class=PlainTextResponse)
+def read_later_bookmarklet(request: Request):
+    """The Read Later counterpart to /bookmarklet — same page, same
+    token-refreshed-per-request/login-gate/CORS story (see /bookmarklet's own
+    docstring and the _save_cors middleware above), posting to /save-later
+    instead of /save. No tags prompt: Read Later has no tags concept
+    (add_read_later takes no tags parameter), so this is a genuine one-click
+    save with no prompt() interrupting it — unlike the Archive bookmarklet,
+    which always asks for optional tags first. `document.title` rides along
+    so the Reader's Read Later view has something to show immediately rather
+    than falling back to "(no title)"."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    token_param = f"?token={SAVE_TOKEN}" if SAVE_TOKEN else ""
+    js = (
+        "javascript:(function(){"
+        "var u=location.href;"
+        "var ti=document.title;"
+        f"fetch('{PUBLIC_BASE}/save-later{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
+        "body:JSON.stringify({url:u,title:ti})}).then(function(r){alert(r.ok?'Saved to Read Later':'Error saving');})"
         ".catch(function(e){alert('Error saving: '+e);});"
         "})();"
     )

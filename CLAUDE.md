@@ -3931,6 +3931,65 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   against all 40 — the pre-merge spot-check that validated the fallback PR
   itself only ever sampled tools, never communities, so this is treated as
   a real verification gap to close, not a formality.
+- **`generate_tool_differentiation` joins the D1 content-exclusion rules
+  (2026-08) — the gap the blast-radius spot-check bullet above flagged and
+  deferred.** Investigated first: `generate_tool_differentiation` already
+  resolved and used `voice_core` correctly (unlike Community profile's own
+  gap, fixed earlier), and its em-dash/marketing-language rules were
+  already in place — what was missing was the citation-tag investigation's
+  D1 content rules (no vendor-reported stats/proof-points, no
+  testimonials/review-scores/logos, no editor-facing asides), which
+  Description and Agent taxonomy both got as part of that fix and this
+  field never did, since it predates that fix and has no citations
+  mechanism of its own (it's still plain JSON output — Citations-API
+  grounding for this field stays deferred, unchanged by this pass) to have
+  motivated including it. Two new rules (5-6) added to
+  `_TOOL_DIFFERENTIATION_PROMPT`, reusing Description/Agent taxonomy's own
+  reported-results/testimonials wording and editor-facing-address ban,
+  adapted for this field's short 1-2-sentence JSON format: rule 5 bans
+  vendor-reported stats/testimonials/review-scores/logos as the basis for
+  the comparison **even when one already appears in the `description` or
+  competitor context fed into the prompt** — a real path, since a legacy,
+  not-yet-regenerated description can still carry a stat predating the
+  Description-side fix, exactly what the sampled output turned out to be
+  pulling from: a sampled Differentiation output for **Maxima** included
+  "Scale AI's CAO reports closing two to three days faster at over 98%
+  automation," attributing that vendor-reported result to Scale AI as a
+  third-party comparison example named *within* Maxima's own text — Scale
+  AI is not itself a Toolbox entry (confirmed: no tool by that name exists
+  in the DB), so this is one finding on one tool (Maxima), not two; rule 6
+  bans referencing "the description above"/"the competitor context"/the
+  model's own research process. **Same disclosed limitation as the original citation-tag
+  fix, verified rather than assumed**: this is preventative (prompt-level)
+  only — nothing after the `json.loads()` call can recognize and strip a
+  vendor stat the model decided to include anyway, since a legitimate
+  comparison claim and an excluded marketing stat aren't mechanically
+  distinguishable after the fact. `tests/citations_fixtures/
+  differentiation_fixtures.py` + `tests/test_differentiation_content_
+  exclusions.py` cover both sides of that, mirroring
+  `enrich_sentinel_fixtures.py`'s own two-sided pattern: a clean/compliant
+  fixture (description carries the stat, mocked response — a model that
+  complied — doesn't) proving the pipeline stores exactly what a compliant
+  model returns, and an old-bug-reproduction fixture (mocked response DOES
+  include the stat) proving it still leaks through unfiltered if the model
+  reverts, plus static prompt-content assertions that the new rules are
+  actually present. **Verified live and closed (2026-08)**: Brian ran
+  `regen_ai_drafted_fields.py --ids --only tools --sample 1` against
+  Maxima — the same tool the original finding traced to — via
+  `railway ssh`. Output came back clean — no vendor-reported stat, no
+  editor-facing language, appropriately hedged where information (pricing)
+  wasn't available — confirming the new rules hold on real model output,
+  not just in the mocked fixtures above. **Known follow-up, not fixed by
+  this PR**: Maxima's own live `competitive_differentiation` field still
+  carries the pre-fix leaked stat (the prompt fix only governs future
+  generations, never rewrites what's already stored) — tracked in issue
+  #445 for a targeted re-run, alongside anything else surfaced during
+  content review, rather than a one-off fix here. (An earlier draft of
+  this note and of #445 mistakenly treated "Scale AI" as a second Toolbox
+  entry needing its own re-run — corrected: it's the third-party example
+  named inside Maxima's own leaked text, not a tool in the DB, so Maxima is
+  the only entry #445 needs to cover unless content review turns up
+  another.)
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -4000,6 +4059,14 @@ tables, no third-party dependency.
     `Access-Control-Allow-Origin: *` is safe here specifically because `/save` already
     requires a valid token to do anything — same trust model as any bearer-token API,
     and it grants no cookie-authenticated access. No other route gets a CORS header.
+  - `/save-later` is the same token-only, no-login mechanism as `/save` — same
+    `_check_token`, same CORS treatment (the `_save_cors` middleware now matches
+    either path) — but writes into the per-user `read_later` list instead of the
+    shared Archive, via a second bookmarklet/Shortcut pair (`GET
+    /read-later-bookmarklet`, admin-gated like `/bookmarklet`). Since a token-only
+    request has no session, and Read Later is `user_id`-scoped, the write is
+    attributed to `Library.default_admin_user_id()` (the earliest admin account) —
+    see ARCHITECTURE.md's matching bullet for the full write-up.
 - **No secret in rendered HTML.** Internal links no longer carry `?token=`; the cookie
   authorizes navigation. Token comparison is constant-time (`hmac.compare_digest`).
 - **⚠️ Bookmarklet caveat (by design).** The `/bookmarklet` snippet embeds
@@ -4015,6 +4082,9 @@ tables, no third-party dependency.
   options object twice before `.then` ever ran) — a syntax error, so every copy was a
   silent no-op that never threw anywhere visible; fixed, plus a `.catch` on the fetch
   chain so a network/CORS failure now alerts visibly instead of doing nothing.
+  Same caveat applies to `/read-later-bookmarklet` — it embeds the same
+  `LINKLIB_SAVE_TOKEN`, is login-gated the same way, and needs re-grabbing on the
+  same token rotation.
 - `/static/{filename}` resolves through `os.path.basename` to block path traversal.
 
 ## `library.db` is intentionally not in the repo
