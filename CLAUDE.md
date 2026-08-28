@@ -4010,6 +4010,21 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   communities` prints a note and changes nothing, rather than silently
   doing nothing with no signal.
 
+- **Reader "expand"/distraction-free mode, corrected (2026-08).** The
+  original build only shrank the middle `.rr-list-pane` to a 220px "sliver"
+  on expand, leaving `.rr-rail` (the left nav rail) fully visible on
+  desktop — confirmed live as a real bug against Instapaper's own reference
+  screenshots, not the intended design: Instapaper's expand hides BOTH the
+  rail and the article list completely, leaving just the centered reading
+  pane with the sticky action bar and a top-left collapse-back arrow. Fixed:
+  `.rr-shell.rr-focus-mode` now hides `.rr-rail`/`.rr-list-pane` (and their
+  resize handles) outright, on every viewport — the sliver mechanism
+  (`.rr-sliver`, `rrUpdateSliver`, its scroll-driven time-remaining tracker)
+  is removed entirely. The existing `#rr-reader-expand` button in the sticky
+  `.rr-reader-header` (already swapping between expand/collapse icons)
+  doubles as the collapse-back affordance, since there's no sliver left to
+  click through. See ARCHITECTURE.md's matching bullet.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 

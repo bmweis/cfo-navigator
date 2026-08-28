@@ -17033,22 +17033,24 @@ _READER_SHELL_CSS = """
 .rr-list-search input{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;
   font-size:14px;background:var(--surface);font-family:inherit;}
 .rr-list-rows{flex:1;overflow-y:auto;}
-/* Distraction-free reading: the middle list pane collapses to a thin sliver
-   (title/source/time-remaining) and the reader pane takes the freed width.
-   Works identically regardless of which quick view the open article came
-   from — nothing here is keyed to `view`, only to whether an article is open. */
-.rr-shell.rr-focus-mode .rr-list-pane{flex:0 0 220px;min-width:180px;max-width:260px;}
+/* Distraction-free reading (corrected 2026-08 — see the Reader cleanliness
+   investigation): the reference is Instapaper's own expand view, where BOTH
+   the left nav rail and the article list disappear completely, leaving just
+   the reading pane, centered, full width, with the top action bar still
+   visible and a collapse-back affordance in its top-left corner. The
+   original build only ever shrank .rr-list-pane to a 220px "sliver" while
+   leaving .rr-rail fully visible — confirmed live as the actual bug, not the
+   intended design. Both panes are now hidden outright (their own resize
+   handles too), and .rr-reader-pane's flex:1 (declared above) fills the
+   freed width on its own with no extra rule needed here. The existing
+   #rr-reader-expand button in .rr-reader-header (sticky, so it's still
+   visible with the rail/list gone) doubles as the collapse-back affordance —
+   it already swaps between an expand and a collapse icon on toggle, so no
+   separate button was needed to reach the reference's top-left arrow. */
+.rr-shell.rr-focus-mode .rr-rail,
+.rr-shell.rr-focus-mode .rr-list-pane,
+.rr-shell.rr-focus-mode #rr-resize-rail,
 .rr-shell.rr-focus-mode #rr-resize-list{display:none;}
-.rr-shell.rr-focus-mode .rr-list-header,
-.rr-shell.rr-focus-mode .rr-list-rows,
-.rr-shell.rr-focus-mode #rr-alert-wrap{display:none;}
-.rr-sliver{display:none;flex-direction:column;gap:14px;padding:20px 16px;}
-.rr-shell.rr-focus-mode .rr-sliver{display:flex;}
-.rr-sliver-collapse{align-self:flex-start;background:none;border:1px solid var(--line);border-radius:8px;
-  padding:6px;cursor:pointer;color:var(--navy);display:flex;}
-.rr-sliver-collapse:hover{background:var(--surface-2);}
-.rr-sliver-title{font-family:var(--font-head);font-weight:600;font-size:14px;color:var(--ink);line-height:1.35;}
-.rr-sliver-meta{font-size:12px;color:var(--muted);}
 /* flex-wrap lets the save-time tag form (.rr-row-tagform, flex:0 0 100%) drop
    onto its own line below the row instead of becoming a third column that
    squeezes .rr-row-main. It can't change the collapsed layout: .rr-row-main is
@@ -17189,12 +17191,9 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
   .rr-rail,.rr-list-pane{max-width:none;flex:none;border-right:none;border-bottom:1px solid var(--line);}
   .rr-resize{display:none;}
   /* Distraction-free reading is forced here, not just offered — see
-     rrMobileNoRoom()/rrRenderArticle — so the rail (untouched by the
-     desktop focus-mode toggle, which only collapses the list pane) also
-     needs to get out of the way for the view to read as genuinely
-     full-screen instead of "list pane collapsed, but a whole nav rail
-     still stacked above the article." */
-  .rr-shell.rr-focus-mode .rr-rail{display:none;}
+     rrMobileNoRoom()/rrRenderArticle. The base .rr-shell.rr-focus-mode rule
+     above already hides both .rr-rail and .rr-list-pane on every viewport
+     now, so nothing mobile-specific is needed here any more. */
 }
 </style>
 """
@@ -17463,7 +17462,6 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
   </div>
   <div id="rr-alert-wrap">{alert_html}</div>
   <div class="rr-list-rows" id="rr-list-rows">{rows_html}</div>
-  <div class="rr-sliver" id="rr-sliver"></div>
 </div>"""
 
     reader_pane_html = """<div class="rr-reader-pane" id="rr-reader">
@@ -17671,15 +17669,13 @@ function rrRenderArticle(d) {{
   // The click/tap itself was never broken (rrOpen always fired correctly);
   // the update just happened off-screen, which reads as "does nothing."
   // On a real "no room for 3 panes" viewport, default straight into
-  // distraction-free reading (collapses the rail + list to a sliver, see
-  // the .rr-focus-mode CSS) rather than just scrolling past a still-full
+  // distraction-free reading (hides the rail + list entirely, see the
+  // .rr-focus-mode CSS) rather than just scrolling past a still-full
   // mobile-stacked list; on any other viewport this scrollIntoView is a
   // no-op in practice since .rr-shell is already height-constrained to
   // the viewport with its own internal scroll.
-  if (rrMobileNoRoom()) {{
-    if (!rrFocusMode) rrSetFocusMode(true); else rrUpdateSliver();
-  }} else {{
-    rrUpdateSliver();
+  if (rrMobileNoRoom() && !rrFocusMode) {{
+    rrSetFocusMode(true);
   }}
   pane.scrollIntoView({{behavior: 'instant', block: 'start'}});
 }}
@@ -17705,34 +17701,14 @@ function rrSetFocusMode(on) {{
   if (shell) shell.classList.toggle('rr-focus-mode', rrFocusMode);
   var btn = document.getElementById('rr-reader-expand');
   if (btn) {{
+    // This same button is the reference's top-left collapse-back arrow once
+    // expanded — the rail/list are display:none in focus mode, so this
+    // sticky-header button is the only way back (see rr-focus-mode CSS).
     btn.innerHTML = rrFocusMode ? RR_ICON_COLLAPSE : RR_ICON_EXPAND;
     btn.title = rrFocusMode ? 'Exit distraction-free reading' : 'Distraction-free reading';
   }}
-  rrUpdateSliver();
 }}
 function rrToggleFocusMode() {{ rrSetFocusMode(!rrFocusMode); }}
-function rrUpdateSliver(remainMin) {{
-  var el = document.getElementById('rr-sliver');
-  if (!el || !rrCurrent) return;
-  var mins = (remainMin === undefined) ? rrCurrent.reading_minutes : remainMin;
-  var timeLabel = mins ? (mins + (mins === 1 ? ' min left' : ' mins left')) : '';
-  var meta = [rrCurrent.source, timeLabel].filter(Boolean).join(' \\u00b7 ');
-  el.innerHTML =
-    '<button class="rr-sliver-collapse" onclick="rrToggleFocusMode()" title="Exit distraction-free reading">' + RR_ICON_COLLAPSE + '</button>' +
-    '<div class="rr-sliver-title">' + rrEsc(rrCurrent.title) + '</div>' +
-    '<div class="rr-sliver-meta">' + meta + '</div>';
-}}
-// Non-bubbling scroll events still reach a capturing listener on document,
-// which is the standard way to delegate them without binding directly to
-// #rr-reader (whose content is fully replaced on every article load).
-document.addEventListener('scroll', function(e) {{
-  if (!rrFocusMode || !rrCurrent || !rrCurrent.reading_minutes) return;
-  if (!e.target || e.target.id !== 'rr-reader') return;
-  var pane = e.target;
-  var scrollable = pane.scrollHeight - pane.clientHeight;
-  var frac = scrollable > 0 ? Math.min(1, pane.scrollTop / scrollable) : 0;
-  rrUpdateSliver(Math.max(0, Math.round(rrCurrent.reading_minutes * (1 - frac))));
-}}, true);
 function rrToggleFind() {{
   var bar = document.getElementById('rr-find-bar');
   if (!bar) return;
