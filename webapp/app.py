@@ -6805,9 +6805,12 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # single empty field inside an otherwise-populated section (see the
     # Community Profile cards further down), which shows muted text to
     # everyone instead of hiding.
-    # Competitors: a Logo/Name table rather than the old chip row (Phase F),
-    # moved up next to Bottom Line (see lower_band composition below) instead
-    # of sitting at the bottom of the right column. Competitors are always
+    # Competitors: a Logo/Name table rather than the old chip row (Phase F).
+    # It used to sit right below Bottom Line, both being "how does this
+    # stack up" content — Bottom Line itself moved up into the hero band
+    # (item 5, Aug 2026 UI pass), so Competitors is now the first thing in
+    # lower_band_left, ahead of sitting at the bottom of the right column.
+    # Competitors are always
     # full `tools` rows (list_tool_competitors joins tool_competitors back to
     # tools), never free text, so each row is a real profile link with its
     # own logo_path — the same _logo_box fallback as F2/F3 covers a
@@ -7065,6 +7068,16 @@ function submitIntroForm() {{
     # monogram fallback as the directory cards and Competitors table when
     # logo_path is still empty.
     tool_logo_url = _tool_logo_url(tool)
+    # Item 5 (Aug 2026 UI pass): Bottom Line moved up into the hero, right
+    # after the category pills and before the action row — was previously
+    # the first thing in lower_band_left, which meant crossing into a
+    # separate .tp-band (its own margin-top:22px) after the pills' own
+    # margin-top:14px, reading as an oddly large gap for two adjacent
+    # "about this tool" facts. Category pills moved up alongside it (were
+    # previously the last thing in hero_text, after the action row) so the
+    # two stay adjacent with only their own small margins between them,
+    # rather than splitting Bottom Line from its nearest context by the
+    # width of the whole Visit/Compare/Edit row.
     hero_text = f"""<div class="tp-header-row">
   {_logo_box(tool['name'], tool_logo_url, 56, radius=12)}
   <div>
@@ -7072,8 +7085,9 @@ function submitIntroForm() {{
     {f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
   </div>
 </div>
-<div class="tp-hero-actions">{action_row}</div>
-{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}"""
+{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}
+{differentiation_block}
+<div class="tp-hero-actions">{action_row}</div>"""
 
     top_band = f"""<div class="tp-band">
   <div>{hero_text}</div>
@@ -7104,8 +7118,9 @@ function submitIntroForm() {{
     # all, which is a wasted-whitespace regression, not a fix. Collapse to a
     # single full-width column whenever the right side would otherwise be
     # empty, rather than leaving a dead 1fr gap beside a full left column.
-    lower_band_left = f"""{differentiation_block}
-{competitors_block}
+    # Bottom Line (differentiation_block) moved into hero_text above (item 5,
+    # Aug 2026 UI pass) — no longer the first thing here.
+    lower_band_left = f"""{competitors_block}
 {description_card}
 {agent_taxonomy_block}"""
     if features_card.strip():
