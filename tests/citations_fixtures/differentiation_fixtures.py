@@ -22,9 +22,11 @@ pattern (tests/citations_fixtures/enrich_sentinel_fixtures.py):
    (the new prompt rules), not corrective.
 """
 
-# The actual observed production shape (2026-08 blast-radius spot-check):
-# a sampled Differentiation output for Scale AI included a vendor-reported
-# result attributed to a named customer role.
+# The actual observed production shape (2026-08 blast-radius spot-check,
+# corrected): a sampled Differentiation output for Maxima included a
+# vendor-reported result attributed to Scale AI — a third party named as a
+# comparison example WITHIN Maxima's own text, not a Toolbox entry of its
+# own (confirmed directly: no tool named "Scale AI" exists in the DB).
 VENDOR_STAT_TEXT = (
     "Scale AI's CAO reports closing two to three days faster at over "
     "98% automation"
@@ -38,21 +40,19 @@ DIFFERENTIATION_RESPONSES = [
         # tells the model not to repeat it even when it's right there in
         # the description below. This fixture models a model that complied.
         "description": (
-            f"Scale AI provides data labeling and evaluation infrastructure "
-            f"for AI teams. {VENDOR_STAT_TEXT}, according to the vendor."
+            f"Maxima provides AI-native financial data infrastructure for "
+            f"finance teams. {VENDOR_STAT_TEXT}, according to the vendor."
         ),
-        "competitor_names": ["Labelbox", "Surge AI"],
+        "competitor_names": ["Ramp", "Brex"],
         "raw_response": (
             '{"competitive_differentiation": '
-            '"Best for AI teams that need large-scale human-in-the-loop '
-            'labeling; the trade-off is less depth on pure model evaluation '
-            'than a narrower specialist like Surge AI.", '
+            '"Best for finance teams that want an AI-native build from day '
+            'one; the trade-off is a smaller ecosystem than the incumbents.", '
             '"confident": true}'
         ),
         "expected_differentiation": (
-            "Best for AI teams that need large-scale human-in-the-loop "
-            "labeling; the trade-off is less depth on pure model evaluation "
-            "than a narrower specialist like Surge AI."
+            "Best for finance teams that want an AI-native build from day "
+            "one; the trade-off is a smaller ecosystem than the incumbents."
         ),
         "expected_confident": True,
         "forbid_substrings": ["98%", "two to three days faster", "CAO reports"],
@@ -66,11 +66,11 @@ DIFFERENTIATION_RESPONSES = [
         # disclosed, tested limitation
         # test_old_bug_shape_still_leaks_if_the_model_reverts_to_it
         # documents for Description/Agent taxonomy.
-        "description": "Scale AI provides data labeling and evaluation infrastructure for AI teams.",
-        "competitor_names": ["Labelbox", "Surge AI"],
+        "description": "Maxima provides AI-native financial data infrastructure for finance teams.",
+        "competitor_names": ["Ramp", "Brex"],
         "raw_response": (
             '{"competitive_differentiation": '
-            f'"Best for AI teams at scale; {VENDOR_STAT_TEXT}, so the '
+            f'"Best for finance teams at scale; {VENDOR_STAT_TEXT}, so the '
             'trade-off is mostly about cost.", '
             '"confident": true}'
         ),

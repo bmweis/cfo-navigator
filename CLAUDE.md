@@ -3951,11 +3951,15 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   the comparison **even when one already appears in the `description` or
   competitor context fed into the prompt** — a real path, since a legacy,
   not-yet-regenerated description can still carry a stat predating the
-  Description-side fix, exactly what the sampled Scale AI output ("Scale
-  AI's CAO reports closing two to three days faster at over 98%
-  automation") turned out to be pulling from; rule 6 bans referencing "the
-  description above"/"the competitor context"/the model's own research
-  process. **Same disclosed limitation as the original citation-tag
+  Description-side fix, exactly what the sampled output turned out to be
+  pulling from: a sampled Differentiation output for **Maxima** included
+  "Scale AI's CAO reports closing two to three days faster at over 98%
+  automation," attributing that vendor-reported result to Scale AI as a
+  third-party comparison example named *within* Maxima's own text — Scale
+  AI is not itself a Toolbox entry (confirmed: no tool by that name exists
+  in the DB), so this is one finding on one tool (Maxima), not two; rule 6
+  bans referencing "the description above"/"the competitor context"/the
+  model's own research process. **Same disclosed limitation as the original citation-tag
   fix, verified rather than assumed**: this is preventative (prompt-level)
   only — nothing after the `json.loads()` call can recognize and strip a
   vendor stat the model decided to include anyway, since a legitimate
@@ -3971,17 +3975,21 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   reverts, plus static prompt-content assertions that the new rules are
   actually present. **Verified live and closed (2026-08)**: Brian ran
   `regen_ai_drafted_fields.py --ids --only tools --sample 1` against
-  Maxima (not Scale AI — a different tool from the same catalog, picked at
-  hand) via `railway ssh`. Output came back clean — no vendor-reported
-  stat, no editor-facing language, appropriately hedged where information
-  (pricing) wasn't available — confirming the new rules hold on real model
-  output, not just in the mocked fixtures above. **Known follow-up, not
-  fixed by this PR**: Maxima's own live `competitive_differentiation`
-  field still carries the pre-fix leaked stat (the prompt fix only governs
-  future generations, never rewrites what's already stored) — tracked in
-  issue #445 for whatever targeted re-run scope comes next, alongside
-  anything else surfaced during content review, rather than a one-off fix
-  here.
+  Maxima — the same tool the original finding traced to — via
+  `railway ssh`. Output came back clean — no vendor-reported stat, no
+  editor-facing language, appropriately hedged where information (pricing)
+  wasn't available — confirming the new rules hold on real model output,
+  not just in the mocked fixtures above. **Known follow-up, not fixed by
+  this PR**: Maxima's own live `competitive_differentiation` field still
+  carries the pre-fix leaked stat (the prompt fix only governs future
+  generations, never rewrites what's already stored) — tracked in issue
+  #445 for a targeted re-run, alongside anything else surfaced during
+  content review, rather than a one-off fix here. (An earlier draft of
+  this note and of #445 mistakenly treated "Scale AI" as a second Toolbox
+  entry needing its own re-run — corrected: it's the third-party example
+  named inside Maxima's own leaked text, not a tool in the DB, so Maxima is
+  the only entry #445 needs to cover unless content review turns up
+  another.)
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
