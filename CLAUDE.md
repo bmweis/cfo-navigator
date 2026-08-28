@@ -4049,6 +4049,21 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `.rr-reader-header` (already swapping between expand/collapse icons)
   doubles as the collapse-back affordance, since there's no sliver left to
   click through. See ARCHITECTURE.md's matching bullet.
+- **Read Later content caching + manual refresh (2026-08 follow-up).**
+  `/save-later` was a bare metadata insert with no fetch at all — every open
+  of an unread item re-fetched live, nothing ever cached. Per Brian's
+  explicit scope decision, `read_later` gained `content`/`content_html`
+  columns and `/save-later` now fetches at save time via the same
+  `fetch_page`/`extract_reader_html` pair `ingest_url` uses (best-effort,
+  never blocks the save on a fetch failure — same durability-audit
+  precedent). `Library.add_read_later`'s content write is CASE-guarded
+  (never overwrites a good cache with an empty one from a failed re-fetch).
+  `_resolve_reader_content` gained a Read Later cache tier (below an Archive
+  article's own cache, above the live-fetch fallback) and an `is_read_later`
+  flag. A new session-gated (not token) `POST /read-later/refresh` is the
+  manual per-item "Refresh" button in the reader toolbar — re-fetches on
+  click only (no automatic staleness detection), non-destructive on failure.
+  See ARCHITECTURE.md's matching section and `tests/test_read_later_caching.py`.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -4108,6 +4123,11 @@ tables, no third-party dependency.
     `X-Save-Token`/`?token=`): `/ask`, `/post`, `/feed/save`, `/api/search`,
     `/library/{article_id}/tags` (the Reader's inline tag editor, Phase 5c —
     the route predates it but had no callers until then).
+  - **Session-cookie-only** (401 when unauthenticated, no token fallback at all — these are
+    reached only from inside the already-authenticated `/read` UI, never cross-origin):
+    `/api/read-article` and `/read-later/refresh` (2026-08 follow-up — the per-item Read
+    Later "Refresh" action deliberately doesn't accept `X-Save-Token`/`?token=`, unlike
+    `/save-later`, since it's a button in the signed-in Reader, not the bookmarklet).
   - `/save` is **token-only** (`X-Save-Token` header or `?token=`) because the bookmarklet
     calls it cross-origin, where the login cookie can't be sent. It also carries a
     dedicated, `/save`-only CORS middleware (`_save_cors` in `webapp/app.py`, 2026-08
