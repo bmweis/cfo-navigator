@@ -117,7 +117,7 @@ def test_generate_community_profile_matches_sentinel_spec(monkeypatch, case):
     _mock_fetch_page(monkeypatch, {"https://chief.com": "Homepage content about Chief."})
     _mock_anthropic_blocks(monkeypatch, case["blocks"])
 
-    draft = enrich.generate_community_profile("Chief", "https://chief.com")
+    draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
     assert draft is not None
 
     for field, expected in case["expected_fields"].items():
@@ -139,7 +139,7 @@ def test_confidence_defaults_all_12_keys_even_when_block_missing_entirely(monkey
     _mock_fetch_page(monkeypatch, {"https://chief.com": "Homepage content."})
     _mock_anthropic_blocks(monkeypatch, [("IDEAL_MEMBER:\nSeed-stage CFOs.", [])])
 
-    draft = enrich.generate_community_profile("Chief", "https://chief.com")
+    draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
     assert draft is not None
     assert set(draft.confidence) == set(enrich.COMMUNITY_CONFIDENCE_FIELDS)
     assert all(v is False for v in draft.confidence.values())
@@ -168,7 +168,7 @@ def test_placeholder_null_words_coerce_to_empty_string_except_cpe_eligible(monke
         [],
     )])
 
-    draft = enrich.generate_community_profile("Chief", "https://chief.com")
+    draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.notable_members == ""
     assert draft.public_criticism == ""
@@ -188,7 +188,7 @@ def test_confidence_string_false_does_not_evaluate_truthy(monkeypatch):
         "IDEAL_MEMBER:\nSeed-stage CFOs.\n\nCONFIDENCE:\nIDEAL_MEMBER: false", []
     )])
 
-    draft = enrich.generate_community_profile("Chief", "https://chief.com")
+    draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.confidence["ideal_member"] is False   # NOT True — bool("false") would be wrong here
 
@@ -220,7 +220,7 @@ def test_old_bug_shape_still_leaks_if_the_model_reverts(monkeypatch):
         COMMUNITY_OLD_BUG_REPRODUCTION_CASE["cited_document_indexes"],
     )])
 
-    draft = enrich.generate_community_profile("Chief", "https://chief.example")
+    draft = enrich.generate_community_profile("Chief", "https://chief.example", voice_core="Test voice guide.")
     assert draft is None
 
 

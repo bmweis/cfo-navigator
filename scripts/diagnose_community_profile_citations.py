@@ -170,12 +170,18 @@ def main() -> int:
     from linklib import enrich as enrich_mod
     from linklib import extract
     from linklib.citations import make_document_block
+    from linklib.voice_settings import VoicePromptMissing, require_voice_setting
 
     db_path = resolve_db_path(args.db, allow_missing=False)
     print(f"DB (read-only lookups): {db_path}")
     lib = Library(db_path)
     try:
         model = args.model or lib.get_enrich_model()  # read-only
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")  # read-only
+        except VoicePromptMissing as e:
+            print(f"ERROR: {e}")
+            return 1
         print(f"Model: {model}\n")
 
         client = Anthropic()
@@ -204,7 +210,8 @@ def main() -> int:
                 sent_docs.append({"title": community["name"], "url": community["url"], "type": "community_page"})
 
             prompt = enrich_mod._COMMUNITY_PROFILE_PROMPT.format(
-                name=community["name"], url=community["url"], existing_block="", content_block=content_block)
+                name=community["name"], url=community["url"], existing_block="", content_block=content_block,
+                voice_core=voice_core)
             message_content = (doc_blocks + [{"type": "text", "text": prompt}]) if doc_blocks else prompt
 
             print(f"\nFetched page for {community['name']} (low_confidence={low_confidence}); "

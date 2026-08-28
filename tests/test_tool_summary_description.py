@@ -88,7 +88,7 @@ def test_quick_update_tool_writes_summary(tmp_path):
     lib.close()
 
 
-# -- generate_tool_description (mocked Claude call) --------------------------------
+# -- generate_tool_description (mocked Claude call, voice_core="Test voice guide.") --------------------------------
 
 def _mock_anthropic(monkeypatch, payload_json):
     def _create(**kw):
@@ -120,7 +120,7 @@ def test_generate_tool_description_parses_both_fields(monkeypatch):
         "SUMMARY: Runway is an FP&A platform for growth-stage finance teams. It centralizes "
         "headcount and revenue planning into one collaborative model.\n\n"
         "CONFIDENT: true")
-    draft = enrich.generate_tool_description("Runway", "https://runway.com")
+    draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
     assert "financial planning platform" in draft.description
     assert "FP&A platform" in draft.summary
@@ -131,14 +131,14 @@ def test_generate_tool_description_parses_both_fields(monkeypatch):
 def test_generate_tool_description_low_confidence_when_no_page_content(monkeypatch):
     _mock_fetch_page(monkeypatch, "")
     _mock_anthropic(monkeypatch, "A finance tool.\n\nSUMMARY: A finance tool.\n\nCONFIDENT: false")
-    draft = enrich.generate_tool_description("Runway", "https://runway.com")
+    draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.low_confidence is True
 
 
 def test_generate_tool_description_returns_none_without_api_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    draft = enrich.generate_tool_description("Runway", "https://runway.com")
+    draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is None
 
 
@@ -150,6 +150,11 @@ def env(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", db)
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    # 2026-08 visibility follow-up: the generate-* routes now refuse
+    # (require_voice_setting) unless voice_core is seeded.
+    _seed_lib = Library(db)
+    _seed_lib.seed_voice_prompts()
+    _seed_lib.close()
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     yield appmod

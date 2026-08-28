@@ -849,8 +849,12 @@ def main() -> int:
         communities = _resolve_communities(lib, ids, args.limit) if want_communities else []
 
         model = lib.get_enrich_model()
-        from linklib.agent import VOICE_CORE_DEFAULT
-        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
+        from linklib.voice_settings import VoicePromptMissing, require_voice_setting
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
 
         if args.sample:
             print(f"Using enrichment model: {model}\n")

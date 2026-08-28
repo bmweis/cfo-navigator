@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib import enrich as enrich_mod
 from linklib.db import Library, resolve_db_path
+from linklib.voice_settings import VoicePromptMissing, require_voice_setting
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", enrich_mod.DEFAULT_MODEL)
 
@@ -94,6 +95,12 @@ def main() -> int:
 
     lib = Library(args.db)
     try:
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+
         communities = _select_communities(lib, args.communities, args.limit)
         if not communities:
             print("No matching communities found.", file=sys.stderr)
@@ -118,7 +125,8 @@ def main() -> int:
                 if str(existing_profile.get(field) or "").strip()
             }
             draft = enrich_mod.generate_community_profile(
-                c["name"], c["url"], existing=existing_for_prompt or None, model=args.model)
+                c["name"], c["url"], existing=existing_for_prompt or None, model=args.model,
+                voice_core=voice_core)
             if draft is None:
                 print("  FAILED (SDK/key unavailable or the call errored)")
                 total_failed += 1

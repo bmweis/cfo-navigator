@@ -288,6 +288,7 @@ def test_clean_rewrite_output_validation():
 def test_system_prompt_has_persona_and_no_verbatim_guardrail(tmp_path):
     lib = Library(str(tmp_path / "t.db"))
     try:
+        lib.seed_voice_prompts()
         s = agent._build_system(use_library=True, use_feed=False, use_web=True, lib=lib).lower()
     finally:
         lib.close()
@@ -302,9 +303,24 @@ def test_system_prompt_has_persona_and_no_verbatim_guardrail(tmp_path):
 
 # --- Voice: DB-backed two-field composition (#95) ----------------------------
 
-def test_build_system_uses_code_constant_defaults_when_settings_empty(tmp_path):
+def test_build_system_refuses_when_settings_empty(tmp_path):
+    """2026-08 visibility follow-up: an empty voice_core/voice_fpa_buddy no
+    longer silently falls back to the code-constant default — _build_system
+    raises VoicePromptMissing instead (caught by ask(), which returns an
+    explanatory Answer; see test_ask_agent's own ask()-level coverage, if
+    any, for that half)."""
     lib = Library(str(tmp_path / "t.db"))
     try:
+        with pytest.raises(agent.VoicePromptMissing):
+            agent._build_system(use_library=True, use_feed=False, use_web=True, lib=lib)
+    finally:
+        lib.close()
+
+
+def test_build_system_uses_seeded_defaults_once_seeded(tmp_path):
+    lib = Library(str(tmp_path / "t.db"))
+    try:
+        lib.seed_voice_prompts()
         s = agent._build_system(use_library=True, use_feed=False, use_web=True, lib=lib)
     finally:
         lib.close()
@@ -326,9 +342,23 @@ def test_build_system_prefers_db_settings_over_defaults(tmp_path):
     assert agent.VOICE_FPA_BUDDY_DEFAULT not in s
 
 
-def test_build_system_mixes_one_custom_one_default(tmp_path):
+def test_build_system_refuses_when_only_one_of_two_settings_is_set(tmp_path):
+    """2026-08 visibility follow-up: this used to mix a custom voice_core
+    with the voice_fpa_buddy default. Now voice_fpa_buddy being empty
+    refuses on its own — voice_core being set doesn't help."""
     lib = Library(str(tmp_path / "t.db"))
     try:
+        lib.set_setting("voice_core", "CUSTOM CORE VOICE")
+        with pytest.raises(agent.VoicePromptMissing):
+            agent._build_system(use_library=True, use_feed=False, use_web=True, lib=lib)
+    finally:
+        lib.close()
+
+
+def test_build_system_mixes_one_custom_one_seeded_default(tmp_path):
+    lib = Library(str(tmp_path / "t.db"))
+    try:
+        lib.seed_voice_prompts()
         lib.set_setting("voice_core", "CUSTOM CORE VOICE")
         s = agent._build_system(use_library=True, use_feed=False, use_web=True, lib=lib)
     finally:

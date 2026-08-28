@@ -63,6 +63,11 @@ def env(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", db)
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    # 2026-08 visibility follow-up: the generate-description route now
+    # refuses (require_voice_setting) unless voice_core is seeded.
+    _seed_lib = Library(db)
+    _seed_lib.seed_voice_prompts()
+    _seed_lib.close()
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     yield appmod

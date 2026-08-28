@@ -1456,7 +1456,7 @@ from the public page. Not editable via the admin CRUD.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `settings` | Generic key/value store (global Ask cap default, `matchmaker_default_cap_usd`, editable email copy, tag-style guide, `voice_core`/`voice_fpa_buddy`/`voice_matchmaker` voice guide, `backup_drive_folder_id` — the self-created Drive backup folder's id, Phase O, `exa_enabled` — Phase 7 web-search kill switch, `enrich_model` — the live AI model selection for `linklib.enrich`'s generation calls, 2026-08, see CLAUDE.md's "AI model selection", …). | `key`/`value` |
+| `settings` | Generic key/value store (global Ask cap default, `matchmaker_default_cap_usd`, editable email copy, tag-style guide, `voice_core`/`voice_fpa_buddy`/`voice_matchmaker` voice guide — plus `voice_prompts_seeded`, the 2026-08 one-time seeding gate for those three, see CLAUDE.md's "voice_core/voice_fpa_buddy/voice_matchmaker visibility" bullet — `backup_drive_folder_id` — the self-created Drive backup folder's id, Phase O, `exa_enabled` — Phase 7 web-search kill switch, `enrich_model` — the live AI model selection for `linklib.enrich`'s generation calls, 2026-08, see CLAUDE.md's "AI model selection", …). | `key`/`value` |
 | `contacts` | Contact-form submissions. | `deleted_at` (`''` = live — soft delete for spam, never hard delete) |
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
@@ -1749,10 +1749,14 @@ Details worth knowing:
 
 - **The system prompt's voice block is DB-backed, two fields, live-editable
   from `/admin/voice`.** `_build_system` (`linklib/agent.py`) reads the
-  `voice_core` and `voice_fpa_buddy` settings and concatenates them; each
-  falls back to its code-constant default (`VOICE_CORE_DEFAULT`,
-  `VOICE_FPA_BUDDY_DEFAULT`) when empty, so the field is never silently
-  blank. `voice_core` is written persona-neutrally (mechanics + tone only,
+  `voice_core` and `voice_fpa_buddy` settings and concatenates them.
+  **2026-08 visibility follow-up**: this used to fall back to each
+  setting's code-constant default (`VOICE_CORE_DEFAULT`,
+  `VOICE_FPA_BUDDY_DEFAULT`) when empty — see the dedicated bullet below
+  for why that silent fallback was retired; both settings are now seeded
+  from their defaults once per database instead, and an empty one refuses
+  (`VoicePromptMissing`) rather than substituting anything.
+  `voice_core` is written persona-neutrally (mechanics + tone only,
   no assistant framing) so it also serves standalone as `/admin/voice`'s
   "General / site copy" reviewer rubric; `voice_fpa_buddy` layers the
   analyst-specific register (third-person, cite-or-name-the-gap, no
@@ -1770,12 +1774,16 @@ Details worth knowing:
   inspection rather than assumed. Since `enrich.py` has no `Library` handle
   of its own, each function takes an optional `voice_core: str = ""` param;
   the three call sites in `webapp/app.py` (the two AJAX generate routes plus
-  `_run_tool_research`) resolve `lib.get_setting("voice_core") or
-  VOICE_CORE_DEFAULT` and pass it in — same resolve-at-the-caller pattern
-  `scripts/archive/import_community_profiles.py` already used for
-  `voice_rewrite_community_fields`. A bare `voice_core=""` (every pre-existing
-  test call site, and any future direct caller) falls back to
-  `VOICE_CORE_DEFAULT` inside `enrich._resolve_voice_core`, so nothing broke.
+  `_run_tool_research`) resolve the setting and pass it in — same
+  resolve-at-the-caller pattern `scripts/archive/import_community_profiles.py`
+  already used for `voice_rewrite_community_fields`. **2026-08 visibility
+  follow-up (see the dedicated bullet below):** a bare `voice_core=""` used
+  to fall back to `VOICE_CORE_DEFAULT` inside `enrich._resolve_voice_core`
+  — that fallback is retired, so a caller now has to actually resolve a
+  real value (via `linklib.voice_settings.require_voice_setting`) or the
+  function returns `None` rather than silently drafting on no voice
+  guidance; every pre-existing test call site was updated to pass a real
+  `voice_core` value accordingly.
   Description and Agent taxonomy also gained an explicit structure
   instruction (`enrich._STRUCTURE_GUIDANCE`) — natural paragraph breaks
   instead of one dense block, and a `"- "`-prefixed bulleted list only where
@@ -1798,6 +1806,54 @@ Details worth knowing:
   regeneration Brian plans to run later, test-batch-first, per the pattern
   `scripts/enrich_agent_taxonomy.py`'s own cost-estimate-first convention
   already established.
+- **`voice_core`/`voice_fpa_buddy`/`voice_matchmaker` visibility (2026-08) —
+  the silent code-constant fallback described in the two bullets above is
+  retired for all three settings, not just `voice_core`.** Prompted by the
+  spaced-em-dash incident (see CLAUDE.md's matching bullet): the old
+  `lib.get_setting(key) or CODE_DEFAULT` pattern made it impossible to tell
+  from outside the code whether a given answer was governed by an
+  admin-edited `/admin/voice` value or an invisible hardcoded constant.
+  Two-part fix, both new: **seeding** — `Library.seed_voice_prompts()`
+  populates any currently-empty one of the three settings from its code
+  default, gated on a `voice_prompts_seeded` flag (never an emptiness
+  check, so a deliberate `/admin/voice` clear-out survives every future
+  deploy — same precedent as `seed_paywall_cookie_flags`), wired into a new
+  `_seed_voice_prompts` startup hook. **Resolution** — new
+  `linklib/voice_settings.py` (`require_voice_setting(lib, key)`, raising
+  `VoicePromptMissing` on empty) is the one place every caller resolves a
+  voice setting now; it prescribes the raise, not the response, so each
+  caller degrades however its own module already handles an unavailable
+  precondition — `enrich.py`'s four `generate_*` functions return `None`
+  (checked before any page fetch), `agent.ask()`/`matchmaker._answer()`
+  return their own `Answer`/`MatchAnswer` with explanatory text (same shape
+  as their existing missing-SDK/missing-key branches), a `webapp/app.py`
+  route returns a 503. Every real call site — found via a full grep
+  inventory, not assumed — was switched: the 3 Toolbox generate AJAX
+  routes, `_run_tool_research`, `/admin/voice/review`'s tester,
+  `agent.py`/`matchmaker.py`'s own `_build_system`s, and the two live batch
+  scripts (`scripts/enrich_agent_taxonomy.py`,
+  `scripts/enrich_community_profiles.py`) plus
+  `scripts/regen_ai_drafted_fields.py`. `/admin/voice` gained a
+  blocked-generation banner (names which setting(s) are empty) and a
+  three-way per-field badge (Customized / Default (as seeded) / Not
+  configured) computed by comparing the live value against the code
+  default rather than just checking truthiness, since a just-seeded field
+  is non-empty but not "customized." "Reset to default" now writes the
+  real default text (a `{"reset": true}` payload) instead of sending a
+  blank value, since blank now means "deliberately cleared, blocking
+  generation" rather than "silently uses the default." **Real correction
+  found mid-build**: `generate_community_profile` never actually had a
+  `voice_core` parameter or any voice-guide content in its prompt at all —
+  the citation-tag investigation's original root-cause claim that it did
+  was wrong (it matched a different template's `{voice_core}` placeholder,
+  belonging to `_VOICE_REWRITE_PROMPT`, used only by an archived script).
+  Fixed in this same PR: a real `voice_core` param, a "Voice guide" section
+  in its prompt, and the same empty-guard the other three `generate_*`
+  functions have, plus fixing its one live caller and
+  `scripts/enrich_community_profiles.py` to actually resolve and pass it.
+  `generate_community_listing` (the separate "Auto-fill from URL" basic-
+  listing generator) still has no voice_core support — flagged as a
+  distinct, deliberately out-of-scope enhancement, not a regression.
 - **Two to four API calls can happen per turn.** On follow-ups, a cheap Haiku
   call first rewrites e.g. *"what about at Series A?"* into a standalone
   search question so retrieval sees the conversation's subject. It's

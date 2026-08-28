@@ -28,6 +28,7 @@ import requests
 
 from .citations import extract_citations, make_document_block
 from .db import Library
+from .voice_settings import VoicePromptMissing, require_voice_setting
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
 
@@ -86,11 +87,20 @@ _STOP = {
 
 
 # DB-backed voice, editable live from /admin/voice (settings keys "voice_core"
-# and "voice_fpa_buddy") — these are only the fallback used when a field is
-# empty. voice_core is written persona-neutrally (mechanics + tone only) so it
-# doubles as the "General / site copy" reviewer rubric; voice_fpa_buddy layers
-# the analyst-specific register on top for FP&A Buddy generation and its own
-# reviewer rubric. See issue #95.
+# and "voice_fpa_buddy"). voice_core is written persona-neutrally (mechanics +
+# tone only) so it doubles as the "General / site copy" reviewer rubric;
+# voice_fpa_buddy layers the analyst-specific register on top for FP&A Buddy
+# generation and its own reviewer rubric. See issue #95.
+#
+# 2026-08 visibility follow-up: these two constants are seed-only references
+# now, not active runtime fallbacks. Library.seed_voice_prompts() writes them
+# into the settings table once per database (skipping any field an admin
+# already customized); after that, every real resolution path
+# (linklib.voice_settings.require_voice_setting) reads the DB value only and
+# refuses rather than substituting either constant if the setting is empty.
+# They're still imported in a few places purely as seed values or for a
+# "compare against the default" UI diff (/admin/voice) — never as a live
+# fallback.
 VOICE_CORE_DEFAULT = """Lead with the point, support it with ONE concrete detail, and stop. Direct, low-ceremony, confident — it earns trust by being specific and grounded, not by sounding authoritative.
 
 VOICE:
@@ -119,12 +129,17 @@ VOICE_FPA_BUDDY_DEFAULT = """You are FP&A Buddy: a trusted senior FP&A / strateg
 def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library) -> str:
     """Build the advisor system prompt, describing only the active source types.
 
-    Voice: appends the DB-backed voice_core + voice_fpa_buddy settings (each
-    falling back to its code-constant default when empty) so answers sound
-    like a calibrated analyst persona, not a generic assistant.
+    Voice: appends the DB-backed voice_core + voice_fpa_buddy settings.
+
+    2026-08 visibility follow-up: this used to fall back to each setting's
+    code-constant default when empty. That silent fallback is retired —
+    `require_voice_setting` raises `VoicePromptMissing` instead, and `ask()`
+    (this function's one caller) catches it and returns an `Answer` with an
+    explanatory `text`, the same shape it already uses for a missing SDK/API
+    key, rather than silently answering on an invisible default persona.
     """
-    voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
-    voice_fpa_buddy = lib.get_setting("voice_fpa_buddy") or VOICE_FPA_BUDDY_DEFAULT
+    voice_core = require_voice_setting(lib, "voice_core")
+    voice_fpa_buddy = require_voice_setting(lib, "voice_fpa_buddy")
     voice = f"{voice_core}\n\n{voice_fpa_buddy}"
 
     sources = []
@@ -826,7 +841,15 @@ def answer_question(
         global_chars=settings.get("global_chars", 16000),
     )
 
-    system = _build_system(use_library, use_feed, use_web, lib)
+    try:
+        system = _build_system(use_library, use_feed, use_web, lib)
+    except VoicePromptMissing as e:
+        return Answer(text=f"(Voice prompt not configured: {e})",
+                      sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
+                      cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
+                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
+                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
+                      exa_result_count=exa_results, exa_cost_usd=exa_cost)
 
     # The question rides verbatim as the final text block (never the rewrite —
     # the model already has the raw history for conversational context).

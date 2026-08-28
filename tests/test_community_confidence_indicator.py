@@ -112,7 +112,7 @@ def test_generate_community_profile_parses_confidence_dict(monkeypatch):
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
     _mock_anthropic(monkeypatch, PROFILE_TEXT)
 
-    draft = enrich.generate_community_profile("Acme Circle", "https://acme.example")
+    draft = enrich.generate_community_profile("Acme Circle", "https://acme.example", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.confidence["ideal_member"] is True
     assert draft.confidence["value_prop"] is False
@@ -126,7 +126,7 @@ def test_generate_community_profile_defaults_missing_confidence_to_false(monkeyp
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
     _mock_anthropic(monkeypatch, "IDEAL_MEMBER:\nX\nVERDICT_SUMMARY:\nY\n")   # no CONFIDENCE: block at all
 
-    draft = enrich.generate_community_profile("Acme Circle", "https://acme.example")
+    draft = enrich.generate_community_profile("Acme Circle", "https://acme.example", voice_core="Test voice guide.")
     assert draft is not None
     assert all(v is False for v in draft.confidence.values())
 

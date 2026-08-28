@@ -3,7 +3,7 @@ overhaul Phase 4b; narrowed to agent-taxonomy only in the Feature Taxonomy
 Phase 1b PR 2 legacy retirement, which dropped the feature-drafting half of
 this pipeline along with the tool_features table). Covers
 linklib.enrich.generate_tool_agent_taxonomy (unit, mocked Claude call +
-mocked page fetch) and scripts/enrich_agent_taxonomy.py's selection/dry-run
+mocked page fetch, voice_core="Test voice guide.") and scripts/enrich_agent_taxonomy.py's selection/dry-run
 logic (also mocked — no real API calls in tests).
 """
 import os
@@ -67,7 +67,7 @@ def test_generate_tool_agent_taxonomy_parses_result(monkeypatch):
     })
     _mock_anthropic(monkeypatch, TAXONOMY_RESPONSE)
 
-    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", "FP&A for high-growth teams.")
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", "FP&A for high-growth teams.", voice_core="Test voice guide.")
     assert result is not None
     assert "scenario modeling" in result.agent_taxonomy_note
     assert result.agent_taxonomy_needs_verification is False   # confident: true
@@ -80,7 +80,7 @@ def test_generate_tool_agent_taxonomy_parses_confident_false(monkeypatch):
     _mock_fetch_page(monkeypatch, {"https://runway.com": "Homepage content about Runway."})
     _mock_anthropic(monkeypatch, "Unclear agent framing.\n\nCONFIDENT: false")
 
-    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert result is not None
     assert result.confident is False
     assert result.agent_taxonomy_needs_verification is True
@@ -90,7 +90,7 @@ def test_generate_tool_agent_taxonomy_low_confidence_when_no_pages_fetch(monkeyp
     _mock_fetch_page(monkeypatch, {})   # every fetch returns empty content
     _mock_anthropic(monkeypatch, TAXONOMY_RESPONSE)
 
-    result = enrich.generate_tool_agent_taxonomy("Obscure Co", "https://obscure.example")
+    result = enrich.generate_tool_agent_taxonomy("Obscure Co", "https://obscure.example", voice_core="Test voice guide.")
     assert result is not None
     assert result.low_confidence is True
 
@@ -99,14 +99,14 @@ def test_generate_tool_agent_taxonomy_marks_unconfident_as_needing_verification(
     _mock_fetch_page(monkeypatch, {"https://runway.com": "Homepage only, no pricing page."})
     _mock_anthropic(monkeypatch, "Some AI-powered marketing language, no specifics.\n\nCONFIDENT: false")
 
-    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert result is not None
     assert result.agent_taxonomy_needs_verification is True
 
 
 def test_generate_tool_agent_taxonomy_returns_none_without_api_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com") is None
+    assert enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", voice_core="Test voice guide.") is None
 
 
 # -- Citations-API grounding fix, Phase 1b: real document blocks -------------
@@ -158,7 +158,7 @@ def test_generate_tool_agent_taxonomy_sends_real_document_blocks(monkeypatch):
     })
     captured = _mock_anthropic_citing(monkeypatch, [(TAXONOMY_RESPONSE, [])])
 
-    enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+    enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", voice_core="Test voice guide.")
 
     content = captured["messages"][0]["content"]
     assert isinstance(content, list)   # doc blocks + a trailing text block, not a bare string
@@ -181,7 +181,7 @@ def test_generate_tool_agent_taxonomy_returns_verified_citations_tagged_tool_pag
         ("\n\nCONFIDENT: true", []),
     ])
 
-    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert result is not None
     assert len(result.citations) == 2
     assert {c["url"] for c in result.citations} == {"https://runway.com", "https://runway.com/pricing"}
@@ -206,7 +206,7 @@ def test_generate_tool_agent_taxonomy_confident_still_parses_when_citations_pres
         ("\n\nCONFIDENT: true", []),
     ])
 
-    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert result is not None
     assert result.confident is True
     assert result.agent_taxonomy_needs_verification is False
@@ -218,7 +218,7 @@ def test_generate_tool_agent_taxonomy_no_citations_when_low_confidence(monkeypat
     _mock_fetch_page(monkeypatch, {})
     _mock_anthropic_citing(monkeypatch, [(TAXONOMY_RESPONSE, [0])])
 
-    result = enrich.generate_tool_agent_taxonomy("Obscure Co", "https://obscure.example")
+    result = enrich.generate_tool_agent_taxonomy("Obscure Co", "https://obscure.example", voice_core="Test voice guide.")
     assert result is not None
     assert result.low_confidence is True
     assert result.citations == []
@@ -229,6 +229,11 @@ def test_generate_tool_agent_taxonomy_no_citations_when_low_confidence(monkeypat
 @pytest.fixture
 def db_path():
     path = tempfile.mktemp(suffix=".db")
+    # 2026-08 visibility follow-up: the script now refuses (require_voice_setting)
+    # unless voice_core is seeded.
+    _seed_lib = Library(path)
+    _seed_lib.seed_voice_prompts()
+    _seed_lib.close()
     yield path
     if os.path.exists(path):
         os.remove(path)
@@ -264,7 +269,7 @@ def test_script_writes_taxonomy_and_skips_already_researched_on_rerun(monkeypatc
 
     call_count = {"n": 0}
 
-    def _fake_generate(name, url, description="", model=""):
+    def _fake_generate(name, url, description="", model="", voice_core=""):
         call_count["n"] += 1
         return enrich.AgentTaxonomyResult(
             agent_taxonomy_note="Uses AI-assisted scenario modeling; no named agent found.",
@@ -299,7 +304,7 @@ def test_script_dry_run_writes_nothing(monkeypatch, db_path):
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
     lib.close()
 
-    def _fake_generate(name, url, description="", model=""):
+    def _fake_generate(name, url, description="", model="", voice_core=""):
         return enrich.AgentTaxonomyResult(
             agent_taxonomy_note="Uses AI-assisted scenario modeling.",
             agent_taxonomy_needs_verification=False,
@@ -323,7 +328,7 @@ def test_script_dry_run_prints_taxonomy_detail(monkeypatch, db_path, capsys):
     lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
     lib.close()
 
-    def _fake_generate(name, url, description="", model=""):
+    def _fake_generate(name, url, description="", model="", voice_core=""):
         return enrich.AgentTaxonomyResult(
             agent_taxonomy_note="Uses AI-assisted scenario modeling; no named agent found.",
             agent_taxonomy_needs_verification=True,

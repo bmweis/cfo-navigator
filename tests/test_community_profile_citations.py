@@ -162,7 +162,7 @@ def test_generate_community_profile_sends_real_document_block(monkeypatch):
     _mock_fetch_page(monkeypatch, "Chief is a private membership network for senior executive women.")
     captured = _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY + PROFILE_TAIL, [])])
 
-    enrich.generate_community_profile("Chief", "https://chief.com")
+    enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
 
     content = captured["messages"][0]["content"]
     assert isinstance(content, list)   # doc block + a trailing text block, not a bare string
@@ -177,7 +177,7 @@ def test_generate_community_profile_returns_verified_citations_tagged_community_
     _mock_fetch_page(monkeypatch, "Chief is a private membership network for senior executive women.")
     _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
-    draft = enrich.generate_community_profile("Chief", "https://chief.com")
+    draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
     assert draft is not None
     assert len(draft.citations) == 1
     assert draft.citations[0]["url"] == "https://chief.com"
@@ -195,7 +195,7 @@ def test_generate_community_profile_confidence_still_parses_when_citations_prese
     _mock_fetch_page(monkeypatch, "Homepage content.")
     _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
-    draft = enrich.generate_community_profile("Chief", "https://chief.com")
+    draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.verdict_summary == "Best for seed-stage operator CFOs, not for public-company controllers."
     assert draft.confidence["ideal_member"] is True
@@ -208,7 +208,7 @@ def test_generate_community_profile_no_citations_when_low_confidence(monkeypatch
     _mock_fetch_page(monkeypatch, "")
     _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
-    draft = enrich.generate_community_profile("Obscure Community", "https://obscure.example")
+    draft = enrich.generate_community_profile("Obscure Community", "https://obscure.example", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.low_confidence is True
     assert draft.citations == []
@@ -222,6 +222,11 @@ def app_module(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", db)
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    # 2026-08 visibility follow-up: the generate-* routes now refuse
+    # (require_voice_setting) unless voice_core is seeded.
+    _seed_lib = Library(db)
+    _seed_lib.seed_voice_prompts()
+    _seed_lib.close()
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     yield appmod
