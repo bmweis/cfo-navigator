@@ -3931,6 +3931,49 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   against all 40 — the pre-merge spot-check that validated the fallback PR
   itself only ever sampled tools, never communities, so this is treated as
   a real verification gap to close, not a formality.
+- **`generate_tool_differentiation` joins the D1 content-exclusion rules
+  (2026-08) — the gap the blast-radius spot-check bullet above flagged and
+  deferred.** Investigated first: `generate_tool_differentiation` already
+  resolved and used `voice_core` correctly (unlike Community profile's own
+  gap, fixed earlier), and its em-dash/marketing-language rules were
+  already in place — what was missing was the citation-tag investigation's
+  D1 content rules (no vendor-reported stats/proof-points, no
+  testimonials/review-scores/logos, no editor-facing asides), which
+  Description and Agent taxonomy both got as part of that fix and this
+  field never did, since it predates that fix and has no citations
+  mechanism of its own (it's still plain JSON output — Citations-API
+  grounding for this field stays deferred, unchanged by this pass) to have
+  motivated including it. Two new rules (5-6) added to
+  `_TOOL_DIFFERENTIATION_PROMPT`, reusing Description/Agent taxonomy's own
+  reported-results/testimonials wording and editor-facing-address ban,
+  adapted for this field's short 1-2-sentence JSON format: rule 5 bans
+  vendor-reported stats/testimonials/review-scores/logos as the basis for
+  the comparison **even when one already appears in the `description` or
+  competitor context fed into the prompt** — a real path, since a legacy,
+  not-yet-regenerated description can still carry a stat predating the
+  Description-side fix, exactly what the sampled Scale AI output ("Scale
+  AI's CAO reports closing two to three days faster at over 98%
+  automation") turned out to be pulling from; rule 6 bans referencing "the
+  description above"/"the competitor context"/the model's own research
+  process. **Same disclosed limitation as the original citation-tag
+  fix, verified rather than assumed**: this is preventative (prompt-level)
+  only — nothing after the `json.loads()` call can recognize and strip a
+  vendor stat the model decided to include anyway, since a legitimate
+  comparison claim and an excluded marketing stat aren't mechanically
+  distinguishable after the fact. `tests/citations_fixtures/
+  differentiation_fixtures.py` + `tests/test_differentiation_content_
+  exclusions.py` cover both sides of that, mirroring
+  `enrich_sentinel_fixtures.py`'s own two-sided pattern: a clean/compliant
+  fixture (description carries the stat, mocked response — a model that
+  complied — doesn't) proving the pipeline stores exactly what a compliant
+  model returns, and an old-bug-reproduction fixture (mocked response DOES
+  include the stat) proving it still leaks through unfiltered if the model
+  reverts, plus static prompt-content assertions that the new rules are
+  actually present. Not yet spot-checked with a real `--sample` re-run
+  against Scale AI via `regen_ai_drafted_fields.py --ids --only tools`
+  (this session has no production access) — recommended as the same
+  live-verification follow-up every other prompt-rule change in this
+  investigation received before being considered closed.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
