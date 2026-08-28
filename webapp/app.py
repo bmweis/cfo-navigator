@@ -365,7 +365,7 @@ async def _save_cors(request: Request, call_next):
 @app.on_event("startup")
 def _seed_toolbox():
     """Seed the tool_categories/community_categories vocabulary on first run,
-    and keep the advisor flag and name/description (tools, communities) or
+    and keep the advisor flag and name/description (communities) or
     name/description (benchmarks) in sync with their seed lists on every
     restart/deploy. categories_json is NOT re-synced from the seed list for
     tools/communities that already exist — once seeded, categories are
@@ -373,6 +373,21 @@ def _seed_toolbox():
     /admin/tools/communities, so this must not clobber changes made there.
     Same for promoted/vendor/warm-intro fields (tools) and coverage/pricing
     (benchmarks), which are admin-site-only and never touched here.
+
+    tools.description is a deliberate exception to the name-sync pattern
+    below (2026-08 incident): this hook running on EVERY process startup
+    used to also revert tools.description back to scripts/seed_tools.py's
+    seed blurb whenever it differed from the live value — which is exactly
+    what a successful AI regeneration produces. 81 of 148 seed-listed
+    tools' AI-drafted descriptions were silently reverted this way across
+    a single night's deploys before this was caught (see CLAUDE.md's
+    dedicated bullet for the full incident writeup). description sync is
+    retired entirely, permanently — once a tool has real content (AI-drafted
+    or hand-edited), the seed list must never be able to overwrite it again.
+    name sync is unaffected: nothing ever AI-drafts a tool's name, so it
+    carries none of the same risk, and Brian still occasionally renames a
+    seed-listed tool by editing scripts/seed_tools.py directly (e.g. the
+    "(acquired by ...)" suffixes).
 
     Deleted tools/communities/benchmarks reappearing after a deploy:
     this used to also INSERT a row for any seed entry whose URL wasn't found
@@ -469,8 +484,14 @@ def _seed_toolbox():
                     (new_adv, row["id"]),
                 )
                 lib.conn.commit()
-            if row["name"] != t["name"] or row["description"] != t["description"]:
-                lib.update_tool_content(row["id"], t["name"], t["description"])
+            # description is deliberately NOT synced here — see the docstring's
+            # 2026-08 incident note above. name-only, name never AI-drafted.
+            if row["name"] != t["name"]:
+                lib.conn.execute(
+                    "UPDATE tools SET name=? WHERE id=?",
+                    (t["name"], row["id"]),
+                )
+                lib.conn.commit()
     finally:
         lib.close()
 
@@ -10416,10 +10437,12 @@ applySortFilter('software');
 </script>
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
-  Editing <code>scripts/seed_tools.py</code> updates a tool&rsquo;s <strong>name</strong> and
-  <strong>description</strong> here automatically on the next deploy. No manual re-seed needed.
-  <strong>Categories, Advisor, Featured, and Warm Intro are database-only</strong>: edit them here
-  (Full edit / Quick edit on <a href="/tools/software">/tools/software</a>), and this sync will never touch them.
+  Editing <code>scripts/seed_tools.py</code> updates a tool&rsquo;s <strong>name</strong> here
+  automatically on the next deploy. No manual re-seed needed.
+  <strong>Description, Categories, Advisor, Featured, and Warm Intro are database-only</strong>:
+  edit them here (Full edit / Quick edit on <a href="/tools/software">/tools/software</a>), and this
+  sync will never touch them &mdash; description sync was retired (2026-08 incident: it was silently
+  reverting AI-drafted/hand-edited descriptions back to this file's seed blurb on every deploy).
 </p>
 
 <style>
