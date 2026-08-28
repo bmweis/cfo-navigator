@@ -3969,11 +3969,19 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   model returns, and an old-bug-reproduction fixture (mocked response DOES
   include the stat) proving it still leaks through unfiltered if the model
   reverts, plus static prompt-content assertions that the new rules are
-  actually present. Not yet spot-checked with a real `--sample` re-run
-  against Scale AI via `regen_ai_drafted_fields.py --ids --only tools`
-  (this session has no production access) — recommended as the same
-  live-verification follow-up every other prompt-rule change in this
-  investigation received before being considered closed.
+  actually present. **Verified live and closed (2026-08)**: Brian ran
+  `regen_ai_drafted_fields.py --ids --only tools --sample 1` against
+  Maxima (not Scale AI — a different tool from the same catalog, picked at
+  hand) via `railway ssh`. Output came back clean — no vendor-reported
+  stat, no editor-facing language, appropriately hedged where information
+  (pricing) wasn't available — confirming the new rules hold on real model
+  output, not just in the mocked fixtures above. **Known follow-up, not
+  fixed by this PR**: Maxima's own live `competitive_differentiation`
+  field still carries the pre-fix leaked stat (the prompt fix only governs
+  future generations, never rewrites what's already stored) — tracked in
+  issue #445 for whatever targeted re-run scope comes next, alongside
+  anything else surfaced during content review, rather than a one-off fix
+  here.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
