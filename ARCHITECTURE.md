@@ -4808,6 +4808,22 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   snippet a silent no-op — a syntax error, never thrown anywhere visible.
   Fixed, plus a `.catch` added to the fetch chain so a network/CORS failure
   now alerts visibly instead of silently doing nothing.
+- **A second capture path, `POST /save-later` + `/read-later-bookmarklet`,
+  mirrors `/save`/`/bookmarklet` into `read_later` instead of `articles`.**
+  Same token auth (`_check_token`), same CORS treatment (`_save_cors` now
+  matches either path via `_TOKEN_ONLY_SAVE_PATHS`), same
+  admin-gated-page/token-refreshed-per-request bookmarklet pattern. The real
+  difference: `read_later` is `user_id`-scoped and a token-only request has
+  no session to resolve one from (`_current_user_id` returns `None` for
+  token-only access by design), so the write is attributed to
+  `Library.default_admin_user_id()` — the earliest admin account, same
+  query and reasoning `_migrate_read_later_user_scope`'s one-time backfill
+  already used for the table's pre-multi-user rows. No `ingest_url`/fetch/
+  enrichment happens — `add_read_later` is a plain metadata insert — so the
+  bookmarklet skips the tags prompt entirely (Read Later has no tags
+  concept) and sends `document.title` along instead, for an immediate label
+  in the Reader's Read Later view rather than "(no title)" until the page
+  is opened there.
 - **`/admin/backup-now` is a deliberate, narrowly-scoped exception to the
   canonical-host redirect (Phase O).** The daily backup GitHub Action calls
   this one route directly on the legacy Railway hostname on purpose, to
