@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib import enrich as enrich_mod
 from linklib.db import Library, resolve_db_path
+from linklib.voice_settings import VoicePromptMissing, require_voice_setting
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", enrich_mod.DEFAULT_MODEL)
 
@@ -89,6 +90,12 @@ def main() -> int:
 
     lib = Library(args.db)
     try:
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+
         tools = _select_tools(lib, args.tools, args.limit)
         if not tools:
             print("No matching tools found.", file=sys.stderr)
@@ -107,7 +114,8 @@ def main() -> int:
                 continue
 
             print(f"[{t['name']}] researching…", flush=True)
-            result = enrich_mod.generate_tool_agent_taxonomy(t["name"], t["url"], t.get("description", ""), model=args.model)
+            result = enrich_mod.generate_tool_agent_taxonomy(
+                t["name"], t["url"], t.get("description", ""), model=args.model, voice_core=voice_core)
             if result is None:
                 print("  FAILED (SDK/key unavailable or the call errored)")
                 total_failed += 1

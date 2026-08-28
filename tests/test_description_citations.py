@@ -78,7 +78,7 @@ def test_generate_tool_description_sends_real_document_block(monkeypatch):
     _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
     captured = _mock_anthropic_citing(monkeypatch, [(DESC_BODY + DESC_TAIL, [])])
 
-    enrich.generate_tool_description("Runway", "https://runway.com")
+    enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
 
     content = captured["messages"][0]["content"]
     assert isinstance(content, list)   # doc block + a trailing text block, not a bare string
@@ -93,7 +93,7 @@ def test_generate_tool_description_returns_verified_citations_tagged_tool_page(m
     _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
     _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
-    draft = enrich.generate_tool_description("Runway", "https://runway.com")
+    draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
     assert len(draft.citations) == 1
     assert draft.citations[0]["url"] == "https://runway.com"
@@ -116,7 +116,7 @@ def test_generate_tool_description_confident_still_parses_when_citations_present
     _mock_fetch_page(monkeypatch, "Homepage content.")
     _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
-    draft = enrich.generate_tool_description("Runway", "https://runway.com")
+    draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.confident is True
     assert draft.summary == "Runway is an FP&A platform for growth-stage finance teams."
@@ -128,7 +128,7 @@ def test_generate_tool_description_no_citations_when_low_confidence(monkeypatch)
     _mock_fetch_page(monkeypatch, "")
     _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
-    draft = enrich.generate_tool_description("Obscure Co", "https://obscure.example")
+    draft = enrich.generate_tool_description("Obscure Co", "https://obscure.example", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.low_confidence is True
     assert draft.citations == []
@@ -142,6 +142,11 @@ def app_module(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", db)
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    # 2026-08 visibility follow-up: the generate-* routes now refuse
+    # (require_voice_setting) unless voice_core is seeded.
+    _seed_lib = Library(db)
+    _seed_lib.seed_voice_prompts()
+    _seed_lib.close()
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     yield appmod

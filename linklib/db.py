@@ -7519,6 +7519,48 @@ class Library:
         self.set_setting("paywall_cookie_flags_seeded", "1")
         return {"seeded": True, "feeds": updated}
 
+    def seed_voice_prompts(self) -> dict:
+        """Populate voice_core/voice_fpa_buddy/voice_matchmaker from their
+        current code-default constants, once per database (2026-08
+        visibility follow-up — see linklib/voice_settings.py's module
+        docstring for the full incident/rationale). Only ever writes a
+        setting that's CURRENTLY EMPTY — an admin who already customized
+        one before this shipped keeps their own text untouched.
+
+        Guarded by a settings flag, NOT by "is it currently empty" at call
+        time — same reasoning as seed_paywall_cookie_flags/seed_feeds_from_opml
+        above, and the same bug _seed_toolbox originally shipped: an
+        emptiness check can't tell "never seeded" from "seeded, then
+        deliberately cleared at /admin/voice" apart, and would silently
+        resurrect a deliberate clear-out on the next restart. The flag
+        means every field is populated exactly once; after that, an empty
+        field stays empty until an admin fills it in themselves.
+
+        Returns {"seeded": bool, "populated": [key, ...]}."""
+        if self.get_setting("voice_prompts_seeded") == "1":
+            return {"seeded": False, "populated": []}
+
+        # Lazy import: linklib.agent and linklib.matchmaker both import
+        # Library from this module, so importing them at db.py's own
+        # module level would be circular. Deferred to call time instead,
+        # same pattern webapp/app.py already uses for these same constants.
+        from .agent import VOICE_CORE_DEFAULT, VOICE_FPA_BUDDY_DEFAULT
+        from .matchmaker import VOICE_MATCHMAKER_DEFAULT
+
+        defaults = {
+            "voice_core": VOICE_CORE_DEFAULT,
+            "voice_fpa_buddy": VOICE_FPA_BUDDY_DEFAULT,
+            "voice_matchmaker": VOICE_MATCHMAKER_DEFAULT,
+        }
+        populated = []
+        for key, default_text in defaults.items():
+            if not (self.get_setting(key) or "").strip():
+                self.set_setting(key, default_text)
+                populated.append(key)
+
+        self.set_setting("voice_prompts_seeded", "1")
+        return {"seeded": True, "populated": populated}
+
     # Sources Brian currently pays for, as of this column's introduction. Only
     # domains listed here are switched on; every other feed keeps the column's
     # 0 default. Stratechery and Public Comps are deliberately absent — they're

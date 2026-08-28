@@ -507,6 +507,23 @@ def _seed_and_publish_feeds():
         lib.close()
 
 
+@app.on_event("startup")
+def _seed_voice_prompts():
+    """Populate voice_core/voice_fpa_buddy/voice_matchmaker from their code
+    defaults on first boot (2026-08 visibility follow-up) — see
+    Library.seed_voice_prompts's own docstring and linklib/voice_settings.py
+    for the full rationale. Never blocks boot: a failure here just means the
+    settings stay whatever they already were, same as every other seeding
+    hook above."""
+    lib = _lib()
+    try:
+        lib.seed_voice_prompts()
+    except Exception:
+        pass
+    finally:
+        lib.close()
+
+
 def _lib() -> Library:
     return Library(DB_PATH)
 
@@ -14829,13 +14846,18 @@ async def admin_communities_generate_profile(request: Request):
     if not (name and url):
         return JSONResponse({"ok": False, "error": "Name and URL are required."}, status_code=400)
 
+    from linklib.voice_settings import VoicePromptMissing, require_voice_setting
     lib = _lib()
     try:
         model = lib.get_enrich_model()
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
     finally:
         lib.close()
     from linklib.enrich import generate_community_profile
-    draft = generate_community_profile(name, url, existing=existing, model=model)
+    draft = generate_community_profile(name, url, existing=existing, model=model, voice_core=voice_core)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Profile generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -15053,8 +15075,12 @@ def _run_tool_research(tool_id: int) -> bool:
         if not tool:
             return False
         from linklib import enrich as enrich_mod
-        from linklib.agent import VOICE_CORE_DEFAULT
-        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
+        from linklib.voice_settings import VoicePromptMissing, require_voice_setting
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            print(f"[_run_tool_research:{tool_id}] aborted: {e}")
+            return False
         result = enrich_mod.generate_tool_agent_taxonomy(
             tool["name"], tool["url"], tool.get("description", ""), model=lib.get_enrich_model(),
             voice_core=voice_core)
@@ -16161,11 +16187,14 @@ async def admin_tools_generate_description(request: Request):
     if not (name and url):
         return JSONResponse({"ok": False, "error": "Name and URL are required."}, status_code=400)
 
+    from linklib.voice_settings import VoicePromptMissing, require_voice_setting
     lib = _lib()
     try:
         model = lib.get_enrich_model()
-        from linklib.agent import VOICE_CORE_DEFAULT
-        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
     finally:
         lib.close()
     from linklib.enrich import generate_tool_description
@@ -16194,6 +16223,7 @@ def admin_tools_generate_differentiation(request: Request, tool_id: int):
     tool_id (unlike generate-description, which is stateless)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    from linklib.voice_settings import VoicePromptMissing, require_voice_setting
     lib = _lib()
     try:
         tool = lib.get_tool(tool_id)
@@ -16201,8 +16231,10 @@ def admin_tools_generate_differentiation(request: Request, tool_id: int):
             raise HTTPException(status_code=404, detail="Tool not found")
         competitor_names = [c["name"] for c in lib.list_tool_competitors(tool_id)]
         model = lib.get_enrich_model()
-        from linklib.agent import VOICE_CORE_DEFAULT
-        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            raise HTTPException(status_code=503, detail=str(e))
     finally:
         lib.close()
 
@@ -27631,27 +27663,55 @@ def admin_voice_page(request: Request):
 
     from linklib.agent import VOICE_CORE_DEFAULT, VOICE_FPA_BUDDY_DEFAULT
     from linklib.matchmaker import VOICE_MATCHMAKER_DEFAULT
+    from linklib.voice_settings import any_voice_setting_missing
 
     lib = _lib()
     try:
         custom_core = lib.get_setting("voice_core")
         custom_fpa_buddy = lib.get_setting("voice_fpa_buddy")
         custom_matchmaker = lib.get_setting("voice_matchmaker")
+        missing = any_voice_setting_missing(lib)
     finally:
         lib.close()
 
     mono = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
             "font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;")
 
+    # 2026-08 visibility follow-up: an empty field no longer means "silently
+    # falls back to the built-in default" — every field is seeded from its
+    # default on first boot (see Library.seed_voice_prompts), and an empty
+    # field now means generation for whatever depends on it REFUSES to run
+    # (see linklib.voice_settings.require_voice_setting). This banner is the
+    # visible half of that — the code-level half already refuses; a blank
+    # textarea alone gave no signal that anything was actually broken.
+    blocked_banner = ""
+    if missing:
+        _labels = {"voice_core": "Voice core", "voice_fpa_buddy": "FP&A Buddy voice",
+                   "voice_matchmaker": "Chat matchmaker voice"}
+        names = ", ".join(_labels.get(k, k) for k in missing)
+        blocked_banner = (
+            '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:14px;'
+            'padding:16px 20px;margin:0 0 18px;color:#b91c1c;font-size:14px;">'
+            f'<strong>Generation is blocked:</strong> {_esc(names)} {"is" if len(missing) == 1 else "are"} '
+            "empty. Nothing falls back to a built-in default any more — FP&amp;A Buddy, the Chat "
+            "Matchmaker, and every AI-drafted Toolbox field that depends on the empty setting(s) "
+            "above will refuse to run until you fill them back in below.</div>"
+        )
+
     def _voice_field(field_id, title, blurb, custom_value, default_value, rows):
         current = custom_value or default_value
-        is_customized = bool(custom_value)
-        if is_customized:
+        is_missing = not custom_value
+        is_customized = bool(custom_value) and custom_value.strip() != default_value.strip()
+        if is_missing:
+            badge = ('<span style="font-size:12px;font-weight:600;background:#fee2e2;color:#b91c1c;'
+                      f'border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;" '
+                      f'id="{field_id}-badge">Not configured&mdash;generation blocked</span>')
+        elif is_customized:
             badge = (f'<span id="{field_id}-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
         else:
             badge = (f'<span id="{field_id}-badge" style="font-size:12px;color:var(--muted);'
-                      'margin-left:10px;vertical-align:middle;">Built-in default</span>')
+                      'margin-left:10px;vertical-align:middle;">Default (as seeded)</span>')
         reset_btn = (
             f'<button id="{field_id}-reset-btn" onclick="resetVoice(\'{field_id}\')" class="btn btn-ghost" '
             'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
@@ -27668,7 +27728,7 @@ def admin_voice_page(request: Request):
 {reset_btn}
 <span id="{field_id}-status" style="font-size:13px;color:var(--muted);"></span></div>
 <details style="margin-top:14px;">
-<summary style="cursor:pointer;font-size:13px;color:var(--muted);display:flex;align-items:baseline;gap:5px;"><span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Default voice guide (used when the field above is empty)</summary>
+<summary style="cursor:pointer;font-size:13px;color:var(--muted);display:flex;align-items:baseline;gap:5px;"><span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Default voice guide (the text this field was originally seeded from&mdash;leaving the field above blank no longer falls back to this; generation refuses instead)</summary>
 <pre style="white-space:pre-wrap;font:12px/1.6 ui-monospace,monospace;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:10px;color:var(--muted);">{_esc(default_value)}</pre>
 </details>
 </div>"""
@@ -27691,6 +27751,7 @@ def admin_voice_page(request: Request):
 <h1>Verbal identity</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">The voice FP&amp;A Buddy answers in, and your site's tone&mdash;live, editable here, no redeploy.</p>
 
+{blocked_banner}
 {core_block}
 {fpa_buddy_block}
 {matchmaker_block}
@@ -27719,6 +27780,13 @@ var VOICE_ENDPOINTS = {{'voice-core': '/admin/voice/core', 'voice-fpa': '/admin/
 var VOICE_KEYS = {{'voice-core': 'voice_core', 'voice-fpa': 'voice_fpa_buddy', 'voice-matchmaker': 'voice_matchmaker'}};
 
 async function saveVoice(fieldId) {{
+  // Reloads on success rather than patching the badge/banner in JS: the
+  // blocked-generation banner and the three-way badge (Customized/Default
+  // (as seeded)/Not configured) are both server-computed from the full set
+  // of three settings (any_voice_setting_missing checks all three, not just
+  // this one field), so a full reload is the only way this stays correct
+  // after a save that empties a field — a JS-only patch could only ever
+  // update this one field's own badge, never the shared top banner.
   var prompt = document.getElementById(fieldId + '-prompt').value;
   var btn = document.getElementById(fieldId + '-save-btn');
   var status = document.getElementById(fieldId + '-status');
@@ -27728,30 +27796,17 @@ async function saveVoice(fieldId) {{
     body[VOICE_KEYS[fieldId]] = prompt.trim();
     var r = await fetch(VOICE_ENDPOINTS[fieldId], {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(body)}});
     if (!r.ok) throw new Error();
-    var d = await r.json();
-    status.textContent = 'Saved.'; status.style.color = '#065f46';
-    setTimeout(function() {{ status.textContent = ''; }}, 3000);
-    var badge = document.getElementById(fieldId + '-badge'), resetBtn = document.getElementById(fieldId + '-reset-btn');
-    if (d.custom) {{
-      badge.textContent = 'Customized';
-      badge.style.cssText = 'font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;';
-      resetBtn.style.display = '';
-    }} else {{
-      badge.textContent = 'Built-in default';
-      badge.style.cssText = 'font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;';
-      resetBtn.style.display = 'none';
-    }}
+    window.location.reload();
   }} catch(e) {{
     status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
-  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
+    btn.disabled = false; btn.textContent = 'Save';
+  }}
 }}
 
 async function resetVoice(fieldId) {{
-  if (!confirm('Reset to the built-in default? Your edits will be lost.')) return;
+  if (!confirm('Reset to the built-in default text? Your edits will be lost.')) return;
   try {{
-    var body = {{}};
-    body[VOICE_KEYS[fieldId]] = '';
-    var r = await fetch(VOICE_ENDPOINTS[fieldId], {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(body)}});
+    var r = await fetch(VOICE_ENDPOINTS[fieldId], {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{reset: true}})}});
     if (!r.ok) throw new Error();
     window.location.reload();
   }} catch(e) {{ alert('Reset failed—try again.'); }}
@@ -27783,48 +27838,71 @@ async function reviewVoice() {{
 
 @app.post("/admin/voice/core")
 async def admin_voice_save_core(request: Request):
-    """Save (or reset, when blank) the voice_core setting."""
+    """Save the voice_core setting — or reset it back to the built-in
+    default text (payload {"reset": true}), NOT to blank. 2026-08 visibility
+    follow-up: a blank save used to silently fall back to the code default
+    at read time, so "reset" and "clear" were the same action here. They
+    aren't any more — a blank setting now blocks generation outright (see
+    linklib.voice_settings.require_voice_setting) — so "Reset to default"
+    has to write the real default text, and a deliberate clear (leaving the
+    textarea empty and saving) is its own, separately-supported action that
+    correctly shows the blocked-generation banner rather than being treated
+    as "reset"."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
-    prompt = (payload.get("voice_core") or "").strip()
+    if payload.get("reset"):
+        from linklib.agent import VOICE_CORE_DEFAULT
+        prompt = VOICE_CORE_DEFAULT
+    else:
+        prompt = (payload.get("voice_core") or "").strip()
     lib = _lib()
     try:
         lib.set_setting("voice_core", prompt)
     finally:
         lib.close()
-    return JSONResponse({"ok": True, "custom": bool(prompt)})
+    return JSONResponse({"ok": True, "custom": bool(prompt), "value": prompt})
 
 
 @app.post("/admin/voice/fpa-buddy")
 async def admin_voice_save_fpa_buddy(request: Request):
-    """Save (or reset, when blank) the voice_fpa_buddy setting."""
+    """Save the voice_fpa_buddy setting, or reset to its default text (see
+    admin_voice_save_core's docstring for why reset != blank now)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
-    prompt = (payload.get("voice_fpa_buddy") or "").strip()
+    if payload.get("reset"):
+        from linklib.agent import VOICE_FPA_BUDDY_DEFAULT
+        prompt = VOICE_FPA_BUDDY_DEFAULT
+    else:
+        prompt = (payload.get("voice_fpa_buddy") or "").strip()
     lib = _lib()
     try:
         lib.set_setting("voice_fpa_buddy", prompt)
     finally:
         lib.close()
-    return JSONResponse({"ok": True, "custom": bool(prompt)})
+    return JSONResponse({"ok": True, "custom": bool(prompt), "value": prompt})
 
 
 @app.post("/admin/voice/matchmaker")
 async def admin_voice_save_matchmaker(request: Request):
-    """Save (or reset, when blank) the voice_matchmaker setting — shared by
-    both the Communities and Software Chat Matchmakers."""
+    """Save the voice_matchmaker setting (shared by both the Communities and
+    Software Chat Matchmakers), or reset to its default text (see
+    admin_voice_save_core's docstring for why reset != blank now)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
-    prompt = (payload.get("voice_matchmaker") or "").strip()
+    if payload.get("reset"):
+        from linklib.matchmaker import VOICE_MATCHMAKER_DEFAULT
+        prompt = VOICE_MATCHMAKER_DEFAULT
+    else:
+        prompt = (payload.get("voice_matchmaker") or "").strip()
     lib = _lib()
     try:
         lib.set_setting("voice_matchmaker", prompt)
     finally:
         lib.close()
-    return JSONResponse({"ok": True, "custom": bool(prompt)})
+    return JSONResponse({"ok": True, "custom": bool(prompt), "value": prompt})
 
 
 @app.post("/admin/voice/review")
@@ -27842,14 +27920,16 @@ async def admin_voice_review(request: Request):
     if not text:
         raise HTTPException(status_code=400, detail="text required")
     rubric = payload.get("rubric") or "general"
-    from linklib.agent import VOICE_CORE_DEFAULT, VOICE_FPA_BUDDY_DEFAULT
-    from linklib.matchmaker import VOICE_MATCHMAKER_DEFAULT
     from linklib.voice_review import review_text
+    from linklib.voice_settings import VoicePromptMissing, require_voice_setting
     lib = _lib()
     try:
-        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
-        voice_fpa_buddy = lib.get_setting("voice_fpa_buddy") or VOICE_FPA_BUDDY_DEFAULT
-        voice_matchmaker = lib.get_setting("voice_matchmaker") or VOICE_MATCHMAKER_DEFAULT
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+            voice_fpa_buddy = require_voice_setting(lib, "voice_fpa_buddy") if rubric == "fpa_buddy" else ""
+            voice_matchmaker = require_voice_setting(lib, "voice_matchmaker") if rubric == "matchmaker" else ""
+        except VoicePromptMissing as e:
+            raise HTTPException(status_code=503, detail=str(e))
     finally:
         lib.close()
     if rubric == "fpa_buddy":

@@ -94,7 +94,7 @@ def test_generate_tool_agent_taxonomy_matches_sentinel_spec(monkeypatch, case):
     })
     _mock_anthropic_blocks(monkeypatch, case["blocks"])
 
-    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert result is not None
 
     if "expected_note" in case:
@@ -114,7 +114,7 @@ def test_generate_tool_description_matches_sentinel_spec(monkeypatch, case):
     _mock_fetch_page(monkeypatch, {"https://concourse.example": "Homepage content."})
     _mock_anthropic_blocks(monkeypatch, case["blocks"])
 
-    draft = enrich.generate_tool_description("Concourse", "https://concourse.example")
+    draft = enrich.generate_tool_description("Concourse", "https://concourse.example", voice_core="Test voice guide.")
     assert draft is not None
 
     assert case["expected_description_contains"] in draft.description
@@ -160,7 +160,7 @@ def test_old_bug_shape_still_leaks_if_the_model_reverts_to_it(monkeypatch):
         (OLD_BUG_REPRODUCTION_CASE["raw_text"], OLD_BUG_REPRODUCTION_CASE["cited_document_indexes"]),
     ])
 
-    result = enrich.generate_tool_agent_taxonomy("Datarails", "https://datarails.example")
+    result = enrich.generate_tool_agent_taxonomy("Datarails", "https://datarails.example", voice_core="Test voice guide.")
     assert result is not None   # doesn't crash — degrades, per the missing-sentinel contract
 
     # The honest, disclosed limitation: the tags DO leak through, because

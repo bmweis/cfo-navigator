@@ -21,7 +21,6 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from .agent import VOICE_CORE_DEFAULT
 from .citations import extract_citations, make_document_block
 
 _logger = logging.getLogger(__name__)
@@ -30,12 +29,23 @@ DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-5")
 
 
 def _resolve_voice_core(voice_core: str) -> str:
-    """Same DB-backed-setting-with-fallback pattern as linklib.agent's
-    _build_system / linklib.matchmaker (PR #110): the caller resolves
-    ``lib.get_setting("voice_core")`` and passes it in (enrich.py has no
-    Library handle of its own), and an empty/unset value falls back to the
-    code-constant default here rather than at every call site."""
-    return (voice_core or "").strip() or VOICE_CORE_DEFAULT
+    """The caller resolves ``lib.get_setting("voice_core")`` (via
+    ``linklib.voice_settings.require_voice_setting``, which raises before
+    ever calling here if the setting is empty) and passes the result in —
+    enrich.py has no Library handle of its own, so it can't read the
+    setting itself.
+
+    2026-08 visibility follow-up: this used to fall back to
+    VOICE_CORE_DEFAULT when the caller passed nothing, mirroring
+    linklib.agent/linklib.matchmaker's own pre-follow-up fallback (PR #110).
+    That silent code-level fallback is retired — every correctly-resolving
+    caller now raises before reaching this function at all if the setting
+    is empty, so this just trims whatever it's handed. It can still return
+    "" (a caller that bypasses require_voice_setting, or a test that
+    constructs one of these draft functions directly) — every generate_*
+    function using this checks for that immediately and returns None rather
+    than silently drafting on no voice guidance at all."""
+    return (voice_core or "").strip()
 
 
 _SENTINEL_LINE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*)$")
@@ -436,18 +446,30 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
     tag investigation can't recur here).
 
     Voice enforcement + structure (2026-08): `voice_core` is the caller's
-    already-resolved `lib.get_setting("voice_core") or VOICE_CORE_DEFAULT`
+    already-resolved value from `linklib.voice_settings.require_voice_setting`
     — same pattern PR #110 established for FP&A Buddy/matchmaker/voice
-    rewrite. Falls back to VOICE_CORE_DEFAULT itself if the caller passes
-    nothing, so every existing call site (and every test) keeps working
-    unchanged. Also instructs "description" (not "summary" — see the
-    prompt) to use paragraph breaks and, where genuinely list-like,
+    rewrite, updated by the 2026-08 visibility follow-up: the caller now
+    raises before ever calling here if the setting is empty, rather than
+    this function (or `_resolve_voice_core`) silently substituting
+    VOICE_CORE_DEFAULT. Also instructs "description" (not "summary" — see
+    the prompt) to use paragraph breaks and, where genuinely list-like,
     bullets — previously always one dense block regardless of length."""
     try:
         from anthropic import Anthropic
     except ImportError:
         return None
     if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    resolved_voice_core = _resolve_voice_core(voice_core)
+    if not resolved_voice_core:
+        # Defense in depth: the real caller (webapp/app.py) now resolves
+        # voice_core via require_voice_setting before ever calling here, so
+        # this should be unreachable in production — but a direct caller
+        # (a test, a future script) that skips that resolution must not
+        # silently draft with no voice guidance at all, and must not pay
+        # for a page fetch it's about to discard.
+        _logger.warning("generate_tool_description() aborted: voice_core is empty")
         return None
 
     from . import extract
@@ -466,7 +488,7 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
 
     prompt = _TOOL_DESC_PROMPT.format(
         name=name, url=url, content_block=content_block,
-        voice_core=_resolve_voice_core(voice_core), structure_guidance=_STRUCTURE_GUIDANCE,
+        voice_core=resolved_voice_core, structure_guidance=_STRUCTURE_GUIDANCE,
     )
     # Documents (when any) ride first, the drafting instructions last — same
     # ordering as generate_tool_agent_taxonomy, so citations resolve against
@@ -595,6 +617,12 @@ def generate_tool_differentiation(name: str, url: str, description: str,
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
 
+    resolved_voice_core = _resolve_voice_core(voice_core)
+    if not resolved_voice_core:
+        # Defense in depth — see generate_tool_description's identical guard.
+        _logger.warning("generate_tool_differentiation() aborted: voice_core is empty")
+        return None
+
     competitor_names = competitor_names or []
     low_confidence = not bool(competitor_names)
     competitors_block = (
@@ -615,7 +643,7 @@ def generate_tool_differentiation(name: str, url: str, description: str,
             messages=[{"role": "user",
                        "content": _TOOL_DIFFERENTIATION_PROMPT.format(
                            name=name, url=url, description=description, competitors_block=competitors_block,
-                           voice_core=_resolve_voice_core(voice_core))}],
+                           voice_core=resolved_voice_core)}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -997,6 +1025,12 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
 
+    resolved_voice_core = _resolve_voice_core(voice_core)
+    if not resolved_voice_core:
+        # Defense in depth — see generate_tool_description's identical guard.
+        _logger.warning("generate_tool_agent_taxonomy() aborted: voice_core is empty")
+        return None
+
     _, fetched = _fetch_taxonomy_grounding(url)
     low_confidence = not fetched
     doc_blocks, sent_docs = _build_taxonomy_documents(fetched) if fetched else ([], [])
@@ -1008,7 +1042,7 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     prompt = _AGENT_TAXONOMY_PROMPT.format(
         name=name, url=url, description=description.strip() or "(none provided)",
         content_block=content_note,
-        voice_core=_resolve_voice_core(voice_core), structure_guidance=_STRUCTURE_GUIDANCE,
+        voice_core=resolved_voice_core, structure_guidance=_STRUCTURE_GUIDANCE,
     )
     # Documents (when any) ride first, the drafting instructions last — same
     # ordering as linklib.agent.answer_question's user turn, so citations
@@ -1201,6 +1235,9 @@ CONFIDENCE: exactly twelve lines, one per the long-form/narrative fields
   PUBLIC_CRITICISM: true|false
   VERDICT_SUMMARY: true|false
 
+Voice guide — write every prose field in this voice:
+{voice_core}
+
 Community name: {name}
 Community URL: {url}
 {existing_block}
@@ -1243,7 +1280,8 @@ class CommunityProfileDraft:
 
 
 def generate_community_profile(name: str, url: str, existing: dict | None = None,
-                               model: str = DEFAULT_MODEL) -> CommunityProfileDraft | None:
+                               model: str = DEFAULT_MODEL,
+                               voice_core: str = "") -> CommunityProfileDraft | None:
     """Draft every Community Profile field (COMMUNITY_PROFILE_FIELDS — the
     original 13 narrative fields plus the short factual/categorical ones
     added later) from a community's name + URL in one Claude call, mirroring
@@ -1254,6 +1292,21 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     starts from scratch. Never auto-saved — same review contract as the tool
     description draft. Returns None if the SDK/key is unavailable or the call
     fails.
+
+    Voice enforcement (2026-08 visibility follow-up — correcting a real gap,
+    not a regression): this function had NO voice_core parameter and its
+    prompt had no voice-guide content at all until this change — the
+    citation-tag investigation's original root-cause report incorrectly
+    claimed this function already interpolated {voice_core} the same way
+    Description/Agent taxonomy/Differentiation do (it was actually reading
+    a different template's placeholder — see CLAUDE.md's correction). Now
+    follows the same `_resolve_voice_core`-with-empty-guard contract as the
+    other three: the caller resolves `lib.get_setting("voice_core")` (via
+    `linklib.voice_settings.require_voice_setting`, which refuses before
+    ever calling here if the setting is empty) and passes it in. No
+    structure_guidance here — rule 7's "2-5 plain-prose sentences" plus the
+    labeled-block format already constrain structure; adding bullet
+    guidance would conflict with the "no markdown" instruction above.
 
     Citations-API grounding fix, Phase 3: single-page grounding, same as
     generate_tool_description — the one fetched page, when non-empty, rides
@@ -1293,6 +1346,14 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
 
+    resolved_voice_core = _resolve_voice_core(voice_core)
+    if not resolved_voice_core:
+        # Defense in depth — see generate_tool_description's identical
+        # guard. Real callers now resolve voice_core via require_voice_setting
+        # before ever calling here.
+        _logger.warning("generate_community_profile() aborted: voice_core is empty")
+        return None
+
     from . import extract
     page = extract.fetch_page(url)
     low_confidence = not bool(page.content.strip())
@@ -1317,7 +1378,8 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     )
 
     prompt = _COMMUNITY_PROFILE_PROMPT.format(
-        name=name, url=url, existing_block=existing_block, content_block=content_block)
+        name=name, url=url, existing_block=existing_block, content_block=content_block,
+        voice_core=resolved_voice_core)
     # Documents (when any) ride first, the drafting instructions last — same
     # ordering as generate_tool_description, so citations resolve against
     # what was actually sent.

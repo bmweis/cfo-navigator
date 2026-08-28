@@ -43,7 +43,7 @@ def test_generate_tool_description_parses_confident_true(monkeypatch):
     from linklib import extract
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
     _mock_anthropic(monkeypatch, "A tool.\n\nSUMMARY: Short.\n\nCONFIDENT: true")
-    draft = enrich.generate_tool_description("Runway", "https://runway.com")
+    draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.confident is True
     assert draft.low_confidence is False
@@ -53,7 +53,7 @@ def test_generate_tool_description_parses_confident_false(monkeypatch):
     from linklib import extract
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Thin page text."))
     _mock_anthropic(monkeypatch, "A tool.\n\nSUMMARY: Short.\n\nCONFIDENT: false")
-    draft = enrich.generate_tool_description("Runway", "https://runway.com")
+    draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.confident is False
 
@@ -62,14 +62,14 @@ def test_generate_tool_description_defaults_confident_false_when_missing(monkeyp
     from linklib import extract
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
     _mock_anthropic(monkeypatch, "A tool.\n\nSUMMARY: Short.")   # no CONFIDENT sentinel line
-    draft = enrich.generate_tool_description("Runway", "https://runway.com")
+    draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.confident is False
 
 
 def test_generate_tool_differentiation_parses_confident(monkeypatch):
     _mock_anthropic(monkeypatch, '{"competitive_differentiation": "Best for X.", "confident": true}')
-    draft = enrich.generate_tool_differentiation("Runway", "https://runway.com", "A tool.", ["Datarails"])
+    draft = enrich.generate_tool_differentiation("Runway", "https://runway.com", "A tool.", ["Datarails"], voice_core="Test voice guide.")
     assert draft is not None
     assert draft.confident is True
 

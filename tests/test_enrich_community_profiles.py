@@ -26,6 +26,11 @@ from scripts import enrich_community_profiles as script
 def db(monkeypatch):
     path = tempfile.mktemp(suffix=".db")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    # 2026-08 visibility follow-up: the script now refuses (require_voice_setting)
+    # unless voice_core is seeded.
+    _seed_lib = Library(path)
+    _seed_lib.seed_voice_prompts()
+    _seed_lib.close()
     yield path
     if os.path.exists(path):
         os.remove(path)
@@ -38,7 +43,7 @@ def _add_community(lib: Library, name: str, url: str) -> int:
 def _mock_generate_community_profile(monkeypatch, **overrides):
     calls = []
 
-    def _fake(name, url, existing=None, model=""):
+    def _fake(name, url, existing=None, model="", voice_core=""):
         calls.append((name, url, existing, model))
         defaults = dict(
             ideal_member="CFOs at Series B+ SaaS companies.",

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from .db import Library
 from .enrich import NEEDS_VERIFICATION
+from .voice_settings import VoicePromptMissing, require_voice_setting
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS = 900
@@ -40,11 +41,13 @@ COST_ESTIMATE_USD = 0.01
 
 # Voice: layers the shared mechanical rubric (linklib.agent.VOICE_CORE_DEFAULT
 # — em dash, filler, sentence-case rules) with a matchmaker-specific register.
-# DB-backed/admin-editable (settings key "voice_matchmaker"), same fallback
-# pattern as voice_fpa_buddy — this is only the default used when that
-# setting is empty. One shared field for both the Communities and Software
-# matchmakers (see _build_system's kind param) since the register doesn't
-# change between them.
+# DB-backed/admin-editable (settings key "voice_matchmaker"). One shared field
+# for both the Communities and Software matchmakers (see _build_system's kind
+# param) since the register doesn't change between them.
+#
+# 2026-08 visibility follow-up: seed-only reference now, not an active
+# runtime fallback — see linklib.agent.VOICE_CORE_DEFAULT's own comment for
+# the full explanation (Library.seed_voice_prompts / require_voice_setting).
 VOICE_MATCHMAKER_DEFAULT = """You are matching the visitor with the right fit from a curated directory. Speak as "we": "here's a fit," not "I found a fit." Direct and warm. No sales pitch.
 
 - Reference what the visitor actually told you. A pitch that fits everyone fits no one.
@@ -164,11 +167,15 @@ def _build_software_context(lib: Library) -> str:
 def _build_system(lib: Library, kind: str) -> str:
     """kind: 'community' | 'software' — selects the dataset and persona copy;
     everything else (voice layering, conversation-shape instructions) is
-    shared between the two matchmakers."""
-    from .agent import VOICE_CORE_DEFAULT
+    shared between the two matchmakers.
 
-    voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
-    voice_matchmaker = lib.get_setting("voice_matchmaker") or VOICE_MATCHMAKER_DEFAULT
+    2026-08 visibility follow-up: used to fall back to each setting's
+    code-constant default when empty. Retired — require_voice_setting
+    raises VoicePromptMissing instead; _answer (this function's one caller)
+    catches it and returns a MatchAnswer with an explanatory text, the same
+    shape it already uses for a missing SDK/API key."""
+    voice_core = require_voice_setting(lib, "voice_core")
+    voice_matchmaker = require_voice_setting(lib, "voice_matchmaker")
     voice = f"{voice_core}\n\n{voice_matchmaker}"
 
     if kind == "software":
@@ -275,7 +282,10 @@ def _answer(lib: Library, kind: str, question: str,
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return MatchAnswer(text="(Set ANTHROPIC_API_KEY to enable the matchmaker.)", model=model)
 
-    system = _build_system(lib, kind)
+    try:
+        system = _build_system(lib, kind)
+    except VoicePromptMissing as e:
+        return MatchAnswer(text=f"(Voice prompt not configured: {e})", model=model)
     messages = trimmed_history + [{"role": "user", "content": question}]
 
     try:

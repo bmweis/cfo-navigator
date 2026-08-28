@@ -3818,31 +3818,81 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   untouched — DB-scan mode just synthesizes a `status="success"` row per
   (entity, field) for every tool and every community with a profile row,
   feeding the same pipeline the log-scoped path always used.
-- **`voice_core`/`voice_fpa_buddy`/`voice_matchmaker` visibility work,
-  scoped but not yet built (2026-08).** Deferred, then explicitly
-  unblocked once the em-dash incident closed. Agreed shape, all three
-  settings treated identically (not just `voice_core`, which merely
-  happened to be the one that caused the incident): each is seeded once
-  from its current code-default constant via a settings-flagged "has this
-  ever been seeded" gate — never an emptiness check, so a deliberate
-  clear-out stays cleared across deploys, same precedent as every other
-  seeding gate in this codebase (`_seed_toolbox`, the feed OPML seeding,
-  `paywall_cookie_notes_seeded`). Once seeded, the code-default constants
-  become seed-only references — not read at runtime by any resolution
-  path. Every resolution path for all three (`_resolve_voice_core` and its
-  as-yet-unnamed siblings, plus every `lib.get_setting(...) or DEFAULT`
-  call site in `webapp/app.py`) stops falling back silently: an empty
-  field refuses to draft (`None`/logged reason, matching the existing
-  `generate_*` error convention) rather than quietly substituting the code
-  default — explicitly chosen over keeping any fallback, since a silently
-  *degraded* generation (real voice guidance replaced by nothing) is a
-  different but equally invisible failure mode, not a solution to the
-  original "what's actually governing generation" ambiguity. Also
-  requires a visible banner on `/admin/voice` for the blocked state, and a
-  full inventory of every read of the three DEFAULT constants (not just
-  the fallback call sites — tests, doc comments, any other consumer)
-  before removing them as active runtime fallbacks. Scoped as its own PR,
-  not bundled into the log-independence fix above.
+- **`voice_core`/`voice_fpa_buddy`/`voice_matchmaker` visibility — the silent
+  code-level fallback is retired for real (2026-08).** Every resolution path
+  used to do `lib.get_setting(key) or CODE_DEFAULT_CONSTANT`, which made it
+  genuinely ambiguous from outside the code whether a given answer was
+  governed by an admin-edited `/admin/voice` value or a hardcoded constant
+  nobody could see without reading source — the same ambiguity the em-dash
+  incident above exposed for `voice_core` specifically. Fixed in three parts,
+  applied identically to all three settings, not just `voice_core`:
+  1. **Seeding**: `Library.seed_voice_prompts()` populates any CURRENTLY EMPTY
+     one of the three settings from its code-default constant, gated on a
+     `voice_prompts_seeded` settings flag — never an emptiness check, so a
+     deliberate clear-out through `/admin/voice` stays cleared across every
+     future deploy (same precedent as `seed_paywall_cookie_flags`/
+     `seed_feeds_from_opml`). An admin who already customized a field before
+     this shipped keeps their own text — seeding only fills in what's blank.
+     Wired into a new `@app.on_event("startup")` hook (`_seed_voice_prompts`)
+     alongside the existing seeding hooks, never blocking boot on failure.
+  2. **New `linklib/voice_settings.py`** — `require_voice_setting(lib, key)`
+     is the one place every caller resolves a voice setting from now on; it
+     raises `VoicePromptMissing` on an empty value instead of substituting
+     anything. Deliberately doesn't prescribe one response shape — each
+     caller catches it and responds however its own module already handles
+     an unavailable precondition: `enrich.py`'s four `generate_*` functions
+     return `None` (with a `_logger.warning`, same convention as their
+     missing-SDK/missing-key branches, placed before any page fetch so a
+     missing setting doesn't waste one); `agent.py`'s `ask()` and
+     `matchmaker.py`'s `_answer()` return their own `Answer`/`MatchAnswer`
+     with an explanatory `text`, matching their existing missing-SDK/
+     missing-key branches exactly; every `webapp/app.py` AJAX route returns a
+     JSON/HTTPException 503 naming which setting is missing. Every call site
+     across `webapp/app.py` (3 Toolbox generate routes, the `_run_tool_research`
+     background job, the `/admin/voice/review` tester), `linklib/agent.py`,
+     `linklib/matchmaker.py`, and the two still-active batch backfill scripts
+     (`scripts/enrich_agent_taxonomy.py`, `scripts/enrich_community_profiles.py`,
+     plus `scripts/regen_ai_drafted_fields.py`) was found via a full grep
+     inventory and switched, per Brian's explicit ask ("full inventory... before
+     removing anything as an active fallback").
+  3. **`/admin/voice` UI**: a coral banner names exactly which setting(s) are
+     empty and what's blocked when any is; each field's badge is now
+     three-way (Customized / Default (as seeded) / Not configured—generation
+     blocked, vs. the old binary Customized/Built-in default) computed by
+     comparing the live value against the code default, not just checking
+     truthiness — a just-seeded, unedited field now correctly reads "Default
+     (as seeded)" rather than "Customized" even though the settings table
+     technically holds non-empty text for it. **"Reset to default" now
+     writes the real default text into the setting** (a new `{"reset": true}`
+     payload the three save routes honor) instead of sending a blank value —
+     under the new model a blank save is a distinct, still-supported
+     "deliberately clear it" action (correctly shows the blocked banner),
+     not what "reset" means any more.
+  **Real correction found mid-build, not a regression**: while wiring
+  `generate_community_profile` into this, discovered the citation-tag
+  investigation's original root-cause report (and this CLAUDE.md's own
+  matching bullet above) incorrectly claimed that function already
+  interpolated `{voice_core}` — it never had a `voice_core` parameter at
+  all, and its prompt template had zero voice-guide content; the `{voice_core}`
+  match that produced the original claim was actually inside a different
+  template (`_VOICE_REWRITE_PROMPT`, used only by an archived one-off
+  script). Fixed in this same PR: `generate_community_profile` gained a
+  real `voice_core` parameter, a "Voice guide" section in its prompt (no
+  `structure_guidance` — the field's own rule 7 plus the labeled-block
+  format already constrain structure), and the same empty-guard the other
+  three functions have; its one live caller
+  (`/admin/tools/communities/generate-profile`) and
+  `scripts/enrich_community_profiles.py` both updated to actually resolve
+  and pass it, closing a real, separate gap (community profile drafts had
+  never received ANY voice guidance, not just no visibility into which
+  source was governing it). Two similar batch-script gaps found by the same
+  inventory (`scripts/enrich_agent_taxonomy.py`,
+  `scripts/enrich_community_profiles.py` never resolved `voice_core` at
+  all, relying entirely on the now-removed internal fallback) were fixed
+  the same way. `generate_community_listing` (the "Auto-fill from URL"
+  basic-listing generator) still has no voice_core support at all — flagged
+  as a separate, deliberately out-of-scope enhancement, not a regression
+  from this pass, since it's never had one to begin with.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

@@ -152,14 +152,18 @@ def main() -> int:
         return 1
 
     from linklib import enrich as enrich_mod
-    from linklib.agent import VOICE_CORE_DEFAULT
+    from linklib.voice_settings import VoicePromptMissing, require_voice_setting
 
     db_path = resolve_db_path(args.db, allow_missing=False)
     print(f"DB (read-only lookups): {db_path}")
     lib = Library(db_path)
     try:
         model = args.model or lib.get_enrich_model()  # read-only
-        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT  # read-only
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")  # read-only
+        except VoicePromptMissing as e:
+            print(f"ERROR: {e}")
+            return 1
         print(f"Model: {model}\n")
 
         client = Anthropic()
