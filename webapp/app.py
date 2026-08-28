@@ -7190,8 +7190,20 @@ function submitIntroForm() {{
 .tp-feature-tag-ai{{background:#fef3c7;color:#92400e;}}
 .tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
   background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+/* Icon-weight fix (item 3, Aug 2026 UI pass): a flag on every row read as
+   visually heavy on a long feature list (e.g. NetSuite's ~13 rows) for an
+   action most visitors never use. Kept per-row (rather than collapsing to
+   one card-level "flag an issue" action) so a report still names WHICH
+   feature it's about — the modal this opens is pre-scoped with the
+   feature's own id/name specifically for that reason, and the existing
+   "Suggest one" footer link already covers the card-level, new-feature
+   case. Hidden at rest, revealed on row hover OR keyboard focus (not
+   hover-only) so it stays reachable without a mouse — a bare opacity
+   toggle, not display:none, so it's never removed from the tab order. */
 .tp-feature-flag-btn{{margin-left:auto;background:none;border:none;cursor:pointer;font-size:14px;
-  color:var(--muted);padding:2px 4px;line-height:1;}}
+  color:var(--muted);padding:2px 4px;line-height:1;opacity:0;transition:opacity .15s ease;}}
+.tp-feature-list li:hover .tp-feature-flag-btn,
+.tp-feature-list li:focus-within .tp-feature-flag-btn{{opacity:1;}}
 .tp-feature-flag-btn:hover{{color:var(--navy);}}
 .tp-link-btn{{background:none;border:none;padding:0;cursor:pointer;font:inherit;color:var(--accent);
   font-weight:500;}}
