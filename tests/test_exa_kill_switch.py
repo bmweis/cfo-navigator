@@ -25,6 +25,7 @@ from linklib.db import Library
 
 def test_exa_enabled_defaults_to_true(tmp_path):
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         assert lib.get_exa_enabled() is True
     finally:
@@ -33,6 +34,7 @@ def test_exa_enabled_defaults_to_true(tmp_path):
 
 def test_exa_enabled_persists_toggle(tmp_path):
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         lib.set_exa_enabled(False)
         assert lib.get_exa_enabled() is False
@@ -47,6 +49,7 @@ def test_exa_enabled_persists_toggle(tmp_path):
 def test_web_provider_is_exa_when_enabled_and_keyed(monkeypatch, tmp_path):
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         assert agent._web_provider(lib) == "exa"
     finally:
@@ -56,6 +59,7 @@ def test_web_provider_is_exa_when_enabled_and_keyed(monkeypatch, tmp_path):
 def test_web_provider_is_native_when_toggled_off(monkeypatch, tmp_path):
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         lib.set_exa_enabled(False)
         assert agent._web_provider(lib) == "native"
@@ -66,6 +70,7 @@ def test_web_provider_is_native_when_toggled_off(monkeypatch, tmp_path):
 def test_web_provider_is_native_when_key_missing(monkeypatch, tmp_path):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         assert lib.get_exa_enabled() is True   # toggle itself is on
         assert agent._web_provider(lib) == "native"   # key missing still falls back
@@ -125,6 +130,7 @@ def test_native_tool_is_armed_when_exa_disabled(monkeypatch, tmp_path):
     monkeypatch.setattr(agent, "_get_client", lambda: _FakeClient())
 
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         agent.answer_question(lib, "a question", use_library=False,
                               use_web=True, opml_path="preferred_sites.opml")
@@ -159,6 +165,7 @@ def test_native_tool_not_armed_when_exa_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr(agent, "_get_client", lambda: _FakeClient())
 
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         agent.answer_question(lib, "a question", use_library=False,
                               use_web=True, opml_path="preferred_sites.opml")
@@ -187,6 +194,7 @@ def test_native_tool_armed_even_without_opml_path(monkeypatch, tmp_path):
     monkeypatch.setattr(agent, "_get_client", lambda: _FakeClient())
 
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         agent.answer_question(lib, "a question", use_library=False,
                               use_web=True, opml_path=None)

@@ -199,6 +199,7 @@ def test_answer_question_folds_exa_cost_on_success(monkeypatch, tmp_path):
     monkeypatch.setattr(agent, "_get_client", lambda: _FakeClient())
 
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         ans = agent.answer_question(lib, "a question", use_library=False,
                                     use_web=True, opml_path="preferred_sites.opml")
@@ -228,6 +229,7 @@ def test_answer_question_folds_exa_cost_on_answer_call_exception(monkeypatch, tm
     monkeypatch.setattr(agent, "_get_client", lambda: _FakeClient())
 
     lib = Library(str(tmp_path / "t.db"))
+    lib.seed_voice_prompts()
     try:
         ans = agent.answer_question(lib, "a question", use_library=False,
                                     use_web=True, opml_path="preferred_sites.opml")

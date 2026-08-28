@@ -27690,7 +27690,7 @@ def admin_voice_page(request: Request):
                    "voice_matchmaker": "Chat matchmaker voice"}
         names = ", ".join(_labels.get(k, k) for k in missing)
         blocked_banner = (
-            '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:14px;'
+            '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:14px;'
             'padding:16px 20px;margin:0 0 18px;color:#b91c1c;font-size:14px;">'
             f'<strong>Generation is blocked:</strong> {_esc(names)} {"is" if len(missing) == 1 else "are"} '
             "empty. Nothing falls back to a built-in default any more — FP&amp;A Buddy, the Chat "
@@ -27703,7 +27703,7 @@ def admin_voice_page(request: Request):
         is_missing = not custom_value
         is_customized = bool(custom_value) and custom_value.strip() != default_value.strip()
         if is_missing:
-            badge = ('<span style="font-size:12px;font-weight:600;background:#fef2f2;color:#b91c1c;'
+            badge = ('<span style="font-size:12px;font-weight:600;background:#fee2e2;color:#b91c1c;'
                       f'border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;" '
                       f'id="{field_id}-badge">Not configured&mdash;generation blocked</span>')
         elif is_customized:
