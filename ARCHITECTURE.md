@@ -1854,6 +1854,18 @@ Details worth knowing:
   `generate_community_listing` (the separate "Auto-fill from URL" basic-
   listing generator) still has no voice_core support — flagged as a
   distinct, deliberately out-of-scope enhancement, not a regression.
+  **Follow-up correction (post-merge)**: the line above listing
+  `scripts/regen_ai_drafted_fields.py` among the switched call sites was
+  true only for its `main()`-level resolve (`require_voice_setting` at
+  startup) — its separate community code path
+  (`_run_communities`/`_regen_community_profile`, and the `--sample`
+  branch's community loop) never actually threaded that resolved
+  `voice_core` into the `generate_community_profile` call, so it fell
+  through to the function's own empty default and aborted every call. A
+  real post-merge `--apply` run against 40 communities caught this with
+  zero writes (the empty-guard's designed fail-safe, not a bad write) —
+  see CLAUDE.md's dedicated bullet for the full root-cause elimination and
+  the fix.
 - **Two to four API calls can happen per turn.** On follow-ups, a cheap Haiku
   call first rewrites e.g. *"what about at Series A?"* into a standalone
   search question so retrieval sees the conversation's subject. It's
