@@ -167,3 +167,65 @@ def test_seed_toolbox_does_not_reinstate_a_deleted_community_category(app_client
     remaining = {c["name"] for c in lib.list_community_categories()}
     lib.close()
     assert seeded_name not in remaining
+
+
+def test_seed_toolbox_never_reverts_a_regenerated_description(app_client):
+    """2026-08 incident regression: _seed_toolbox used to sync BOTH name
+    and description on a matching tools row, so any deploy after a tool's
+    description was AI-regenerated (making it differ from
+    scripts/seed_tools.py's short seed blurb) silently reverted it back —
+    81 of 148 seed-listed tools were caught with reverted descriptions
+    from a single night's deploys. description sync must be gone
+    entirely: a real, regenerated description survives a startup pass
+    unchanged, byte for byte."""
+    from linklib.db import Library
+    from scripts.seed_tools import TOOLS
+
+    seed_entry = TOOLS[0]
+    real_description = (
+        "A genuinely different, much longer AI-regenerated description that "
+        "in no way matches the short seed-list blurb this tool started with."
+    )
+    lib = Library(app_client)
+    tool_id = lib.add_tool(seed_entry["name"], real_description, seed_entry["url"],
+                            seed_entry["categories"], approved=1)
+    lib.close()
+
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    with TestClient(appmod.app):
+        pass
+
+    lib = Library(app_client)
+    row = lib.get_tool(tool_id)
+    lib.close()
+    assert row["description"] == real_description
+    assert row["description"] != seed_entry["description"]
+
+
+def test_seed_toolbox_still_syncs_name(app_client):
+    """name sync is unaffected by the description-sync retirement above —
+    nothing ever AI-drafts a tool's name, so it carries none of the same
+    risk, and Brian still occasionally renames a seed-listed tool by
+    editing scripts/seed_tools.py directly (e.g. an "(acquired by ...)"
+    suffix)."""
+    from linklib.db import Library
+    from scripts.seed_tools import TOOLS
+
+    seed_entry = TOOLS[0]
+    lib = Library(app_client)
+    tool_id = lib.add_tool("Old Name Before A Rename", seed_entry["description"],
+                            seed_entry["url"], seed_entry["categories"], approved=1)
+    lib.close()
+
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    with TestClient(appmod.app):
+        pass
+
+    lib = Library(app_client)
+    row = lib.get_tool(tool_id)
+    lib.close()
+    assert row["name"] == seed_entry["name"]

@@ -3931,6 +3931,57 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   against all 40 — the pre-merge spot-check that validated the fallback PR
   itself only ever sampled tools, never communities, so this is treated as
   a real verification gap to close, not a formality.
+- **`_seed_toolbox()` was silently reverting AI-regenerated tool
+  descriptions back to the seed blurb on every deploy — 81 of 148
+  seed-listed tools caught, description sync retired entirely (2026-08).**
+  Found when Abacum's live Description/Agent taxonomy still showed
+  pre-incident content despite the full 157-tool regen run above
+  reportedly completing clean. Root cause, confirmed by direct code read
+  before any live-data check: `webapp/app.py`'s `_seed_toolbox()` runs on
+  **every process startup** (every deploy, restart, or crash recovery) and
+  did, unconditionally, for every tool in `scripts/seed_tools.py`'s
+  `TOOLS` list — `if row["name"] != t["name"] or row["description"] !=
+  t["description"]: lib.update_tool_content(row["id"], t["name"],
+  t["description"])` — reverting the live description back to the seed
+  value whenever they differed, which is exactly what a successful AI
+  regeneration produces (a long grounded description vs. the seed list's
+  1-2 sentence marketing blurb). `scripts/seed_tools.py`'s own re-run path
+  had the identical bug independently — a second, separate blast-radius
+  vector if it were ever run by hand again. Confirmed at production scale
+  via `scripts/diagnose_seed_sync_overwrite.py` (the read-only diagnostic
+  built to answer this): **81 of the 148 seed-listed tools** had a live
+  description currently matching the seed value exactly — the reversion
+  fingerprint — with Abacum's own regen log (2026-08-26 success,
+  `tools.updated_at` matching a deploy this morning) confirming the exact
+  mechanism live, not just in theory. Fixed by retiring `description` from
+  the sync entirely, permanently, at both call sites — `name` sync is
+  unaffected and kept (nothing ever AI-drafts a tool's name, so it carries
+  none of the same risk, and Brian still occasionally renames a
+  seed-listed tool by editing `scripts/seed_tools.py` directly, e.g. an
+  "(acquired by ...)" suffix). `Library.update_tool_content` is left in
+  place (still directly unit-tested) but has zero live callers after this
+  fix — a candidate for a future no-dead-code cleanup pass, not bundled
+  into this urgent fix. The `/admin/tools/software` caption claiming
+  "editing `scripts/seed_tools.py` updates a tool's name and description"
+  was itself part of the problem (accurate description of a behavior that
+  should never have existed) — corrected to say description is
+  database-only, with the incident named inline so a future reader
+  doesn't wonder why the caption changed. Two regression tests added
+  (`tests/test_seed_toolbox_startup.py`) — proven to actually catch the
+  bug by running them against the pre-fix code first and confirming they
+  fail there, not just pass post-fix. **Recovery, not a DB restore**:
+  rolling back to a pre-incident snapshot would also roll back the same
+  day's Differentiation regen, the em-dash cleanup, and the community
+  profile regen — a much worse trade for fixing 81 stale descriptions.
+  Recovery plan instead: with this fix merged and deployed first (so the
+  very next deploy can't re-revert anything), re-run
+  `diagnose_seed_sync_overwrite.py` for the current, real affected-tool-ID
+  list, then a targeted `scripts/regen_ai_drafted_fields.py --field
+  description --ids <list> --apply` pass against just those tools, using
+  the already-fixed generation pipeline (citation grounding, the raised
+  `max_tokens`, the generalized ampersand rule, the em-dash backstop, and
+  real `voice_core` all already fixed and verified clean at full catalog
+  scale before this incident was found).
 - **`generate_tool_differentiation` joins the D1 content-exclusion rules
   (2026-08) — the gap the blast-radius spot-check bullet above flagged and
   deferred.** Investigated first: `generate_tool_differentiation` already

@@ -959,9 +959,15 @@ def main():
                     lib.conn.execute("UPDATE tools SET advisor=1 WHERE id=?", (existing["id"],))
                     lib.conn.commit()
                     print(f"  UPDATED advisor flag: {t['name']}")
-                if existing["name"] != t["name"] or existing["description"] != t["description"]:
-                    lib.update_tool_content(existing["id"], t["name"], t["description"])
-                    print(f"  UPDATED name/description: {t['name']}")
+                # description is deliberately NOT synced here (2026-08 incident —
+                # see CLAUDE.md and webapp/app.py's _seed_toolbox() docstring): a
+                # re-run of this script used to silently revert an AI-regenerated
+                # or hand-edited description back to this file's seed blurb.
+                # name-only from here on, since nothing ever AI-drafts a name.
+                if existing["name"] != t["name"]:
+                    lib.conn.execute("UPDATE tools SET name=? WHERE id=?", (t["name"], existing["id"]))
+                    lib.conn.commit()
+                    print(f"  UPDATED name: {t['name']}")
                     updated += 1
                 else:
                     print(f"  SKIP  {t['name']}")
