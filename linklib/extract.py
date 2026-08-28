@@ -407,6 +407,86 @@ _BLOCK_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote",
                "pre", "figcaption", "br", "div"}
 
 
+# Class/id/data-testid substrings identifying promotional or compliance chrome
+# embedded INSIDE an article body — sponsor call-outs, native-ad units,
+# newsletter-subscribe widgets, cookie/consent banners. Distinct from
+# _READER_JUNK_TAGS below (which strips by TAG NAME — nav/header/footer/
+# script/etc.) because these are ordinary <div>/<section>/<figure> wrappers a
+# source site uses for non-editorial content; nothing about the tag name
+# tells them apart from a real paragraph, only the class/id the source's own
+# CSS gives them.
+#
+# Found via the Reader cleanliness investigation (2026-08): neither this
+# module's plain-text fallback nor its structured Reader extraction had any
+# such detection before this — a sponsor block or cookie banner shaped as
+# <div class="sponsor-block">...</div> isn't a <nav>/<header>/<script>, so it
+# was previously either collected as an ordinary block (_extract_content) or
+# unwrapped, keeping its content (extract_reader_html) — confirmed live via a
+# saved OnlyCFO newsletter rendering a full Brex sponsor block inline.
+#
+# Matched as a substring against a normalized (lowercased, non-alphanumeric
+# stripped) class/id/data-testid string, so "Sponsor-Block--wide",
+# "sponsorBlock", and "sponsor_block_2" all normalize to the same
+# "sponsorblock2"-ish string and match "sponsor". Deliberately conservative:
+# multi-character, word-ish tokens most publishers actually use for
+# non-editorial units, never a single common word ("ad" alone would nuke
+# "advice", "gadget", "admin", ...).
+_PROMO_CHROME_MARKERS = (
+    "sponsor", "sponsored",
+    "advertisement", "adslot", "adunit", "adcontainer", "nativead",
+    "promoblock", "promotedcontent",
+    "newslettercta", "newslettersignup", "newsletterpromo",
+    "subscribewidget", "subscriptionwidget", "subscribecta",
+    "cookiebanner", "cookieconsent", "cookienotice",
+    "consentbanner", "consentmanager",
+    "gdprbanner", "gdprnotice", "onetrust", "ccbanner", "ccpanel",
+    "privacybanner",
+)
+
+
+def _normalize_marker_check(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (value or "").lower())
+
+
+def _is_promo_chrome_element(tag) -> bool:
+    """True when a tag's class/id/data-testid looks like sponsor/ad/
+    newsletter-signup/cookie-consent chrome rather than editorial content."""
+    haystacks = []
+    classes = tag.get("class")
+    if classes:
+        haystacks.append(" ".join(classes) if isinstance(classes, list) else str(classes))
+    for attr in ("id", "data-testid", "data-test-id", "data-qa"):
+        val = tag.get(attr)
+        if val:
+            haystacks.append(str(val))
+    if not haystacks:
+        return False
+    combined = _normalize_marker_check(" ".join(haystacks))
+    return any(marker in combined for marker in _PROMO_CHROME_MARKERS)
+
+
+def strip_promotional_chrome(soup) -> None:
+    """Decompose (remove entirely, content included) any element that looks
+    like sponsor/ad/newsletter-signup/cookie-consent chrome, in place — shared
+    by both extraction paths (`_extract_content`'s BS4 fallback and
+    `extract_reader_html`) so a sponsor block embedded in a fetched page never
+    survives into either the stored plain-text content or a live Reader view.
+
+    Deliberately called BEFORE either path's own tag-name-based junk
+    stripping/block collection, so a promo block's inner <p>/<img> tags never
+    get a chance to be collected or kept as if they were real article
+    content."""
+    for tag in soup.find_all(True):
+        # A tag already decomposed as a descendant of an earlier match (find_all
+        # snapshots the whole tree up front, before any decompose() runs) has
+        # its attrs cleared to None — skip it rather than re-inspecting a
+        # detached, attribute-less stub.
+        if tag.decomposed:
+            continue
+        if _is_promo_chrome_element(tag):
+            tag.decompose()
+
+
 def _extract_content(html: str) -> str:
     """Plain-text extraction — the contract the ingest/search/enrichment pipeline
     depends on (`articles.content`, FTS5 indexing, the Claude enrichment prompt,
@@ -433,6 +513,7 @@ def _extract_content(html: str) -> str:
     # giant paragraph.
     try:
         soup = BeautifulSoup(html, "html.parser")
+        strip_promotional_chrome(soup)
         for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
             tag.decompose()
         blocks = []
@@ -495,6 +576,7 @@ def extract_reader_html(html: str, base_url: str) -> str:
 
     for c in soup.find_all(string=lambda s: isinstance(s, Comment)):
         c.extract()
+    strip_promotional_chrome(soup)
     for tag in soup(_READER_JUNK_TAGS):
         tag.decompose()
 

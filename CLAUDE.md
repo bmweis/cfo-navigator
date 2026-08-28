@@ -4010,6 +4010,31 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   communities` prints a note and changes nothing, rather than silently
   doing nothing with no signal.
 
+- **Reader cleanliness pass (2026-08) — sponsor/ad/cookie-banner stripping,
+  shared by every extraction path.** A backlog item framed as "Read Later
+  saves aren't scrubbed like Archive saves" turned out to have a different
+  root cause: Read Later's bare-metadata save was never the gap — every
+  Read Later item is resolved through the same live-fetch extraction
+  (`extract_reader_html`) an unsaved Feed item or a not-yet-backfilled
+  Archive article uses. The real finding: **neither extraction path
+  (`_extract_content`'s plain-text fallback, or `extract_reader_html`'s
+  structured Reader HTML) had ever had any class/id-based content
+  filtering** — both only recognize chrome by TAG NAME
+  (`nav`/`header`/`footer`/`script`/...), so an ordinary
+  `<div class="sponsor-block">` or `<div id="cookie-consent-banner">` rode
+  straight through as ordinary article content — confirmed live via a saved
+  OnlyCFO newsletter rendering a full Brex sponsor block inline, and
+  confirmed the identical content would have rendered the same way via
+  Archive, not just Read Later. Fixed once, in the shared extraction layer:
+  `linklib/extract.py`'s new `strip_promotional_chrome(soup)` decomposes any
+  element whose class/id/`data-testid`/`data-test-id`/`data-qa` matches a
+  curated marker list (sponsor/advertisement/native-ad/newsletter-signup/
+  subscribe-widget/cookie-banner/cookie-consent/gdpr/onetrust/...) —
+  deliberately multi-character, word-ish tokens, never a bare word like "ad"
+  that would also nuke "advice"/"gadget" — checked against element
+  attributes only, never text content. Called before either path's own
+  tag-name junk stripping. No change needed to `/save-later` or Read
+  Later's schema. See ARCHITECTURE.md's matching Reader-cleanliness section.
 - **Reader "expand"/distraction-free mode, corrected (2026-08).** The
   original build only shrank the middle `.rr-list-pane` to a 220px "sliver"
   on expand, leaving `.rr-rail` (the left nav rail) fully visible on
