@@ -5765,7 +5765,7 @@ Not sure which tool's for you? {(
 
 <div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
+<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="tool-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -5798,13 +5798,17 @@ Not sure which tool's for you? {(
 #tool-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #tool-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #tool-pagination-label{{font-size:13px;color:var(--muted);}}
-.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
+.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;height:100%;}}
 /* Same fixed-to-N-lines technique as .tool-desc below, applied to the title:
    a long name (e.g. "Airbase (acquired by Paylocity)") used to wrap to a
-   second line and push that card's header row taller than its row siblings,
-   since the grid uses align-items:start rather than stretching cards to a
-   shared row height. Clamping to 2 lines with a matching min-height means
-   every card reserves the same header height regardless of name length. */
+   second line and push that card's header row taller than its content
+   below. #tool-grid now uses align-items:stretch (Aug 2026 fix — cards in
+   the same row render at matching heights, with the bottom action row
+   pinned via margin-top:auto below), so this clamp is no longer load-
+   bearing for row-height matching, but it's kept: without it, a 2-line
+   title still shifts every OTHER element inside that one card down by a
+   line versus a 1-line-title card in a different row, which reads as
+   inconsistent even though rows themselves now match. */
 .tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
   line-height:1.3;min-height:44px;margin-bottom:6px;letter-spacing:-0.01em;}}
@@ -7590,7 +7594,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 
 <div id="comm-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
+<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="comm-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -7624,7 +7628,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 #comm-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #comm-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #comm-pagination-label{{font-size:13px;color:var(--muted);}}
-.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
+.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;height:100%;}}
 .comm-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
 .comm-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 /* Same fixed-height technique as .tool-name/.tool-desc on the Software directory
