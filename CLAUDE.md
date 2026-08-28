@@ -3893,6 +3893,162 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   basic-listing generator) still has no voice_core support at all — flagged
   as a separate, deliberately out-of-scope enhancement, not a regression
   from this pass, since it's never had one to begin with.
+- **`scripts/regen_ai_drafted_fields.py`'s community path never threaded
+  `voice_core` through at all — a real gap the fallback-retirement PR above
+  missed, caught by the fail-safe it built rather than by a bad write.**
+  A post-merge full re-run (40 communities, real `railway ssh` execution)
+  failed every single call with `generate_community_profile() aborted:
+  voice_core is empty`, zero writes — confirmed via the log and this
+  script's own before-write guard (`draft is None` returns before
+  `upsert_community_profile` is ever called), the exact non-corrupting
+  behavior the empty-guard was designed to produce. Root-caused by
+  elimination against the three plausible explanations before touching any
+  code, per Brian's explicit ask: `Library.get_setting`/`set_setting` do a
+  plain uncached `SELECT`/`UPDATE` on every call (no in-memory cache, no
+  `lru_cache`, so a stale-read-after-save theory doesn't hold); the script
+  resolves `voice_core` once via `require_voice_setting` at startup exactly
+  like the web app, and threads it correctly into every **tool** call
+  (`_run_tools`/`_regen_tool_description` etc. all take and pass it) — but
+  `_run_communities`/`_regen_community_profile`, and the `--sample`
+  branch's own community loop, simply had no `voice_core` parameter at
+  all, so `generate_community_profile(...)` fell through to its own
+  `voice_core: str = ""` default and tripped its empty-guard every time,
+  regardless of what was actually saved in the DB or when. Not a timing
+  issue either — the bug is structural, so it would have failed identically
+  on any run, any container, any delay after the save. This is a real,
+  separate gap from the "two batch-script gap callers" the fallback PR
+  actually fixed (`scripts/enrich_agent_taxonomy.py`,
+  `scripts/enrich_community_profiles.py`) — this script's own community
+  path was a third, unrelated caller that got missed. Fixed by threading
+  `voice_core` through `_run_communities`, `_regen_community_profile`, and
+  `_run_sample`'s community branch, mirroring the tool path exactly.
+  Verified with a mocked-generator smoke test (temp DB, `--sample 1 --only
+  communities`, capturing the actual `voice_core` value the mock receives)
+  before any real API call — confirms the fix reaches the generator, not
+  just that the code compiles. Per Brian's explicit sequencing: a real
+  `--sample` run against a couple of communities (genuine API calls, output
+  pasted back for review) is required before the full `--apply` re-run
+  against all 40 — the pre-merge spot-check that validated the fallback PR
+  itself only ever sampled tools, never communities, so this is treated as
+  a real verification gap to close, not a formality.
+- **`generate_tool_differentiation` joins the D1 content-exclusion rules
+  (2026-08) — the gap the blast-radius spot-check bullet above flagged and
+  deferred.** Investigated first: `generate_tool_differentiation` already
+  resolved and used `voice_core` correctly (unlike Community profile's own
+  gap, fixed earlier), and its em-dash/marketing-language rules were
+  already in place — what was missing was the citation-tag investigation's
+  D1 content rules (no vendor-reported stats/proof-points, no
+  testimonials/review-scores/logos, no editor-facing asides), which
+  Description and Agent taxonomy both got as part of that fix and this
+  field never did, since it predates that fix and has no citations
+  mechanism of its own (it's still plain JSON output — Citations-API
+  grounding for this field stays deferred, unchanged by this pass) to have
+  motivated including it. Two new rules (5-6) added to
+  `_TOOL_DIFFERENTIATION_PROMPT`, reusing Description/Agent taxonomy's own
+  reported-results/testimonials wording and editor-facing-address ban,
+  adapted for this field's short 1-2-sentence JSON format: rule 5 bans
+  vendor-reported stats/testimonials/review-scores/logos as the basis for
+  the comparison **even when one already appears in the `description` or
+  competitor context fed into the prompt** — a real path, since a legacy,
+  not-yet-regenerated description can still carry a stat predating the
+  Description-side fix, exactly what the sampled output turned out to be
+  pulling from: a sampled Differentiation output for **Maxima** included
+  "Scale AI's CAO reports closing two to three days faster at over 98%
+  automation," attributing that vendor-reported result to Scale AI as a
+  third-party comparison example named *within* Maxima's own text — Scale
+  AI is not itself a Toolbox entry (confirmed: no tool by that name exists
+  in the DB), so this is one finding on one tool (Maxima), not two; rule 6
+  bans referencing "the description above"/"the competitor context"/the
+  model's own research process. **Same disclosed limitation as the original citation-tag
+  fix, verified rather than assumed**: this is preventative (prompt-level)
+  only — nothing after the `json.loads()` call can recognize and strip a
+  vendor stat the model decided to include anyway, since a legitimate
+  comparison claim and an excluded marketing stat aren't mechanically
+  distinguishable after the fact. `tests/citations_fixtures/
+  differentiation_fixtures.py` + `tests/test_differentiation_content_
+  exclusions.py` cover both sides of that, mirroring
+  `enrich_sentinel_fixtures.py`'s own two-sided pattern: a clean/compliant
+  fixture (description carries the stat, mocked response — a model that
+  complied — doesn't) proving the pipeline stores exactly what a compliant
+  model returns, and an old-bug-reproduction fixture (mocked response DOES
+  include the stat) proving it still leaks through unfiltered if the model
+  reverts, plus static prompt-content assertions that the new rules are
+  actually present. **Verified live and closed (2026-08)**: Brian ran
+  `regen_ai_drafted_fields.py --ids --only tools --sample 1` against
+  Maxima — the same tool the original finding traced to — via
+  `railway ssh`. Output came back clean — no vendor-reported stat, no
+  editor-facing language, appropriately hedged where information (pricing)
+  wasn't available — confirming the new rules hold on real model output,
+  not just in the mocked fixtures above. **Known follow-up, not fixed by
+  this PR**: Maxima's own live `competitive_differentiation` field still
+  carries the pre-fix leaked stat (the prompt fix only governs future
+  generations, never rewrites what's already stored) — tracked in issue
+  #445 for a targeted re-run, alongside anything else surfaced during
+  content review, rather than a one-off fix here. (An earlier draft of
+  this note and of #445 mistakenly treated "Scale AI" as a second Toolbox
+  entry needing its own re-run — corrected: it's the third-party example
+  named inside Maxima's own leaked text, not a tool in the DB, so Maxima is
+  the only entry #445 needs to cover unless content review turns up
+  another.)
+- **`scripts/regen_ai_drafted_fields.py` gained a `--field` flag (2026-08
+  follow-up)** — requested to make #445's re-run genuinely cheap: a
+  full-catalog `--only tools --field competitive_differentiation --apply`
+  pass (no `--ids`) regenerates just Differentiation across all ~157 tools,
+  instead of the original design's 3-fields-per-tool cost, and doubles as a
+  sweep for any OTHER tool with a similar leaked-vendor-stat pattern that
+  content review hasn't surfaced yet — not just Maxima. Repeatable and/or
+  comma-separated (`--field description --field agent_taxonomy`,
+  `--field description,agent_taxonomy` — both forms combine), normalized
+  back to the real per-tool regeneration order regardless of command-line
+  order. Omitting it regenerates all three fields, exactly as before this
+  flag existed — a true no-op for every prior invocation, covered by
+  `tests/test_regen_field_flag.py` (this script's first real committed
+  test file — its earlier hardening rounds were smoke-tested by hand
+  against a temp DB, per those bullets above, but never given a permanent
+  test). Has no effect on Communities' single `community_profile` draft,
+  which has no field concept to narrow — `--field` with `--only
+  communities` prints a note and changes nothing, rather than silently
+  doing nothing with no signal.
+
+- **Reader cleanliness pass (2026-08) — sponsor/ad/cookie-banner stripping,
+  shared by every extraction path.** A backlog item framed as "Read Later
+  saves aren't scrubbed like Archive saves" turned out to have a different
+  root cause: Read Later's bare-metadata save was never the gap — every
+  Read Later item is resolved through the same live-fetch extraction
+  (`extract_reader_html`) an unsaved Feed item or a not-yet-backfilled
+  Archive article uses. The real finding: **neither extraction path
+  (`_extract_content`'s plain-text fallback, or `extract_reader_html`'s
+  structured Reader HTML) had ever had any class/id-based content
+  filtering** — both only recognize chrome by TAG NAME
+  (`nav`/`header`/`footer`/`script`/...), so an ordinary
+  `<div class="sponsor-block">` or `<div id="cookie-consent-banner">` rode
+  straight through as ordinary article content — confirmed live via a saved
+  OnlyCFO newsletter rendering a full Brex sponsor block inline, and
+  confirmed the identical content would have rendered the same way via
+  Archive, not just Read Later. Fixed once, in the shared extraction layer:
+  `linklib/extract.py`'s new `strip_promotional_chrome(soup)` decomposes any
+  element whose class/id/`data-testid`/`data-test-id`/`data-qa` matches a
+  curated marker list (sponsor/advertisement/native-ad/newsletter-signup/
+  subscribe-widget/cookie-banner/cookie-consent/gdpr/onetrust/...) —
+  deliberately multi-character, word-ish tokens, never a bare word like "ad"
+  that would also nuke "advice"/"gadget" — checked against element
+  attributes only, never text content. Called before either path's own
+  tag-name junk stripping. No change needed to `/save-later` or Read
+  Later's schema. See ARCHITECTURE.md's matching Reader-cleanliness section.
+- **Reader "expand"/distraction-free mode, corrected (2026-08).** The
+  original build only shrank the middle `.rr-list-pane` to a 220px "sliver"
+  on expand, leaving `.rr-rail` (the left nav rail) fully visible on
+  desktop — confirmed live as a real bug against Instapaper's own reference
+  screenshots, not the intended design: Instapaper's expand hides BOTH the
+  rail and the article list completely, leaving just the centered reading
+  pane with the sticky action bar and a top-left collapse-back arrow. Fixed:
+  `.rr-shell.rr-focus-mode` now hides `.rr-rail`/`.rr-list-pane` (and their
+  resize handles) outright, on every viewport — the sliver mechanism
+  (`.rr-sliver`, `rrUpdateSliver`, its scroll-driven time-remaining tracker)
+  is removed entirely. The existing `#rr-reader-expand` button in the sticky
+  `.rr-reader-header` (already swapping between expand/collapse icons)
+  doubles as the collapse-back affordance, since there's no sliver left to
+  click through. See ARCHITECTURE.md's matching bullet.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -3962,6 +4118,14 @@ tables, no third-party dependency.
     `Access-Control-Allow-Origin: *` is safe here specifically because `/save` already
     requires a valid token to do anything — same trust model as any bearer-token API,
     and it grants no cookie-authenticated access. No other route gets a CORS header.
+  - `/save-later` is the same token-only, no-login mechanism as `/save` — same
+    `_check_token`, same CORS treatment (the `_save_cors` middleware now matches
+    either path) — but writes into the per-user `read_later` list instead of the
+    shared Archive, via a second bookmarklet/Shortcut pair (`GET
+    /read-later-bookmarklet`, admin-gated like `/bookmarklet`). Since a token-only
+    request has no session, and Read Later is `user_id`-scoped, the write is
+    attributed to `Library.default_admin_user_id()` (the earliest admin account) —
+    see ARCHITECTURE.md's matching bullet for the full write-up.
 - **No secret in rendered HTML.** Internal links no longer carry `?token=`; the cookie
   authorizes navigation. Token comparison is constant-time (`hmac.compare_digest`).
 - **⚠️ Bookmarklet caveat (by design).** The `/bookmarklet` snippet embeds
@@ -3977,6 +4141,9 @@ tables, no third-party dependency.
   options object twice before `.then` ever ran) — a syntax error, so every copy was a
   silent no-op that never threw anywhere visible; fixed, plus a `.catch` on the fetch
   chain so a network/CORS failure now alerts visibly instead of doing nothing.
+  Same caveat applies to `/read-later-bookmarklet` — it embeds the same
+  `LINKLIB_SAVE_TOKEN`, is login-gated the same way, and needs re-grabbing on the
+  same token rotation.
 - `/static/{filename}` resolves through `os.path.basename` to block path traversal.
 
 ## `library.db` is intentionally not in the repo

@@ -26,9 +26,12 @@ Private routes (require login cookie; API routes also accept a token):
     POST /ask                  FP&A Q&A
     POST /post                 Draft a LinkedIn post
     POST /feed/save            Save a feed item to the archive
-    POST /save                 Capture a link (token auth — used by bookmarklet)
+    POST /feed/read-later      Add/remove a feed item from the signed-in user's Read Later list
+    POST /save                 Capture a link into the Archive (token auth — used by bookmarklet)
+    POST /save-later           Capture a link into Read Later (token auth — used by its own bookmarklet)
     GET  /api/search           JSON search API
-    GET  /bookmarklet          One-click saver script
+    GET  /bookmarklet          One-click Archive saver script
+    GET  /read-later-bookmarklet  One-click Read Later saver script
     GET  /admin/contacts       View contact form submissions
 """
 from __future__ import annotations
@@ -320,27 +323,32 @@ async def _no_store_admin_pages(request: Request, call_next):
     return response
 
 
+_TOKEN_ONLY_SAVE_PATHS = {"/save", "/save-later"}
+
+
 @app.middleware("http")
 async def _save_cors(request: Request, call_next):
-    """CORS for /save only (2026-08 wrap-up sprint item 2) — the bookmarklet
-    runs on third-party pages (it POSTs cross-origin, where the login cookie
-    can't be sent — see /bookmarklet's own docstring), so the browser needs
-    real CORS headers on this one route or every request silently fails
-    with no server-side trace at all (Chrome's console shows "TypeError:
-    Failed to fetch", confirmed live from a real third-party origin — the
-    request never even reaches this app, so nothing here could have logged
-    it). A permissive `Access-Control-Allow-Origin: *` is safe specifically
-    for this route: /save already requires a valid save token to do
-    anything (see _check_token), so this is the same trust model as any
-    other bearer-token API, and it grants no cookie-authenticated access
-    (browsers never attach credentials to a `*`-origin CORS response).
-    Scoped to exactly this one path — no other route gets a CORS header,
-    since everything else on this site is same-origin cookie-authenticated
-    and has no reason to be called from a third-party page. A JSON POST body
-    (`Content-Type: application/json`) triggers a real preflight OPTIONS
-    request, so that has to be answered directly, not just the actual POST.
+    """CORS for the token-only capture routes (2026-08 wrap-up sprint item 2;
+    extended to /save-later alongside /save for the Read Later bookmarklet/
+    Shortcut pair) — the bookmarklet runs on third-party pages (it POSTs
+    cross-origin, where the login cookie can't be sent — see /bookmarklet's
+    own docstring), so the browser needs real CORS headers on these routes or
+    every request silently fails with no server-side trace at all (Chrome's
+    console shows "TypeError: Failed to fetch", confirmed live from a real
+    third-party origin — the request never even reaches this app, so nothing
+    here could have logged it). A permissive `Access-Control-Allow-Origin: *`
+    is safe specifically for these routes: both already require a valid save
+    token to do anything (see _check_token), so this is the same trust model
+    as any other bearer-token API, and it grants no cookie-authenticated
+    access (browsers never attach credentials to a `*`-origin CORS
+    response). Scoped to exactly these two paths — no other route gets a
+    CORS header, since everything else on this site is same-origin
+    cookie-authenticated and has no reason to be called from a third-party
+    page. A JSON POST body (`Content-Type: application/json`) triggers a real
+    preflight OPTIONS request, so that has to be answered directly, not just
+    the actual POST.
     """
-    if request.url.path == "/save":
+    if request.url.path in _TOKEN_ONLY_SAVE_PATHS:
         if request.method == "OPTIONS":
             return Response(status_code=204, headers={
                 "Access-Control-Allow-Origin": "*",
@@ -908,6 +916,36 @@ def _confidence_indicator_html(confident: object) -> str:
             f'Claude confidence: {value}</p>')
 
 
+def _low_confidence_indicator_html(low_confidence: object) -> str:
+    """Item 6 (Aug 2026 UI pass) — the OTHER quality signal every
+    generate_tool_* draft returns (draft.low_confidence), persisted and
+    shown right next to _confidence_indicator_html's "Claude confidence"
+    line, not folded into it. A distinct, independent fact from
+    `confident`: this is a MECHANICAL pre-generation signal (did the page
+    fetch behind this draft actually succeed), not the model's own
+    post-generation self-report — the two can and do disagree (a
+    successful fetch of a thin page can still yield a low-confidence
+    self-report, or vice versa).
+
+    Phrased as what actually happened ("Source page fetch:
+    Succeeded/Failed"), not as a literal "Low confidence: Yes/No" — a
+    literal mirror would put two "Yes/No" lines back to back whose "Yes"
+    means opposite things (Claude confidence: Yes is good; low_confidence:
+    Yes is bad), which reads as confusing rather than clarifying. Same
+    three-state/permanent-display/sanctioned-color convention as
+    _confidence_indicator_html: NULL (no signal — a hand-written field, or
+    one drafted before this column existed) -> a neutral "Not recorded"
+    state, never hidden."""
+    if low_confidence is None:
+        return ('<p style="font-size:12px;color:var(--muted);margin:2px 0 0;font-weight:500;">'
+                'Source page fetch: Not recorded</p>')
+    failed = bool(int(low_confidence))
+    value = "Failed" if failed else "Succeeded"
+    color = "#92400e" if failed else "#065f46"
+    return (f'<p style="font-size:12px;color:{color};margin:2px 0 0;font-weight:500;">'
+            f'Source page fetch: {value}</p>')
+
+
 def _citations_list_html(citations: list, cap: int | None = None, empty_note: str = "") -> str:
     """Render a field's API-verified citation list (Citations-API grounding
     fix, Phase 1b — see linklib.citations, linklib.enrich.
@@ -1017,6 +1055,28 @@ def _ai_drafted_field_confidence(form) -> dict[str, bool]:
     hand-edited or untouched field has no entry, so callers should only
     consult this for fields also present in _ai_drafted_field_names(form)."""
     raw = (form.get("ai_drafted_confidence") or "").strip()
+    out: dict[str, bool] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        name, _, val = pair.partition(":")
+        if name.strip():
+            out[name.strip()] = val.strip() == "1"
+    return out
+
+
+def _ai_drafted_field_low_confidence(form) -> dict[str, bool]:
+    """Item 6 (Aug 2026 UI pass) — the pre-generation counterpart to
+    _ai_drafted_field_confidence: whether the page fetch behind this draft
+    actually succeeded (draft.low_confidence), not the model's own
+    post-generation self-report. Same 'ai_drafted_low_confidence' hidden
+    input / 'field:0-or-1,field2:...' shape, same one-parallel-input-per-
+    field convention as ai_drafted_confidence (see markAiLowConfidence in
+    the edit-form JS) — a distinct, independent signal from confidence:
+    the two can and do disagree (a successful fetch of a thin page can
+    still yield a low-confidence model self-report, or vice versa)."""
+    raw = (form.get("ai_drafted_low_confidence") or "").strip()
     out: dict[str, bool] = {}
     for pair in raw.split(","):
         pair = pair.strip()
@@ -5765,7 +5825,7 @@ Not sure which tool's for you? {(
 
 <div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
+<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="tool-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -5798,13 +5858,17 @@ Not sure which tool's for you? {(
 #tool-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #tool-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #tool-pagination-label{{font-size:13px;color:var(--muted);}}
-.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
+.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;height:100%;}}
 /* Same fixed-to-N-lines technique as .tool-desc below, applied to the title:
    a long name (e.g. "Airbase (acquired by Paylocity)") used to wrap to a
-   second line and push that card's header row taller than its row siblings,
-   since the grid uses align-items:start rather than stretching cards to a
-   shared row height. Clamping to 2 lines with a matching min-height means
-   every card reserves the same header height regardless of name length. */
+   second line and push that card's header row taller than its content
+   below. #tool-grid now uses align-items:stretch (Aug 2026 fix — cards in
+   the same row render at matching heights, with the bottom action row
+   pinned via margin-top:auto below), so this clamp is no longer load-
+   bearing for row-height matching, but it's kept: without it, a 2-line
+   title still shifts every OTHER element inside that one card down by a
+   line versus a 1-line-title card in a different row, which reads as
+   inconsistent even though rows themselves now match. */
 .tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
   line-height:1.3;min-height:44px;margin-bottom:6px;letter-spacing:-0.01em;}}
@@ -6047,7 +6111,12 @@ function renderTools(tools) {{
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">'
       + logoBox(t.name, t.logo_url, 32)
-      + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
+      // Name click goes to the internal profile page (matching Communities'
+      // .comm-name behavior) — not the vendor's external site. A curated
+      // directory's own primary click target should keep the visitor on our
+      // page; Visit (external, on the profile page) is a separate, unchanged
+      // action.
+      + '<a class="tool-name" href="/tools/software/' + esc(t.slug) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
       + '</div>'
       + (promotedBadge || star
           ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-top:2px;">' + promotedBadge + star + '</div>'
@@ -6805,9 +6874,12 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # single empty field inside an otherwise-populated section (see the
     # Community Profile cards further down), which shows muted text to
     # everyone instead of hiding.
-    # Competitors: a Logo/Name table rather than the old chip row (Phase F),
-    # moved up next to Bottom Line (see lower_band composition below) instead
-    # of sitting at the bottom of the right column. Competitors are always
+    # Competitors: a Logo/Name table rather than the old chip row (Phase F).
+    # It used to sit right below Bottom Line, both being "how does this
+    # stack up" content — Bottom Line itself moved up into the hero band
+    # (item 5, Aug 2026 UI pass), so Competitors is now the first thing in
+    # lower_band_left, ahead of sitting at the bottom of the right column.
+    # Competitors are always
     # full `tools` rows (list_tool_competitors joins tool_competitors back to
     # tools), never free text, so each row is a real profile link with its
     # own logo_path — the same _logo_box fallback as F2/F3 covers a
@@ -7065,6 +7137,16 @@ function submitIntroForm() {{
     # monogram fallback as the directory cards and Competitors table when
     # logo_path is still empty.
     tool_logo_url = _tool_logo_url(tool)
+    # Item 5 (Aug 2026 UI pass): Bottom Line moved up into the hero, right
+    # after the category pills and before the action row — was previously
+    # the first thing in lower_band_left, which meant crossing into a
+    # separate .tp-band (its own margin-top:22px) after the pills' own
+    # margin-top:14px, reading as an oddly large gap for two adjacent
+    # "about this tool" facts. Category pills moved up alongside it (were
+    # previously the last thing in hero_text, after the action row) so the
+    # two stay adjacent with only their own small margins between them,
+    # rather than splitting Bottom Line from its nearest context by the
+    # width of the whole Visit/Compare/Edit row.
     hero_text = f"""<div class="tp-header-row">
   {_logo_box(tool['name'], tool_logo_url, 56, radius=12)}
   <div>
@@ -7072,8 +7154,9 @@ function submitIntroForm() {{
     {f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
   </div>
 </div>
-<div class="tp-hero-actions">{action_row}</div>
-{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}"""
+{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}
+{differentiation_block}
+<div class="tp-hero-actions">{action_row}</div>"""
 
     top_band = f"""<div class="tp-band">
   <div>{hero_text}</div>
@@ -7104,8 +7187,9 @@ function submitIntroForm() {{
     # all, which is a wasted-whitespace regression, not a fix. Collapse to a
     # single full-width column whenever the right side would otherwise be
     # empty, rather than leaving a dead 1fr gap beside a full left column.
-    lower_band_left = f"""{differentiation_block}
-{competitors_block}
+    # Bottom Line (differentiation_block) moved into hero_text above (item 5,
+    # Aug 2026 UI pass) — no longer the first thing here.
+    lower_band_left = f"""{competitors_block}
 {description_card}
 {agent_taxonomy_block}"""
     if features_card.strip():
@@ -7190,8 +7274,20 @@ function submitIntroForm() {{
 .tp-feature-tag-ai{{background:#fef3c7;color:#92400e;}}
 .tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
   background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+/* Icon-weight fix (item 3, Aug 2026 UI pass): a flag on every row read as
+   visually heavy on a long feature list (e.g. NetSuite's ~13 rows) for an
+   action most visitors never use. Kept per-row (rather than collapsing to
+   one card-level "flag an issue" action) so a report still names WHICH
+   feature it's about — the modal this opens is pre-scoped with the
+   feature's own id/name specifically for that reason, and the existing
+   "Suggest one" footer link already covers the card-level, new-feature
+   case. Hidden at rest, revealed on row hover OR keyboard focus (not
+   hover-only) so it stays reachable without a mouse — a bare opacity
+   toggle, not display:none, so it's never removed from the tab order. */
 .tp-feature-flag-btn{{margin-left:auto;background:none;border:none;cursor:pointer;font-size:14px;
-  color:var(--muted);padding:2px 4px;line-height:1;}}
+  color:var(--muted);padding:2px 4px;line-height:1;opacity:0;transition:opacity .15s ease;}}
+.tp-feature-list li:hover .tp-feature-flag-btn,
+.tp-feature-list li:focus-within .tp-feature-flag-btn{{opacity:1;}}
 .tp-feature-flag-btn:hover{{color:var(--navy);}}
 .tp-link-btn{{background:none;border:none;padding:0;cursor:pointer;font:inherit;color:var(--accent);
   font-weight:500;}}
@@ -7590,7 +7686,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 
 <div id="comm-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
+<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="comm-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -7624,7 +7720,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 #comm-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #comm-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #comm-pagination-label{{font-size:13px;color:var(--muted);}}
-.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
+.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;height:100%;}}
 .comm-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
 .comm-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 /* Same fixed-height technique as .tool-name/.tool-desc on the Software directory
@@ -9121,6 +9217,14 @@ function unmarkAiDrafted(fieldName) {
     });
     confEl.value = pairs.join(',');
   }
+  var lowConfEl = document.getElementById('ai-drafted-low-confidence');
+  if (lowConfEl) {
+    var lcPrefix = fieldName + ':';
+    var lcPairs = (lowConfEl.value ? lowConfEl.value.split(',') : []).filter(function(p) {
+      return p && p.indexOf(lcPrefix) !== 0;
+    });
+    lowConfEl.value = lcPairs.join(',');
+  }
 }
 // Citations-API grounding fix, Phase 2 — the citations a stateless
 // generate-description call handed back, carried to the submit route as
@@ -9156,6 +9260,21 @@ function markAiConfidence(fieldName, confident) {
   var prefix = fieldName + ':';
   pairs = pairs.filter(function(p) { return p.indexOf(prefix) !== 0; });
   pairs.push(fieldName + ':' + (confident ? '1' : '0'));
+  el.value = pairs.join(',');
+}
+// Quality-indicator visibility (item 6, Aug 2026 UI pass) — the OTHER
+// signal a Generate call returns (d.low_confidence: did the page fetch
+// behind this draft actually succeed), mirroring markAiConfidence exactly
+// but as its own hidden input/parser (_ai_drafted_field_low_confidence)
+// since it's a distinct, independent fact from confident — a mechanical
+// pre-generation signal, not the model's post-generation self-report.
+function markAiLowConfidence(fieldName, lowConfidence) {
+  var el = document.getElementById('ai-drafted-low-confidence');
+  if (!el) return;
+  var pairs = el.value ? el.value.split(',').filter(function(p) { return p; }) : [];
+  var prefix = fieldName + ':';
+  pairs = pairs.filter(function(p) { return p.indexOf(prefix) !== 0; });
+  pairs.push(fieldName + ':' + (lowConfidence ? '1' : '0'));
   el.value = pairs.join(',');
 }
 // Shared error-box treatment for every Generate-button failure (Phase M):
@@ -9228,10 +9347,14 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
     document.getElementById(descId).value = d.description;
     markAiDrafted('description');
     markAiConfidence('description', d.confident);
+    markAiLowConfidence('description', d.low_confidence);
     markAiCitations(d.citations || [], d.model || '');
     if (summaryId) {
       var summaryEl = document.getElementById(summaryId);
-      if (summaryEl) { summaryEl.value = d.summary || ''; markAiDrafted('summary'); markAiConfidence('summary', d.confident); }
+      if (summaryEl) {
+        summaryEl.value = d.summary || ''; markAiDrafted('summary');
+        markAiConfidence('summary', d.confident); markAiLowConfidence('summary', d.low_confidence);
+      }
     }
     // A hand-edit to the description after this Generate call means its
     // text no longer matches what the citations above actually ground —
@@ -13643,6 +13766,7 @@ def admin_communities(request: Request, filter: str = ""):
     try:
         all_communities = lib.list_communities(approved_only=False)
         needs_review_ids = lib.community_profile_needs_review_ids()
+        quality_flags = lib.community_profile_quality_flags()
         community_categories = lib.list_community_categories()
     finally:
         lib.close()
@@ -13651,6 +13775,7 @@ def admin_communities(request: Request, filter: str = ""):
     approved = [c for c in all_communities if c["approved"]]
     for c in approved:
         c["needs_review"] = c["id"] in needs_review_ids
+        c["quality_flags"] = quality_flags.get(c["id"])
     if filter == "needs_review":
         approved = [c for c in approved if c["needs_review"]]
 
@@ -13687,6 +13812,24 @@ def admin_communities(request: Request, filter: str = ""):
         gap_badge = (f'<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--muted);color:#fff;border-radius:4px;'
                      f'padding:1px 6px;">{n_gaps} field{"s" if n_gaps != 1 else ""} '
                      f'need{"s" if n_gaps == 1 else ""} verification</span>') if n_gaps else ""
+        # Item 6 (Aug 2026 UI pass): both signals already exist and are
+        # already persisted/shown on the per-profile edit view (the
+        # low_confidence checkbox, the 12 per-field Claude-confidence
+        # badges) — they just never reached this LIST page. Read-only
+        # here, on purpose: this list has no per-row save action for
+        # either signal, only the per-profile edit page does.
+        qf = c.get("quality_flags")
+        low_conf_badge = (
+            '<span style="display:inline-block;font-size:11px;font-weight:700;background:#fef3c7;color:#92400e;'
+            'border-radius:4px;padding:1px 6px;" title="community_profiles.low_confidence: drafted without a '
+            'successful page fetch">Low confidence</span>'
+        ) if qf and qf["low_confidence"] else ""
+        unconfident_badge = (
+            f'<span style="display:inline-block;font-size:11px;font-weight:700;background:#fef3c7;color:#92400e;'
+            f'border-radius:4px;padding:1px 6px;" title="Claude self-reported low confidence on '
+            f'{qf["unconfident_count"]} of the 12 tracked profile fields">'
+            f'{qf["unconfident_count"]}/12 fields low-confidence</span>'
+        ) if qf and qf["unconfident_count"] else ""
         mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="margin:0;">'
                          f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>'
                          ) if c.get("needs_review") else ""
@@ -13700,7 +13843,7 @@ def admin_communities(request: Request, filter: str = ""):
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
   <td style="padding:10px 12px;font-weight:600;min-width:250px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{review_badge}{gap_badge}
+      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{review_badge}{gap_badge}{low_conf_badge}{unconfident_badge}
     </div>
   </td>
   <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
@@ -14972,6 +15115,7 @@ def admin_tools_new(request: Request):
 <form method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="">
   <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
   <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
   <div class="tool-form-cols">
@@ -15092,6 +15236,7 @@ def _run_tool_research(tool_id: int) -> bool:
                 tool_id, result.agent_taxonomy_note,
                 needs_verification=int(result.agent_taxonomy_needs_verification),
                 ai_confident=int(result.confident),
+                low_confidence=int(result.low_confidence),
             )
             lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
                                      result.citations, model=result.model)
@@ -15133,9 +15278,14 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     # just evaluated once at creation instead of on every resave.
     ai_drafted = _ai_drafted_field_names(form)
     ai_confidence = _ai_drafted_field_confidence(form)
+    ai_low_confidence = _ai_drafted_field_low_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     description_confident = (
         int(ai_confidence["description"]) if "description" in ai_drafted and "description" in ai_confidence
+        else None
+    )
+    description_low_confidence = (
+        int(ai_low_confidence["description"]) if "description" in ai_drafted and "description" in ai_low_confidence
         else None
     )
     description_citations = (
@@ -15151,7 +15301,8 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
                                 warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
                                 summary=summary,
                                 description_needs_verification=description_needs_verification,
-                                description_ai_confident=description_confident)
+                                description_ai_confident=description_confident,
+                                description_low_confidence=description_low_confidence)
         if description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
     except DuplicateURLError as e:
@@ -15452,9 +15603,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             latest_differentiation_review,
         )
     )
-    _description_confidence_html = _confidence_indicator_html(tool.get("description_ai_confident"))
-    _differentiation_confidence_html = _confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
-    _taxonomy_confidence_html = _confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
+    _description_confidence_html = (_confidence_indicator_html(tool.get("description_ai_confident"))
+        + _low_confidence_indicator_html(tool.get("description_low_confidence")))
+    _differentiation_confidence_html = (_confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
+        + _low_confidence_indicator_html(tool.get("competitive_differentiation_low_confidence")))
+    _taxonomy_confidence_html = (_confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
+        + _low_confidence_indicator_html(tool.get("agent_taxonomy_low_confidence")))
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -15485,6 +15639,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="">
   <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
   <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
 
@@ -15635,6 +15790,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" maxlength="600" rows="5"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('competitive_differentiation') or '')}</textarea>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Generated from the Description and competitor list already on this page&mdash;it doesn't fetch or research anything new. If you edit or regenerate the Description, this won't update on its own; run Generate summary again to pick up the change.</p>
     {_differentiation_verify_action}
     {_differentiation_confidence_html}
     {_differentiation_review_line_html}
@@ -15723,6 +15879,7 @@ async function generateDifferentiation(toolId, textareaId, statusId, errBoxId, h
     document.getElementById(textareaId).value = d.competitive_differentiation;
     markAiDrafted('competitive_differentiation');
     markAiConfidence('competitive_differentiation', d.confident);
+    markAiLowConfidence('competitive_differentiation', d.low_confidence);
     status.textContent = d.low_confidence
       ? 'Drafted. No competitors curated yet, so this is weaker than it could be—review carefully.'
       : 'Drafted. Review before saving.';
@@ -15803,6 +15960,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     # already uses.
     ai_drafted = _ai_drafted_field_names(form)
     ai_confidence = _ai_drafted_field_confidence(form)
+    ai_low_confidence = _ai_drafted_field_low_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     competitive_differentiation_needs_verification = 1 if "competitive_differentiation" in ai_drafted else 0
     # Confidence indicator (2026-08): only a real value when the field is
@@ -15817,6 +15975,19 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     differentiation_confident = (
         int(ai_confidence["competitive_differentiation"])
         if "competitive_differentiation" in ai_drafted and "competitive_differentiation" in ai_confidence
+        else None
+    )
+    # low_confidence (item 6, Aug 2026 UI pass): the pre-generation fetch-
+    # success signal, mirroring description_confident/differentiation_confident's
+    # own "only a real value on a fresh draft this save" guard exactly.
+    description_low_confidence = (
+        int(ai_low_confidence["description"])
+        if "description" in ai_drafted and "description" in ai_low_confidence
+        else None
+    )
+    differentiation_low_confidence = (
+        int(ai_low_confidence["competitive_differentiation"])
+        if "competitive_differentiation" in ai_drafted and "competitive_differentiation" in ai_low_confidence
         else None
     )
     # Citations-API grounding fix, Phase 2 — same "fresh draft this submit"
@@ -15840,14 +16011,16 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
                         summary=summary,
                         description_needs_verification=description_needs_verification,
-                        description_ai_confident=description_confident)
+                        description_ai_confident=description_confident,
+                        description_low_confidence=description_low_confidence)
         if "description" in ai_drafted and description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
         else:
             lib.clear_entity_citations("tool", tool_id, "description")
         lib.update_tool_differentiation(tool_id, competitive_differentiation,
                                         needs_verification=competitive_differentiation_needs_verification,
-                                        ai_confident=differentiation_confident)
+                                        ai_confident=differentiation_confident,
+                                        low_confidence=differentiation_low_confidence)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
@@ -16860,22 +17033,24 @@ _READER_SHELL_CSS = """
 .rr-list-search input{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;
   font-size:14px;background:var(--surface);font-family:inherit;}
 .rr-list-rows{flex:1;overflow-y:auto;}
-/* Distraction-free reading: the middle list pane collapses to a thin sliver
-   (title/source/time-remaining) and the reader pane takes the freed width.
-   Works identically regardless of which quick view the open article came
-   from — nothing here is keyed to `view`, only to whether an article is open. */
-.rr-shell.rr-focus-mode .rr-list-pane{flex:0 0 220px;min-width:180px;max-width:260px;}
+/* Distraction-free reading (corrected 2026-08 — see the Reader cleanliness
+   investigation): the reference is Instapaper's own expand view, where BOTH
+   the left nav rail and the article list disappear completely, leaving just
+   the reading pane, centered, full width, with the top action bar still
+   visible and a collapse-back affordance in its top-left corner. The
+   original build only ever shrank .rr-list-pane to a 220px "sliver" while
+   leaving .rr-rail fully visible — confirmed live as the actual bug, not the
+   intended design. Both panes are now hidden outright (their own resize
+   handles too), and .rr-reader-pane's flex:1 (declared above) fills the
+   freed width on its own with no extra rule needed here. The existing
+   #rr-reader-expand button in .rr-reader-header (sticky, so it's still
+   visible with the rail/list gone) doubles as the collapse-back affordance —
+   it already swaps between an expand and a collapse icon on toggle, so no
+   separate button was needed to reach the reference's top-left arrow. */
+.rr-shell.rr-focus-mode .rr-rail,
+.rr-shell.rr-focus-mode .rr-list-pane,
+.rr-shell.rr-focus-mode #rr-resize-rail,
 .rr-shell.rr-focus-mode #rr-resize-list{display:none;}
-.rr-shell.rr-focus-mode .rr-list-header,
-.rr-shell.rr-focus-mode .rr-list-rows,
-.rr-shell.rr-focus-mode #rr-alert-wrap{display:none;}
-.rr-sliver{display:none;flex-direction:column;gap:14px;padding:20px 16px;}
-.rr-shell.rr-focus-mode .rr-sliver{display:flex;}
-.rr-sliver-collapse{align-self:flex-start;background:none;border:1px solid var(--line);border-radius:8px;
-  padding:6px;cursor:pointer;color:var(--navy);display:flex;}
-.rr-sliver-collapse:hover{background:var(--surface-2);}
-.rr-sliver-title{font-family:var(--font-head);font-weight:600;font-size:14px;color:var(--ink);line-height:1.35;}
-.rr-sliver-meta{font-size:12px;color:var(--muted);}
 /* flex-wrap lets the save-time tag form (.rr-row-tagform, flex:0 0 100%) drop
    onto its own line below the row instead of becoming a third column that
    squeezes .rr-row-main. It can't change the collapsed layout: .rr-row-main is
@@ -17016,12 +17191,9 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
   .rr-rail,.rr-list-pane{max-width:none;flex:none;border-right:none;border-bottom:1px solid var(--line);}
   .rr-resize{display:none;}
   /* Distraction-free reading is forced here, not just offered — see
-     rrMobileNoRoom()/rrRenderArticle — so the rail (untouched by the
-     desktop focus-mode toggle, which only collapses the list pane) also
-     needs to get out of the way for the view to read as genuinely
-     full-screen instead of "list pane collapsed, but a whole nav rail
-     still stacked above the article." */
-  .rr-shell.rr-focus-mode .rr-rail{display:none;}
+     rrMobileNoRoom()/rrRenderArticle. The base .rr-shell.rr-focus-mode rule
+     above already hides both .rr-rail and .rr-list-pane on every viewport
+     now, so nothing mobile-specific is needed here any more. */
 }
 </style>
 """
@@ -17290,7 +17462,6 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
   </div>
   <div id="rr-alert-wrap">{alert_html}</div>
   <div class="rr-list-rows" id="rr-list-rows">{rows_html}</div>
-  <div class="rr-sliver" id="rr-sliver"></div>
 </div>"""
 
     reader_pane_html = """<div class="rr-reader-pane" id="rr-reader">
@@ -17498,15 +17669,13 @@ function rrRenderArticle(d) {{
   // The click/tap itself was never broken (rrOpen always fired correctly);
   // the update just happened off-screen, which reads as "does nothing."
   // On a real "no room for 3 panes" viewport, default straight into
-  // distraction-free reading (collapses the rail + list to a sliver, see
-  // the .rr-focus-mode CSS) rather than just scrolling past a still-full
+  // distraction-free reading (hides the rail + list entirely, see the
+  // .rr-focus-mode CSS) rather than just scrolling past a still-full
   // mobile-stacked list; on any other viewport this scrollIntoView is a
   // no-op in practice since .rr-shell is already height-constrained to
   // the viewport with its own internal scroll.
-  if (rrMobileNoRoom()) {{
-    if (!rrFocusMode) rrSetFocusMode(true); else rrUpdateSliver();
-  }} else {{
-    rrUpdateSliver();
+  if (rrMobileNoRoom() && !rrFocusMode) {{
+    rrSetFocusMode(true);
   }}
   pane.scrollIntoView({{behavior: 'instant', block: 'start'}});
 }}
@@ -17532,34 +17701,14 @@ function rrSetFocusMode(on) {{
   if (shell) shell.classList.toggle('rr-focus-mode', rrFocusMode);
   var btn = document.getElementById('rr-reader-expand');
   if (btn) {{
+    // This same button is the reference's top-left collapse-back arrow once
+    // expanded — the rail/list are display:none in focus mode, so this
+    // sticky-header button is the only way back (see rr-focus-mode CSS).
     btn.innerHTML = rrFocusMode ? RR_ICON_COLLAPSE : RR_ICON_EXPAND;
     btn.title = rrFocusMode ? 'Exit distraction-free reading' : 'Distraction-free reading';
   }}
-  rrUpdateSliver();
 }}
 function rrToggleFocusMode() {{ rrSetFocusMode(!rrFocusMode); }}
-function rrUpdateSliver(remainMin) {{
-  var el = document.getElementById('rr-sliver');
-  if (!el || !rrCurrent) return;
-  var mins = (remainMin === undefined) ? rrCurrent.reading_minutes : remainMin;
-  var timeLabel = mins ? (mins + (mins === 1 ? ' min left' : ' mins left')) : '';
-  var meta = [rrCurrent.source, timeLabel].filter(Boolean).join(' \\u00b7 ');
-  el.innerHTML =
-    '<button class="rr-sliver-collapse" onclick="rrToggleFocusMode()" title="Exit distraction-free reading">' + RR_ICON_COLLAPSE + '</button>' +
-    '<div class="rr-sliver-title">' + rrEsc(rrCurrent.title) + '</div>' +
-    '<div class="rr-sliver-meta">' + meta + '</div>';
-}}
-// Non-bubbling scroll events still reach a capturing listener on document,
-// which is the standard way to delegate them without binding directly to
-// #rr-reader (whose content is fully replaced on every article load).
-document.addEventListener('scroll', function(e) {{
-  if (!rrFocusMode || !rrCurrent || !rrCurrent.reading_minutes) return;
-  if (!e.target || e.target.id !== 'rr-reader') return;
-  var pane = e.target;
-  var scrollable = pane.scrollHeight - pane.clientHeight;
-  var frac = scrollable > 0 ? Math.min(1, pane.scrollTop / scrollable) : 0;
-  rrUpdateSliver(Math.max(0, Math.round(rrCurrent.reading_minutes * (1 - frac))));
-}}, true);
 function rrToggleFind() {{
   var bar = document.getElementById('rr-find-bar');
   if (!bar) return;
@@ -19037,6 +19186,48 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         row = ingest_url(lib, url, tags=tags, notes=payload.get("note", ""))
         background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True, "id": row["id"], "title": row.get("title"), "tags": row.get("tags", [])})
+    finally:
+        lib.close()
+
+
+@app.post("/save-later")
+async def save_later(request: Request, token: str | None = None):
+    """Token-gated capture into Read Later — the second bookmarklet/Shortcut
+    pair's endpoint, mirroring /save's auth exactly (same _check_token, same
+    JSON-or-form payload parsing) but writing into the per-user Read Later
+    list instead of the shared Archive.
+
+    Read Later (linklib/db.py's `read_later` table) is scoped by user_id, and
+    a token-only request has no session to read one from (_current_user_id
+    returns None for token-only access, by design — see its docstring). This
+    resolves the target list the same way the table's own one-time migration
+    already did for its pre-multi-user rows: the earliest admin account
+    (Library.default_admin_user_id), since that's Brian's own account and
+    this capture path exists for him alone. No article row is created and no
+    fetch/enrichment happens — add_read_later is a plain metadata insert, so
+    this is a much lighter write than /save's ingest_url. `title` is
+    optional (the bookmarklet sends `document.title`; a Shortcut may not) —
+    a missing title just shows as "(no title)" in the Reader's Read Later
+    view until the article is actually opened there."""
+    _check_token(token or request.headers.get("X-Save-Token"))
+    payload = {}
+    try:
+        payload = await request.json()
+    except Exception:
+        form = await request.form()
+        payload = dict(form)
+    url = (payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    title = (payload.get("title") or "").strip()
+    source = (payload.get("source") or "").strip()
+    lib = _lib()
+    try:
+        user_id = lib.default_admin_user_id()
+        if user_id is None:
+            raise HTTPException(status_code=503, detail="no admin account configured")
+        lib.add_read_later(user_id=user_id, url=url, title=title, source=source)
+        return JSONResponse({"ok": True})
     finally:
         lib.close()
 
@@ -21260,14 +21451,14 @@ def admin_library(request: Request):
     # capture-path accordions. Both halves keep their own shape — a _lib_card
     # and the existing accordion group — under one quadrant heading, rather
     # than being blended into a single undifferentiated block.
-    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus the two ways to save a page by hand.</p>
+    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
 <div style="margin-bottom:22px;">{_lib_card(
     "/admin/library/feeds", "Manage feeds",
     "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into "
     "sections, and set which ones are read-only. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
     "web search is restricted to.",
     _badge_for_href("/admin/library/feeds", task_counts.get("/admin/library/feeds", 0)))}</div>
-<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving articles from anywhere</div>
+<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving to the archive</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
@@ -21305,13 +21496,53 @@ def admin_library(request: Request):
 </div>
 </details>
 
-<p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working&mdash;the old copies embed the old values. Set them up again from the instructions above.</p>"""
+<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:22px 0 8px;">Saving to Read Later instead</div>
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Same idea, same no-login token, a second destination: these post to <code>/save-later</code> and land in the Reader's Read Later list instead of the archive&mdash;no enrichment, no tags, just a quick queue for something to read later.</p>
 
-    # 3, not the literal 1 card: Manage feeds plus the bookmarklet and
-    # Share-Sheet accordions. See _lib_quadrant's count_override note.
+<details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>Desktop&mdash;the bookmarklet</summary>
+<div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
+<p style="margin:0 0 10px;">Same mechanism as the archive bookmarklet above&mdash;an ordinary browser bookmark whose &ldquo;URL&rdquo; is a tiny program. Clicking it grabs the current page's address (and title) and saves it straight to Read Later&mdash;no prompt, one click.</p>
+<ol style="margin:0 0 10px;padding-left:20px;">
+  <li>Open <a href="/read-later-bookmarklet">/read-later-bookmarklet</a> (login-gated) and copy the <em>entire</em> snippet&mdash;click the text, <strong>Cmd+A</strong>, <strong>Cmd+C</strong>.</li>
+  <li>Show the bookmarks bar (<strong>Cmd+Shift+B</strong> in Chrome), right-click an empty spot on it &rarr; <strong>Add page&hellip;</strong></li>
+  <li>Name: <code>Save to Read Later</code>. URL: <strong>paste the snippet</strong>. Save.</li>
+  <li>On any article page, click it like a button &rarr; &ldquo;Saved to Read Later.&rdquo; It shows up right away under the Reader's Read Later view.</li>
+</ol>
+<p style="margin:0;color:var(--muted);font-size:13px;">It won't fire on browser-internal pages (new tab, chrome:// pages)&mdash;that's a browser rule. The snippet contains the save token in plaintext, so don't paste it anywhere public.</p>
+</div>
+</details>
+
+<details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>iPhone / iPad&mdash;Share-Sheet shortcut</summary>
+<div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
+<p style="margin:0 0 10px;">One-time setup in the <strong>Shortcuts</strong> app (~5 minutes); afterwards &ldquo;Save to Read Later&rdquo; appears in Safari's share sheet, alongside &ldquo;Save to CFO Library&rdquo; if you set that one up too.</p>
+<ol style="margin:0 0 10px;padding-left:20px;">
+  <li>Shortcuts app &rarr; <strong>+</strong> to create a new shortcut &rarr; rename it <code>Save to Read Later</code>.</li>
+  <li>Tap the shortcut's <strong>info (&#9432;)</strong> panel &rarr; turn on <strong>Show in Share Sheet</strong>. Under the accepted types, keep <strong>URLs</strong> and <strong>Safari web pages</strong>.</li>
+  <li>Add action <strong>&ldquo;Get URLs from Input&rdquo;</strong> (its input should be <em>Shortcut Input</em>).</li>
+  <li>Add action <strong>&ldquo;Get Contents of URL&rdquo;</strong> and expand its options:
+    <ul style="margin:4px 0;padding-left:18px;">
+      <li>URL: <code>{_esc(PUBLIC_BASE)}/save-later{'?token=' + _esc(SAVE_TOKEN) if SAVE_TOKEN else ''}</code></li>
+      <li>Method: <strong>POST</strong></li>
+      <li>Request Body: <strong>JSON</strong> &rarr; add a text field named <code>url</code> whose value is the <em>URLs</em> variable from step 3.</li>
+    </ul></li>
+  <li>Optional: add a second JSON text field named <code>title</code> (e.g. the <em>Name</em> output of a <strong>&ldquo;Get Details of Safari Web Page&rdquo;</strong> action) so the item shows a real title in the Reader right away, instead of &ldquo;(no title)&rdquo; until you open it.</li>
+  <li>Optional: add <strong>&ldquo;Show Notification&rdquo;</strong> saying &ldquo;Saved to Read Later&rdquo; so you get visible confirmation.</li>
+  <li>Use it: in Safari, tap <strong>Share &rarr; Save to Read Later</strong>. The article lands straight in the Reader's Read Later list, no queue.</li>
+</ol>
+<p style="margin:0;color:var(--muted);font-size:13px;">Read Later has no tags concept, so there's no tags field to add here&mdash;unlike the archive shortcut above.</p>
+</div>
+</details>
+
+<p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, all four snippets above stop working at once&mdash;they share the same token, and the old copies embed the old values. Set them up again from the instructions above.</p>"""
+
+    # 5, not the literal 1 card: Manage feeds plus the archive bookmarklet/
+    # Share-Sheet accordions and the Read Later bookmarklet/Share-Sheet
+    # accordions. See _lib_quadrant's count_override note.
     saving_articles_html = _lib_quadrant("New content", saving_articles_body,
                                          ["/admin/library/feeds"],
-                                         count_override=3)
+                                         count_override=5)
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -23911,14 +24142,14 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 {datalist}
 
 <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 4px;">Monthly spend by category</h3>
     <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Last 12 months.</p>
     {monthly_chart_html}
     <div style="margin-top:10px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">See full history &amp; edit &rarr;</a></div>
   </div>
 
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
     <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
       <div>
@@ -23926,7 +24157,16 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <!-- auto-fit/minmax, not a hardcoded 1fr 1fr (CSS Grid blowout — see
+           CLAUDE.md's Phase P note): a native <input type="date"> has a
+           fixed intrinsic rendering minimum (~160px in Chromium) that
+           doesn't shrink below that regardless of width:100%, so a rigid
+           1fr/1fr track forced this whole card — and therefore the page —
+           to overflow horizontally on real phone widths (measured: 320px
+           through 414px). minmax(140px,1fr) lets the pair collapse to one
+           stacked column instead of squeezing below each input's own
+           floor. -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;">
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
@@ -23952,12 +24192,18 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </form>
   </div>
 
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 8px;">Upload CSV</h3>
     <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Batch-import charges instead of typing each one in. Columns: <code>vendor, date, amount, category, note</code> (header row required; category and note optional). Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. You'll get a preview to check before anything is saved. <a href="/admin/overhead-spend/csv/template" style="color:var(--navy);">Download a template &darr;</a></p>
     <form method="post" action="/admin/overhead-spend/csv/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+      <!-- width:100%/max-width:100% on the file input: a bare <input
+           type="file"> has its own intrinsic rendering width (the native
+           "Choose File" button + filename text) that doesn't shrink on its
+           own, which forced this specific card ~6px past a 320px viewport
+           even after the fixes above — this constrains it to the card's
+           own (already-shrinkable) width instead. -->
       <input type="file" name="file" accept=".csv,text/csv" required
-        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);width:100%;max-width:100%;box-sizing:border-box;">
       <div><button type="submit" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;">Preview import</button></div>
     </form>
   </div>
@@ -23969,7 +24215,18 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 <p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong> &mdash; model choice directly affects the Enrichment row below. <a href="/admin/system/model" style="color:var(--accent);">Change it &rarr;</a></p>
 
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
-  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;">
+  <!-- min-width:0 on both flex items below (same pattern as .tp-band>div
+       elsewhere in this file): without it, a flex item's automatic minimum
+       width is based on its content's min-content size, and that
+       recurses right through the overflow-x:auto table wrappers below to
+       their tables' own min-width:400px/320px — forcing this WHOLE ROW,
+       and therefore the page, wider than the viewport on a real phone,
+       rather than letting the intended per-table horizontal scroll
+       actually contain it. This was the real, page-wide overflow found
+       while investigating item 4; the Date/Amount grid fix above (Add a
+       charge) is a real, separate blowout of the same class but wasn't
+       the dominant cause once measured directly. -->
+  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;min-width:0;">
     <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
       <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_total:.2f}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:2px;">Estimated usage, all time</div>
@@ -23994,7 +24251,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </div>
   </div>
 
-  <div style="flex:1 1 460px;">
+  <div style="flex:1 1 460px;min-width:0;">
     <h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;min-width:320px;">
@@ -28507,6 +28764,32 @@ def bookmarklet(request: Request):
         "var u=location.href;"
         f"fetch('{PUBLIC_BASE}/save{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
         "body:JSON.stringify({url:u,tags:t})}).then(function(r){alert(r.ok?'Saved to archive':'Error saving');})"
+        ".catch(function(e){alert('Error saving: '+e);});"
+        "})();"
+    )
+    return js
+
+
+@app.get("/read-later-bookmarklet", response_class=PlainTextResponse)
+def read_later_bookmarklet(request: Request):
+    """The Read Later counterpart to /bookmarklet — same page, same
+    token-refreshed-per-request/login-gate/CORS story (see /bookmarklet's own
+    docstring and the _save_cors middleware above), posting to /save-later
+    instead of /save. No tags prompt: Read Later has no tags concept
+    (add_read_later takes no tags parameter), so this is a genuine one-click
+    save with no prompt() interrupting it — unlike the Archive bookmarklet,
+    which always asks for optional tags first. `document.title` rides along
+    so the Reader's Read Later view has something to show immediately rather
+    than falling back to "(no title)"."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    token_param = f"?token={SAVE_TOKEN}" if SAVE_TOKEN else ""
+    js = (
+        "javascript:(function(){"
+        "var u=location.href;"
+        "var ti=document.title;"
+        f"fetch('{PUBLIC_BASE}/save-later{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
+        "body:JSON.stringify({url:u,title:ti})}).then(function(r){alert(r.ok?'Saved to Read Later':'Error saving');})"
         ".catch(function(e){alert('Error saving: '+e);});"
         "})();"
     )

@@ -155,6 +155,22 @@ the full write-up; briefly:
      are UNCHANGED — its live path (_run_tool_research) writes
      result.citations directly with no _validate_citations_payload call
      either, so this script already matched it correctly.
+
+  7. --field (2026-08 follow-up, motivated by the Differentiation
+     content-exclusion fix — see CLAUDE.md and issue #445): narrows TOOLS
+     mode to a subset of {description, agent_taxonomy,
+     competitive_differentiation} — repeatable and/or comma-separated,
+     both forms combine, order on the command line doesn't matter (always
+     normalized back to the real per-tool regeneration order). Omitting it
+     regenerates all three, exactly as before this flag existed — a true
+     no-op for every prior invocation, tested explicitly
+     (test_regen_field_flag.py). Lets a single-field full-catalog pass
+     (e.g. `--only tools --field competitive_differentiation --apply`,
+     no --ids) run far cheaper than the original 3-fields-per-tool design
+     when only one field needs re-doing — the exact shape of Differentiation's
+     own targeted re-run once #445 landed. Has no effect on Communities'
+     single community_profile draft, which has no field concept to narrow
+     — --field with --only communities prints a note and changes nothing.
 ------------------------------------------------------------------------
 """
 from __future__ import annotations
@@ -174,6 +190,13 @@ from linklib.enrich import (
     generate_community_profile,
 )
 from webapp.app import _validate_citations_payload
+
+# -- --field (2026-08 follow-up) --------------------------------------------
+# The three tools-mode fields, in the same order they're regenerated for a
+# given tool (see the module docstring above) — --field limits a run to a
+# subset of these without touching Communities' single community_profile
+# call, which has no field concept of its own to select from.
+TOOL_FIELDS = ("description", "agent_taxonomy", "competitive_differentiation")
 
 # -- Brian-approved defaults ----------------------------------------------
 BATCH_SIZE = 25
@@ -499,7 +522,7 @@ def _regen_tool_differentiation(lib: Library, tool: dict, model: str, voice_core
 
 # -- Communities ------------------------------------------------------------
 
-def _regen_community_profile(lib: Library, community: dict, model: str,
+def _regen_community_profile(lib: Library, community: dict, model: str, voice_core: str,
                               log_file: str, apply: bool) -> None:
     community_id, name, url = community["id"], community["name"], community["url"]
     print(f"  [community {community_id}] {name}: Community profile (23 fields)...")
@@ -508,7 +531,7 @@ def _regen_community_profile(lib: Library, community: dict, model: str,
     existing_profile = lib.get_community_profile(community_id)
     try:
         draft = _call_with_retry(generate_community_profile, name, url,
-                                  existing=existing_profile, model=model)
+                                  existing=existing_profile, model=model, voice_core=voice_core)
     except Exception as e:
         print(f"      FAILED: {type(e).__name__}: {e}")
         _log(log_file, "community", community_id, name, "community_profile", "failure",
@@ -607,16 +630,19 @@ def _print_draft_fields(field: str, draft) -> None:
 
 
 def _run_sample(lib: Library, tools: list[dict], communities: list[dict], model: str,
-                 voice_core: str, log_file: str, n: int) -> None:
+                 voice_core: str, log_file: str, n: int,
+                 fields: tuple[str, ...] = TOOL_FIELDS) -> None:
     """Makes up to N real generation calls (no DB writes) across the
     resolved tool/community list, printing the full generated content for
-    each — see the module docstring's hardening item 2."""
+    each — see the module docstring's hardening item 2. `fields` narrows
+    which tool fields are sampled (--field, 2026-08 follow-up); Communities'
+    single community_profile draft is unaffected, same as --apply mode."""
     made = 0
 
     tool_jobs = [
         (tool, field)
         for tool in tools
-        for field in ("description", "agent_taxonomy", "competitive_differentiation")
+        for field in fields
     ]
     for tool, field in tool_jobs:
         if made >= n:
@@ -664,7 +690,7 @@ def _run_sample(lib: Library, tools: list[dict], communities: list[dict], model:
         existing_profile = lib.get_community_profile(community_id)
         try:
             draft = _call_with_retry(generate_community_profile, name, url,
-                                      existing=existing_profile, model=model)
+                                      existing=existing_profile, model=model, voice_core=voice_core)
         except Exception as e:
             print(f"  FAILED: {type(e).__name__}: {e}")
             _log(log_file, "community", community_id, name, "community_profile", "preview",
@@ -692,8 +718,16 @@ def _run_sample(lib: Library, tools: list[dict], communities: list[dict], model:
 
 # -- Batch driver ------------------------------------------------------------
 
+_TOOL_FIELD_FNS = {
+    "description": _regen_tool_description,
+    "agent_taxonomy": _regen_tool_agent_taxonomy,
+    "competitive_differentiation": _regen_tool_differentiation,
+}
+
+
 def _run_tools(lib: Library, tools: list[dict], model: str, voice_core: str,
-               log_file: str, apply: bool, done: set[tuple[str, int, str]]) -> None:
+               log_file: str, apply: bool, done: set[tuple[str, int, str]],
+               fields: tuple[str, ...] = TOOL_FIELDS) -> None:
     total = len(tools)
     for batch_start in range(0, total, BATCH_SIZE):
         batch = tools[batch_start:batch_start + BATCH_SIZE]
@@ -703,11 +737,8 @@ def _run_tools(lib: Library, tools: list[dict], model: str, voice_core: str,
               f"({batch_start + 1}-{batch_start + len(batch)} of {total}) --")
         for tool in batch:
             tool_id = tool["id"]
-            for field, fn in (
-                ("description", _regen_tool_description),
-                ("agent_taxonomy", _regen_tool_agent_taxonomy),
-                ("competitive_differentiation", _regen_tool_differentiation),
-            ):
+            for field in fields:
+                fn = _TOOL_FIELD_FNS[field]
                 if ("tool", tool_id, field) in done:
                     print(f"  [tool {tool_id}] {tool['name']}: {field} — already done this pass, skipping")
                     continue
@@ -719,7 +750,7 @@ def _run_tools(lib: Library, tools: list[dict], model: str, voice_core: str,
             time.sleep(INTER_BATCH_SLEEP)
 
 
-def _run_communities(lib: Library, communities: list[dict], model: str,
+def _run_communities(lib: Library, communities: list[dict], model: str, voice_core: str,
                       log_file: str, apply: bool, done: set[tuple[str, int, str]]) -> None:
     total = len(communities)
     for batch_start in range(0, total, BATCH_SIZE):
@@ -734,7 +765,7 @@ def _run_communities(lib: Library, communities: list[dict], model: str,
                 print(f"  [community {community_id}] {community['name']}: "
                       f"community_profile — already done this pass, skipping")
                 continue
-            _regen_community_profile(lib, community, model, log_file, apply)
+            _regen_community_profile(lib, community, model, voice_core, log_file, apply)
             if apply:
                 time.sleep(INTER_CALL_SLEEP)
         if apply and batch_start + BATCH_SIZE < total:
@@ -757,6 +788,36 @@ def _parse_ids(raw: str | None) -> set[int] | None:
         except ValueError:
             raise SystemExit(f"--ids: {part!r} is not an integer")
     return ids
+
+
+def _parse_fields(raw: list[str] | None) -> tuple[str, ...]:
+    """--field is repeatable (--field description --field agent_taxonomy)
+    AND accepts a comma-separated value in each occurrence
+    (--field description,agent_taxonomy) — both forms combine. Order is
+    normalized to TOOL_FIELDS' own regeneration order regardless of the
+    order given on the command line, matching _run_tools'/_run_sample's
+    existing per-tool ordering (Description saved before Agent taxonomy is
+    even generated, and so on — see the module docstring). Returns
+    TOOL_FIELDS unchanged (every field) when --field was never given, so
+    omitting the flag is a true no-op against every existing invocation."""
+    if not raw:
+        return TOOL_FIELDS
+    requested: set[str] = set()
+    for occurrence in raw:
+        for part in occurrence.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if part not in TOOL_FIELDS:
+                raise SystemExit(
+                    f"--field: {part!r} is not one of {TOOL_FIELDS} "
+                    f"(Communities' community_profile draft has no field concept to select from — "
+                    f"--field only ever narrows tools mode)"
+                )
+            requested.add(part)
+    if not requested:
+        raise SystemExit("--field: no field names given")
+    return tuple(f for f in TOOL_FIELDS if f in requested)
 
 
 def _resolve_tools(lib: Library, ids: set[int] | None, limit: int | None) -> list[dict]:
@@ -819,6 +880,13 @@ def main() -> int:
                           "list and print the FULL generated content for each, with no DB writes at "
                           "all. Logged as status=\"preview\" in the JSONL log. Runs standalone and "
                           "returns immediately — --apply is ignored if --sample is also given.")
+    ap.add_argument("--field", action="append", default=None,
+                     help=f"Limit TOOLS mode to a subset of {TOOL_FIELDS} — repeatable "
+                          "(--field description --field agent_taxonomy) and/or comma-separated "
+                          "(--field description,agent_taxonomy); both forms combine. Defaults to all "
+                          "three when omitted, so existing invocations are unaffected. Communities' "
+                          "single community_profile draft has no field concept and is never narrowed "
+                          "by this flag.")
     ap.add_argument("--log-file", default="regen_ai_drafted_fields_log.jsonl",
                      help="JSONL log path — also the resume marker (default: "
                           "regen_ai_drafted_fields_log.jsonl in the current directory)")
@@ -832,6 +900,11 @@ def main() -> int:
         ap.error("--sample must be a positive integer")
 
     ids = _parse_ids(args.ids)
+    fields = _parse_fields(args.field)
+    if args.field is not None and args.only == "communities":
+        print("NOTE: --field has no effect with --only communities (the community profile draft has "
+              "no field concept to select from) — every field is still regenerated for tools if any "
+              "are also in scope.\n")
 
     db_path = resolve_db_path(args.db, allow_missing=False)
     mode = "SAMPLE (real calls, no writes)" if args.sample else \
@@ -858,7 +931,7 @@ def main() -> int:
 
         if args.sample:
             print(f"Using enrichment model: {model}\n")
-            _run_sample(lib, tools, communities, model, voice_core, args.log_file, args.sample)
+            _run_sample(lib, tools, communities, model, voice_core, args.log_file, args.sample, fields)
             if args.apply:
                 print("\nNote: --apply was also given but is ignored while --sample is set — "
                       "re-run without --sample to actually run the full pass.")
@@ -866,12 +939,13 @@ def main() -> int:
 
         n_tools = len(tools)
         n_communities = len(communities)
-        tool_calls = n_tools * 3
+        n_fields = len(fields)
+        tool_calls = n_tools * n_fields
         community_calls = n_communities * 1
         total_calls = tool_calls + community_calls
 
         est_seconds = (
-            n_tools * 3 * EST_SECONDS_PER_TOOL_FIELD
+            n_tools * n_fields * EST_SECONDS_PER_TOOL_FIELD
             + n_communities * EST_SECONDS_PER_COMMUNITY_PROFILE
         )
         num_tool_batches = (n_tools + BATCH_SIZE - 1) // BATCH_SIZE if n_tools else 0
@@ -880,9 +954,9 @@ def main() -> int:
         est_seconds += total_calls * INTER_CALL_SLEEP
 
         scope_label = "targeted via --ids" if ids is not None else "approved"
+        fields_label = ", ".join(fields) if n_fields < len(TOOL_FIELDS) else "description, agent_taxonomy, competitive_differentiation"
         print(f"Counts ({scope_label}):")
-        print(f"  Tools:       {n_tools}  x 3 fields (description, agent_taxonomy, "
-              f"competitive_differentiation) = {tool_calls} calls")
+        print(f"  Tools:       {n_tools}  x {n_fields} field(s) ({fields_label}) = {tool_calls} calls")
         print(f"  Communities: {n_communities}  x 1 call (23-field profile draft)  "
               f"= {community_calls} calls")
         print(f"  TOTAL generation calls: {total_calls}")
@@ -905,9 +979,9 @@ def main() -> int:
         print(f"Using enrichment model: {model}\n")
 
         if want_tools:
-            _run_tools(lib, tools, model, voice_core, args.log_file, args.apply, done)
+            _run_tools(lib, tools, model, voice_core, args.log_file, args.apply, done, fields)
         if want_communities:
-            _run_communities(lib, communities, model, args.log_file, args.apply, done)
+            _run_communities(lib, communities, model, voice_core, args.log_file, args.apply, done)
 
         print(f"\nDone. Full per-field log at {args.log_file!r} — review it (or grep for "
               f"'\"status\": \"failure\"') before considering this pass complete.")
