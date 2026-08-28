@@ -916,6 +916,36 @@ def _confidence_indicator_html(confident: object) -> str:
             f'Claude confidence: {value}</p>')
 
 
+def _low_confidence_indicator_html(low_confidence: object) -> str:
+    """Item 6 (Aug 2026 UI pass) — the OTHER quality signal every
+    generate_tool_* draft returns (draft.low_confidence), persisted and
+    shown right next to _confidence_indicator_html's "Claude confidence"
+    line, not folded into it. A distinct, independent fact from
+    `confident`: this is a MECHANICAL pre-generation signal (did the page
+    fetch behind this draft actually succeed), not the model's own
+    post-generation self-report — the two can and do disagree (a
+    successful fetch of a thin page can still yield a low-confidence
+    self-report, or vice versa).
+
+    Phrased as what actually happened ("Source page fetch:
+    Succeeded/Failed"), not as a literal "Low confidence: Yes/No" — a
+    literal mirror would put two "Yes/No" lines back to back whose "Yes"
+    means opposite things (Claude confidence: Yes is good; low_confidence:
+    Yes is bad), which reads as confusing rather than clarifying. Same
+    three-state/permanent-display/sanctioned-color convention as
+    _confidence_indicator_html: NULL (no signal — a hand-written field, or
+    one drafted before this column existed) -> a neutral "Not recorded"
+    state, never hidden."""
+    if low_confidence is None:
+        return ('<p style="font-size:12px;color:var(--muted);margin:2px 0 0;font-weight:500;">'
+                'Source page fetch: Not recorded</p>')
+    failed = bool(int(low_confidence))
+    value = "Failed" if failed else "Succeeded"
+    color = "#92400e" if failed else "#065f46"
+    return (f'<p style="font-size:12px;color:{color};margin:2px 0 0;font-weight:500;">'
+            f'Source page fetch: {value}</p>')
+
+
 def _citations_list_html(citations: list, cap: int | None = None, empty_note: str = "") -> str:
     """Render a field's API-verified citation list (Citations-API grounding
     fix, Phase 1b — see linklib.citations, linklib.enrich.
@@ -1025,6 +1055,28 @@ def _ai_drafted_field_confidence(form) -> dict[str, bool]:
     hand-edited or untouched field has no entry, so callers should only
     consult this for fields also present in _ai_drafted_field_names(form)."""
     raw = (form.get("ai_drafted_confidence") or "").strip()
+    out: dict[str, bool] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        name, _, val = pair.partition(":")
+        if name.strip():
+            out[name.strip()] = val.strip() == "1"
+    return out
+
+
+def _ai_drafted_field_low_confidence(form) -> dict[str, bool]:
+    """Item 6 (Aug 2026 UI pass) — the pre-generation counterpart to
+    _ai_drafted_field_confidence: whether the page fetch behind this draft
+    actually succeeded (draft.low_confidence), not the model's own
+    post-generation self-report. Same 'ai_drafted_low_confidence' hidden
+    input / 'field:0-or-1,field2:...' shape, same one-parallel-input-per-
+    field convention as ai_drafted_confidence (see markAiLowConfidence in
+    the edit-form JS) — a distinct, independent signal from confidence:
+    the two can and do disagree (a successful fetch of a thin page can
+    still yield a low-confidence model self-report, or vice versa)."""
+    raw = (form.get("ai_drafted_low_confidence") or "").strip()
     out: dict[str, bool] = {}
     for pair in raw.split(","):
         pair = pair.strip()
@@ -6822,9 +6874,12 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # single empty field inside an otherwise-populated section (see the
     # Community Profile cards further down), which shows muted text to
     # everyone instead of hiding.
-    # Competitors: a Logo/Name table rather than the old chip row (Phase F),
-    # moved up next to Bottom Line (see lower_band composition below) instead
-    # of sitting at the bottom of the right column. Competitors are always
+    # Competitors: a Logo/Name table rather than the old chip row (Phase F).
+    # It used to sit right below Bottom Line, both being "how does this
+    # stack up" content — Bottom Line itself moved up into the hero band
+    # (item 5, Aug 2026 UI pass), so Competitors is now the first thing in
+    # lower_band_left, ahead of sitting at the bottom of the right column.
+    # Competitors are always
     # full `tools` rows (list_tool_competitors joins tool_competitors back to
     # tools), never free text, so each row is a real profile link with its
     # own logo_path — the same _logo_box fallback as F2/F3 covers a
@@ -7082,6 +7137,16 @@ function submitIntroForm() {{
     # monogram fallback as the directory cards and Competitors table when
     # logo_path is still empty.
     tool_logo_url = _tool_logo_url(tool)
+    # Item 5 (Aug 2026 UI pass): Bottom Line moved up into the hero, right
+    # after the category pills and before the action row — was previously
+    # the first thing in lower_band_left, which meant crossing into a
+    # separate .tp-band (its own margin-top:22px) after the pills' own
+    # margin-top:14px, reading as an oddly large gap for two adjacent
+    # "about this tool" facts. Category pills moved up alongside it (were
+    # previously the last thing in hero_text, after the action row) so the
+    # two stay adjacent with only their own small margins between them,
+    # rather than splitting Bottom Line from its nearest context by the
+    # width of the whole Visit/Compare/Edit row.
     hero_text = f"""<div class="tp-header-row">
   {_logo_box(tool['name'], tool_logo_url, 56, radius=12)}
   <div>
@@ -7089,8 +7154,9 @@ function submitIntroForm() {{
     {f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
   </div>
 </div>
-<div class="tp-hero-actions">{action_row}</div>
-{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}"""
+{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}
+{differentiation_block}
+<div class="tp-hero-actions">{action_row}</div>"""
 
     top_band = f"""<div class="tp-band">
   <div>{hero_text}</div>
@@ -7121,8 +7187,9 @@ function submitIntroForm() {{
     # all, which is a wasted-whitespace regression, not a fix. Collapse to a
     # single full-width column whenever the right side would otherwise be
     # empty, rather than leaving a dead 1fr gap beside a full left column.
-    lower_band_left = f"""{differentiation_block}
-{competitors_block}
+    # Bottom Line (differentiation_block) moved into hero_text above (item 5,
+    # Aug 2026 UI pass) — no longer the first thing here.
+    lower_band_left = f"""{competitors_block}
 {description_card}
 {agent_taxonomy_block}"""
     if features_card.strip():
@@ -9150,6 +9217,14 @@ function unmarkAiDrafted(fieldName) {
     });
     confEl.value = pairs.join(',');
   }
+  var lowConfEl = document.getElementById('ai-drafted-low-confidence');
+  if (lowConfEl) {
+    var lcPrefix = fieldName + ':';
+    var lcPairs = (lowConfEl.value ? lowConfEl.value.split(',') : []).filter(function(p) {
+      return p && p.indexOf(lcPrefix) !== 0;
+    });
+    lowConfEl.value = lcPairs.join(',');
+  }
 }
 // Citations-API grounding fix, Phase 2 — the citations a stateless
 // generate-description call handed back, carried to the submit route as
@@ -9185,6 +9260,21 @@ function markAiConfidence(fieldName, confident) {
   var prefix = fieldName + ':';
   pairs = pairs.filter(function(p) { return p.indexOf(prefix) !== 0; });
   pairs.push(fieldName + ':' + (confident ? '1' : '0'));
+  el.value = pairs.join(',');
+}
+// Quality-indicator visibility (item 6, Aug 2026 UI pass) — the OTHER
+// signal a Generate call returns (d.low_confidence: did the page fetch
+// behind this draft actually succeed), mirroring markAiConfidence exactly
+// but as its own hidden input/parser (_ai_drafted_field_low_confidence)
+// since it's a distinct, independent fact from confident — a mechanical
+// pre-generation signal, not the model's post-generation self-report.
+function markAiLowConfidence(fieldName, lowConfidence) {
+  var el = document.getElementById('ai-drafted-low-confidence');
+  if (!el) return;
+  var pairs = el.value ? el.value.split(',').filter(function(p) { return p; }) : [];
+  var prefix = fieldName + ':';
+  pairs = pairs.filter(function(p) { return p.indexOf(prefix) !== 0; });
+  pairs.push(fieldName + ':' + (lowConfidence ? '1' : '0'));
   el.value = pairs.join(',');
 }
 // Shared error-box treatment for every Generate-button failure (Phase M):
@@ -9257,10 +9347,14 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
     document.getElementById(descId).value = d.description;
     markAiDrafted('description');
     markAiConfidence('description', d.confident);
+    markAiLowConfidence('description', d.low_confidence);
     markAiCitations(d.citations || [], d.model || '');
     if (summaryId) {
       var summaryEl = document.getElementById(summaryId);
-      if (summaryEl) { summaryEl.value = d.summary || ''; markAiDrafted('summary'); markAiConfidence('summary', d.confident); }
+      if (summaryEl) {
+        summaryEl.value = d.summary || ''; markAiDrafted('summary');
+        markAiConfidence('summary', d.confident); markAiLowConfidence('summary', d.low_confidence);
+      }
     }
     // A hand-edit to the description after this Generate call means its
     // text no longer matches what the citations above actually ground —
@@ -13672,6 +13766,7 @@ def admin_communities(request: Request, filter: str = ""):
     try:
         all_communities = lib.list_communities(approved_only=False)
         needs_review_ids = lib.community_profile_needs_review_ids()
+        quality_flags = lib.community_profile_quality_flags()
         community_categories = lib.list_community_categories()
     finally:
         lib.close()
@@ -13680,6 +13775,7 @@ def admin_communities(request: Request, filter: str = ""):
     approved = [c for c in all_communities if c["approved"]]
     for c in approved:
         c["needs_review"] = c["id"] in needs_review_ids
+        c["quality_flags"] = quality_flags.get(c["id"])
     if filter == "needs_review":
         approved = [c for c in approved if c["needs_review"]]
 
@@ -13716,6 +13812,24 @@ def admin_communities(request: Request, filter: str = ""):
         gap_badge = (f'<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--muted);color:#fff;border-radius:4px;'
                      f'padding:1px 6px;">{n_gaps} field{"s" if n_gaps != 1 else ""} '
                      f'need{"s" if n_gaps == 1 else ""} verification</span>') if n_gaps else ""
+        # Item 6 (Aug 2026 UI pass): both signals already exist and are
+        # already persisted/shown on the per-profile edit view (the
+        # low_confidence checkbox, the 12 per-field Claude-confidence
+        # badges) — they just never reached this LIST page. Read-only
+        # here, on purpose: this list has no per-row save action for
+        # either signal, only the per-profile edit page does.
+        qf = c.get("quality_flags")
+        low_conf_badge = (
+            '<span style="display:inline-block;font-size:11px;font-weight:700;background:#fef3c7;color:#92400e;'
+            'border-radius:4px;padding:1px 6px;" title="community_profiles.low_confidence: drafted without a '
+            'successful page fetch">Low confidence</span>'
+        ) if qf and qf["low_confidence"] else ""
+        unconfident_badge = (
+            f'<span style="display:inline-block;font-size:11px;font-weight:700;background:#fef3c7;color:#92400e;'
+            f'border-radius:4px;padding:1px 6px;" title="Claude self-reported low confidence on '
+            f'{qf["unconfident_count"]} of the 12 tracked profile fields">'
+            f'{qf["unconfident_count"]}/12 fields low-confidence</span>'
+        ) if qf and qf["unconfident_count"] else ""
         mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="margin:0;">'
                          f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>'
                          ) if c.get("needs_review") else ""
@@ -13729,7 +13843,7 @@ def admin_communities(request: Request, filter: str = ""):
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
   <td style="padding:10px 12px;font-weight:600;min-width:250px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{review_badge}{gap_badge}
+      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{review_badge}{gap_badge}{low_conf_badge}{unconfident_badge}
     </div>
   </td>
   <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
@@ -15001,6 +15115,7 @@ def admin_tools_new(request: Request):
 <form method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="">
   <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
   <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
   <div class="tool-form-cols">
@@ -15121,6 +15236,7 @@ def _run_tool_research(tool_id: int) -> bool:
                 tool_id, result.agent_taxonomy_note,
                 needs_verification=int(result.agent_taxonomy_needs_verification),
                 ai_confident=int(result.confident),
+                low_confidence=int(result.low_confidence),
             )
             lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
                                      result.citations, model=result.model)
@@ -15162,9 +15278,14 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     # just evaluated once at creation instead of on every resave.
     ai_drafted = _ai_drafted_field_names(form)
     ai_confidence = _ai_drafted_field_confidence(form)
+    ai_low_confidence = _ai_drafted_field_low_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     description_confident = (
         int(ai_confidence["description"]) if "description" in ai_drafted and "description" in ai_confidence
+        else None
+    )
+    description_low_confidence = (
+        int(ai_low_confidence["description"]) if "description" in ai_drafted and "description" in ai_low_confidence
         else None
     )
     description_citations = (
@@ -15180,7 +15301,8 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
                                 warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
                                 summary=summary,
                                 description_needs_verification=description_needs_verification,
-                                description_ai_confident=description_confident)
+                                description_ai_confident=description_confident,
+                                description_low_confidence=description_low_confidence)
         if description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
     except DuplicateURLError as e:
@@ -15481,9 +15603,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             latest_differentiation_review,
         )
     )
-    _description_confidence_html = _confidence_indicator_html(tool.get("description_ai_confident"))
-    _differentiation_confidence_html = _confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
-    _taxonomy_confidence_html = _confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
+    _description_confidence_html = (_confidence_indicator_html(tool.get("description_ai_confident"))
+        + _low_confidence_indicator_html(tool.get("description_low_confidence")))
+    _differentiation_confidence_html = (_confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
+        + _low_confidence_indicator_html(tool.get("competitive_differentiation_low_confidence")))
+    _taxonomy_confidence_html = (_confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
+        + _low_confidence_indicator_html(tool.get("agent_taxonomy_low_confidence")))
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -15514,6 +15639,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="">
   <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
   <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
 
@@ -15753,6 +15879,7 @@ async function generateDifferentiation(toolId, textareaId, statusId, errBoxId, h
     document.getElementById(textareaId).value = d.competitive_differentiation;
     markAiDrafted('competitive_differentiation');
     markAiConfidence('competitive_differentiation', d.confident);
+    markAiLowConfidence('competitive_differentiation', d.low_confidence);
     status.textContent = d.low_confidence
       ? 'Drafted. No competitors curated yet, so this is weaker than it could be—review carefully.'
       : 'Drafted. Review before saving.';
@@ -15833,6 +15960,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     # already uses.
     ai_drafted = _ai_drafted_field_names(form)
     ai_confidence = _ai_drafted_field_confidence(form)
+    ai_low_confidence = _ai_drafted_field_low_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     competitive_differentiation_needs_verification = 1 if "competitive_differentiation" in ai_drafted else 0
     # Confidence indicator (2026-08): only a real value when the field is
@@ -15847,6 +15975,19 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     differentiation_confident = (
         int(ai_confidence["competitive_differentiation"])
         if "competitive_differentiation" in ai_drafted and "competitive_differentiation" in ai_confidence
+        else None
+    )
+    # low_confidence (item 6, Aug 2026 UI pass): the pre-generation fetch-
+    # success signal, mirroring description_confident/differentiation_confident's
+    # own "only a real value on a fresh draft this save" guard exactly.
+    description_low_confidence = (
+        int(ai_low_confidence["description"])
+        if "description" in ai_drafted and "description" in ai_low_confidence
+        else None
+    )
+    differentiation_low_confidence = (
+        int(ai_low_confidence["competitive_differentiation"])
+        if "competitive_differentiation" in ai_drafted and "competitive_differentiation" in ai_low_confidence
         else None
     )
     # Citations-API grounding fix, Phase 2 — same "fresh draft this submit"
@@ -15870,14 +16011,16 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
                         summary=summary,
                         description_needs_verification=description_needs_verification,
-                        description_ai_confident=description_confident)
+                        description_ai_confident=description_confident,
+                        description_low_confidence=description_low_confidence)
         if "description" in ai_drafted and description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
         else:
             lib.clear_entity_citations("tool", tool_id, "description")
         lib.update_tool_differentiation(tool_id, competitive_differentiation,
                                         needs_verification=competitive_differentiation_needs_verification,
-                                        ai_confident=differentiation_confident)
+                                        ai_confident=differentiation_confident,
+                                        low_confidence=differentiation_low_confidence)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
@@ -24023,14 +24166,14 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 {datalist}
 
 <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 4px;">Monthly spend by category</h3>
     <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Last 12 months.</p>
     {monthly_chart_html}
     <div style="margin-top:10px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">See full history &amp; edit &rarr;</a></div>
   </div>
 
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
     <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
       <div>
@@ -24038,7 +24181,16 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <!-- auto-fit/minmax, not a hardcoded 1fr 1fr (CSS Grid blowout — see
+           CLAUDE.md's Phase P note): a native <input type="date"> has a
+           fixed intrinsic rendering minimum (~160px in Chromium) that
+           doesn't shrink below that regardless of width:100%, so a rigid
+           1fr/1fr track forced this whole card — and therefore the page —
+           to overflow horizontally on real phone widths (measured: 320px
+           through 414px). minmax(140px,1fr) lets the pair collapse to one
+           stacked column instead of squeezing below each input's own
+           floor. -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;">
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
@@ -24064,12 +24216,18 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </form>
   </div>
 
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 8px;">Upload CSV</h3>
     <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Batch-import charges instead of typing each one in. Columns: <code>vendor, date, amount, category, note</code> (header row required; category and note optional). Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. You'll get a preview to check before anything is saved. <a href="/admin/overhead-spend/csv/template" style="color:var(--navy);">Download a template &darr;</a></p>
     <form method="post" action="/admin/overhead-spend/csv/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+      <!-- width:100%/max-width:100% on the file input: a bare <input
+           type="file"> has its own intrinsic rendering width (the native
+           "Choose File" button + filename text) that doesn't shrink on its
+           own, which forced this specific card ~6px past a 320px viewport
+           even after the fixes above — this constrains it to the card's
+           own (already-shrinkable) width instead. -->
       <input type="file" name="file" accept=".csv,text/csv" required
-        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);width:100%;max-width:100%;box-sizing:border-box;">
       <div><button type="submit" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;">Preview import</button></div>
     </form>
   </div>
@@ -24081,7 +24239,18 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 <p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong> &mdash; model choice directly affects the Enrichment row below. <a href="/admin/system/model" style="color:var(--accent);">Change it &rarr;</a></p>
 
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
-  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;">
+  <!-- min-width:0 on both flex items below (same pattern as .tp-band>div
+       elsewhere in this file): without it, a flex item's automatic minimum
+       width is based on its content's min-content size, and that
+       recurses right through the overflow-x:auto table wrappers below to
+       their tables' own min-width:400px/320px — forcing this WHOLE ROW,
+       and therefore the page, wider than the viewport on a real phone,
+       rather than letting the intended per-table horizontal scroll
+       actually contain it. This was the real, page-wide overflow found
+       while investigating item 4; the Date/Amount grid fix above (Add a
+       charge) is a real, separate blowout of the same class but wasn't
+       the dominant cause once measured directly. -->
+  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;min-width:0;">
     <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
       <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_total:.2f}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:2px;">Estimated usage, all time</div>
@@ -24106,7 +24275,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </div>
   </div>
 
-  <div style="flex:1 1 460px;">
+  <div style="flex:1 1 460px;min-width:0;">
     <h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;min-width:320px;">
