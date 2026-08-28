@@ -23911,14 +23911,14 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 {datalist}
 
 <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 4px;">Monthly spend by category</h3>
     <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Last 12 months.</p>
     {monthly_chart_html}
     <div style="margin-top:10px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">See full history &amp; edit &rarr;</a></div>
   </div>
 
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
     <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
       <div>
@@ -23926,7 +23926,16 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <!-- auto-fit/minmax, not a hardcoded 1fr 1fr (CSS Grid blowout — see
+           CLAUDE.md's Phase P note): a native <input type="date"> has a
+           fixed intrinsic rendering minimum (~160px in Chromium) that
+           doesn't shrink below that regardless of width:100%, so a rigid
+           1fr/1fr track forced this whole card — and therefore the page —
+           to overflow horizontally on real phone widths (measured: 320px
+           through 414px). minmax(140px,1fr) lets the pair collapse to one
+           stacked column instead of squeezing below each input's own
+           floor. -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;">
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
@@ -23952,12 +23961,18 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </form>
   </div>
 
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 8px;">Upload CSV</h3>
     <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Batch-import charges instead of typing each one in. Columns: <code>vendor, date, amount, category, note</code> (header row required; category and note optional). Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. You'll get a preview to check before anything is saved. <a href="/admin/overhead-spend/csv/template" style="color:var(--navy);">Download a template &darr;</a></p>
     <form method="post" action="/admin/overhead-spend/csv/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+      <!-- width:100%/max-width:100% on the file input: a bare <input
+           type="file"> has its own intrinsic rendering width (the native
+           "Choose File" button + filename text) that doesn't shrink on its
+           own, which forced this specific card ~6px past a 320px viewport
+           even after the fixes above — this constrains it to the card's
+           own (already-shrinkable) width instead. -->
       <input type="file" name="file" accept=".csv,text/csv" required
-        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);width:100%;max-width:100%;box-sizing:border-box;">
       <div><button type="submit" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;">Preview import</button></div>
     </form>
   </div>
@@ -23969,7 +23984,18 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 <p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong> &mdash; model choice directly affects the Enrichment row below. <a href="/admin/system/model" style="color:var(--accent);">Change it &rarr;</a></p>
 
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
-  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;">
+  <!-- min-width:0 on both flex items below (same pattern as .tp-band>div
+       elsewhere in this file): without it, a flex item's automatic minimum
+       width is based on its content's min-content size, and that
+       recurses right through the overflow-x:auto table wrappers below to
+       their tables' own min-width:400px/320px — forcing this WHOLE ROW,
+       and therefore the page, wider than the viewport on a real phone,
+       rather than letting the intended per-table horizontal scroll
+       actually contain it. This was the real, page-wide overflow found
+       while investigating item 4; the Date/Amount grid fix above (Add a
+       charge) is a real, separate blowout of the same class but wasn't
+       the dominant cause once measured directly. -->
+  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;min-width:0;">
     <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
       <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_total:.2f}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:2px;">Estimated usage, all time</div>
@@ -23994,7 +24020,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </div>
   </div>
 
-  <div style="flex:1 1 460px;">
+  <div style="flex:1 1 460px;min-width:0;">
     <h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;min-width:320px;">
