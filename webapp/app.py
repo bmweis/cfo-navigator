@@ -6047,7 +6047,12 @@ function renderTools(tools) {{
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">'
       + logoBox(t.name, t.logo_url, 32)
-      + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
+      // Name click goes to the internal profile page (matching Communities'
+      // .comm-name behavior) — not the vendor's external site. A curated
+      // directory's own primary click target should keep the visitor on our
+      // page; Visit (external, on the profile page) is a separate, unchanged
+      // action.
+      + '<a class="tool-name" href="/tools/software/' + esc(t.slug) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
       + '</div>'
       + (promotedBadge || star
           ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-top:2px;">' + promotedBadge + star + '</div>'
