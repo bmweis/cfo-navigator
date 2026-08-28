@@ -7312,7 +7312,7 @@ function submitIntroForm() {{
 .tp-feature-list li:focus-within .tp-feature-flag-btn{{opacity:1;}}
 .tp-feature-flag-btn:hover{{color:var(--navy);}}
 .tp-link-btn{{background:none;border:none;padding:0;cursor:pointer;font:inherit;color:var(--accent);
-  font-weight:500;}}
+  font-weight:500;text-align:left;}}
 .tp-feature-suggest-cta{{margin:10px 0 0;font-size:13.5px;}}
 .tp-fs-tab{{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 12px;
   font-size:13px;cursor:pointer;color:var(--muted);}}
