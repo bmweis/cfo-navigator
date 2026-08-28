@@ -15643,6 +15643,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" maxlength="600" rows="5"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('competitive_differentiation') or '')}</textarea>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Generated from the Description and competitor list already on this page&mdash;it doesn't fetch or research anything new. If you edit or regenerate the Description, this won't update on its own; run Generate summary again to pick up the change.</p>
     {_differentiation_verify_action}
     {_differentiation_confidence_html}
     {_differentiation_review_line_html}
