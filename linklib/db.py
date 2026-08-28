@@ -287,7 +287,13 @@ CREATE TABLE IF NOT EXISTS read_later (
     source      TEXT NOT NULL DEFAULT '',
     summary     TEXT NOT NULL DEFAULT '',
     published_at TEXT,
-    added_at    TEXT NOT NULL
+    added_at    TEXT NOT NULL,
+    -- Cached content from a save-time fetch (2026-08 Reader cleanliness
+    -- pass) — see the ALTER TABLE migration comment below for why this
+    -- replaced the original always-live-fetch design. Both '' until a save
+    -- or a manual refresh populates them.
+    content       TEXT NOT NULL DEFAULT '',
+    content_html  TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS tool_leads (
@@ -2103,6 +2109,17 @@ class Library:
             "ALTER TABLE tools ADD COLUMN description_low_confidence INTEGER",
             "ALTER TABLE tools ADD COLUMN competitive_differentiation_low_confidence INTEGER",
             "ALTER TABLE tools ADD COLUMN agent_taxonomy_low_confidence INTEGER",
+            # Read Later content caching (2026-08 Reader cleanliness pass) —
+            # /save-later used to be a bare metadata insert with no fetch at
+            # all; every open of an unread Read Later item re-fetched live via
+            # _resolve_reader_content, with nothing ever cached. These two
+            # columns let /save-later cache a fetch's result the same way
+            # Archive does, and let a manual per-item "Refresh" action replace
+            # it later. Both default to '' (no cache yet) — a row saved before
+            # this migration just falls through to the existing live-fetch
+            # path unchanged, same as today, until it's next refreshed.
+            "ALTER TABLE read_later ADD COLUMN content TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE read_later ADD COLUMN content_html TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -6355,14 +6372,28 @@ class Library:
     # so one user's saves are never visible to or affected by another's.
 
     def add_read_later(self, user_id: int, url: str, title: str = "", source: str = "",
-                       summary: str = "", published_at: str | None = None) -> None:
+                       summary: str = "", published_at: str | None = None,
+                       content: str = "", content_html: str = "") -> None:
+        """Save (or re-save) a Read Later item. `content`/`content_html` are
+        the result of a save-time fetch (2026-08 Reader cleanliness pass —
+        see the read_later ALTER TABLE migration comment) — optional, since a
+        caller that can't fetch (or chooses not to) should still be able to
+        queue the URL, same as before this pair of columns existed.
+
+        On a re-save of an already-queued URL, content/content_html are only
+        ever REPLACED by a non-empty new value, never blanked by an empty one
+        — the same write-once-on-empty guard `Library.upsert()` uses for
+        articles.content, so a re-save whose own fetch happened to fail can't
+        destroy a previously-cached good copy."""
         self.conn.execute(
-            """INSERT INTO read_later (user_id, url, title, source, summary, published_at, added_at)
-               VALUES (?,?,?,?,?,?,?)
+            """INSERT INTO read_later (user_id, url, title, source, summary, published_at, added_at, content, content_html)
+               VALUES (?,?,?,?,?,?,?,?,?)
                ON CONFLICT(user_id, url) DO UPDATE SET
                    title=excluded.title, source=excluded.source,
-                   summary=excluded.summary, published_at=excluded.published_at""",
-            (user_id, url, title, source, summary, published_at, _now()),
+                   summary=excluded.summary, published_at=excluded.published_at,
+                   content=CASE WHEN excluded.content != '' THEN excluded.content ELSE read_later.content END,
+                   content_html=CASE WHEN excluded.content_html != '' THEN excluded.content_html ELSE read_later.content_html END""",
+            (user_id, url, title, source, summary, published_at, _now(), content, content_html),
         )
         self.conn.commit()
 
@@ -6380,6 +6411,37 @@ class Library:
         return {r[0] for r in self.conn.execute(
             "SELECT url FROM read_later WHERE user_id=?", (user_id,)
         ).fetchall()}
+
+    def get_read_later_by_url(self, user_id: int, url: str) -> dict | None:
+        """A single Read Later row for this user by URL, or None — the Reader's
+        read-time cache lookup (mirrors the existing articles-by-url match in
+        webapp._resolve_reader_content) and the source-of-truth for the
+        per-item "Refresh" action's before-you-refresh existence check."""
+        row = self.conn.execute(
+            "SELECT * FROM read_later WHERE user_id=? AND url=?", (user_id, url)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_read_later_content(self, user_id: int, url: str, content: str, content_html: str) -> bool:
+        """Replace a Read Later row's cached content — the manual per-item
+        "Refresh" action's write path (deliberately its own narrow method,
+        not a call through add_read_later, since add_read_later's other
+        fields — title/source/summary — have no fresh values to offer here
+        and must never be touched by a content-only refresh).
+
+        Never blanks existing content: an empty content AND content_html (a
+        failed refresh fetch) is a no-op that leaves the previously-cached
+        copy alone, same non-destructive guard add_read_later's own ON
+        CONFLICT uses. Returns False on that no-op case or when the URL
+        isn't actually in this user's Read Later list; True on a real write."""
+        if not content and not content_html:
+            return False
+        cur = self.conn.execute(
+            "UPDATE read_later SET content=?, content_html=? WHERE user_id=? AND url=?",
+            (content, content_html, user_id, url),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
 
     # -- library queue ---------------------------------------------------------
 
