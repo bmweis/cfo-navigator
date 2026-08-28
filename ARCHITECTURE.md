@@ -2774,6 +2774,45 @@ above the tag bar — so with the form moved it reads "Tags", matching Feed's
 DOM ancestry rather than geometry: on the stacked mobile layout the rail and
 list pane both span the full width, so bounding boxes can't tell them apart.
 
+### Reader cleanliness pass (2026-08) — sponsor/ad/cookie-banner stripping
+
+A backlog item ("Read Later saves aren't scrubbed like Archive saves")
+turned out to have a different root cause than its own premise assumed.
+Read Later's bare-metadata `/save-later` insert was never the gap — every
+Read Later item is resolved through `_resolve_reader_content`'s live-fetch
+branch (`extract_reader_html`) on open, the same function an unsaved Feed
+item or a not-yet-backfilled Archive article goes through. Investigation
+found **neither extraction path had ever had any class/id-based content
+filtering** — `_READER_JUNK_TAGS`/`_BLOCK_TAGS` only recognize chrome by TAG
+NAME (`nav`/`header`/`footer`/`script`/...), so an ordinary
+`<div class="sponsor-block">` or `<div id="cookie-consent-banner">` was
+either collected as an ordinary block (`_extract_content`) or unwrapped,
+keeping its content (`extract_reader_html`) — confirmed live via a saved
+OnlyCFO newsletter rendering a full Brex sponsor block inline, and confirmed
+by inspection that the identical content would have rendered the same way
+via Archive, not just Read Later.
+
+Fixed once, shared by both paths: `linklib/extract.py` gained
+`strip_promotional_chrome(soup)`, called before either path's own tag-name
+junk stripping/block collection. It decomposes (removes entirely) any
+element whose class/id/`data-testid`/`data-test-id`/`data-qa` — normalized
+(lowercased, non-alphanumeric stripped) — contains one of a curated set of
+markers (`_PROMO_CHROME_MARKERS`: sponsor/advertisement/ad-slot/native-ad/
+newsletter-signup/subscribe-widget/cookie-banner/cookie-consent/consent-
+banner/gdpr/onetrust/... — deliberately multi-character, word-ish tokens,
+never a single common word like "ad" that would also match "advice" or
+"gadget"). Matched only against element attributes, never text content, so
+a real paragraph that happens to mention "sponsor" as a plain word is never
+touched. Covered by `tests/test_promo_chrome_stripping.py` — including a
+reproduction of the exact reported bug shape, a false-positive guard for
+common words containing "ad", and mixed-case/separator normalization.
+
+No change was needed to `/save-later` itself, or to Read Later's schema —
+the fix lives entirely in the shared extraction layer both paths already
+funnel through. (A separate, follow-up PR caches Read Later's live fetch at
+save time instead of always live-fetching on open — see the Reader backlog
+investigation notes for that PR's own scope.)
+
 ### Reader content-structure backfill (Phase 5b)
 
 Closes the "Known gap" the Reader-fixes section above flagged: `extract_reader_html()`
