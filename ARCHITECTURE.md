@@ -309,7 +309,7 @@ used manual check rather than a per-turn or overhead cost.
 | `enrichment_cost` | Overhead-cost ledger for `linklib.enrich.enrich()` calls (#105). Unlike `article_embeddings`, this is **append-only**, not upserted — an article can be enriched more than once (backfill force-reruns, a rules-version bump), and each call's real cost stays in history. `article_id` is nullable: `linklib/queue.py`'s pre-save enrichment (a candidate enriched before it's queued or promoted) has no `articles.id` yet, but the API call still cost real money even if the candidate is later dismissed. | `id` (PK, autoincrement), `article_id` (nullable), `model`, `input_tokens`, `output_tokens`, `cost_usd` |
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
-| `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
+| `read_later` | Per-user private bookmark list, never shared or mixed into the archive. `content`/`content_html` (2026-08 follow-up) cache a save-time fetch the same way `articles` does — see the "Read Later content caching + manual refresh" write-up below — write-once-on-empty (never blanked by a failed re-fetch), replaceable via the per-item "Refresh" action (`Library.update_read_later_content`). | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
 | `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). Also backs the "needs manual review" capped-retry tier (Phase 5b follow-up #2, see the write-up below) — `Library._manual_review_article_ids()` counts attempts per article *since its last `url_correction_log` row* (or ever, if never corrected). A THIRD `status` value, `'accepted'` (durability audit item 4), is the "accept as final" override — see the write-up below — and composes with `_manual_review_article_ids()` for free: that query already only looks at the most recent attempt and requires `status='failure'`, so an `'accepted'` row as the latest attempt drops the article out of the manual-review list without any change to that query; `articles_needing_content_backfill()`'s default scope and `count_content_backfill_remaining()` separately exclude the same latest-row-`'accepted'` set (`Library._accepted_content_ids()`) so the override also sticks against future automatic retries, not just the one list. | `article_id` (no FK), `status` (`success` \| `failure` \| `accepted`), `reason` (failure only, or copied from the prior failure onto an `accepted` row for display/undo: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error` \| `defunct-service`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback or migration success, the URL actually used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` \| `'migration'` \| `'medium-fetch'` \| `'medium-search'` \| `'save'` — distinguishes a Wayback-archived-snapshot, known-domain-migration, Medium-platform-tier (`'medium-fetch'` for a direct Exa fetch of the article's own URL, `'medium-search'` for a search-by-title match — see the "Medium-platform tier follow-up" note in §3), or save-time (durability audit item 1 — `ingest_url` itself, not a backfill re-fetch) success/failure from a normal live-fetch success; see the "fetch reliability", "retry backoff", and "Medium-platform Exa fetch tier" notes in §3 below) |
 | `url_correction_log` | Durable trace of every manual URL correction applied via the manual-review CSV import (Phase 5b follow-up #2) — per CLAUDE.md's "every production data change leaves a trace" rule. Written by `Library.apply_article_url_correction()`, one row per correction, `old_url` snapshotted immediately before the `UPDATE` (same precedent as `tool_audit_log`/`community_audit_log`). No SQL-level FK to `articles`. `admin_id` is nullable and always `NULL` today — this app has no per-admin accounts (a single shared secret), so the column is forward-looking only. | `article_id` (no FK), `old_url`, `new_url`, `source` (default `'csv-import'`), `admin_id` (nullable, unused today) |
 
@@ -2819,11 +2819,82 @@ touched. Covered by `tests/test_promo_chrome_stripping.py` — including a
 reproduction of the exact reported bug shape, a false-positive guard for
 common words containing "ad", and mixed-case/separator normalization.
 
-No change was needed to `/save-later` itself, or to Read Later's schema —
-the fix lives entirely in the shared extraction layer both paths already
-funnel through. (A separate, follow-up PR caches Read Later's live fetch at
-save time instead of always live-fetching on open — see the Reader backlog
-investigation notes for that PR's own scope.)
+No change was needed to `/save-later` itself, or to Read Later's schema for
+THIS fix — the scrubbing lives entirely in the shared extraction layer both
+paths already funnel through. (The follow-up PR below covers Read Later's
+own always-live-fetch design, a separate, deliberately deferred decision.)
+
+### Read Later content caching + manual refresh (2026-08 follow-up)
+
+The sponsor-stripping fix above closed the scrubbing gap but left Read
+Later's actual design unchanged: `POST /save-later` was (and, before this
+PR, still is) a bare metadata insert — no fetch, no cache — so every open of
+an unread item re-fetches live via `_resolve_reader_content`, every time,
+with nothing ever stored. Per Brian's explicit scope decision (the Phase 0
+report's tradeoff question), this PR caches Read Later's fetch at save time
+the same way Archive does, rather than leaving it always-live:
+
+- **`read_later` gains `content`/`content_html` columns** (migration +
+  fresh-DB schema, both default `''`). `POST /save-later` now runs the same
+  `linklib.extract.fetch_page` + `extract_reader_html` pair `ingest_url`
+  uses for Archive — reusing PR 1's `strip_promotional_chrome` for free,
+  since it lives inside `extract_reader_html` itself, not a separate call.
+  Best-effort throughout: a fetch failure never blocks or rejects the save
+  (same durability-audit precedent `ingest_url` already set) — the row still
+  saves with empty content, and `_resolve_reader_content` falls through to
+  its pre-existing live-fetch-on-open behavior exactly as before this PR, so
+  a failed save-time fetch is never a regression. A missing caller-supplied
+  `title` now also falls back to the fetched page's own title (the same
+  `page.title` fallback `ingest_url` uses), narrowing how often the Read
+  Later view falls back to its own "(no title)" placeholder.
+- **`Library.add_read_later`'s `ON CONFLICT` write for `content`/
+  `content_html` is CASE-guarded, never overwriting a good cache with an
+  empty one** — a re-save whose own fetch happens to fail can't destroy a
+  previously-cached good copy, the same write-once-on-empty guard
+  `Library.upsert()` already uses for `articles.content`.
+- **`_resolve_reader_content` gained a new cache tier and a `user_id`
+  parameter.** Priority order: an Archive article's own `content_html`/
+  `content` (unchanged, always wins — a real Archive save's backfilled
+  content is a strict upgrade over anything Read-Later-specific) →
+  **Read Later's own cached `content_html`/`content` for this user+url** →
+  the pre-existing live-fetch-and-fallback chain (Wayback, Medium recovery,
+  etc.), unchanged. `GET /api/read-article` resolves the signed-in user's id
+  via `_current_user_id` and passes it through; `GET /read/{article_id}`
+  (by-id only, can never resolve to a Read Later row) doesn't need it. The
+  returned payload gained `is_read_later` (True only when a Read Later cache
+  exists AND there's no Archive article — an Archive article's content isn't
+  what a Read Later refresh would change, so the flag stays False there even
+  if the URL also happens to be queued to Read Later).
+- **`POST /read-later/refresh`** — the manual per-item "Refresh" action from
+  the build brief: re-fetches the URL, replaces the cached copy via a new
+  narrow `Library.update_read_later_content` (deliberately not a call
+  through `add_read_later`, whose other fields have no fresh values to offer
+  a content-only refresh and must never be touched by one). Session-gated
+  (`_is_authed`/`_current_user_id`), NOT token-only — this is a button
+  inside the already-authenticated `/read` UI, not a cross-origin
+  bookmarklet call, so it uses the same session-cookie gate `/api/read-
+  article` and `/library/{id}/tags` already do. Deliberately no automatic
+  staleness detection — it only ever runs on a click. Non-destructive on
+  failure: `update_read_later_content` is the same empty-guard as the
+  `add_read_later` CASE clause, so a failed refresh leaves the previously-
+  cached copy untouched and the route reports `{"ok": false}` (not a 5xx) —
+  live-verified against both a genuinely unreachable URL and (given this
+  sandbox's outbound network restrictions) network-blocked real domains,
+  both correctly leaving the prior cache intact rather than blanking it.
+- **Reader toolbar**: a new "Refresh" button (`RR_ICON_REFRESH`, same
+  labeled-icon treatment as Find/Remove) in `.rr-reader-actions`, gated on
+  `d.is_read_later` — Read-Later-only for now, per the build brief's
+  explicit scope call (Archive's own content is managed by the admin's
+  dedicated backfill/refetch tools, not this button). `rrRefreshReadLater()`
+  POSTs to the new route, then reloads via the existing `rrLoadArticle` path
+  so the refreshed content renders in place without a full page reload.
+
+Deliberately NOT built: automatic staleness detection or a "last refreshed"
+timestamp — the build brief was explicit that this is a manual-only action,
+not automatic. See `tests/test_read_later_caching.py` for the full
+regression coverage (Library-layer write-once guards, save-time fetch +
+scrubbing, refresh success/failure/404, the new cache tier and
+`is_read_later` flag, and the toolbar markup).
 
 ### Reader content-structure backfill (Phase 5b)
 
@@ -4869,12 +4940,16 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   token-only access by design), so the write is attributed to
   `Library.default_admin_user_id()` — the earliest admin account, same
   query and reasoning `_migrate_read_later_user_scope`'s one-time backfill
-  already used for the table's pre-multi-user rows. No `ingest_url`/fetch/
-  enrichment happens — `add_read_later` is a plain metadata insert — so the
-  bookmarklet skips the tags prompt entirely (Read Later has no tags
-  concept) and sends `document.title` along instead, for an immediate label
-  in the Reader's Read Later view rather than "(no title)" until the page
-  is opened there.
+  already used for the table's pre-multi-user rows. No enrichment happens —
+  `read_later` has no tags concept, so the bookmarklet skips the tags prompt
+  entirely and sends `document.title` along instead. **Content caching
+  (2026-08 follow-up, see the "Read Later content caching + manual refresh"
+  section above) — `add_read_later` is no longer a plain metadata insert**:
+  `/save-later` now runs the same `fetch_page`/`extract_reader_html` pair
+  `ingest_url` uses, best-effort, so an unread item opens instantly from its
+  own cache instead of always live-fetching, and a missing `document.title`
+  now also falls back to the fetched page's own title before ever reaching
+  the Reader's "(no title)" placeholder.
 - **`/admin/backup-now` is a deliberate, narrowly-scoped exception to the
   canonical-host redirect (Phase O).** The daily backup GitHub Action calls
   this one route directly on the legacy Railway hostname on purpose, to

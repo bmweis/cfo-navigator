@@ -29,6 +29,7 @@ Private routes (require login cookie; API routes also accept a token):
     POST /feed/read-later      Add/remove a feed item from the signed-in user's Read Later list
     POST /save                 Capture a link into the Archive (token auth — used by bookmarklet)
     POST /save-later           Capture a link into Read Later (token auth — used by its own bookmarklet)
+    POST /read-later/refresh   Re-fetch and replace a Read Later item's cached content (session auth)
     GET  /api/search           JSON search API
     GET  /bookmarklet          One-click Archive saver script
     GET  /read-later-bookmarklet  One-click Read Later saver script
@@ -16578,14 +16579,24 @@ async def tools_interest(tool_id: int, request: Request):
 OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferred_sites.opml"))
 
 
-def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
+def _resolve_reader_content(id: int = 0, url: str = "", user_id: int | None = None) -> dict | None:
     """Resolve an id-or-url to reader content: DB lookup by id first (using
     cached content when it's substantial), falling back to a live fetch by
     url. Shared by GET /read/{article_id} (a standalone HTML page) and
     GET /api/read-article (the JSON endpoint the merged /read page's reader
     pane calls) — exactly one implementation of "resolve id-or-url to article
     content," not two. Returns None when neither an id nor a url resolves to
-    anything."""
+    anything.
+
+    `user_id` (2026-08 Reader cleanliness pass) additionally checks the
+    signed-in user's Read Later list for a cached copy of this url, used only
+    as a fallback BELOW an Archive article's own cache — an Archive save's
+    backfilled content_html is always the strict upgrade, so this never
+    competes with it, only fills in when there's no `articles` row at all (or
+    the row itself has nothing cached yet). Optional and defaults to None
+    (skips the Read Later lookup entirely) so `reader_single`'s by-id call,
+    which can never resolve to a Read Later row anyway, doesn't need to
+    thread a user_id through for no benefit."""
     from linklib.extract import fetch_page, extract_reader_html
     import html as html_mod
 
@@ -16620,6 +16631,15 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
                 matched_by_url = True
         finally:
             lib.close()
+
+    rl_row = None
+    if user_id is not None:
+        lib = _lib()
+        try:
+            rl_row = lib.get_read_later_by_url(user_id, url)
+        finally:
+            lib.close()
+    is_read_later = rl_row is not None
 
     # Only the plain-text `content` cache is skipped for a url-matched row:
     # using it there would silently downgrade a Feed item that currently reads
@@ -16661,6 +16681,17 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
     elif cached_content and len(cached_content) > 200:
         title = cached_title or url
         content = cached_content
+    elif rl_row and rl_row.get("content_html"):
+        # Read Later's own cache (2026-08 Reader cleanliness pass) — only
+        # reachable when there's no Archive article content above to prefer
+        # already, so this never competes with a real Archive save's cache,
+        # only fills in for a url that's ONLY ever been queued to Read Later.
+        title = cached_title or rl_row.get("title") or url
+        content = rl_row["content_html"]
+        is_structured = True
+    elif rl_row and rl_row.get("content") and len(rl_row["content"]) > 200:
+        title = cached_title or rl_row.get("title") or url
+        content = rl_row["content"]
     else:
         try:
             page = fetch_page(url)
@@ -16761,7 +16792,7 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
         "id": article["id"] if article else None,
         "url": url,
         "title": title,
-        "source": (article or {}).get("source", "") or "",
+        "source": (article or {}).get("source", "") or (rl_row or {}).get("source", "") or "",
         "author": (article or {}).get("author", "") or "",
         "published_at": (article or {}).get("published_at", "") or "",
         "tags": tags,
@@ -16770,6 +16801,11 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
         "body_html": body_html,
         "has_content": bool(content),
         "content_via": content_via,
+        # Gates the reader toolbar's "Refresh" button (2026-08 Reader
+        # cleanliness pass) — only meaningful (and only ever True) when there's
+        # no Archive `article` id, since an Archive save's own content isn't
+        # what a Read Later refresh would change.
+        "is_read_later": is_read_later and not article,
     }
 
 
@@ -16781,7 +16817,12 @@ def api_read_article(request: Request, id: int = 0, url: str = ""):
         raise HTTPException(status_code=401, detail="unauthorized")
     if not id and not url:
         raise HTTPException(status_code=400, detail="id or url required")
-    data = _resolve_reader_content(id=id, url=url)
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+    finally:
+        lib.close()
+    data = _resolve_reader_content(id=id, url=url, user_id=user_id)
     if data is None:
         raise HTTPException(status_code=404, detail="not found")
     return JSONResponse(data)
@@ -17587,6 +17628,12 @@ var RR_ICON_TAG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" s
 // separate admin check on this button since anyone in the Reader already is
 // an admin).
 var RR_ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>';
+// Refresh glyph for the Read Later per-item "Refresh" action (2026-08 Reader
+// cleanliness pass) — a manual re-fetch, not automatic staleness detection.
+// Read-Later-only for now: an Archive article's own content is managed by
+// the admin's dedicated backfill/refetch tools, not this button (see
+// rrRenderArticle's is_read_later gate).
+var RR_ICON_REFRESH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
 // In-article find (a separate, article-scoped search — not the list search).
 var rrFindMatches = [];
 var rrFindIndex = -1;
@@ -17654,6 +17701,14 @@ function rrRenderArticle(d) {{
         // "+ Save" buttons already get (text, not just a glyph).
         '<button onclick="rrToggleFind()" title="Find in article" class="rr-find-toggle">' +
           RR_ICON_SEARCH + '<span>Find</span></button>' +
+        // Read Later's per-item "Refresh" action (2026-08 Reader cleanliness
+        // pass) — only shown for a Read Later item (never an Archive
+        // article's own content, per d.is_read_later's own gate — see
+        // _resolve_reader_content). Same toolbar area as Find/Remove/Original,
+        // per the build brief.
+        (d.is_read_later ? '<button id="rr-refresh-btn" onclick="rrRefreshReadLater()" ' +
+          'title="Re-fetch this article" class="rr-find-toggle">' + RR_ICON_REFRESH +
+          '<span>Refresh</span></button>' : '') +
         // Only for a saved article — there's nothing to remove from the
         // library for a Feed/Read Later item that was never saved.
         (isSaved ? '<button id="rr-delete-btn" onclick="rrDeleteCurrent()" title="Remove from library" ' +
@@ -18039,6 +18094,37 @@ async function rrToggleReadLaterCurrent() {{
       btn.innerHTML = !isOn ? '&#10003; Read later' : '&#128204; Read later';
     }}
   }} finally {{ btn.disabled = false; }}
+}}
+// Manual per-item "Refresh" for a Read Later article (2026-08 Reader
+// cleanliness pass) — re-fetches the URL server-side and replaces the
+// cached copy, then reloads the pane via the same rrLoadArticle path a
+// fresh open would use, so the freshly-scrubbed content renders in place
+// without a full page reload or losing find/scroll state longer than the
+// refresh itself takes. No automatic staleness detection — this only ever
+// runs on a click.
+async function rrRefreshReadLater() {{
+  if (!rrCurrent || !rrCurrent.url) return;
+  var btn = document.getElementById('rr-refresh-btn');
+  if (btn) {{ btn.disabled = true; btn.querySelector('span').textContent = 'Refreshing\\u2026'; }}
+  try {{
+    var r = await fetch('/read-later/refresh', {{method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{url: rrCurrent.url}})}});
+    var result = r.ok ? await r.json() : {{ok: false}};
+    if (result.ok) {{
+      await rrLoadArticle(rrCurrent.id, rrCurrent.url, {{
+        title: rrCurrent.title, source: rrCurrent.source,
+        pub: rrCurrent.published_at, summary: ''
+      }});
+    }} else if (btn) {{
+      btn.querySelector('span').textContent = 'Couldn\\u2019t refresh';
+      setTimeout(function() {{ if (btn) btn.querySelector('span').textContent = 'Refresh'; }}, 2500);
+    }}
+  }} catch (e) {{
+    if (btn) btn.querySelector('span').textContent = 'Couldn\\u2019t refresh';
+  }} finally {{
+    if (btn) btn.disabled = false;
+  }}
 }}
 // Permanently removes the currently open article from the library. The
 // route (POST /library/{{id}}/delete) redirects on success rather than
@@ -19226,12 +19312,33 @@ async def save_later(request: Request, token: str | None = None):
     resolves the target list the same way the table's own one-time migration
     already did for its pre-multi-user rows: the earliest admin account
     (Library.default_admin_user_id), since that's Brian's own account and
-    this capture path exists for him alone. No article row is created and no
-    fetch/enrichment happens — add_read_later is a plain metadata insert, so
-    this is a much lighter write than /save's ingest_url. `title` is
-    optional (the bookmarklet sends `document.title`; a Shortcut may not) —
-    a missing title just shows as "(no title)" in the Reader's Read Later
-    view until the article is actually opened there."""
+    this capture path exists for him alone.
+
+    Content caching (2026-08 Reader cleanliness pass): this now does a real
+    fetch, same as /save's ingest_url — a bare metadata insert with no fetch
+    at all meant every open of an unread item re-fetched live with nothing
+    ever cached, and (the actual bug report) meant sponsor/ad/cookie-banner
+    content that the shared extraction layer now scrubs never got scrubbed
+    for Read Later at save time either. `linklib.extract.fetch_page` +
+    `extract_reader_html` are reused directly — no separate scrubbing
+    mechanism, the fix lives entirely in extract.py and applies here for
+    free. Deliberately best-effort: a fetch failure (dead link, bot-block,
+    timeout — any reason) never blocks or rejects the save, same precedent
+    as `ingest_url`'s own durability-audit guard — the row still saves with
+    empty content, and `_resolve_reader_content` falls through to its
+    existing live-fetch-on-open behavior exactly as it did before this PR,
+    so a failed save-time fetch is never a regression from today. `title` is
+    still optional — the bookmarklet sends `document.title`, but a Shortcut
+    may not, and a fresh fetch can now fill in a missing one from the page's
+    own <title>/og:title, the same fallback ingest_url already uses via
+    fetch_page's title extraction — the (no title) fallback in the Reader's
+    Read Later view is now reached only when both the caller AND the fetch
+    itself have nothing.
+
+    This does add real latency to the request (a live HTTP fetch on an
+    interactive POST) — an accepted, deliberate tradeoff over the previous
+    instant-but-unprocessed save, per the Reader/Library backlog
+    investigation's own scope decision."""
     _check_token(token or request.headers.get("X-Save-Token"))
     payload = {}
     try:
@@ -19244,13 +19351,79 @@ async def save_later(request: Request, token: str | None = None):
         raise HTTPException(status_code=400, detail="url required")
     title = (payload.get("title") or "").strip()
     source = (payload.get("source") or "").strip()
+
+    content, content_html = "", ""
+    try:
+        from linklib.extract import fetch_page, extract_reader_html
+        page = fetch_page(url)
+        if not title:
+            title = page.title or title
+        if page.raw_html:
+            content_html = extract_reader_html(page.raw_html, url)
+        content = page.content or ""
+    except Exception:
+        pass  # best-effort — see docstring; never blocks the save
+
     lib = _lib()
     try:
         user_id = lib.default_admin_user_id()
         if user_id is None:
             raise HTTPException(status_code=503, detail="no admin account configured")
-        lib.add_read_later(user_id=user_id, url=url, title=title, source=source)
+        lib.add_read_later(user_id=user_id, url=url, title=title, source=source,
+                           content=content, content_html=content_html)
         return JSONResponse({"ok": True})
+    finally:
+        lib.close()
+
+
+@app.post("/read-later/refresh")
+async def read_later_refresh(request: Request):
+    """Manual per-item "Refresh" action for a Read Later row — re-fetches the
+    URL and replaces its cached content, on demand only (no automatic
+    staleness detection). Session-gated like the rest of the Reader
+    (`_is_authed`), unlike /save-later's token-only auth — this is a button
+    inside the already-authenticated /read UI, not a cross-origin
+    bookmarklet call, so it can and should use the ordinary session cookie
+    the same way /api/read-article and /library/{id}/tags already do.
+
+    Never blocks on a failed fetch: `Library.update_read_later_content`'s own
+    non-destructive guard means an unsuccessful refresh leaves whatever was
+    already cached untouched rather than blanking it, and this route surfaces
+    that as `{"ok": false}` (not a 5xx) so the reader pane can show a plain
+    "couldn't refresh" status without treating it as a hard error."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        if lib.get_read_later_by_url(user_id, url) is None:
+            raise HTTPException(status_code=404, detail="not in Read Later")
+    finally:
+        lib.close()
+
+    content, content_html = "", ""
+    try:
+        from linklib.extract import fetch_page, extract_reader_html
+        page = fetch_page(url)
+        if page.raw_html:
+            content_html = extract_reader_html(page.raw_html, url)
+        content = page.content or ""
+    except Exception:
+        pass
+
+    lib = _lib()
+    try:
+        ok = lib.update_read_later_content(user_id, url, content, content_html)
+        return JSONResponse({"ok": ok})
     finally:
         lib.close()
 
