@@ -3982,6 +3982,36 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `max_tokens`, the generalized ampersand rule, the em-dash backstop, and
   real `voice_core` all already fixed and verified clean at full catalog
   scale before this incident was found).
+- **`regen_ai_drafted_fields.py`'s post-write verify step was comparing
+  against the wrong string — false "VERIFY FAILED"s on perfectly good
+  writes, caught live during the description-sync recovery run
+  (2026-08).** ~8 of the first 27 tools targeted by `--field description
+  --ids <list> --apply` (Tabs, Zip, Maxio, Pigment, Orb, Coupa, Datarails,
+  Rillet, ...) logged `VERIFY FAILED — post-write read-back did not
+  match`. Root cause, confirmed by direct code read before touching
+  anything: `Library.update_tool()` (and every other write method this
+  script calls — `set_tool_agent_taxonomy_draft`,
+  `update_tool_differentiation`, `upsert_community_profile`) runs every
+  prose field through `normalize_voice_mechanics` (the spaced-em-dash
+  mechanical backstop from earlier tonight's PR) before writing — but all
+  four of this script's verify blocks compared the freshly re-fetched
+  (and therefore already-normalized) DB value against
+  `draft.<field>.strip()`, the RAW, pre-normalization string the model
+  returned. Whenever a draft's raw text contained a spaced em dash, the
+  two strings genuinely differed, so the comparison tripped false even
+  though the write succeeded and the stored content was correctly
+  formatted — the write was never the problem, only the check. Reproduced
+  end-to-end with a mocked generator against a temp DB before writing any
+  fix: the exact `VERIFY FAILED` message on spaced-em-dash content, with
+  the actual stored row confirmed correct
+  (`description`/`description_needs_verification=0`) despite the false
+  failure. Fixed by wrapping the draft-side comparison in the same
+  `normalize_voice_mechanics()` call in all four verify blocks — apples
+  to apples against what's actually stored, not the model's raw output.
+  **The already-"failed" tools from the recovery run needed no retry** —
+  their content was already correct; only the log's status line was
+  wrong. Confirmed by direct inspection rather than re-spending API cost
+  regenerating already-good content.
 - **`generate_tool_differentiation` joins the D1 content-exclusion rules
   (2026-08) — the gap the blast-radius spot-check bullet above flagged and
   deferred.** Investigated first: `generate_tool_differentiation` already
