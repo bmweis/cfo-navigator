@@ -3788,6 +3788,36 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   fix_spaced_em_dashes.py --apply` via `railway ssh`; re-running the
   blast-radius report afterward is the actual "0 legacy-shape rows"
   verification, not merely asserted here.
+- **Spaced-em-dash incident, closed — and `report_regen_blast_radius.py`
+  made log-independent (2026-08) after the incident's own verification
+  exposed the gap.** Brian ran the full sequence via `railway ssh`:
+  `fix_spaced_em_dashes.py` fixed 456/456 flagged fields, 0 failures, 0
+  read-back mismatches — but verification had to fall back to that
+  script's own preview/apply/read-back cycle rather than a blast-radius
+  re-run, because the JSONL log from the em-dash PR's own merge-triggered
+  redeploy never made it to the persistent volume (a fresh container on
+  merge; the log lived only in the old container's local filesystem). This
+  closes the full citation-tag-through-em-dash investigation: citation
+  pollution, the Community profile generator, Description truncation, the
+  ampersand rule, and spaced em dashes are all confirmed clean at full
+  catalog scale. **Fixed the log-fragility gap directly, not just noted
+  it**: `scripts/report_regen_blast_radius.py` now defaults to scanning
+  the full current `tools`/`community_profiles` catalog directly (every
+  row, `approved` or not — a pending tool's drafted content matters before
+  approval too) when no `--log-file` is passed, rather than requiring one
+  — pollution/legacy-shape are properties of what's actually stored right
+  now, not of any particular regen run, so a log was only ever a
+  scoping convenience, never a structural requirement. `--log-file`
+  still works exactly as before when passed (repeatable, same
+  dropped-SSH-session dedup), for the one thing DB-scan mode genuinely
+  can't reconstruct — per-attempt FAILURE detail, which needs real
+  attempt-status data no full-catalog scan has; that section prints "not
+  tracked in DB-scan mode" instead of a false zero. Implemented as the
+  "small, fairly mechanical change" it was scoped as: the existing
+  `_analyze`/`_print_sections`/`_print_dedup_summary` machinery is
+  untouched — DB-scan mode just synthesizes a `status="success"` row per
+  (entity, field) for every tool and every community with a profile row,
+  feeding the same pipeline the log-scoped path always used.
 - **`voice_core`/`voice_fpa_buddy`/`voice_matchmaker` visibility — the silent
   code-level fallback is retired for real (2026-08).** Every resolution path
   used to do `lib.get_setting(key) or CODE_DEFAULT_CONSTANT`, which made it

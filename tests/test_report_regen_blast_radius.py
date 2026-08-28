@@ -1,9 +1,12 @@
 """scripts/report_regen_blast_radius.py — community-side extension (2026-08
-follow-up). The original script only ever analyzed tools; this covers the
-new community_profile analysis (failures / cite-tag pollution / legacy-shape
-across all 22 prose-capable columns), the per-(entity_type, entity_id, field)
-dedup across multiple --log-file inputs (the dropped-SSH-session rerun case),
-and that the script remains fully read-only.
+follow-up) plus the log-independent DB-scan default (2026-08 second
+follow-up, prompted by the real em-dash cleanup's own JSONL log being lost
+to a redeploy before this report could read it). Covers: community_profile
+analysis (failures / cite-tag pollution / legacy-shape across all 22
+prose-capable columns), the per-(entity_type, entity_id, field) dedup
+across multiple --log-file inputs (the dropped-SSH-session rerun case), the
+full-catalog DB-scan default when no --log-file is passed at all, and that
+the script remains fully read-only in both modes.
 
 Run as a subprocess (not an import-and-call) so stdout capture and argv
 parsing are exercised exactly the way `railway ssh` will invoke it."""
@@ -153,6 +156,87 @@ def test_tool_and_community_ids_are_not_conflated(db_path):
     assert "[community 1] Acme Circle" in out
     assert "Distinct tools needing regeneration (any field): 1" in out
     assert "Distinct communities needing regeneration (any field): 1" in out
+
+
+def test_db_scan_mode_finds_dirty_entities_with_no_log_file(db_path):
+    """The new default: omit --log-file entirely and the script scans the
+    full current catalog directly."""
+    lib = Library(db_path)
+    tool_id = lib.add_tool("Acme Tool", "clean desc", "https://acme-tool.example", [], approved=1)
+    lib.conn.execute(
+        "UPDATE tools SET agent_taxonomy_note=? WHERE id=?",
+        ("flags anomalies — reviewed by a human", tool_id),
+    )
+    cid = lib.add_community("Acme Circle", "https://acme-circle.example", "demo", "Free", [], approved=1)
+    lib.upsert_community_profile(cid, ideal_member="great fit")
+    lib.conn.execute(
+        "UPDATE community_profiles SET anti_fit=? WHERE community_id=?",
+        ("not a fit — too early", cid),
+    )
+    lib.conn.commit()
+    lib.close()
+
+    out = _run(db_path)  # no log files passed at all
+    assert "Mode: DB-scan (no --log-file supplied)" in out
+    assert "[tool 1] Acme Tool — agent_taxonomy (agent_taxonomy_note): spaced em dash" in out
+    assert "[community 1] Acme Circle — community_profile (anti_fit): spaced em dash" in out
+    assert "Distinct tools needing regeneration (any field): 1" in out
+    assert "Distinct communities needing regeneration (any field): 1" in out
+
+
+def test_db_scan_mode_excludes_clean_entities(db_path):
+    """A tool/community with no violations at all must not appear anywhere
+    in DB-scan mode's output — proves the scan isn't just flagging every
+    row it touches."""
+    lib = Library(db_path)
+    lib.add_tool("Clean Tool", "nothing wrong here at all", "https://clean-tool.example", [], approved=1)
+    cid = lib.add_community("Clean Circle", "https://clean-circle.example", "demo", "Free", [], approved=1)
+    lib.upsert_community_profile(cid, ideal_member="a genuinely clean fit", anti_fit="also clean")
+    lib.close()
+
+    out = _run(db_path)
+    assert "Distinct tools needing regeneration (any field): 0" in out
+    assert "Distinct communities needing regeneration (any field): 0" in out
+    assert "Clean Tool" not in out
+    assert "Clean Circle" not in out
+
+
+def test_db_scan_mode_covers_unapproved_tools_too(db_path):
+    """A pending (unapproved) tool's drafted content matters before it's
+    ever approved — DB-scan mode must not silently skip it."""
+    lib = Library(db_path)
+    tool_id = lib.add_tool("Pending Tool", "clean desc", "https://pending-tool.example", [], approved=0)
+    lib.conn.execute(
+        "UPDATE tools SET agent_taxonomy_note=? WHERE id=?",
+        ("flags anomalies — reviewed by a human", tool_id),
+    )
+    lib.conn.commit()
+    lib.close()
+
+    out = _run(db_path)
+    assert "[tool 1] Pending Tool — agent_taxonomy (agent_taxonomy_note): spaced em dash" in out
+
+
+def test_db_scan_mode_failures_section_says_not_tracked(db_path):
+    lib = Library(db_path)
+    lib.close()
+    out = _run(db_path)
+    assert "not tracked in DB-scan mode" in out
+
+
+def test_log_scoped_mode_still_works_when_log_file_is_passed(db_path):
+    """Regression guard: passing --log-file must still produce the original
+    log-scoped FAILURES section, not silently fall into DB-scan mode."""
+    lib = Library(db_path)
+    lib.close()
+    log = _write_log([
+        {"entity_type": "tool", "entity_id": 999, "name": "Ghost",
+         "field": "description", "status": "failure", "detail": "boom"},
+    ])
+    out = _run(db_path, log)
+    assert "Mode: log-scoped" in out
+    assert "[tool 999] Ghost — field='description'" in out
+    assert "boom" in out
 
 
 def test_script_makes_no_write_calls():

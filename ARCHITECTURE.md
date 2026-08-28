@@ -2419,6 +2419,26 @@ Details worth knowing:
   actual underlying column; it also accepts multiple `--log-file` inputs,
   deduplicated to each entity's LAST logged status, to match the real shape
   of a run spanning several dropped SSH sessions.
+- **`report_regen_blast_radius.py` made log-independent (2026-08 follow-up)
+  — a real gap found the moment the em-dash cleanup above actually ran in
+  production.** The cleanup itself succeeded (456/456 fields fixed, verified
+  via its own write-then-read-back), but the blast-radius report couldn't
+  verify it afterward the way CLAUDE.md's own sequencing described: the
+  JSONL log the regen run wrote lived only in that container's local
+  filesystem, and the em-dash PR's merge triggered a fresh Railway deploy —
+  a new container, so the log never reached persistent storage. The report
+  now scans the full current catalog directly by default (every `tools` row
+  regardless of `approved`, every `community_profiles` row) instead of
+  requiring `--log-file` — pollution/legacy-shape are properties of stored
+  content, not of a particular run, so the log was only ever a scoping
+  convenience. `--log-file` still works unchanged when passed (same
+  multi-file dedup), for the one thing a full-catalog scan structurally
+  can't reconstruct — per-attempt failure detail — which DB-scan mode
+  reports as "not tracked" rather than a misleading zero. Implementation is
+  additive, not a rewrite: DB-scan mode synthesizes a `status="success"` row
+  per (entity, field) for every catalog row and feeds it through the exact
+  same `_analyze`/`_print_sections`/`_print_dedup_summary` pipeline the
+  log-scoped path already used.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything
