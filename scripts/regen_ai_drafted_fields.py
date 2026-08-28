@@ -189,6 +189,7 @@ from linklib.enrich import (
     generate_tool_differentiation,
     generate_community_profile,
 )
+from linklib.voice_mechanics import normalize_voice_mechanics
 from webapp.app import _validate_citations_payload
 
 # -- --field (2026-08 follow-up) --------------------------------------------
@@ -368,11 +369,17 @@ def _regen_tool_description(lib: Library, tool: dict, model: str, voice_core: st
     else:
         lib.clear_entity_citations("tool", tool_id, "description")
 
+    # Compare against the NORMALIZED value, not the raw draft — Library.
+    # update_tool() runs every prose field through normalize_voice_mechanics
+    # (the spaced-em-dash mechanical backstop) before writing, so a draft
+    # containing a spaced em dash is stored correctly-but-different from
+    # draft.description.strip() itself. Comparing against the raw draft
+    # made this verify step fail on perfectly good, already-fixed writes.
     verify = lib.get_tool(tool_id)
     ok = bool(
         verify
-        and verify["description"] == draft.description.strip()
-        and verify["summary"] == draft.summary.strip()
+        and verify["description"] == normalize_voice_mechanics(draft.description.strip())
+        and verify["summary"] == normalize_voice_mechanics(draft.summary.strip())
         and verify["description_needs_verification"] == 0
     )
     if not ok:
@@ -439,10 +446,13 @@ def _regen_tool_agent_taxonomy(lib: Library, tool: dict, model: str, voice_core:
     else:
         lib.clear_entity_citations("tool", tool_id, "agent_taxonomy")
 
+    # Same normalize-before-compare fix as description above —
+    # set_tool_agent_taxonomy_draft also runs agent_taxonomy_note through
+    # normalize_voice_mechanics before writing.
     verify = lib.get_tool(tool_id)
     ok = bool(
         verify
-        and verify["agent_taxonomy_note"] == result.agent_taxonomy_note.strip()
+        and verify["agent_taxonomy_note"] == normalize_voice_mechanics(result.agent_taxonomy_note.strip())
         and verify["agent_taxonomy_needs_verification"] == 0
     )
     if not ok:
@@ -504,10 +514,14 @@ def _regen_tool_differentiation(lib: Library, tool: dict, model: str, voice_core
     # No entity_citations mechanism for this field — ToolDifferentiationDraft
     # carries no `citations` attribute at all, confirmed by reading enrich.py.
 
+    # Same normalize-before-compare fix as description above —
+    # update_tool_differentiation also runs competitive_differentiation
+    # through normalize_voice_mechanics before writing.
     verify = lib.get_tool(tool_id)
     ok = bool(
         verify
-        and verify["competitive_differentiation"] == draft.competitive_differentiation.strip()
+        and verify["competitive_differentiation"] == normalize_voice_mechanics(
+            draft.competitive_differentiation.strip())
         and verify["competitive_differentiation_needs_verification"] == 0
     )
     if not ok:
@@ -583,11 +597,14 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
     else:
         lib.clear_entity_citations("community", community_id, "community_profile")
 
+    # Same normalize-before-compare fix as description above —
+    # upsert_community_profile also runs every prose field (including these
+    # two) through normalize_voice_mechanics before writing.
     verify = lib.get_community_profile(community_id)
     ok = bool(
         verify
-        and verify["ideal_member"] == draft.ideal_member.strip()
-        and verify["verdict_summary"] == draft.verdict_summary.strip()
+        and verify["ideal_member"] == normalize_voice_mechanics(draft.ideal_member.strip())
+        and verify["verdict_summary"] == normalize_voice_mechanics(draft.verdict_summary.strip())
         and verify["needs_review"] == 0
     )
     if not ok:
