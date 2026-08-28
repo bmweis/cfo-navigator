@@ -3990,6 +3990,25 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   named inside Maxima's own leaked text, not a tool in the DB, so Maxima is
   the only entry #445 needs to cover unless content review turns up
   another.)
+- **`scripts/regen_ai_drafted_fields.py` gained a `--field` flag (2026-08
+  follow-up)** — requested to make #445's re-run genuinely cheap: a
+  full-catalog `--only tools --field competitive_differentiation --apply`
+  pass (no `--ids`) regenerates just Differentiation across all ~157 tools,
+  instead of the original design's 3-fields-per-tool cost, and doubles as a
+  sweep for any OTHER tool with a similar leaked-vendor-stat pattern that
+  content review hasn't surfaced yet — not just Maxima. Repeatable and/or
+  comma-separated (`--field description --field agent_taxonomy`,
+  `--field description,agent_taxonomy` — both forms combine), normalized
+  back to the real per-tool regeneration order regardless of command-line
+  order. Omitting it regenerates all three fields, exactly as before this
+  flag existed — a true no-op for every prior invocation, covered by
+  `tests/test_regen_field_flag.py` (this script's first real committed
+  test file — its earlier hardening rounds were smoke-tested by hand
+  against a temp DB, per those bullets above, but never given a permanent
+  test). Has no effect on Communities' single `community_profile` draft,
+  which has no field concept to narrow — `--field` with `--only
+  communities` prints a note and changes nothing, rather than silently
+  doing nothing with no signal.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
