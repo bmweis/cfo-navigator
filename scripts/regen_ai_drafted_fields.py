@@ -48,6 +48,18 @@ needs_review value:
     carry forward except the confidence dict for the 12 confidence-tracked
     fields, which the fresh draft already supplies for all 12.
 
+Stale "Verified by X on Y" stamp fix (2026-08): forcing needs_verification/
+needs_review=0 above only suppresses the review BADGE — it does not touch
+narrative_review_log, so without an explicit signal the edit page would go
+on showing a prior human's stamp against content that human never actually
+saw. Every write call above also passes `clear_description_verification_stamp`/
+`clear_verification_stamp=True` (agent taxonomy needs no such kwarg — see
+`Library.set_tool_agent_taxonomy_draft`'s docstring), so a regenerated
+field always renders "never verified" until someone explicitly clicks
+Mark verified again — same outcome a human clicking Generate/Refresh/Save
+in the live admin UI produces, just reached via this script's different
+needs_verification=0 bypass instead of the live routes' =1.
+
 entity_citations is written/cleared exactly as the live admin routes do
 (`Library.set_entity_citations` / `clear_entity_citations`) for
 Description, Agent taxonomy, and Community profile — completely
@@ -361,6 +373,11 @@ def _regen_tool_description(lib: Library, tool: dict, model: str, voice_core: st
         vendor_email=current.get("vendor_email") or "", warm_intro_enabled=current.get("warm_intro_enabled") or 0,
         vendor_name=current.get("vendor_name") or "", summary=draft.summary,
         description_needs_verification=0, description_ai_confident=int(bool(draft.confident)),
+        # Stale-stamp fix (2026-08): forcing needs_verification=0 above is
+        # this script's own deliberate bypass of the review badge, but the
+        # content is still a fresh, not-yet-human-reviewed draft — the old
+        # "Verified by X on Y" stamp must not go on showing against it.
+        clear_description_verification_stamp=True,
     )
     # Citations-validation parity (hardening item 6).
     validated_citations = _validated_citations(draft.citations)
@@ -510,6 +527,11 @@ def _regen_tool_differentiation(lib: Library, tool: dict, model: str, voice_core
     lib.update_tool_differentiation(
         tool_id, draft.competitive_differentiation,
         needs_verification=0, ai_confident=int(bool(draft.confident)),
+        # Stale-stamp fix (2026-08) — same reasoning as the description call
+        # above: needs_verification=0 is this script's own bypass, but this
+        # is still a fresh draft, so any old "Verified by X on Y" stamp must
+        # be cleared.
+        clear_verification_stamp=True,
     )
     # No entity_citations mechanism for this field — ToolDifferentiationDraft
     # carries no `citations` attribute at all, confirmed by reading enrich.py.
@@ -582,6 +604,11 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
         resources_included=draft.resources_included, needs_review=0,
         stage_focus=draft.stage_focus, jobs_program=draft.jobs_program,
         team_or_individual=draft.team_or_individual, confidence=draft.confidence,
+        # Stale-stamp fix (2026-08) — same reasoning as the tool-side calls
+        # above: needs_review=0 is this script's own bypass, but this is
+        # still a fresh draft, so any old "Reviewed by X on Y" stamp must be
+        # cleared.
+        clear_verification_stamp=True,
     )
     # Citations-validation parity (hardening item 6) — same reasoning as
     # Description above: the Community profile's Generate call is also

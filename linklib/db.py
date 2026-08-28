@@ -2120,6 +2120,13 @@ class Library:
             # path unchanged, same as today, until it's next refreshed.
             "ALTER TABLE read_later ADD COLUMN content TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE read_later ADD COLUMN content_html TEXT NOT NULL DEFAULT ''",
+            # Stale "Verified by X on Y" stamp fix (2026-08) — narrative_review_log
+            # stays append-only (nothing is ever deleted, per its own schema
+            # comment), but get_latest_narrative_review must stop surfacing a
+            # row once the field it verified has been regenerated. NULL means
+            # "still the live stamp"; a non-NULL timestamp means "superseded by
+            # a later regeneration" — see Library._supersede_narrative_review.
+            "ALTER TABLE narrative_review_log ADD COLUMN superseded_at TEXT",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -2806,17 +2813,40 @@ class Library:
 
     def get_latest_narrative_review(self, entity_type: str, field_type: str,
                                      item_id: int) -> Optional[dict]:
-        """Most recent "Mark verified" row for one field on one entity, with
-        the verifying admin's username joined in — the "Verified by X on Y"
-        line on the edit page. None if it's never been explicitly verified."""
+        """Most recent, still-live "Mark verified" row for one field on one
+        entity, with the verifying admin's username joined in — the
+        "Verified by X on Y" line on the edit page. None if it's never been
+        explicitly verified, OR if it was verified but the field has since
+        been regenerated (superseded_at IS NOT NULL — see
+        _supersede_narrative_review) — either way, "never verified" is the
+        correct rendering for the CURRENT content."""
         row = self.conn.execute(
             """SELECT a.*, u.username AS admin_username, u.name AS admin_name
                FROM narrative_review_log a LEFT JOIN users u ON u.id = a.admin_id
-               WHERE a.entity_type=? AND a.field_type=? AND a.item_id=?
+               WHERE a.entity_type=? AND a.field_type=? AND a.item_id=? AND a.superseded_at IS NULL
                ORDER BY a.created_at DESC, a.id DESC LIMIT 1""",
             (entity_type, field_type, item_id),
         ).fetchone()
         return dict(row) if row else None
+
+    def _supersede_narrative_review(self, entity_type: str, field_type: str, item_id: int) -> None:
+        """Marks every currently-live narrative_review_log row for this field
+        as superseded, so get_latest_narrative_review stops returning it and
+        the edit page renders "never verified" instead of a stale "Verified
+        by X on Y" stamp. Called whenever a field is regenerated (a fresh,
+        not-yet-human-reviewed AI draft is written) — see the call sites in
+        set_tool_agent_taxonomy_draft/update_tool/update_tool_differentiation/
+        upsert_community_profile. Rows are marked, never deleted:
+        narrative_review_log's append-only history (list_narrative_review_log)
+        is preserved unchanged; superseded_at IS NULL means "is this the live
+        stamp," not "does this row exist." A no-op if there's no live row to
+        supersede (a field that's never been verified)."""
+        self.conn.execute(
+            """UPDATE narrative_review_log SET superseded_at=?
+               WHERE entity_type=? AND field_type=? AND item_id=? AND superseded_at IS NULL""",
+            (_now(), entity_type, field_type, item_id),
+        )
+        self.conn.commit()
 
     def list_narrative_review_log(self, limit: int = 500) -> list[dict]:
         """Full log, newest first — mirrors list_tool_audit_log's shape.
@@ -4502,7 +4532,8 @@ class Library:
                     summary: str = "",
                     description_needs_verification: Optional[int] = None,
                     description_ai_confident: Optional[int] = None,
-                    description_low_confidence: Optional[int] = None) -> None:
+                    description_low_confidence: Optional[int] = None,
+                    clear_description_verification_stamp: bool = False) -> None:
         # description_needs_verification defaults to None ("leave the column
         # alone") rather than 0/1, because update_tool is also the bulk-edit
         # panel's write path (every row resaved at once) and
@@ -4513,6 +4544,17 @@ class Library:
         # route (which reads the ai_drafted_fields signal) passes an explicit
         # 0 or 1. COALESCE keeps that "unless told otherwise" behavior a
         # plain UPDATE can't express on its own.
+        #
+        # clear_description_verification_stamp (2026-08, stale-stamp fix) is a
+        # DIFFERENT, explicit signal from description_needs_verification=1 —
+        # the edit-submit route passes both together (same underlying "field
+        # ai-drafted this save" boolean), but scripts/regen_ai_drafted_fields.py
+        # forces description_needs_verification=0 (so no review badge shows)
+        # while still passing this =True, since it's still a fresh,
+        # not-yet-human-reviewed draft that must not go on showing an old
+        # "Verified by X on Y" line. Never inferred from the needs_verification
+        # value itself for exactly that reason. Defaults False so every other
+        # caller (bulk-edit, one-off scripts, tests) is unaffected.
         #
         # Only check when the URL is actually changing — callers that resave a
         # row unchanged (e.g. the bulk-edit routes, which always pass the
@@ -4538,6 +4580,8 @@ class Library:
              description_low_confidence, _now(), tool_id),
         )
         self.conn.commit()
+        if clear_description_verification_stamp:
+            self._supersede_narrative_review("tool", "description", tool_id)
 
     def update_tool_content(self, tool_id: int, name: str, description: str) -> None:
         """Narrow update for scripts/seed_tools.py's re-sync pass (#113): touches only
@@ -4647,7 +4691,8 @@ class Library:
     def update_tool_differentiation(self, tool_id: int, competitive_differentiation: str,
                                      needs_verification: int = 0,
                                      ai_confident: Optional[int] = None,
-                                     low_confidence: Optional[int] = None) -> None:
+                                     low_confidence: Optional[int] = None,
+                                     clear_verification_stamp: bool = False) -> None:
         """Narrow update for the admin full-edit form's "How this differs from
         the competition" field (Phase 3) — same reasoning as
         quick_update_tool: kept separate from update_tool so the Software
@@ -4670,7 +4715,16 @@ class Library:
         the UI displays it permanently regardless of needs_verification's
         value (2026-08 policy revision — see CLAUDE.md's "Confidence
         indicator" bullet), so there's no need to clear a stale value on
-        every unrelated resave the way needs_verification itself must be."""
+        every unrelated resave the way needs_verification itself must be.
+
+        clear_verification_stamp (2026-08, stale-stamp fix) is a separate,
+        explicit signal from needs_verification=1 — the edit-submit route
+        passes both together (same "field ai-drafted this save" boolean),
+        but scripts/regen_ai_drafted_fields.py forces needs_verification=0
+        while still passing this =True, since it's still a fresh,
+        not-yet-human-reviewed draft. See update_tool's matching parameter
+        for the full reasoning; never inferred from needs_verification's
+        value itself."""
         self.conn.execute(
             "UPDATE tools SET competitive_differentiation=?, competitive_differentiation_needs_verification=?, "
             "competitive_differentiation_ai_confident=COALESCE(?, competitive_differentiation_ai_confident), "
@@ -4680,6 +4734,8 @@ class Library:
              low_confidence, _now(), tool_id),
         )
         self.conn.commit()
+        if clear_verification_stamp:
+            self._supersede_narrative_review("tool", "differentiation", tool_id)
 
     def set_tool_suite_note(self, tool_id: int, suite_note: str) -> None:
         """Narrow update for tools.suite_note (Feature Taxonomy rules doc §5's
@@ -4732,7 +4788,17 @@ class Library:
         "confident" self-report from the same generation call —
         COALESCE-written so a caller that somehow omits it (there isn't one
         today; both trigger points always have a real AgentTaxonomyResult)
-        can't accidentally blank out a previously-recorded signal."""
+        can't accidentally blank out a previously-recorded signal.
+
+        Unconditionally supersedes any live narrative_review_log stamp
+        (2026-08, stale-stamp fix) — unlike Description/Differentiation/
+        Community profile, this method has no hand-edit-confirms sibling
+        call path (that's update_tool_agent_taxonomy); every call here,
+        whether from the live "Refresh" route or scripts/
+        regen_ai_drafted_fields.py, is by construction a fresh, not-yet-
+        human-reviewed AI draft, so no extra parameter is needed to gate it
+        the way update_tool/update_tool_differentiation/
+        upsert_community_profile need one."""
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=?, "
             "agent_taxonomy_ai_confident=COALESCE(?, agent_taxonomy_ai_confident), "
@@ -4742,6 +4808,7 @@ class Library:
              low_confidence, _now(), tool_id),
         )
         self.conn.commit()
+        self._supersede_narrative_review("tool", "agent_taxonomy", tool_id)
 
     def mark_tool_agent_taxonomy_verified(self, tool_id: int) -> None:
         """One-click "Mark verified" action — clears the flag without
@@ -5974,10 +6041,21 @@ class Library:
                                  resources_included: str = "", needs_review: int = 0,
                                  stage_focus: str = "", jobs_program: str = "",
                                  team_or_individual: str = "",
-                                 confidence: Optional[dict] = None) -> None:
+                                 confidence: Optional[dict] = None,
+                                 clear_verification_stamp: bool = False) -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
         edit form always submits every field, generated or hand-written.
+
+        clear_verification_stamp (2026-08, stale-stamp fix) must be an
+        EXPLICIT, separate signal from needs_review — needs_review can be 1
+        either because this save followed a fresh Generate click
+        (profile_ai_drafted) OR because the admin manually ticked the
+        "needs review" checkbox with no fresh draft at all, and only the
+        former should clear the "Reviewed by X on Y" stamp. The submit route
+        passes profile_ai_drafted here; scripts/regen_ai_drafted_fields.py
+        forces needs_review=0 (so no review flag is set) while still passing
+        this =True, since it's still a fresh, not-yet-human-reviewed draft.
 
         `confidence` (2026-08 confidence indicator): an optional
         {field_name: 0|1|None} dict covering
@@ -6077,6 +6155,8 @@ class Library:
              *conf),
         )
         self.conn.commit()
+        if clear_verification_stamp:
+            self._supersede_narrative_review("community", "community_profile", community_id)
 
     def update_community_profile_research_fields(
         self, community_id: int, *, founded_year: Optional[int] = None,

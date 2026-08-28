@@ -14985,6 +14985,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             jobs_program=(form.get("jobs_program") or "").strip(),
             team_or_individual=(form.get("team_or_individual") or "").strip(),
             confidence=confidence,
+            clear_verification_stamp=profile_ai_drafted,
         )
         if profile_citations:
             lib.set_entity_citations("community", community_id, "community_profile",
@@ -16036,7 +16037,8 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         summary=summary,
                         description_needs_verification=description_needs_verification,
                         description_ai_confident=description_confident,
-                        description_low_confidence=description_low_confidence)
+                        description_low_confidence=description_low_confidence,
+                        clear_description_verification_stamp=bool(description_needs_verification))
         if "description" in ai_drafted and description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
         else:
@@ -16044,7 +16046,8 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         lib.update_tool_differentiation(tool_id, competitive_differentiation,
                                         needs_verification=competitive_differentiation_needs_verification,
                                         ai_confident=differentiation_confident,
-                                        low_confidence=differentiation_low_confidence)
+                                        low_confidence=differentiation_low_confidence,
+                                        clear_verification_stamp=bool(competitive_differentiation_needs_verification))
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
