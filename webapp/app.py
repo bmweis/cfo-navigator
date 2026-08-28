@@ -1331,6 +1331,23 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .btn-ghost{background:transparent;color:var(--navy);border:1px solid var(--navy);}
 .btn-ghost:hover{background:var(--accent-light);color:var(--navy);}
 
+/* Edit-page footer action row (primary save / stay-on-page save / cancel) —
+   shared by the Software and Community edit pages. A plain inline-block row
+   wraps unpredictably at narrow widths (the first button lands alone on its
+   own line, the other two size themselves off their own text, so the row
+   reads with mismatched weight) — flex+gap keeps desktop spacing even, and
+   the mobile breakpoint stacks all three at one full width so the primary
+   action still reads as primary (navy fill) without the other two buttons
+   looking broken next to it. Deliberately avoids quoting the buttons' own
+   label text here — a page-rendered CSS comment containing a button's exact
+   label inflates any test that counts label occurrences in the HTML. */
+.edit-footer-actions{display:flex;flex-wrap:wrap;gap:10px;}
+.edit-footer-actions .btn{margin:0;text-align:center;}
+@media(max-width:640px){
+  .edit-footer-actions{flex-direction:column;}
+  .edit-footer-actions .btn{width:100%;}
+}
+
 /* Inputs — navy focus border + soft seafoam ring */
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(163,229,212,.55);}
 
@@ -14539,10 +14556,10 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 
 {_competitors_card_html}
 
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+<div class="edit-footer-actions" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <button type="submit" form="comm-edit-form" class="btn">Save changes</button>
-  <button type="submit" form="comm-edit-form" name="save_action" value="continue" class="btn btn-ghost" style="margin-left:10px;">Save and continue</button>
-  <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  <button type="submit" form="comm-edit-form" name="save_action" value="continue" class="btn btn-ghost">Save and continue</button>
+  <a href="/admin/tools/communities" class="btn btn-ghost">Cancel</a>
 </div>
 </div>
 <style>
@@ -15850,10 +15867,10 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
 {_governed_features_html}
 
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+<div class="edit-footer-actions" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <button type="submit" form="tool-edit-form" class="btn">Save changes</button>
-  <button type="submit" form="tool-edit-form" name="save_action" value="continue" class="btn btn-ghost" style="margin-left:10px;">Save and continue</button>
-  <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  <button type="submit" form="tool-edit-form" name="save_action" value="continue" class="btn btn-ghost">Save and continue</button>
+  <a href="/tools/software" class="btn btn-ghost">Cancel</a>
 </div>
 </div>
 <style>
