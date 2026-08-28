@@ -4091,6 +4091,58 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   communities` prints a note and changes nothing, rather than silently
   doing nothing with no signal.
 
+- **Stale "Verified by X on Y" stamp fix (2026-08) — regenerating a field
+  now clears its narrative_review_log stamp, not just its needs_verification
+  badge.** An investigation into tonight's `regen_ai_drafted_fields.py`
+  recovery run found the "Verified by bmw on {old date}" line on a
+  regenerated tool's edit page was a real, standing gap, not unique to the
+  script: the stamp is derived entirely from `narrative_review_log`
+  (`Library.get_latest_narrative_review`), written only by the four
+  dedicated "Mark verified"/"Mark reviewed" routes — no Generate/Refresh/
+  Save path, live or scripted, had ever touched it. The live admin UI's
+  ordinary Generate+Save flow correctly sets `needs_verification=1` (so the
+  amber badge does show, unlike tonight's script which forced `0`), but
+  even there the OLD stamp kept rendering alongside the fresh badge until
+  someone explicitly clicked Mark verified again — confusing, not just a
+  one-off artifact of tonight's incident. Fixed with a new
+  `narrative_review_log.superseded_at` column (nullable, `NULL` = still the
+  live stamp) rather than deleting rows — the table's own schema comment
+  already commits to being append-only, so `Library._supersede_narrative_review`
+  marks every currently-live row for a field superseded instead, and
+  `get_latest_narrative_review` filters `WHERE superseded_at IS NULL`; the
+  full history stays intact in `list_narrative_review_log` for a future
+  history view, only the *live* stamp reads as cleared. Wired into the same
+  choke points that already write `needs_verification`/`needs_review`:
+  `set_tool_agent_taxonomy_draft` clears unconditionally (it's used only
+  for fresh AI drafts — hand-edits go through the separate
+  `update_tool_agent_taxonomy`, untouched); `update_tool` (Description),
+  `update_tool_differentiation`, and `upsert_community_profile` each gained
+  an explicit `clear_description_verification_stamp`/`clear_verification_stamp`
+  parameter, deliberately NOT inferred from the `needs_verification`/
+  `needs_review` value passed alongside it. That distinction matters for two
+  real reasons found during investigation: `regen_ai_drafted_fields.py`
+  forces `needs_verification`/`needs_review=0` directly (its own pre-existing,
+  documented bypass of the review badge — see the script's own docstring) on
+  a call that is nonetheless still a fresh, not-yet-human-reviewed draft, so
+  clearing had to be driven by an independent explicit flag (now `True` on
+  all three of the script's write calls) rather than by the value `0`/`1`
+  itself; and Community profile's `needs_review` can independently be set to
+  `1` by an admin manually ticking a "needs review" checkbox with no fresh
+  AI draft at all (a genuinely unrelated action), so inferring "clear" from
+  `needs_review==1` there would have wrongly wiped a still-accurate stamp —
+  the live submit route instead passes the already-computed
+  `profile_ai_drafted` boolean directly. An ordinary hand-edit save (no
+  fresh draft this session) is unaffected either way — it was never in
+  scope, since the decision was specifically "whenever needs_verification
+  flips 0→1 or is freshly set to 1 on a draft," and a hand-edit sets it to
+  `0`. See `tests/test_stale_verification_stamp.py` for the full coverage
+  (Library-layer clear/no-clear behavior for all four write paths including
+  the script's own bypass pattern, the live route end to end, and Mark
+  verified/Mark reviewed still working correctly — with a fresh, current
+  stamp — immediately after a regeneration clears the old one) and
+  ARCHITECTURE.md's `narrative_review_log` schema-table row for the full
+  mechanism write-up.
+
 - **Reader cleanliness pass (2026-08) — sponsor/ad/cookie-banner stripping,
   shared by every extraction path.** A backlog item framed as "Read Later
   saves aren't scrubbed like Archive saves" turned out to have a different
