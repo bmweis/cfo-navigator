@@ -3715,6 +3715,79 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   (`--ids 10 --only tools`) confirming "T&E" renders correctly, rather than
   trusting the wording change to hold across the full 157-tool catalog
   untested.
+- **Spaced-em-dash cleanup + a permanent deterministic backstop (2026-08) —
+  the real fix for "zero spaced em dashes, permanently," not just a lower
+  violation rate.** After the full 157-tool + 40-community regeneration run
+  (0 failures, 0 cite-tag pollution on the tool side), Brian flagged 63 rows
+  / 52 distinct tools (mostly `agent_taxonomy_note`) still violating
+  `voice_core`'s own "HARD MECHANICAL RULES" em-dash rule ("no surrounding
+  spaces... never violate"). **Root cause, confirmed by direct code read,
+  not assumed**: the rule was never missing from any prompt path.
+  `generate_tool_description`, `generate_tool_agent_taxonomy`,
+  `generate_tool_differentiation`, and `generate_community_profile` all four
+  call `_resolve_voice_core()` and interpolate `{voice_core}` into their
+  prompt template (confirmed at each call site — e.g.
+  `linklib/enrich.py`'s `_STRUCTURE_GUIDANCE` comment explicitly notes
+  "voice_core covers tone/mechanics (including the em dash rule)"). The
+  violations happened anyway because a natural-language "never" in a prompt
+  is an instruction, not an invariant — an LLM's per-token compliance with
+  prose rules is probabilistic, however emphatically worded, so prompt text
+  alone can reduce the violation rate but can never guarantee zero. This is
+  the same class of gap the Phase 0 investigation's F3 finding names:
+  "nothing in the current pipeline can catch or repair a voice/structure
+  violation after the fact." **One residual unknown this session cannot
+  close without production access**: if Brian has ever saved a custom
+  override at `/admin/voice`, that stored `settings.voice_core` value (not
+  the `VOICE_CORE_DEFAULT` code constant) is what every prompt actually
+  uses — this session confirmed the DEFAULT copy has always had the rule,
+  but cannot inspect a possible custom override's exact wording.
+  **Fix has three parts.** (1) A new `linklib/voice_mechanics.py` module
+  (`fix_spaced_em_dashes`/`normalize_voice_mechanics`) — pure, idempotent
+  regex substitution, no API call — collapsing a spaced em dash (or a
+  spaced ASCII `--` used as a dash) to an unspaced real em dash. (2) The
+  **permanent backstop**: wired into `linklib/db.py` at every `Library`
+  write path that persists a prose-capable field, not just the bulk regen
+  script — `add_tool`/`update_tool`/`update_tool_content`/
+  `quick_update_tool` (description, summary), `update_tool_agent_taxonomy`/
+  `set_tool_agent_taxonomy_draft` (agent_taxonomy_note),
+  `update_tool_differentiation` (competitive_differentiation),
+  `set_tool_suite_note` (suite_note), `add_community`/`update_community`/
+  `update_community_content` (demographic, cost_note, notes,
+  local_markets), and `upsert_community_profile`/
+  `update_community_profile_research_fields` (all 22 prose-capable
+  `community_profiles` columns). Every one of the 15 real call sites in
+  `webapp/app.py` (the admin Generate-then-save AJAX routes, every
+  hand-edit save form, bulk-edit) and every script (the regen script
+  included) already funnels through these same `Library` methods —
+  confirmed by direct grep before wiring the fix in, not assumed — so this
+  is the one choke point that guarantees coverage regardless of what
+  produced the text or what future code writes it. (3) A one-off cleanup
+  script, `scripts/fix_spaced_em_dashes.py` (preview-by-default, `--apply`
+  to write, write-then-read-back verified per row/column — same convention
+  as `scripts/archive/rename_differentiation_columns.py`), for the rows
+  already written before the backstop existed. Deliberately narrow raw
+  single-column `UPDATE`s, NOT `Library.update_tool_agent_taxonomy`/
+  `upsert_community_profile` — reusing those higher-level methods for a
+  pure text fix would trigger their real side effects (clearing
+  `agent_taxonomy_needs_verification`, clearing `entity_citations`) on the
+  false premise that a mechanical whitespace fix is a human edit; a
+  regression test (`test_apply_does_not_clear_needs_verification_or_citations`)
+  covers exactly this. Companion fix in the same PR: `scripts/
+  report_regen_blast_radius.py` (previously tools-only, since the
+  throwaway run that motivated it never touched communities) now also
+  analyzes `community_profiles`' 22 prose columns for cite-tag pollution
+  and legacy-shape — communities are logged under one shared field name,
+  `"community_profile"` (all 23 columns drafted in one call), so the
+  extension reports which underlying COLUMN(S) are affected, not just that
+  the field as a whole is dirty, and accepts multiple `--log-file` inputs
+  (deduplicated to each entity's LAST logged status), matching the real
+  shape of Brian's run — 98 community log lines across sessions dropped by
+  SSH, some communities regenerated more than once. Not yet run against
+  production by this session (no production access) — Brian runs both the
+  extended blast-radius report and, if it finds anything, `scripts/
+  fix_spaced_em_dashes.py --apply` via `railway ssh`; re-running the
+  blast-radius report afterward is the actual "0 legacy-shape rows"
+  verification, not merely asserted here.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

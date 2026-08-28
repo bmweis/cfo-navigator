@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 
+from .voice_mechanics import normalize_voice_mechanics as _voice_fix
+
 
 def resolve_db_path(cli_db: Optional[str], *, allow_missing: bool = False) -> str:
     """Resolve the database path for a one-off script, and refuse to guess.
@@ -4395,10 +4397,10 @@ class Library:
                warm_intro_enabled, vendor_name, summary,
                description_needs_verification, description_ai_confident)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (name.strip(), slug, description.strip(), url.strip(),
+            (name.strip(), slug, _voice_fix(description.strip()), url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
              promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip(),
-             summary.strip(), description_needs_verification, description_ai_confident),
+             _voice_fix(summary.strip()), description_needs_verification, description_ai_confident),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -4472,9 +4474,9 @@ class Library:
                description_needs_verification=COALESCE(?, description_needs_verification),
                description_ai_confident=COALESCE(?, description_ai_confident),
                updated_at=? WHERE id=?""",
-            (name.strip(), description.strip(), url.strip(),
+            (name.strip(), _voice_fix(description.strip()), url.strip(),
              json.dumps(categories), advisor, promoted, vendor_email.strip(),
-             warm_intro_enabled, vendor_name.strip(), summary.strip(),
+             warm_intro_enabled, vendor_name.strip(), _voice_fix(summary.strip()),
              description_needs_verification, description_ai_confident, _now(), tool_id),
         )
         self.conn.commit()
@@ -4486,7 +4488,7 @@ class Library:
         directly on the live site after seeding."""
         self.conn.execute(
             "UPDATE tools SET name=?, description=?, updated_at=? WHERE id=?",
-            (name.strip(), description.strip(), _now(), tool_id),
+            (name.strip(), _voice_fix(description.strip()), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -4500,8 +4502,8 @@ class Library:
         self.conn.execute(
             """UPDATE tools SET description=?, warm_intro_enabled=?, vendor_name=?,
                vendor_email=?, summary=?, updated_at=? WHERE id=?""",
-            (description.strip(), warm_intro_enabled, vendor_name.strip(),
-             vendor_email.strip(), summary.strip(), _now(), tool_id),
+            (_voice_fix(description.strip()), warm_intro_enabled, vendor_name.strip(),
+             vendor_email.strip(), _voice_fix(summary.strip()), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -4614,7 +4616,7 @@ class Library:
             "UPDATE tools SET competitive_differentiation=?, competitive_differentiation_needs_verification=?, "
             "competitive_differentiation_ai_confident=COALESCE(?, competitive_differentiation_ai_confident), "
             "updated_at=? WHERE id=?",
-            (competitive_differentiation.strip(), needs_verification, ai_confident, _now(), tool_id),
+            (_voice_fix(competitive_differentiation.strip()), needs_verification, ai_confident, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -4629,7 +4631,7 @@ class Library:
         never blank it out on an unrelated save."""
         self.conn.execute(
             "UPDATE tools SET suite_note=?, updated_at=? WHERE id=?",
-            (suite_note.strip(), _now(), tool_id),
+            (_voice_fix(suite_note.strip()), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -4647,7 +4649,7 @@ class Library:
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
             "updated_at=? WHERE id=?",
-            (agent_taxonomy_note.strip(), _now(), tool_id),
+            (_voice_fix(agent_taxonomy_note.strip()), _now(), tool_id),
         )
         self.conn.commit()
         self.clear_entity_citations("tool", tool_id, "agent_taxonomy")
@@ -4673,7 +4675,7 @@ class Library:
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=?, "
             "agent_taxonomy_ai_confident=COALESCE(?, agent_taxonomy_ai_confident), "
             "updated_at=? WHERE id=?",
-            (agent_taxonomy_note.strip(), needs_verification, ai_confident, _now(), tool_id),
+            (_voice_fix(agent_taxonomy_note.strip()), needs_verification, ai_confident, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -5636,11 +5638,11 @@ class Library:
                categories_json, approved, submitted_by, created_at, updated_at,
                reach, local_markets, featured, advisor)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (name.strip(), slug, url.strip(), demographic.strip(),
-             cost_band, cost_note.strip(), sponsorship_type, sponsor_name.strip(),
-             access.strip(), format.strip(), notes.strip(), json.dumps(categories),
+            (name.strip(), slug, url.strip(), _voice_fix(demographic.strip()),
+             cost_band, _voice_fix(cost_note.strip()), sponsorship_type, sponsor_name.strip(),
+             access.strip(), format.strip(), _voice_fix(notes.strip()), json.dumps(categories),
              approved, submitted_by.strip(), now, now,
-             reach, local_markets.strip(), featured, advisor),
+             reach, _voice_fix(local_markets.strip()), featured, advisor),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -5687,10 +5689,10 @@ class Library:
                cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
                notes=?, categories_json=?, updated_at=?, reach=?, local_markets=?,
                featured=?, advisor=? WHERE id=?""",
-            (name.strip(), url.strip(), demographic.strip(), cost_band,
-             cost_note.strip(), sponsorship_type, sponsor_name.strip(), access.strip(),
-             format.strip(), notes.strip(), json.dumps(categories), _now(),
-             reach, local_markets.strip(), featured, advisor, community_id),
+            (name.strip(), url.strip(), _voice_fix(demographic.strip()), cost_band,
+             _voice_fix(cost_note.strip()), sponsorship_type, sponsor_name.strip(), access.strip(),
+             format.strip(), _voice_fix(notes.strip()), json.dumps(categories), _now(),
+             reach, _voice_fix(local_markets.strip()), featured, advisor, community_id),
         )
         self.conn.commit()
 
@@ -5708,7 +5710,7 @@ class Library:
         would get silently reverted on the next deploy's re-sync."""
         self.conn.execute(
             "UPDATE communities SET name=?, notes=?, updated_at=? WHERE id=?",
-            (name.strip(), notes.strip(), _now(), community_id),
+            (name.strip(), _voice_fix(notes.strip()), _now(), community_id),
         )
         self.conn.commit()
 
@@ -5993,15 +5995,21 @@ class Library:
                  notable_members_ai_confident=excluded.notable_members_ai_confident,
                  public_criticism_ai_confident=excluded.public_criticism_ai_confident,
                  verdict_summary_ai_confident=excluded.verdict_summary_ai_confident""",
-            (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
-             format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
-             application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
-             founded_year, public_criticism.strip(), verdict_summary.strip(),
-             low_confidence, _now(), business_model.strip(),
-             primary_purpose.strip(), cpe_eligible.strip(), platform_type.strip(),
-             meeting_format.strip(), event_style.strip(), seniority_band.strip(),
-             resources_included.strip(), needs_review,
-             stage_focus.strip(), jobs_program.strip(), team_or_individual.strip(),
+            (community_id, _voice_fix(ideal_member.strip()), _voice_fix(anti_fit.strip()),
+             _voice_fix(value_prop.strip()),
+             _voice_fix(format_reality.strip()), _voice_fix(engagement_level.strip()),
+             _voice_fix(sponsor_relationship_note.strip()),
+             _voice_fix(application_friction.strip()), _voice_fix(cost_value_verdict.strip()),
+             _voice_fix(notable_members.strip()),
+             founded_year, _voice_fix(public_criticism.strip()), _voice_fix(verdict_summary.strip()),
+             low_confidence, _now(), _voice_fix(business_model.strip()),
+             _voice_fix(primary_purpose.strip()), _voice_fix(cpe_eligible.strip()),
+             _voice_fix(platform_type.strip()),
+             _voice_fix(meeting_format.strip()), _voice_fix(event_style.strip()),
+             _voice_fix(seniority_band.strip()),
+             _voice_fix(resources_included.strip()), needs_review,
+             _voice_fix(stage_focus.strip()), _voice_fix(jobs_program.strip()),
+             _voice_fix(team_or_individual.strip()),
              *conf),
         )
         self.conn.commit()
@@ -6038,7 +6046,7 @@ class Library:
         if not fields:
             return
         set_clause = ", ".join(f"{col}=?" for col in fields)
-        values = [v.strip() if isinstance(v, str) else v for v in fields.values()]
+        values = [_voice_fix(v.strip()) if isinstance(v, str) else v for v in fields.values()]
         self.conn.execute(
             f"UPDATE community_profiles SET {set_clause}, updated_at=? WHERE community_id=?",
             (*values, _now(), community_id),

@@ -2321,6 +2321,48 @@ Details worth knowing:
   function makes, plus an explicit `REGRESSION CHECK: PASS/FAIL` line — for
   Brian's post-merge `railway ssh` verification against real communities,
   same convention as the first fix's diagnostic re-run.
+- **Spaced-em-dash deterministic backstop (2026-08) — closes a gap the
+  citation-tag fixes above didn't touch: a prompt-only voice rule can't
+  guarantee compliance, however emphatically worded.** After the citation-
+  tag fixes shipped and a full 157-tool + 40-community regeneration ran
+  clean on cite-tag pollution, 63 rows / 52 tools still carried a spaced em
+  dash — `voice_core`'s own "HARD MECHANICAL RULES" say "never violate,"
+  and the rule was confirmed present in every one of the four generation
+  prompts (`generate_tool_description`/`generate_tool_agent_taxonomy`/
+  `generate_tool_differentiation`/`generate_community_profile`, all four
+  interpolating `{voice_core}` via `_resolve_voice_core`), so this is not a
+  missing-instruction bug — an LLM's compliance with a natural-language rule
+  is probabilistic, not a guarantee, and prompt wording alone can't make a
+  violation rate literally zero. New `linklib/voice_mechanics.py`
+  (`fix_spaced_em_dashes`/`normalize_voice_mechanics`, pure regex
+  substitution, no model call) is wired into every `Library` write method
+  that persists a prose-capable field — both tables' AI-drafted fields
+  (`tools.description`/`summary`/`agent_taxonomy_note`/
+  `competitive_differentiation`/`suite_note`, every prose column in
+  `community_profiles`) and the `communities` table's own AI-draftable
+  listing fields (`demographic`/`cost_note`/`notes`/`local_markets`, from
+  `generate_community_listing`). Applied at the `Library` layer rather than
+  inside each `generate_*` function specifically so it also covers a
+  hand-edit save and any future write path — every one of `webapp/app.py`'s
+  15 real call sites into these methods, and `scripts/
+  regen_ai_drafted_fields.py`'s own writes, is covered automatically with no
+  per-call-site change, confirmed by grepping every write path before
+  wiring the fix in rather than assumed. A companion one-off cleanup,
+  `scripts/fix_spaced_em_dashes.py` (preview/`--apply`, write-then-read-back
+  per row/column), fixes content already written before the backstop
+  existed — deliberately narrow raw single-column `UPDATE`s rather than
+  reusing `Library.update_tool_agent_taxonomy`/`upsert_community_profile`,
+  since those methods' real side effects (clearing
+  `agent_taxonomy_needs_verification`, clearing `entity_citations`) assume a
+  human just made a real edit, which a pure whitespace fix is not.
+  `scripts/report_regen_blast_radius.py` (previously tools-only) was
+  extended in the same pass to analyze `community_profiles`' 22 prose
+  columns for cite-tag pollution and legacy-shape, since communities are
+  logged under one shared field name (`"community_profile"`, all 23 columns
+  drafted in a single call) and the report now breaks a hit down to the
+  actual underlying column; it also accepts multiple `--log-file` inputs,
+  deduplicated to each entity's LAST logged status, to match the real shape
+  of a run spanning several dropped SSH sessions.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything
