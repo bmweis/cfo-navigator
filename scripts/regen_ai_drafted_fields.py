@@ -499,7 +499,7 @@ def _regen_tool_differentiation(lib: Library, tool: dict, model: str, voice_core
 
 # -- Communities ------------------------------------------------------------
 
-def _regen_community_profile(lib: Library, community: dict, model: str,
+def _regen_community_profile(lib: Library, community: dict, model: str, voice_core: str,
                               log_file: str, apply: bool) -> None:
     community_id, name, url = community["id"], community["name"], community["url"]
     print(f"  [community {community_id}] {name}: Community profile (23 fields)...")
@@ -508,7 +508,7 @@ def _regen_community_profile(lib: Library, community: dict, model: str,
     existing_profile = lib.get_community_profile(community_id)
     try:
         draft = _call_with_retry(generate_community_profile, name, url,
-                                  existing=existing_profile, model=model)
+                                  existing=existing_profile, model=model, voice_core=voice_core)
     except Exception as e:
         print(f"      FAILED: {type(e).__name__}: {e}")
         _log(log_file, "community", community_id, name, "community_profile", "failure",
@@ -664,7 +664,7 @@ def _run_sample(lib: Library, tools: list[dict], communities: list[dict], model:
         existing_profile = lib.get_community_profile(community_id)
         try:
             draft = _call_with_retry(generate_community_profile, name, url,
-                                      existing=existing_profile, model=model)
+                                      existing=existing_profile, model=model, voice_core=voice_core)
         except Exception as e:
             print(f"  FAILED: {type(e).__name__}: {e}")
             _log(log_file, "community", community_id, name, "community_profile", "preview",
@@ -719,7 +719,7 @@ def _run_tools(lib: Library, tools: list[dict], model: str, voice_core: str,
             time.sleep(INTER_BATCH_SLEEP)
 
 
-def _run_communities(lib: Library, communities: list[dict], model: str,
+def _run_communities(lib: Library, communities: list[dict], model: str, voice_core: str,
                       log_file: str, apply: bool, done: set[tuple[str, int, str]]) -> None:
     total = len(communities)
     for batch_start in range(0, total, BATCH_SIZE):
@@ -734,7 +734,7 @@ def _run_communities(lib: Library, communities: list[dict], model: str,
                 print(f"  [community {community_id}] {community['name']}: "
                       f"community_profile — already done this pass, skipping")
                 continue
-            _regen_community_profile(lib, community, model, log_file, apply)
+            _regen_community_profile(lib, community, model, voice_core, log_file, apply)
             if apply:
                 time.sleep(INTER_CALL_SLEEP)
         if apply and batch_start + BATCH_SIZE < total:
@@ -907,7 +907,7 @@ def main() -> int:
         if want_tools:
             _run_tools(lib, tools, model, voice_core, args.log_file, args.apply, done)
         if want_communities:
-            _run_communities(lib, communities, model, args.log_file, args.apply, done)
+            _run_communities(lib, communities, model, voice_core, args.log_file, args.apply, done)
 
         print(f"\nDone. Full per-field log at {args.log_file!r} — review it (or grep for "
               f"'\"status\": \"failure\"') before considering this pass complete.")

@@ -3893,6 +3893,44 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   basic-listing generator) still has no voice_core support at all — flagged
   as a separate, deliberately out-of-scope enhancement, not a regression
   from this pass, since it's never had one to begin with.
+- **`scripts/regen_ai_drafted_fields.py`'s community path never threaded
+  `voice_core` through at all — a real gap the fallback-retirement PR above
+  missed, caught by the fail-safe it built rather than by a bad write.**
+  A post-merge full re-run (40 communities, real `railway ssh` execution)
+  failed every single call with `generate_community_profile() aborted:
+  voice_core is empty`, zero writes — confirmed via the log and this
+  script's own before-write guard (`draft is None` returns before
+  `upsert_community_profile` is ever called), the exact non-corrupting
+  behavior the empty-guard was designed to produce. Root-caused by
+  elimination against the three plausible explanations before touching any
+  code, per Brian's explicit ask: `Library.get_setting`/`set_setting` do a
+  plain uncached `SELECT`/`UPDATE` on every call (no in-memory cache, no
+  `lru_cache`, so a stale-read-after-save theory doesn't hold); the script
+  resolves `voice_core` once via `require_voice_setting` at startup exactly
+  like the web app, and threads it correctly into every **tool** call
+  (`_run_tools`/`_regen_tool_description` etc. all take and pass it) — but
+  `_run_communities`/`_regen_community_profile`, and the `--sample`
+  branch's own community loop, simply had no `voice_core` parameter at
+  all, so `generate_community_profile(...)` fell through to its own
+  `voice_core: str = ""` default and tripped its empty-guard every time,
+  regardless of what was actually saved in the DB or when. Not a timing
+  issue either — the bug is structural, so it would have failed identically
+  on any run, any container, any delay after the save. This is a real,
+  separate gap from the "two batch-script gap callers" the fallback PR
+  actually fixed (`scripts/enrich_agent_taxonomy.py`,
+  `scripts/enrich_community_profiles.py`) — this script's own community
+  path was a third, unrelated caller that got missed. Fixed by threading
+  `voice_core` through `_run_communities`, `_regen_community_profile`, and
+  `_run_sample`'s community branch, mirroring the tool path exactly.
+  Verified with a mocked-generator smoke test (temp DB, `--sample 1 --only
+  communities`, capturing the actual `voice_core` value the mock receives)
+  before any real API call — confirms the fix reaches the generator, not
+  just that the code compiles. Per Brian's explicit sequencing: a real
+  `--sample` run against a couple of communities (genuine API calls, output
+  pasted back for review) is required before the full `--apply` re-run
+  against all 40 — the pre-merge spot-check that validated the fallback PR
+  itself only ever sampled tools, never communities, so this is treated as
+  a real verification gap to close, not a formality.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
