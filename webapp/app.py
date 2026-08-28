@@ -916,6 +916,36 @@ def _confidence_indicator_html(confident: object) -> str:
             f'Claude confidence: {value}</p>')
 
 
+def _low_confidence_indicator_html(low_confidence: object) -> str:
+    """Item 6 (Aug 2026 UI pass) — the OTHER quality signal every
+    generate_tool_* draft returns (draft.low_confidence), persisted and
+    shown right next to _confidence_indicator_html's "Claude confidence"
+    line, not folded into it. A distinct, independent fact from
+    `confident`: this is a MECHANICAL pre-generation signal (did the page
+    fetch behind this draft actually succeed), not the model's own
+    post-generation self-report — the two can and do disagree (a
+    successful fetch of a thin page can still yield a low-confidence
+    self-report, or vice versa).
+
+    Phrased as what actually happened ("Source page fetch:
+    Succeeded/Failed"), not as a literal "Low confidence: Yes/No" — a
+    literal mirror would put two "Yes/No" lines back to back whose "Yes"
+    means opposite things (Claude confidence: Yes is good; low_confidence:
+    Yes is bad), which reads as confusing rather than clarifying. Same
+    three-state/permanent-display/sanctioned-color convention as
+    _confidence_indicator_html: NULL (no signal — a hand-written field, or
+    one drafted before this column existed) -> a neutral "Not recorded"
+    state, never hidden."""
+    if low_confidence is None:
+        return ('<p style="font-size:12px;color:var(--muted);margin:2px 0 0;font-weight:500;">'
+                'Source page fetch: Not recorded</p>')
+    failed = bool(int(low_confidence))
+    value = "Failed" if failed else "Succeeded"
+    color = "#92400e" if failed else "#065f46"
+    return (f'<p style="font-size:12px;color:{color};margin:2px 0 0;font-weight:500;">'
+            f'Source page fetch: {value}</p>')
+
+
 def _citations_list_html(citations: list, cap: int | None = None, empty_note: str = "") -> str:
     """Render a field's API-verified citation list (Citations-API grounding
     fix, Phase 1b — see linklib.citations, linklib.enrich.
@@ -1025,6 +1055,28 @@ def _ai_drafted_field_confidence(form) -> dict[str, bool]:
     hand-edited or untouched field has no entry, so callers should only
     consult this for fields also present in _ai_drafted_field_names(form)."""
     raw = (form.get("ai_drafted_confidence") or "").strip()
+    out: dict[str, bool] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        name, _, val = pair.partition(":")
+        if name.strip():
+            out[name.strip()] = val.strip() == "1"
+    return out
+
+
+def _ai_drafted_field_low_confidence(form) -> dict[str, bool]:
+    """Item 6 (Aug 2026 UI pass) — the pre-generation counterpart to
+    _ai_drafted_field_confidence: whether the page fetch behind this draft
+    actually succeeded (draft.low_confidence), not the model's own
+    post-generation self-report. Same 'ai_drafted_low_confidence' hidden
+    input / 'field:0-or-1,field2:...' shape, same one-parallel-input-per-
+    field convention as ai_drafted_confidence (see markAiLowConfidence in
+    the edit-form JS) — a distinct, independent signal from confidence:
+    the two can and do disagree (a successful fetch of a thin page can
+    still yield a low-confidence model self-report, or vice versa)."""
+    raw = (form.get("ai_drafted_low_confidence") or "").strip()
     out: dict[str, bool] = {}
     for pair in raw.split(","):
         pair = pair.strip()
@@ -9165,6 +9217,14 @@ function unmarkAiDrafted(fieldName) {
     });
     confEl.value = pairs.join(',');
   }
+  var lowConfEl = document.getElementById('ai-drafted-low-confidence');
+  if (lowConfEl) {
+    var lcPrefix = fieldName + ':';
+    var lcPairs = (lowConfEl.value ? lowConfEl.value.split(',') : []).filter(function(p) {
+      return p && p.indexOf(lcPrefix) !== 0;
+    });
+    lowConfEl.value = lcPairs.join(',');
+  }
 }
 // Citations-API grounding fix, Phase 2 — the citations a stateless
 // generate-description call handed back, carried to the submit route as
@@ -9200,6 +9260,21 @@ function markAiConfidence(fieldName, confident) {
   var prefix = fieldName + ':';
   pairs = pairs.filter(function(p) { return p.indexOf(prefix) !== 0; });
   pairs.push(fieldName + ':' + (confident ? '1' : '0'));
+  el.value = pairs.join(',');
+}
+// Quality-indicator visibility (item 6, Aug 2026 UI pass) — the OTHER
+// signal a Generate call returns (d.low_confidence: did the page fetch
+// behind this draft actually succeed), mirroring markAiConfidence exactly
+// but as its own hidden input/parser (_ai_drafted_field_low_confidence)
+// since it's a distinct, independent fact from confident — a mechanical
+// pre-generation signal, not the model's post-generation self-report.
+function markAiLowConfidence(fieldName, lowConfidence) {
+  var el = document.getElementById('ai-drafted-low-confidence');
+  if (!el) return;
+  var pairs = el.value ? el.value.split(',').filter(function(p) { return p; }) : [];
+  var prefix = fieldName + ':';
+  pairs = pairs.filter(function(p) { return p.indexOf(prefix) !== 0; });
+  pairs.push(fieldName + ':' + (lowConfidence ? '1' : '0'));
   el.value = pairs.join(',');
 }
 // Shared error-box treatment for every Generate-button failure (Phase M):
@@ -9272,10 +9347,14 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
     document.getElementById(descId).value = d.description;
     markAiDrafted('description');
     markAiConfidence('description', d.confident);
+    markAiLowConfidence('description', d.low_confidence);
     markAiCitations(d.citations || [], d.model || '');
     if (summaryId) {
       var summaryEl = document.getElementById(summaryId);
-      if (summaryEl) { summaryEl.value = d.summary || ''; markAiDrafted('summary'); markAiConfidence('summary', d.confident); }
+      if (summaryEl) {
+        summaryEl.value = d.summary || ''; markAiDrafted('summary');
+        markAiConfidence('summary', d.confident); markAiLowConfidence('summary', d.low_confidence);
+      }
     }
     // A hand-edit to the description after this Generate call means its
     // text no longer matches what the citations above actually ground —
@@ -13687,6 +13766,7 @@ def admin_communities(request: Request, filter: str = ""):
     try:
         all_communities = lib.list_communities(approved_only=False)
         needs_review_ids = lib.community_profile_needs_review_ids()
+        quality_flags = lib.community_profile_quality_flags()
         community_categories = lib.list_community_categories()
     finally:
         lib.close()
@@ -13695,6 +13775,7 @@ def admin_communities(request: Request, filter: str = ""):
     approved = [c for c in all_communities if c["approved"]]
     for c in approved:
         c["needs_review"] = c["id"] in needs_review_ids
+        c["quality_flags"] = quality_flags.get(c["id"])
     if filter == "needs_review":
         approved = [c for c in approved if c["needs_review"]]
 
@@ -13731,6 +13812,24 @@ def admin_communities(request: Request, filter: str = ""):
         gap_badge = (f'<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--muted);color:#fff;border-radius:4px;'
                      f'padding:1px 6px;">{n_gaps} field{"s" if n_gaps != 1 else ""} '
                      f'need{"s" if n_gaps == 1 else ""} verification</span>') if n_gaps else ""
+        # Item 6 (Aug 2026 UI pass): both signals already exist and are
+        # already persisted/shown on the per-profile edit view (the
+        # low_confidence checkbox, the 12 per-field Claude-confidence
+        # badges) — they just never reached this LIST page. Read-only
+        # here, on purpose: this list has no per-row save action for
+        # either signal, only the per-profile edit page does.
+        qf = c.get("quality_flags")
+        low_conf_badge = (
+            '<span style="display:inline-block;font-size:11px;font-weight:700;background:#fef3c7;color:#92400e;'
+            'border-radius:4px;padding:1px 6px;" title="community_profiles.low_confidence: drafted without a '
+            'successful page fetch">Low confidence</span>'
+        ) if qf and qf["low_confidence"] else ""
+        unconfident_badge = (
+            f'<span style="display:inline-block;font-size:11px;font-weight:700;background:#fef3c7;color:#92400e;'
+            f'border-radius:4px;padding:1px 6px;" title="Claude self-reported low confidence on '
+            f'{qf["unconfident_count"]} of the 12 tracked profile fields">'
+            f'{qf["unconfident_count"]}/12 fields low-confidence</span>'
+        ) if qf and qf["unconfident_count"] else ""
         mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="margin:0;">'
                          f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>'
                          ) if c.get("needs_review") else ""
@@ -13744,7 +13843,7 @@ def admin_communities(request: Request, filter: str = ""):
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
   <td style="padding:10px 12px;font-weight:600;min-width:250px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{review_badge}{gap_badge}
+      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{review_badge}{gap_badge}{low_conf_badge}{unconfident_badge}
     </div>
   </td>
   <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
@@ -15016,6 +15115,7 @@ def admin_tools_new(request: Request):
 <form method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="">
   <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
   <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
   <div class="tool-form-cols">
@@ -15136,6 +15236,7 @@ def _run_tool_research(tool_id: int) -> bool:
                 tool_id, result.agent_taxonomy_note,
                 needs_verification=int(result.agent_taxonomy_needs_verification),
                 ai_confident=int(result.confident),
+                low_confidence=int(result.low_confidence),
             )
             lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
                                      result.citations, model=result.model)
@@ -15177,9 +15278,14 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     # just evaluated once at creation instead of on every resave.
     ai_drafted = _ai_drafted_field_names(form)
     ai_confidence = _ai_drafted_field_confidence(form)
+    ai_low_confidence = _ai_drafted_field_low_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     description_confident = (
         int(ai_confidence["description"]) if "description" in ai_drafted and "description" in ai_confidence
+        else None
+    )
+    description_low_confidence = (
+        int(ai_low_confidence["description"]) if "description" in ai_drafted and "description" in ai_low_confidence
         else None
     )
     description_citations = (
@@ -15195,7 +15301,8 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
                                 warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
                                 summary=summary,
                                 description_needs_verification=description_needs_verification,
-                                description_ai_confident=description_confident)
+                                description_ai_confident=description_confident,
+                                description_low_confidence=description_low_confidence)
         if description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
     except DuplicateURLError as e:
@@ -15496,9 +15603,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             latest_differentiation_review,
         )
     )
-    _description_confidence_html = _confidence_indicator_html(tool.get("description_ai_confident"))
-    _differentiation_confidence_html = _confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
-    _taxonomy_confidence_html = _confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
+    _description_confidence_html = (_confidence_indicator_html(tool.get("description_ai_confident"))
+        + _low_confidence_indicator_html(tool.get("description_low_confidence")))
+    _differentiation_confidence_html = (_confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
+        + _low_confidence_indicator_html(tool.get("competitive_differentiation_low_confidence")))
+    _taxonomy_confidence_html = (_confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
+        + _low_confidence_indicator_html(tool.get("agent_taxonomy_low_confidence")))
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -15529,6 +15639,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="">
   <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
   <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
 
@@ -15768,6 +15879,7 @@ async function generateDifferentiation(toolId, textareaId, statusId, errBoxId, h
     document.getElementById(textareaId).value = d.competitive_differentiation;
     markAiDrafted('competitive_differentiation');
     markAiConfidence('competitive_differentiation', d.confident);
+    markAiLowConfidence('competitive_differentiation', d.low_confidence);
     status.textContent = d.low_confidence
       ? 'Drafted. No competitors curated yet, so this is weaker than it could be—review carefully.'
       : 'Drafted. Review before saving.';
@@ -15848,6 +15960,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     # already uses.
     ai_drafted = _ai_drafted_field_names(form)
     ai_confidence = _ai_drafted_field_confidence(form)
+    ai_low_confidence = _ai_drafted_field_low_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     competitive_differentiation_needs_verification = 1 if "competitive_differentiation" in ai_drafted else 0
     # Confidence indicator (2026-08): only a real value when the field is
@@ -15862,6 +15975,19 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     differentiation_confident = (
         int(ai_confidence["competitive_differentiation"])
         if "competitive_differentiation" in ai_drafted and "competitive_differentiation" in ai_confidence
+        else None
+    )
+    # low_confidence (item 6, Aug 2026 UI pass): the pre-generation fetch-
+    # success signal, mirroring description_confident/differentiation_confident's
+    # own "only a real value on a fresh draft this save" guard exactly.
+    description_low_confidence = (
+        int(ai_low_confidence["description"])
+        if "description" in ai_drafted and "description" in ai_low_confidence
+        else None
+    )
+    differentiation_low_confidence = (
+        int(ai_low_confidence["competitive_differentiation"])
+        if "competitive_differentiation" in ai_drafted and "competitive_differentiation" in ai_low_confidence
         else None
     )
     # Citations-API grounding fix, Phase 2 — same "fresh draft this submit"
@@ -15885,14 +16011,16 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
                         summary=summary,
                         description_needs_verification=description_needs_verification,
-                        description_ai_confident=description_confident)
+                        description_ai_confident=description_confident,
+                        description_low_confidence=description_low_confidence)
         if "description" in ai_drafted and description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
         else:
             lib.clear_entity_citations("tool", tool_id, "description")
         lib.update_tool_differentiation(tool_id, competitive_differentiation,
                                         needs_verification=competitive_differentiation_needs_verification,
-                                        ai_confident=differentiation_confident)
+                                        ai_confident=differentiation_confident,
+                                        low_confidence=differentiation_low_confidence)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)

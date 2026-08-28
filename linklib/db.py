@@ -2083,6 +2083,26 @@ class Library:
             # unchanged) — this is a second, independent admin-facing fact,
             # not a replacement for either existing mechanism.
             "ALTER TABLE tools ADD COLUMN agent_taxonomy_ai_confident INTEGER",
+            # Quality-indicator visibility (item 6, Aug 2026 UI pass) —
+            # persists the OTHER signal every generate_tool_* draft already
+            # returns (draft.low_confidence: "the page fetch failed / no
+            # page content, drafted from name+URL alone") right alongside
+            # each field's existing *_ai_confident column. Previously this
+            # only ever flashed in the Generate-status toast text
+            # ("Could not fetch the page...") and was lost on reload —
+            # never persisted for tools at all, unlike community_profiles'
+            # single low_confidence column (which predates this and stays
+            # untouched). A DISTINCT fact from confident: low_confidence is
+            # a mechanical pre-generation signal (did the fetch succeed),
+            # confident is the model's own post-generation self-report —
+            # the two can and do disagree (a successful fetch of a thin
+            # page can still yield a confident=false draft). NULL means no
+            # signal yet, same convention as every *_ai_confident column;
+            # written alongside a fresh generation only, same COALESCE
+            # write-path convention.
+            "ALTER TABLE tools ADD COLUMN description_low_confidence INTEGER",
+            "ALTER TABLE tools ADD COLUMN competitive_differentiation_low_confidence INTEGER",
+            "ALTER TABLE tools ADD COLUMN agent_taxonomy_low_confidence INTEGER",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4379,7 +4399,8 @@ class Library:
                  warm_intro_enabled: int = 0, vendor_name: str = "",
                  summary: str = "",
                  description_needs_verification: int = 0,
-                 description_ai_confident: Optional[int] = None) -> int:
+                 description_ai_confident: Optional[int] = None,
+                 description_low_confidence: Optional[int] = None) -> int:
         # description_needs_verification/description_ai_confident (Citations-API
         # grounding fix, Phase 2): a brand-new tool created straight from a
         # Generate-description draft used to have no way to record either —
@@ -4411,12 +4432,13 @@ class Library:
             """INSERT INTO tools (name, slug, description, url, categories_json,
                approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email,
                warm_intro_enabled, vendor_name, summary,
-               description_needs_verification, description_ai_confident)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               description_needs_verification, description_ai_confident, description_low_confidence)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, _voice_fix(description.strip()), url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
              promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip(),
-             _voice_fix(summary.strip()), description_needs_verification, description_ai_confident),
+             _voice_fix(summary.strip()), description_needs_verification, description_ai_confident,
+             description_low_confidence),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -4462,7 +4484,8 @@ class Library:
                     warm_intro_enabled: int = 0, vendor_name: str = "",
                     summary: str = "",
                     description_needs_verification: Optional[int] = None,
-                    description_ai_confident: Optional[int] = None) -> None:
+                    description_ai_confident: Optional[int] = None,
+                    description_low_confidence: Optional[int] = None) -> None:
         # description_needs_verification defaults to None ("leave the column
         # alone") rather than 0/1, because update_tool is also the bulk-edit
         # panel's write path (every row resaved at once) and
@@ -4489,11 +4512,13 @@ class Library:
                summary=?,
                description_needs_verification=COALESCE(?, description_needs_verification),
                description_ai_confident=COALESCE(?, description_ai_confident),
+               description_low_confidence=COALESCE(?, description_low_confidence),
                updated_at=? WHERE id=?""",
             (name.strip(), _voice_fix(description.strip()), url.strip(),
              json.dumps(categories), advisor, promoted, vendor_email.strip(),
              warm_intro_enabled, vendor_name.strip(), _voice_fix(summary.strip()),
-             description_needs_verification, description_ai_confident, _now(), tool_id),
+             description_needs_verification, description_ai_confident,
+             description_low_confidence, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -4604,7 +4629,8 @@ class Library:
 
     def update_tool_differentiation(self, tool_id: int, competitive_differentiation: str,
                                      needs_verification: int = 0,
-                                     ai_confident: Optional[int] = None) -> None:
+                                     ai_confident: Optional[int] = None,
+                                     low_confidence: Optional[int] = None) -> None:
         """Narrow update for the admin full-edit form's "How this differs from
         the competition" field (Phase 3) — same reasoning as
         quick_update_tool: kept separate from update_tool so the Software
@@ -4631,8 +4657,10 @@ class Library:
         self.conn.execute(
             "UPDATE tools SET competitive_differentiation=?, competitive_differentiation_needs_verification=?, "
             "competitive_differentiation_ai_confident=COALESCE(?, competitive_differentiation_ai_confident), "
+            "competitive_differentiation_low_confidence=COALESCE(?, competitive_differentiation_low_confidence), "
             "updated_at=? WHERE id=?",
-            (_voice_fix(competitive_differentiation.strip()), needs_verification, ai_confident, _now(), tool_id),
+            (_voice_fix(competitive_differentiation.strip()), needs_verification, ai_confident,
+             low_confidence, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -4672,7 +4700,8 @@ class Library:
 
     def set_tool_agent_taxonomy_draft(self, tool_id: int, agent_taxonomy_note: str,
                                       needs_verification: int = 1,
-                                      ai_confident: Optional[int] = None) -> None:
+                                      ai_confident: Optional[int] = None,
+                                      low_confidence: Optional[int] = None) -> None:
         """Records an LLM-drafted agent-taxonomy summary (automated research —
         either the auto-run-on-add background task or the on-demand refresh)
         as unconfirmed by default. Only writes when the tool doesn't already
@@ -4690,8 +4719,10 @@ class Library:
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=?, "
             "agent_taxonomy_ai_confident=COALESCE(?, agent_taxonomy_ai_confident), "
+            "agent_taxonomy_low_confidence=COALESCE(?, agent_taxonomy_low_confidence), "
             "updated_at=? WHERE id=?",
-            (_voice_fix(agent_taxonomy_note.strip()), needs_verification, ai_confident, _now(), tool_id),
+            (_voice_fix(agent_taxonomy_note.strip()), needs_verification, ai_confident,
+             low_confidence, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -6091,6 +6122,48 @@ class Library:
         return {r[0] for r in self.conn.execute(
             "SELECT community_id FROM community_profiles WHERE needs_review=1"
         ).fetchall()}
+
+    # The 12 Community profile fields tracked for confidence — mirrors
+    # linklib.enrich.COMMUNITY_CONFIDENCE_FIELDS verbatim (not imported, to
+    # keep linklib.db free of an enrich.py dependency, same reasoning as
+    # every other hand-duplicated small constant in this file).
+    _COMMUNITY_CONFIDENCE_FIELDS = (
+        "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
+        "engagement_level", "sponsor_relationship_note", "application_friction",
+        "cost_value_verdict", "notable_members", "public_criticism", "verdict_summary",
+    )
+
+    def community_profile_quality_flags(self) -> dict[int, dict]:
+        """Item 6 (Aug 2026 UI pass) — read-only surfacing of quality
+        signals the admin communities LIST page never showed, even though
+        both already exist and are fully persisted on community_profiles
+        (low_confidence: a real checkbox on the per-profile edit view,
+        auto-set from Generate; the 12 *_ai_confident columns: inline
+        badges on that same edit view). No new columns — this is purely a
+        bulk read, one query for every community, same reasoning as
+        community_profile_needs_review_ids just above (avoid a full-row
+        join per community on a list page).
+
+        Returns {community_id: {"low_confidence": bool,
+        "unconfident_count": int}} for every community with a profile row;
+        a community with no profile row at all has no entry (nothing to
+        flag)."""
+        cols = ", ".join(f"{f}_ai_confident" for f in self._COMMUNITY_CONFIDENCE_FIELDS)
+        rows = self.conn.execute(
+            f"SELECT community_id, low_confidence, {cols} FROM community_profiles"
+        ).fetchall()
+        out: dict[int, dict] = {}
+        for r in rows:
+            row = dict(r)
+            unconfident = sum(
+                1 for f in self._COMMUNITY_CONFIDENCE_FIELDS
+                if row.get(f"{f}_ai_confident") is not None and not bool(row[f"{f}_ai_confident"])
+            )
+            out[row["community_id"]] = {
+                "low_confidence": bool(row["low_confidence"]),
+                "unconfident_count": unconfident,
+            }
+        return out
 
     # -- community gap submissions (Phase 5: native gap-collection) ---------
 
