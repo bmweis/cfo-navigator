@@ -4051,6 +4051,14 @@ tables, no third-party dependency.
     `Access-Control-Allow-Origin: *` is safe here specifically because `/save` already
     requires a valid token to do anything — same trust model as any bearer-token API,
     and it grants no cookie-authenticated access. No other route gets a CORS header.
+  - `/save-later` is the same token-only, no-login mechanism as `/save` — same
+    `_check_token`, same CORS treatment (the `_save_cors` middleware now matches
+    either path) — but writes into the per-user `read_later` list instead of the
+    shared Archive, via a second bookmarklet/Shortcut pair (`GET
+    /read-later-bookmarklet`, admin-gated like `/bookmarklet`). Since a token-only
+    request has no session, and Read Later is `user_id`-scoped, the write is
+    attributed to `Library.default_admin_user_id()` (the earliest admin account) —
+    see ARCHITECTURE.md's matching bullet for the full write-up.
 - **No secret in rendered HTML.** Internal links no longer carry `?token=`; the cookie
   authorizes navigation. Token comparison is constant-time (`hmac.compare_digest`).
 - **⚠️ Bookmarklet caveat (by design).** The `/bookmarklet` snippet embeds
@@ -4066,6 +4074,9 @@ tables, no third-party dependency.
   options object twice before `.then` ever ran) — a syntax error, so every copy was a
   silent no-op that never threw anywhere visible; fixed, plus a `.catch` on the fetch
   chain so a network/CORS failure now alerts visibly instead of doing nothing.
+  Same caveat applies to `/read-later-bookmarklet` — it embeds the same
+  `LINKLIB_SAVE_TOKEN`, is login-gated the same way, and needs re-grabbing on the
+  same token rotation.
 - `/static/{filename}` resolves through `os.path.basename` to block path traversal.
 
 ## `library.db` is intentionally not in the repo

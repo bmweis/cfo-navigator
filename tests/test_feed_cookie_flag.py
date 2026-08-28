@@ -576,12 +576,13 @@ def _quadrant(html, cls):
     return html[start:min(ends)] if ends else html[start:]
 
 
-def test_new_content_quadrant_counts_three_tools(app_env):
-    """One _lib_card plus the two capture-method accordions."""
+def test_new_content_quadrant_counts_five_tools(app_env):
+    """One _lib_card plus two capture-method accordion pairs (Archive +
+    Read Later, added by the Read Later bookmarklet/Shortcut PR)."""
     with _client(app_env) as client:
         html = client.get("/admin/library").text
     quadrant = _quadrant(html, "lib-q-new")
-    assert "3 tools" in quadrant
+    assert "5 tools" in quadrant
     assert "1 tool" not in quadrant
 
 
