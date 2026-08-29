@@ -3412,6 +3412,147 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   byte-identical between this page and `/thought-leadership/growth-engine-ratio`
   at the same viewport width.
 
+- **Tools whole-record profile signoff (2026-08, amended same phase) — a new
+  `tools.needs_review` column, mirroring `community_profiles.needs_review`'s
+  concept as closely as sensible for tools' shape, sitting alongside (never
+  replacing) the three existing per-field flags.** A same-night investigation
+  mapped Software vendors' and Communities' verification workflows side by
+  side: tools have three independent per-field flags
+  (`description_needs_verification`, `agent_taxonomy_needs_verification`,
+  `competitive_differentiation_needs_verification`), each with its own "Mark
+  verified" route/button, all writing to the shared `narrative_review_log`
+  table — but no whole-record rollup, no single "is this vendor's profile
+  fully verified" view or action anywhere. Communities have exactly the
+  opposite shape: one whole-record `community_profiles.needs_review` flag
+  covering all ~23 profile fields at once, settable via a manual checkbox
+  independent of any AI generation, plus a dedicated "Mark reviewed" button
+  (`mark_community_profile_reviewed()`). Built as a genuinely additive,
+  higher-level signoff for tools: `tools.needs_review INTEGER NOT NULL
+  DEFAULT 0` (same literal column name as Communities', not
+  `*_needs_verification`-prefixed, so it reads as the same cross-entity
+  concept while staying unambiguous next to the three field-scoped columns,
+  which are always field-prefixed).
+
+  **The initial build (same night, same phase) shipped this as purely manual
+  and default-0, deliberately diverging from Communities on both counts —
+  Brian reversed both calls before this PR ever merged**, so the two
+  divergences below are stated as the FINAL behavior, not the original one
+  (worth knowing if an old draft PR description or an early commit message
+  is ever read literally): (1) **auto-linked to per-field regeneration after
+  all** — mirrors Communities' `needs_review = checkbox OR profile_ai_drafted`
+  pattern as closely as tools' three-independent-fields shape allows: a fresh
+  Generate/Refresh draft that lands ANY of the three per-field flags on 1
+  also forces `tools.needs_review` to 1, regardless of the checkbox's prior
+  state; the checkbox/"Mark reviewed" button can still clear it to 0 at any
+  time, and that manual 0 persists across any later save that doesn't itself
+  draft one of the three fields. Structurally, Communities has one submit
+  route for all 23 fields, so one OR expression covers everything; tools'
+  three flags are written from three different places — Description/
+  Differentiation share a request with the whole-record checkbox (inside
+  `admin_tools_edit_submit`, where the OR is literal:
+  `needs_review = checkbox=="1" or description_needs_verification or
+  competitive_differentiation_needs_verification`), while Agent taxonomy's
+  own fresh-draft trigger fires from an entirely separate request
+  (`_run_tool_research`, called either as a background task right after tool
+  creation or synchronously from the "Refresh AI research" button) with no
+  checkbox of its own to OR against — that path force-sets `needs_review` to
+  1 directly (never forces to 0) whenever the fresh draft's own
+  `agent_taxonomy_needs_verification` comes back true. Keying the trigger on
+  the per-field flag actually landing on 1 — not merely "a field was
+  drafted" — has a useful side effect: `scripts/regen_ai_drafted_fields.py`'s
+  own pre-existing, deliberate bypass (it always passes
+  `needs_verification=0` for all three fields on every regen) correctly
+  never trips the auto-link either, with no special-casing needed. (2)
+  **defaults to `1` (needs review) on tool creation, not `0`** — a brand-new
+  profile should read as "needs review" until someone actually signs off on
+  it, matching Communities' own "unreviewed until confirmed" intent even
+  though the mechanism differs (Communities has no profile row at all until
+  content is drafted; tools have a live row from creation). The SQL column
+  default itself stays `0` (the safe, non-retroactive-flagging value for
+  migration backfill of any already-existing row, and for a raw INSERT that
+  doesn't pass a value) — the "1 by default" behavior lives instead as
+  `add_tool()`'s own Python-level default parameter (`needs_review: int =
+  1`), same "SQL default is the floor, Python default is the real behavior"
+  split `description_needs_verification` already uses.
+
+  Mirrors Communities' mechanics exactly everywhere else: `Library.
+  set_tool_needs_review(tool_id, needs_review)` (the checkbox's write path,
+  called from `admin_tools_edit_submit`) and `Library.mark_tool_reviewed
+  (tool_id)` (mirrors `mark_community_profile_reviewed`, a plain single-column
+  clear, no-op on a missing tool) plus `Library.count_tools_needing_review()`;
+  `POST /admin/tools/software/{tool_id}/mark-reviewed` mirrors
+  `admin_communities_mark_reviewed`'s shape exactly, including its
+  `redirect_to` handling (defaults to `/admin/tools/software` for the admin
+  list's inline button, validated against an allowlist that also accepts
+  the tool's own edit page for the edit page's hidden form — the same
+  allowlist convention `admin_tools_delete` already uses) — logs to
+  `narrative_review_log` with a new `field_type='profile'` discriminator
+  (`detail` snapshots `tools.description`, the single most representative
+  field, same reasoning the Community route gives for snapshotting
+  `verdict_summary`). The checkbox and "Mark reviewed" widget (reusing
+  `_narrative_verify_widget`) render in a new "Profile signoff" section on
+  `/tools/software/{slug}/edit`, just above the Save changes footer.
+
+  **New scope added in the same amendment: a "Needs review" filter on both
+  admin list pages.** `/admin/tools/communities` already had this exact
+  pattern (a `?filter=needs_review` query param, a count/"Show all" link
+  pair, a `--caution`-colored row badge, an inline "Mark reviewed" button) —
+  nothing needed adding there. `/admin/tools/software` gained the identical
+  pattern (not the separate client-side `_admin_sort_filter_toolbar_html`
+  dropdown mechanism used for the AND-matched scalar fields below it — that
+  fits a category/cost-band-style filter, not this single boolean toggle,
+  and Communities' existing pattern already solves exactly this case).
+  **A real, pre-existing bug in Communities' own filter, found and fixed by
+  this amendment's verification pass**: both list routes' empty-state
+  fallback was written as `"".join(rows) or MSG_A if filter != "needs_review"
+  else MSG_B` — Python parses this as `("".join(rows) or MSG_A) if ... else
+  MSG_B`, so whenever `filter=="needs_review"` the whole expression
+  unconditionally evaluated to `MSG_B` ("Nothing left to review"),
+  discarding any real matching rows regardless of whether there were any —
+  the filtered view on `/admin/tools/communities` had silently never shown a
+  single row since it shipped. Fixed on both pages with explicit
+  parentheses: `"".join(rows) or (MSG_A if ... else MSG_B)`, which evaluates
+  the join first and only chooses between the two empty messages when it's
+  genuinely empty — covered by a regression test on each page (one proving
+  real rows render under the filter, one proving the correct empty message
+  shows when there truly are none).
+
+  **Public gating (the one open question raised before building): admin-only
+  bookkeeping, no visitor-facing effect** — confirmed with Brian rather than
+  assumed either way, and unchanged by the reversals above. Unlike
+  Communities' `needs_review`, which hides the entire profile draft
+  (Bottom-line callout, Sources list, every grouped card) from a public
+  visitor, `tools.needs_review` changes nothing on `/tools/software/{slug}`
+  or the compare matrix — the three existing per-field flags already do that
+  gating job for tools, so a second, coarser gate would be redundant. A
+  regression test asserts the public profile page renders byte-identical
+  with the flag on or off.
+
+  **"Flag for review" quick-toggle (2026-08 follow-up, same PR before merge)**
+  — Brian's post-review ask: a way to flag a profile "needs review" in the
+  moment while just looking at it, not only while actively editing.
+  Investigated first: the `needs_review` checkbox rendered in exactly two
+  places (the tool edit form, the Community profile edit form) — nowhere
+  else, confirmed by direct grep. Added the mirror action of the existing
+  "Mark reviewed" list-row button, on both admin lists: `POST /admin/tools/
+  software/{tool_id}/flag-for-review` (`Library.set_tool_needs_review
+  (tool_id, 1)`, reusing the existing method) and `POST /admin/tools/
+  communities/{community_id}/flag-for-review` (`Library.
+  flag_community_profile_needs_review`, a new narrow single-column `UPDATE`
+  mirroring `mark_community_profile_reviewed`'s own shape — including its
+  no-op-on-missing-row precedent: a community with no profile draft yet has
+  nothing to flag, so this deliberately does NOT fabricate a row). Both
+  buttons render only when the row is NOT already flagged (the inverse of
+  "Mark reviewed"'s own only-when-flagged guard), same `_is_authed` admin
+  gating and `redirect_to` allowlist pattern as every other action in this
+  system — never reachable by a public visitor. **Deliberately does NOT
+  write to `narrative_review_log`** — that table's whole purpose is
+  recording an explicit human confirmation ("I reviewed this"); flagging is
+  the opposite signal, so logging it there would misrepresent the table's
+  meaning. It also does not clear an existing "Reviewed by X on Y" stamp —
+  same as the checkbox-driven path already didn't, kept consistent between
+  the two ways of setting the flag rather than introducing a new asymmetry.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded

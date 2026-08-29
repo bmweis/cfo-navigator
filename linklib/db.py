@@ -2155,6 +2155,57 @@ class Library:
             "ALTER TABLE tools ADD COLUMN logo_override_stale INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE communities ADD COLUMN logo_manual_override INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE communities ADD COLUMN logo_override_stale INTEGER NOT NULL DEFAULT 0",
+            # Whole-record tool profile signoff (2026-08) — mirrors
+            # community_profiles.needs_review as closely as sensible for
+            # tools' shape (see CLAUDE.md's "Tools whole-record profile
+            # signoff" bullet). Deliberately named identically to Communities'
+            # own column, not *_needs_verification-prefixed, so it reads as
+            # the same higher-level concept across both entity types while
+            # staying unambiguous next to the three field-scoped
+            # description_needs_verification/agent_taxonomy_needs_verification/
+            # competitive_differentiation_needs_verification columns (those are
+            # always field-prefixed; this one never is).
+            #
+            # Amended (2026-08, same phase, before this shipped) — two
+            # reversals, both by explicit direction:
+            #
+            # (1) Auto-linked to per-field regeneration after all, mirroring
+            # Communities' `needs_review = checkbox OR profile_ai_drafted`
+            # pattern as closely as tools' three-independent-fields shape
+            # allows: a fresh Generate/Refresh draft that sets ANY of the
+            # three per-field flags to 1 also forces this one to 1, regardless
+            # of the checkbox's prior state — see admin_tools_edit_submit
+            # (Description/Differentiation, computed in the same request as
+            # the checkbox, so the OR is literal) and _run_tool_research
+            # (Agent taxonomy, whose fresh-draft trigger fires from a
+            # different request entirely — the background task on tool
+            # creation or the "Refresh AI research" button — so it force-sets
+            # to 1 directly rather than ORing). The checkbox/"Mark reviewed"
+            # button can still set this to 0 at any time, and that manual 0
+            # persists across any later save that doesn't itself draft one of
+            # the three fields — only a FRESH draft landing needs_verification
+            # on 1 overrides it. This also means scripts/regen_ai_drafted_
+            # fields.py's own deliberate bypass (it always passes
+            # needs_verification=0 for all three fields) correctly never
+            # triggers the auto-link, since the trigger is keyed on the flag
+            # actually landing on 1, not on "a field was drafted."
+            #
+            # (2) SQL column default stays 0 — the safe, non-retroactive-
+            # flagging value for both migration backfill (an existing row on
+            # first deploy of this column must not suddenly read as
+            # unreviewed) and any raw INSERT that doesn't pass a value. The
+            # "brand-new tool defaults to needs review" behavior instead
+            # lives as add_tool()'s own Python-level default parameter
+            # (needs_review: int = 1) — same "SQL default is the floor,
+            # Python default is the real behavior for the one call site that
+            # matters" split description_needs_verification already uses.
+            #
+            # Admin-only bookkeeping is unchanged by either reversal — still
+            # gates nothing on the public profile/compare pages, unlike
+            # Communities' needs_review (which hides the whole profile
+            # draft): tools already have the three per-field gates doing
+            # that job.
+            "ALTER TABLE tools ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4475,7 +4526,15 @@ class Library:
                  summary: str = "",
                  description_needs_verification: int = 0,
                  description_ai_confident: Optional[int] = None,
-                 description_low_confidence: Optional[int] = None) -> int:
+                 description_low_confidence: Optional[int] = None,
+                 needs_review: int = 1) -> int:
+        # needs_review defaults to 1 (not the column's own SQL default of 0)
+        # — a brand-new tool's profile should read as "needs review" until
+        # someone actually signs off on it, not "already reviewed" by
+        # default. See the needs_review migration comment for the SQL-
+        # default-vs-Python-default split this relies on. Applies to every
+        # caller (admin add-form, public /tools/submit, seed scripts) unless
+        # one explicitly passes 0 — none does today.
         # description_needs_verification/description_ai_confident (Citations-API
         # grounding fix, Phase 2): a brand-new tool created straight from a
         # Generate-description draft used to have no way to record either —
@@ -4507,13 +4566,14 @@ class Library:
             """INSERT INTO tools (name, slug, description, url, categories_json,
                approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email,
                warm_intro_enabled, vendor_name, summary,
-               description_needs_verification, description_ai_confident, description_low_confidence)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               description_needs_verification, description_ai_confident, description_low_confidence,
+               needs_review)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, _voice_fix(description.strip()), url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
              promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip(),
              _voice_fix(summary.strip()), description_needs_verification, description_ai_confident,
-             description_low_confidence),
+             description_low_confidence, 1 if needs_review else 0),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -4876,6 +4936,38 @@ class Library:
             (_now(), tool_id),
         )
         self.conn.commit()
+
+    def set_tool_needs_review(self, tool_id: int, needs_review: int) -> None:
+        """Whole-record profile signoff (2026-08) — the manual checkbox on
+        the tool edit form writes here directly, same as
+        community_profiles.needs_review's own checkbox. Deliberately its own
+        narrow single-column update, not folded into update_tool's larger
+        COALESCE-based write, so it's obviously independent of the three
+        per-field flags update_tool/update_tool_differentiation/
+        update_tool_agent_taxonomy touch — see the tools.needs_review
+        migration comment for the full reasoning."""
+        self.conn.execute(
+            "UPDATE tools SET needs_review=?, updated_at=? WHERE id=?",
+            (1 if needs_review else 0, _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def mark_tool_reviewed(self, tool_id: int) -> None:
+        """One-click whole-record "Mark reviewed" action — clears
+        tools.needs_review without touching anything else. Mirrors
+        mark_community_profile_reviewed(); a no-op (not an error) if the
+        tool doesn't exist (matched by the UPDATE's WHERE clause finding no
+        row, same as every other mark_*_verified method here)."""
+        self.conn.execute(
+            "UPDATE tools SET needs_review=0, updated_at=? WHERE id=?",
+            (_now(), tool_id),
+        )
+        self.conn.commit()
+
+    def count_tools_needing_review(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM tools WHERE needs_review=1"
+        ).fetchone()[0]
 
     def update_tool_screenshot(self, tool_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
         """Legacy narrow update, kept for pre-Phase-E callers/tests only —
@@ -6334,6 +6426,20 @@ class Library:
         error) if the profile row doesn't exist yet."""
         self.conn.execute(
             "UPDATE community_profiles SET needs_review=0, updated_at=? WHERE community_id=?",
+            (_now(), community_id),
+        )
+        self.conn.commit()
+
+    def flag_community_profile_needs_review(self, community_id: int) -> None:
+        """One-click "Flag for review" (2026-08 quick-toggle follow-up) — the
+        mirror action of mark_community_profile_reviewed: sets `needs_review`
+        to 1 from the admin list alone, without opening the profile edit
+        form. Same narrow single-column UPDATE shape, and the same no-op
+        (not an error) precedent for a community with no profile row yet —
+        deliberately does NOT create one; a community with nothing drafted
+        yet has no profile to flag."""
+        self.conn.execute(
+            "UPDATE community_profiles SET needs_review=1, updated_at=? WHERE community_id=?",
             (_now(), community_id),
         )
         self.conn.commit()
