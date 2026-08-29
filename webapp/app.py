@@ -1892,7 +1892,7 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
       {_logo_box(entity['name'], logo_url, 64, radius=10)}
       <div style="flex:1;min-width:260px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <form method="post" action="{route_prefix}/logo/set-url" style="display:flex;gap:8px;flex-wrap:nowrap;flex:1;min-width:220px;">
+        <form method="post" action="{route_prefix}/logo/set-url" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;flex:1;min-width:220px;">
           <input name="logo_url" type="text" maxlength="500"
             style="flex:1;min-width:140px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
             placeholder="https://…/logo.png">
