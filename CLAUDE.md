@@ -3394,6 +3394,63 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   byte-identical between this page and `/thought-leadership/growth-engine-ratio`
   at the same viewport width.
 
+- **Tools whole-record profile signoff (2026-08) — a new `tools.needs_review`
+  column, mirroring `community_profiles.needs_review`'s concept as closely as
+  sensible for tools' shape, sitting alongside (never replacing or deriving
+  from) the three existing per-field flags.** A same-night investigation
+  mapped Software vendors' and Communities' verification workflows side by
+  side: tools have three independent per-field flags
+  (`description_needs_verification`, `agent_taxonomy_needs_verification`,
+  `competitive_differentiation_needs_verification`), each with its own "Mark
+  verified" route/button, all writing to the shared `narrative_review_log`
+  table — but no whole-record rollup, no single "is this vendor's profile
+  fully verified" view or action anywhere. Communities have exactly the
+  opposite shape: one whole-record `community_profiles.needs_review` flag
+  covering all ~23 profile fields at once, settable via a manual checkbox
+  independent of any AI generation, plus a dedicated "Mark reviewed" button
+  (`mark_community_profile_reviewed()`). Built as a genuinely additive,
+  higher-level signoff for tools: `tools.needs_review INTEGER NOT NULL
+  DEFAULT 0` (same literal column name as Communities', not
+  `*_needs_verification`-prefixed, so it reads as the same cross-entity
+  concept while staying unambiguous next to the three field-scoped columns,
+  which are always field-prefixed). **Two deliberate divergences from
+  Communities' own mechanics, both by explicit direction rather than a
+  mechanical port:** (1) **default is `0` for every row, existing and new**
+  — unlike a Community (which has no profile row at all until content is
+  drafted), a tool has a live, fully-populated row the moment it's created
+  (required name/url/description/summary), so there's no "doesn't apply yet"
+  state to model; `0` matches every existing `*_needs_verification` column's
+  own default. (2) **never auto-set by a Generate/Save action** — Communities'
+  own submit route ORs its checkbox with `profile_ai_drafted`
+  (`needs_review = checkbox OR profile_ai_drafted`), so a fresh AI draft can
+  silently flip it to 1; `tools.needs_review` deliberately does NOT copy that
+  behavior — it's settable only via its own checkbox on `#tool-edit-form` or
+  the "Mark reviewed" button, staying independent of all three per-field
+  flags and of whatever `ai_drafted_fields` a given save carries. Confirmed
+  live (a regression test covers it): a fresh Generate+Save that flips
+  `description_needs_verification` to 1 leaves `needs_review` untouched at 0.
+  Mirrors Communities' mechanics exactly everywhere else: `Library.
+  set_tool_needs_review(tool_id, needs_review)` (the checkbox's write path,
+  called from `admin_tools_edit_submit`) and `Library.mark_tool_reviewed
+  (tool_id)` (mirrors `mark_community_profile_reviewed`, a plain single-column
+  clear, no-op on a missing tool) plus `Library.count_tools_needing_review()`;
+  `POST /admin/tools/software/{tool_id}/mark-reviewed` mirrors
+  `admin_communities_mark_reviewed`'s shape, logging to `narrative_review_log`
+  with a new `field_type='profile'` discriminator (`detail` snapshots
+  `tools.description`, the single most representative field, same reasoning
+  the Community route gives for snapshotting `verdict_summary`). The checkbox
+  and "Mark reviewed" widget (reusing `_narrative_verify_widget`) render in a
+  new "Profile signoff" section on `/tools/software/{slug}/edit`, just above
+  the Save changes footer. **Public gating (the one open question raised
+  before building): admin-only bookkeeping, no visitor-facing effect** —
+  confirmed with Brian rather than assumed either way. Unlike Communities'
+  `needs_review`, which hides the entire profile draft (Bottom-line callout,
+  Sources list, every grouped card) from a public visitor, `tools.needs_review`
+  changes nothing on `/tools/software/{slug}` or the compare matrix — the
+  three existing per-field flags already do that gating job for tools, so a
+  second, coarser gate would be redundant. A regression test asserts the
+  public profile page renders byte-identical with the flag on or off.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded

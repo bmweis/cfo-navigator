@@ -15652,6 +15652,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         latest_differentiation_review = (
             lib.get_latest_narrative_review("tool", "differentiation", tool_id) if tool else None
         )
+        latest_profile_review = (
+            lib.get_latest_narrative_review("tool", "profile", tool_id) if tool else None
+        )
         agent_taxonomy_citations = (
             lib.get_entity_citations("tool", tool_id, "agent_taxonomy") if tool else []
         )
@@ -15870,6 +15873,18 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             latest_differentiation_review,
         )
     )
+    # Whole-record profile signoff (2026-08) — a higher-level, purely manual
+    # sign-off sitting alongside the three per-field flags above, not derived
+    # from them. Mirrors community_profiles.needs_review's "Mark reviewed"
+    # widget shape; admin-only bookkeeping, no public gating (see CLAUDE.md's
+    # "Tools whole-record profile signoff" bullet).
+    _profile_reviewed_action, _profile_reviewed_form_html, _profile_review_line_html = (
+        _narrative_verify_widget(
+            bool(tool.get("needs_review")),
+            "profile-mark-reviewed-form", f"/admin/tools/software/{tool_id}/mark-reviewed",
+            latest_profile_review, action_label="Mark reviewed", past_tense_verb="Reviewed",
+        )[1:]
+    )
     _description_confidence_html = (_confidence_indicator_html(tool.get("description_ai_confident"))
         + _low_confidence_indicator_html(tool.get("description_low_confidence")))
     _differentiation_confidence_html = (_confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
@@ -16022,6 +16037,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 {_taxonomy_verify_form_html}
 {_description_verify_form_html}
 {_differentiation_verify_form_html}
+{_profile_reviewed_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Competition</h2>
@@ -16096,6 +16112,17 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 </div>
 
 {_governed_features_html}
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 8px;">Profile signoff</h2>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A whole-record signoff, separate from the three "Needs verification" flags above&mdash;those track each AI-drafted field independently; this tracks whether you've personally read the vendor's profile as a whole and are comfortable calling it done. Never set automatically by Generate/Refresh&mdash;only by checking the box below or clicking "Mark reviewed."</p>
+  <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+    <input type="checkbox" name="needs_review" value="1" form="tool-edit-form"{' checked' if tool.get('needs_review') else ''}>
+    <span>Needs review: flagged for a full read-through before treating this vendor's profile as final.</span>
+  </label>
+  {_profile_reviewed_action}
+  {_profile_review_line_html}
+</div>
 
 <div class="edit-footer-actions" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <button type="submit" form="tool-edit-form" class="btn">Save changes</button>
@@ -16218,6 +16245,10 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     agent_taxonomy_note = (form.get("agent_taxonomy_note") or "").strip()
     screenshot_url = (form.get("screenshot_url") or "").strip()
     app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
+    # Whole-record profile signoff (2026-08) — purely manual, read straight
+    # off the checkbox, never derived from ai_drafted/the three per-field
+    # flags below. See tools.needs_review's migration comment.
+    needs_review = 1 if form.get("needs_review") == "1" else 0
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     # Phase G PR 2: a field saved right after a fresh Generate click (named
@@ -16297,6 +16328,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
+        lib.set_tool_needs_review(tool_id, needs_review)
         _record_ai_drafted_reviews(lib, request, "tool", tool_id, form)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
@@ -16577,6 +16609,32 @@ def admin_tools_differentiation_verify(request: Request, tool_id: int):
         lib.record_narrative_review(
             _current_user_id(lib, request), "tool", "differentiation", tool_id,
             detail=tool.get("competitive_differentiation") or "",
+        )
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
+
+
+@app.post("/admin/tools/software/{tool_id}/mark-reviewed")
+def admin_tools_mark_reviewed(request: Request, tool_id: int):
+    """One-click whole-record "Mark reviewed" — clears tools.needs_review
+    without touching any of the three per-field verification flags. Mirrors
+    admin_communities_mark_reviewed's shape (see CLAUDE.md's "Tools
+    whole-record profile signoff" bullet); logs to narrative_review_log with
+    field_type='profile', a snapshot of the description as of this click
+    (the single most representative field, same reasoning
+    admin_communities_mark_reviewed gives for snapshotting verdict_summary)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        lib.mark_tool_reviewed(tool_id)
+        lib.record_narrative_review(
+            _current_user_id(lib, request), "tool", "profile", tool_id,
+            detail=tool.get("description") or "",
         )
     finally:
         lib.close()

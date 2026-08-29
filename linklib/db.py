@@ -2155,6 +2155,33 @@ class Library:
             "ALTER TABLE tools ADD COLUMN logo_override_stale INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE communities ADD COLUMN logo_manual_override INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE communities ADD COLUMN logo_override_stale INTEGER NOT NULL DEFAULT 0",
+            # Whole-record tool profile signoff (2026-08) — mirrors
+            # community_profiles.needs_review as closely as sensible for
+            # tools' shape (see CLAUDE.md's "Tools whole-record profile
+            # signoff" bullet). Deliberately named identically to Communities'
+            # own column, not *_needs_verification-prefixed, so it reads as
+            # the same higher-level concept across both entity types while
+            # staying unambiguous next to the three field-scoped
+            # description_needs_verification/agent_taxonomy_needs_verification/
+            # competitive_differentiation_needs_verification columns (those are
+            # always field-prefixed; this one never is). Defaults to 0 for
+            # every existing and new row — unlike Communities, a tool has a
+            # live, fully-populated row the moment it's created (required
+            # name/url/description/summary, not an absent draft), so there's
+            # no "doesn't apply yet" state to model; 0 matches every existing
+            # *_needs_verification column's own default and the general
+            # "nothing is auto-flagged, an admin opts in" convention.
+            # Deliberately NOT auto-set by any Generate/Save action on the
+            # three per-field flags (Communities' own needs_review IS
+            # auto-OR'd by a fresh AI draft — this column intentionally does
+            # NOT copy that one behavior, per explicit direction: it must stay
+            # a purely manual, independent signoff, settable only via the
+            # checkbox on the tool edit form or the "Mark reviewed" button).
+            # Admin-only bookkeeping — does not gate anything on the public
+            # profile/compare pages, unlike Communities' needs_review (which
+            # hides the whole profile draft): tools already have the three
+            # per-field gates doing that job.
+            "ALTER TABLE tools ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4876,6 +4903,38 @@ class Library:
             (_now(), tool_id),
         )
         self.conn.commit()
+
+    def set_tool_needs_review(self, tool_id: int, needs_review: int) -> None:
+        """Whole-record profile signoff (2026-08) — the manual checkbox on
+        the tool edit form writes here directly, same as
+        community_profiles.needs_review's own checkbox. Deliberately its own
+        narrow single-column update, not folded into update_tool's larger
+        COALESCE-based write, so it's obviously independent of the three
+        per-field flags update_tool/update_tool_differentiation/
+        update_tool_agent_taxonomy touch — see the tools.needs_review
+        migration comment for the full reasoning."""
+        self.conn.execute(
+            "UPDATE tools SET needs_review=?, updated_at=? WHERE id=?",
+            (1 if needs_review else 0, _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def mark_tool_reviewed(self, tool_id: int) -> None:
+        """One-click whole-record "Mark reviewed" action — clears
+        tools.needs_review without touching anything else. Mirrors
+        mark_community_profile_reviewed(); a no-op (not an error) if the
+        tool doesn't exist (matched by the UPDATE's WHERE clause finding no
+        row, same as every other mark_*_verified method here)."""
+        self.conn.execute(
+            "UPDATE tools SET needs_review=0, updated_at=? WHERE id=?",
+            (_now(), tool_id),
+        )
+        self.conn.commit()
+
+    def count_tools_needing_review(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM tools WHERE needs_review=1"
+        ).fetchone()[0]
 
     def update_tool_screenshot(self, tool_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
         """Legacy narrow update, kept for pre-Phase-E callers/tests only —
