@@ -4863,14 +4863,15 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     independently reproduced from this session (its outbound network egress
     is blocked to both `api.brandfetch.io` and the tool's own site), so the
     fix ships two things regardless of that unconfirmed root cause: (1) a
-    domain-echo guard in `backfill_logos._fetch_logo_asset` — the Brand API
-    response's own `domain` field is now checked against the domain
-    requested before its logo asset is ever trusted, closing the exact class
-    of gap (accepting whatever a fuzzy/mismatched API response returns with
-    no cross-check) that would explain Aleph's case whether or not it's the
-    actual cause; and (2) a real manual-override mechanism, since a wrong
-    logo needs to be fixable without a code deploy regardless of why it went
-    wrong. `tools.logo_manual_override`/`tools.logo_override_stale` (and the
+    domain-echo guard in `linklib.brandfetch.fetch_logo_asset` (originally
+    `backfill_logos._fetch_logo_asset`; relocated in the follow-up described
+    below) — the Brand API response's own `domain` field is now checked
+    against the domain requested before its logo asset is ever trusted,
+    closing the exact class of gap (accepting whatever a fuzzy/mismatched
+    API response returns with no cross-check) that would explain Aleph's
+    case whether or not it's the actual cause; and (2) a real manual-override
+    mechanism, since a wrong logo needs to be fixable without a code deploy
+    regardless of why it went wrong. `tools.logo_manual_override`/`tools.logo_override_stale` (and the
     same two columns on `communities`) back it: `Library.set_tool_logo_manual`/
     `set_community_logo_manual` write an admin-supplied logo (fetched
     server-side from a pasted URL, or uploaded directly — jpeg/png/webp only,
@@ -4906,6 +4907,43 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     unaffected, revert-to-automatic, staleness on a domain change but not a
     path-only edit, the backfill script's own selection-query exclusion, and
     the admin routes end to end).
+    **"Revert & re-fetch from Brandfetch" (2026-08 follow-up)** — the
+    "Revert to automatic" action originally only reset the DB row, leaving
+    the actual re-fetch to whenever `scripts/backfill_logos.py --apply` was
+    next run by hand; Brian asked for the button to also trigger a live
+    Brand API call for that one row immediately. Two things had to happen
+    for this to be safe. First, the Brand API call/asset-selection/download
+    logic (`extract_domain`, `best_logo_asset`, `fetch_logo_asset` — with
+    its domain-echo guard — `download_asset`) moved out of
+    `scripts/backfill_logos.py` into a new shared `linklib/brandfetch.py`,
+    so the script's own monthly batch run and the admin route call exactly
+    one implementation rather than risk two copies drifting apart; the
+    script now imports from there, with no behavior change (verified with
+    the same preview/read-back conventions, plus a new
+    `tests/test_brandfetch.py` covering the pure logic — including the
+    domain-echo guard — against a fake HTTP session). Second, a new
+    `webapp.app._live_refetch_logo(lib, kind, entity_id, entity)` helper
+    powers the route: called AFTER `clear_tool_logo_override`/
+    `clear_community_logo_override` (never before — the override flag is
+    always dropped first), it makes one real, synchronous Brand API call for
+    that row's domain and, on success, writes the result via the normal
+    `set_tool_logo`/`set_community_logo` path (now safe again since the
+    override was just cleared). On ANY failure along the way — no
+    `BRANDFETCH_API_KEY` configured, the 100/month quota hit, no usable
+    asset for the domain, or the asset download itself failing — the row is
+    simply left reverted to automatic (already cleared moments earlier), so
+    it can never end up worse off than a plain revert would have been; the
+    next `backfill_logos.py` batch run can still pick it up later. Each
+    failure mode gets its own explanatory message, shown as a banner on the
+    edit page via new `logo_refetched`/`logo_refetch_msg` query params on
+    `admin_tools_edit`/`admin_communities_edit` (green on success, coral on
+    failure — same convention as the existing screenshot/research banners).
+    The button's own label and helper copy were updated to say plainly that
+    clicking it spends one real Brand API call right now, not a free,
+    scheduled action. See `tests/test_logo_override.py`'s "Revert &
+    re-fetch" section for the full coverage (success, no API key, quota,
+    no-usable-asset, download failure, and the route end to end via a
+    mocked `linklib.brandfetch`).
     `/tools/communities/gap` (the "not
     quite the right fit?" CTA on a profile page — currently a stub that redirects
     into `/contact` with the community pre-filled as context, pending the real
