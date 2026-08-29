@@ -1883,9 +1883,10 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
 
     in_form_html = f"""<div id="gen-host-logo-{idsfx}">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Logo{source_badge}</label>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos are auto-fetched from Brandfetch and refreshed by an occasional
-      batch script&mdash;never automatically for a row with a manual override set here. Use this to correct a wrong or missing logo;
-      it always wins over anything Brandfetch returns.</p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos auto-fetch from Brandfetch via a monthly batch script.
+      A manual override set here always wins, and that batch never touches it. "Revert &amp; re-fetch" clears the override and calls
+      Brandfetch live right now, spending one of the 100 free monthly requests instead of waiting for the batch. If nothing usable
+      turns up, it still reverts to automatic so the batch can retry later.</p>
     {banner_html}
     {stale_banner_html}
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
@@ -1903,9 +1904,6 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
           <button type="submit" class="tool-admin-btn">Upload</button>
         </form>
         <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert &amp; re-fetch from Brandfetch</button>
-        <p style="font-size:11px;color:var(--muted);margin:6px 0 0;">Clears this override and makes one live Brandfetch request for it
-          right now&mdash;not the monthly batch script, a real API call that spends one of the 100/month free-tier requests. If
-          Brandfetch has nothing usable, this still reverts to automatic (the next batch run will try again).</p>
       </div>
     </div>
   </div>"""
