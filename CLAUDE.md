@@ -327,6 +327,50 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `tools.logo_path`/`communities.logo_path` store the resulting relative path; actually
   rendering a logo on a profile page or directory card, and the fallback UI for a record
   that never resolves one, is deferred to a later phase.
+- **Manual logo override (2026-08) — a wrong or missing Brandfetch logo is now fixable
+  from the admin edit page, without a code deploy, and can never be silently reverted by
+  a future automated re-fetch.** Triggered by finding Aleph's public profile showing
+  Zapier's logo (live screenshot evidence). Phase 0 investigation confirmed
+  `scripts/backfill_logos.py` is the only writer of `logo_path` (a manual, occasional
+  batch script — never triggered on tool add, and there's no periodic/background
+  refresh at all), and ruled out a same-repo cause for Aleph specifically: its stored
+  URL (`https://www.getaleph.com`) extracts to the correct domain (`getaleph.com`), and
+  there's no Zapier tool/community anywhere in this codebase's data for a slug/domain
+  collision to explain it. The live Brandfetch-side root cause couldn't be independently
+  reproduced from this session — its outbound network egress is blocked to both
+  `api.brandfetch.io` and Aleph's own site — so this ships two things regardless of
+  which theory is right: (1) a domain-echo guard in `backfill_logos._fetch_logo_asset`,
+  which now checks the Brand API response's own `domain` field against the domain
+  requested before trusting its logo asset — closing the real code-level gap this
+  investigation found (nothing previously cross-checked a mismatched/fuzzy API response),
+  whether or not it's what actually happened to Aleph; and (2) the override mechanism
+  itself, since a wrong logo needs a fix path regardless of why it went wrong.
+  `tools.logo_manual_override`/`tools.logo_override_stale` (mirrored on `communities`)
+  back it, following the same "human edits win over automation" principle the
+  `seed_tools.py` description-sync incident established: `set_tool_logo`/
+  `set_community_logo` (the only calls a Brandfetch fetch ever makes) refuse to overwrite
+  a row with `logo_manual_override=1` unless explicitly forced — the one choke point
+  every automated write goes through, so the protection holds regardless of what
+  selection query got a caller there (the backfill script's own selection query also
+  excludes these rows, as a second belt, so a run never burns Brand API quota on a row
+  it can't write anyway). The admin edit page (`_logo_admin_section`, both Software and
+  Communities) reuses the App screenshot section's own conventions — a URL-fetch text
+  input plus a plain file-upload `<form>` (jpeg/png/webp only, no SVG — admin-supplied
+  content is untrusted input in a way a vetted third-party API response isn't) — and a
+  "Revert to automatic" action that blanks `logo_path` and drops the flag so the next
+  backfill run repopulates it. A URL change to a genuinely different domain (not a
+  path/query/scheme-only edit to the same site) flags an active override as stale
+  (`logo_override_stale=1`) rather than silently keeping it applied to what's now a
+  different company's site, or silently dropping a real correction — surfaced as a
+  banner with "still correct—dismiss" and "clear override" actions. A brand-new row
+  (e.g. delete-then-re-add) starts with no override, by construction — neither `add_tool`
+  nor `add_community` sets these flags to anything but their schema default of 0.
+  **Open question, not independently confirmed by this investigation**: whether
+  Brandfetch's Brand API genuinely returned mismatched data for `getaleph.com`, or the
+  issue is something else on Brandfetch's side — this session had no network access to
+  either `api.brandfetch.io` or `getaleph.com` to check directly. Worth a quick manual
+  check (or a session with broader network access) if it matters to pin down exactly;
+  the fix above doesn't depend on the answer.
 - **CFO Toolbox profile pages show two screenshots (Phase E): homepage and app/product,
   independently sourced.** The homepage slot (`screenshot_url`/`screenshot_captured_at`)
   is unchanged — always captured from the record's own `url`. The app slot

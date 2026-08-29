@@ -134,12 +134,19 @@ def _select_candidates(lib: Library, limit: int) -> list[tuple[str, sqlite3.Row]
     """Every tool then every community still missing a logo, each in a
     stable id order, truncated to `limit`. Deliberately not scoped to
     approved-only — a pending tool's logo is harmless to have ready before
-    approval, and logo_path is orthogonal to the approval workflow."""
+    approval, and logo_path is orthogonal to the approval workflow.
+
+    Excludes logo_manual_override=1 rows explicitly (2026-08, manual logo
+    override) — Library.set_tool_logo/set_community_logo already refuse to
+    write over one regardless, but skipping them here too means this run
+    never spends a Brand API call it can't use anyway."""
     tools = lib.conn.execute(
-        "SELECT id, name, slug, url FROM tools WHERE logo_path='' OR logo_path IS NULL ORDER BY id"
+        "SELECT id, name, slug, url FROM tools "
+        "WHERE (logo_path='' OR logo_path IS NULL) AND logo_manual_override=0 ORDER BY id"
     ).fetchall()
     communities = lib.conn.execute(
-        "SELECT id, name, slug, url FROM communities WHERE logo_path='' OR logo_path IS NULL ORDER BY id"
+        "SELECT id, name, slug, url FROM communities "
+        "WHERE (logo_path='' OR logo_path IS NULL) AND logo_manual_override=0 ORDER BY id"
     ).fetchall()
     queue = [("tool", r) for r in tools] + [("community", r) for r in communities]
     return queue[:limit] if limit else queue
@@ -197,6 +204,19 @@ def _fetch_logo_asset(domain: str, api_key: str, session: requests.Session) -> t
         data = resp.json()
     except ValueError:
         return None, "non-JSON response"
+
+    # Domain-echo guard (2026-08, manual logo override investigation) — the
+    # Brand API response carries its own "domain" field for the brand it
+    # actually matched. Prior to this fix nothing here ever checked it
+    # against the domain we requested, so a fuzzy/mismatched match on
+    # Brandfetch's side (confirmed suspect in the Aleph/Zapier
+    # investigation, though not independently reproducible from this
+    # session — see CLAUDE.md) would be accepted silently. Cheap and
+    # correct regardless of root cause: only trust the response for the
+    # exact domain (or its own www. variant) we asked for.
+    resp_domain = (data.get("domain") or "").strip().lower()
+    if resp_domain and resp_domain not in (domain.lower(), f"www.{domain.lower()}"):
+        return None, f"MISMATCH: requested {domain!r} but response is for {resp_domain!r} — skipped, not saved"
 
     asset = _best_logo_asset(data)
     if not asset:
@@ -325,12 +345,21 @@ def main() -> int:
                     failed.append((kind, name, f"asset download failed: {exc}"))
                     print(f"{prefix} ({domain}): MISS — asset download failed: {exc}")
                 else:
+                    # Defense in depth: _select_candidates already excludes
+                    # logo_manual_override=1 rows, but set_tool_logo/
+                    # set_community_logo re-check and refuse to write over one
+                    # regardless — a row could only get here on a race with
+                    # a concurrent admin edit, but the write must still no-op
+                    # rather than clobber a manual correction.
                     if kind == "tool":
-                        lib.set_tool_logo(row["id"], rel_path)
+                        wrote = lib.set_tool_logo(row["id"], rel_path)
                     else:
-                        lib.set_community_logo(row["id"], rel_path)
-                    updated.append((kind, row["id"], name, rel_path))
-                    print(f"{prefix} ({domain}): OK — saved {rel_path}")
+                        wrote = lib.set_community_logo(row["id"], rel_path)
+                    if wrote:
+                        updated.append((kind, row["id"], name, rel_path))
+                        print(f"{prefix} ({domain}): OK — saved {rel_path}")
+                    else:
+                        print(f"{prefix} ({domain}): SKIPPED — manual logo override is active, not overwritten")
 
             if i < len(candidates):
                 time.sleep(args.delay)
