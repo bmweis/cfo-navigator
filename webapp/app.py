@@ -1891,16 +1891,16 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     {stale_banner_html}
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
       {_logo_box(entity['name'], logo_url, 64, radius=10)}
-      <div style="flex:1;min-width:260px;">
-        <form method="post" action="{route_prefix}/logo/set-url" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="flex:1;min-width:260px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <form method="post" action="{route_prefix}/logo/set-url" style="display:flex;gap:8px;flex-wrap:nowrap;flex:1;min-width:220px;">
           <input name="logo_url" type="text" maxlength="500"
-            style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
+            style="flex:1;min-width:140px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
             placeholder="https://…/logo.png">
           <button type="submit" class="tool-admin-btn">Fetch from URL</button>
         </form>
-        <form method="post" action="{route_prefix}/logo/upload" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+        <form method="post" action="{route_prefix}/logo/upload" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">
           <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required
-            style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:220px;">
+            style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:180px;">
           <button type="submit" class="tool-admin-btn">Upload</button>
         </form>
         <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert &amp; re-fetch from Brandfetch</button>
