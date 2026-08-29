@@ -1466,6 +1466,15 @@ def _domain_slug_base(url: str) -> str:
     return label
 
 
+def _url_domain_changed(old_url: str, new_url: str) -> bool:
+    """True when two URLs resolve to a genuinely different bare domain (via
+    _slug_host — lowercased, www-stripped), used to flag a manual logo
+    override as stale on a real site change (see update_tool/update_community)
+    without tripping on a path/query/scheme-only edit to the same site."""
+    old_host, new_host = _slug_host(old_url), _slug_host(new_url)
+    return bool(old_host) and bool(new_host) and old_host != new_host
+
+
 def _domain_slug_full(url: str) -> str:
     """Full bare domain with dots replaced by hyphens, e.g. 'abacum.io' ->
     'abacum-io'. Used as the collision fallback when two entries of the same
@@ -2127,6 +2136,25 @@ class Library:
             # "still the live stamp"; a non-NULL timestamp means "superseded by
             # a later regeneration" — see Library._supersede_narrative_review.
             "ALTER TABLE narrative_review_log ADD COLUMN superseded_at TEXT",
+            # Manual logo override (2026-08) — Phase 0 investigation confirmed
+            # scripts/backfill_logos.py is the ONLY writer of logo_path, and it
+            # already skips any row where logo_path is non-empty — but that's an
+            # accident of its own WHERE clause, not a real guarantee, and a
+            # future "refresh logos" feature could easily not know to preserve
+            # it. logo_manual_override is the explicit, defense-in-depth signal:
+            # set_tool_logo/set_community_logo (the only writers Brandfetch-side
+            # automation ever calls) now refuse to overwrite a row with this
+            # flag set, regardless of what selection query got them there — same
+            # "one choke point" precedent as the em-dash mechanical backstop.
+            # logo_override_stale flags (never silently clears) a manual
+            # override when the tool/community's URL domain changes after the
+            # override was set — see update_tool/update_community — so a
+            # correction made for one company's site doesn't quietly keep
+            # rendering once the URL points somewhere else entirely.
+            "ALTER TABLE tools ADD COLUMN logo_manual_override INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tools ADD COLUMN logo_override_stale INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE communities ADD COLUMN logo_manual_override INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE communities ADD COLUMN logo_override_stale INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4582,6 +4610,17 @@ class Library:
         self.conn.commit()
         if clear_description_verification_stamp:
             self._supersede_narrative_review("tool", "description", tool_id)
+        # Manual logo override staleness (2026-08): a URL edit that changes
+        # the domain never touches logo_path/logo_manual_override itself —
+        # silently dropping the override would lose a real correction, and
+        # silently keeping it could paper the new site with the old one's
+        # logo with no signal anything changed. Flag only; surfaced as a
+        # banner on the edit page (see _logo_admin_section).
+        if current and current.get("logo_manual_override") and _url_domain_changed(current["url"], url):
+            self.conn.execute(
+                "UPDATE tools SET logo_override_stale=1 WHERE id=?", (tool_id,)
+            )
+            self.conn.commit()
 
     def update_tool_content(self, tool_id: int, name: str, description: str) -> None:
         """Narrow update for scripts/seed_tools.py's re-sync pass (#113): touches only
@@ -4920,15 +4959,67 @@ class Library:
         )
         self.conn.commit()
 
-    def set_tool_logo(self, tool_id: int, logo_path: str) -> None:
-        """Records a downloaded-and-stored logo asset (Phase D backfill —
-        scripts/backfill_logos.py is the only caller today). `logo_path` is a
+    def set_tool_logo(self, tool_id: int, logo_path: str, force: bool = False) -> bool:
+        """Records a downloaded-and-stored logo asset — scripts/backfill_logos.py
+        (automated Brandfetch fetch) is the only caller today. `logo_path` is a
         relative path under webapp/static/ (e.g. "logos/tools/abacum.svg"),
         never an external URL — see the logo_path ALTER TABLE comment in
-        __init__ for the full reasoning."""
+        __init__ for the full reasoning.
+
+        Manual-override fix (2026-08): refuses to overwrite a row with
+        logo_manual_override=1 unless force=True — this is the one choke
+        point every automated write goes through, so it protects a manual
+        correction regardless of what selection query got the caller here
+        (backfill_logos.py's own WHERE clause already skips these rows too,
+        but that's a selection-query nicety, not the guarantee; this is).
+        Returns True if the row was actually written, False if skipped
+        because of an active override — callers that care (the backfill
+        script's own reporting) can tell a no-op from a real write."""
+        if not force:
+            row = self.conn.execute(
+                "SELECT logo_manual_override FROM tools WHERE id=?", (tool_id,)
+            ).fetchone()
+            if row and row["logo_manual_override"]:
+                return False
         self.conn.execute(
             "UPDATE tools SET logo_path=?, updated_at=? WHERE id=?",
             (logo_path.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+        return True
+
+    def set_tool_logo_manual(self, tool_id: int, logo_path: str) -> None:
+        """Admin-set logo override (manual URL fetch or upload) — the only
+        writer that sets logo_manual_override=1. Also clears
+        logo_override_stale, since setting/re-setting the override is itself
+        the admin confirming it's correct for the tool's current URL."""
+        self.conn.execute(
+            "UPDATE tools SET logo_path=?, logo_manual_override=1, "
+            "logo_override_stale=0, updated_at=? WHERE id=?",
+            (logo_path.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def clear_tool_logo_override(self, tool_id: int) -> None:
+        """"Revert to automatic": drops the override flag and blanks
+        logo_path, so the next scripts/backfill_logos.py run (its selection
+        query targets empty logo_path) picks the tool back up and re-fetches
+        from Brandfetch. Does not itself fetch anything — that stays a
+        separate, deliberate script run, same as every other logo fetch."""
+        self.conn.execute(
+            "UPDATE tools SET logo_path='', logo_manual_override=0, "
+            "logo_override_stale=0, updated_at=? WHERE id=?",
+            (_now(), tool_id),
+        )
+        self.conn.commit()
+
+    def dismiss_tool_logo_stale(self, tool_id: int) -> None:
+        """Admin confirms an existing manual override is still correct after
+        a URL change, without re-uploading anything — clears the stale flag
+        only, leaves logo_path/logo_manual_override untouched."""
+        self.conn.execute(
+            "UPDATE tools SET logo_override_stale=0, updated_at=? WHERE id=?",
+            (_now(), tool_id),
         )
         self.conn.commit()
 
@@ -5826,6 +5917,12 @@ class Library:
              reach, _voice_fix(local_markets.strip()), featured, advisor, community_id),
         )
         self.conn.commit()
+        # Manual logo override staleness — mirrors update_tool exactly.
+        if current and current.get("logo_manual_override") and _url_domain_changed(current["url"], url):
+            self.conn.execute(
+                "UPDATE communities SET logo_override_stale=1 WHERE id=?", (community_id,)
+            )
+            self.conn.commit()
 
     def update_community_content(self, community_id: int, name: str, notes: str = "") -> None:
         """Narrow update for scripts/seed_communities.py's re-sync pass (and the startup
@@ -5898,12 +5995,46 @@ class Library:
         )
         self.conn.commit()
 
-    def set_community_logo(self, community_id: int, logo_path: str) -> None:
+    def set_community_logo(self, community_id: int, logo_path: str, force: bool = False) -> bool:
         """Records a downloaded-and-stored logo asset — mirrors set_tool_logo
-        exactly (Phase D backfill, scripts/backfill_logos.py)."""
+        exactly, including the manual-override guard (see that method's
+        docstring for the full reasoning)."""
+        if not force:
+            row = self.conn.execute(
+                "SELECT logo_manual_override FROM communities WHERE id=?", (community_id,)
+            ).fetchone()
+            if row and row["logo_manual_override"]:
+                return False
         self.conn.execute(
             "UPDATE communities SET logo_path=?, updated_at=? WHERE id=?",
             (logo_path.strip(), _now(), community_id),
+        )
+        self.conn.commit()
+        return True
+
+    def set_community_logo_manual(self, community_id: int, logo_path: str) -> None:
+        """Admin-set logo override — mirrors set_tool_logo_manual exactly."""
+        self.conn.execute(
+            "UPDATE communities SET logo_path=?, logo_manual_override=1, "
+            "logo_override_stale=0, updated_at=? WHERE id=?",
+            (logo_path.strip(), _now(), community_id),
+        )
+        self.conn.commit()
+
+    def clear_community_logo_override(self, community_id: int) -> None:
+        """"Revert to automatic" — mirrors clear_tool_logo_override exactly."""
+        self.conn.execute(
+            "UPDATE communities SET logo_path='', logo_manual_override=0, "
+            "logo_override_stale=0, updated_at=? WHERE id=?",
+            (_now(), community_id),
+        )
+        self.conn.commit()
+
+    def dismiss_community_logo_stale(self, community_id: int) -> None:
+        """Mirrors dismiss_tool_logo_stale exactly."""
+        self.conn.execute(
+            "UPDATE communities SET logo_override_stale=0, updated_at=? WHERE id=?",
+            (_now(), community_id),
         )
         self.conn.commit()
 

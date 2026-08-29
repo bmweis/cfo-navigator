@@ -108,6 +108,21 @@ _APP_SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024  # 8MB — a manually uploaded scree
 _LOGO_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "logos", "tools")
 _COMMUNITY_LOGO_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "logos", "communities")
 
+# Manual logo override (2026-08 — see CLAUDE.md's Aleph/Zapier investigation
+# writeup). Files land in the same _LOGO_DIR/_COMMUNITY_LOGO_DIR directories
+# Brandfetch downloads into, named "{slug}-manual.{ext}" so a manual upload
+# never collides with (or gets silently replaced by re-saving over) whatever
+# Brandfetch previously wrote to "{slug}.{ext}" — the two files coexist
+# harmlessly on disk; only tools.logo_path/communities.logo_path decides
+# which one is actually served, via Library.set_tool_logo_manual/
+# set_community_logo_manual. Restricted to jpeg/png/webp (no SVG) for both
+# the URL-fetch and upload paths, deliberately narrower than Brandfetch's own
+# svg-preferred fetch — an admin-supplied URL/file is user input in a way a
+# vetted third-party API response isn't, and this site doesn't accept raw
+# SVG uploads anywhere else either (see admin_brand_avatar_upload).
+_MANUAL_LOGO_MAX_BYTES = 3 * 1024 * 1024  # 3MB — same cap as the brand avatar upload
+_MANUAL_LOGO_EXT_BY_MIME = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+
 # /contact spam controls (see _contact_rate_limited and _is_contact_spam below).
 CONTACT_RATE_LIMIT_PER_HOUR = int(os.environ.get("LINKLIB_CONTACT_RATE_LIMIT_PER_HOUR", "5"))
 CONTACT_TIME_TRAP_SECONDS = float(os.environ.get("LINKLIB_CONTACT_TIME_TRAP_SECONDS", "3"))
@@ -1813,6 +1828,130 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
   </div>
 </div>"""
     return in_form_html, after_form_html
+
+
+def _logo_admin_section(entity: dict, entity_id: int, kind: str) -> str:
+    """Renders the admin edit page's "Logo" section (manual logo override,
+    2026-08 — see CLAUDE.md's Aleph/Zapier investigation writeup).
+
+    Reuses the app-screenshot section's own conventions: a text URL input
+    with a dedicated "Fetch" action, a separate file-upload form (plain
+    `<input type=file>` + submit, same shape as /admin/brand/avatar — no
+    crop needed here, a logo isn't cropped to a fixed frame), and a "Revert
+    to automatic" action — all as their own standalone <form>s (not nested
+    inside #tool-edit-form/#comm-edit-form) since none of these need to
+    submit alongside the rest of the edit form's fields, unlike the
+    homepage-screenshot URL field beside them.
+
+    kind is "tools" or "communities" — picks the route prefix and which
+    _*_logo_url helper renders the current image."""
+    route_prefix = f"/admin/tools/software/{entity_id}" if kind == "tools" else f"/admin/tools/communities/{entity_id}"
+    logo_url = _tool_logo_url(entity) if kind == "tools" else _community_logo_url(entity)
+    manual = bool(entity.get("logo_manual_override"))
+    stale = bool(entity.get("logo_override_stale"))
+    idsfx = f"{kind}-{entity_id}"
+
+    if manual:
+        source_badge = ('<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
+                         'background:var(--seafoam-wash);color:var(--seafoam-deep);border-radius:5px;'
+                         'padding:2px 7px;margin-left:8px;">Manual override</span>')
+    elif (entity.get("logo_path") or "").strip():
+        source_badge = ('<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
+                         'color:var(--muted);border:1px solid var(--line);border-radius:5px;'
+                         'padding:2px 7px;margin-left:8px;">Auto-fetched (Brandfetch)</span>')
+    else:
+        source_badge = ""
+
+    stale_banner_html = ""
+    if stale:
+        stale_banner_html = (
+            '<div style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+            'padding:10px 16px;font-size:13px;margin:10px 0;">'
+            "This logo was manually set before the URL below changed—confirm it's still the "
+            "right logo for the new site, or clear the override to go back to automatic fetching."
+            '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">'
+            f'<button type="submit" form="logo-dismiss-stale-form-{idsfx}" class="tool-admin-btn">Still correct&mdash;dismiss</button>'
+            f'<button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn">Clear override</button>'
+            '</div></div>'
+        )
+
+    clear_disabled = "" if (manual or (entity.get("logo_path") or "").strip()) else " disabled"
+
+    in_form_html = f"""<div id="gen-host-logo-{idsfx}">
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Logo{source_badge}</label>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos are auto-fetched from Brandfetch and refreshed by an occasional
+      batch script&mdash;never automatically for a row with a manual override set here. Use this to correct a wrong or missing logo;
+      it always wins over anything Brandfetch returns.</p>
+    {stale_banner_html}
+    <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
+      {_logo_box(entity['name'], logo_url, 64, radius=10)}
+      <div style="flex:1;min-width:260px;">
+        <form method="post" action="{route_prefix}/logo/set-url" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <input name="logo_url" type="text" maxlength="500"
+            style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
+            placeholder="https://…/logo.png">
+          <button type="submit" class="tool-admin-btn">Fetch from URL</button>
+        </form>
+        <form method="post" action="{route_prefix}/logo/upload" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+          <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required
+            style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:220px;">
+          <button type="submit" class="tool-admin-btn">Upload</button>
+        </form>
+        <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert to automatic</button>
+      </div>
+    </div>
+  </div>"""
+
+    after_form_html = (
+        f'<form id="logo-clear-form-{idsfx}" method="post" action="{route_prefix}/logo/clear" style="display:none;"></form>'
+        f'<form id="logo-dismiss-stale-form-{idsfx}" method="post" action="{route_prefix}/logo/dismiss-stale" style="display:none;"></form>'
+    )
+    return in_form_html + after_form_html
+
+
+def _save_manual_logo(lib: "Library", kind: str, entity_id: int, slug: str, data: bytes) -> bool:
+    """Validates and saves manually-supplied logo bytes (from either the
+    URL-fetch or upload route below), then records the override via
+    set_tool_logo_manual/set_community_logo_manual. Returns False (no file
+    written, no DB write) on a bad/oversized/unrecognized image — same
+    validate-magic-bytes-not-Pillow approach as the app-screenshot upload."""
+    if len(data) > _MANUAL_LOGO_MAX_BYTES:
+        return False
+    mime = _sniff_image_mime(data)
+    ext = _MANUAL_LOGO_EXT_BY_MIME.get(mime or "")
+    if not ext:
+        return False
+    logo_dir = _LOGO_DIR if kind == "tools" else _COMMUNITY_LOGO_DIR
+    dest = os.path.join(logo_dir, f"{slug}-manual.{ext}")
+    os.makedirs(logo_dir, exist_ok=True)
+    with open(dest, "wb") as f:
+        f.write(data)
+    rel_path = f"logos/{'tools' if kind == 'tools' else 'communities'}/{slug}-manual.{ext}"
+    if kind == "tools":
+        lib.set_tool_logo_manual(entity_id, rel_path)
+    else:
+        lib.set_community_logo_manual(entity_id, rel_path)
+    return True
+
+
+def _fetch_manual_logo_url(url: str) -> tuple[bytes | None, str | None]:
+    """Downloads an admin-pasted logo image URL for the manual-override
+    routes below. Returns (bytes, None) on success or (None, reason) on any
+    failure — content-type/size/format validation itself happens in
+    _save_manual_logo right after, same as the URL is only a fetch source
+    here, not a value that gets stored or hotlinked."""
+    from urllib.parse import urlsplit
+    if urlsplit(url).scheme not in ("http", "https"):
+        return None, "not an http(s) URL"
+    import requests
+    try:
+        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0 (compatible; cfo-navigator-logo-fetch/1.0)"})
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        return None, f"fetch failed: {exc}"
+    if len(resp.content) > _MANUAL_LOGO_MAX_BYTES:
+        return None, "too large"
+    return resp.content, None
 
 
 # Shared client-side crop flow (Phase E) for the "Upload app screenshot"
@@ -14531,6 +14670,10 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 </form>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  {_logo_admin_section(c, c['id'], "communities")}
+</div>
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Screenshots</h2>
 
   <div id="gen-host-community-screenshot-home" style="margin-bottom:28px;">
@@ -14815,6 +14958,88 @@ async def admin_communities_app_screenshot_upload(request: Request, community_id
         lib.close()
     msg = "app_screenshot_captured=1" if ok else "app_screenshot_captured=0"
     return RedirectResponse(f"/tools/communities/{community['slug']}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/logo/set-url")
+async def admin_communities_logo_set_url(request: Request, community_id: int):
+    """Manual logo override: fetch-and-store from an admin-pasted image URL.
+    Communities equivalent of admin_tools_logo_set_url — see that route for
+    the full write-up."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        form = await request.form()
+        url = (form.get("logo_url") or "").strip()
+        ok = False
+        if url:
+            data, _err = _fetch_manual_logo_url(url)
+            if data is not None:
+                ok = _save_manual_logo(lib, "communities", community_id, community["slug"], data)
+        slug = community["slug"]
+    finally:
+        lib.close()
+    msg = "logo_set=1" if ok else "logo_set=0"
+    return RedirectResponse(f"/tools/communities/{slug}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/logo/upload")
+async def admin_communities_logo_upload(request: Request, community_id: int, file: UploadFile = File(...)):
+    """Manual logo override: direct file upload. Communities equivalent of
+    admin_tools_logo_upload."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        data = await file.read()
+        ok = _save_manual_logo(lib, "communities", community_id, community["slug"], data)
+        slug = community["slug"]
+    finally:
+        lib.close()
+    msg = "logo_set=1" if ok else "logo_set=0"
+    return RedirectResponse(f"/tools/communities/{slug}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/logo/clear")
+def admin_communities_logo_clear(request: Request, community_id: int):
+    """"Revert to automatic" — drops the override and blanks logo_path so
+    the next scripts/backfill_logos.py run re-fetches from Brandfetch."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        lib.clear_community_logo_override(community_id)
+        slug = community["slug"]
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/communities/{slug}/edit", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/logo/dismiss-stale")
+def admin_communities_logo_dismiss_stale(request: Request, community_id: int):
+    """Admin confirms an existing manual override is still correct after a
+    URL change — clears logo_override_stale only, keeps the override."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        lib.dismiss_community_logo_stale(community_id)
+        slug = community["slug"]
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/communities/{slug}/edit", status_code=303)
 
 
 @app.post("/admin/tools/communities/{community_id}/mark-reviewed")
@@ -15840,6 +16065,10 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 </div>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  {_logo_admin_section(tool, tool_id, "tools")}
+</div>
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Screenshots</h2>
 
   <div id="gen-host-tool-screenshot-home" style="margin-bottom:28px;">
@@ -16176,6 +16405,97 @@ async def admin_tools_app_screenshot_upload(request: Request, tool_id: int, file
         lib.close()
     msg = "app_screenshot_captured=1" if ok else "app_screenshot_captured=0"
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/software/{tool_id}/logo/set-url")
+async def admin_tools_logo_set_url(request: Request, tool_id: int):
+    """Manual logo override (2026-08 — see CLAUDE.md's Aleph/Zapier logo
+    investigation): fetch-and-store from an admin-pasted image URL, mirroring
+    scripts/backfill_logos.py's own download-and-store approach (never a
+    hotlinked external URL). Sets logo_manual_override=1 via
+    set_tool_logo_manual, which is the one thing that keeps this correction
+    from being silently reverted by a future backfill_logos.py run — see
+    that script's _select_candidates and Library.set_tool_logo."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        form = await request.form()
+        url = (form.get("logo_url") or "").strip()
+        ok = False
+        if url:
+            data, _err = _fetch_manual_logo_url(url)
+            if data is not None:
+                ok = _save_manual_logo(lib, "tools", tool_id, tool["slug"], data)
+        slug = tool["slug"]
+    finally:
+        lib.close()
+    msg = "logo_set=1" if ok else "logo_set=0"
+    return RedirectResponse(f"/tools/software/{slug}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/software/{tool_id}/logo/upload")
+async def admin_tools_logo_upload(request: Request, tool_id: int, file: UploadFile = File(...)):
+    """Manual logo override: direct file upload — same
+    validate-magic-bytes-not-Pillow approach as admin_tools_app_screenshot_upload,
+    no crop needed (a logo isn't cropped to a fixed frame the way a
+    screenshot is)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        data = await file.read()
+        ok = _save_manual_logo(lib, "tools", tool_id, tool["slug"], data)
+        slug = tool["slug"]
+    finally:
+        lib.close()
+    msg = "logo_set=1" if ok else "logo_set=0"
+    return RedirectResponse(f"/tools/software/{slug}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/software/{tool_id}/logo/clear")
+def admin_tools_logo_clear(request: Request, tool_id: int):
+    """"Revert to automatic": drops logo_manual_override and blanks
+    logo_path, so the next scripts/backfill_logos.py run (its selection
+    query targets empty logo_path) picks the tool back up and re-fetches
+    from Brandfetch."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        lib.clear_tool_logo_override(tool_id)
+        slug = tool["slug"]
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/software/{slug}/edit", status_code=303)
+
+
+@app.post("/admin/tools/software/{tool_id}/logo/dismiss-stale")
+def admin_tools_logo_dismiss_stale(request: Request, tool_id: int):
+    """Admin confirms an existing manual override is still correct after a
+    URL change (see update_tool's logo_override_stale flagging) — clears
+    the stale flag only, keeps the override/logo_path untouched."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        lib.dismiss_tool_logo_stale(tool_id)
+        slug = tool["slug"]
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/software/{slug}/edit", status_code=303)
 
 
 @app.post("/admin/tools/software/{tool_id}/research/refresh")
