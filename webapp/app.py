@@ -1830,7 +1830,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     return in_form_html, after_form_html
 
 
-def _logo_admin_section(entity: dict, entity_id: int, kind: str) -> str:
+def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: str = "") -> str:
     """Renders the admin edit page's "Logo" section (manual logo override,
     2026-08 — see CLAUDE.md's Aleph/Zapier investigation writeup).
 
@@ -1838,13 +1838,17 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str) -> str:
     with a dedicated "Fetch" action, a separate file-upload form (plain
     `<input type=file>` + submit, same shape as /admin/brand/avatar — no
     crop needed here, a logo isn't cropped to a fixed frame), and a "Revert
-    to automatic" action — all as their own standalone <form>s (not nested
+    & re-fetch from Brandfetch" action (2026-08 follow-up — see
+    _live_refetch_logo) — all as their own standalone <form>s (not nested
     inside #tool-edit-form/#comm-edit-form) since none of these need to
     submit alongside the rest of the edit form's fields, unlike the
     homepage-screenshot URL field beside them.
 
     kind is "tools" or "communities" — picks the route prefix and which
-    _*_logo_url helper renders the current image."""
+    _*_logo_url helper renders the current image. banner_html (same
+    parameter shape as _app_screenshot_admin_section's own banner_html) is
+    the post-redirect success/failure message from the last revert+re-fetch
+    action, computed by the caller from query params."""
     route_prefix = f"/admin/tools/software/{entity_id}" if kind == "tools" else f"/admin/tools/communities/{entity_id}"
     logo_url = _tool_logo_url(entity) if kind == "tools" else _community_logo_url(entity)
     manual = bool(entity.get("logo_manual_override"))
@@ -1879,25 +1883,27 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str) -> str:
 
     in_form_html = f"""<div id="gen-host-logo-{idsfx}">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Logo{source_badge}</label>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos are auto-fetched from Brandfetch and refreshed by an occasional
-      batch script&mdash;never automatically for a row with a manual override set here. Use this to correct a wrong or missing logo;
-      it always wins over anything Brandfetch returns.</p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos auto-fetch from Brandfetch via a monthly batch script.
+      A manual override set here always wins, and that batch never touches it. "Revert &amp; re-fetch" clears the override and calls
+      Brandfetch live right now, spending one of the 100 free monthly requests instead of waiting for the batch. If nothing usable
+      turns up, it still reverts to automatic so the batch can retry later.</p>
+    {banner_html}
     {stale_banner_html}
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
       {_logo_box(entity['name'], logo_url, 64, radius=10)}
-      <div style="flex:1;min-width:260px;">
-        <form method="post" action="{route_prefix}/logo/set-url" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="flex:1;min-width:260px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <form method="post" action="{route_prefix}/logo/set-url" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;flex:1;min-width:220px;">
           <input name="logo_url" type="text" maxlength="500"
-            style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
+            style="flex:1;min-width:140px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
             placeholder="https://…/logo.png">
           <button type="submit" class="tool-admin-btn">Fetch from URL</button>
         </form>
-        <form method="post" action="{route_prefix}/logo/upload" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+        <form method="post" action="{route_prefix}/logo/upload" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">
           <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required
-            style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:220px;">
+            style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:180px;">
           <button type="submit" class="tool-admin-btn">Upload</button>
         </form>
-        <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert to automatic</button>
+        <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert &amp; re-fetch from Brandfetch</button>
       </div>
     </div>
   </div>"""
@@ -1952,6 +1958,55 @@ def _fetch_manual_logo_url(url: str) -> tuple[bytes | None, str | None]:
     if len(resp.content) > _MANUAL_LOGO_MAX_BYTES:
         return None, "too large"
     return resp.content, None
+
+
+def _live_refetch_logo(lib: "Library", kind: str, entity_id: int, entity: dict) -> tuple[bool, str]:
+    """Powers the "Revert & re-fetch from Brandfetch" action (2026-08
+    follow-up to the manual override feature) — a single, deliberate Brand
+    API call for the one row an admin just flagged, distinct from
+    scripts/backfill_logos.py's own batched, quota-paced monthly run. Both
+    call the exact same linklib.brandfetch functions (including its
+    domain-echo guard), so there is exactly one implementation of "how we
+    talk to Brandfetch" — see that module's docstring.
+
+    Callers always call Library.clear_tool_logo_override/
+    clear_community_logo_override FIRST, before this — this function never
+    touches the override flag itself, only logo_path via a plain
+    set_tool_logo/set_community_logo write. On any failure (missing API
+    key, quota, no usable asset, download error) the row is simply left
+    reverted to automatic (already cleared by the caller), so the next
+    scripts/backfill_logos.py batch run can still pick it up later — this
+    never leaves a row worse off than a plain revert would have.
+
+    Returns (ok, message) for the redirect banner."""
+    from linklib import brandfetch
+    api_key = os.environ.get("BRANDFETCH_API_KEY")
+    if not api_key:
+        return False, ("Reverted to automatic, but BRANDFETCH_API_KEY isn't set on this environment, so no live "
+                        "re-fetch happened. It'll pick up on the next scripts/backfill_logos.py run instead.")
+    domain = brandfetch.extract_domain(entity.get("url") or "")
+    if not domain:
+        return False, "Reverted to automatic, but couldn't parse a domain from this record's URL to re-fetch from."
+    asset, err = brandfetch.fetch_logo_asset(domain, api_key)
+    if err:
+        if err.startswith("QUOTA"):
+            return False, ("Reverted to automatic, but Brandfetch's free-tier quota (100/month) is exhausted right "
+                            "now. It'll pick up on the next scripts/backfill_logos.py run once quota resets.")
+        return False, f"Reverted to automatic, but Brandfetch had nothing usable for {domain}: {err}"
+    src_url, ext = asset
+    slug = entity["slug"]
+    logo_dir = _LOGO_DIR if kind == "tools" else _COMMUNITY_LOGO_DIR
+    dest = os.path.join(logo_dir, f"{slug}.{ext}")
+    try:
+        brandfetch.download_asset(src_url, dest)
+    except Exception as exc:
+        return False, f"Reverted to automatic, but found a logo and couldn't download it: {exc}"
+    rel_path = f"logos/{'tools' if kind == 'tools' else 'communities'}/{slug}.{ext}"
+    if kind == "tools":
+        lib.set_tool_logo(entity_id, rel_path)
+    else:
+        lib.set_community_logo(entity_id, rel_path)
+    return True, f"Re-fetched a fresh logo from Brandfetch for {domain}."
 
 
 # Shared client-side crop flow (Phase E) for the "Upload app screenshot"
@@ -14476,7 +14531,8 @@ async def admin_communities_new_submit(request: Request):
 
 @app.get("/tools/communities/{slug}/edit", response_class=HTMLResponse)
 def admin_communities_edit(request: Request, slug: str, screenshot_captured: str = "",
-                            app_screenshot_captured: str = ""):
+                            app_screenshot_captured: str = "",
+                            logo_refetched: str = "", logo_refetch_msg: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -14609,6 +14665,14 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     app_screenshot_in_form_html, app_screenshot_after_form_html = _app_screenshot_admin_section(
         c, c["id"], "communities", app_screenshot_banner_html, standalone_form_id="comm-edit-form")
 
+    logo_refetch_banner_html = ""
+    if logo_refetched == "1":
+        logo_refetch_banner_html = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
+                                     f'padding:10px 16px;font-size:13px;margin:0 0 10px;">{_esc(logo_refetch_msg)}</p>')
+    elif logo_refetched == "0":
+        logo_refetch_banner_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                                     f'padding:10px 16px;font-size:13px;margin:0 0 10px;">{_esc(logo_refetch_msg)}</p>')
+
     # Phase P: same section-heading treatment as the Software edit page
     # (admin_tools_edit), adapted to Communities' different field set — see
     # that route's layout comment for the shared reasoning (form has to
@@ -14670,7 +14734,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 </form>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  {_logo_admin_section(c, c['id'], "communities")}
+  {_logo_admin_section(c, c['id'], "communities", logo_refetch_banner_html)}
 </div>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
@@ -15008,8 +15072,11 @@ async def admin_communities_logo_upload(request: Request, community_id: int, fil
 
 @app.post("/admin/tools/communities/{community_id}/logo/clear")
 def admin_communities_logo_clear(request: Request, community_id: int):
-    """"Revert to automatic" — drops the override and blanks logo_path so
-    the next scripts/backfill_logos.py run re-fetches from Brandfetch."""
+    """"Revert & re-fetch from Brandfetch" (2026-08 follow-up — see
+    _live_refetch_logo). Drops the override, blanks logo_path, then makes
+    ONE live Brand API call for this community right now — never leaves it
+    worse off than a plain revert if that call fails for any reason (see
+    _live_refetch_logo's own docstring)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
@@ -15018,10 +15085,14 @@ def admin_communities_logo_clear(request: Request, community_id: int):
         if not community:
             raise HTTPException(status_code=404, detail="Community not found")
         lib.clear_community_logo_override(community_id)
+        community = lib.get_community(community_id)
+        ok, message = _live_refetch_logo(lib, "communities", community_id, community)
         slug = community["slug"]
     finally:
         lib.close()
-    return RedirectResponse(f"/tools/communities/{slug}/edit", status_code=303)
+    from urllib.parse import quote
+    msg = "logo_refetched=1" if ok else "logo_refetched=0"
+    return RedirectResponse(f"/tools/communities/{slug}/edit?{msg}&logo_refetch_msg={quote(message)}", status_code=303)
 
 
 @app.post("/admin/tools/communities/{community_id}/logo/dismiss-stale")
@@ -15609,7 +15680,8 @@ def admin_tools_reject(request: Request, tool_id: int):
 
 @app.get("/tools/software/{slug}/edit", response_class=HTMLResponse)
 def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "", research_refreshed: str = "",
-                      app_screenshot_captured: str = ""):
+                      app_screenshot_captured: str = "",
+                      logo_refetched: str = "", logo_refetch_msg: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -15914,6 +15986,14 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     _app_screenshot_in_form_html, _app_screenshot_after_form_html = _app_screenshot_admin_section(
         tool, tool_id, "tools", _app_screenshot_banner_html, standalone_form_id="tool-edit-form")
 
+    _logo_refetch_banner_html = ""
+    if logo_refetched == "1":
+        _logo_refetch_banner_html = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
+                                      f'padding:10px 16px;font-size:13px;margin:0 0 10px;">{_esc(logo_refetch_msg)}</p>')
+    elif logo_refetched == "0":
+        _logo_refetch_banner_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                                      f'padding:10px 16px;font-size:13px;margin:0 0 10px;">{_esc(logo_refetch_msg)}</p>')
+
     body = f"""<div class="page page-grid">
 <h1>Edit software</h1>
 {_CROPPER_CDN_HTML}
@@ -16081,7 +16161,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 </div>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  {_logo_admin_section(tool, tool_id, "tools")}
+  {_logo_admin_section(tool, tool_id, "tools", _logo_refetch_banner_html)}
 </div>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
@@ -16493,10 +16573,12 @@ async def admin_tools_logo_upload(request: Request, tool_id: int, file: UploadFi
 
 @app.post("/admin/tools/software/{tool_id}/logo/clear")
 def admin_tools_logo_clear(request: Request, tool_id: int):
-    """"Revert to automatic": drops logo_manual_override and blanks
-    logo_path, so the next scripts/backfill_logos.py run (its selection
-    query targets empty logo_path) picks the tool back up and re-fetches
-    from Brandfetch."""
+    """"Revert & re-fetch from Brandfetch" (2026-08 follow-up — see
+    _live_refetch_logo). Drops logo_manual_override, blanks logo_path, then
+    makes ONE live Brand API call for this tool right now — distinct from
+    scripts/backfill_logos.py's own batched, quota-paced monthly run; never
+    leaves the row worse off than a plain revert if that call fails for any
+    reason (missing key, quota, no usable asset — see _live_refetch_logo)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
@@ -16505,10 +16587,14 @@ def admin_tools_logo_clear(request: Request, tool_id: int):
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         lib.clear_tool_logo_override(tool_id)
+        tool = lib.get_tool(tool_id)
+        ok, message = _live_refetch_logo(lib, "tools", tool_id, tool)
         slug = tool["slug"]
     finally:
         lib.close()
-    return RedirectResponse(f"/tools/software/{slug}/edit", status_code=303)
+    from urllib.parse import quote
+    msg = "logo_refetched=1" if ok else "logo_refetched=0"
+    return RedirectResponse(f"/tools/software/{slug}/edit?{msg}&logo_refetch_msg={quote(message)}", status_code=303)
 
 
 @app.post("/admin/tools/software/{tool_id}/logo/dismiss-stale")

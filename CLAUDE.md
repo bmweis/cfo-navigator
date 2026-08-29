@@ -371,6 +371,24 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   either `api.brandfetch.io` or `getaleph.com` to check directly. Worth a quick manual
   check (or a session with broader network access) if it matters to pin down exactly;
   the fix above doesn't depend on the answer.
+- **Manual logo override, "Revert & re-fetch from Brandfetch" (2026-08 follow-up)** —
+  confirmed live by Brian (Aleph's logo corrected, badge showing "Manual override"), then
+  asked for one more thing: "Revert to automatic" used to only reset the row for the *next*
+  monthly `scripts/backfill_logos.py` run — no button anywhere actually called the Brand
+  API live. Now it does both in one click: clears the override, then makes one real,
+  synchronous Brand API call for that row right then. The Brand API call/asset-selection/
+  download logic moved out of `scripts/backfill_logos.py` into a new shared
+  `linklib/brandfetch.py` first, so the batch script and this button call exactly one
+  implementation (including the domain-echo guard above) rather than risking two copies
+  drifting apart — the script's own behavior is otherwise unchanged, re-verified against a
+  temp DB. The new `webapp.app._live_refetch_logo` helper always runs after the override is
+  already cleared, and on any failure (missing `BRANDFETCH_API_KEY`, the 100/month quota
+  exhausted, no usable asset, a download error) simply leaves the row reverted to automatic
+  — it can never end up worse off than a plain revert, and the monthly batch run can still
+  pick it up later. The button's own copy now says plainly that clicking it spends a real
+  Brand API call immediately, not a free scheduled action, since quota is capped. See
+  ARCHITECTURE.md's matching bullet for the full write-up and `tests/test_brandfetch.py`/
+  `tests/test_logo_override.py` for the coverage.
 - **CFO Toolbox profile pages show two screenshots (Phase E): homepage and app/product,
   independently sourced.** The homepage slot (`screenshot_url`/`screenshot_captured_at`)
   is unchanged — always captured from the record's own `url`. The app slot
@@ -4418,7 +4436,7 @@ for 8 further weeks, deleting the rest, so the folder doesn't grow without limit
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
 | `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's preferred web retrieval mechanism (`linklib/agent.py`'s `retrieve_exa`). Absent, or the `exa_enabled` setting toggled off at `/admin/exa-settings` → Claude's native `web_search_20250305` tool handles the web tier instead (Phase 7 kill switch); web search itself is never disabled, only which engine runs. No error either way. |
-| `BRANDFETCH_API_KEY` | — | Brandfetch **Brand API** Bearer token, required only for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D). A different product/credential from `BRANDFETCH_CLIENT_ID` below — do not confuse them. |
+| `BRANDFETCH_API_KEY` | — | Brandfetch **Brand API** Bearer token, required for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D) and for the admin edit page's "Revert & re-fetch from Brandfetch" live re-fetch action (2026-08 follow-up) — both go through `linklib/brandfetch.py`. Absent → the batch script errors out on `--apply`; the button still reverts a manual override to automatic but reports it couldn't re-fetch live. A different product/credential from `BRANDFETCH_CLIENT_ID` below — do not confuse them. |
 | `BRANDFETCH_CLIENT_ID` | — | Public client ID for Brandfetch's free CDN Logo API (`cdn.brandfetch.io`). Kept for reference/potential future browser-embed use, but **not** used by the logo backfill — that product is browser-embed-only and blocks programmatic access (see the Key architecture decisions bullet above). |
 | `LINKLIB_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model for `linklib/embeddings.py` |
 | `LINKLIB_DB` | `library.db` | Path to the SQLite database |

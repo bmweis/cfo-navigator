@@ -13,6 +13,11 @@ Covers:
   - a URL/domain change flags an active override as stale instead of
     silently dropping or silently keeping it
   - scripts/backfill_logos.py's selection query excludes overridden rows
+  - "Revert & re-fetch from Brandfetch" (2026-08 follow-up): the same clear
+    action now also makes one live Brand API call for that row, via
+    _live_refetch_logo — success, no API key, quota, and no-usable-asset
+    paths, and that a failed live re-fetch never leaves the row worse off
+    than a plain revert would have (still ends up reverted to automatic)
 """
 import os
 import pathlib
@@ -333,3 +338,155 @@ def test_logo_upload_route_rejects_non_image_and_sets_override_on_success(env):
     lib.close()
     assert tool["logo_manual_override"] == 1
     assert tool["logo_path"] == f"logos/tools/{tool['slug']}-manual.png"
+
+
+# --- "Revert & re-fetch from Brandfetch" (2026-08 follow-up) -----------
+
+def _fake_asset(src_url="https://cdn.example/logo.svg", ext="svg"):
+    return (src_url, ext)
+
+
+def _fake_download_asset(src_url, dest_path, session=None):
+    """Mirrors linklib.brandfetch.download_asset's own directory-creation
+    behavior (mkdir -p the parent) without a real network call."""
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    with open(dest_path, "wb") as f:
+        f.write(b"<svg/>")
+
+
+def test_live_refetch_logo_no_api_key(env, monkeypatch):
+    monkeypatch.delenv("BRANDFETCH_API_KEY", raising=False)
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = _add_tool(lib)
+    tool = lib.get_tool(tid)
+    ok, message = env._live_refetch_logo(lib, "tools", tid, tool)
+    lib.close()
+    assert ok is False
+    assert "BRANDFETCH_API_KEY" in message
+
+
+def test_live_refetch_logo_success_writes_non_manual_logo(env, monkeypatch):
+    monkeypatch.setenv("BRANDFETCH_API_KEY", "fake-key")
+    from linklib import brandfetch as bf
+    monkeypatch.setattr(bf, "fetch_logo_asset", lambda domain, api_key, session=None: (_fake_asset(), None))
+    monkeypatch.setattr(bf, "download_asset", _fake_download_asset)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = _add_tool(lib)
+    tool = lib.get_tool(tid)
+    ok, message = env._live_refetch_logo(lib, "tools", tid, tool)
+    tool = lib.get_tool(tid)
+    lib.close()
+
+    assert ok is True
+    assert "Re-fetched" in message
+    assert tool["logo_manual_override"] == 0
+    assert tool["logo_path"] == f"logos/tools/{tool['slug']}.svg"
+
+
+def test_live_refetch_logo_quota_message(env, monkeypatch):
+    monkeypatch.setenv("BRANDFETCH_API_KEY", "fake-key")
+    from linklib import brandfetch as bf
+    monkeypatch.setattr(bf, "fetch_logo_asset",
+                         lambda domain, api_key, session=None: (None, "QUOTA: 429 rate-limited"))
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = _add_tool(lib)
+    tool = lib.get_tool(tid)
+    ok, message = env._live_refetch_logo(lib, "tools", tid, tool)
+    tool_after = lib.get_tool(tid)
+    lib.close()
+
+    assert ok is False
+    assert "quota" in message.lower()
+    # Never left worse off than a plain revert: still no manual override, no path.
+    assert tool_after["logo_manual_override"] == 0
+    assert tool_after["logo_path"] == ""
+
+
+def test_live_refetch_logo_no_usable_asset(env, monkeypatch):
+    monkeypatch.setenv("BRANDFETCH_API_KEY", "fake-key")
+    from linklib import brandfetch as bf
+    monkeypatch.setattr(bf, "fetch_logo_asset",
+                         lambda domain, api_key, session=None: (None, "404 — Brandfetch has no record"))
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = _add_tool(lib)
+    tool = lib.get_tool(tid)
+    ok, message = env._live_refetch_logo(lib, "tools", tid, tool)
+    lib.close()
+
+    assert ok is False
+    assert "nothing usable" in message
+
+
+def test_live_refetch_logo_download_failure(env, monkeypatch):
+    monkeypatch.setenv("BRANDFETCH_API_KEY", "fake-key")
+    from linklib import brandfetch as bf
+
+    def boom(src_url, dest_path, session=None):
+        raise Exception("connection reset")
+
+    monkeypatch.setattr(bf, "fetch_logo_asset", lambda domain, api_key, session=None: (_fake_asset(), None))
+    monkeypatch.setattr(bf, "download_asset", boom)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = _add_tool(lib)
+    tool = lib.get_tool(tid)
+    ok, message = env._live_refetch_logo(lib, "tools", tid, tool)
+    tool_after = lib.get_tool(tid)
+    lib.close()
+
+    assert ok is False
+    assert "couldn't download" in message.lower()
+    assert tool_after["logo_path"] == ""
+
+
+def test_logo_clear_route_without_api_key_reverts_with_explanatory_banner(env, monkeypatch):
+    monkeypatch.delenv("BRANDFETCH_API_KEY", raising=False)
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = _add_tool(lib)
+    lib.set_tool_logo_manual(tid, "logos/tools/aleph-manual.png")
+    slug = lib.get_tool(tid)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/software/{tid}/logo/clear", follow_redirects=True)
+    assert "logo_refetched=0" in str(r.url)
+    assert "BRANDFETCH_API_KEY" in r.text
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool = lib.get_tool(tid)
+    lib.close()
+    assert tool["logo_manual_override"] == 0
+    assert tool["logo_path"] == ""
+
+
+def test_logo_clear_route_live_refetch_success_end_to_end(env, monkeypatch):
+    """The actual scenario the button is for: an admin corrects a wrong
+    logo, then later clicks to re-check Brandfetch — one click both reverts
+    the override and lands a fresh, non-manual logo."""
+    monkeypatch.setenv("BRANDFETCH_API_KEY", "fake-key")
+    from linklib import brandfetch as bf
+    monkeypatch.setattr(bf, "fetch_logo_asset", lambda domain, api_key, session=None: (_fake_asset(), None))
+    monkeypatch.setattr(bf, "download_asset", _fake_download_asset)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = _add_tool(lib)
+    lib.set_tool_logo_manual(tid, "logos/tools/aleph-manual.png")
+    slug = lib.get_tool(tid)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/software/{tid}/logo/clear", follow_redirects=True)
+    assert "logo_refetched=1" in str(r.url)
+    assert "Re-fetched a fresh logo" in r.text
+    assert "Auto-fetched (Brandfetch)" in r.text  # badge reflects the new, non-manual source
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool = lib.get_tool(tid)
+    lib.close()
+    assert tool["logo_manual_override"] == 0
+    assert tool["logo_path"] == f"logos/tools/{slug}.svg"
