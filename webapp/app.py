@@ -10560,6 +10560,14 @@ def admin_software(request: Request, filter: str = ""):
         mark_reviewed = (f'<form method="post" action="/admin/tools/software/{t["id"]}/mark-reviewed" style="margin:0;">'
                          f'<button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>'
                          ) if t.get("needs_review") else ""
+        # Flag for review (2026-08 quick-toggle follow-up) — the mirror
+        # action of Mark reviewed above: lets an admin flag a profile from
+        # the list view alone, without opening the edit form. Shown only
+        # when NOT already flagged, same shown-only-when-relevant convention
+        # as mark_reviewed's own `if t.get("needs_review")` guard.
+        flag_for_review = (f'<form method="post" action="/admin/tools/software/{t["id"]}/flag-for-review" style="margin:0;">'
+                           f'<button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;white-space:nowrap;">Flag for review</button></form>'
+                           ) if not t.get("needs_review") else ""
         row_attrs = _admin_row_data_attrs({
             "name": t["name"], "promoted": "1" if t.get("promoted") else "0",
             "categories": "|".join(t["categories"]),
@@ -10590,7 +10598,7 @@ def admin_software(request: Request, filter: str = ""):
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
                 <button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
               </form>
-              {f'<div style="grid-column:1/-1;">{mark_reviewed}</div>' if mark_reviewed else ''}
+              {f'<div style="grid-column:1/-1;">{mark_reviewed}{flag_for_review}</div>' if (mark_reviewed or flag_for_review) else ''}
             </div>
           </td>
         </tr>"""
@@ -14112,6 +14120,14 @@ def admin_communities(request: Request, filter: str = ""):
         mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="margin:0;">'
                          f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>'
                          ) if c.get("needs_review") else ""
+        # Flag for review (2026-08 quick-toggle follow-up) — the mirror
+        # action of Mark reviewed above: lets an admin flag a profile from
+        # the list view alone, without opening the edit form. Shown only
+        # when NOT already flagged, same shown-only-when-relevant convention
+        # as mark_reviewed's own `if c.get("needs_review")` guard.
+        flag_for_review = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/flag-for-review" style="margin:0;">'
+                           f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Flag for review</button></form>'
+                           ) if not c.get("needs_review") else ""
         row_attrs = _admin_row_data_attrs({
             "name": c["name"], "cost_band": c["cost_band"], "access": c["access"] or "",
             "sponsorship_type": c["sponsorship_type"] or "", "format": c["format"] or "",
@@ -14141,7 +14157,7 @@ def admin_communities(request: Request, filter: str = ""):
           <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
         </form>
       </div>
-      {mark_reviewed}
+      {mark_reviewed}{flag_for_review}
     </div>
   </td>
 </tr>"""
@@ -15195,6 +15211,30 @@ async def admin_communities_mark_reviewed(request: Request, community_id: int):
             _current_user_id(lib, request), "community", "community_profile", community_id,
             detail=(profile or {}).get("verdict_summary") or "",
         )
+    finally:
+        lib.close()
+    return RedirectResponse(redirect_to, status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/flag-for-review")
+async def admin_communities_flag_for_review(request: Request, community_id: int):
+    """One-click "Flag for review" (2026-08 quick-toggle follow-up) — the
+    mirror of admin_communities_mark_reviewed above: lets an admin flag a
+    profile as needing review straight from the admin list, without opening
+    the profile edit form. Deliberately does NOT touch narrative_review_log
+    (flagging isn't a confirmation — that table only ever records the
+    OPPOSITE action, an explicit "I reviewed this"), and does NOT clear any
+    existing "Reviewed by X on Y" stamp — same as checking the needs_review
+    checkbox on the edit form itself already does (or rather, doesn't)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    redirect_to = form.get("redirect_to") or "/admin/tools/communities"
+    if redirect_to not in ("/admin/tools/communities", f"/admin/tools/communities/{community_id}/profile"):
+        redirect_to = "/admin/tools/communities"
+    lib = _lib()
+    try:
+        lib.flag_community_profile_needs_review(community_id)
     finally:
         lib.close()
     return RedirectResponse(redirect_to, status_code=303)
@@ -16815,6 +16855,34 @@ async def admin_tools_mark_reviewed(request: Request, tool_id: int):
             _current_user_id(lib, request), "tool", "profile", tool_id,
             detail=tool.get("description") or "",
         )
+    finally:
+        lib.close()
+    return RedirectResponse(redirect_to, status_code=303)
+
+
+@app.post("/admin/tools/software/{tool_id}/flag-for-review")
+async def admin_tools_flag_for_review(request: Request, tool_id: int):
+    """One-click "Flag for review" (2026-08 quick-toggle follow-up) — the
+    mirror of admin_tools_mark_reviewed above: lets an admin flag a tool's
+    profile as needing review straight from the admin list, without opening
+    the edit form (the checkbox there stays the only way to flag it while
+    actively editing). Deliberately does NOT touch narrative_review_log
+    (flagging isn't a confirmation — that table only ever records the
+    OPPOSITE action, an explicit "I reviewed this"), and does NOT clear any
+    existing "Reviewed by X on Y" stamp — same as checking the needs_review
+    checkbox on the edit form itself already does (or rather, doesn't)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        redirect_to = form.get("redirect_to") or "/admin/tools/software"
+        if redirect_to not in ("/admin/tools/software", f"/tools/software/{tool['slug']}/edit"):
+            redirect_to = "/admin/tools/software"
+        lib.set_tool_needs_review(tool_id, 1)
     finally:
         lib.close()
     return RedirectResponse(redirect_to, status_code=303)

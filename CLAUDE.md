@@ -3528,6 +3528,31 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   regression test asserts the public profile page renders byte-identical
   with the flag on or off.
 
+  **"Flag for review" quick-toggle (2026-08 follow-up, same PR before merge)**
+  — Brian's post-review ask: a way to flag a profile "needs review" in the
+  moment while just looking at it, not only while actively editing.
+  Investigated first: the `needs_review` checkbox rendered in exactly two
+  places (the tool edit form, the Community profile edit form) — nowhere
+  else, confirmed by direct grep. Added the mirror action of the existing
+  "Mark reviewed" list-row button, on both admin lists: `POST /admin/tools/
+  software/{tool_id}/flag-for-review` (`Library.set_tool_needs_review
+  (tool_id, 1)`, reusing the existing method) and `POST /admin/tools/
+  communities/{community_id}/flag-for-review` (`Library.
+  flag_community_profile_needs_review`, a new narrow single-column `UPDATE`
+  mirroring `mark_community_profile_reviewed`'s own shape — including its
+  no-op-on-missing-row precedent: a community with no profile draft yet has
+  nothing to flag, so this deliberately does NOT fabricate a row). Both
+  buttons render only when the row is NOT already flagged (the inverse of
+  "Mark reviewed"'s own only-when-flagged guard), same `_is_authed` admin
+  gating and `redirect_to` allowlist pattern as every other action in this
+  system — never reachable by a public visitor. **Deliberately does NOT
+  write to `narrative_review_log`** — that table's whole purpose is
+  recording an explicit human confirmation ("I reviewed this"); flagging is
+  the opposite signal, so logging it there would misrepresent the table's
+  meaning. It also does not clear an existing "Reviewed by X on Y" stamp —
+  same as the checkbox-driven path already didn't, kept consistent between
+  the two ways of setting the flag rather than introducing a new asymmetry.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded

@@ -565,6 +565,166 @@ def test_communities_admin_list_filter_still_works(env):
     assert "The F Suite" not in r.text
 
 
+# -- "Flag for review" quick-toggle (2026-08 follow-up) --------------------------
+# The mirror action of "Mark reviewed": lets an admin flag a profile as
+# needing review straight from the admin list, without opening the edit
+# form — Brian's ask for a way to flag a profile "in the moment" while just
+# looking at it. Admin-gated exactly like everything else in this system.
+
+def test_tool_flag_for_review_route_sets_flag(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
+    lib.mark_tool_reviewed(tool_id)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/software/{tool_id}/flag-for-review", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/tools/software"
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    assert lib.get_tool(tool_id)["needs_review"] == 1
+    lib.close()
+
+
+def test_tool_flag_for_review_does_not_touch_narrative_review_log(env):
+    """Flagging isn't a confirmation — narrative_review_log only ever
+    records the opposite action (an explicit "I reviewed this")."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.create_user("brian", "pw", role="admin", name="Brian")
+    tool_id = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
+    lib.close()
+
+    client = _client(env)
+    _login(client, "brian", "pw")
+    client.post(f"/admin/tools/software/{tool_id}/mark-reviewed", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/flag-for-review", follow_redirects=False)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    assert lib.get_tool(tool_id)["needs_review"] == 1
+    # The stamp from the earlier Mark reviewed click is untouched/still live.
+    review = lib.get_latest_narrative_review("tool", "profile", tool_id)
+    assert review is not None
+    assert review["admin_username"] == "brian"
+    lib.close()
+
+
+def test_tool_flag_for_review_requires_auth(env):
+    client = _client(env)
+    assert client.post("/admin/tools/software/1/flag-for-review").status_code == 401
+
+
+def test_tool_flag_for_review_404s_for_missing_tool(env):
+    client = _client(env)
+    _login(client)
+    assert client.post("/admin/tools/software/999999/flag-for-review").status_code == 404
+
+
+def test_tool_flag_for_review_honors_edit_page_redirect_to(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.mark_tool_reviewed(tool_id)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/software/{tool_id}/flag-for-review",
+                     data={"redirect_to": f"/tools/software/{slug}/edit"}, follow_redirects=False)
+    assert r.headers["location"] == f"/tools/software/{slug}/edit"
+
+
+def test_tool_flag_for_review_rejects_unknown_redirect_to(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
+    lib.mark_tool_reviewed(tool_id)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/software/{tool_id}/flag-for-review",
+                     data={"redirect_to": "https://evil.example.com"}, follow_redirects=False)
+    assert r.headers["location"] == "/admin/tools/software"
+
+
+def test_software_admin_list_shows_flag_button_only_when_not_flagged(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    t1 = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)  # needs_review=1
+    t2 = lib.add_tool("Abacum", "d", "https://abacum.io", ["FP&A"], approved=1)
+    lib.mark_tool_reviewed(t2)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get("/admin/tools/software")
+    assert f'action="/admin/tools/software/{t1}/flag-for-review"' not in r.text  # already flagged
+    assert f'action="/admin/tools/software/{t2}/flag-for-review"' in r.text      # not flagged, so shown
+
+
+def test_community_flag_for_review_route_sets_flag(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    community_id = lib.add_community("CFO Alliance", "https://cfoalliance.example", "demo", "Free", ["General"], approved=1)
+    lib.upsert_community_profile(community_id, ideal_member="x", needs_review=0)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/communities/{community_id}/flag-for-review", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/tools/communities"
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    assert lib.get_community_profile(community_id)["needs_review"] == 1
+    lib.close()
+
+
+def test_community_flag_for_review_is_noop_when_no_profile_row_exists(env):
+    """A community with no profile draft yet has nothing to flag — the
+    route must not error, and must not fabricate a profile row."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    community_id = lib.add_community("CFO Alliance", "https://cfoalliance.example", "demo", "Free", ["General"], approved=1)
+    assert lib.get_community_profile(community_id) is None
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/communities/{community_id}/flag-for-review", follow_redirects=False)
+    assert r.status_code == 303
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    assert lib.get_community_profile(community_id) is None  # still no row fabricated
+    lib.close()
+
+
+def test_community_flag_for_review_requires_auth(env):
+    client = _client(env)
+    assert client.post("/admin/tools/communities/1/flag-for-review").status_code == 401
+
+
+def test_communities_admin_list_shows_flag_button_only_when_not_flagged(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    c1 = lib.add_community("CFO Alliance", "https://cfoalliance.example", "demo", "Free", ["General"], approved=1)
+    c2 = lib.add_community("The F Suite", "https://thefsuite.example", "demo", "Free", ["General"], approved=1)
+    lib.upsert_community_profile(c1, ideal_member="x", needs_review=1)
+    lib.upsert_community_profile(c2, ideal_member="y", needs_review=0)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get("/admin/tools/communities")
+    assert f'action="/admin/tools/communities/{c1}/flag-for-review"' not in r.text  # already flagged
+    assert f'action="/admin/tools/communities/{c2}/flag-for-review"' in r.text      # not flagged, so shown
+
+
 # -- No public gating: profile page renders identically regardless of flag ------
 
 def test_public_profile_page_unaffected_by_needs_review_flag(env):

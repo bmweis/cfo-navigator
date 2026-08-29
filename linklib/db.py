@@ -6430,6 +6430,20 @@ class Library:
         )
         self.conn.commit()
 
+    def flag_community_profile_needs_review(self, community_id: int) -> None:
+        """One-click "Flag for review" (2026-08 quick-toggle follow-up) — the
+        mirror action of mark_community_profile_reviewed: sets `needs_review`
+        to 1 from the admin list alone, without opening the profile edit
+        form. Same narrow single-column UPDATE shape, and the same no-op
+        (not an error) precedent for a community with no profile row yet —
+        deliberately does NOT create one; a community with nothing drafted
+        yet has no profile to flag."""
+        self.conn.execute(
+            "UPDATE community_profiles SET needs_review=1, updated_at=? WHERE community_id=?",
+            (_now(), community_id),
+        )
+        self.conn.commit()
+
     def count_communities_needing_review(self) -> int:
         return self.conn.execute(
             "SELECT COUNT(*) FROM community_profiles WHERE needs_review=1"
