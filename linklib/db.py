@@ -2164,23 +2164,47 @@ class Library:
             # staying unambiguous next to the three field-scoped
             # description_needs_verification/agent_taxonomy_needs_verification/
             # competitive_differentiation_needs_verification columns (those are
-            # always field-prefixed; this one never is). Defaults to 0 for
-            # every existing and new row — unlike Communities, a tool has a
-            # live, fully-populated row the moment it's created (required
-            # name/url/description/summary, not an absent draft), so there's
-            # no "doesn't apply yet" state to model; 0 matches every existing
-            # *_needs_verification column's own default and the general
-            # "nothing is auto-flagged, an admin opts in" convention.
-            # Deliberately NOT auto-set by any Generate/Save action on the
-            # three per-field flags (Communities' own needs_review IS
-            # auto-OR'd by a fresh AI draft — this column intentionally does
-            # NOT copy that one behavior, per explicit direction: it must stay
-            # a purely manual, independent signoff, settable only via the
-            # checkbox on the tool edit form or the "Mark reviewed" button).
-            # Admin-only bookkeeping — does not gate anything on the public
-            # profile/compare pages, unlike Communities' needs_review (which
-            # hides the whole profile draft): tools already have the three
-            # per-field gates doing that job.
+            # always field-prefixed; this one never is).
+            #
+            # Amended (2026-08, same phase, before this shipped) — two
+            # reversals, both by explicit direction:
+            #
+            # (1) Auto-linked to per-field regeneration after all, mirroring
+            # Communities' `needs_review = checkbox OR profile_ai_drafted`
+            # pattern as closely as tools' three-independent-fields shape
+            # allows: a fresh Generate/Refresh draft that sets ANY of the
+            # three per-field flags to 1 also forces this one to 1, regardless
+            # of the checkbox's prior state — see admin_tools_edit_submit
+            # (Description/Differentiation, computed in the same request as
+            # the checkbox, so the OR is literal) and _run_tool_research
+            # (Agent taxonomy, whose fresh-draft trigger fires from a
+            # different request entirely — the background task on tool
+            # creation or the "Refresh AI research" button — so it force-sets
+            # to 1 directly rather than ORing). The checkbox/"Mark reviewed"
+            # button can still set this to 0 at any time, and that manual 0
+            # persists across any later save that doesn't itself draft one of
+            # the three fields — only a FRESH draft landing needs_verification
+            # on 1 overrides it. This also means scripts/regen_ai_drafted_
+            # fields.py's own deliberate bypass (it always passes
+            # needs_verification=0 for all three fields) correctly never
+            # triggers the auto-link, since the trigger is keyed on the flag
+            # actually landing on 1, not on "a field was drafted."
+            #
+            # (2) SQL column default stays 0 — the safe, non-retroactive-
+            # flagging value for both migration backfill (an existing row on
+            # first deploy of this column must not suddenly read as
+            # unreviewed) and any raw INSERT that doesn't pass a value. The
+            # "brand-new tool defaults to needs review" behavior instead
+            # lives as add_tool()'s own Python-level default parameter
+            # (needs_review: int = 1) — same "SQL default is the floor,
+            # Python default is the real behavior for the one call site that
+            # matters" split description_needs_verification already uses.
+            #
+            # Admin-only bookkeeping is unchanged by either reversal — still
+            # gates nothing on the public profile/compare pages, unlike
+            # Communities' needs_review (which hides the whole profile
+            # draft): tools already have the three per-field gates doing
+            # that job.
             "ALTER TABLE tools ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
@@ -4502,7 +4526,15 @@ class Library:
                  summary: str = "",
                  description_needs_verification: int = 0,
                  description_ai_confident: Optional[int] = None,
-                 description_low_confidence: Optional[int] = None) -> int:
+                 description_low_confidence: Optional[int] = None,
+                 needs_review: int = 1) -> int:
+        # needs_review defaults to 1 (not the column's own SQL default of 0)
+        # — a brand-new tool's profile should read as "needs review" until
+        # someone actually signs off on it, not "already reviewed" by
+        # default. See the needs_review migration comment for the SQL-
+        # default-vs-Python-default split this relies on. Applies to every
+        # caller (admin add-form, public /tools/submit, seed scripts) unless
+        # one explicitly passes 0 — none does today.
         # description_needs_verification/description_ai_confident (Citations-API
         # grounding fix, Phase 2): a brand-new tool created straight from a
         # Generate-description draft used to have no way to record either —
@@ -4534,13 +4566,14 @@ class Library:
             """INSERT INTO tools (name, slug, description, url, categories_json,
                approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email,
                warm_intro_enabled, vendor_name, summary,
-               description_needs_verification, description_ai_confident, description_low_confidence)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               description_needs_verification, description_ai_confident, description_low_confidence,
+               needs_review)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, _voice_fix(description.strip()), url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
              promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip(),
              _voice_fix(summary.strip()), description_needs_verification, description_ai_confident,
-             description_low_confidence),
+             description_low_confidence, 1 if needs_review else 0),
         )
         self.conn.commit()
         return cur.lastrowid

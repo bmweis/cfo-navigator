@@ -10500,7 +10500,7 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
 
 
 @app.get("/admin/tools/software", response_class=HTMLResponse)
-def admin_software(request: Request):
+def admin_software(request: Request, filter: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -10510,8 +10510,18 @@ def admin_software(request: Request):
         lead_counts = lib.get_tool_lead_counts()
         tool_categories = lib.list_tool_categories()
         n_name_dupes = len(lib.find_tool_name_duplicate_candidates())
+        n_needs_review = lib.count_tools_needing_review()
     finally:
         lib.close()
+    # "Needs review" filter (2026-08 amendment) — mirrors admin_communities'
+    # own ?filter=needs_review pattern exactly (count/show-all links, a row
+    # badge, an inline Mark reviewed button), not the client-side
+    # _admin_sort_filter_toolbar_html dropdown mechanism used for the
+    # AND-matched scalar fields below — that mechanism fits a category/cost-
+    # band style filter, not this single boolean toggle, and Communities'
+    # existing pattern already solves exactly this case.
+    if filter == "needs_review":
+        approved = [t for t in approved if t["needs_review"]]
 
     def _tool_row(t: dict) -> str:
         cats = ", ".join(t["categories"]) or "—"
@@ -10541,6 +10551,15 @@ def admin_software(request: Request):
                       f'{n_leads} intro{"s" if n_leads != 1 else ""}</a>') if n_leads else \
                      '<span style="font-size:12px;color:var(--muted);">0 intros</span>'
         featured_badge = '<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;">Featured</span>' if t.get("promoted") else ""
+        # Needs review badge/action (2026-08 amendment) — same
+        # review_badge/mark_reviewed shape as admin_communities' own
+        # _approved_row, just for tools.needs_review instead of
+        # community_profiles.needs_review.
+        review_badge = ('<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--caution);color:#fff;border-radius:4px;'
+                         'padding:1px 6px;">Needs review</span>') if t.get("needs_review") else ""
+        mark_reviewed = (f'<form method="post" action="/admin/tools/software/{t["id"]}/mark-reviewed" style="margin:0;">'
+                         f'<button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>'
+                         ) if t.get("needs_review") else ""
         row_attrs = _admin_row_data_attrs({
             "name": t["name"], "promoted": "1" if t.get("promoted") else "0",
             "categories": "|".join(t["categories"]),
@@ -10557,7 +10576,7 @@ def admin_software(request: Request):
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;max-width:200px;">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-              <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}
+              <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}{review_badge}
             </div>
           </td>
           <td data-col="software:summary" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:260px;">{_esc(t.get('summary') or '—')}</td>
@@ -10571,14 +10590,26 @@ def admin_software(request: Request):
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
                 <button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
               </form>
+              {f'<div style="grid-column:1/-1;">{mark_reviewed}</div>' if mark_reviewed else ''}
             </div>
           </td>
         </tr>"""
 
     pending_rows = "".join(_tool_row(t) for t in pending) or \
         '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
-    approved_rows = "".join(_approved_row(t) for t in approved) or \
+    # Parenthesized deliberately: `A or B if C else D` parses as
+    # `(A or B) if C else D` in Python, which would show the empty-state
+    # fallback unconditionally whenever filter=="needs_review" regardless
+    # of whether `approved` actually has rows — a real bug found (and fixed
+    # here) via this amendment's own verification pass, and also present
+    # verbatim in admin_communities' matching line (fixed there too, same
+    # PR). `"".join(...) or (X if C else Y)` evaluates the join first and
+    # only picks between the two empty-state messages when it's genuinely empty.
+    approved_rows = "".join(_approved_row(t) for t in approved) or (
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No approved software yet.</td></tr>'
+        if filter != "needs_review" else
+        '<tr><td colspan="7" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
+    )
     total_leads = sum(lead_counts.values())
 
     software_cols = [("summary", "Short description"), ("categories", "Categories"), ("intros", "Intros")]
@@ -10593,6 +10624,18 @@ def admin_software(request: Request):
     # table above, which likewise never lists its own Featured checkbox).
     software_sort_fields = [("name", "Name"), ("url", "URL"), ("summary", "Short description"), ("intros", "Intros")]
 
+    # "Needs review" count/show-all links (2026-08 amendment) — same
+    # review_filter_link/clear_filter_link pattern as admin_communities.
+    review_filter_link = (
+        f'&nbsp;&middot;&nbsp;<a href="/admin/tools/software?filter=needs_review" style="font-size:13px;color:var(--muted);">'
+        f'{n_needs_review} need{"s" if n_needs_review == 1 else ""} review →</a>'
+        if n_needs_review else ""
+    )
+    clear_filter_link = (
+        '&nbsp;&middot;&nbsp;<a href="/admin/tools/software" style="font-size:13px;color:var(--muted);">Show all →</a>'
+        if filter == "needs_review" else ""
+    )
+
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -10606,6 +10649,7 @@ def admin_software(request: Request):
   <a href="/admin/tools/software/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/software/name-duplicates" style="font-size:13px;color:{'#92400e' if n_name_dupes else 'var(--muted)'};font-weight:{'700' if n_name_dupes else '400'};">Check for name duplicates{f' ({n_name_dupes})' if n_name_dupes else ''} →</a>
+  {review_filter_link}{clear_filter_link}
 </p>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
@@ -10623,7 +10667,7 @@ def admin_software(request: Request):
 </table>
 </div>
 
-<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software</h2>
+<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software{' needing review' if filter == 'needs_review' else ''}</h2>
 {_admin_column_picker_html("software", software_cols)}
 {_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
@@ -14104,9 +14148,19 @@ def admin_communities(request: Request, filter: str = ""):
 
     pending_rows = "".join(_pending_row(c) for c in pending) or \
         '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
-    approved_rows = "".join(_approved_row(c) for c in approved) or \
-        '<tr><td colspan="11" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>' if filter != "needs_review" else \
+    # Parenthesized deliberately (2026-08 amendment fix) — `A or B if C else
+    # D` parses as `(A or B) if C else D` in Python, which showed the
+    # empty-state fallback unconditionally whenever filter=="needs_review"
+    # regardless of whether `approved` actually had rows, discarding real
+    # matching rows every time this filter was used. Found via the tools-
+    # side amendment's own verification pass, fixed here at the source too.
+    # `"".join(...) or (X if C else Y)` evaluates the join first and only
+    # picks between the two empty-state messages when it's genuinely empty.
+    approved_rows = "".join(_approved_row(c) for c in approved) or (
+        '<tr><td colspan="11" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>'
+        if filter != "needs_review" else
         '<tr><td colspan="11" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
+    )
 
     communities_cols = [
         ("notes", "Short description"), ("cost_band", "Cost band"), ("access", "Access"), ("categories", "Categories"),
@@ -15578,6 +15632,15 @@ def _run_tool_research(tool_id: int) -> bool:
             )
             lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
                                      result.citations, model=result.model)
+            # Whole-record profile signoff (2026-08 amendment) — this fresh
+            # draft's own trigger for the auto-link: force needs_review to 1
+            # when this draft itself landed agent_taxonomy_needs_verification
+            # on 1 (an unconfident/uncertain result), same as the OR pattern
+            # in admin_tools_edit_submit but applied here since this call has
+            # no checkbox/request of its own to OR against — never forces to
+            # 0, only ever adds the flag, same as Communities' own pattern.
+            if result.agent_taxonomy_needs_verification:
+                lib.set_tool_needs_review(tool_id, 1)
             wrote_anything = True
         if wrote_anything or result.cost_usd:
             lib.record_enrichment_cost(None, result.model, result.input_tokens,
@@ -15945,16 +16008,24 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             latest_differentiation_review,
         )
     )
-    # Whole-record profile signoff (2026-08) — a higher-level, purely manual
-    # sign-off sitting alongside the three per-field flags above, not derived
-    # from them. Mirrors community_profiles.needs_review's "Mark reviewed"
-    # widget shape; admin-only bookkeeping, no public gating (see CLAUDE.md's
-    # "Tools whole-record profile signoff" bullet).
+    # Whole-record profile signoff (2026-08, amended same phase) — a
+    # higher-level sign-off sitting alongside the three per-field flags
+    # above; auto-linked to a fresh Generate/Refresh draft on any of them
+    # (see admin_tools_edit_submit/_run_tool_research), but still clearable
+    # here at any time via the checkbox or this button. Mirrors
+    # community_profiles.needs_review's "Mark reviewed" widget shape;
+    # admin-only bookkeeping, no public gating (see CLAUDE.md's "Tools
+    # whole-record profile signoff" bullet).
     _profile_reviewed_action, _profile_reviewed_form_html, _profile_review_line_html = (
         _narrative_verify_widget(
             bool(tool.get("needs_review")),
             "profile-mark-reviewed-form", f"/admin/tools/software/{tool_id}/mark-reviewed",
             latest_profile_review, action_label="Mark reviewed", past_tense_verb="Reviewed",
+            # Return here rather than the admin list's default redirect —
+            # this button lives on the tool edit page itself.
+            extra_hidden_fields_html=(
+                f'<input type="hidden" name="redirect_to" value="/tools/software/{tool["slug"]}/edit">'
+            ),
         )[1:]
     )
     _description_confidence_html = (_confidence_indicator_html(tool.get("description_ai_confident"))
@@ -16325,10 +16396,6 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     agent_taxonomy_note = (form.get("agent_taxonomy_note") or "").strip()
     screenshot_url = (form.get("screenshot_url") or "").strip()
     app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
-    # Whole-record profile signoff (2026-08) — purely manual, read straight
-    # off the checkbox, never derived from ai_drafted/the three per-field
-    # flags below. See tools.needs_review's migration comment.
-    needs_review = 1 if form.get("needs_review") == "1" else 0
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     # Phase G PR 2: a field saved right after a fresh Generate click (named
@@ -16345,6 +16412,21 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     ai_low_confidence = _ai_drafted_field_low_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     competitive_differentiation_needs_verification = 1 if "competitive_differentiation" in ai_drafted else 0
+    # Whole-record profile signoff (2026-08 amendment) — auto-linked to
+    # per-field regeneration, mirroring Communities' `needs_review =
+    # checkbox OR profile_ai_drafted` pattern precisely for the two of the
+    # three per-field flags that land in this same request (Agent
+    # taxonomy's own fresh-draft trigger lives in _run_tool_research
+    # instead, since it never shares a request with this checkbox — see
+    # the needs_review migration comment for the full reasoning). The
+    # checkbox can still clear this to 0, but a fresh draft of Description
+    # or Competitive differentiation THIS submit always forces it back to
+    # 1, regardless of the checkbox's value in the same submission.
+    needs_review = 1 if (
+        form.get("needs_review") == "1"
+        or description_needs_verification
+        or competitive_differentiation_needs_verification
+    ) else 0
     # Confidence indicator (2026-08): only a real value when the field is
     # actually a fresh draft this save — same "field also in ai_drafted"
     # guard the comment on _ai_drafted_field_confidence calls out, so a
@@ -16702,21 +16784,32 @@ def admin_tools_differentiation_verify(request: Request, tool_id: int):
 
 
 @app.post("/admin/tools/software/{tool_id}/mark-reviewed")
-def admin_tools_mark_reviewed(request: Request, tool_id: int):
+async def admin_tools_mark_reviewed(request: Request, tool_id: int):
     """One-click whole-record "Mark reviewed" — clears tools.needs_review
     without touching any of the three per-field verification flags. Mirrors
     admin_communities_mark_reviewed's shape (see CLAUDE.md's "Tools
     whole-record profile signoff" bullet); logs to narrative_review_log with
     field_type='profile', a snapshot of the description as of this click
     (the single most representative field, same reasoning
-    admin_communities_mark_reviewed gives for snapshotting verdict_summary)."""
+    admin_communities_mark_reviewed gives for snapshotting verdict_summary).
+
+    redirect_to (2026-08 amendment, matching admin_communities_mark_reviewed
+    exactly): called from both the admin list row (no redirect_to — stay on
+    the list, same default that route uses) and the tool edit page itself
+    (its own hidden form passes redirect_to explicitly). Validated against
+    an allowlist since it echoes into a redirect, same convention as
+    admin_communities_mark_reviewed/admin_tools_delete."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
     lib = _lib()
     try:
         tool = lib.get_tool(tool_id)
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
+        redirect_to = form.get("redirect_to") or "/admin/tools/software"
+        if redirect_to not in ("/admin/tools/software", f"/tools/software/{tool['slug']}/edit"):
+            redirect_to = "/admin/tools/software"
         lib.mark_tool_reviewed(tool_id)
         lib.record_narrative_review(
             _current_user_id(lib, request), "tool", "profile", tool_id,
@@ -16724,7 +16817,7 @@ def admin_tools_mark_reviewed(request: Request, tool_id: int):
         )
     finally:
         lib.close()
-    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
+    return RedirectResponse(redirect_to, status_code=303)
 
 
 @app.post("/admin/tools/software/{tool_id}/competitors/add")
