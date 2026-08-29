@@ -65,62 +65,22 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sqlite3
 import sys
 import time
-from urllib.parse import urlparse
 
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from linklib.db import Library, resolve_db_path
+from linklib.brandfetch import extract_domain, fetch_logo_asset, download_asset
 
-BRAND_API_URL = "https://api.brandfetch.io/v2/brands/domain/{domain}"
-REQUEST_TIMEOUT = 15  # seconds
 DEFAULT_LIMIT = 90  # safety margin below the hard 100/month free-tier cap
 DEFAULT_DELAY = 0.25  # seconds between Brand API calls — sanctioned use, but no reason to hammer it
-
-_HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}\.)+[a-z]{2,}$", re.IGNORECASE)
-
-
-def extract_domain(url: str) -> str | None:
-    """Bare registrable-ish domain from a stored tool/community URL, e.g.
-    "https://www.brex.com/pricing" -> "brex.com". Returns None for a URL
-    too malformed to parse at all. Formerly imported from
-    scripts.report_brandfetch_coverage — inlined here (Phase N archive
-    cleanup) so this recurring script doesn't depend on a one-time,
-    archived investigation script; report_brandfetch_coverage.py (now in
-    scripts/archive/) keeps its own copy, frozen as-is."""
-    url = (url or "").strip()
-    if not url:
-        return None
-    if "://" not in url:
-        url = "https://" + url
-    try:
-        host = urlparse(url).netloc
-    except ValueError:
-        return None
-    host = host.split("@")[-1].split(":")[0]  # strip userinfo/port if present
-    if host.startswith("www."):
-        host = host[4:]
-    if not host or not _HOSTNAME_RE.match(host):
-        return None
-    return host
 
 # Subdirectory per record type, to avoid a slug collision between a tool and
 # a community silently overwriting each other's logo file (see module docstring).
 _DIR_BY_KIND = {"tool": "tools", "community": "communities"}
-
-# Format preference, carried over from the original Phase D investigation's
-# recommendation: SVG scales cleanly across card-size and profile-page-size
-# renders with zero quality loss; PNG is the fallback when a brand has no SVG.
-_FORMAT_PREFERENCE = ("svg", "png")
-
-# Logo "theme" preference: our pages sit on a light background (#F5F4EF,
-# BRAND.md), so a logo variant designed for light backgrounds reads better
-# than one designed for dark. Not every brand publishes both.
-_THEME_PREFERENCE = ("light", "dark")
 
 
 def _logos_root(db_path: str) -> str:
@@ -150,86 +110,6 @@ def _select_candidates(lib: Library, limit: int) -> list[tuple[str, sqlite3.Row]
     ).fetchall()
     queue = [("tool", r) for r in tools] + [("community", r) for r in communities]
     return queue[:limit] if limit else queue
-
-
-def _best_logo_asset(data: dict) -> tuple[str, str] | None:
-    """Given a Brand API /v2/brands/domain/{domain} response body, pick the
-    best logo asset: prefer the "logo" type (primary brand mark) over
-    "icon"/"symbol", prefer a "light"-theme variant, prefer SVG over PNG —
-    falling back gracefully at each step since not every brand publishes
-    every combination. Returns (src_url, format_ext) or None if the response
-    has no usable logo asset at all."""
-    logos = data.get("logos") or []
-    if not logos:
-        return None
-
-    def type_rank(logo: dict) -> int:
-        return 0 if logo.get("type") == "logo" else 1
-
-    def theme_rank(logo: dict) -> int:
-        theme = logo.get("theme")
-        try:
-            return _THEME_PREFERENCE.index(theme)
-        except ValueError:
-            return len(_THEME_PREFERENCE)  # unknown/missing theme sorts last, not first
-
-    ordered = sorted(logos, key=lambda logo: (type_rank(logo), theme_rank(logo)))
-    for fmt_pref in _FORMAT_PREFERENCE:
-        for logo in ordered:
-            for fmt in logo.get("formats") or []:
-                if (fmt.get("format") or "").lower() == fmt_pref and fmt.get("src"):
-                    return fmt["src"], fmt_pref
-    return None
-
-
-def _fetch_logo_asset(domain: str, api_key: str, session: requests.Session) -> tuple[tuple[str, str] | None, str | None]:
-    """Calls the Brand API for one domain. Returns ((src_url, ext), None) on
-    success, or (None, reason) on any kind of miss/failure. `reason` starting
-    with "QUOTA" signals the caller should stop the whole run, not just skip
-    this record — see main()'s handling."""
-    url = BRAND_API_URL.format(domain=domain)
-    try:
-        resp = session.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=REQUEST_TIMEOUT)
-    except requests.RequestException as exc:
-        return None, f"request error: {exc}"
-
-    if resp.status_code == 429:
-        return None, "QUOTA: 429 rate-limited/quota-exceeded — stopping the run, not just this record"
-    if resp.status_code == 404:
-        return None, "404 — Brandfetch has no record for this domain"
-    if resp.status_code != 200:
-        return None, f"{resp.status_code} {resp.text[:200]!r}"
-
-    try:
-        data = resp.json()
-    except ValueError:
-        return None, "non-JSON response"
-
-    # Domain-echo guard (2026-08, manual logo override investigation) — the
-    # Brand API response carries its own "domain" field for the brand it
-    # actually matched. Prior to this fix nothing here ever checked it
-    # against the domain we requested, so a fuzzy/mismatched match on
-    # Brandfetch's side (confirmed suspect in the Aleph/Zapier
-    # investigation, though not independently reproducible from this
-    # session — see CLAUDE.md) would be accepted silently. Cheap and
-    # correct regardless of root cause: only trust the response for the
-    # exact domain (or its own www. variant) we asked for.
-    resp_domain = (data.get("domain") or "").strip().lower()
-    if resp_domain and resp_domain not in (domain.lower(), f"www.{domain.lower()}"):
-        return None, f"MISMATCH: requested {domain!r} but response is for {resp_domain!r} — skipped, not saved"
-
-    asset = _best_logo_asset(data)
-    if not asset:
-        return None, "200 OK but no usable svg/png logo asset in the response"
-    return asset, None
-
-
-def _download_asset(src_url: str, dest_path: str, session: requests.Session) -> None:
-    resp = session.get(src_url, timeout=REQUEST_TIMEOUT)
-    resp.raise_for_status()
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    with open(dest_path, "wb") as f:
-        f.write(resp.content)
 
 
 def _pct(done: int, total: int) -> str:
@@ -327,7 +207,7 @@ def main() -> int:
                 print(f"{prefix}: SKIP (unparseable url={url!r})")
                 continue
 
-            asset, err = _fetch_logo_asset(domain, api_key, session)
+            asset, err = fetch_logo_asset(domain, api_key, session)
             if err:
                 if err.startswith("QUOTA"):
                     print(f"{prefix} ({domain}): STOPPING — {err}")
@@ -340,7 +220,7 @@ def main() -> int:
                 rel_path = f"logos/{_DIR_BY_KIND[kind]}/{slug}.{ext}"
                 dest_path = os.path.join(logos_root, _DIR_BY_KIND[kind], f"{slug}.{ext}")
                 try:
-                    _download_asset(src_url, dest_path, session)
+                    download_asset(src_url, dest_path, session)
                 except requests.RequestException as exc:
                     failed.append((kind, name, f"asset download failed: {exc}"))
                     print(f"{prefix} ({domain}): MISS — asset download failed: {exc}")
