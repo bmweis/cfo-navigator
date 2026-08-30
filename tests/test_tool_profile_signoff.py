@@ -152,7 +152,13 @@ def test_count_tools_needing_review(lib):
 
 # -- Edit-submit route: checkbox + auto-link from Description/Differentiation ---
 
-def test_edit_submit_sets_needs_review_from_checkbox(env):
+def test_edit_submit_ignores_stray_needs_review_form_field(env):
+    """2026-08 Review-status consolidation: the checkbox is gone from this
+    form (the whole-record signoff is now the shared pill+action at the top
+    of the edit page, an immediate one-click route, not tied to Save) — a
+    stray `needs_review` form field is simply ignored by the submit route
+    now. A tool with no prior manual state and no fresh draft this submit
+    stays at whatever its current DB value already was."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1, needs_review=0)
@@ -168,13 +174,16 @@ def test_edit_submit_sets_needs_review_from_checkbox(env):
     assert r.status_code == 303
 
     lib = Library(os.environ["LINKLIB_DB"])
-    assert lib.get_tool(tool_id)["needs_review"] == 1
+    assert lib.get_tool(tool_id)["needs_review"] == 0
     lib.close()
 
 
-def test_edit_submit_clears_needs_review_when_checkbox_unchecked_and_no_fresh_draft(env):
-    """Manual 0 persists across a save that doesn't itself draft one of the
-    three fields — no ai_drafted_fields this submit, checkbox unchecked."""
+def test_edit_submit_persists_existing_needs_review_without_fresh_draft(env):
+    """Manual state now persists by carrying the CURRENTLY-persisted DB
+    value forward on every save (there's no checkbox to reflect it back
+    any more) — a plain resave with no fresh draft this submit can never
+    silently clear a manually-set flag; only the dedicated "Mark reviewed"
+    action can."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -190,7 +199,7 @@ def test_edit_submit_clears_needs_review_when_checkbox_unchecked_and_no_fresh_dr
     assert r.status_code == 303
 
     lib = Library(os.environ["LINKLIB_DB"])
-    assert lib.get_tool(tool_id)["needs_review"] == 0
+    assert lib.get_tool(tool_id)["needs_review"] == 1
     lib.close()
 
 
@@ -242,10 +251,10 @@ def test_edit_submit_forces_needs_review_when_differentiation_ai_drafted(env):
     lib.close()
 
 
-def test_edit_submit_fresh_draft_overrides_unchecked_checkbox(env):
-    """The checkbox being explicitly absent (unchecked) in the SAME submit
-    as a fresh draft must not prevent the force-to-1 — a fresh draft always
-    wins, regardless of the checkbox's value in that submission."""
+def test_edit_submit_fresh_draft_overrides_currently_reviewed_state(env):
+    """A currently-reviewed tool (needs_review=0) that gets a fresh draft
+    this same submit is forced back to 1 regardless — a fresh draft always
+    wins over whatever the prior persisted state was."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -255,7 +264,6 @@ def test_edit_submit_fresh_draft_overrides_unchecked_checkbox(env):
 
     client = _client(env)
     _login(client)
-    # No "needs_review" key at all in the posted data (unchecked checkbox).
     client.post(f"/tools/software/{slug}/edit", data={
         "name": "Runway", "url": "https://runway.com", "description": "AI text",
         "summary": "AI sum", "ai_drafted_fields": "description,summary",
@@ -427,7 +435,11 @@ def test_mark_reviewed_route_rejects_unknown_redirect_to(env):
 
 # -- Edit page rendering ----------------------------------------------------------
 
-def test_edit_page_shows_checkbox_and_mark_reviewed_button_when_needs_review(env):
+def test_edit_page_shows_review_status_pill_and_mark_reviewed_at_top(env):
+    """2026-08 consolidation: the checkbox is gone — the whole-record
+    signoff is now the shared Review-status pill + one-click action,
+    positioned at the TOP of the edit page (before the main form), not a
+    checkbox tied to Save at the bottom."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -437,12 +449,13 @@ def test_edit_page_shows_checkbox_and_mark_reviewed_button_when_needs_review(env
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/software/{slug}/edit")
-    assert 'name="needs_review"' in r.text
-    assert " checked" in r.text.split('name="needs_review"')[1][:40]
-    assert 'action="/admin/tools/software/{}/mark-reviewed"'.format(tool_id) in r.text
+    assert 'name="needs_review"' not in r.text  # the checkbox is gone
+    assert "Needs review" in r.text  # the coral pill text
+    assert f'action="/admin/tools/software/{tool_id}/mark-reviewed"' in r.text
     assert "Mark reviewed" in r.text
-    # The edit page's own hidden form must carry redirect_to back to itself.
     assert f'name="redirect_to" value="/tools/software/{slug}/edit"' in r.text
+    # Positioned before the main edit form, not after it.
+    assert r.text.index("Mark reviewed") < r.text.index('id="tool-edit-form"')
 
 
 def test_edit_page_hides_mark_reviewed_button_when_not_flagged(env):
@@ -652,7 +665,12 @@ def test_tool_flag_for_review_rejects_unknown_redirect_to(env):
     assert r.headers["location"] == "/admin/tools/software"
 
 
-def test_software_admin_list_shows_flag_button_only_when_not_flagged(env):
+def test_software_admin_list_never_shows_flag_for_review(env):
+    """2026-08 Review-status consolidation, item 1: "Flag for review" is
+    deliberately NOT offered on either admin list, in either state — it
+    only ever belongs on the profile VIEW page and the edit page, never a
+    list of many rows. "Mark reviewed" is unaffected and still shows for a
+    flagged row."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     t1 = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)  # needs_review=1
@@ -663,8 +681,8 @@ def test_software_admin_list_shows_flag_button_only_when_not_flagged(env):
     client = _client(env)
     _login(client)
     r = client.get("/admin/tools/software")
-    assert f'action="/admin/tools/software/{t1}/flag-for-review"' not in r.text  # already flagged
-    assert f'action="/admin/tools/software/{t2}/flag-for-review"' in r.text      # not flagged, so shown
+    assert "flag-for-review" not in r.text
+    assert f'action="/admin/tools/software/{t1}/mark-reviewed"' in r.text
 
 
 def test_community_flag_for_review_route_sets_flag(env):
@@ -709,7 +727,9 @@ def test_community_flag_for_review_requires_auth(env):
     assert client.post("/admin/tools/communities/1/flag-for-review").status_code == 401
 
 
-def test_communities_admin_list_shows_flag_button_only_when_not_flagged(env):
+def test_communities_admin_list_never_shows_flag_for_review(env):
+    """Same item-1 rule as the Software list — see
+    test_software_admin_list_never_shows_flag_for_review."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     c1 = lib.add_community("CFO Alliance", "https://cfoalliance.example", "demo", "Free", ["General"], approved=1)
@@ -721,16 +741,189 @@ def test_communities_admin_list_shows_flag_button_only_when_not_flagged(env):
     client = _client(env)
     _login(client)
     r = client.get("/admin/tools/communities")
-    assert f'action="/admin/tools/communities/{c1}/flag-for-review"' not in r.text  # already flagged
-    assert f'action="/admin/tools/communities/{c2}/flag-for-review"' in r.text      # not flagged, so shown
+    assert "flag-for-review" not in r.text
+    assert f'action="/admin/tools/communities/{c1}/mark-reviewed"' in r.text
+
+
+# -- Review status on the profile VIEW page (item 2/3) --------------------------
+
+def test_software_view_page_shows_review_status_pill_for_admin(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)  # needs_review=1
+    lib.update_tool(tool_id, "Runway", "d", "https://runway.com", ["FP&A"], summary="s",
+                     description_needs_verification=1)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{slug}")
+    assert "Needs review" in r.text
+    assert "(1/3)" in r.text  # 1 of the 3 per-field flags is set
+    assert f'action="/admin/tools/software/{tool_id}/mark-reviewed"' in r.text
+    assert f'name="redirect_to" value="/tools/software/{slug}"' in r.text
+
+
+def test_software_view_page_hides_review_status_for_anonymous_visitor(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)  # no login
+    r = client.get(f"/tools/software/{slug}")
+    assert "Needs review" not in r.text
+    assert "flag-for-review" not in r.text
+    assert "mark-reviewed" not in r.text
+
+
+def test_software_view_page_shows_reviewed_pill_when_not_flagged(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
+    lib.mark_tool_reviewed(tool_id)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{slug}")
+    assert "Reviewed" in r.text
+    assert f'action="/admin/tools/software/{tool_id}/flag-for-review"' in r.text
+
+
+def test_community_view_page_shows_review_status_pill_for_admin(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    community_id = lib.add_community("CFO Alliance", "https://cfoalliance.example", "demo", "Free", ["General"], approved=1)
+    lib.upsert_community_profile(community_id, ideal_member="x", needs_review=1,
+                                  confidence={"ideal_member": 0, "anti_fit": 0})
+    slug = lib.get_community(community_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/communities/{slug}")
+    assert "Needs review" in r.text
+    assert "(2/12)" in r.text  # 2 of the 12 confidence-tracked fields reported low confidence
+    assert f'action="/admin/tools/communities/{community_id}/mark-reviewed"' in r.text
+
+
+def test_community_view_page_hides_review_status_when_no_profile_drafted(env):
+    """A community with no profile draft yet has nothing to review or
+    flag — the pill/action block is simply absent, not shown empty."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    community_id = lib.add_community("CFO Alliance", "https://cfoalliance.example", "demo", "Free", ["General"], approved=1)
+    slug = lib.get_community(community_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/communities/{slug}")
+    assert "Needs review" not in r.text
+    assert "flag-for-review" not in r.text
+
+
+def test_community_view_page_hides_review_status_for_anonymous_visitor(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    community_id = lib.add_community("CFO Alliance", "https://cfoalliance.example", "demo", "Free", ["General"], approved=1)
+    lib.upsert_community_profile(community_id, ideal_member="x", needs_review=1)
+    slug = lib.get_community(community_id)["slug"]
+    lib.close()
+
+    client = _client(env)  # no login
+    r = client.get(f"/tools/communities/{slug}")
+    assert "Needs review" not in r.text
+    assert "mark-reviewed" not in r.text
+
+
+# -- Filter matches the pill's own signal exactly (item 4) -----------------------
+
+def test_software_filter_and_pill_agree(env):
+    """The admin-list filter must key off exactly the same signal the pill
+    displays — no separate/stale logic. A tool shown as "Needs review" by
+    the pill is exactly the set the filter returns, and vice versa."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)  # needs_review=1
+    t2 = lib.add_tool("Abacum", "d", "https://abacum.io", ["FP&A"], approved=1)
+    lib.mark_tool_reviewed(t2)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    full = client.get("/admin/tools/software").text
+    filtered = client.get("/admin/tools/software?filter=needs_review").text
+    # Runway shows a coral pill on the unfiltered page and survives filtering.
+    assert "Runway" in full and "Runway" in filtered
+    # Abacum shows a green pill on the unfiltered page and is excluded by the filter.
+    assert "Abacum" in full and "Abacum" not in filtered
+
+
+def test_communities_filter_and_pill_agree(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    c1 = lib.add_community("CFO Alliance", "https://cfoalliance.example", "demo", "Free", ["General"], approved=1)
+    c2 = lib.add_community("The F Suite", "https://thefsuite.example", "demo", "Free", ["General"], approved=1)
+    lib.upsert_community_profile(c1, ideal_member="x", needs_review=1)
+    lib.upsert_community_profile(c2, ideal_member="y", needs_review=0)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    full = client.get("/admin/tools/communities").text
+    filtered = client.get("/admin/tools/communities?filter=needs_review").text
+    assert "CFO Alliance" in full and "CFO Alliance" in filtered
+    assert "The F Suite" in full and "The F Suite" not in filtered
+
+
+# -- Shared pill component (unit-level) ------------------------------------------
+
+def test_review_status_pill_html_reviewed_state(env):
+    html = env._review_status_pill_html(True)
+    assert "Reviewed" in html
+    assert "Needs review" not in html
+
+
+def test_review_status_pill_html_needs_review_state_with_breakdown(env):
+    html = env._review_status_pill_html(False, (2, 3))
+    assert "Needs review" in html
+    assert "(2/3)" in html
+
+
+def test_review_status_pill_html_needs_review_state_without_breakdown(env):
+    html = env._review_status_pill_html(False)
+    assert "Needs review</span>" in html  # no trailing " (n/total)" fraction
+
+
+def test_review_status_action_html_polarity():
+    """The action must be the MIRROR of the pill's own state — Flag for
+    review when currently reviewed, Mark reviewed when currently needs
+    review. (This exact polarity bug was caught and fixed while building
+    this component — this test pins it down.)"""
+    from webapp.app import _review_status_action_html
+    reviewed_action = _review_status_action_html(True, "/mark", "/flag", "/redirect")
+    assert "Flag for review" in reviewed_action
+    assert "Mark reviewed" not in reviewed_action
+
+    needs_review_action = _review_status_action_html(False, "/mark", "/flag", "/redirect")
+    assert "Mark reviewed" in needs_review_action
+    assert "Flag for review" not in needs_review_action
 
 
 # -- No public gating: profile page renders identically regardless of flag ------
 
 def test_public_profile_page_unaffected_by_needs_review_flag(env):
     """Admin-only bookkeeping, per explicit direction — unlike Communities'
-    needs_review, this must not hide/change anything on the public profile
-    page (the three per-field flags already do that job for tools)."""
+    needs_review, this must not hide/change anything on the PUBLIC
+    (unauthenticated) profile page (the three per-field flags already do
+    that job for tools). The signed-in admin view is deliberately
+    different now (it shows the Review-status pill) — see
+    test_software_view_page_shows_review_status_pill_for_admin above."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "Planning software for finance teams.",

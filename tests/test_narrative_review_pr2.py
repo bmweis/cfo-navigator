@@ -346,7 +346,13 @@ def test_profile_submit_sets_needs_review_when_ai_drafted(env):
     lib.close()
 
 
-def test_profile_submit_respects_manual_checkbox_without_ai_draft(env):
+def test_profile_submit_ignores_stray_needs_review_form_field(env):
+    """2026-08 Review-status consolidation: the needs_review checkbox is
+    gone from this form (the whole-record signoff is now the shared
+    pill+action at the top of the page, an immediate one-click route, not
+    tied to Save) — a stray `needs_review` form field is simply ignored by
+    the submit route now. A brand-new profile (no prior needs_review=1
+    state) with no ai_drafted fields stays 0 regardless."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     community_id = lib.add_community(
@@ -361,11 +367,18 @@ def test_profile_submit_respects_manual_checkbox_without_ai_draft(env):
                 data=_profile_form_data(needs_review="1"), follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
-    assert lib.get_community_profile(community_id)["needs_review"] == 1
+    assert lib.get_community_profile(community_id)["needs_review"] == 0
     lib.close()
 
 
-def test_profile_submit_clears_needs_review_when_neither(env):
+def test_profile_submit_persists_existing_needs_review_without_ai_draft(env):
+    """2026-08 Review-status consolidation: manual state now persists by
+    carrying the CURRENTLY-persisted DB value forward on every save (since
+    there's no checkbox to reflect it back), rather than the old
+    checkbox-driven behavior where an ordinary resave with no ai draft used
+    to silently CLEAR a manually-set flag. Only the dedicated "Mark
+    reviewed" action (its own route) can clear it now — a plain Save can
+    never accidentally lose it."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     community_id = lib.add_community(
@@ -381,7 +394,7 @@ def test_profile_submit_clears_needs_review_when_neither(env):
                 data=_profile_form_data(), follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
-    assert lib.get_community_profile(community_id)["needs_review"] == 0
+    assert lib.get_community_profile(community_id)["needs_review"] == 1
     lib.close()
 
 

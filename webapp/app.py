@@ -867,10 +867,13 @@ def _narrative_verify_widget(needs_verification: bool, verify_form_id: str, veri
     """Shared "Needs verification" badge / "Mark [verified/reviewed]" button /
     hidden verify-form / "Verified by X on Y" line for one AI-drafted
     narrative field — the widget PR 1 built once for Agent taxonomy and
-    Phase G PR 2 reuses for Description and Differentiation (Community
-    profile draft reuses only the button+line half, via its own existing
-    needs_review checkbox instead of a badge — see
-    _community_profile_form_fields).
+    Phase G PR 2 reuses for Description and Differentiation. Tools' and
+    Communities' whole-record needs_review signoff used to reuse this
+    widget too (button+line half only); the 2026-08 Review-status
+    consolidation moved both onto the shared _review_status_pill_html/
+    _review_status_action_html/_review_status_block_html components
+    instead (a real pill, not a badge, plus a self-contained action) —
+    this widget is now Agent taxonomy/Description/Differentiation-only.
 
     Returns (badge_html, action_html, hidden_form_html, review_line_html).
     Every rendering site lives inside a <form> of its own (#tool-edit-form
@@ -7439,9 +7442,29 @@ function submitIntroForm() {{
     {lower_band_left}
   </div>"""
 
+    # Review status (2026-08 consolidation) — the shared pill+action, now
+    # also visible on the profile VIEW page itself, not just the edit page
+    # and the admin list. Admin-only, same _is_authed gating as every other
+    # admin-facing element on this page (the meta line, the Edit button).
+    review_status_html = ""
+    if authed:
+        _needs_review = bool(tool.get("needs_review"))
+        _tool_breakdown = (sum(1 for f in (
+            "description_needs_verification", "agent_taxonomy_needs_verification",
+            "competitive_differentiation_needs_verification") if tool.get(f)), 3) if _needs_review else None
+        _rs_block = _review_status_block_html(
+            not _needs_review,
+            f"/admin/tools/software/{tool['id']}/mark-reviewed",
+            f"/admin/tools/software/{tool['id']}/flag-for-review",
+            f"/tools/software/{tool['slug']}",
+            _tool_breakdown,
+        )
+        review_status_html = f'<div style="margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{_rs_block}</div>'
+
     main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 {top_band}
 {lower_band}
+{review_status_html}
 {f'<p style="font-size:13px;color:var(--muted);margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}
 {footnote_block}"""
 
@@ -9111,6 +9134,11 @@ def tools_community_profile(request: Request, slug: str):
         profile = lib.get_community_profile(community["id"]) or {}
         similar_communities = lib.list_community_competitors(community["id"])
         profile_citations = lib.get_entity_citations("community", community["id"], "community_profile")
+        # Review status (2026-08 consolidation) — fetched here, in the same
+        # connection as everything else on this page, rather than opening a
+        # second one later just for this; admin-only, so the extra query
+        # only ever runs for a signed-in admin's own request.
+        quality_flags = lib.community_profile_quality_flags().get(community["id"]) if authed else None
         lib.record_community_view(session_id, community["id"])
     finally:
         lib.close()
@@ -9335,9 +9363,28 @@ def tools_community_profile(request: Request, slug: str):
   <p style="margin:0;"><a href="/tools/communities/correct?community_id={community['id']}" style="font-size:13px;color:var(--muted);">Something here out of date? Suggest a correction &rarr;</a></p>
 </div>"""
 
+    # Review status (2026-08 consolidation) — same shared pill+action as
+    # Software's profile page, admin-only. Shown only when a profile draft
+    # actually exists (`profile` non-empty) — a community with nothing
+    # drafted yet has nothing to review or flag, same no-op precedent
+    # flag_community_profile_needs_review already applies.
+    review_status_html = ""
+    if authed and profile:
+        _needs_review = bool(profile.get("needs_review"))
+        _comm_breakdown = (quality_flags["unconfident_count"], 12) if (_needs_review and quality_flags) else None
+        _rs_block = _review_status_block_html(
+            not _needs_review,
+            f"/admin/tools/communities/{community['id']}/mark-reviewed",
+            f"/admin/tools/communities/{community['id']}/flag-for-review",
+            f"/tools/communities/{community['slug']}",
+            _comm_breakdown,
+        )
+        review_status_html = f'<div style="margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{_rs_block}</div>'
+
     main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 {top_band}
 {lower_band}
+{review_status_html}
 {footnote_block}
 {footer_links}"""
 
@@ -10403,6 +10450,71 @@ function resetSortFilter(tableKey) {
 """
 
 
+def _review_status_pill_html(reviewed: bool, breakdown: tuple[int, int] | None = None) -> str:
+    """Shared whole-record review-status pill (2026-08 consolidation) — ONE
+    visual component, used on both admin list tables (Software/Communities),
+    both public profile VIEW pages (admin-only), and the top of both edit
+    pages, replacing what used to be three-to-five different scattered
+    indicators (a plain "Needs review" chip, a brown "N field(s) needs
+    verification" auto-fill-gap badge, and a separate "N/12 fields
+    low-confidence" badge — the latter two retired outright per this
+    consolidation, not relocated).
+
+    Solid green "Reviewed" when the whole-record needs_review flag is
+    false; solid coral "Needs review" when true, with an optional
+    "(n/total)" fraction alongside — Communities' Claude-self-reported
+    low-confidence count (unconfident_count/12, the one dataset explicitly
+    named to carry over into this component) or Software's own count of
+    how many of its 3 per-field *_needs_verification flags are currently
+    set. True stoplight green (#15803D), not --good (navy, the site's
+    dominant color and so unusable as a health signal) — same sanctioned
+    exception BRAND.md documents for the auth-cookie-status dots; --coral
+    for the "needs review" state is Brian's own explicit design call for
+    this specific component, not a general license to use coral for status
+    elsewhere. A real pill shape (border-radius:999px) rather than the
+    4px-radius chip style every other admin badge on this page uses, so it
+    reads as this component's own distinct identity."""
+    if reviewed:
+        return ('<span style="display:inline-flex;align-items:center;font-size:11px;font-weight:700;'
+                'letter-spacing:.02em;background:#15803D;color:#fff;border-radius:999px;padding:3px 11px;'
+                'white-space:nowrap;">Reviewed</span>')
+    frac = f" ({breakdown[0]}/{breakdown[1]})" if breakdown else ""
+    return (f'<span style="display:inline-flex;align-items:center;font-size:11px;font-weight:700;'
+            f'letter-spacing:.02em;background:var(--coral);color:#fff;border-radius:999px;padding:3px 11px;'
+            f'white-space:nowrap;">Needs review{_esc(frac)}</span>')
+
+
+def _review_status_action_html(reviewed: bool, mark_reviewed_url: str, flag_url: str,
+                                redirect_to: str, ghost: bool = True) -> str:
+    """The one-click action that belongs next to the pill above — the
+    mirror-image action of the CURRENT state, same `reviewed` polarity as
+    _review_status_pill_html (True = currently reviewed/green,
+    False = currently needs review/coral): "Flag for review" when
+    currently reviewed (reopen it), "Mark reviewed" when currently needs
+    review (close it out). Self-contained form+button, safe to drop next
+    to the pill anywhere (list row, view page, edit page top) — each
+    caller supplies its own redirect_to since the three surfaces return to
+    different places."""
+    btn_cls = "btn btn-ghost" if ghost else "btn"
+    if reviewed:
+        return (f'<form method="post" action="{flag_url}" style="margin:0;display:inline;">'
+                f'<input type="hidden" name="redirect_to" value="{_esc(redirect_to)}">'
+                f'<button type="submit" class="{btn_cls}" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Flag for review</button></form>')
+    return (f'<form method="post" action="{mark_reviewed_url}" style="margin:0;display:inline;">'
+            f'<input type="hidden" name="redirect_to" value="{_esc(redirect_to)}">'
+            f'<button type="submit" class="{btn_cls}" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>')
+
+
+def _review_status_block_html(reviewed: bool, mark_reviewed_url: str, flag_url: str,
+                               redirect_to: str, breakdown: tuple[int, int] | None = None) -> str:
+    """Pill + its matching action, side by side — the combo used on the
+    profile VIEW page and at the top of the edit page (the admin list uses
+    the pill and action separately, in their own table cells)."""
+    pill = _review_status_pill_html(reviewed, breakdown)
+    action = _review_status_action_html(reviewed, mark_reviewed_url, flag_url, redirect_to)
+    return f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">{pill}{action}</div>'
+
+
 def _admin_row_data_attrs(fields: dict[str, str]) -> str:
     """fields: {attr_suffix: raw_value}. Renders data-{suffix}="{value}" pairs,
     lowercased for case-insensitive sort/filter comparison in _ADMIN_SORT_FILTER_JS.
@@ -10551,23 +10663,23 @@ def admin_software(request: Request, filter: str = ""):
                       f'{n_leads} intro{"s" if n_leads != 1 else ""}</a>') if n_leads else \
                      '<span style="font-size:12px;color:var(--muted);">0 intros</span>'
         featured_badge = '<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;">Featured</span>' if t.get("promoted") else ""
-        # Needs review badge/action (2026-08 amendment) — same
-        # review_badge/mark_reviewed shape as admin_communities' own
-        # _approved_row, just for tools.needs_review instead of
-        # community_profiles.needs_review.
-        review_badge = ('<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--caution);color:#fff;border-radius:4px;'
-                         'padding:1px 6px;">Needs review</span>') if t.get("needs_review") else ""
-        mark_reviewed = (f'<form method="post" action="/admin/tools/software/{t["id"]}/mark-reviewed" style="margin:0;">'
-                         f'<button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>'
-                         ) if t.get("needs_review") else ""
-        # Flag for review (2026-08 quick-toggle follow-up) — the mirror
-        # action of Mark reviewed above: lets an admin flag a profile from
-        # the list view alone, without opening the edit form. Shown only
-        # when NOT already flagged, same shown-only-when-relevant convention
-        # as mark_reviewed's own `if t.get("needs_review")` guard.
-        flag_for_review = (f'<form method="post" action="/admin/tools/software/{t["id"]}/flag-for-review" style="margin:0;">'
-                           f'<button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;white-space:nowrap;">Flag for review</button></form>'
-                           ) if not t.get("needs_review") else ""
+        # Review status (2026-08 consolidation) — the shared pill, plus
+        # (for the coral/"needs review" state) a breakdown of how many of
+        # the 3 per-field *_needs_verification flags are currently set,
+        # the tools-side parallel to Communities' unconfident_count/12.
+        # "Flag for review" is deliberately NOT offered here — per Brian's
+        # explicit call, that action only ever belongs on the profile VIEW
+        # page and the edit page, never a list of many rows; "Mark
+        # reviewed" stays here (unchanged from before this consolidation).
+        _needs_review = bool(t.get("needs_review"))
+        _tool_breakdown = (sum(1 for f in (
+            "description_needs_verification", "agent_taxonomy_needs_verification",
+            "competitive_differentiation_needs_verification") if t.get(f)), 3) if _needs_review else None
+        review_pill = _review_status_pill_html(not _needs_review, _tool_breakdown)
+        mark_reviewed = _review_status_action_html(
+            not _needs_review, f"/admin/tools/software/{t['id']}/mark-reviewed",
+            f"/admin/tools/software/{t['id']}/flag-for-review", "/admin/tools/software",
+        ) if _needs_review else ""
         row_attrs = _admin_row_data_attrs({
             "name": t["name"], "promoted": "1" if t.get("promoted") else "0",
             "categories": "|".join(t["categories"]),
@@ -10584,21 +10696,24 @@ def admin_software(request: Request, filter: str = ""):
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;max-width:200px;">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-              <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}{review_badge}
+              <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}
             </div>
           </td>
           <td data-col="software:summary" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:260px;">{_esc(t.get('summary') or '—')}</td>
           <td data-col="software:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td data-col="software:intros" data-label="Intros" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
+          <td data-col="software:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">{review_pill}{mark_reviewed}</div>
+          </td>
           <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
             <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
+              <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">View profile</a>
               <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
               <form method="post" action="/admin/tools/software/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
                 <button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
               </form>
-              {f'<div style="grid-column:1/-1;">{mark_reviewed}{flag_for_review}</div>' if (mark_reviewed or flag_for_review) else ''}
             </div>
           </td>
         </tr>"""
@@ -10620,7 +10735,8 @@ def admin_software(request: Request, filter: str = ""):
     )
     total_leads = sum(lead_counts.values())
 
-    software_cols = [("summary", "Short description"), ("categories", "Categories"), ("intros", "Intros")]
+    software_cols = [("summary", "Short description"), ("categories", "Categories"), ("intros", "Intros"),
+                      ("review_status", "Review status")]
     software_bulk_fields = [
         {"key": "categories", "label": "Categories", "kind": "multi"},
         {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
@@ -10689,6 +10805,7 @@ def admin_software(request: Request, filter: str = ""):
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
+  <th data-col="software:review_status" style="padding:10px 12px;text-align:left;font-size:13px;">Review status</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
 <tbody id="software-approved-tbody">{approved_rows}</tbody>
@@ -13756,55 +13873,33 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
 
 def _community_profile_form_fields(p: dict | None, community: dict,
                                     latest_review: dict | None = None,
-                                    citations: list | None = None) -> tuple[str, str]:
+                                    citations: list | None = None) -> str:
     """The Community Profile edit form (deep qualitative fields, distinct from
     the directory metadata in _community_form_fields_parts above). Field ids are
     'cp-<column name>' — generateCommunityProfile (_GENERATE_PROFILE_JS)
     reads/writes them by that convention.
 
-    latest_review (Phase G PR 2): the narrative_review_log entry, if any,
-    for this profile's field_type='community_profile' — powers the
-    "Reviewed by X on Y" line next to the needs_review checkbox below. The
-    admin-list "Mark reviewed" button (POST .../mark-reviewed) already
-    existed pre-Phase-G; this adds the *same* one-click action inline on
-    this edit page too, since that button living only on the list row
-    (never on the page where the content actually is) is exactly the
-    discoverability gap the Phase G investigation flagged for Agent
-    taxonomy — reusing needs_review rather than a new column deliberately
-    avoids repeating that gap for a second flag.
+    The whole-record needs_review checkbox/"Mark reviewed" widget that used
+    to live at the bottom of this field list (Phase G PR 2) moved to the
+    TOP of the edit page in the 2026-08 Review-status consolidation — see
+    admin_community_profile_edit, which renders the shared
+    _review_status_block_html there instead. This function only renders the
+    23 profile fields plus the uncapped citations list now, hence the
+    single-string return (was a tuple, for a hidden verify-form the caller
+    no longer needs to render separately).
 
     citations (Citations-API grounding fix, Phase 3): the FULL, uncapped
     list from Library.get_entity_citations("community", id,
     "community_profile") — ONE shared set covering the whole 23-field draft
-    (decision 5, Phase 0), not one per field. Rendered once, uncapped, in
-    this same block as the "Mark reviewed" widget — an admin reviewing the
-    draft sees every source before deciding to sign off, same placement
-    logic as Agent taxonomy/Description's own uncapped admin lists.
-
-    Returns (fields_html, hidden_verify_form_html) rather than one string —
-    fields_html renders inside the page's main <form>, but the "Mark
-    reviewed" button's target <form> must NOT be nested inside it (see
-    _narrative_verify_widget's docstring for why), so the caller renders
-    hidden_verify_form_html after the main form's closing tag instead."""
+    (decision 5, Phase 0), not one per field. Rendered once, uncapped, at
+    the end of this field list — an admin reviewing the draft sees every
+    source before deciding to sign off, same placement logic as Agent
+    taxonomy/Description's own uncapped admin lists."""
     p = p or {}
     citations = citations or []
     _admin_citations_html = _citations_list_html(
         citations, empty_note="No citations recorded for this draft (hand-written, "
                                "regenerated without a successful page fetch, or predates this feature).")
-    _, _community_profile_mark_reviewed_action, _community_profile_mark_reviewed_form_html, _community_profile_review_line_html = (
-        _narrative_verify_widget(
-            bool(p.get("needs_review")),
-            "community-profile-mark-reviewed-form",
-            f"/admin/tools/communities/{community['id']}/mark-reviewed",
-            latest_review, action_label="Mark reviewed", past_tense_verb="Reviewed",
-            # Return here rather than the admin list's default redirect —
-            # this button lives on the profile edit page itself.
-            extra_hidden_fields_html=(
-                f'<input type="hidden" name="redirect_to" '
-                f'value="/admin/tools/communities/{community["id"]}/profile">'
-            ),
-        )
-    )
 
     # Confidence indicator (2026-08) — a genuine self-report from the model,
     # distinct from needs_review (human review status). Displays permanently
@@ -13938,15 +14033,9 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     </label>
   </div>
   <div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" id="cp-needs_review" name="needs_review" value="1"{' checked' if p.get('needs_review') else ''}>
-      <span>Needs review: flagged for Brian to personally read and approve before treating this profile as final. Auto-checked whenever "Generate summary" above drafts new content—uncheck and save, or use "Mark reviewed" below, once it's been read.</span>
-    </label>
-    {_community_profile_mark_reviewed_action if p.get('needs_review') else ''}
-    {_community_profile_review_line_html}
     {_admin_citations_html}
   </div>
-  </div>""", _community_profile_mark_reviewed_form_html
+  </div>"""
 
 
 # Reference content for the "How this works" block on /admin/tools/communities
@@ -14088,46 +14177,33 @@ def admin_communities(request: Request, filter: str = ""):
     def _approved_row(c: dict) -> str:
         cats = ", ".join(c["categories"]) or "—"
         featured_badge = '<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;">Featured</span>' if c.get("featured") else ""
-        review_badge = ('<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--caution);color:#fff;border-radius:4px;'
-                         'padding:1px 6px;">Needs review</span>') if c.get("needs_review") else ""
-        # Distinct from review_badge above: that one is Brian's manual
-        # whole-profile sign-off (community_profiles.needs_review). This one
-        # is a passive count of per-field auto-fill gaps left by "Auto-fill
-        # from URL" (the _NEEDS_VERIFICATION sentinel) — not a save blocker,
-        # just a nudge toward Edit for anyone who forgets to check the field.
-        n_gaps = sum(1 for f in _COMMUNITY_VERIFIABLE_FIELDS if c.get(f) == _NEEDS_VERIFICATION)
-        gap_badge = (f'<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--muted);color:#fff;border-radius:4px;'
-                     f'padding:1px 6px;">{n_gaps} field{"s" if n_gaps != 1 else ""} '
-                     f'need{"s" if n_gaps == 1 else ""} verification</span>') if n_gaps else ""
-        # Item 6 (Aug 2026 UI pass): both signals already exist and are
-        # already persisted/shown on the per-profile edit view (the
-        # low_confidence checkbox, the 12 per-field Claude-confidence
-        # badges) — they just never reached this LIST page. Read-only
-        # here, on purpose: this list has no per-row save action for
-        # either signal, only the per-profile edit page does.
+        # Review status (2026-08 consolidation) — the shared pill replaces
+        # three previously-separate indicators that used to live in this
+        # name cell: the plain "Needs review" chip (review_badge), the
+        # brown "N field(s) needs verification" auto-fill-gap badge
+        # (gap_badge — a genuinely different signal, per-field data left
+        # blank by "Auto-fill from URL", not a review-status fact; that
+        # information isn't lost, it's still visible per-field on the
+        # profile edit view, just no longer duplicated here), and the
+        # separate "N/12 fields low-confidence" badge (unconfident_badge —
+        # its count IS the breakdown this pill now shows, in parens,
+        # alongside the coral state). `low_conf_badge` below (the
+        # whole-profile-drafted-without-a-fetch signal, a third, distinct
+        # concept from either of those) was not named for retirement and
+        # stays as its own badge.
         qf = c.get("quality_flags")
         low_conf_badge = (
             '<span style="display:inline-block;font-size:11px;font-weight:700;background:#fef3c7;color:#92400e;'
             'border-radius:4px;padding:1px 6px;" title="community_profiles.low_confidence: drafted without a '
             'successful page fetch">Low confidence</span>'
         ) if qf and qf["low_confidence"] else ""
-        unconfident_badge = (
-            f'<span style="display:inline-block;font-size:11px;font-weight:700;background:#fef3c7;color:#92400e;'
-            f'border-radius:4px;padding:1px 6px;" title="Claude self-reported low confidence on '
-            f'{qf["unconfident_count"]} of the 12 tracked profile fields">'
-            f'{qf["unconfident_count"]}/12 fields low-confidence</span>'
-        ) if qf and qf["unconfident_count"] else ""
-        mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="margin:0;">'
-                         f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>'
-                         ) if c.get("needs_review") else ""
-        # Flag for review (2026-08 quick-toggle follow-up) — the mirror
-        # action of Mark reviewed above: lets an admin flag a profile from
-        # the list view alone, without opening the edit form. Shown only
-        # when NOT already flagged, same shown-only-when-relevant convention
-        # as mark_reviewed's own `if c.get("needs_review")` guard.
-        flag_for_review = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/flag-for-review" style="margin:0;">'
-                           f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Flag for review</button></form>'
-                           ) if not c.get("needs_review") else ""
+        _needs_review = bool(c.get("needs_review"))
+        _comm_breakdown = (qf["unconfident_count"], 12) if (_needs_review and qf) else None
+        review_pill = _review_status_pill_html(not _needs_review, _comm_breakdown)
+        mark_reviewed = _review_status_action_html(
+            not _needs_review, f"/admin/tools/communities/{c['id']}/mark-reviewed",
+            f"/admin/tools/communities/{c['id']}/flag-for-review", "/admin/tools/communities",
+        ) if _needs_review else ""
         row_attrs = _admin_row_data_attrs({
             "name": c["name"], "cost_band": c["cost_band"], "access": c["access"] or "",
             "sponsorship_type": c["sponsorship_type"] or "", "format": c["format"] or "",
@@ -14138,7 +14214,7 @@ def admin_communities(request: Request, filter: str = ""):
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
   <td style="padding:10px 12px;font-weight:600;min-width:250px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{review_badge}{gap_badge}{low_conf_badge}{unconfident_badge}
+      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{low_conf_badge}
     </div>
   </td>
   <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
@@ -14148,16 +14224,19 @@ def admin_communities(request: Request, filter: str = ""):
   <td data-col="communities:sponsorship_type" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['sponsorship_type'] or '—')}</td>
   <td data-col="communities:format" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
   <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
+  <td data-col="communities:review_status" style="padding:10px 12px;">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">{review_pill}{mark_reviewed}</div>
+  </td>
   <td style="padding:10px 12px;min-width:210px;">
     <div style="display:flex;flex-direction:column;gap:6px;">
       <div style="display:flex;flex-wrap:nowrap;align-items:center;gap:6px;">
+        <a href="/tools/communities/{c['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">View profile</a>
         <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
         <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
               onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
           <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
         </form>
       </div>
-      {mark_reviewed}{flag_for_review}
     </div>
   </td>
 </tr>"""
@@ -14181,6 +14260,7 @@ def admin_communities(request: Request, filter: str = ""):
     communities_cols = [
         ("notes", "Short description"), ("cost_band", "Cost band"), ("access", "Access"), ("categories", "Categories"),
         ("sponsorship_type", "Sponsorship type"), ("format", "Format"), ("reach", "Reach"),
+        ("review_status", "Review status"),
     ]
     communities_bulk_fields = [
         {"key": "cost_band", "label": "Cost band", "kind": "select", "options": _COMMUNITY_COST_BANDS},
@@ -14269,6 +14349,7 @@ def admin_communities(request: Request, filter: str = ""):
   <th data-col="communities:sponsorship_type" style="padding:10px 12px;text-align:left;font-size:13px;">Sponsorship type</th>
   <th data-col="communities:format" style="padding:10px 12px;text-align:left;font-size:13px;min-width:220px;">Format</th>
   <th data-col="communities:reach" style="padding:10px 12px;text-align:left;font-size:13px;">Reach</th>
+  <th data-col="communities:review_status" style="padding:10px 12px;text-align:left;font-size:13px;">Review status</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:210px;">Actions</th>
 </tr></thead>
 <tbody id="communities-approved-tbody">{approved_rows}</tbody>
@@ -15196,15 +15277,21 @@ async def admin_communities_mark_reviewed(request: Request, community_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
-    # Called from both the admin list row (no redirect_to — stay on the
-    # list, its original behavior) and the profile edit page itself
-    # (Phase G PR 2 addition) — validated against an allowlist since it
-    # echoes into a redirect, same convention as admin_tools_delete.
-    redirect_to = form.get("redirect_to") or "/admin/tools/communities"
-    if redirect_to not in ("/admin/tools/communities", f"/admin/tools/communities/{community_id}/profile"):
-        redirect_to = "/admin/tools/communities"
     lib = _lib()
     try:
+        community = lib.get_community(community_id)
+        # Called from the admin list row (no redirect_to — stay on the
+        # list, its original behavior), the profile edit page (Phase G PR 2),
+        # and now the public profile VIEW page too (2026-08 consolidation —
+        # the same "Review status" component's action button) — validated
+        # against an allowlist since it echoes into a redirect, same
+        # convention as admin_tools_delete.
+        redirect_to = form.get("redirect_to") or "/admin/tools/communities"
+        _allowed = {"/admin/tools/communities", f"/admin/tools/communities/{community_id}/profile"}
+        if community:
+            _allowed.add(f"/tools/communities/{community['slug']}")
+        if redirect_to not in _allowed:
+            redirect_to = "/admin/tools/communities"
         profile = lib.get_community_profile(community_id)
         lib.mark_community_profile_reviewed(community_id)
         lib.record_narrative_review(
@@ -15229,11 +15316,15 @@ async def admin_communities_flag_for_review(request: Request, community_id: int)
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
-    redirect_to = form.get("redirect_to") or "/admin/tools/communities"
-    if redirect_to not in ("/admin/tools/communities", f"/admin/tools/communities/{community_id}/profile"):
-        redirect_to = "/admin/tools/communities"
     lib = _lib()
     try:
+        community = lib.get_community(community_id)
+        redirect_to = form.get("redirect_to") or "/admin/tools/communities"
+        _allowed = {"/admin/tools/communities", f"/admin/tools/communities/{community_id}/profile"}
+        if community:
+            _allowed.add(f"/tools/communities/{community['slug']}")
+        if redirect_to not in _allowed:
+            redirect_to = "/admin/tools/communities"
         lib.flag_community_profile_needs_review(community_id)
     finally:
         lib.close()
@@ -15289,15 +15380,43 @@ def admin_community_profile_edit(request: Request, community_id: int):
         p = lib.get_community_profile(community_id)
         latest_review = lib.get_latest_narrative_review("community", "community_profile", community_id)
         profile_citations = lib.get_entity_citations("community", community_id, "community_profile")
+        quality_flags = lib.community_profile_quality_flags().get(community_id)
     finally:
         lib.close()
     if not c:
         raise HTTPException(status_code=404, detail="Community not found")
-    _profile_fields_html, _profile_mark_reviewed_form_html = _community_profile_form_fields(
-        p, c, latest_review, citations=profile_citations)
+    _profile_fields_html = _community_profile_form_fields(p, c, latest_review, citations=profile_citations)
+
+    # Review status (2026-08 consolidation) — moved to the TOP of this page
+    # (was a checkbox + "Mark reviewed" widget at the bottom of the field
+    # list), on the same shared pill+action component used on the admin
+    # list and the public profile VIEW page. Shown only once a profile
+    # actually exists (`p` non-empty) — nothing to flag/review before then.
+    _profile_review_status_html = ""
+    if p:
+        _needs_review = bool(p.get("needs_review"))
+        _comm_breakdown = (quality_flags["unconfident_count"], 12) if (_needs_review and quality_flags) else None
+        _rs_block = _review_status_block_html(
+            not _needs_review, f"/admin/tools/communities/{community_id}/mark-reviewed",
+            f"/admin/tools/communities/{community_id}/flag-for-review",
+            f"/admin/tools/communities/{community_id}/profile", _comm_breakdown,
+        )
+        _review_line_html = ""
+        if latest_review:
+            _reviewer = latest_review.get("admin_username") or "admin"
+            _reviewed_date = (latest_review.get("created_at") or "")[:10]
+            _review_line_html = (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
+                                  f'Reviewed by {_esc(_reviewer)} on {_esc(_reviewed_date)}</p>')
+        _profile_review_status_html = f"""<div style="margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
+  {_rs_block}
+  <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Flags this profile for a full read-through&mdash;set automatically whenever the profile is drafted or refreshed via Generate, or manually anytime here.</p>
+  {_review_line_html}
+</div>"""
+
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <h1>Profile: {_esc(c['name'])}</h1>
+{_profile_review_status_html}
 <form method="post" action="/admin/tools/communities/{community_id}/profile" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
@@ -15309,7 +15428,6 @@ def admin_community_profile_edit(request: Request, community_id: int):
     <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
-{_profile_mark_reviewed_form_html}
 </div>
 <script>{_GENERATE_PROFILE_JS}</script>"""
     return HTMLResponse(_page(f"Profile: {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
@@ -15327,17 +15445,18 @@ async def admin_community_profile_submit(request: Request, community_id: int):
         form = await request.form()
         founded_year_raw = (form.get("founded_year") or "").strip()
         founded_year = int(founded_year_raw) if founded_year_raw.isdigit() else None
-        # Phase G PR 2: reuses needs_review (pre-existing, whole-profile,
-        # manual-only until now) as the Community profile draft's
-        # needs-verification flag rather than adding a new column — OR'd
-        # with the submitted checkbox value rather than replacing it, so
-        # this save can only ever ADD the flag, never silently clear a
-        # manual one Brian set for an unrelated reason (e.g. flagged from a
-        # bulk import); the checkbox itself, unchecked and saved, is still
-        # the "I reviewed it" action, same as before this phase.
+        # Phase G PR 2 / 2026-08 consolidation: needs_review is the whole-
+        # profile signoff, now driven by the shared Review-status pill's
+        # Flag for review/Mark reviewed buttons (top of this edit page,
+        # profile view page, admin list) rather than a checkbox on this
+        # form — so this save carries the CURRENTLY-persisted value
+        # (`existing_profile`, fetched above) forward, OR'd with a fresh
+        # draft on any of the 23 profile fields this submit, so a save can
+        # only ever ADD the flag here, never silently clear a value one of
+        # those one-click buttons set for an unrelated reason.
         ai_drafted = _ai_drafted_field_names(form)
         profile_ai_drafted = bool(ai_drafted & set(_COMMUNITY_PROFILE_FIELD_IDS))
-        needs_review = 1 if (form.get("needs_review") == "1" or profile_ai_drafted) else 0
+        needs_review = 1 if (bool(existing_profile.get("needs_review")) or profile_ai_drafted) else 0
         # Citations-API grounding fix, Phase 3: one shared citation set for
         # the whole 23-field draft (decision 5) — persisted only when this
         # exact save follows a fresh Generate click on at least one profile
@@ -16048,26 +16167,31 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             latest_differentiation_review,
         )
     )
-    # Whole-record profile signoff (2026-08, amended same phase) — a
-    # higher-level sign-off sitting alongside the three per-field flags
-    # above; auto-linked to a fresh Generate/Refresh draft on any of them
-    # (see admin_tools_edit_submit/_run_tool_research), but still clearable
-    # here at any time via the checkbox or this button. Mirrors
-    # community_profiles.needs_review's "Mark reviewed" widget shape;
-    # admin-only bookkeeping, no public gating (see CLAUDE.md's "Tools
-    # whole-record profile signoff" bullet).
-    _profile_reviewed_action, _profile_reviewed_form_html, _profile_review_line_html = (
-        _narrative_verify_widget(
-            bool(tool.get("needs_review")),
-            "profile-mark-reviewed-form", f"/admin/tools/software/{tool_id}/mark-reviewed",
-            latest_profile_review, action_label="Mark reviewed", past_tense_verb="Reviewed",
-            # Return here rather than the admin list's default redirect —
-            # this button lives on the tool edit page itself.
-            extra_hidden_fields_html=(
-                f'<input type="hidden" name="redirect_to" value="/tools/software/{tool["slug"]}/edit">'
-            ),
-        )[1:]
+    # Whole-record profile signoff (2026-08 consolidation) — moved to the
+    # TOP of the edit page (was a checkbox at the bottom, in its own
+    # "Profile signoff" section) and rebuilt on the same shared
+    # Review-status pill+action component used on the admin list and the
+    # profile VIEW page — no more checkbox-tied-to-Save; Flag for
+    # review/Mark reviewed are now immediate one-click actions here too,
+    # exactly like everywhere else in this system. Still auto-linked to a
+    # fresh Generate/Refresh draft on any of the three per-field flags
+    # (see admin_tools_edit_submit/_run_tool_research) — that logic now
+    # reads the CURRENT DB value forward on every save instead of a
+    # checkbox field, since there's no checkbox on this form to read.
+    _needs_review = bool(tool.get("needs_review"))
+    _tool_breakdown = (sum(1 for f in (
+        "description_needs_verification", "agent_taxonomy_needs_verification",
+        "competitive_differentiation_needs_verification") if tool.get(f)), 3) if _needs_review else None
+    _review_status_top_html = _review_status_block_html(
+        not _needs_review, f"/admin/tools/software/{tool_id}/mark-reviewed",
+        f"/admin/tools/software/{tool_id}/flag-for-review", f"/tools/software/{slug}/edit", _tool_breakdown,
     )
+    _profile_review_line_html = ""
+    if latest_profile_review:
+        _reviewer = latest_profile_review.get("admin_username") or "admin"
+        _reviewed_date = (latest_profile_review.get("created_at") or "")[:10]
+        _profile_review_line_html = (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
+                                      f'Reviewed by {_esc(_reviewer)} on {_esc(_reviewed_date)}</p>')
     _description_confidence_html = (_confidence_indicator_html(tool.get("description_ai_confident"))
         + _low_confidence_indicator_html(tool.get("description_low_confidence")))
     _differentiation_confidence_html = (_confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
@@ -16109,6 +16233,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <h1>Edit software</h1>
 {_CROPPER_CDN_HTML}
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
+<div style="margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
+  {_review_status_top_html}
+  <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Flags this profile for a full read-through&mdash;set automatically when a new tool is added or any tracked field is refreshed, or manually anytime here.</p>
+  {_profile_review_line_html}
+</div>
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
@@ -16228,7 +16357,6 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 {_taxonomy_verify_form_html}
 {_description_verify_form_html}
 {_differentiation_verify_form_html}
-{_profile_reviewed_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Competition</h2>
@@ -16303,17 +16431,6 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 </div>
 
 {_governed_features_html}
-
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 8px;">Profile signoff</h2>
-  <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A whole-record signoff, separate from the three "Needs verification" flags above&mdash;those track each AI-drafted field independently; this tracks whether you've personally read the vendor's profile as a whole and are comfortable calling it done. Never set automatically by Generate/Refresh&mdash;only by checking the box below or clicking "Mark reviewed."</p>
-  <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-    <input type="checkbox" name="needs_review" value="1" form="tool-edit-form"{' checked' if tool.get('needs_review') else ''}>
-    <span>Needs review: flagged for a full read-through before treating this vendor's profile as final.</span>
-  </label>
-  {_profile_reviewed_action}
-  {_profile_review_line_html}
-</div>
 
 <div class="edit-footer-actions" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <button type="submit" form="tool-edit-form" class="btn">Save changes</button>
@@ -16452,18 +16569,22 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     ai_low_confidence = _ai_drafted_field_low_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     competitive_differentiation_needs_verification = 1 if "competitive_differentiation" in ai_drafted else 0
-    # Whole-record profile signoff (2026-08 amendment) — auto-linked to
+    # Whole-record profile signoff (2026-08 consolidation) — auto-linked to
     # per-field regeneration, mirroring Communities' `needs_review =
-    # checkbox OR profile_ai_drafted` pattern precisely for the two of the
-    # three per-field flags that land in this same request (Agent
+    # existing-value OR profile_ai_drafted` pattern precisely for the two
+    # of the three per-field flags that land in this same request (Agent
     # taxonomy's own fresh-draft trigger lives in _run_tool_research
-    # instead, since it never shares a request with this checkbox — see
-    # the needs_review migration comment for the full reasoning). The
-    # checkbox can still clear this to 0, but a fresh draft of Description
-    # or Competitive differentiation THIS submit always forces it back to
-    # 1, regardless of the checkbox's value in the same submission.
+    # instead, since it never shares a request with this form — see the
+    # needs_review migration comment for the full reasoning). No checkbox
+    # on this form any more (the edit page's own Flag for review/Mark
+    # reviewed buttons at the top are immediate one-click actions, not tied
+    # to Save) — so the manual-persists-across-saves half of this now
+    # works by carrying the CURRENTLY-persisted value (`tool`, fetched
+    # before this save) forward instead of reading a form field. A fresh
+    # draft of Description or Competitive differentiation THIS submit
+    # still always forces it to 1, regardless of that current value.
     needs_review = 1 if (
-        form.get("needs_review") == "1"
+        bool(tool.get("needs_review"))
         or description_needs_verification
         or competitive_differentiation_needs_verification
     ) else 0
@@ -16834,9 +16955,11 @@ async def admin_tools_mark_reviewed(request: Request, tool_id: int):
     admin_communities_mark_reviewed gives for snapshotting verdict_summary).
 
     redirect_to (2026-08 amendment, matching admin_communities_mark_reviewed
-    exactly): called from both the admin list row (no redirect_to — stay on
-    the list, same default that route uses) and the tool edit page itself
-    (its own hidden form passes redirect_to explicitly). Validated against
+    exactly): called from the admin list row (no redirect_to — stay on
+    the list, same default that route uses), the tool edit page itself
+    (its own hidden form passes redirect_to explicitly), and now the
+    public profile VIEW page too (2026-08 consolidation — the same
+    "Review status" component's action button). Validated against
     an allowlist since it echoes into a redirect, same convention as
     admin_communities_mark_reviewed/admin_tools_delete."""
     if not _is_authed(request):
@@ -16848,7 +16971,8 @@ async def admin_tools_mark_reviewed(request: Request, tool_id: int):
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         redirect_to = form.get("redirect_to") or "/admin/tools/software"
-        if redirect_to not in ("/admin/tools/software", f"/tools/software/{tool['slug']}/edit"):
+        _allowed = {"/admin/tools/software", f"/tools/software/{tool['slug']}/edit", f"/tools/software/{tool['slug']}"}
+        if redirect_to not in _allowed:
             redirect_to = "/admin/tools/software"
         lib.mark_tool_reviewed(tool_id)
         lib.record_narrative_review(
@@ -16880,7 +17004,8 @@ async def admin_tools_flag_for_review(request: Request, tool_id: int):
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         redirect_to = form.get("redirect_to") or "/admin/tools/software"
-        if redirect_to not in ("/admin/tools/software", f"/tools/software/{tool['slug']}/edit"):
+        _allowed = {"/admin/tools/software", f"/tools/software/{tool['slug']}/edit", f"/tools/software/{tool['slug']}"}
+        if redirect_to not in _allowed:
             redirect_to = "/admin/tools/software"
         lib.set_tool_needs_review(tool_id, 1)
     finally:
