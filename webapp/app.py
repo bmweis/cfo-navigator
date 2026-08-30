@@ -10853,7 +10853,7 @@ def admin_software(request: Request, filter: str = ""):
             <div class="admin-review-status-group" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
           </td>
           <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
+            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
               <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">View profile</a>
               <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
               <form method="post" action="/admin/tools/software/{t['id']}/delete" style="margin:0;"
@@ -14387,7 +14387,7 @@ def admin_communities(request: Request, filter: str = ""):
     <div class="admin-review-status-group" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
   </td>
   <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;min-width:210px;">
-    <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
+    <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
       <a href="/tools/communities/{c['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">View profile</a>
       <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
       <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"

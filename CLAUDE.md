@@ -3898,6 +3898,32 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   both; 390px shows both pairs correctly flipped to one row each, no
   horizontal overflow on either page.
 
+  **Fourth same-PR follow-up (2026-08) — Actions buttons were stretching
+  wider on desktop than the mobile screenshots, a real CSS Grid gotcha, not
+  a design choice to fix by eye.** Brian flagged it by comparing screenshots
+  directly ("the buttons should never be wider than they are in those
+  portrait mobile screenshots, even on desktop"); confirmed and root-caused
+  by measuring real `getBoundingClientRect()` widths rather than eyeballing
+  — "View profile" measured 255px and "Edit" 197px on desktop, both far
+  wider than their visible text needs. Cause: `grid-template-columns:
+  repeat(2,auto)` (the desktop break-into-2-rows layout from the previous
+  follow-up) has no `fr` track to absorb leftover space, and a CSS Grid
+  container's default `justify-content` computes to `normal`, which for
+  `auto`-sized tracks with no flexible tracks present behaves as `stretch`
+  — so the two `auto` columns silently grew to consume all the free width
+  in the Actions cell instead of staying content-sized. Fixed with one
+  added property, `justify-content:start`, on both tables' `.admin-table-
+  actions-grid` (the desktop grid only — the mobile `repeat(3,1fr)`
+  override is unaffected, since `1fr` tracks are supposed to fill their
+  container). Re-measured after the fix: desktop "View profile" is now
+  113px, identical to its mobile width; desktop "Edit" (55px) and "Delete"
+  (74px) are both narrower than their mobile versions (95px each, since
+  mobile's three equal `1fr` columns size to the widest label). Review
+  status's pill/button pair needed no fix — already `align-items:flex-
+  start` on its flex-column container, so it was never stretching in the
+  first place; confirmed by the same measurement (143px/134px, identical
+  at both breakpoints). Full regression: 2364 passed, 0 failed.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded
