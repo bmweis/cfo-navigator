@@ -28664,8 +28664,16 @@ def admin_backup(request: Request, uploaded: str = ""):
   .backup-actions{{grid-template-columns:1fr 1fr;align-items:start;}}
   .backup-actions .backup-action-divider{{border-left:1px solid var(--line);border-top:none;padding-left:24px;padding-top:0;}}
 }}
-.backup-log-table{{width:100%;max-width:860px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;}}
+.backup-log-table{{width:100%;table-layout:fixed;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;}}
 .backup-log-table td{{overflow-wrap:anywhere;}}
+.backup-log-table .col-when{{width:150px;}}
+.backup-log-table .col-filename{{width:200px;}}
+.backup-log-table .col-location{{width:120px;}}
+.backup-log-table .col-status{{width:90px;}}
+/* Notes gets no explicit width — table-layout:fixed hands it whatever's
+   left of the table's own full width, so it's the one column that grows
+   or shrinks with the page instead of the table just being capped small
+   or every column stretching evenly with wasted whitespace. */
 @media(max-width:700px){{
   .backup-log-table thead{{display:none;}}
   .backup-log-table, .backup-log-table tbody, .backup-log-table tr, .backup-log-table td{{display:block;width:100%;}}
@@ -28708,10 +28716,10 @@ def admin_backup(request: Request, uploaded: str = ""):
 <div style="overflow-x:auto;">
 <table class="backup-log-table">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">Filename</th>
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">Location</th>
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">Status</th>
+  <th class="col-when" style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
+  <th class="col-filename" style="padding:8px 12px;text-align:left;font-size:13px;">Filename</th>
+  <th class="col-location" style="padding:8px 12px;text-align:left;font-size:13px;">Location</th>
+  <th class="col-status" style="padding:8px 12px;text-align:left;font-size:13px;">Status</th>
   <th style="padding:8px 12px;text-align:left;font-size:13px;">Notes</th>
 </tr></thead>
 <tbody>{backup_log_rows_html}</tbody>
