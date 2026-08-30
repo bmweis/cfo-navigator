@@ -29553,10 +29553,12 @@ def download_db(request: Request):
 @app.post("/admin/backup-now", response_class=HTMLResponse)
 def backup_now_route(request: Request, token: str | None = None):
     """Force an immediate off-site backup, bypassing the debounce.
-    Also the target of the weekly GitHub Action (.github/workflows/backup.yml)
-    — the status code below is not decorative: it's how the Action (and any
-    future monitoring) tells success from failure, since a browser click
-    used to get 200 either way and only the rendered message differed."""
+    Also the target of the daily Railway Cron Service (RUNBOOK.md §7 —
+    migrated off a GitHub Actions schedule, 2026-08, after a GitHub billing
+    outage silently stopped that schedule firing) — the status code below
+    is not decorative: it's how the cron service (and any future
+    monitoring) tells success from failure, since a browser click used to
+    get 200 either way and only the rendered message differed."""
     _require_api(request, token)
     if not backup.is_configured():
         body = """<div class="page page-admin"><h1>Backup not configured</h1>
