@@ -722,7 +722,7 @@ CREATE INDEX IF NOT EXISTS idx_contact_audit_created ON contact_audit_log(create
 -- backup_now() attempt, success or failure — the actual audit trail for
 -- "did the Google Drive backup work." Written from linklib/backup.py
 -- itself (not from webapp/app.py call sites) so every trigger path is
--- covered by one code path: the weekly GitHub Action hitting
+-- covered by one code path: the daily Railway Cron Service hitting
 -- POST /admin/backup-now, an admin clicking the same route by hand, and
 -- the ~18 debounced maybe_backup() call sites in webapp/app.py that fire
 -- it as a side effect of a Library/Archive write. Before this table

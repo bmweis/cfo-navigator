@@ -494,6 +494,46 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   isn't in this repo. See RUNBOOK.md §7 for the exact dashboard setup steps and the
   curl command, and the "Off-site backup" note in ARCHITECTURE.md's deployment diagram
   for the updated trigger edge.
+- **Post-migration cleanup + a real failure-logging gap closed (2026-08).** A
+  follow-up session swept the repo for leftover "weekly"/"GitHub Action" backup
+  references beyond what the migration PR above already updated (found and fixed
+  a handful more — `_canonical_host_redirect`'s docstring, the Archive backup
+  admin-tool description, a `backup_log` schema comment in `linklib/db.py`, and
+  two test-file docstrings — all describing-the-mechanism prose, no behavior
+  change) and fixed the now-stale `/admin/library/backup` status banner copy
+  ("Scheduled weekly via GitHub Action…" → describes the daily Railway Cron
+  Service and points at its Railway dashboard run history instead of a
+  nonexistent in-app "Actions tab" equivalent). Also confirmed `LINKLIB_SAVE_TOKEN`
+  is no longer referenced by any GitHub Actions workflow (`qa.yml`,
+  `secret-scan-weekly.yml` — neither uses `secrets.*` at all) now that
+  `backup.yml` is gone, so the matching GitHub repo secret is safe to delete —
+  flagged for Brian to remove himself, not done automatically.
+  **The more consequential finding**: `backup_now()`'s own docstring has always
+  claimed "every attempt — success or failure — is logged to backup_log... before
+  returning or re-raising," but the "Drive not configured" path was the one
+  exception — it raised immediately with no log call, and `webapp/app.py`'s
+  `backup_now_route()` had its own separate `is_configured()` pre-check that
+  returned a `503` without ever calling `backup_now()` at all, so this failure
+  left zero trace in `backup_log` from either code path. A pre-existing test
+  explicitly asserted this was intentional ("not being configured isn't a real
+  attempt — nothing should be logged"), reasoning that the status banner's own
+  live `is_configured()` check already shows "Backups are off" independent of
+  `backup_log`. True for the banner, but it meant the history table stayed
+  completely silent for the entire span of any misconfiguration — a lapsed OAuth
+  grant would leave the daily Railway Cron Service pinging a broken instance for
+  days with nothing to show for it anywhere but Railway's own run log. Reversed,
+  flagging the reversal explicitly rather than silently overriding a documented
+  prior decision (same precedent as the homepage "🚧 building" sticker mix-up
+  elsewhere in this doc): `backup_now()` now logs this path too, and
+  `backup_now_route()` was simplified to always call `backup_now()` (its
+  separate pre-check removed) so there is one logging code path instead of two
+  that could silently diverge — the route infers its `503`-vs-`502` response by
+  re-checking `is_configured()` inside the `except` block, strictly after the
+  failure has already been logged. See ARCHITECTURE.md's `backup_log` schema-table
+  row for the full write-up and `tests/test_backup.py`'s
+  `test_backup_now_logs_before_raising_when_not_configured`/
+  `test_backup_now_route_logs_a_failed_row_when_not_configured` for the
+  before/after regression coverage.
 - **Phase G — the Agent taxonomy "unverified" banner promised a step that
   sometimes had no button behind it; fixed, plus a real "Mark verified" audit
   trail.** An investigation (2026-08) confirmed the green banner on a
@@ -4925,8 +4965,9 @@ instead, off that page — kept for git history, not meant to run again.
 - Hosting/deployment on Railway (see Deployment below)
 - bmweis.com custom domain pointed at Railway (July 2026)
 - MCP server (`scripts/mcp_server.py`) wrapping `/api/search` for Claude Desktop/Code
-- Daily off-site Drive backup (bumped from weekly, 2026-08), scheduled via GitHub
-  Action (Phase O — see Key architecture decisions above), with retention pruning
+- Daily off-site Drive backup (bumped from weekly, 2026-08), scheduled via a
+  Railway Cron Service (Phase O — originally a GitHub Action, migrated 2026-08;
+  see Key architecture decisions above), with retention pruning
   (`linklib.backup.prune_old_backups`), a persistent `backup_log` audit trail, and a
   status banner + history table on `/admin/library/backup`
 

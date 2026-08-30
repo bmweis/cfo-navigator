@@ -304,15 +304,16 @@ async def _canonical_host_redirect(request: Request, call_next):
     untouched), only when PUBLIC_BASE is a real https base (so a dev
     instance with the default localhost base never redirects anywhere),
     never for /health (Railway's healthcheck must always see a 200), and
-    never for /admin/backup-now (Phase O — the weekly GitHub Action calls
-    this route directly on cfo-navigator-production.up.railway.app,
+    never for /admin/backup-now (Phase O — the daily Railway Cron Service
+    calls this route directly on cfo-navigator-production.up.railway.app,
     deliberately bypassing Cloudflare's Bot Fight Mode; a 301 here would
-    silently no-op the backup, since the Action's `curl -f` treats a 3xx as
-    success and never follows it — which is exactly what happened on the
-    first live run after the previous fix, discovered only because backup_log stayed
-    empty despite the Action reporting green). Scoped to this one path on
-    purpose, not a blanket exemption for every token-authenticated route —
-    see CLAUDE.md's Phase O bullet before widening this list.
+    silently no-op the backup, since a plain non-2xx-checking caller treats
+    a 3xx as success and never follows it — which is exactly what happened
+    on the first live run after the previous fix (back when this route was
+    still called by a GitHub Action), discovered only because backup_log
+    stayed empty despite the trigger reporting green). Scoped to this one
+    path on purpose, not a blanket exemption for every token-authenticated
+    route — see CLAUDE.md's Phase O bullet before widening this list.
     """
     host = (request.headers.get("host") or "").split(":")[0].lower()
     if (host in _LEGACY_HOSTS
@@ -20316,7 +20317,7 @@ async def read_later_refresh(request: Request):
 # three — see that function's own note on why).
 _LIBRARY_TOOLS = [
     ("/admin/library/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into sections, and set which ones are read-only (in the Reader, but never proposed into the archive queue). The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
-    ("/admin/library/backup",       "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run weekly on a schedule (a GitHub Action syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
+    ("/admin/library/backup",       "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily on a schedule (a Railway Cron Service syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
     ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. Different from Archive Queue's Historical sweep panel: this re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
     ("/admin/library/queue",        "Archive queue",       "Review every proposed save—from an ongoing feed scan, or the page's own Historical sweep panel (a one-time catch-up on an older source's back catalog)—fix dates, edit tags, and approve into the archive or dismiss."),
     ("/admin/library/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
@@ -28575,7 +28576,8 @@ def _backup_status_banner(backup_rows: list[dict]) -> str:
         when = _esc(last["created_at"][:16].replace("T", " "))
         html = (f'Backups are <strong>on</strong>&mdash;last successful backup {when} UTC '
                 f'(<code>{_esc(last["filename"])}</code>, {last["bytes"]:,} bytes, {last["row_count"]:,} articles). '
-                f'Scheduled weekly via GitHub Action (see the repo’s Actions tab for run history).')
+                f'Scheduled daily via a Railway Cron Service (check that service&rsquo;s run history '
+                f'in the Railway dashboard).')
     return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
             f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
 
@@ -29792,19 +29794,24 @@ def backup_now_route(request: Request, token: str | None = None):
     monitoring) tells success from failure, since a browser click used to
     get 200 either way and only the rendered message differed."""
     _require_api(request, token)
-    if not backup.is_configured():
-        body = """<div class="page page-admin"><h1>Backup not configured</h1>
-  <p class="muted">Set <code>GOOGLE_OAUTH_CLIENT_ID</code>, <code>GOOGLE_OAUTH_CLIENT_SECRET</code>,
-  and <code>GOOGLE_OAUTH_REFRESH_TOKEN</code> to enable Google Drive backups.</p></div>"""
-        return HTMLResponse(_page("Backup", "", body, authed=True), status_code=503)
     try:
         result = backup.backup_now(DB_PATH)
         msg = (f"Uploaded <strong>{result['name']}</strong> ({result['bytes']:,} bytes, "
                f"{result['row_count']:,} articles) to Google Drive.")
         status_code = 200
     except Exception as e:
-        msg = f"Backup failed: {e}"
-        status_code = 502
+        # backup.backup_now() logs every failure to backup_log before it
+        # ever raises — including "not configured" — so this branch only
+        # has to pick the right message/status code, not do any logging
+        # of its own (see linklib/backup.py's backup_now() docstring).
+        if not backup.is_configured():
+            msg = ("Backup not configured. Set <code>GOOGLE_OAUTH_CLIENT_ID</code>, "
+                   "<code>GOOGLE_OAUTH_CLIENT_SECRET</code>, and "
+                   "<code>GOOGLE_OAUTH_REFRESH_TOKEN</code> to enable Google Drive backups.")
+            status_code = 503
+        else:
+            msg = f"Backup failed: {e}"
+            status_code = 502
     body = f"""<div class="page page-admin"><h1>Backup</h1><p>{msg}</p>
   <p style="margin-top:1rem;"><a href="/read?view=saved">Back to Archive →</a></p></div>"""
     return HTMLResponse(_page("Backup", "", body, authed=True), status_code=status_code)
