@@ -16653,16 +16653,16 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       </div>
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
         <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <label style="flex:0 0 50px;font-size:14px;font-weight:500;color:var(--navy);white-space:nowrap;">Name</label>
           <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
-            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+            style="flex:1;min-width:0;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
             placeholder="Jane Smith">
         </div>
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <label style="flex:0 0 50px;font-size:14px;font-weight:500;color:var(--navy);white-space:nowrap;">Email</label>
           <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
-            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+            style="flex:1;min-width:0;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
             placeholder="contact@vendor.com">
         </div>
         <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
