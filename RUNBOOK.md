@@ -19,8 +19,8 @@ accidentally bulk-deleted from, or the volume was lost/recreated.
 snapshots in Google Drive, named `library-YYYYMMDD-HHMMSS.db`, retained per
 `linklib.backup.prune_old_backups()`'s policy (most recent 14 unconditionally,
 plus one per week for 8 further weeks, everything older deleted). The daily
-cadence comes from `.github/workflows/backup.yml`'s scheduled Action, the
-primary trigger — the in-app `linklib/backup.py::maybe_backup` bonus trigger
+cadence comes from a Railway Cron Service in the same project (§7 below),
+the primary trigger — the in-app `linklib/backup.py::maybe_backup` bonus trigger
 is still separately debounced to once per 168 h, tracked by a
 `.last_backup` marker beside the DB. Every snapshot is produced via SQLite's
 online backup API, so it's a consistent, self-contained file — no WAL sidecar
@@ -111,9 +111,8 @@ shell on the volume:
       (admin cookie or `?token=`), so Drive holds a copy of the restored
       state. Note the in-app `maybe_backup` bonus trigger won't fire on its
       own right away if the `.last_backup` marker on the volume is recent —
-      but the daily GitHub Action (`.github/workflows/backup.yml`, Phase O)
-      bypasses that debounce, so it isn't the only path back to a fresh
-      snapshot.
+      but the daily Railway Cron Service (§7, Phase O) bypasses that
+      debounce, so it isn't the only path back to a fresh snapshot.
 - [ ] Confirm that snapshot on `/admin/library/backup` — the status banner
       should read green with this restore's timestamp, and the history table's
       top row should show `status=success` with a row count matching what you
@@ -162,12 +161,15 @@ passwords are their own (scrypt, in the DB).
    - The MCP server config for Claude Desktop / Claude Code
      (`scripts/mcp_server.py` reads `LINKLIB_SAVE_TOKEN` from its env —
      it's set in the client's MCP config JSON).
-   - The GitHub repo secret backing the daily backup Action
-     (`.github/workflows/backup.yml`, Phase O) — Settings → Secrets and
-     variables → Actions → `LINKLIB_SAVE_TOKEN`. Miss this and the Action
-     starts failing with `401` on the next scheduled run, silently, until
-     someone checks the Actions tab or `/admin/library/backup`'s status
-     banner shows a stale "last successful backup."
+   - The daily backup Railway Cron Service's `LINKLIB_SAVE_TOKEN` (§7,
+     Phase O) — if it's set up as a direct Railway variable reference to
+     the main web service's own `LINKLIB_SAVE_TOKEN` (as §7.1 recommends),
+     this updates automatically with step 2 above and needs no separate
+     action; only check this if it was ever set as a standalone copy
+     instead. Miss it and the cron service starts failing with `401` on
+     the next scheduled run, silently, until someone checks that service's
+     Railway run history or `/admin/library/backup`'s status banner shows
+     a stale "last successful backup."
    - Any personal shell exports / scripts that call `/save`, `/api/search`,
      or `/ask` with `X-Save-Token` or `?token=`.
 
@@ -494,3 +496,104 @@ removed LinkedIn-drafting feature, never read by any code—safe to delete
 from `.env.example` whenever someone's next in that file) and
 `LINKLIB_QUEUE_EXCLUDE_CATEGORIES` (already correctly documented elsewhere
 as retired in favor of `feeds.exclude_from_queue`).
+
+---
+
+## 7. Railway Cron Service — daily backup trigger
+
+**Background:** the daily off-site Drive backup used to be triggered by a
+scheduled GitHub Action (`.github/workflows/backup.yml`). That Action's
+schedule silently stopped firing for 9 straight days (2026-08) when the
+GitHub account's Actions spending limit blocked every workflow run — an
+outage with nothing to do with Railway or this app, and one that wouldn't
+self-resolve until the next billing cycle. The trigger was moved onto a
+native **Railway Cron Service** in the same project instead, removing the
+GitHub Actions dependency entirely. See CLAUDE.md's "Backup trigger moved
+from GitHub Actions to a Railway Cron Service" note and ARCHITECTURE.md's
+matching bullet for the full write-up — this section is the exact
+one-time setup procedure.
+
+### 7.1 One-time setup (Railway dashboard)
+
+1. Open the `cfo-navigator` project in the Railway dashboard (the same
+   project the main web service already lives in — this does **not** need
+   its own project).
+2. **+ New** → **Empty Service** (not "Deploy from GitHub repo" — this
+   service runs no application code, just one `curl` call, so it doesn't
+   need a source repo or a build).
+3. Name it something identifiable, e.g. `backup-cron`.
+4. On the new service's **Settings** tab:
+   - **Cron Schedule**: `0 9 * * *` (daily, 09:00 UTC — the same slot the
+     GitHub Action used).
+   - **Deploy → Custom Start Command** (this is the only thing the service
+     ever runs, since it has no build/source):
+     ```
+     response=$(curl -sS -w '\n%{http_code}' -X POST "https://cfo-navigator-production.up.railway.app/admin/backup-now" -H "X-Save-Token: $LINKLIB_SAVE_TOKEN"); status="${response##*$'\n'}"; echo "${response%$'\n'*}"; echo "HTTP status: $status"; [ "$status" -ge 200 ] && [ "$status" -lt 300 ]
+     ```
+     A non-2xx status makes the command's own exit code non-zero (the final
+     `[ ... ] && [ ... ]` expression *is* the command's exit status), so a
+     failed backup shows up as a failed run in this service's Railway run
+     history — the same signal the old Action's `curl -f` gave in the
+     GitHub Actions tab.
+   - Confirm the **Restart Policy** is `Never` (or leave it at the Railway
+     default for a cron service) — this service should run once per
+     schedule tick and exit, not stay resident or auto-restart after a
+     normal exit.
+5. On the **Variables** tab, add a **Shared Variable reference** to the
+   main web service's `LINKLIB_SAVE_TOKEN` (Railway's "reference a variable
+   from another service" mechanism), rather than pasting a second copy of
+   the token — one source of truth for the secret, and a future token
+   rotation only has to happen in one place.
+6. **Trigger one run manually** ("Run now" / the equivalent one-off trigger
+   in the service's Deployments tab) to confirm it actually works before
+   trusting the schedule:
+   - A successful run's log should show the JSON body from
+     `/admin/backup-now` (`Uploaded <name> (...) to Google Drive.`) and
+     `HTTP status: 200`, and the run itself should show as succeeded.
+   - Then confirm the backup actually landed: check `/admin/library/backup`
+     for a fresh green banner entry and a new row in the history table with
+     a timestamp matching the run, and spot-check the Drive folder link on
+     that page shows a new snapshot file.
+7. Once a manual run is confirmed working end-to-end, leave the schedule
+   in place and stop checking it manually — `/admin/library/backup`'s
+   status banner is the ongoing signal; it goes amber/red if a scheduled
+   run stops landing.
+
+### 7.2 Verifying without spending an extra backup
+
+`/admin/backup-now` always performs a real backup when triggered — there's
+no dry-run mode — so the manual "Run now" in step 6 above genuinely creates
+one more Drive snapshot. That's expected and harmless (it's the same
+action a manual "Force backup now" click already does from
+`/admin/library/backup`, and `prune_old_backups()` keeps the retained
+snapshot count bounded regardless of how it got there) — don't try to avoid
+it by skipping the manual verification run. If you want to confirm the
+service is wired correctly without touching production data at all, the
+only real option is to point the Custom Start Command at a non-mutating
+route first (e.g. `GET /health`, no auth needed) to prove the service and
+its schedule work mechanically, then switch the command to the real
+`/admin/backup-now` call once that's confirmed and do the one real
+verification run from step 6.
+
+### 7.3 If a scheduled run fails
+
+Same triage as any other backup failure — this cron service is a trigger,
+not a new failure mode of its own:
+
+- **A non-2xx status printed in the run log**: read the response body the
+  command echoed — `503` means `GOOGLE_OAUTH_*` isn't configured, `502`
+  means the upload itself failed (check the message for the underlying
+  Google API error). Fix per `/admin/library/backup`'s own status banner.
+- **The run never started, or the service shows no run history**: check
+  the cron schedule is still enabled on the service's Settings tab —
+  unlike a GitHub Actions schedule, a Railway cron service doesn't
+  auto-disable itself after a period of repo inactivity, but it can be
+  paused manually from the dashboard.
+- **The run succeeded (2xx) but `/admin/library/backup` shows nothing
+  new**: this is the exact failure mode §Phase O's investigation found
+  with the original GitHub Action (a redirect silently swallowing the
+  request) — confirm the Custom Start Command is hitting the Railway
+  origin (`*.up.railway.app`), not `bmweis.com` (which would 403 at
+  Cloudflare, not redirect, but is still the wrong target for the same
+  underlying "don't go through the CDN for this call" reason), and confirm
+  `/admin/backup-now` isn't returning a 3xx anywhere in the chain.

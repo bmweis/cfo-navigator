@@ -23,12 +23,13 @@ Design notes
   what powers the status banner + history table on ``/admin/library/backup``
   (Phase O). The ``print()`` calls below stay as a redundant secondary
   signal in Railway's runtime logs, but they're no longer the only record.
-- **Scheduling lives outside this module.** A GitHub Action
-  (``.github/workflows/backup.yml``, daily as of 2026-08 — Railway-native
-  volume snapshots turned out unavailable on the current plan, so this is
-  the only recovery path and daily beats weekly for how much a restore
-  could lose) is the primary trigger, hitting ``POST /admin/backup-now`` on
-  the live site. The ~18 ``maybe_backup()`` call sites sprinkled through
+- **Scheduling lives outside this module.** A Railway Cron Service in the
+  same project (daily as of 2026-08 — Railway-native volume snapshots
+  turned out unavailable on the current plan, so this is the only recovery
+  path and daily beats weekly for how much a restore could lose; migrated
+  off a GitHub Actions schedule later in 2026-08 after a GitHub billing
+  outage silently stopped it firing for 9 days — see RUNBOOK.md §7) is the
+  primary trigger, hitting ``POST /admin/backup-now`` on the live site. The ~18 ``maybe_backup()`` call sites sprinkled through
   ``webapp/app.py``'s admin/save routes are a harmless bonus trigger (still
   debounced to once a week by default — see ``maybe_backup``'s own
   ``min_interval_hours``) — they fire only when an admin action happens to

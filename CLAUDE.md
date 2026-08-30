@@ -467,6 +467,33 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `GOOGLE_DRIVE_FOLDER_ID` still overrides this if set — normally left unset now.
   `/admin/library/backup` shows a live link to whichever folder is currently in use. The
   old hand-made "Library Backup" folder is abandoned, not deleted or referenced anywhere.
+- **Backup trigger moved from GitHub Actions to a Railway Cron Service (2026-08) — the
+  GitHub-Actions dependency is gone entirely.** The GitHub Action above worked, but its
+  schedule silently stopped firing for 9 straight days when the account's GitHub Actions
+  spending limit blocked every workflow run (no spending limit configured, wouldn't
+  self-resolve until the next billing cycle) — an outage in a billing system that has
+  nothing to do with Railway or this app. Fixed by moving the trigger onto a native
+  Railway Cron Service in the same Railway project: a tiny standalone service with no
+  app code of its own, configured with a cron schedule (`0 9 * * *`, same daily
+  09:00 UTC slot the Action used) whose only job is one `curl -sS -w '\n%{http_code}'
+  -X POST https://cfo-navigator-production.up.railway.app/admin/backup-now -H
+  "X-Save-Token: $LINKLIB_SAVE_TOKEN"` call, checking the trailing status code and
+  `exit 1`-ing on anything outside 200-299 so a failed run shows up red in Railway's own
+  run history — same non-2xx contract `/admin/backup-now` already provided for the
+  Action's `curl -f`, just read by a shell check instead. `LINKLIB_SAVE_TOKEN` is
+  referenced from the project's existing Railway variable (the same one the app itself
+  runs with), not duplicated as a second copied secret. Still targets the Railway
+  origin, not `bmweis.com`, for the identical Cloudflare Bot Fight Mode reason the
+  Action's own comment documented. `.github/workflows/backup.yml` is deleted outright
+  (not kept as a manual `workflow_dispatch` fallback — a fallback that itself depends on
+  Actions quota isn't a real fallback for an Actions-quota outage). This is a
+  platform-level Railway configuration, not application code — there's no new Python,
+  no new repo dependency, and no new committed service definition; the cron service's
+  schedule and command live in the Railway dashboard, same as every other
+  project-level Railway setting (the healthcheck path, the build command) that already
+  isn't in this repo. See RUNBOOK.md §7 for the exact dashboard setup steps and the
+  curl command, and the "Off-site backup" note in ARCHITECTURE.md's deployment diagram
+  for the updated trigger edge.
 - **Phase G — the Agent taxonomy "unverified" banner promised a step that
   sometimes had no button behind it; fixed, plus a real "Mark verified" audit
   trail.** An investigation (2026-08) confirmed the green banner on a
