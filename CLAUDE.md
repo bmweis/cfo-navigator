@@ -3553,6 +3553,212 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   same as the checkbox-driven path already didn't, kept consistent between
   the two ways of setting the flag rather than introducing a new asymmetry.
 
+- **Review-status consolidation (2026-08 follow-up) — a real scope
+  correction, not a small tweak: "Flag for review" comes OFF both admin
+  lists entirely, moves to exactly two places (profile VIEW page, edit
+  page), and ONE shared visual "Review status" pill component replaces
+  every scattered whole-record/per-field/confidence indicator across all
+  three surfaces (admin list, profile view, edit page top) for both
+  Software vendors and Communities.** Phase 0 investigation confirmed: (1)
+  the per-field `*_needs_verification` badges (Description/Agent taxonomy)
+  already rendered on the tool profile VIEW page, admin-only, unchanged by
+  this pass — but Competitive differentiation had **no publish gate or
+  visibility label there at all**, a real, pre-existing, undocumented gap
+  (flagged, not fixed in this pass — out of scope, since this pass is about
+  the whole-record signal, not adding a new per-field gate); (2) the
+  "View profile →" link Brian recalled is actually labeled "Full profile
+  →" on the public directory cards (`/tools/software`, `/tools/communities`)
+  and works correctly there, unconditionally, for both authed and anon
+  visitors — but **no equivalent link existed on either admin list at
+  all**, only "Edit" (which opens the edit form, not a read-only view);
+  fixed by adding a "View profile" link to both admin list rows, pointing
+  at the tool/community's own public profile URL (which already renders an
+  admin-enhanced view when signed in — the Edit button, the meta line, the
+  per-field unverified labels — this pass's new pill just joins that
+  existing admin-enhancement pattern, not a new page).
+
+  **Shared component** (`_review_status_pill_html`/`_review_status_action_html`/
+  `_review_status_block_html` in `webapp/app.py`): a real pill shape
+  (`border-radius:999px`, distinct from every other 4px-radius admin chip
+  on these pages), solid `#15803D` "Reviewed" / solid `var(--coral)` "Needs
+  review" — true stoplight green, the same sanctioned BRAND.md exception
+  the auth-cookie-status dots use, since `--good` (navy) is the site's
+  dominant color and unusable as a health signal; coral for the negative
+  state is Brian's own explicit call for this one component, not a general
+  license to use coral for status elsewhere. The coral state can carry an
+  optional "(n/total)" breakdown: Communities reuses the existing
+  `unconfident_count`/12 (Claude's self-reported low-confidence count on
+  the 12 tracked profile fields) — the one dataset explicitly named to
+  carry over; Software counts how many of its own 3 per-field
+  `*_needs_verification` flags are currently set, giving "(n/3)". The
+  action half is the exact mirror of the pill's own state — "Flag for
+  review" when currently reviewed (green), "Mark reviewed" when currently
+  needs review (coral) — a real polarity bug (the branches were swapped)
+  was caught and fixed by this build's own verification pass before it
+  shipped, now pinned down by `test_review_status_action_html_polarity`.
+
+  **Admin list**: both `/admin/tools/software` and `/admin/tools/communities`
+  gained a dedicated "Review status" column (pill + "Mark reviewed" only —
+  "Flag for review" is deliberately never offered here, Brian's explicit
+  call: "I never want to flag something from a list of many rows"),
+  replacing what used to be scattered inline badges in the name cell:
+  Software's plain "Needs review" chip; Communities' plain "Needs review"
+  chip, its brown "N field(s) needs verification" auto-fill-gap badge
+  (`gap_badge` — a genuinely different signal, per-field data `_NEEDS_
+  VERIFICATION`-sentinel-blank left by "Auto-fill from URL", not a review-
+  status fact; not lost, still visible per-field on the profile edit view,
+  just no longer duplicated on the list), and its separate "N/12 fields
+  low-confidence" badge (`unconfident_badge` — its count IS the new pill's
+  breakdown now). `low_conf_badge` (the whole-profile "drafted without a
+  fetch" boolean, a third, distinct concept from either retired badge) was
+  not named for retirement and stays as its own badge. The `?filter=
+  needs_review` links needed **no logic change on either page** — both
+  already keyed off exactly `tools.needs_review`/`community_profiles.
+  needs_review`, the same signal the new pill displays, confirmed rather
+  than assumed.
+
+  **Profile VIEW page** (`/tools/software/{slug}`, `/tools/communities/{slug}`):
+  the pill+action block renders admin-only (`if authed`), placed near the
+  existing admin-only meta line at the bottom of the page. Communities'
+  version is additionally gated on a profile draft actually existing (`if
+  authed and profile`) — a community with nothing drafted yet has nothing
+  to review or flag, so the block is simply absent, not shown empty.
+
+  **Edit page, moved to the TOP** (was a checkbox + "Mark reviewed" widget
+  in a "Profile signoff" section at the bottom of the tools edit page, and
+  a checkbox near the bottom of the Community profile field list) — **the
+  checkbox is gone entirely on both entity types**, replaced by the same
+  pill+action block, now an immediate one-click route action like every
+  other surface, not tied to clicking Save. This is a real mechanism
+  change, not just a relocation: `admin_tools_edit_submit`'s and
+  `admin_community_profile_submit`'s own `needs_review` computation used to
+  read a submitted checkbox field; with no checkbox on the form to read,
+  each route now instead carries the tool's/profile's CURRENTLY-persisted
+  `needs_review` value (fetched before the write, already available as
+  `tool`/`existing_profile`) forward, OR'd with a fresh draft on the
+  tracked fields this same submit — so a plain resave can never again
+  accidentally clear a manually-set flag (the old checkbox-based design
+  could, if a resubmission simply omitted the field); only the dedicated
+  "Mark reviewed" action clears it now. `_community_profile_form_fields`'s
+  return type changed from `tuple[str, str]` (fields HTML + a hidden verify
+  form the caller had to render separately) to a single string, since the
+  new component is self-contained (`_review_status_action_html` already
+  produces its own `<form>`, no external hidden-form pairing needed).
+
+  **Copy tightened** (item 7): both entity types' explanatory line under the
+  pill is now one short sentence, entity-specific rather than one sentence
+  forced to cover both — Tools: "set automatically when a new tool is added
+  or any tracked field is refreshed, or manually anytime here" (matches
+  tools' two real triggers: the creation-time default and the per-field
+  auto-link); Communities: "set automatically whenever the profile is
+  drafted or refreshed via Generate, or manually anytime here" (Communities
+  has no creation-time default — profile_ai_drafted is genuinely one
+  mechanism covering both "first draft" and "later refresh," not two).
+
+  **Redirect allowlists extended**: `admin_tools_mark_reviewed`/
+  `admin_tools_flag_for_review`/`admin_communities_mark_reviewed`/
+  `admin_communities_flag_for_review` all gained the plain profile-view
+  URL (`/tools/software/{slug}`, `/tools/communities/{slug}`) alongside
+  their existing admin-list/edit-page allowlist entries, since the action
+  button now also lives on the view page and needs to redirect back to it.
+
+  **Item 5 (blank field rendering) and item 6 (the "View profile" link)
+  were investigation-only in this pass, not built** — see the findings
+  above (folded in since item 6's finding is what motivated adding the new
+  "View profile" list-row link) and the session's own report to Brian for
+  the full write-up on item 5 (the `c['field'] or '—'` pattern is
+  consistent and bug-free everywhere checked; whether "Beyond the Books"
+  specifically has genuinely-empty underlying data needs Brian's own check
+  against production, which this session has no access to).
+
+- **Review-status consolidation, brand-fidelity follow-up (2026-08) — Brian's
+  review of the first draft's screenshots found real BRAND.md violations,
+  not preference; fixed against BRAND.md directly (via the
+  cfo-navigator-brand skill) rather than approximated, plus a scope
+  expansion to every "needs verification"/"unverified" indicator on both
+  entity types, not just the three original surfaces.**
+  1. **Green isn't in the palette at all** — the pill's "Reviewed" state
+     (`#15803D`, the auth-cookie-status dots' own sanctioned exception) was
+     never re-confirmed against BRAND.md for this component. Replaced with
+     `var(--seafoam)` fill + `var(--navy)` text — the exact "seafoam fill,
+     navy text, radius 6px" tag/badge convention every other pill on these
+     pages already uses (the category "FP&A" tag).
+  2. **Coral as a solid-fill "button-shaped" pill violates the standing
+     "coral is a rare accent, never a button" rule** — restyled to a light
+     `var(--coral-wash)` fill. Text color needed a second correction beyond
+     what item 2 literally asked for: `var(--coral-deep)` text reads as the
+     obvious "colored text on light background" pairing, but
+     `tests/test_brand_standards.py`'s own mechanical CI check
+     (`small_coral_text_spans`, BRAND.md §2.3) bans coral/coral-deep text
+     under 18px outright — checked directly against the live test, not
+     assumed from the ramp table's "text-capable coral (AA)" description
+     for `--coral-deep`, which reads as an exception this stricter
+     mechanical rule doesn't actually carve out. So `--coral-wash` pairs
+     with `var(--navy)` text instead — literally BRAND.md's own coral-wash
+     row ("Callout blocks — pair with navy text (11:1 contrast)"), and the
+     same pairing already repeated at every other real `--coral-wash` call
+     site in this codebase (`error_banner`s, the community-gap-feedback
+     dismiss banner, etc.) — confirmed by grep before choosing it, not
+     invented. The whole-record pill and every per-field badge below both
+     use this identical `coral-wash`+`navy` pairing now.
+  3. **Consolidated every "unverified—hidden from visitors"/"needs
+     verification" indicator across both Software and Communities**, not
+     just the three original surfaces — a full audit (not just the two
+     pages Brian's screenshots showed) found the concept rendered in
+     **six** different places, four of them off-palette amber
+     (`#92400e`/`#fef3c7`, no BRAND.md token at all): `.tool-desc-verify`
+     (Software directory card — recolored, and unified from plain text to
+     the same small badge-box treatment every other surface uses),
+     `.tp-verify` (tool profile page's Description/Agent taxonomy cards),
+     `.cc-verify` (Software compare page), and `_narrative_verify_widget`'s
+     inline badge (the tool EDIT page's own per-field "Needs verification"
+     flag next to Description/Agent taxonomy/Differentiation — found only
+     by tracing `_narrative_verify_widget`'s remaining callers, not
+     mentioned in Brian's screenshots at all). Two more were found broken,
+     not just off-brand: **the Community profile page's own `.tp-verify`
+     was never defined in that page's `<style>` block at all** — a real
+     pre-existing bug, so the whole-profile "unverified—hidden from
+     visitors" badge on the Bottom line callout and each of the 4 grouped
+     section cards was rendering completely unstyled; and **the Communities
+     compare page's `_profile_cell` reused `.comm-verify`** (the unrelated,
+     intentionally-muted-dashed "field was never auto-fill-researched"
+     data-completeness flag, `_verify_html`'s `_NEEDS_VERIFICATION`
+     sentinel) **for this different, publish-gated concept too** — two
+     genuinely different meanings sharing one style. Split into a proper
+     `.cc-verify` for the publish-gate meaning, leaving `.comm-verify`
+     untouched for its own, correct, separate meaning. Every one of these
+     six/eight surfaces now shares the identical `coral-wash`+`navy` small
+     badge (uppercase, 10-11px, radius 5px) — visually distinct from the
+     whole-record pill (999px pill radius, sentence case, larger padding)
+     specifically so a reader can tell "this one field's status" from "the
+     whole profile's status" at a glance, per Brian's explicit ask, even
+     though both now share one color language. `_confidence_badge_html`/
+     `_confidence_indicator_html` (Claude's self-reported confidence — a
+     deliberately separate, already-on-brand-adjacent concept, not a
+     verification-status indicator) were confirmed out of scope and left
+     untouched.
+  4. **Placement**: the whole-record pill moved from the bottom of both
+     profile VIEW pages (after all card content) to the hero, computed
+     before `hero_text` is built and spliced in right after the name/
+     subhead — above the category pills on the Software page (which has
+     hero-level category pills) and above the Categories card on the
+     Communities page (which has no hero-level cats at all, so this reads
+     as "above the Categories card, and above everything else on the
+     page," the closest honest match to Communities' different layout).
+  5. **Edit page**: both edit pages' bordered "Verification status" panel
+     now carries an actual `<h2>Verification status</h2>` label above the
+     pill/action pair — previously unlabeled, reading as abrupt.
+  Verified against 10 screenshots covering every affected surface (both
+  entity types × admin list, profile view, edit page top, compare page,
+  plus the reviewed/green state and the Beyond the Books blank-field row)
+  — including confirming, via a direct authenticated HTTP request
+  (independent of the screenshot tooling), that the whole-record pill and
+  every per-field badge render with the corrected colors and copy exactly
+  as designed. `tests/test_brand_standards.py`/`tests/test_checks.py` both
+  pass clean against the corrected version — they did not against the
+  first draft's solid-coral pill, which is what surfaced the CI-check
+  detail this whole correction turned on.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded

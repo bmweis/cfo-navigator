@@ -326,9 +326,13 @@ def test_compare_shows_community_profile_verification_flag_to_admin(env):
     r = client.get(f"/tools/communities/compare?ids={a},{b}")
     assert "Drafted note for Peer CFOs." in r.text
     assert "Confirmed note for Finance Guild." in r.text
-    assert '<span class="comm-verify">unverified' in r.text
+    # .cc-verify, not .comm-verify (2026-08 brand-consistency pass split the
+    # two: .comm-verify is the unrelated data-completeness "Needs
+    # verification" flag; .cc-verify is this publish-gate "unverified—hidden
+    # from visitors" flag, matching every other surface that renders it).
+    assert '<span class="cc-verify">unverified' in r.text
     confirmed_idx = r.text.index("Confirmed note for Finance Guild.")
-    assert "comm-verify" not in r.text[confirmed_idx:confirmed_idx + 80]
+    assert "cc-verify" not in r.text[confirmed_idx:confirmed_idx + 80]
 
 
 # -- Null-state safety -----------------------------------------------------------
