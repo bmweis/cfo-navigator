@@ -3826,6 +3826,262 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   first draft's solid-coral pill, which is what surfaced the CI-check
   detail this whole correction turned on.
 
+- **Admin list table-width investigation (2026-08, PR 465 fast-follow) —
+  the Communities admin list's Review status/Actions columns ran off the
+  right edge at ordinary desktop widths; root cause was column count, not
+  missing responsive handling, and the real fix ended up being a shared
+  minimal-default column state rather than the reorder/scroll-shadow
+  approach first proposed.** Phase 0 investigation (Playwright, computed
+  styles, real scroll widths — not assumed): both admin lists already wrap
+  their table in `<div style="overflow-x:auto;">`, and that container was
+  already working correctly — `document.body.scrollWidth` never exceeded
+  the viewport at either 1280px or 1024px on either page, so the *page*
+  was never actually breaking BRAND.md's "wide content scrolls in its own
+  container" rule. The real problem was narrower: Software's table (7
+  columns) genuinely fits at both widths and never needs scroll; Communities'
+  (11 columns, several with explicit `min-width`s) measured 1549px wide and
+  needed internal scroll at *both* widths, with zero visual cue that more
+  columns existed off-screen — and the two columns that vanish first
+  (Review status, Actions) are exactly the ones an admin acts on. Communities
+  also has no mobile-card fallback below 700px at all (Software's
+  `admin-table-responsive` class, confirmed absent from Communities' HTML).
+  **First proposed fix (reorder Review status/Actions earlier + a CSS
+  scroll-shadow affordance) was reported to Brian but never built** — a
+  follow-up message proposed something better before implementation started,
+  and Brian confirmed it should replace rather than supplement the reorder
+  work. **What shipped instead**: both admin lists now default to showing
+  only Name, Review status, and Actions (Name/Actions have no `data-col` at
+  all on either table, so they're always visible regardless; Review status
+  is the one optional column marked default-visible) — unless the admin has
+  explicitly saved a wider view. A new "Save view for next time" button
+  (reusing the existing `_admin_column_picker_html`/`initColPicker`/
+  `toggleColumn` mechanism — already the single shared implementation for
+  both tables, confirmed before extending rather than assumed) persists the
+  *current* checkbox state to `localStorage`; `toggleColumn` itself no
+  longer auto-persists on every checkbox change (it used to) — a column
+  toggle is now session-only exploration, and only the explicit Save click
+  commits it, so peeking at a wider view can never silently overwrite (or
+  silently revert away from) a view someone already saved. `initColPicker`
+  falls back to the shared `ADMIN_DEFAULT_VISIBLE_COLS = ['review_status']`
+  constant only when nothing is saved yet; a stored view is always honored
+  exactly as saved. Verified live (not just reasoned about) that under the
+  new default, Communities' table's `scrollWidth` exactly equals its
+  container's `clientWidth` at both 1280px and 1024px — the 11-vs-7-column
+  overflow this investigation started from simply doesn't occur for the
+  default view any more. **This is why the reorder/scroll-shadow proposal
+  was dropped, not kept alongside the new default**: a wider *saved* view
+  can still need to scroll on a narrow viewport, but the existing
+  `overflow-x:auto` container already handles that correctly (confirmed
+  both before this fix and unmodified by it) — building a scroll-shadow
+  affordance for that comparatively rare case was judged premature/
+  speculative rather than a real gap, and can be added later if it's ever
+  actually needed. **Communities' missing mobile-card breakpoint was
+  explicitly scoped OUT of this PR** (per its own author's ask, not
+  silently dropped) — recommended as worth doing but as a separate,
+  single-purpose follow-up: the new minimal default (4 columns, well under
+  700px) substantially closes the everyday mobile gap already, and building
+  the stacked-card CSS treatment is a large enough, separable change to
+  deserve its own PR rather than being bundled in reactively. A real
+  brand-check false positive recurred during this work (the third time
+  this exact pattern has hit this repo, per this doc's own earlier
+  entries): a `#465` PR-number reference in a code comment parsed as a
+  valid 3-digit hex color and normalized to `#446655`, tripping
+  `tests/test_brand_standards.py`; fixed the same way as every prior
+  instance — reworded to "PR 465" in prose, not suppressed.
+
+  **Two same-PR follow-ups, both requested live during review rather than
+  planned up front.** (1) **Software's Actions column (View profile/Edit/
+  Delete) was on a 2-column CSS grid, wrapping the three buttons onto two
+  rows** — Communities' own Actions column already used a single-row flex
+  layout for the identical three buttons, so this was a real inconsistency
+  between the two tables' otherwise-matching designs, not a new decision.
+  Switched Software to the same `display:flex;flex-wrap:nowrap` treatment
+  Communities already had, with the `<700px` card-layout override changed
+  from forcing a 1-column grid to `flex-direction:column` + full-width
+  children so the stacked mobile card view is unaffected — verified live at
+  both 1280px (one row now) and a real 390px mobile viewport (unchanged
+  stacking, no overflow). (2) **The mobile-card fallback explicitly scoped
+  OUT above got built after all**, once Brian offered to fold it in and a
+  live 390px check of the *new minimal default* found it still genuinely
+  needed: even at just 4 columns, Communities' plain (non-card) table forced
+  the `overflow-x:auto` container into a real internal horizontal scroll at
+  390px, with Review status/Actions cut off exactly as before — the minimal
+  default closed the *page-breaking* version of the problem, not the
+  *mobile-usability* one. Software's `admin-table-responsive` treatment
+  (already shipped, already tested) was extended to Communities' approved-
+  communities table rather than building a second implementation: every
+  `<td>` gained `class="admin-table-cell"` and (for the previously-`data-col`-
+  only optional columns) a matching `data-label`, the `<table>` gained
+  `class="admin-table-responsive"`, and the identical `@media(max-width:700px)`
+  block Software's own `<style>` tag carries was added to the Communities
+  admin route's `<style>` tag — this page had never had one before, since
+  nothing on it needed page-specific CSS until now. Verified live: the
+  default 4-column view stacks as clean full-width cards on a real 390px
+  viewport (matching Software's card treatment exactly), AND a wider
+  *saved* column view (Cost band + Format checked and saved) still stacks
+  correctly at 390px too — the stress case for the whole mobile-card
+  mechanism, not just the default state. Desktop (1280px) confirmed
+  unaffected by either change. **Communities' separate "Pending
+  submissions" table (a different table, different columns, no
+  column-picker mechanism) was investigated and found to have the identical
+  unresponsive-table gap on BOTH admin lists** — deliberately left alone in
+  this pass: it's usually empty, structurally separate from the
+  column-picker/review-status work this whole thread is about, and fixing
+  it doubles the surface area of an already-two-part follow-up for a
+  rarely-visited state — flagged here as a genuine, real, still-open gap
+  rather than silently found and dropped.
+
+  **Third same-PR follow-up (2026-08) — desktop and mobile deliberately
+  invert each other for both the Review status pill/action pair and the
+  three Actions buttons, on both tables.** Requested live, after the
+  mobile-card fallback above shipped: Delete should break onto its own row
+  below View/Edit on desktop (mirroring the Review status pill/Mark
+  reviewed button's own always-stacked "break" — which stays exactly as it
+  was on desktop, unchanged), while on mobile both pairs go the other
+  way — Review status's pill+button sit side by side, and all three Actions
+  buttons share one row, since a mobile card's full width has the room a
+  narrow desktop table cell doesn't. Implemented with the same CSS-only,
+  no-JS-change discipline the rest of this admin-list work has used:
+  `.admin-table-actions-grid`'s desktop styling reverted to
+  `display:grid;grid-template-columns:repeat(2,auto)` (the exact 2-column
+  grid Software had before the Actions-single-row fix two follow-ups
+  earlier in this same PR — that fix wasn't wrong, it just turned out not
+  to be the shape wanted once Brian saw it live; this is a genuine reversal
+  of a prior commit in this PR, not a new decision layered on top) — 3
+  items in row-major order on a 2-column grid land View+Edit on row 1 and
+  Delete alone on row 2 automatically, no manual grouping needed. The
+  `<700px` mobile override changed from forcing 1-column stacking to
+  `grid-template-columns:repeat(3,1fr)` — one row, three equal columns,
+  comfortably fitting "View profile"/"Edit"/"Delete" at real mobile card
+  width. A new `.admin-review-status-group` class (added to the pill+button
+  wrapper `<div>` on both tables, no visual change to its own default
+  behavior) is what the mobile override targets to flip it from
+  `flex-direction:column` to `row` — column stays the un-overridden desktop
+  default. Communities' Actions cell also lost a redundant extra wrapper
+  `<div>` around `.admin-table-actions-grid` (a leftover from an earlier
+  structure, harmless but unnecessary once the grid itself does the
+  layout work) while this was already being touched. Verified live at both
+  breakpoints on both tables — 1280px shows the 2-row desktop break on
+  both; 390px shows both pairs correctly flipped to one row each, no
+  horizontal overflow on either page.
+
+  **Fourth same-PR follow-up (2026-08) — Actions buttons were stretching
+  wider on desktop than the mobile screenshots, a real CSS Grid gotcha, not
+  a design choice to fix by eye.** Brian flagged it by comparing screenshots
+  directly ("the buttons should never be wider than they are in those
+  portrait mobile screenshots, even on desktop"); confirmed and root-caused
+  by measuring real `getBoundingClientRect()` widths rather than eyeballing
+  — "View profile" measured 255px and "Edit" 197px on desktop, both far
+  wider than their visible text needs. Cause: `grid-template-columns:
+  repeat(2,auto)` (the desktop break-into-2-rows layout from the previous
+  follow-up) has no `fr` track to absorb leftover space, and a CSS Grid
+  container's default `justify-content` computes to `normal`, which for
+  `auto`-sized tracks with no flexible tracks present behaves as `stretch`
+  — so the two `auto` columns silently grew to consume all the free width
+  in the Actions cell instead of staying content-sized. Fixed with one
+  added property, `justify-content:start`, on both tables' `.admin-table-
+  actions-grid` (the desktop grid only — the mobile `repeat(3,1fr)`
+  override is unaffected, since `1fr` tracks are supposed to fill their
+  container). Re-measured after the fix: desktop "View profile" is now
+  113px, identical to its mobile width; desktop "Edit" (55px) and "Delete"
+  (74px) are both narrower than their mobile versions (95px each, since
+  mobile's three equal `1fr` columns size to the widest label). Review
+  status's pill/button pair needed no fix — already `align-items:flex-
+  start` on its flex-column container, so it was never stretching in the
+  first place; confirmed by the same measurement (143px/134px, identical
+  at both breakpoints). Full regression: 2364 passed, 0 failed.
+
+  **Fifth same-PR follow-up (2026-08) — "narrower than mobile" wasn't
+  good enough either; Brian's actual ask was genuine uniformity
+  ("They should be a consistent size regardless"), and getting there
+  surfaced two more real CSS Grid/specificity bugs, both caught only by
+  measuring the grid's own box, not the page's.** The Fourth follow-up's
+  fix left desktop Edit/Delete narrower than their mobile widths (55px/
+  74px vs mobile's 95px each) — mobile's `repeat(3,1fr)` sizes every
+  column to the widest label's own min-content width, so "View profile"
+  (95px) forced Edit/Delete to match it too, but that's incidental
+  uniformity within one breakpoint, not the same width at every
+  breakpoint. Replaced both the desktop `auto`-track sizing and the
+  mobile `1fr`-stretch with one unconditional fixed width (no media
+  query, same value everywhere) on `.admin-table-actions-grid a`/`form`
+  plus `width:100%` on the form's own button. First attempt used 113px
+  (View profile's natural unconstrained width) and appeared to pass a
+  first measurement pass (`getBoundingClientRect()` reporting 113px at
+  all four breakpoint/table combinations, `document.body.scrollWidth`
+  never exceeding the viewport) — but the actual mobile screenshot
+  showed Delete visibly clipped at the card's right edge, exposing a
+  real gap in that check: page-level overflow can read `False` while a
+  child element overflows its OWN box, invisibly, as long as nothing
+  widens the page itself. A targeted follow-up measurement
+  (`.admin-table-actions-grid`'s own `clientWidth` vs `scrollWidth`,
+  not the page's) confirmed it: `316` vs `351` — the grid's real box
+  genuinely wasn't wide enough for 3×113px+gaps. Two distinct bugs,
+  found in this order: (1) the mobile `repeat(3,1fr)` override needed
+  its own explicit `justify-content:normal!important` — the Fourth
+  follow-up's desktop `justify-content:start` lives in an inline style,
+  which a non-`!important` external rule can never outrank regardless
+  of which media query it's in, and `start` (unlike the default
+  `normal`) makes `1fr` tracks stop filling the row and collapse to
+  their content size instead — exactly backwards for a 3-across mobile
+  layout that needs its `1fr` columns to actually consume all available
+  width. (2) Once that was fixed, the grid's real available width at a
+  390px card (~316px, after the row's own padding) was still too narrow
+  for three 113px buttons plus gaps (351px needed) — "View profile"'s
+  own unpadded text needs ~89px at the existing 13px font/12px
+  horizontal padding, confirmed by measuring a cloned, unconstrained
+  copy of the element rather than guessing. Fixed by shrinking these
+  three buttons' padding (12px→8px horizontal) and font-size (13px→
+  12px — which also brings them in line with every other admin list-row
+  Edit/Delete button on the site, nearly all of which already use 12px;
+  13px here was the odd one out) and the fixed width itself (113px→
+  100px), sized with a real ~3px margin over the newly-measured natural
+  text width (98.5px), not tuned to fit exactly. Re-verified after the
+  fix: all three buttons render at a literal 100px at both 1280px and
+  390px on both tables, and `.admin-table-actions-grid`'s own
+  `clientWidth`/`scrollWidth` are equal (no internal overflow) —
+  confirmed by measurement, not just a clean screenshot. Full
+  regression: 2364 passed, 0 failed.
+
+  **Sixth same-PR follow-up (2026-08, two rounds) — "+ Add software"/
+  "+ Add community" overlapped the page h1 on mobile; the first fix's
+  own width still wrapped in Brian's real browser, so the button moved
+  again, below the view-links line, at every breakpoint, sized with a
+  mechanism that can't wrap regardless of font.** Round 1: the header
+  row (`display:flex;align-items:center;justify-content:space-between`,
+  no mobile override) put the Add button vertically centered next to the
+  h1 — fine at desktop width, but at a narrow mobile viewport the h1 can
+  wrap to two lines and the centered button sat on top of the wrapped
+  second line. Fixed with a `.admin-header-row`/`.admin-header-add-btn`
+  class pair and a `@media(max-width:700px)` override dropping the
+  button below the h1 (`flex-direction:column`), sized to a fixed
+  186px (measured against "+ Add community"'s natural width in this
+  sandbox's own headless Chromium, plus a small margin). **Round 2:**
+  Brian reported the button still wrapping to two lines and reading too
+  tall in his real browser — the 186px measurement held in this sandbox
+  but not in his, because a non-fallback font can render the same text
+  wider than this sandbox's font-loading-impaired Chromium measured it
+  (the already-documented Google Fonts sandbox-networking gap). Rather
+  than re-tune another brittle exact pixel value against a font this
+  session can't fully trust, the button moved a second time — below the
+  "View public directory / ..." links paragraph entirely, at every
+  breakpoint, not just mobile, so it no longer competes with the h1 (or
+  anything else) for horizontal space and there's nothing left to
+  overlap; the `admin-header-row` class and its mobile-only override are
+  gone, replaced by a plain `<h1>` and a standalone `<p>` holding the
+  button. Sizing switched from a fixed `width` to
+  `min-width:200px;white-space:nowrap` — mathematically guaranteed never
+  to wrap regardless of which font actually renders (a narrower real
+  font just leaves extra padding inside the same floor; a wider one
+  grows past it instead of wrapping), so both pages' buttons still render
+  the same size in the common case without depending on a font
+  measurement this sandbox can get wrong. Verified live (both rounds):
+  round 1 via element-level bounding-box overlap checks between the h1
+  and the button at 390px/320px; round 2 via direct
+  `getBoundingClientRect()` on the button itself at both 1280px and
+  390px on both pages, confirming a consistent single-line 200×34px
+  render and no page-level overflow. Full regression: 2364 passed, 0
+  failed, both rounds.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded

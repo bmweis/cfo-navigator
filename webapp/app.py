@@ -10177,11 +10177,25 @@ def admin_email_failure_dismiss(request: Request, failure_id: int):
 # (_COMMUNITY_BULK_FIELDS / _SOFTWARE_BULK_FIELDS below); the JS is generic
 # over a "table key" so both pages share one script block.
 _ADMIN_BULK_EDIT_JS = """
+// Shared across every admin list table (Software, Communities, and any
+// future one) — same default, same save-view mechanism, one implementation.
+// Communities genuinely has more optional columns than Software (11 vs. 7),
+// and that's fine; what has to match is this behavior, not the column
+// count. See CLAUDE.md's admin-list column-defaults follow-up for the
+// full write-up (table-width investigation after PR 465).
+var ADMIN_DEFAULT_VISIBLE_COLS = ['review_status'];
 function initColPicker(tableKey, cols) {
   var stored = localStorage.getItem('cfo_admin_cols_' + tableKey);
-  if (!stored) return;
   var active;
-  try { active = JSON.parse(stored); } catch (e) { return; }
+  if (stored) {
+    try { active = JSON.parse(stored); } catch (e) { active = ADMIN_DEFAULT_VISIBLE_COLS.slice(); }
+  } else {
+    // No saved view yet — the minimal default (Name/Actions are always
+    // shown, no data-col; only Review status joins them here) rather than
+    // every column, so an admin list with a lot of optional metadata
+    // (Communities) doesn't overflow its container by default.
+    active = ADMIN_DEFAULT_VISIBLE_COLS.slice();
+  }
   cols.forEach(function(col) {
     var visible = active.indexOf(col) !== -1;
     document.querySelectorAll('[data-col="' + tableKey + ':' + col + '"]').forEach(function(el) {
@@ -10191,16 +10205,28 @@ function initColPicker(tableKey, cols) {
     if (cb) cb.checked = visible;
   });
 }
-function toggleColumn(tableKey, col, checked, allCols) {
+function toggleColumn(tableKey, col, checked) {
+  // Session-only — does NOT touch localStorage. Exploring a wider view is
+  // never silently persisted; only saveColumnView() (the explicit "Save
+  // view for next time" button) commits a selection, so returning to this
+  // page without saving reverts to whatever was last actually saved (or
+  // the minimal default if nothing ever was).
   document.querySelectorAll('[data-col="' + tableKey + ':' + col + '"]').forEach(function(el) {
     el.style.display = checked ? '' : 'none';
   });
-  var stored = localStorage.getItem('cfo_admin_cols_' + tableKey);
-  var active;
-  try { active = stored ? JSON.parse(stored) : allCols.slice(); } catch (e) { active = allCols.slice(); }
-  if (checked && active.indexOf(col) === -1) active.push(col);
-  if (!checked) active = active.filter(function(c) { return c !== col; });
+}
+function saveColumnView(tableKey, allCols) {
+  var active = allCols.filter(function(col) {
+    var cb = document.getElementById('colpick-' + tableKey + '-' + col);
+    return cb && cb.checked;
+  });
   localStorage.setItem('cfo_admin_cols_' + tableKey, JSON.stringify(active));
+  var msg = document.getElementById('colpick-saved-' + tableKey);
+  if (msg) {
+    msg.style.display = 'inline';
+    clearTimeout(msg._hideTimer);
+    msg._hideTimer = setTimeout(function() { msg.style.display = 'none'; }, 2000);
+  }
 }
 function updateBulkButton(tableKey) {
   var n = document.querySelectorAll('.' + tableKey + '-row-cb:checked').length;
@@ -10354,25 +10380,41 @@ function closeDeleteSelectedPanel(tableKey) {
 """
 
 
-def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]]) -> str:
-    """columns: (col_key, label) pairs, all default-visible. Toggled client-side
-    via data-col="{table_key}:{col_key}" on the corresponding <th>/<td>s and
-    persisted to localStorage by toggleColumn() in _ADMIN_BULK_EDIT_JS."""
-    # json.dumps() quotes with ", same as the onchange="" attribute itself—
-    # unescaped, that closes the attribute early at the first array element
-    # and leaves toggleColumn's 4th argument truncated, so the checkbox's
-    # onchange handler never actually runs. _esc() turns those into &quot;
-    # so the attribute parses whole.
+def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]],
+                               default_visible: tuple[str, ...] = ("review_status",)) -> str:
+    """columns: (col_key, label) pairs. `default_visible` names which of these
+    render checked — and are therefore visible — before any saved view exists
+    in localStorage; the rest start unchecked/hidden. Toggled client-side via
+    data-col="{table_key}:{col_key}" on the corresponding <th>/<td>s
+    (toggleColumn, session-only) and only actually persisted by the "Save
+    view for next time" button (saveColumnView) — both in
+    _ADMIN_BULK_EDIT_JS. Name and Actions have no data-col at all on either
+    admin list, so they're always visible regardless of this picker; only
+    the OPTIONAL columns (this function's `columns` list) are gated by it.
+    Same default_visible/mechanism on every admin list table by design (the
+    2026-08 column-defaults follow-up to PR 465) — Communities has more
+    optional columns than Software, but the behavior is identical."""
+    # json.dumps() quotes with ", same as the onclick/onchange attributes
+    # themselves — unescaped, that closes the attribute early at the first
+    # array element and truncates the handler's argument, so it never
+    # actually runs. _esc() turns those into &quot; so the attribute parses
+    # whole.
+    all_keys_json = _esc(json.dumps([k for k, _ in columns]))
     checks = "".join(
         f'<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">'
-        f'<input type="checkbox" id="colpick-{table_key}-{key}" checked '
-        f'onchange="toggleColumn(\'{table_key}\',\'{key}\',this.checked,{_esc(json.dumps([k for k, _ in columns]))})"> {_esc(label)}</label>'
+        f'<input type="checkbox" id="colpick-{table_key}-{key}" {"checked " if key in default_visible else ""}'
+        f'onchange="toggleColumn(\'{table_key}\',\'{key}\',this.checked)"> {_esc(label)}</label>'
         for key, label in columns
     )
     return f"""<details style="margin:0 0 12px;">
   <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;">Columns <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
-  <div style="display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:8px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);max-width:520px;">
-    {checks}
+  <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);max-width:520px;">
+    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;">{checks}</div>
+    <div style="display:flex;align-items:center;gap:10px;padding-top:8px;border-top:1px solid var(--line);">
+      <button type="button" id="colpick-save-{table_key}" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;"
+              onclick="saveColumnView('{table_key}',{all_keys_json})">Save view for next time</button>
+      <span id="colpick-saved-{table_key}" style="display:none;font-size:12px;color:var(--seafoam-deep);font-weight:600;">Saved</span>
+    </div>
   </div>
 </details>"""
 
@@ -10809,16 +10851,16 @@ def admin_software(request: Request, filter: str = ""):
           <td data-col="software:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td data-col="software:intros" data-label="Intros" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
           <td data-col="software:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
+            <div class="admin-review-status-group" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
           </td>
           <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-              <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">View profile</a>
-              <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
+              <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">View profile</a>
+              <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">Edit</a>
               <form method="post" action="/admin/tools/software/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
-                <button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+                <button type="submit" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
               </form>
             </div>
           </td>
@@ -10869,17 +10911,17 @@ def admin_software(request: Request, filter: str = ""):
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Software vendors</h1>
-  <a href="/admin/tools/software/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add software</a>
-</div>
-<p style="margin:0 0 24px;">
+<h1 style="margin:0 0 4px;">Software vendors</h1>
+<p style="margin:0 0 12px;">
   <a href="/tools/software" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/software/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/software/name-duplicates" style="font-size:13px;color:{'#92400e' if n_name_dupes else 'var(--muted)'};font-weight:{'700' if n_name_dupes else '400'};">Check for name duplicates{f' ({n_name_dupes})' if n_name_dupes else ''} →</a>
   {review_filter_link}{clear_filter_link}
+</p>
+<p style="margin:0 0 24px;">
+  <a href="/admin/tools/software/new" class="btn admin-header-add-btn" style="font-size:14px;padding:8px 18px;">+ Add software</a>
 </p>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
@@ -10942,6 +10984,43 @@ applySortFilter('software');
    in block layout as in table layout. Fixes the URL column wrapping badly
    and the Edit/Delete actions rendering unusably small on mobile.
 */
+/* Consistent size regardless of viewport or label length (2026-08
+   follow-up, Brian's explicit ask, after the grid-auto-stretch fix
+   above still left View profile/Edit/Delete unevenly sized to their own
+   text — a real CSS Grid quirk: 1fr tracks reserve an implicit min-width
+   equal to their content's own min-content size before splitting
+   remaining space evenly, so a longer label like "View profile" claims
+   more than its fair third even inside repeat(3,1fr)). One fixed width,
+   applied unconditionally (no media query — same value at every
+   breakpoint), replaces both the desktop auto-track sizing and the
+   mobile 100%-of-1fr stretch, so all three actions render identically
+   sized everywhere rather than merely "not wider than mobile."
+   Two more real bugs surfaced getting here, both caught only by live
+   measurement, not by a page-level overflow check: (1) the mobile
+   3-column media-query override needs its own explicit
+   justify-content:normal!important — the desktop justify-content:start
+   lives in an inline style (which a non-!important stylesheet rule can
+   never outrank regardless of media query), and start collapses 1fr
+   tracks to their content size instead of letting them fill the row,
+   the opposite of what 3-across mobile needs; a bare page-level
+   document.body.scrollWidth check missed this entirely, since the
+   overflow was contained inside the card and never widened the page —
+   only measuring .admin-table-actions-grid's own clientWidth vs
+   scrollWidth caught it. (2) once that was fixed, the grid's real
+   available width at a 390px card (~316px, after the row's own 6px/12px
+   padding) turned out too narrow for three 113px-wide buttons plus
+   gaps (351px needed) — "View profile"'s own unpadded text needs
+   ~89px at 13px/12px-horizontal-padding, more than a three-way split of
+   316px allows. Fixed by shrinking these three buttons' padding
+   (12px->8px horizontal) and font-size (13px->12px, matching the
+   smaller font this same list/edit/delete row pattern already uses
+   everywhere else on the admin side) and the fixed width itself
+   (113px->100px) — confirmed by measuring the unpadded text's own
+   natural width first, not by trial and error, so the new value has a
+   real margin (~3px) rather than being tuned to fit exactly. */
+.admin-table-actions-grid a,
+.admin-table-actions-grid form{{width:100px;}}
+.admin-table-actions-grid form button{{width:100%;}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
   .admin-table-responsive, .admin-table-responsive tbody,
@@ -10951,8 +11030,38 @@ applySortFilter('software');
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
-  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:1fr!important;}}
+  /* Inverted from desktop on purpose (2026-08 follow-up, Brian's explicit
+     ask): desktop deliberately breaks Delete onto its own row below View/
+     Edit (a 2-column grid, matching the Review status pill/Mark reviewed
+     button's own always-stacked "break"); mobile does the opposite — all
+     three actions fit comfortably in one row at full card width, and
+     Review status's pill+button go row instead of column, since a mobile
+     card's own full width has plenty of room neither narrow desktop table
+     cell has. */
+  /* Row/column COUNT still flips (2 cols desktop, 3 cols mobile) — only
+     the WIDTH-stretching part is gone now, replaced by the unconditional
+     fixed-width rule above that already applies at every breakpoint. */
+  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
+  .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
 }}
+/* "+ Add software"/"+ Add community" (2026-08 follow-up, Brian's explicit
+   ask — two rounds). First round put the button beside the h1 and
+   dropped it below on mobile only via a fixed width tuned against this
+   sandbox's own font metrics — Brian reported it still wrapping to two
+   lines in the real browser, since a real (non-fallback) font can render
+   the same text wider than this sandbox's headless Chromium measured it
+   (a known, already-documented sandbox-networking limitation: Google
+   Fonts can silently fail to load here). Second round: moved the button
+   below the "View public directory / ..." links line entirely, at every
+   breakpoint, not just mobile — it no longer competes with the h1 or
+   anything else for horizontal space, so there's nothing left to overlap.
+   Sized to the longer of the two labels ("+ Add community") without
+   guessing a brittle exact pixel width a second time: min-width (not a
+   fixed width) plus white-space:nowrap is mathematically guaranteed
+   never to wrap regardless of which font actually renders — a narrower
+   real font just leaves a little extra padding inside the same
+   200px floor; a wider one simply grows past it instead of wrapping. */
+.admin-header-add-btn{{min-width:200px;text-align:center;white-space:nowrap;}}
 </style>
 </div>"""
     return HTMLResponse(_page("Software vendors—CFO Toolbox Admin", "", body, authed=True))
@@ -14317,32 +14426,30 @@ def admin_communities(request: Request, filter: str = ""):
             "search": f"{c['name']} {c['url']}",
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
-  <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
-  <td style="padding:10px 12px;font-weight:600;min-width:250px;">
+  <td class="admin-table-cell" style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
+  <td class="admin-table-cell" style="padding:10px 12px;font-weight:600;min-width:250px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
       <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{low_conf_badge}
     </div>
   </td>
-  <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
-  <td data-col="communities:cost_band" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
-  <td data-col="communities:access" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
-  <td data-col="communities:categories" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
-  <td data-col="communities:sponsorship_type" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['sponsorship_type'] or '—')}</td>
-  <td data-col="communities:format" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
-  <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
-  <td data-col="communities:review_status" style="padding:10px 12px;">
-    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
+  <td data-col="communities:notes" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
+  <td data-col="communities:cost_band" data-label="Cost band" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
+  <td data-col="communities:access" data-label="Access" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
+  <td data-col="communities:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+  <td data-col="communities:sponsorship_type" data-label="Sponsorship type" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['sponsorship_type'] or '—')}</td>
+  <td data-col="communities:format" data-label="Format" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
+  <td data-col="communities:reach" data-label="Reach" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
+  <td data-col="communities:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;">
+    <div class="admin-review-status-group" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
   </td>
-  <td style="padding:10px 12px;min-width:210px;">
-    <div style="display:flex;flex-direction:column;gap:6px;">
-      <div style="display:flex;flex-wrap:nowrap;align-items:center;gap:6px;">
-        <a href="/tools/communities/{c['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">View profile</a>
-        <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
-        <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
-              onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
-          <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
-        </form>
-      </div>
+  <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;min-width:210px;">
+    <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
+      <a href="/tools/communities/{c['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">View profile</a>
+      <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">Edit</a>
+      <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
+            onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
+        <button type="submit" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
+      </form>
     </div>
   </td>
 </tr>"""
@@ -14404,15 +14511,15 @@ def admin_communities(request: Request, filter: str = ""):
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Communities</h1>
-  <a href="/admin/tools/communities/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add community</a>
-</div>
-<p style="margin:0 0 24px;">
+<h1 style="margin:0 0 4px;">Communities</h1>
+<p style="margin:0 0 12px;">
   <a href="/tools/communities" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/communities/categories" style="font-size:13px;color:var(--muted);">Manage categories →</a>
   {review_filter_link}{clear_filter_link}
+</p>
+<p style="margin:0 0 24px;">
+  <a href="/admin/tools/communities/new" class="btn admin-header-add-btn" style="font-size:14px;padding:8px 18px;">+ Add community</a>
 </p>
 
 <details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
@@ -14444,7 +14551,7 @@ def admin_communities(request: Request, filter: str = ""):
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
 <div style="overflow-x:auto;">
 <form id="communities-approved-form">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:250px;">Name</th>
@@ -14472,6 +14579,95 @@ applySortFilter('communities');
   <strong>notes</strong> here automatically on the next deploy. No manual re-seed needed.
   <strong>Everything else is database-only</strong>: edit it here (Edit above), and this sync will never touch it.
 </p>
+
+<style>
+/* Stacked-card responsive table (2026-08 mobile follow-up to the admin
+   list column-defaults PR) — same admin-table-responsive/admin-table-cell/
+   admin-table-actions-grid classes and rules as the Software admin list's
+   own copy of this block (webapp/app.py, admin_software), so both tables
+   share identical mobile behavior; this page just never had its own
+   <style> block to carry them before now. Below the breakpoint, rows
+   become blocks and each cell gets a label from its data-label attribute
+   instead of relying on a <thead> the layout no longer has room for. */
+/* Consistent size regardless of viewport or label length (2026-08
+   follow-up, Brian's explicit ask, after the grid-auto-stretch fix
+   above still left View profile/Edit/Delete unevenly sized to their own
+   text — a real CSS Grid quirk: 1fr tracks reserve an implicit min-width
+   equal to their content's own min-content size before splitting
+   remaining space evenly, so a longer label like "View profile" claims
+   more than its fair third even inside repeat(3,1fr)). One fixed width,
+   applied unconditionally (no media query — same value at every
+   breakpoint), replaces both the desktop auto-track sizing and the
+   mobile 100%-of-1fr stretch, so all three actions render identically
+   sized everywhere rather than merely "not wider than mobile."
+   Two more real bugs surfaced getting here, both caught only by live
+   measurement, not by a page-level overflow check: (1) the mobile
+   3-column media-query override needs its own explicit
+   justify-content:normal!important — the desktop justify-content:start
+   lives in an inline style (which a non-!important stylesheet rule can
+   never outrank regardless of media query), and start collapses 1fr
+   tracks to their content size instead of letting them fill the row,
+   the opposite of what 3-across mobile needs; a bare page-level
+   document.body.scrollWidth check missed this entirely, since the
+   overflow was contained inside the card and never widened the page —
+   only measuring .admin-table-actions-grid's own clientWidth vs
+   scrollWidth caught it. (2) once that was fixed, the grid's real
+   available width at a 390px card (~316px, after the row's own 6px/12px
+   padding) turned out too narrow for three 113px-wide buttons plus
+   gaps (351px needed) — "View profile"'s own unpadded text needs
+   ~89px at 13px/12px-horizontal-padding, more than a three-way split of
+   316px allows. Fixed by shrinking these three buttons' padding
+   (12px->8px horizontal) and font-size (13px->12px, matching the
+   smaller font this same list/edit/delete row pattern already uses
+   everywhere else on the admin side) and the fixed width itself
+   (113px->100px) — confirmed by measuring the unpadded text's own
+   natural width first, not by trial and error, so the new value has a
+   real margin (~3px) rather than being tuned to fit exactly. */
+.admin-table-actions-grid a,
+.admin-table-actions-grid form{{width:100px;}}
+.admin-table-actions-grid form button{{width:100%;}}
+@media(max-width:700px){{
+  .admin-table-responsive thead{{display:none;}}
+  .admin-table-responsive, .admin-table-responsive tbody,
+  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;}}
+  .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
+  .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
+    font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin-bottom:3px;}}
+  /* Inverted from desktop on purpose (2026-08 follow-up, Brian's explicit
+     ask): desktop deliberately breaks Delete onto its own row below View/
+     Edit (a 2-column grid, matching the Review status pill/Mark reviewed
+     button's own always-stacked "break"); mobile does the opposite — all
+     three actions fit comfortably in one row at full card width, and
+     Review status's pill+button go row instead of column, since a mobile
+     card's own full width has plenty of room neither narrow desktop table
+     cell has. */
+  /* Row/column COUNT still flips (2 cols desktop, 3 cols mobile) — only
+     the WIDTH-stretching part is gone now, replaced by the unconditional
+     fixed-width rule above that already applies at every breakpoint. */
+  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
+  .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
+}}
+/* "+ Add software"/"+ Add community" (2026-08 follow-up, Brian's explicit
+   ask — two rounds). First round put the button beside the h1 and
+   dropped it below on mobile only via a fixed width tuned against this
+   sandbox's own font metrics — Brian reported it still wrapping to two
+   lines in the real browser, since a real (non-fallback) font can render
+   the same text wider than this sandbox's headless Chromium measured it
+   (a known, already-documented sandbox-networking limitation: Google
+   Fonts can silently fail to load here). Second round: moved the button
+   below the "View public directory / ..." links line entirely, at every
+   breakpoint, not just mobile — it no longer competes with the h1 or
+   anything else for horizontal space, so there's nothing left to overlap.
+   Sized to the longer of the two labels ("+ Add community") without
+   guessing a brittle exact pixel width a second time: min-width (not a
+   fixed width) plus white-space:nowrap is mathematically guaranteed
+   never to wrap regardless of which font actually renders — a narrower
+   real font just leaves a little extra padding inside the same
+   200px floor; a wider one simply grows past it instead of wrapping. */
+.admin-header-add-btn{{min-width:200px;text-align:center;white-space:nowrap;}}
+</style>
 </div>"""
     return HTMLResponse(_page("Communities—CFO Toolbox Admin", "", body, authed=True))
 
