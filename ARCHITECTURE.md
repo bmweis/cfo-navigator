@@ -4977,6 +4977,34 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     `logo_in_form_html` parameter (default `""`) to splice this into its
     identity column — only Edit passes it; Add has no community id yet, so
     it renders nothing there, unchanged from before.
+    **Field-order pass, follow-up (2026-08)** — on the Software edit page
+    only (Communities has no Verification status box on this page — that
+    concept lives on Communities' separate 23-field profile-draft page
+    instead), two more moves: the Verification status box moved from
+    full-width above `#tool-edit-form` into the right column, stacked
+    directly above the Warm intro card (each keeps its own bordered/
+    surface-background box now, rather than one continuous box, so neither
+    reads as nested inside the other); and the Formal advisor/Featured
+    checkboxes, previously bare and unlabeled directly under the Logo
+    section, gained a "Priority tags" header (the exact `<label>` styling
+    the Categories header already uses) in that same left-column spot.
+    Pulling Verification status out of its own full-width block let Company
+    details (including the relocated Logo section) move up to sit
+    immediately under the page's h1/meta line. Same nested-`<form>` hazard
+    as the Logo move, same fix shape: `_review_status_action_html` (and
+    `_review_status_block_html`, which composes it with the pill) gained an
+    optional `standalone_form_id` param — when set, the "Mark reviewed"/
+    "Flag for review" button renders as a bare `form="{id}"`-bound element
+    instead of its own literal `<form>`, and a new
+    `_review_status_hidden_form_html` renders the matching hidden `<form>`
+    for the caller to place outside `#tool-edit-form` (right where the
+    Logo/App-screenshot/narrative-verify hidden forms already collect,
+    after the main form closes). Every other caller of these three
+    functions (both admin list tables, the public profile VIEW pages, the
+    Community profile-draft page) omits the param and keeps its original
+    literal-`<form>` behavior unchanged — only the Software edit page's
+    own top-of-page block passes it, since it's the only caller that moved
+    inside another `<form>`.
     `/tools/communities/gap` (the "not
     quite the right fit?" CTA on a profile page — currently a stub that redirects
     into `/contact` with the community pre-filled as context, pending the real

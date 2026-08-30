@@ -437,9 +437,13 @@ def test_mark_reviewed_route_rejects_unknown_redirect_to(env):
 
 def test_edit_page_shows_review_status_pill_and_mark_reviewed_at_top(env):
     """2026-08 consolidation: the checkbox is gone — the whole-record
-    signoff is now the shared Review-status pill + one-click action,
-    positioned at the TOP of the edit page (before the main form), not a
-    checkbox tied to Save at the bottom."""
+    signoff is now the shared Review-status pill + one-click action. Field-
+    order pass (2026-08 follow-up): moved from full-width above the main
+    form into the right column, above Warm intro — inside #tool-edit-form
+    now, not before it, so its "Mark reviewed" action is a standalone-form
+    button (form="review-status-form-tools-{id}") pointing at a hidden
+    <form> rendered after #tool-edit-form closes, the same pattern
+    _logo_admin_section uses (a <form> can't nest inside another <form>)."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -454,8 +458,10 @@ def test_edit_page_shows_review_status_pill_and_mark_reviewed_at_top(env):
     assert f'action="/admin/tools/software/{tool_id}/mark-reviewed"' in r.text
     assert "Mark reviewed" in r.text
     assert f'name="redirect_to" value="/tools/software/{slug}/edit"' in r.text
-    # Positioned before the main edit form, not after it.
-    assert r.text.index("Mark reviewed") < r.text.index('id="tool-edit-form"')
+    assert f'form="review-status-form-tools-{tool_id}"' in r.text
+    # Now positioned inside the main edit form (right column), above Warm intro.
+    assert r.text.index('id="tool-edit-form"') < r.text.index("Mark reviewed")
+    assert r.text.index("Mark reviewed") < r.text.index("Warm intro")
 
 
 def test_edit_page_hides_mark_reviewed_button_when_not_flagged(env):
