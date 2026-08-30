@@ -888,9 +888,19 @@ def _narrative_verify_widget(needs_verification: bool, verify_form_id: str, veri
     action_html = ""
     form_html = ""
     if needs_verification:
+        # Brand-consistency pass (2026-08): was #92400e/#fef3c7 (off-palette
+        # amber) — recolored to --coral-wash bg + --navy text (the CI-enforced
+        # small-coral-text rule bans coral/coral-deep text under 18px, so this
+        # pairs with navy instead — same sanctioned coral-wash+navy pairing
+        # BRAND.md documents for callout blocks), the same small
+        # per-field "unverified" badge language used on the VIEW page's own
+        # .tp-verify/.cc-verify (this is the edit-page rendering of the
+        # identical per-field needs_verification concept, just via a
+        # different helper), deliberately distinct in size/shape from the
+        # larger pill-shaped whole-record _review_status_pill_html.
         badge_html = (
             f'<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
-            f'background:#fef3c7;color:#92400e;border-radius:5px;padding:2px 7px;margin-left:8px;">{_esc(badge_label)}</span>'
+            f'background:var(--coral-wash);color:var(--navy);border-radius:5px;padding:2px 7px;margin-left:8px;">{_esc(badge_label)}</span>'
         )
         action_html = (
             f'<button type="submit" form="{verify_form_id}" '
@@ -6114,8 +6124,17 @@ Not sure which tool's for you? {(
    every card's description block occupies the same height. */
 .tool-desc{{font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;min-height:63px;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}}
-.tool-desc-verify{{display:block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
-  color:#92400e;margin:-8px 0 12px;}}
+/* Brand-consistency pass (2026-08): was plain #92400e text, off-palette
+   and the sole "text only, no badge box" outlier among the several places
+   this same "unverified—hidden from visitors" concept renders (see
+   .tp-verify/.cc-verify below) — unified onto the same small coral-wash/
+   navy-text badge box those use (navy, not coral-deep, text — the mechanical
+   small-coral-text CI rule bans coral/coral-deep text under 18px), just kept
+   inline-block instead of a
+   full block since it sits on its own row under a clamped card description
+   either way. */
+.tool-desc-verify{{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--navy);background:var(--coral-wash);border-radius:5px;padding:1px 6px;margin:-4px 0 12px;}}
 .tool-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .tool-full-link{{font-size:12px;font-weight:600;color:var(--navy);white-space:nowrap;flex-shrink:0;}}
 .tool-compare-label{{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;}}
@@ -6794,8 +6813,18 @@ that's increasingly a deciding factor. Rows still marked
 .cc-empty{{color:var(--muted);font-style:italic;}}
 .cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);
   background:var(--seafoam);padding:8px 16px;}}
-.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
-  background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+/* Brand-consistency pass (2026-08): was #92400e/#fef3c7 (off-palette amber)
+   — recolored to --coral-wash bg + --navy text (navy, not coral-deep,
+   because BRAND.md's own mechanical CI check bans coral/coral-deep text
+   under 18px — same sanctioned coral-wash+navy callout pairing), the same
+   small per-field
+   "unverified" badge language used everywhere this concept renders
+   (.tp-verify, .tool-desc-verify, the Communities compare page's own
+   .cc-verify below), deliberately distinct in size/shape from the larger
+   pill-shaped whole-record _review_status_pill_html so the two read as
+   different signal types even though they now share one color rule. */
+.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
+  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
 .comm-name:hover{{color:var(--accent);}}
@@ -7369,6 +7398,30 @@ function submitIntroForm() {{
 
     subhead = "" if _desc_hidden else (tool.get("summary") or tool.get("description") or "").strip()
 
+    # Review status (2026-08 consolidation) — the shared pill+action, now
+    # also visible on the profile VIEW page itself, not just the edit page
+    # and the admin list. Admin-only, same _is_authed gating as every other
+    # admin-facing element on this page (the meta line, the Edit button).
+    # Placement (2026-08 follow-up, per Brian's review of the first draft):
+    # moved from the bottom of the page (after all card content) to the
+    # hero, above the category pills — computed here, before hero_text is
+    # built, so it can be spliced in above tp-hero-cats rather than buried
+    # under everything else.
+    review_status_html = ""
+    if authed:
+        _needs_review = bool(tool.get("needs_review"))
+        _tool_breakdown = (sum(1 for f in (
+            "description_needs_verification", "agent_taxonomy_needs_verification",
+            "competitive_differentiation_needs_verification") if tool.get(f)), 3) if _needs_review else None
+        _rs_block = _review_status_block_html(
+            not _needs_review,
+            f"/admin/tools/software/{tool['id']}/mark-reviewed",
+            f"/admin/tools/software/{tool['id']}/flag-for-review",
+            f"/tools/software/{tool['slug']}",
+            _tool_breakdown,
+        )
+        review_status_html = f'<div style="margin:2px 0 14px;">{_rs_block}</div>'
+
     # Header row: logo (F2) beside the name/subhead, same understated
     # monogram fallback as the directory cards and Competitors table when
     # logo_path is still empty.
@@ -7390,6 +7443,7 @@ function submitIntroForm() {{
     {f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
   </div>
 </div>
+{review_status_html}
 {f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}
 {differentiation_block}
 <div class="tp-hero-actions">{action_row}</div>"""
@@ -7442,29 +7496,13 @@ function submitIntroForm() {{
     {lower_band_left}
   </div>"""
 
-    # Review status (2026-08 consolidation) — the shared pill+action, now
-    # also visible on the profile VIEW page itself, not just the edit page
-    # and the admin list. Admin-only, same _is_authed gating as every other
-    # admin-facing element on this page (the meta line, the Edit button).
-    review_status_html = ""
-    if authed:
-        _needs_review = bool(tool.get("needs_review"))
-        _tool_breakdown = (sum(1 for f in (
-            "description_needs_verification", "agent_taxonomy_needs_verification",
-            "competitive_differentiation_needs_verification") if tool.get(f)), 3) if _needs_review else None
-        _rs_block = _review_status_block_html(
-            not _needs_review,
-            f"/admin/tools/software/{tool['id']}/mark-reviewed",
-            f"/admin/tools/software/{tool['id']}/flag-for-review",
-            f"/tools/software/{tool['slug']}",
-            _tool_breakdown,
-        )
-        review_status_html = f'<div style="margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{_rs_block}</div>'
+    # review_status_html is now computed above, before hero_text, and
+    # spliced into the hero above the category pills (item 4, 2026-08
+    # placement follow-up) — see that comment for the full reasoning.
 
     main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 {top_band}
 {lower_band}
-{review_status_html}
 {f'<p style="font-size:13px;color:var(--muted);margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}
 {footnote_block}"""
 
@@ -7528,8 +7566,18 @@ function submitIntroForm() {{
   border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 .tp-feature-tag-addon{{background:var(--seafoam-wash);color:var(--seafoam-deep);}}
 .tp-feature-tag-ai{{background:#fef3c7;color:#92400e;}}
-.tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
-  background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+/* Brand-consistency pass (2026-08): the small per-field "unverified—hidden
+   from visitors" badge — was #92400e/#fef3c7 (off-palette amber),
+   recolored to --coral-wash bg + --navy text (not coral-deep — the
+   mechanical small-coral-text CI check bans coral/coral-deep text under
+   18px, so this uses the same sanctioned coral-wash+navy callout pairing
+   BRAND.md documents), same small badge language as
+   .cc-verify/.tool-desc-verify, deliberately smaller/uppercase/tag-shaped
+   (radius 5px) rather than pill-shaped, so it reads as a distinct signal
+   type from the larger whole-record _review_status_pill_html even though
+   both now share the same coral-wash/navy color rule. */
+.tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
+  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 /* Icon-weight fix (item 3, Aug 2026 UI pass): a flag on every row read as
    visually heavy on a long feature list (e.g. NetSuite's ~13 rows) for an
    action most visitors never use. Kept per-row (rather than collapsing to
@@ -8734,7 +8782,11 @@ to compare them side by side. Check the box on any card, then use the compare ba
             return '<td class="cc-cell cc-empty">Not available yet</td>'
         if text == _NEEDS_VERIFICATION:
             return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
-        verify = ' <span class="comm-verify">unverified&mdash;hidden from visitors</span>' if unverified else ""
+        # .cc-verify (publish-gate "unverified—hidden from visitors"), not
+        # .comm-verify (the data-completeness flag above) — these are two
+        # different concepts that used to incorrectly share one style; see
+        # the .cc-verify definition's own comment for the split.
+        verify = ' <span class="cc-verify">unverified&mdash;hidden from visitors</span>' if unverified else ""
         return f'<td class="cc-cell" style="white-space:pre-wrap;">{_esc(text)}{verify}</td>'
 
     def _profile_row(label: str, values: list) -> str:
@@ -8785,6 +8837,19 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .comm-star{{font-size:14px;color:#b8860b;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
 .comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
+/* Brand-consistency pass (2026-08) — .comm-verify (above) is a DIFFERENT
+   concept from "unverified—hidden from visitors": it's the dashed/muted
+   "field was never auto-fill-researched" flag (_verify_html's
+   _NEEDS_VERIFICATION sentinel), which stays visible (not gated) and
+   deliberately quiet since it's a data-completeness note, not a
+   publish-gate warning — left untouched. _profile_cell below was
+   incorrectly reusing this same class for the OTHER, publish-gated
+   concept too (a real pre-existing bug: two different meanings sharing
+   one style). Split: this new .cc-verify is the small coral-wash/navy
+   badge every other "unverified—hidden from visitors" surface
+   uses (.tp-verify, the Software compare page's own .cc-verify, etc.). */
+.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
+  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 </style>"""
     return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
@@ -9170,6 +9235,32 @@ def tools_community_profile(request: Request, slug: str):
 
     demographic_html = _verify_html(community["demographic"], "tp-verify-inline")
     community_logo_url = _community_logo_url(community)
+
+    # Review status (2026-08 consolidation) — same shared pill+action as
+    # Software's profile page, admin-only. Shown only when a profile draft
+    # actually exists (`profile` non-empty) — a community with nothing
+    # drafted yet has nothing to review or flag, same no-op precedent
+    # flag_community_profile_needs_review already applies. Placement
+    # (2026-08 follow-up, per Brian's review of the first draft): moved
+    # from the bottom of the page to the hero, above the Categories card —
+    # Communities have no hero-level category pills the way Software does,
+    # so this is placed right after the name/subhead, above everything
+    # else on the page (including the Categories card, further down in the
+    # lower band), rather than literally "above the tp-hero-cats row" which
+    # doesn't exist on this page.
+    review_status_html = ""
+    if authed and profile:
+        _needs_review = bool(profile.get("needs_review"))
+        _comm_breakdown = (quality_flags["unconfident_count"], 12) if (_needs_review and quality_flags) else None
+        _rs_block = _review_status_block_html(
+            not _needs_review,
+            f"/admin/tools/communities/{community['id']}/mark-reviewed",
+            f"/admin/tools/communities/{community['id']}/flag-for-review",
+            f"/tools/communities/{community['slug']}",
+            _comm_breakdown,
+        )
+        review_status_html = f'<div style="margin:2px 0 14px;">{_rs_block}</div>'
+
     hero_text = f"""<div class="tp-header-row">
   {_logo_box(community['name'], community_logo_url, 56, radius=12)}
   <div>
@@ -9177,6 +9268,7 @@ def tools_community_profile(request: Request, slug: str):
     <p class="tp-subhead">{demographic_html}</p>
   </div>
 </div>
+{review_status_html}
 <div class="tp-hero-actions">{action_row}</div>"""
 
     featured_sticker = _sticker("Featured", rotate=8, top="-14px", right="-16px", size=14) if community.get("featured") else ""
@@ -9363,28 +9455,13 @@ def tools_community_profile(request: Request, slug: str):
   <p style="margin:0;"><a href="/tools/communities/correct?community_id={community['id']}" style="font-size:13px;color:var(--muted);">Something here out of date? Suggest a correction &rarr;</a></p>
 </div>"""
 
-    # Review status (2026-08 consolidation) — same shared pill+action as
-    # Software's profile page, admin-only. Shown only when a profile draft
-    # actually exists (`profile` non-empty) — a community with nothing
-    # drafted yet has nothing to review or flag, same no-op precedent
-    # flag_community_profile_needs_review already applies.
-    review_status_html = ""
-    if authed and profile:
-        _needs_review = bool(profile.get("needs_review"))
-        _comm_breakdown = (quality_flags["unconfident_count"], 12) if (_needs_review and quality_flags) else None
-        _rs_block = _review_status_block_html(
-            not _needs_review,
-            f"/admin/tools/communities/{community['id']}/mark-reviewed",
-            f"/admin/tools/communities/{community['id']}/flag-for-review",
-            f"/tools/communities/{community['slug']}",
-            _comm_breakdown,
-        )
-        review_status_html = f'<div style="margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{_rs_block}</div>'
+    # review_status_html is now computed above, before hero_text, and
+    # spliced into the hero right after the name/subhead (item 4, 2026-08
+    # placement follow-up) — see that comment for the full reasoning.
 
     main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 {top_band}
 {lower_band}
-{review_status_html}
 {footnote_block}
 {footer_links}"""
 
@@ -9434,6 +9511,16 @@ def tools_community_profile(request: Request, slug: str):
 .tp-detail-label{{color:var(--muted);font-weight:500;}}
 .tp-detail-value{{color:var(--ink-soft);text-align:left;overflow-wrap:break-word;word-break:break-word;min-width:0;}}
 .tp-verify-inline{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
+/* Brand-consistency pass (2026-08) — this page renders .tp-verify (the
+   whole-profile "unverified—hidden from visitors" badge, via _profile_verify
+   on the verdict callout and each of the 4 grouped section cards) but
+   never actually defined it in this page's own <style> block, so it was
+   rendering completely unstyled (a real pre-existing bug, found while
+   auditing every "unverified" indicator for this pass — not introduced by
+   it). Same small coral-wash/navy badge as the tool profile page's
+   own .tp-verify definition. */
+.tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
+  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 </style>"""
     resp = HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request)))
     _set_visitor_cookie(request, resp, session_id)
@@ -10460,28 +10547,46 @@ def _review_status_pill_html(reviewed: bool, breakdown: tuple[int, int] | None =
     low-confidence" badge — the latter two retired outright per this
     consolidation, not relocated).
 
-    Solid green "Reviewed" when the whole-record needs_review flag is
-    false; solid coral "Needs review" when true, with an optional
-    "(n/total)" fraction alongside — Communities' Claude-self-reported
-    low-confidence count (unconfident_count/12, the one dataset explicitly
-    named to carry over into this component) or Software's own count of
-    how many of its 3 per-field *_needs_verification flags are currently
-    set. True stoplight green (#15803D), not --good (navy, the site's
-    dominant color and so unusable as a health signal) — same sanctioned
-    exception BRAND.md documents for the auth-cookie-status dots; --coral
-    for the "needs review" state is Brian's own explicit design call for
-    this specific component, not a general license to use coral for status
-    elsewhere. A real pill shape (border-radius:999px) rather than the
-    4px-radius chip style every other admin badge on this page uses, so it
-    reads as this component's own distinct identity."""
+    "Reviewed" when the whole-record needs_review flag is false; "Needs
+    review" when true, with an optional "(n/total)" fraction alongside —
+    Communities' Claude-self-reported low-confidence count
+    (unconfident_count/12, the one dataset explicitly named to carry over
+    into this component) or Software's own count of how many of its 3
+    per-field *_needs_verification flags are currently set.
+
+    Color corrected (2026-08 brand-consistency pass, per Brian's review of
+    the first draft's screenshots): the original shipped a true-stoplight
+    green (#15803D) and a solid saturated coral fill, matching the
+    auth-cookie-status dots' sanctioned exception — but that exception was
+    never re-confirmed against BRAND.md for THIS component, and green
+    isn't in the palette there at all (checked directly against BRAND.md,
+    not assumed). Reviewed now uses --seafoam fill + --navy text, the
+    exact same "seafoam fill, navy text, radius 6px" tag/badge convention
+    every other pill on these pages already uses (e.g. the category "FP&A"
+    tag) — seafoam's base shade IS meant for solid fills, unlike coral.
+    Needs review now uses --coral-wash (light) fill + --navy text — never a
+    solid --coral fill (coral is a rare accent, ~10% of a screen at most,
+    one per screen, and never a button/solid-fill background per BRAND.md),
+    and navy rather than --coral-deep text specifically because
+    tests/test_brand_standards.py mechanically bans coral/coral-deep text
+    under 18px (BRAND.md §2.3) — so this pairs coral-wash with navy text
+    instead, the exact "callout blocks — pair with navy text (11:1
+    contrast)" pairing BRAND.md's own coral-wash row already documents, and
+    the same pairing repeated throughout this codebase's real coral-wash
+    call sites. A real pill shape
+    (border-radius:999px) is kept — deliberately larger/rounder than the
+    small uppercase per-field "unverified" badges (_esc'd inline, radius
+    5px, see .tp-verify/.cc-verify), so the WHOLE-RECORD signal and a
+    PER-FIELD signal read as visually distinct component families even
+    though they now share the same color language."""
     if reviewed:
         return ('<span style="display:inline-flex;align-items:center;font-size:11px;font-weight:700;'
-                'letter-spacing:.02em;background:#15803D;color:#fff;border-radius:999px;padding:3px 11px;'
-                'white-space:nowrap;">Reviewed</span>')
+                'letter-spacing:.02em;background:var(--seafoam);color:var(--navy);border-radius:999px;'
+                'padding:3px 11px;white-space:nowrap;">Reviewed</span>')
     frac = f" ({breakdown[0]}/{breakdown[1]})" if breakdown else ""
     return (f'<span style="display:inline-flex;align-items:center;font-size:11px;font-weight:700;'
-            f'letter-spacing:.02em;background:var(--coral);color:#fff;border-radius:999px;padding:3px 11px;'
-            f'white-space:nowrap;">Needs review{_esc(frac)}</span>')
+            f'letter-spacing:.02em;background:var(--coral-wash);color:var(--navy);border-radius:999px;'
+            f'padding:3px 11px;white-space:nowrap;">Needs review{_esc(frac)}</span>')
 
 
 def _review_status_action_html(reviewed: bool, mark_reviewed_url: str, flag_url: str,
@@ -15408,6 +15513,7 @@ def admin_community_profile_edit(request: Request, community_id: int):
             _review_line_html = (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
                                   f'Reviewed by {_esc(_reviewer)} on {_esc(_reviewed_date)}</p>')
         _profile_review_status_html = f"""<div style="margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
+  <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
   {_rs_block}
   <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Flags this profile for a full read-through&mdash;set automatically whenever the profile is drafted or refreshed via Generate, or manually anytime here.</p>
   {_review_line_html}
@@ -16234,6 +16340,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 {_CROPPER_CDN_HTML}
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <div style="margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
+  <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
   {_review_status_top_html}
   <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Flags this profile for a full read-through&mdash;set automatically when a new tool is added or any tracked field is refreshed, or manually anytime here.</p>
   {_profile_review_line_html}

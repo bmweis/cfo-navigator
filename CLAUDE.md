@@ -3671,6 +3671,94 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   specifically has genuinely-empty underlying data needs Brian's own check
   against production, which this session has no access to).
 
+- **Review-status consolidation, brand-fidelity follow-up (2026-08) — Brian's
+  review of the first draft's screenshots found real BRAND.md violations,
+  not preference; fixed against BRAND.md directly (via the
+  cfo-navigator-brand skill) rather than approximated, plus a scope
+  expansion to every "needs verification"/"unverified" indicator on both
+  entity types, not just the three original surfaces.**
+  1. **Green isn't in the palette at all** — the pill's "Reviewed" state
+     (`#15803D`, the auth-cookie-status dots' own sanctioned exception) was
+     never re-confirmed against BRAND.md for this component. Replaced with
+     `var(--seafoam)` fill + `var(--navy)` text — the exact "seafoam fill,
+     navy text, radius 6px" tag/badge convention every other pill on these
+     pages already uses (the category "FP&A" tag).
+  2. **Coral as a solid-fill "button-shaped" pill violates the standing
+     "coral is a rare accent, never a button" rule** — restyled to a light
+     `var(--coral-wash)` fill. Text color needed a second correction beyond
+     what item 2 literally asked for: `var(--coral-deep)` text reads as the
+     obvious "colored text on light background" pairing, but
+     `tests/test_brand_standards.py`'s own mechanical CI check
+     (`small_coral_text_spans`, BRAND.md §2.3) bans coral/coral-deep text
+     under 18px outright — checked directly against the live test, not
+     assumed from the ramp table's "text-capable coral (AA)" description
+     for `--coral-deep`, which reads as an exception this stricter
+     mechanical rule doesn't actually carve out. So `--coral-wash` pairs
+     with `var(--navy)` text instead — literally BRAND.md's own coral-wash
+     row ("Callout blocks — pair with navy text (11:1 contrast)"), and the
+     same pairing already repeated at every other real `--coral-wash` call
+     site in this codebase (`error_banner`s, the community-gap-feedback
+     dismiss banner, etc.) — confirmed by grep before choosing it, not
+     invented. The whole-record pill and every per-field badge below both
+     use this identical `coral-wash`+`navy` pairing now.
+  3. **Consolidated every "unverified—hidden from visitors"/"needs
+     verification" indicator across both Software and Communities**, not
+     just the three original surfaces — a full audit (not just the two
+     pages Brian's screenshots showed) found the concept rendered in
+     **six** different places, four of them off-palette amber
+     (`#92400e`/`#fef3c7`, no BRAND.md token at all): `.tool-desc-verify`
+     (Software directory card — recolored, and unified from plain text to
+     the same small badge-box treatment every other surface uses),
+     `.tp-verify` (tool profile page's Description/Agent taxonomy cards),
+     `.cc-verify` (Software compare page), and `_narrative_verify_widget`'s
+     inline badge (the tool EDIT page's own per-field "Needs verification"
+     flag next to Description/Agent taxonomy/Differentiation — found only
+     by tracing `_narrative_verify_widget`'s remaining callers, not
+     mentioned in Brian's screenshots at all). Two more were found broken,
+     not just off-brand: **the Community profile page's own `.tp-verify`
+     was never defined in that page's `<style>` block at all** — a real
+     pre-existing bug, so the whole-profile "unverified—hidden from
+     visitors" badge on the Bottom line callout and each of the 4 grouped
+     section cards was rendering completely unstyled; and **the Communities
+     compare page's `_profile_cell` reused `.comm-verify`** (the unrelated,
+     intentionally-muted-dashed "field was never auto-fill-researched"
+     data-completeness flag, `_verify_html`'s `_NEEDS_VERIFICATION`
+     sentinel) **for this different, publish-gated concept too** — two
+     genuinely different meanings sharing one style. Split into a proper
+     `.cc-verify` for the publish-gate meaning, leaving `.comm-verify`
+     untouched for its own, correct, separate meaning. Every one of these
+     six/eight surfaces now shares the identical `coral-wash`+`navy` small
+     badge (uppercase, 10-11px, radius 5px) — visually distinct from the
+     whole-record pill (999px pill radius, sentence case, larger padding)
+     specifically so a reader can tell "this one field's status" from "the
+     whole profile's status" at a glance, per Brian's explicit ask, even
+     though both now share one color language. `_confidence_badge_html`/
+     `_confidence_indicator_html` (Claude's self-reported confidence — a
+     deliberately separate, already-on-brand-adjacent concept, not a
+     verification-status indicator) were confirmed out of scope and left
+     untouched.
+  4. **Placement**: the whole-record pill moved from the bottom of both
+     profile VIEW pages (after all card content) to the hero, computed
+     before `hero_text` is built and spliced in right after the name/
+     subhead — above the category pills on the Software page (which has
+     hero-level category pills) and above the Categories card on the
+     Communities page (which has no hero-level cats at all, so this reads
+     as "above the Categories card, and above everything else on the
+     page," the closest honest match to Communities' different layout).
+  5. **Edit page**: both edit pages' bordered "Verification status" panel
+     now carries an actual `<h2>Verification status</h2>` label above the
+     pill/action pair — previously unlabeled, reading as abrupt.
+  Verified against 10 screenshots covering every affected surface (both
+  entity types × admin list, profile view, edit page top, compare page,
+  plus the reviewed/green state and the Beyond the Books blank-field row)
+  — including confirming, via a direct authenticated HTTP request
+  (independent of the screenshot tooling), that the whole-record pill and
+  every per-field badge render with the corrected colors and copy exactly
+  as designed. `tests/test_brand_standards.py`/`tests/test_checks.py` both
+  pass clean against the corrected version — they did not against the
+  first draft's solid-coral pill, which is what surfaced the CI-check
+  detail this whole correction turned on.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded
