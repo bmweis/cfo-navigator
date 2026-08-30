@@ -28684,7 +28684,7 @@ def admin_backup(request: Request, uploaded: str = ""):
     <div>
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
-      <a href="/admin/library/backup/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
+      <a href="/admin/library/backup/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;width:202px;text-align:center;box-sizing:border-box;">Download library.db</a>
     </div>
     <div class="backup-action-divider">
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
@@ -28692,7 +28692,7 @@ def admin_backup(request: Request, uploaded: str = ""):
       <form method="post" action="/admin/library/backup/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
         <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
           style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
+        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;align-self:flex-start;width:202px;text-align:center;box-sizing:border-box;">Upload and replace</button>
       </form>
     </div>
   </div>
