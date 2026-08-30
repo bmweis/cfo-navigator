@@ -6736,7 +6736,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         # sees the drafted-but-unconfirmed text, clearly labeled as hidden.
         if not note or (unverified and not _compare_authed):
             return '<td class="cc-cell cc-empty">Not documented yet</td>'
-        verify = ' <span class="cc-verify">unverified&mdash;hidden from visitors</span>' if unverified else ""
+        verify = '<div style="margin-top:4px;"><span class="cc-verify">unverified&mdash;hidden from visitors</span></div>' if unverified else ""
         return f'<td class="cc-cell">{_esc(note)}{verify}</td>'
 
     agent_row = ""
@@ -6763,7 +6763,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         # visitor, only an admin, clearly labeled as hidden.
         if not text or (unverified and not _compare_authed):
             return '<td class="cc-cell cc-empty">Not available yet</td>'
-        verify = ' <span class="cc-verify">unverified&mdash;hidden from visitors</span>' if unverified else ""
+        verify = '<div style="margin-top:4px;"><span class="cc-verify">unverified&mdash;hidden from visitors</span></div>' if unverified else ""
         return f'<td class="cc-cell">{_esc(text)}{verify}</td>'
 
     description_row = ""
@@ -8786,7 +8786,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         # .comm-verify (the data-completeness flag above) — these are two
         # different concepts that used to incorrectly share one style; see
         # the .cc-verify definition's own comment for the split.
-        verify = ' <span class="cc-verify">unverified&mdash;hidden from visitors</span>' if unverified else ""
+        verify = '<div style="margin-top:4px;"><span class="cc-verify">unverified&mdash;hidden from visitors</span></div>' if unverified else ""
         return f'<td class="cc-cell" style="white-space:pre-wrap;">{_esc(text)}{verify}</td>'
 
     def _profile_row(label: str, values: list) -> str:
@@ -10808,7 +10808,7 @@ def admin_software(request: Request, filter: str = ""):
           <td data-col="software:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td data-col="software:intros" data-label="Intros" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
           <td data-col="software:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">{review_pill}{mark_reviewed}</div>
+            <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
           </td>
           <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
             <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
@@ -14330,7 +14330,7 @@ def admin_communities(request: Request, filter: str = ""):
   <td data-col="communities:format" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
   <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
   <td data-col="communities:review_status" style="padding:10px 12px;">
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">{review_pill}{mark_reviewed}</div>
+    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
   </td>
   <td style="padding:10px 12px;min-width:210px;">
     <div style="display:flex;flex-direction:column;gap:6px;">
