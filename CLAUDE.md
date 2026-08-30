@@ -3864,6 +3864,40 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   rarely-visited state — flagged here as a genuine, real, still-open gap
   rather than silently found and dropped.
 
+  **Third same-PR follow-up (2026-08) — desktop and mobile deliberately
+  invert each other for both the Review status pill/action pair and the
+  three Actions buttons, on both tables.** Requested live, after the
+  mobile-card fallback above shipped: Delete should break onto its own row
+  below View/Edit on desktop (mirroring the Review status pill/Mark
+  reviewed button's own always-stacked "break" — which stays exactly as it
+  was on desktop, unchanged), while on mobile both pairs go the other
+  way — Review status's pill+button sit side by side, and all three Actions
+  buttons share one row, since a mobile card's full width has the room a
+  narrow desktop table cell doesn't. Implemented with the same CSS-only,
+  no-JS-change discipline the rest of this admin-list work has used:
+  `.admin-table-actions-grid`'s desktop styling reverted to
+  `display:grid;grid-template-columns:repeat(2,auto)` (the exact 2-column
+  grid Software had before the Actions-single-row fix two follow-ups
+  earlier in this same PR — that fix wasn't wrong, it just turned out not
+  to be the shape wanted once Brian saw it live; this is a genuine reversal
+  of a prior commit in this PR, not a new decision layered on top) — 3
+  items in row-major order on a 2-column grid land View+Edit on row 1 and
+  Delete alone on row 2 automatically, no manual grouping needed. The
+  `<700px` mobile override changed from forcing 1-column stacking to
+  `grid-template-columns:repeat(3,1fr)` — one row, three equal columns,
+  comfortably fitting "View profile"/"Edit"/"Delete" at real mobile card
+  width. A new `.admin-review-status-group` class (added to the pill+button
+  wrapper `<div>` on both tables, no visual change to its own default
+  behavior) is what the mobile override targets to flip it from
+  `flex-direction:column` to `row` — column stays the un-overridden desktop
+  default. Communities' Actions cell also lost a redundant extra wrapper
+  `<div>` around `.admin-table-actions-grid` (a leftover from an earlier
+  structure, harmless but unnecessary once the grid itself does the
+  layout work) while this was already being touched. Verified live at both
+  breakpoints on both tables — 1280px shows the 2-row desktop break on
+  both; 390px shows both pairs correctly flipped to one row each, no
+  horizontal overflow on either page.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded
