@@ -2,6 +2,7 @@
 column-picker/bulk-edit routes for the Communities and Software admin tables."""
 import json
 import os
+import re
 import tempfile
 from html.parser import HTMLParser
 
@@ -10,20 +11,22 @@ import pytest
 
 class _AttrFinder(HTMLParser):
     """Parses HTML the same way a browser's attribute parser does—finds the
-    onchange="" attribute for a given element id and returns its fully
-    HTML-unescaped value (HTMLParser unescapes entities in attribute values
-    automatically). Used to catch the class of bug where an unescaped "
-    inside an attribute value truncates the attribute instead of a mere
-    substring check, which can't tell a whole attribute from a cut-off one."""
-    def __init__(self, target_id):
+    given attribute (default "onchange") for a given element id and returns
+    its fully HTML-unescaped value (HTMLParser unescapes entities in
+    attribute values automatically). Used to catch the class of bug where an
+    unescaped " inside an attribute value truncates the attribute instead of
+    a mere substring check, which can't tell a whole attribute from a
+    cut-off one."""
+    def __init__(self, target_id, attr="onchange"):
         super().__init__(convert_charrefs=True)
         self.target_id = target_id
+        self.attr = attr
         self.found = None
 
     def handle_starttag(self, tag, attrs):
         d = dict(attrs)
         if d.get("id") == self.target_id:
-            self.found = d.get("onchange")
+            self.found = d.get(self.attr)
 
 
 @pytest.fixture
@@ -380,19 +383,24 @@ def test_communities_page_renders_column_picker_and_bulk_edit_markup(admin_clien
     assert "colpick-communities-cost_band" in r.text
 
 
-# --- column-picker onchange attribute is well-formed, not truncated ----------
+# --- column-picker onclick attribute is well-formed, not truncated ----------
 #
-# _admin_column_picker_html builds onchange="toggleColumn(...,{json.dumps(...)})"
-# inside a double-quoted HTML attribute. json.dumps() also uses double quotes,
-# so an unescaped array there closes the attribute at its first element and
-# leaves toggleColumn's 4th argument cut off mid-array—the checkbox's onchange
-# then either does nothing or throws (Unexpected end of input) instead of
-# running toggleColumn, no matter how correct toggleColumn's own JS is. A
-# substring check (`'colpick-software-url' in r.text`, as in the tests above)
-# can't catch this—it doesn't care where the attribute actually ends. Parsing
-# with html.parser, the same way a browser does, can.
+# _admin_column_picker_html builds onclick="saveColumnView(...,{json.dumps(...)})"
+# on the "Save view for next time" button, inside a double-quoted HTML
+# attribute. json.dumps() also uses double quotes, so an unescaped array
+# there closes the attribute at its first element and leaves
+# saveColumnView's 2nd argument cut off mid-array—the button's onclick then
+# either does nothing or throws (Unexpected end of input) instead of running
+# saveColumnView, no matter how correct saveColumnView's own JS is. A
+# substring check (`'colpick-software-url' in r.text`, as in the tests
+# above) can't catch this—it doesn't care where the attribute actually
+# ends. Parsing with html.parser, the same way a browser does, can.
+#
+# (The checkbox's own onchange="toggleColumn(...)" carries no JSON array
+# any more—toggleColumn is session-only now, see _ADMIN_BULK_EDIT_JS—so
+# this truncation risk moved to the Save button's onclick instead.)
 
-def test_software_column_picker_onchange_is_not_truncated(admin_client):
+def test_software_column_picker_onclick_is_not_truncated(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
@@ -400,20 +408,20 @@ def test_software_column_picker_onchange_is_not_truncated(admin_client):
     lib.close()
 
     r = client.get("/admin/tools/software")
-    finder = _AttrFinder("colpick-software-summary")
+    finder = _AttrFinder("colpick-save-software", attr="onclick")
     finder.feed(r.text)
-    onchange = finder.found
-    assert onchange is not None, "colpick-software-summary checkbox not found"
-    assert onchange.startswith("toggleColumn('software','summary',this.checked,")
-    assert onchange.endswith(")")
-    # The 4th argument must itself be valid, complete JSON—not truncated at
+    onclick = finder.found
+    assert onclick is not None, "colpick-save-software button not found"
+    assert onclick.startswith("saveColumnView('software',")
+    assert onclick.endswith(")")
+    # The 2nd argument must itself be valid, complete JSON—not truncated at
     # the first embedded double quote.
-    array_json = onchange[len("toggleColumn('software','summary',this.checked,"):-1]
+    array_json = onclick[len("saveColumnView('software',"):-1]
     parsed = json.loads(array_json)
     assert "summary" in parsed and "categories" in parsed
 
 
-def test_communities_column_picker_onchange_is_not_truncated(admin_client):
+def test_communities_column_picker_onclick_is_not_truncated(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
@@ -422,15 +430,71 @@ def test_communities_column_picker_onchange_is_not_truncated(admin_client):
     lib.close()
 
     r = client.get("/admin/tools/communities")
-    finder = _AttrFinder("colpick-communities-cost_band")
+    finder = _AttrFinder("colpick-save-communities", attr="onclick")
     finder.feed(r.text)
-    onchange = finder.found
-    assert onchange is not None, "colpick-communities-cost_band checkbox not found"
-    assert onchange.startswith("toggleColumn('communities','cost_band',this.checked,")
-    assert onchange.endswith(")")
-    array_json = onchange[len("toggleColumn('communities','cost_band',this.checked,"):-1]
+    onclick = finder.found
+    assert onclick is not None, "colpick-save-communities button not found"
+    assert onclick.startswith("saveColumnView('communities',")
+    assert onclick.endswith(")")
+    array_json = onclick[len("saveColumnView('communities',"):-1]
     parsed = json.loads(array_json)
     assert "cost_band" in parsed and "reach" in parsed
+
+
+# --- default-visible column state matches the shared spec -------------------
+#
+# Only "review_status" should render checked in the server-rendered HTML
+# (the state before any localStorage-saved view exists) on either table—
+# Name and Actions are always visible regardless (no data-col at all), and
+# every other optional column starts unchecked/hidden. Same default on both
+# tables by design (2026-08 column-defaults follow-up to #465).
+#
+# "checked" is a bare boolean HTML attribute (no ="value"), so html.parser
+# represents both "present" and "absent" as None via dict.get()—the two
+# cases are indistinguishable that way. A regex over the checkbox's own
+# <input ...> tag, checking whether the literal token "checked" appears
+# inside it, is the simple, reliable way to tell them apart.
+
+def _colpick_is_checked(html: str, checkbox_id: str) -> bool:
+    m = re.search(r'<input[^>]*\bid="' + re.escape(checkbox_id) + r'"[^>]*>', html)
+    assert m is not None, f"{checkbox_id} checkbox not found"
+    # A naive `"checked" in tag` substring check false-positives on every
+    # checkbox—the onchange handler's own `this.checked` also contains the
+    # substring "checked". The real boolean attribute renders as a bare,
+    # whitespace-bounded token (` checked `); `this.checked` is preceded by
+    # a dot, which \b alone doesn't exclude.
+    return re.search(r'(?<!\.)\bchecked\b', m.group(0)) is not None
+
+
+def test_software_default_visible_columns_match_shared_spec(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.add_tool("Tool A", "desc", "https://a.example", [], approved=1)
+    lib.close()
+
+    r = client.get("/admin/tools/software")
+    for key in ("summary", "categories", "intros"):
+        assert not _colpick_is_checked(r.text, f"colpick-software-{key}"), \
+            f"software:{key} should be unchecked by default"
+    assert _colpick_is_checked(r.text, "colpick-software-review_status"), \
+        "software:review_status should be checked by default"
+
+
+def test_communities_default_visible_columns_match_shared_spec(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.add_community(name="Comm A", url="https://ca.example", demographic="CFOs",
+                       cost_band="Free", categories=[], approved=1)
+    lib.close()
+
+    r = client.get("/admin/tools/communities")
+    for key in ("notes", "cost_band", "access", "categories", "sponsorship_type", "format", "reach"):
+        assert not _colpick_is_checked(r.text, f"colpick-communities-{key}"), \
+            f"communities:{key} should be unchecked by default"
+    assert _colpick_is_checked(r.text, "colpick-communities-review_status"), \
+        "communities:review_status should be checked by default"
 
 
 # --- shared admin JS block's escaped apostrophe renders as valid JS ----------
