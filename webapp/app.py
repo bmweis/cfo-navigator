@@ -28836,42 +28836,67 @@ def admin_backup(request: Request, uploaded: str = ""):
     )
     backup_log_rows_html = "".join(
         f"""<tr>
-          <td style="padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:13px;">{_esc(b['created_at'][:16].replace('T',' '))}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(b['filename']) or '—'}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
+          <td data-label="When" style="padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:13px;">{_esc(b['created_at'][:16].replace('T',' '))}</td>
+          <td data-label="Filename" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(b['filename']) or '—'}</td>
+          <td data-label="Location" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
             f'<a href="https://drive.google.com/file/d/{quote(b["drive_file_id"])}/view" target="_blank" rel="noopener">Open in Drive &rarr;</a>'
             if b['drive_file_id'] else '—'
           }</td>
-          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
+          <td data-label="Status" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
             '<span style="color:var(--seafoam-deep);font-weight:600;">Success</span>' if b['status'] == 'success'
             else '<span style="color:var(--alert);font-weight:600;">Failed</span>'
           }</td>
-          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-soft);">{
+          <td data-label="Notes" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-soft);">{
             _esc(f"{b['bytes']:,} bytes · {b['row_count']:,} articles") if b['status'] == 'success' else _esc(b['error'])
           }</td>
         </tr>"""
         for b in backup_rows
     ) or '<tr><td colspan="5" style="padding:16px;color:var(--muted);font-size:13px;">No off-site backups recorded yet.</td></tr>'
     body = f"""<div class="page page-admin">
+<style>
+.backup-actions{{display:grid;grid-template-columns:1fr;gap:24px;}}
+.backup-actions .backup-action-divider{{border-left:none;border-top:1px solid var(--line);padding-left:0;padding-top:20px;}}
+@media(min-width:700px){{
+  .backup-actions{{grid-template-columns:1fr 1fr;align-items:start;}}
+  .backup-actions .backup-action-divider{{border-left:1px solid var(--line);border-top:none;padding-left:24px;padding-top:0;}}
+}}
+.backup-log-table{{width:100%;table-layout:fixed;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;}}
+.backup-log-table td{{overflow-wrap:anywhere;}}
+.backup-log-table .col-when{{width:150px;}}
+.backup-log-table .col-filename{{width:200px;}}
+.backup-log-table .col-location{{width:120px;}}
+.backup-log-table .col-status{{width:90px;}}
+/* Notes gets no explicit width — table-layout:fixed hands it whatever's
+   left of the table's own full width, so it's the one column that grows
+   or shrinks with the page instead of the table just being capped small
+   or every column stretching evenly with wasted whitespace. */
+@media(max-width:700px){{
+  .backup-log-table thead{{display:none;}}
+  .backup-log-table, .backup-log-table tbody, .backup-log-table tr, .backup-log-table td{{display:block;width:100%;}}
+  .backup-log-table tr{{border-bottom:1px solid var(--line);padding:10px 12px;}}
+  .backup-log-table td{{border-bottom:none !important;padding:3px 0 !important;white-space:normal !important;}}
+  .backup-log-table td[data-label]::before{{content:attr(data-label);font-weight:600;display:inline-block;min-width:76px;color:var(--ink-soft);}}
+}}
+</style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Archive backup</h1>
 {uploaded_banner}
 <p style="color:var(--muted);margin:-6px 0 24px;">Currently <strong>{count:,}</strong> articles in the live database.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:40px;">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+  <div class="backup-actions">
     <div>
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
-      <a href="/admin/library/backup/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
+      <a href="/admin/library/backup/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;width:202px;text-align:center;box-sizing:border-box;">Download library.db</a>
     </div>
-    <div style="border-left:1px solid var(--line);padding-left:24px;">
+    <div class="backup-action-divider">
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately—no restart needed.</p>
       <form method="post" action="/admin/library/backup/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
         <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
           style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
+        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;align-self:flex-start;width:202px;text-align:center;box-sizing:border-box;">Upload and replace</button>
       </form>
     </div>
   </div>
@@ -28884,16 +28909,18 @@ def admin_backup(request: Request, uploaded: str = ""):
 <h2 style="font-size:16px;margin:24px 0 4px;">Pre-backup integrity check</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Runs automatically against the live database right before every backup attempt&mdash;<code>PRAGMA integrity_check</code> plus an FTS5 self-check. A failure blocks that night&rsquo;s upload so corruption is never captured into a retained snapshot.</p>
 {_integrity_status_banner(integrity_rows)}
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<div style="overflow-x:auto;">
+<table class="backup-log-table">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">Filename</th>
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">Location</th>
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">Status</th>
+  <th class="col-when" style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
+  <th class="col-filename" style="padding:8px 12px;text-align:left;font-size:13px;">Filename</th>
+  <th class="col-location" style="padding:8px 12px;text-align:left;font-size:13px;">Location</th>
+  <th class="col-status" style="padding:8px 12px;text-align:left;font-size:13px;">Status</th>
   <th style="padding:8px 12px;text-align:left;font-size:13px;">Notes</th>
 </tr></thead>
 <tbody>{backup_log_rows_html}</tbody>
 </table>
+</div>
 </div>"""
     return HTMLResponse(_page("Archive backup—Admin", "Admin", body, authed=True))
 
