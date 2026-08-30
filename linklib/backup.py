@@ -406,6 +406,9 @@ def backup_now(db_path: str) -> dict:
     review" note on this PR for the full reasoning, flagged for Brian's
     sign-off rather than decided silently."""
     if not is_configured():
+        _log_attempt(db_path, status="failure",
+                     error="Google Drive backup is not configured "
+                           "(GOOGLE_OAUTH_CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN not set)")
         raise RuntimeError("Google Drive backup is not configured")
 
     integrity = check_integrity(db_path)
