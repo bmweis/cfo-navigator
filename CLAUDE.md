@@ -3975,6 +3975,47 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   confirmed by measurement, not just a clean screenshot. Full
   regression: 2364 passed, 0 failed.
 
+  **Sixth same-PR follow-up (2026-08) — "+ Add software"/"+ Add community"
+  overlapped the page h1 on mobile; moved below the header, sized to the
+  longer label, not full-width.** Both pages' header row
+  (`display:flex;align-items:center;justify-content:space-between`, no
+  mobile override at all) put the Add button vertically centered next to
+  the h1 — fine at desktop width, where "Software vendors"/"Communities"
+  fit on one line, but at a narrow mobile viewport the h1 can wrap to two
+  lines (confirmed reproducible down to 320px; whether it wraps at exactly
+  390px turned out to depend on whether this sandbox's headless Chromium
+  successfully loaded the Google Fonts `--font-head` stack that turn — a
+  known, already-documented sandbox-networking quirk, not something this
+  fix should depend on either way) and the centered button sat on top of
+  the wrapped second line instead of clearing it. Fixed with a new
+  `.admin-header-row`/`.admin-header-add-btn` class pair (added to the
+  existing inline-styled header `<div>` and the Add `<a class="btn">` on
+  both pages, no markup restructuring) and a `@media(max-width:700px)`
+  override — same breakpoint the Actions-button/table-card CSS above
+  already uses on these same two pages — switching the row to
+  `flex-direction:column;align-items:flex-start`, so the button always
+  renders below the h1 regardless of how many lines the h1 itself takes;
+  this is what makes the fix robust to the font-loading variance above,
+  rather than tuned to one specific wrap point. **Sized to the longer of
+  the two labels, not full width**, per Brian's explicit ask — one shared
+  fixed width (186px) applied to both pages via the shared
+  `.admin-header-add-btn` class, so "+ Add software" and "+ Add community"
+  render identically sized on mobile even though the visible text differs;
+  the value itself was measured, not guessed — a first attempt at 170px
+  (the initial eyeball guess) actually wrapped "+ Add community" onto two
+  lines inside its own button, caught by comparing each button's rendered
+  height rather than assuming a passing overlap check meant the button
+  itself looked right; the real natural (nowrap) width of "+ Add
+  community" measured 178px via a cloned, unconstrained copy, so 186px
+  (a ~8px margin) plus an explicit `white-space:nowrap` on the button
+  itself is what shipped. Desktop is untouched — no width constraint
+  applies outside the mobile breakpoint, so both pages' desktop Add
+  buttons keep their natural, slightly different auto-sized widths (160px/
+  178px) exactly as before. Verified live at 390px and 320px on both
+  pages (element-level bounding-box overlap check between the h1 and the
+  button, not just a screenshot glance) and confirmed unaffected at
+  1280px desktop. Full regression: 2364 passed, 0 failed.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded

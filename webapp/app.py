@@ -10910,9 +10910,9 @@ def admin_software(request: Request, filter: str = ""):
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+<div class="admin-header-row" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Software vendors</h1>
-  <a href="/admin/tools/software/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add software</a>
+  <a href="/admin/tools/software/new" class="btn admin-header-add-btn" style="font-size:14px;padding:8px 18px;">+ Add software</a>
 </div>
 <p style="margin:0 0 24px;">
   <a href="/tools/software" style="font-size:13px;color:var(--muted);">View public directory →</a>
@@ -11042,6 +11042,19 @@ applySortFilter('software');
      fixed-width rule above that already applies at every breakpoint. */
   .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
   .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
+  /* "+ Add software"/"+ Add community" overlapped the page h1 on mobile
+     (2026-08 follow-up, Brian's explicit ask) — the header row's inline
+     display:flex;align-items:center;justify-content:space-between never
+     had a mobile override, so once the h1 wrapped to two lines at a
+     narrow viewport ("Software" / "vendors"), the vertically-centered
+     button sat on top of the wrapped second line instead of clearing it.
+     Drops the button below the h1 (column direction, left-aligned) and
+     gives it one shared fixed width — sized to the longer of the two
+     labels ("+ Add community"), not full-width — so both pages' buttons
+     render identically sized on mobile, matching the "consistent, not
+     excessively wide" ask from the Actions-button round above. */
+  .admin-header-row{{flex-direction:column!important;align-items:flex-start!important;justify-content:flex-start!important;gap:10px;}}
+  .admin-header-add-btn{{width:186px;text-align:center;white-space:nowrap;}}
 }}
 </style>
 </div>"""
@@ -14492,9 +14505,9 @@ def admin_communities(request: Request, filter: str = ""):
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+<div class="admin-header-row" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Communities</h1>
-  <a href="/admin/tools/communities/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add community</a>
+  <a href="/admin/tools/communities/new" class="btn admin-header-add-btn" style="font-size:14px;padding:8px 18px;">+ Add community</a>
 </div>
 <p style="margin:0 0 24px;">
   <a href="/tools/communities" style="font-size:13px;color:var(--muted);">View public directory →</a>
@@ -14629,6 +14642,19 @@ applySortFilter('communities');
      fixed-width rule above that already applies at every breakpoint. */
   .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
   .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
+  /* "+ Add software"/"+ Add community" overlapped the page h1 on mobile
+     (2026-08 follow-up, Brian's explicit ask) — the header row's inline
+     display:flex;align-items:center;justify-content:space-between never
+     had a mobile override, so once the h1 wrapped to two lines at a
+     narrow viewport ("Software" / "vendors"), the vertically-centered
+     button sat on top of the wrapped second line instead of clearing it.
+     Drops the button below the h1 (column direction, left-aligned) and
+     gives it one shared fixed width — sized to the longer of the two
+     labels ("+ Add community"), not full-width — so both pages' buttons
+     render identically sized on mobile, matching the "consistent, not
+     excessively wide" ask from the Actions-button round above. */
+  .admin-header-row{{flex-direction:column!important;align-items:flex-start!important;justify-content:flex-start!important;gap:10px;}}
+  .admin-header-add-btn{{width:186px;text-align:center;white-space:nowrap;}}
 }}
 </style>
 </div>"""
