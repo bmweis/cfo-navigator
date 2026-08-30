@@ -10853,13 +10853,13 @@ def admin_software(request: Request, filter: str = ""):
             <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
           </td>
           <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-              <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">View profile</a>
-              <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+            <div class="admin-table-actions-grid" style="display:flex;flex-wrap:nowrap;align-items:center;gap:6px;">
+              <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">View profile</a>
+              <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
               <form method="post" action="/admin/tools/software/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
-                <button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+                <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
               </form>
             </div>
           </td>
@@ -10992,7 +10992,10 @@ applySortFilter('software');
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
-  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:1fr!important;}}
+  .admin-table-actions .admin-table-actions-grid{{flex-direction:column!important;align-items:stretch!important;}}
+  .admin-table-actions .admin-table-actions-grid a,
+  .admin-table-actions .admin-table-actions-grid form,
+  .admin-table-actions .admin-table-actions-grid button{{width:100%;}}
 }}
 </style>
 </div>"""
