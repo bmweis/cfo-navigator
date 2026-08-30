@@ -2,11 +2,12 @@
 
 The middleware must redirect ONLY the two known legacy hosts, ONLY when
 PUBLIC_BASE is a real https base, and never for /health or /admin/backup-now
-(Phase O — the weekly backup GitHub Action calls the latter directly on the
-legacy Railway hostname on purpose, to route around Cloudflare's Bot Fight
-Mode; a redirect there would silently no-op the backup, since the Action's
-`curl -f` treats a 3xx as success and never follows it — exactly what
-happened on the first live run before this exemption existed).
+(Phase O — the daily backup trigger, a Railway Cron Service as of 2026-08
+(originally a GitHub Action), calls the latter directly on the legacy
+Railway hostname on purpose, to route around Cloudflare's Bot Fight Mode; a
+redirect there would silently no-op the backup, since a plain
+non-2xx-checking caller treats a 3xx as success and never follows it —
+exactly what happened on the first live run before this exemption existed).
 """
 import pathlib
 import sys
@@ -64,12 +65,14 @@ def test_health_never_redirects(appmod):
 
 
 def test_backup_now_never_redirects_even_on_legacy_railway_host(appmod):
-    """Phase O regression pin: the weekly backup Action calls this route
-    directly on cfo-navigator-production.up.railway.app on purpose (to
-    bypass Cloudflare's Bot Fight Mode against bmweis.com). A 301 here
-    would silently defeat that — curl -f treats a 3xx as success and never
-    follows it, so the Action would report green while the backup logic
-    never ran at all (exactly what happened before this exemption)."""
+    """Phase O regression pin: the daily backup trigger (a Railway Cron
+    Service as of 2026-08) calls this route directly on
+    cfo-navigator-production.up.railway.app on purpose (to bypass
+    Cloudflare's Bot Fight Mode against bmweis.com). A 301 here would
+    silently defeat that — a plain non-2xx-checking caller treats a 3xx as
+    success and never follows it, so the trigger would report green while
+    the backup logic never ran at all (exactly what happened before this
+    exemption, back when this was a GitHub Action)."""
     r = _client(appmod).post("/admin/backup-now",
                               headers={"host": "cfo-navigator-production.up.railway.app"},
                               follow_redirects=False)

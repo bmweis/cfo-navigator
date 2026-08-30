@@ -36,7 +36,7 @@ flowchart LR
     R -->|"RSS/Atom + article<br/>full-text fetches"| F["Publisher sites"]
     R -->|"outbound email"| G["Gmail REST API"]
     R -->|"daily DB snapshot"| D["Google Drive"]
-    GH["GitHub Actions<br/>backup.yml, daily cron"] -->|"POST /admin/backup-now<br/>(X-Save-Token, direct to<br/>Railway origin — bypasses CF)"| R
+    RC["Railway Cron Service<br/>same project, daily<br/>schedule, curl only"] -->|"POST /admin/backup-now<br/>(X-Save-Token, direct to<br/>Railway origin — bypasses CF)"| R
 ```
 
 Notes on the edges:
@@ -63,16 +63,17 @@ Notes on the edges:
   `CF-Connecting-IP` (set by Cloudflare on proxied requests) is a trustworthy
   client IP — `X-Forwarded-For` can be spoofed by anyone hitting the origin
   directly (see Known limitations).
-  **This is also why `.github/workflows/backup.yml` (Phase O) deliberately
-  targets `cfo-navigator-production.up.railway.app`, not `bmweis.com`:** the
+  **This is also why the daily backup trigger (originally `.github/workflows/backup.yml`,
+  now a Railway Cron Service — see below) deliberately targets
+  `cfo-navigator-production.up.railway.app`, not `bmweis.com`:** the
   first live run against `bmweis.com` got a `403` from Cloudflare's Bot
   Fight Mode before the request ever reached the app (confirmed via the
   app's own auth path, which returns `401` for a bad token, never `403` —
   so this wasn't the app rejecting the token). Cloudflare was never meant to
   gate this one authenticated backend-to-backend call — `X-Save-Token`
-  remains the actual auth boundary either way — so the Action routes around
+  remains the actual auth boundary either way — so the trigger routes around
   the CDN on purpose rather than trying to carve out a Bot Fight Mode
-  exception for GitHub's rotating runner IP ranges. This is the first
+  exception for a rotating set of runner/caller IPs. This is the first
   deliberate consumer of the "accepted risk" above, not an accident.
 - **The volume path** is Railway configuration, not code: the app reads
   `LINKLIB_DB` (default `./library.db`); production points it at the mounted
@@ -97,19 +98,25 @@ Notes on the edges:
   domain has SPF and DKIM in place, plus DMARC in `p=none` monitoring mode —
   collecting reports, not yet enforcing.
 - **The daily (bumped from weekly, 2026-08) Drive backup is triggered by a
-  GitHub Action, not a Railway cron service.** `.github/workflows/backup.yml`
-  calls `POST /admin/backup-now` on a daily schedule (`X-Save-Token` auth,
-  same as RUNBOOK.md's manual curl example) — this is Phase O's fix for the original
-  mechanism (`linklib.backup.maybe_backup`, debounced and only fired as a
-  side effect of ~18 admin/save routes in `webapp/app.py`) never getting a
-  reliable weekly opportunity to run in practice. Those ~18 call sites are
+  Railway Cron Service in the same project (migrated off GitHub Actions,
+  2026-08).** A small standalone cron service calls `POST
+  /admin/backup-now` on a daily schedule (`X-Save-Token` auth, same as
+  RUNBOOK.md's manual curl example) — this is Phase O's fix for the
+  original mechanism (`linklib.backup.maybe_backup`, debounced and only
+  fired as a side effect of ~18 admin/save routes in `webapp/app.py`) never
+  getting a reliable weekly opportunity to run in practice. The trigger was
+  originally a scheduled GitHub Action, moved to Railway Cron after the
+  Action's schedule silently stopped firing for 9 straight days during a
+  GitHub Actions billing/spending-limit outage unrelated to Railway or this
+  app — see the "backup trigger" bullet further down for the full
+  migration write-up and the exact cron command. Those ~18 call sites are
   unchanged and still fire opportunistically as a harmless bonus trigger.
   Every attempt from either path — success or failure — is logged to the
   `backup_log` table (see the Site operations table below) and surfaced on
-  `/admin/library/backup`'s status banner + history table; the Action's own
-  run history in the repo's Actions tab is a second, independent signal that
-  catches the case where the site itself is unreachable and there's no
-  in-app record at all.
+  `/admin/library/backup`'s status banner + history table; the cron
+  service's own run history in the Railway dashboard is a second,
+  independent signal that catches the case where the site itself is
+  unreachable and there's no in-app record at all.
 
 ## 2. Database
 
@@ -1461,7 +1468,7 @@ from the public page. Not editable via the admin CRUD.
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
 | `contact_audit_log` | Same shape for contact deletions — kept separate so `item_id` is never ambiguous about which table it references. | as above, `item_id` → `contacts.id` |
-| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily GitHub Action, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled Action run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. A backup skipped because the pre-backup integrity check failed (durability audit item 2, see `integrity_check_log` below) also logs a `'failure'` row here, `error` prefixed `"Backup skipped — integrity check failed: ..."`, so the existing status banner surfaces it without a second banner-reading code path. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
+| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily Railway Cron Service, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled cron run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. A backup skipped because the pre-backup integrity check failed (durability audit item 2, see `integrity_check_log` below) also logs a `'failure'` row here, `error` prefixed `"Backup skipped — integrity check failed: ..."`, so the existing status banner surfaces it without a second banner-reading code path. **Failure-logging completeness audit (2026-08, post-Railway-Cron-migration):** the "Drive not configured" path used to be the one exception to "every attempt is logged" — `backup_now()` raised immediately on `not is_configured()` with no `_log_attempt` call, and `backup_now_route()` in `webapp/app.py` had its own separate pre-check that returned a `503` without ever calling `backup_now()` at all, so this specific failure never left a `backup_log` row from either code path. A pre-existing test explicitly asserted this was intentional ("not being configured isn't a real attempt"), reasoning that the status banner's own live `is_configured()` check already surfaces it — true for the banner, but it left the history table below it completely silent for the entire span of a misconfiguration (e.g. a lapsed OAuth grant that keeps the daily cron pinging a broken instance for days with no trace anywhere but Railway's own run log). Reversed: `backup_now()` now logs this path too, matching its own docstring's contract, and `backup_now_route()` was simplified to always call `backup_now()` (removing its separate pre-check) so there's one logging code path instead of two divergent ones — the route now infers its 503-vs-502 response purely from re-checking `is_configured()` in the `except` block, after the failure is already logged. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
 | `integrity_check_log` | Durability audit item 2 (elevated, 2026-08) — one row per `linklib.backup.check_integrity()` run, shape mirrors `backup_log` exactly. Nothing previously ran `PRAGMA integrity_check` against the live DB; corruption would only ever have surfaced at restore time, by which point it would already be baked into every retained snapshot. `check_integrity()` runs `PRAGMA integrity_check` plus the FTS5 self-check (`INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')` — the exact command RUNBOOK.md §4's restore rehearsal already runs by hand) against the live DB, on the same cadence as the backup itself, immediately before every snapshot. **A failure blocks that night's backup upload** (see `backup_now()`'s docstring for the full "block vs. upload-and-flag" reasoning) rather than uploading a possibly-corrupt snapshot anyway. Read by the "Pre-backup integrity check" status banner on `/admin/library/backup`, which sits above the existing backup-status banner — deliberately a separate banner, since "the backup succeeded" and "the DB is structurally sound" are two different facts a single banner would conflate. | `status` (`'ok'`\|`'failure'`), `detail` (the failing `PRAGMA integrity_check` row text, or the FTS5 self-check's exception text; `'ok'` on success) |
 | `job_run_log` | Durability audit item 3 (2026-08) — durable start/finish record for each of the three `_JOB_STATE`-backed background jobs (re-enrich, Historical sweep, Reader content backfill), shape mirrors `backup_log`/`integrity_check_log`. `_JOB_STATE` (`webapp/app.py`, an in-process dict) is unchanged and still owns LIVE in-request progress — this table is written only twice per run (`Library.start_job_run` at the top of each job function, `Library.finish_job_run` at every exit path, including a deliberate stop) and exists purely so a Railway redeploy or crash doesn't erase whether a job last succeeded, failed, or ever ran. Read by `_job_run_banner()`, a shared "last run: outcome, N ago" banner rendered on each of the three jobs' own admin-page section (`/admin/library/enrich`, the Historical sweep panel on `/admin/library/queue`, `/admin/library/backfill-content`) — same green/amber/coral posture as the backup/integrity banners. A row stuck at `status='running'` with an empty `finished_at` is exactly what a crash mid-run looks like, and is called out as such rather than shown as live progress — **but only when nothing live actually corresponds to it** (2026-08 wrap-up sprint item 3 fix): `_job_run_banner()` originally rendered the crash interpretation for ANY open row, so it showed "never finished — likely interrupted by a deploy or crash" directly above the same page's own genuinely-in-progress status panel whenever a job happened to still be running, confirmed in production twice. Fixed by checking `_job_get(job_name)["running"]` before assuming an open row means a crash — when the job is actually live, the open row IS that live run, and the banner renders a plain in-progress line instead. | `job_name` (`'enrich'`\|`'backfill'`\|`'content_backfill'`), `status` (`'running'`\|`'success'`\|`'failure'`\|`'stopped'`), `summary` (short human-readable counts, e.g. `'42/50 succeeded'`), `error` (failure only), `started_at`, `finished_at` (`''` while running) |
 
@@ -3506,7 +3513,7 @@ if the typed value doesn't exactly match the number of `article_id` rows posted 
 independent check that the admin actually looked at how many rows they were about to delete,
 not just that the file happened to parse.
 
-**The nightly/weekly backup is the ultimate net, but deliberately not the first one**: the
+**The daily backup is the ultimate net, but deliberately not the first one**: the
 commit route calls `backup.backup_now()` (a real, unconditional snapshot — NOT the
 debounced `maybe_backup()` every other bulk-delete flow in this codebase uses) immediately
 before the delete loop, when backups are configured at all; if that snapshot attempt fails,
@@ -3785,7 +3792,7 @@ Reader as tool #1. `_LIBRARY_TOOLS` is now 8 entries (down from 10):
 "Open Reader" is gone (moved to the callout) and "Historical sweep" is gone
 (merged into Archive Queue, next paragraph). Two descriptions were rewritten
 for clarity: **Archive backup**'s now explicitly says automated backups
-already run daily via the GitHub Action (Phase O) and that this manual
+already run daily via the Railway Cron Service (Phase O) and that this manual
 tool is for an on-demand snapshot right before something risky, not a
 day-to-day safety net; **Reader content backfill**'s now explicitly
 differentiates itself from Archive Queue's Historical sweep panel
@@ -5043,13 +5050,14 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   now also falls back to the fetched page's own title before ever reaching
   the Reader's "(no title)" placeholder.
 - **`/admin/backup-now` is a deliberate, narrowly-scoped exception to the
-  canonical-host redirect (Phase O).** The daily backup GitHub Action calls
-  this one route directly on the legacy Railway hostname on purpose, to
-  route around Cloudflare's Bot Fight Mode (see the "publicly reachable
-  Railway origin" note above) — without this exception, the 301 the
-  canonical-host middleware would otherwise issue silently defeats that,
-  since the Action's `curl -f` treats a 3xx as success and never follows
-  it. This is exactly what happened on the first live run after the Action
+  canonical-host redirect (Phase O).** The daily backup trigger (originally
+  the GitHub Action, now the Railway Cron Service) calls this one route
+  directly on the legacy Railway hostname on purpose, to route around
+  Cloudflare's Bot Fight Mode (see the "publicly reachable Railway origin"
+  note above) — without this exception, the 301 the canonical-host
+  middleware would otherwise issue silently defeats that, since a plain
+  `curl -f`-style check treats a 3xx as success and never follows it. This
+  is exactly what happened on the first live run after the GitHub Action
   was pointed at the Railway origin: `curl` reported success, but
   `backup_log` stayed empty, because the redirect meant `backup_now_route`
   never executed at all — caught only by checking `/admin/library/backup`'s
@@ -5446,25 +5454,44 @@ recorded anywhere, it's flagged rather than invented.
   generation (`linklib/social.py`, `scripts/post.py`) was removed entirely in
   the same change — superseded by Brian's `write-like-brian` skill used
   directly in Claude, so the app no longer needs its own drafting surface.
-- **The backup trigger is a scheduled GitHub Action, not a Railway cron
-  service or an in-process scheduler (Phase O).** A Phase O investigation
-  found the Drive backup mechanism itself (`linklib/backup.py`) was real and
-  working, but had never actually been *scheduled* — it only fired as a
-  debounced side effect of ~18 unrelated admin/save routes, which in
-  practice went weeks without tripping. *Why a GitHub Action over the
-  alternatives:* it reuses the existing `POST /admin/backup-now` route and
-  auth verbatim (no new code path), needs no second Railway service, and its
-  own run history in the Actions tab is a second, independent visibility
-  layer beyond the in-app `backup_log` table — if the site itself is down,
-  the Action still fails visibly even though the app never got the chance
-  to write a log row. `/admin/backup-now` now returns a real non-2xx status
-  on failure (`503` not configured, `502` upload failed) instead of always
-  `200`, specifically so `curl -f` in the Action (and any future monitoring)
-  can tell success from failure without parsing HTML. **Targets the Railway
-  origin, not `bmweis.com`** — see the "publicly reachable Railway origin"
-  bullet above for why; the first live verification run against the
-  Cloudflare-fronted hostname got a `403` from Bot Fight Mode before ever
-  reaching the app.
+- **The backup trigger is a Railway Cron Service in the same project, not a
+  GitHub Action or an in-process scheduler (Phase O, migrated off GitHub
+  Actions 2026-08).** A Phase O investigation found the Drive backup
+  mechanism itself (`linklib/backup.py`) was real and working, but had
+  never actually been *scheduled* — it only fired as a debounced side
+  effect of ~18 unrelated admin/save routes, which in practice went weeks
+  without tripping. The original fix was a scheduled GitHub Action calling
+  `POST /admin/backup-now`, chosen at the time because it reused the
+  existing route/auth verbatim and needed no second Railway service — but
+  that dependency on GitHub Actions turned out to be a real liability: the
+  schedule silently stopped firing for 9 straight days when the GitHub
+  account's Actions spending limit blocked every workflow run, an outage
+  entirely unrelated to Railway or this app. Moved onto a native Railway
+  Cron Service instead — a minimal service in the same project with no
+  application code, configured with a cron schedule (`0 9 * * *`, the same
+  daily 09:00 UTC slot) and one command:
+  ```
+  response=$(curl -sS -w '\n%{http_code}' -X POST \
+    "https://cfo-navigator-production.up.railway.app/admin/backup-now" \
+    -H "X-Save-Token: $LINKLIB_SAVE_TOKEN")
+  status="${response##*$'\n'}"
+  echo "${response%$'\n'*}"
+  [ "$status" -ge 200 ] && [ "$status" -lt 300 ] || { echo "HTTP $status"; exit 1; }
+  ```
+  `LINKLIB_SAVE_TOKEN` is a shared/referenced Railway project variable, not
+  a second copy of the secret. `/admin/backup-now`'s non-2xx-on-failure
+  contract (`503` not configured, `502` upload failed) is unchanged and is
+  exactly what lets this shell check — not `curl -f`, since a Railway cron
+  service's own run log is the failure-visibility layer now, in place of
+  the GitHub Actions tab — tell success from failure without parsing HTML.
+  **Still targets the Railway origin, not `bmweis.com`** — see the
+  "publicly reachable Railway origin" bullet above for why; the same
+  Cloudflare Bot Fight Mode `403` that blocked the original GitHub Action
+  run would block this cron service's call too, since neither is exempted
+  from Bot Fight Mode. `.github/workflows/backup.yml` is deleted outright
+  (no `workflow_dispatch`-only fallback kept — a fallback that itself
+  depends on Actions quota isn't a real fallback for an Actions-quota
+  outage). See RUNBOOK.md §7 for the exact Railway dashboard setup steps.
 - **The Drive backup folder is created and owned by the app, never a
   folder made by hand (Phase O).** The OAuth refresh token is minted with
   the `drive.file` scope — deliberately the narrowest Drive scope, not

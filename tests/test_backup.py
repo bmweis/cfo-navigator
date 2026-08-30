@@ -2,8 +2,9 @@
 
 Covers the three things that changed: (1) linklib.backup logs every attempt
 (success or failure) to the new backup_log table instead of only print()ing,
-(2) /admin/backup-now returns a real non-2xx status on failure so the weekly
-GitHub Action can tell success from failure, and (3) /admin/library/backup's
+(2) /admin/backup-now returns a real non-2xx status on failure so the daily
+Railway Cron Service (originally a GitHub Action, migrated 2026-08) can tell
+success from failure, and (3) /admin/library/backup's
 status banner correctly distinguishes "not configured", "configured but the
 last attempt failed", "configured but the folder ID is missing", and "on".
 
@@ -189,7 +190,20 @@ def test_backup_now_logs_failure_and_reraises(monkeypatch, configured_env):
     os.remove(db)
 
 
-def test_backup_now_raises_without_logging_when_not_configured(monkeypatch):
+def test_backup_now_logs_before_raising_when_not_configured(monkeypatch):
+    """Post-migration failure-logging audit (2026-08) reversed this: an
+    earlier version of this test asserted the OPPOSITE ("not being
+    configured isn't a real attempt — nothing should be logged"), on the
+    reasoning that the admin banner already shows "Backups are off" via a
+    live is_configured() check, independent of backup_log. That's still
+    true for the top banner, but it left the backup_log history table
+    completely silent for the entire span of any misconfiguration — if the
+    daily Railway Cron Service pings a misconfigured production instance
+    for days, none of those attempts show up anywhere but Railway's own run
+    log. Flagged and reversed rather than left as-is: every failure path in
+    backup_now(), not-configured included, now logs before raising, per its
+    own docstring's contract ("Every attempt — success or failure — is
+    logged to backup_log... before returning or re-raising")."""
     monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("GOOGLE_OAUTH_REFRESH_TOKEN", raising=False)
@@ -199,13 +213,14 @@ def test_backup_now_raises_without_logging_when_not_configured(monkeypatch):
     with pytest.raises(RuntimeError, match="not configured"):
         backup.backup_now(db)
 
-    # Not being configured isn't a real "attempt" — nothing should be logged.
     logged = Library(db)
     try:
         rows = logged.list_backup_log()
     finally:
         logged.close()
-    assert rows == []
+    assert len(rows) == 1
+    assert rows[0]["status"] == "failure"
+    assert "not configured" in rows[0]["error"].lower()
     os.remove(db)
 
 
@@ -238,6 +253,30 @@ def test_backup_now_route_returns_503_when_not_configured(admin_client):
     r = client.post("/admin/backup-now")
     assert r.status_code == 503
     assert "not configured" in r.text.lower()
+
+
+def test_backup_now_route_logs_a_failed_row_when_not_configured(admin_client):
+    """Failure-logging audit (2026-08): before the fix, hitting this route
+    while Drive wasn't configured returned a 503 with nothing written to
+    backup_log at all — the route short-circuited before ever calling
+    backup.backup_now() (the only place that used to log anything), so an
+    admin scanning the history table on /admin/library/backup would see no
+    trace of the attempt, even though the top banner separately showed
+    "Backups are off" via its own live is_configured() check. The route now
+    always calls backup.backup_now() (which logs before it raises, per its
+    own docstring), so this exact failure is visible in both places."""
+    client, appmod, db = admin_client
+    r = client.post("/admin/backup-now")
+    assert r.status_code == 503
+
+    lib = Library(db)
+    try:
+        rows = lib.list_backup_log()
+    finally:
+        lib.close()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "failure"
+    assert "not configured" in rows[0]["error"].lower()
 
 
 def test_backup_now_route_returns_502_on_failure(admin_client, monkeypatch):
