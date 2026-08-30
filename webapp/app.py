@@ -28626,11 +28626,11 @@ def admin_backup(request: Request, uploaded: str = ""):
         lib.close()
     folder_id = backup.known_folder_id(DB_PATH)
     folder_line = (
-        f'Weekly consistent snapshots, uploaded automatically to '
+        f'Daily consistent snapshots, uploaded automatically to '
         f'<a href="https://drive.google.com/drive/folders/{quote(folder_id)}" target="_blank" rel="noopener">'
         f'&ldquo;{_esc(backup.FOLDER_NAME)}&rdquo; in Drive</a>. See RUNBOOK.md §1 to restore from one.'
         if folder_id else
-        'Weekly consistent snapshots, uploaded automatically&mdash;the destination folder is created on the '
+        'Daily consistent snapshots, uploaded automatically&mdash;the destination folder is created on the '
         'first successful run (see RUNBOOK.md §1 to restore from one).'
     )
     uploaded_banner = (
