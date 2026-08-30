@@ -1844,7 +1844,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     return in_form_html, after_form_html
 
 
-def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: str = "") -> str:
+def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: str = "") -> tuple[str, str]:
     """Renders the admin edit page's "Logo" section (manual logo override,
     2026-08 — see CLAUDE.md's Aleph/Zapier investigation writeup).
 
@@ -1853,10 +1853,27 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     `<input type=file>` + submit, same shape as /admin/brand/avatar — no
     crop needed here, a logo isn't cropped to a fixed frame), and a "Revert
     & re-fetch from Brandfetch" action (2026-08 follow-up — see
-    _live_refetch_logo) — all as their own standalone <form>s (not nested
-    inside #tool-edit-form/#comm-edit-form) since none of these need to
-    submit alongside the rest of the edit form's fields, unlike the
-    homepage-screenshot URL field beside them.
+    _live_refetch_logo).
+
+    Returns (in_form_html, after_form_html), same split as
+    _app_screenshot_admin_section: in_form_html is the visible block (label,
+    badge, preview, and every input/button — all form-associated via an
+    explicit `form=` attribute rather than a literal nested <form>), meant
+    to be embedded anywhere, including inside #tool-edit-form/#comm-edit-form
+    (Field-order pass, 2026-08 — moved next to Vendor/Community name and
+    URL). after_form_html holds the four actual hidden, empty <form>s
+    (set-url, upload, clear, dismiss-stale) that those inputs/buttons point
+    at via `form=` — always rendered OUTSIDE any other <form>, since a
+    <form> can't nest inside another <form>: a nested <form>'s closing tag
+    pops the *outer* form off the browser's parse stack early, silently
+    orphaning every field/button after that point (Save changes included) —
+    see _narrative_verify_widget's own comment for the "Save changes does
+    nothing" incident that taught this. Before the field-order pass, this
+    section rendered outside every <form> entirely, so the "Fetch from URL"
+    and "Upload" mini-forms could safely be real, non-nested <form>s in
+    place; moving the section next to Name/URL put it inside the main edit
+    form, so those two also switched to the hidden-form-plus-`form=`-attribute
+    pattern the "Revert & re-fetch"/"Clear" actions already used.
 
     kind is "tools" or "communities" — picks the route prefix and which
     _*_logo_url helper renders the current image. banner_html (same
@@ -1906,27 +1923,29 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
       {_logo_box(entity['name'], logo_url, 64, radius=10)}
       <div style="flex:1;min-width:260px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <form method="post" action="{route_prefix}/logo/set-url" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;flex:1;min-width:220px;">
-          <input name="logo_url" type="text" maxlength="500"
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;flex:1;min-width:220px;">
+          <input form="logo-seturl-form-{idsfx}" name="logo_url" type="text" maxlength="500"
             style="flex:1;min-width:140px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
             placeholder="https://…/logo.png">
-          <button type="submit" class="tool-admin-btn">Fetch from URL</button>
-        </form>
-        <form method="post" action="{route_prefix}/logo/upload" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">
-          <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required
+          <button type="submit" form="logo-seturl-form-{idsfx}" class="tool-admin-btn">Fetch from URL</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">
+          <input form="logo-upload-form-{idsfx}" type="file" name="file" accept="image/jpeg,image/png,image/webp" required
             style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:180px;">
-          <button type="submit" class="tool-admin-btn">Upload</button>
-        </form>
+          <button type="submit" form="logo-upload-form-{idsfx}" class="tool-admin-btn">Upload</button>
+        </div>
         <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert &amp; re-fetch from Brandfetch</button>
       </div>
     </div>
   </div>"""
 
     after_form_html = (
+        f'<form id="logo-seturl-form-{idsfx}" method="post" action="{route_prefix}/logo/set-url" style="display:none;"></form>'
+        f'<form id="logo-upload-form-{idsfx}" method="post" action="{route_prefix}/logo/upload" enctype="multipart/form-data" style="display:none;"></form>'
         f'<form id="logo-clear-form-{idsfx}" method="post" action="{route_prefix}/logo/clear" style="display:none;"></form>'
         f'<form id="logo-dismiss-stale-form-{idsfx}" method="post" action="{route_prefix}/logo/dismiss-stale" style="display:none;"></form>'
     )
-    return in_form_html + after_form_html
+    return in_form_html, after_form_html
 
 
 def _save_manual_logo(lib: "Library", kind: str, entity_id: int, slug: str, data: bytes) -> bool:
@@ -10633,7 +10652,8 @@ def _review_status_pill_html(reviewed: bool, breakdown: tuple[int, int] | None =
 
 
 def _review_status_action_html(reviewed: bool, mark_reviewed_url: str, flag_url: str,
-                                redirect_to: str, ghost: bool = True) -> str:
+                                redirect_to: str, ghost: bool = True,
+                                standalone_form_id: str = "") -> str:
     """The one-click action that belongs next to the pill above — the
     mirror-image action of the CURRENT state, same `reviewed` polarity as
     _review_status_pill_html (True = currently reviewed/green,
@@ -10642,24 +10662,55 @@ def _review_status_action_html(reviewed: bool, mark_reviewed_url: str, flag_url:
     review (close it out). Self-contained form+button, safe to drop next
     to the pill anywhere (list row, view page, edit page top) — each
     caller supplies its own redirect_to since the three surfaces return to
-    different places."""
+    different places.
+
+    standalone_form_id (Field-order pass, 2026-08): when set, renders a
+    bare form-associated button (form="{standalone_form_id}") instead of
+    wrapping it in its own literal <form> — for a caller that needs to
+    place this action inside ANOTHER <form> (a <form> can't nest inside
+    another <form>, silently orphaning every field/button after it — the
+    same "Save changes does nothing" failure mode
+    _logo_admin_section/_narrative_verify_widget's own comments describe).
+    The caller must separately render the matching hidden <form
+    id="{standalone_form_id}">, OUTSIDE any other <form> — see
+    _review_status_hidden_form_html — same split _logo_admin_section and
+    _app_screenshot_admin_section already use for the same reason."""
     btn_cls = "btn btn-ghost" if ghost else "btn"
-    if reviewed:
-        return (f'<form method="post" action="{flag_url}" style="margin:0;display:inline;">'
-                f'<input type="hidden" name="redirect_to" value="{_esc(redirect_to)}">'
-                f'<button type="submit" class="{btn_cls}" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Flag for review</button></form>')
-    return (f'<form method="post" action="{mark_reviewed_url}" style="margin:0;display:inline;">'
+    label = "Flag for review" if reviewed else "Mark reviewed"
+    if standalone_form_id:
+        return (f'<button type="submit" form="{standalone_form_id}" class="{btn_cls}" '
+                f'style="padding:5px 12px;font-size:13px;white-space:nowrap;">{label}</button>')
+    url = flag_url if reviewed else mark_reviewed_url
+    return (f'<form method="post" action="{url}" style="margin:0;display:inline;">'
             f'<input type="hidden" name="redirect_to" value="{_esc(redirect_to)}">'
-            f'<button type="submit" class="{btn_cls}" style="padding:5px 12px;font-size:13px;white-space:nowrap;">Mark reviewed</button></form>')
+            f'<button type="submit" class="{btn_cls}" style="padding:5px 12px;font-size:13px;white-space:nowrap;">{label}</button></form>')
+
+
+def _review_status_hidden_form_html(reviewed: bool, mark_reviewed_url: str, flag_url: str,
+                                     redirect_to: str, standalone_form_id: str) -> str:
+    """The hidden, empty <form> a standalone_form_id-bound
+    _review_status_action_html button points at via its `form=` attribute.
+    Render this OUTSIDE any other <form> — see _review_status_action_html's
+    own docstring for why."""
+    url = flag_url if reviewed else mark_reviewed_url
+    return (f'<form id="{standalone_form_id}" method="post" action="{url}" style="display:none;">'
+            f'<input type="hidden" name="redirect_to" value="{_esc(redirect_to)}"></form>')
 
 
 def _review_status_block_html(reviewed: bool, mark_reviewed_url: str, flag_url: str,
-                               redirect_to: str, breakdown: tuple[int, int] | None = None) -> str:
+                               redirect_to: str, breakdown: tuple[int, int] | None = None,
+                               standalone_form_id: str = "") -> str:
     """Pill + its matching action, side by side — the combo used on the
     profile VIEW page and at the top of the edit page (the admin list uses
-    the pill and action separately, in their own table cells)."""
+    the pill and action separately, in their own table cells).
+
+    standalone_form_id: passed straight through to _review_status_action_html
+    (see its docstring) — the caller is responsible for also rendering
+    _review_status_hidden_form_html with the same id, outside any other
+    <form>, when this is set."""
     pill = _review_status_pill_html(reviewed, breakdown)
-    action = _review_status_action_html(reviewed, mark_reviewed_url, flag_url, redirect_to)
+    action = _review_status_action_html(reviewed, mark_reviewed_url, flag_url, redirect_to,
+                                         standalone_form_id=standalone_form_id)
     return f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">{pill}{action}</div>'
 
 
@@ -13873,7 +13924,8 @@ def _community_category_checkboxes(categories: list[dict], selected: list[str] |
          'No categories yet. <a href="/admin/tools/communities/categories">Add one</a> first.</p>'
 
 
-def _community_form_fields_parts(c: dict | None = None, categories: list[dict] | None = None) -> dict:
+def _community_form_fields_parts(c: dict | None = None, categories: list[dict] | None = None,
+                                  logo_in_form_html: str = "") -> dict:
     """Phase P (extended by the admin intake form layout pass, and again by
     a follow-up round after live review of that pass's shipped result):
     field markup for Add and Edit community, split into named fragments so
@@ -13897,7 +13949,14 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     match Edit's); identity_block is the one exception, since Add and Edit
     ended up wrapping identity+disclosures in byte-identical markup, so it
     was pulled into the shared function instead of staying duplicated at
-    both call sites."""
+    both call sites.
+
+    logo_in_form_html (Field-order pass, 2026-08): the Logo section's
+    in-form half (see _logo_admin_section), spliced into identity_block's
+    left column right after Name/URL/Auto-fill, before the right column's
+    Featured/Advisor. Only Edit passes this — Add has no community id yet,
+    so there's nothing to fetch/upload a logo for; defaults to "" so Add's
+    call site is unaffected."""
     c = c or {}
     categories = categories or []
     # _NEEDS_VERIFICATION is appended as a literal, selectable option on every
@@ -14058,6 +14117,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     <div class="tool-form-cols">
       <div style="display:grid;gap:14px;align-content:start;">
 {identity_html}
+{logo_in_form_html}
       </div>
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:10px;align-content:start;">
 {disclosures_html}
@@ -15166,7 +15226,9 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # (/admin/tools/communities/{id}/profile, linked from this page's meta
     # line below) and is out of scope for this reorg — flagged in the PR
     # rather than restructured on assumption.
-    _parts = _community_form_fields_parts(c, categories)
+    _logo_in_form_html, _logo_after_form_html = _logo_admin_section(
+        c, c['id'], "communities", logo_refetch_banner_html)
+    _parts = _community_form_fields_parts(c, categories, logo_in_form_html=_logo_in_form_html)
     body = f"""<div class="page page-grid">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
@@ -15185,10 +15247,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     </div>
   </div>
 </form>
-
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  {_logo_admin_section(c, c['id'], "communities", logo_refetch_banner_html)}
-</div>
+{_logo_after_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Screenshots</h2>
@@ -16485,9 +16544,21 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     _tool_breakdown = (sum(1 for f in (
         "description_needs_verification", "agent_taxonomy_needs_verification",
         "competitive_differentiation_needs_verification") if tool.get(f)), 3) if _needs_review else None
+    # Field-order pass (2026-08): this box moved from full-width above the
+    # form into the right column, above Warm intro — now rendered inside
+    # #tool-edit-form, so its "Mark reviewed"/"Flag for review" action
+    # switches to the same standalone-form pattern _logo_admin_section uses
+    # (a <form> can't nest inside another <form>).
+    _review_status_mark_url = f"/admin/tools/software/{tool_id}/mark-reviewed"
+    _review_status_flag_url = f"/admin/tools/software/{tool_id}/flag-for-review"
+    _review_status_form_id = f"review-status-form-tools-{tool_id}"
     _review_status_top_html = _review_status_block_html(
-        not _needs_review, f"/admin/tools/software/{tool_id}/mark-reviewed",
-        f"/admin/tools/software/{tool_id}/flag-for-review", f"/tools/software/{slug}/edit", _tool_breakdown,
+        not _needs_review, _review_status_mark_url, _review_status_flag_url,
+        f"/tools/software/{slug}/edit", _tool_breakdown, standalone_form_id=_review_status_form_id,
+    )
+    _review_status_after_form_html = _review_status_hidden_form_html(
+        not _needs_review, _review_status_mark_url, _review_status_flag_url,
+        f"/tools/software/{slug}/edit", _review_status_form_id,
     )
     _profile_review_line_html = ""
     if latest_profile_review:
@@ -16531,17 +16602,13 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     elif logo_refetched == "0":
         _logo_refetch_banner_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                                       f'padding:10px 16px;font-size:13px;margin:0 0 10px;">{_esc(logo_refetch_msg)}</p>')
+    _logo_in_form_html, _logo_after_form_html = _logo_admin_section(
+        tool, tool_id, "tools", _logo_refetch_banner_html)
 
     body = f"""<div class="page page-grid">
 <h1>Edit software</h1>
 {_CROPPER_CDN_HTML}
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
-<div style="margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
-  <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
-  {_review_status_top_html}
-  <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Flags this profile for a full read-through&mdash;set automatically when a new tool is added or any tracked field is refreshed, or manually anytime here.</p>
-  {_profile_review_line_html}
-</div>
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
@@ -16562,33 +16629,47 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         <input id="tool-url" name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
       </div>
-      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
-        <span>&#129305; Formal advisor</span>
-      </label>
-      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
-        <span>&#10024; Featured</span>
-      </label>
+      {_logo_in_form_html}
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Priority tags</label>
+        <div style="display:grid;gap:10px;">
+          <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+            <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
+            <span>&#129305; Formal advisor</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+            <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
+            <span>&#10024; Featured</span>
+          </label>
+        </div>
+      </div>
     </div>
-    <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
-      <div>
-        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
-        <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
-          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-          placeholder="Jane Smith">
+    <div style="display:grid;gap:16px;align-content:start;">
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;">
+        <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
+        {_review_status_top_html}
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Flags this profile for a full read-through&mdash;set automatically when a new tool is added or any tracked field is refreshed, or manually anytime here.</p>
+        {_profile_review_line_html}
       </div>
-      <div>
-        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
-        <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
-          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-          placeholder="contact@vendor.com">
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
+        <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <label style="flex:0 0 50px;font-size:14px;font-weight:500;color:var(--navy);white-space:nowrap;">Name</label>
+          <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
+            style="flex:1;min-width:0;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+            placeholder="Jane Smith">
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <label style="flex:0 0 50px;font-size:14px;font-weight:500;color:var(--navy);white-space:nowrap;">Email</label>
+          <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
+            style="flex:1;min-width:0;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+            placeholder="contact@vendor.com">
+        </div>
+        <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+          <input type="checkbox" name="warm_intro_enabled" value="1"{'checked' if tool.get('warm_intro_enabled') else ''}>
+          <span>&#128232; Offer warm intro</span>
+        </label>
       </div>
-      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" name="warm_intro_enabled" value="1"{'checked' if tool.get('warm_intro_enabled') else ''}>
-        <span>&#128232; Offer warm intro</span>
-      </label>
     </div>
   </div>
 
@@ -16661,6 +16742,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 {_taxonomy_verify_form_html}
 {_description_verify_form_html}
 {_differentiation_verify_form_html}
+{_logo_after_form_html}
+{_review_status_after_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Competition</h2>
@@ -16701,10 +16784,6 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     {_differentiation_confidence_html}
     {_differentiation_review_line_html}
   </div>
-</div>
-
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  {_logo_admin_section(tool, tool_id, "tools", _logo_refetch_banner_html)}
 </div>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">

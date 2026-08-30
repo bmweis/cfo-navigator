@@ -4906,8 +4906,8 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     override is never silently kept applying to what's now effectively a
     different company's site, and never silently dropped either. The admin
     UI (`_logo_admin_section`, both edit pages) reuses the App screenshot
-    section's own conventions — a URL-fetch text input, a plain file-upload
-    `<form>` (no crop needed, unlike the app-screenshot upload), and a
+    section's own conventions — a URL-fetch text input, a file-upload
+    control (no crop needed, unlike the app-screenshot upload), and a
     badge distinguishing "Manual override" from "Auto-fetched (Brandfetch)".
     See `tests/test_logo_override.py` for the full coverage (override wins
     over a fresh automated fetch, a normal tool still auto-fetches
@@ -4951,6 +4951,60 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     re-fetch" section for the full coverage (success, no API key, quota,
     no-usable-asset, download failure, and the route end to end via a
     mocked `linklib.brandfetch`).
+    **Field-order pass (2026-08)** — the Logo section moved from far down
+    both edit pages (past Competition/Screenshots) to directly beside the
+    identifying fields at the top: on the Software edit page, inside the
+    two-column "Company details"/"Warm intro" split (`.tool-form-cols`),
+    right after URL and before the Formal advisor/Featured checkboxes; on
+    the Community edit page, in `_community_form_fields_parts`'s identity
+    column, right after Name/URL/"Auto-fill from URL" and before the
+    right-column Featured/Advisor box. Neither page's two-column grid nor
+    the Warm intro card changed. This forced a real markup change, not just
+    a reposition: `_logo_admin_section` now returns `(in_form_html,
+    after_form_html)` — the same split `_app_screenshot_admin_section`
+    already used — instead of one concatenated string, because the section
+    now renders inside `#tool-edit-form`/`#comm-edit-form`, and a `<form>`
+    can't nest inside another `<form>` (a nested `<form>`'s closing tag pops
+    the outer form off the parser's stack early, silently orphaning every
+    field/button after it, Save changes included — the same "Save changes
+    does nothing" failure mode `_narrative_verify_widget`'s hidden-verify-form
+    pattern exists to avoid). The section's "Fetch from URL" and "Upload"
+    mini-forms, previously real `<form>` elements wrapping their own
+    input+button, switched to the same hidden-empty-`<form>`-plus-`form=`-
+    attribute pattern the "Revert & re-fetch"/"Clear" actions already used,
+    so `in_form_html` now contains zero literal `<form>` tags and is safe to
+    embed anywhere. `_community_form_fields_parts` gained an optional
+    `logo_in_form_html` parameter (default `""`) to splice this into its
+    identity column — only Edit passes it; Add has no community id yet, so
+    it renders nothing there, unchanged from before.
+    **Field-order pass, follow-up (2026-08)** — on the Software edit page
+    only (Communities has no Verification status box on this page — that
+    concept lives on Communities' separate 23-field profile-draft page
+    instead), two more moves: the Verification status box moved from
+    full-width above `#tool-edit-form` into the right column, stacked
+    directly above the Warm intro card (each keeps its own bordered/
+    surface-background box now, rather than one continuous box, so neither
+    reads as nested inside the other); and the Formal advisor/Featured
+    checkboxes, previously bare and unlabeled directly under the Logo
+    section, gained a "Priority tags" header (the exact `<label>` styling
+    the Categories header already uses) in that same left-column spot.
+    Pulling Verification status out of its own full-width block let Company
+    details (including the relocated Logo section) move up to sit
+    immediately under the page's h1/meta line. Same nested-`<form>` hazard
+    as the Logo move, same fix shape: `_review_status_action_html` (and
+    `_review_status_block_html`, which composes it with the pill) gained an
+    optional `standalone_form_id` param — when set, the "Mark reviewed"/
+    "Flag for review" button renders as a bare `form="{id}"`-bound element
+    instead of its own literal `<form>`, and a new
+    `_review_status_hidden_form_html` renders the matching hidden `<form>`
+    for the caller to place outside `#tool-edit-form` (right where the
+    Logo/App-screenshot/narrative-verify hidden forms already collect,
+    after the main form closes). Every other caller of these three
+    functions (both admin list tables, the public profile VIEW pages, the
+    Community profile-draft page) omits the param and keeps its original
+    literal-`<form>` behavior unchanged — only the Software edit page's
+    own top-of-page block passes it, since it's the only caller that moved
+    inside another `<form>`.
     `/tools/communities/gap` (the "not
     quite the right fit?" CTA on a profile page — currently a stub that redirects
     into `/contact` with the community pre-filled as context, pending the real
