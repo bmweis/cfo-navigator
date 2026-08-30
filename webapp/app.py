@@ -1844,7 +1844,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     return in_form_html, after_form_html
 
 
-def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: str = "") -> str:
+def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: str = "") -> tuple[str, str]:
     """Renders the admin edit page's "Logo" section (manual logo override,
     2026-08 — see CLAUDE.md's Aleph/Zapier investigation writeup).
 
@@ -1853,10 +1853,27 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     `<input type=file>` + submit, same shape as /admin/brand/avatar — no
     crop needed here, a logo isn't cropped to a fixed frame), and a "Revert
     & re-fetch from Brandfetch" action (2026-08 follow-up — see
-    _live_refetch_logo) — all as their own standalone <form>s (not nested
-    inside #tool-edit-form/#comm-edit-form) since none of these need to
-    submit alongside the rest of the edit form's fields, unlike the
-    homepage-screenshot URL field beside them.
+    _live_refetch_logo).
+
+    Returns (in_form_html, after_form_html), same split as
+    _app_screenshot_admin_section: in_form_html is the visible block (label,
+    badge, preview, and every input/button — all form-associated via an
+    explicit `form=` attribute rather than a literal nested <form>), meant
+    to be embedded anywhere, including inside #tool-edit-form/#comm-edit-form
+    (Field-order pass, 2026-08 — moved next to Vendor/Community name and
+    URL). after_form_html holds the four actual hidden, empty <form>s
+    (set-url, upload, clear, dismiss-stale) that those inputs/buttons point
+    at via `form=` — always rendered OUTSIDE any other <form>, since a
+    <form> can't nest inside another <form>: a nested <form>'s closing tag
+    pops the *outer* form off the browser's parse stack early, silently
+    orphaning every field/button after that point (Save changes included) —
+    see _narrative_verify_widget's own comment for the "Save changes does
+    nothing" incident that taught this. Before the field-order pass, this
+    section rendered outside every <form> entirely, so the "Fetch from URL"
+    and "Upload" mini-forms could safely be real, non-nested <form>s in
+    place; moving the section next to Name/URL put it inside the main edit
+    form, so those two also switched to the hidden-form-plus-`form=`-attribute
+    pattern the "Revert & re-fetch"/"Clear" actions already used.
 
     kind is "tools" or "communities" — picks the route prefix and which
     _*_logo_url helper renders the current image. banner_html (same
@@ -1906,27 +1923,29 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
       {_logo_box(entity['name'], logo_url, 64, radius=10)}
       <div style="flex:1;min-width:260px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <form method="post" action="{route_prefix}/logo/set-url" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;flex:1;min-width:220px;">
-          <input name="logo_url" type="text" maxlength="500"
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;flex:1;min-width:220px;">
+          <input form="logo-seturl-form-{idsfx}" name="logo_url" type="text" maxlength="500"
             style="flex:1;min-width:140px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
             placeholder="https://…/logo.png">
-          <button type="submit" class="tool-admin-btn">Fetch from URL</button>
-        </form>
-        <form method="post" action="{route_prefix}/logo/upload" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">
-          <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required
+          <button type="submit" form="logo-seturl-form-{idsfx}" class="tool-admin-btn">Fetch from URL</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">
+          <input form="logo-upload-form-{idsfx}" type="file" name="file" accept="image/jpeg,image/png,image/webp" required
             style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:180px;">
-          <button type="submit" class="tool-admin-btn">Upload</button>
-        </form>
+          <button type="submit" form="logo-upload-form-{idsfx}" class="tool-admin-btn">Upload</button>
+        </div>
         <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert &amp; re-fetch from Brandfetch</button>
       </div>
     </div>
   </div>"""
 
     after_form_html = (
+        f'<form id="logo-seturl-form-{idsfx}" method="post" action="{route_prefix}/logo/set-url" style="display:none;"></form>'
+        f'<form id="logo-upload-form-{idsfx}" method="post" action="{route_prefix}/logo/upload" enctype="multipart/form-data" style="display:none;"></form>'
         f'<form id="logo-clear-form-{idsfx}" method="post" action="{route_prefix}/logo/clear" style="display:none;"></form>'
         f'<form id="logo-dismiss-stale-form-{idsfx}" method="post" action="{route_prefix}/logo/dismiss-stale" style="display:none;"></form>'
     )
-    return in_form_html + after_form_html
+    return in_form_html, after_form_html
 
 
 def _save_manual_logo(lib: "Library", kind: str, entity_id: int, slug: str, data: bytes) -> bool:
@@ -13873,7 +13892,8 @@ def _community_category_checkboxes(categories: list[dict], selected: list[str] |
          'No categories yet. <a href="/admin/tools/communities/categories">Add one</a> first.</p>'
 
 
-def _community_form_fields_parts(c: dict | None = None, categories: list[dict] | None = None) -> dict:
+def _community_form_fields_parts(c: dict | None = None, categories: list[dict] | None = None,
+                                  logo_in_form_html: str = "") -> dict:
     """Phase P (extended by the admin intake form layout pass, and again by
     a follow-up round after live review of that pass's shipped result):
     field markup for Add and Edit community, split into named fragments so
@@ -13897,7 +13917,14 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     match Edit's); identity_block is the one exception, since Add and Edit
     ended up wrapping identity+disclosures in byte-identical markup, so it
     was pulled into the shared function instead of staying duplicated at
-    both call sites."""
+    both call sites.
+
+    logo_in_form_html (Field-order pass, 2026-08): the Logo section's
+    in-form half (see _logo_admin_section), spliced into identity_block's
+    left column right after Name/URL/Auto-fill, before the right column's
+    Featured/Advisor. Only Edit passes this — Add has no community id yet,
+    so there's nothing to fetch/upload a logo for; defaults to "" so Add's
+    call site is unaffected."""
     c = c or {}
     categories = categories or []
     # _NEEDS_VERIFICATION is appended as a literal, selectable option on every
@@ -14058,6 +14085,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     <div class="tool-form-cols">
       <div style="display:grid;gap:14px;align-content:start;">
 {identity_html}
+{logo_in_form_html}
       </div>
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:10px;align-content:start;">
 {disclosures_html}
@@ -15166,7 +15194,9 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # (/admin/tools/communities/{id}/profile, linked from this page's meta
     # line below) and is out of scope for this reorg — flagged in the PR
     # rather than restructured on assumption.
-    _parts = _community_form_fields_parts(c, categories)
+    _logo_in_form_html, _logo_after_form_html = _logo_admin_section(
+        c, c['id'], "communities", logo_refetch_banner_html)
+    _parts = _community_form_fields_parts(c, categories, logo_in_form_html=_logo_in_form_html)
     body = f"""<div class="page page-grid">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
@@ -15185,10 +15215,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     </div>
   </div>
 </form>
-
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  {_logo_admin_section(c, c['id'], "communities", logo_refetch_banner_html)}
-</div>
+{_logo_after_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Screenshots</h2>
@@ -16531,6 +16558,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     elif logo_refetched == "0":
         _logo_refetch_banner_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                                       f'padding:10px 16px;font-size:13px;margin:0 0 10px;">{_esc(logo_refetch_msg)}</p>')
+    _logo_in_form_html, _logo_after_form_html = _logo_admin_section(
+        tool, tool_id, "tools", _logo_refetch_banner_html)
 
     body = f"""<div class="page page-grid">
 <h1>Edit software</h1>
@@ -16562,6 +16591,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         <input id="tool-url" name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
       </div>
+      {_logo_in_form_html}
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
         <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
         <span>&#129305; Formal advisor</span>
@@ -16661,6 +16691,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 {_taxonomy_verify_form_html}
 {_description_verify_form_html}
 {_differentiation_verify_form_html}
+{_logo_after_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Competition</h2>
@@ -16701,10 +16732,6 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     {_differentiation_confidence_html}
     {_differentiation_review_line_html}
   </div>
-</div>
-
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  {_logo_admin_section(tool, tool_id, "tools", _logo_refetch_banner_html)}
 </div>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
