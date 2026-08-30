@@ -3924,6 +3924,57 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   first place; confirmed by the same measurement (143px/134px, identical
   at both breakpoints). Full regression: 2364 passed, 0 failed.
 
+  **Fifth same-PR follow-up (2026-08) — "narrower than mobile" wasn't
+  good enough either; Brian's actual ask was genuine uniformity
+  ("They should be a consistent size regardless"), and getting there
+  surfaced two more real CSS Grid/specificity bugs, both caught only by
+  measuring the grid's own box, not the page's.** The Fourth follow-up's
+  fix left desktop Edit/Delete narrower than their mobile widths (55px/
+  74px vs mobile's 95px each) — mobile's `repeat(3,1fr)` sizes every
+  column to the widest label's own min-content width, so "View profile"
+  (95px) forced Edit/Delete to match it too, but that's incidental
+  uniformity within one breakpoint, not the same width at every
+  breakpoint. Replaced both the desktop `auto`-track sizing and the
+  mobile `1fr`-stretch with one unconditional fixed width (no media
+  query, same value everywhere) on `.admin-table-actions-grid a`/`form`
+  plus `width:100%` on the form's own button. First attempt used 113px
+  (View profile's natural unconstrained width) and appeared to pass a
+  first measurement pass (`getBoundingClientRect()` reporting 113px at
+  all four breakpoint/table combinations, `document.body.scrollWidth`
+  never exceeding the viewport) — but the actual mobile screenshot
+  showed Delete visibly clipped at the card's right edge, exposing a
+  real gap in that check: page-level overflow can read `False` while a
+  child element overflows its OWN box, invisibly, as long as nothing
+  widens the page itself. A targeted follow-up measurement
+  (`.admin-table-actions-grid`'s own `clientWidth` vs `scrollWidth`,
+  not the page's) confirmed it: `316` vs `351` — the grid's real box
+  genuinely wasn't wide enough for 3×113px+gaps. Two distinct bugs,
+  found in this order: (1) the mobile `repeat(3,1fr)` override needed
+  its own explicit `justify-content:normal!important` — the Fourth
+  follow-up's desktop `justify-content:start` lives in an inline style,
+  which a non-`!important` external rule can never outrank regardless
+  of which media query it's in, and `start` (unlike the default
+  `normal`) makes `1fr` tracks stop filling the row and collapse to
+  their content size instead — exactly backwards for a 3-across mobile
+  layout that needs its `1fr` columns to actually consume all available
+  width. (2) Once that was fixed, the grid's real available width at a
+  390px card (~316px, after the row's own padding) was still too narrow
+  for three 113px buttons plus gaps (351px needed) — "View profile"'s
+  own unpadded text needs ~89px at the existing 13px font/12px
+  horizontal padding, confirmed by measuring a cloned, unconstrained
+  copy of the element rather than guessing. Fixed by shrinking these
+  three buttons' padding (12px→8px horizontal) and font-size (13px→
+  12px — which also brings them in line with every other admin list-row
+  Edit/Delete button on the site, nearly all of which already use 12px;
+  13px here was the odd one out) and the fixed width itself (113px→
+  100px), sized with a real ~3px margin over the newly-measured natural
+  text width (98.5px), not tuned to fit exactly. Re-verified after the
+  fix: all three buttons render at a literal 100px at both 1280px and
+  390px on both tables, and `.admin-table-actions-grid`'s own
+  `clientWidth`/`scrollWidth` are equal (no internal overflow) —
+  confirmed by measurement, not just a clean screenshot. Full
+  regression: 2364 passed, 0 failed.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded

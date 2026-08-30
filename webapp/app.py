@@ -10854,12 +10854,12 @@ def admin_software(request: Request, filter: str = ""):
           </td>
           <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
             <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
-              <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">View profile</a>
-              <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
+              <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">View profile</a>
+              <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">Edit</a>
               <form method="post" action="/admin/tools/software/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
-                <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
+                <button type="submit" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
               </form>
             </div>
           </td>
@@ -10983,6 +10983,43 @@ applySortFilter('software');
    in block layout as in table layout. Fixes the URL column wrapping badly
    and the Edit/Delete actions rendering unusably small on mobile.
 */
+/* Consistent size regardless of viewport or label length (2026-08
+   follow-up, Brian's explicit ask, after the grid-auto-stretch fix
+   above still left View profile/Edit/Delete unevenly sized to their own
+   text — a real CSS Grid quirk: 1fr tracks reserve an implicit min-width
+   equal to their content's own min-content size before splitting
+   remaining space evenly, so a longer label like "View profile" claims
+   more than its fair third even inside repeat(3,1fr)). One fixed width,
+   applied unconditionally (no media query — same value at every
+   breakpoint), replaces both the desktop auto-track sizing and the
+   mobile 100%-of-1fr stretch, so all three actions render identically
+   sized everywhere rather than merely "not wider than mobile."
+   Two more real bugs surfaced getting here, both caught only by live
+   measurement, not by a page-level overflow check: (1) the mobile
+   3-column media-query override needs its own explicit
+   justify-content:normal!important — the desktop justify-content:start
+   lives in an inline style (which a non-!important stylesheet rule can
+   never outrank regardless of media query), and start collapses 1fr
+   tracks to their content size instead of letting them fill the row,
+   the opposite of what 3-across mobile needs; a bare page-level
+   document.body.scrollWidth check missed this entirely, since the
+   overflow was contained inside the card and never widened the page —
+   only measuring .admin-table-actions-grid's own clientWidth vs
+   scrollWidth caught it. (2) once that was fixed, the grid's real
+   available width at a 390px card (~316px, after the row's own 6px/12px
+   padding) turned out too narrow for three 113px-wide buttons plus
+   gaps (351px needed) — "View profile"'s own unpadded text needs
+   ~89px at 13px/12px-horizontal-padding, more than a three-way split of
+   316px allows. Fixed by shrinking these three buttons' padding
+   (12px->8px horizontal) and font-size (13px->12px, matching the
+   smaller font this same list/edit/delete row pattern already uses
+   everywhere else on the admin side) and the fixed width itself
+   (113px->100px) — confirmed by measuring the unpadded text's own
+   natural width first, not by trial and error, so the new value has a
+   real margin (~3px) rather than being tuned to fit exactly. */
+.admin-table-actions-grid a,
+.admin-table-actions-grid form{{width:100px;}}
+.admin-table-actions-grid form button{{width:100%;}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
   .admin-table-responsive, .admin-table-responsive tbody,
@@ -11000,10 +11037,10 @@ applySortFilter('software');
      Review status's pill+button go row instead of column, since a mobile
      card's own full width has plenty of room neither narrow desktop table
      cell has. */
-  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;}}
-  .admin-table-actions .admin-table-actions-grid a,
-  .admin-table-actions .admin-table-actions-grid form,
-  .admin-table-actions .admin-table-actions-grid button{{width:100%;}}
+  /* Row/column COUNT still flips (2 cols desktop, 3 cols mobile) — only
+     the WIDTH-stretching part is gone now, replaced by the unconditional
+     fixed-width rule above that already applies at every breakpoint. */
+  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
   .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
 }}
 </style>
@@ -14388,11 +14425,11 @@ def admin_communities(request: Request, filter: str = ""):
   </td>
   <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;min-width:210px;">
     <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
-      <a href="/tools/communities/{c['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">View profile</a>
-      <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
+      <a href="/tools/communities/{c['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">View profile</a>
+      <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">Edit</a>
       <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
             onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
-        <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
+        <button type="submit" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;color:#b91c1c;border-color:#fca5a5;white-space:nowrap;">Delete</button>
       </form>
     </div>
   </td>
@@ -14533,6 +14570,43 @@ applySortFilter('communities');
    <style> block to carry them before now. Below the breakpoint, rows
    become blocks and each cell gets a label from its data-label attribute
    instead of relying on a <thead> the layout no longer has room for. */
+/* Consistent size regardless of viewport or label length (2026-08
+   follow-up, Brian's explicit ask, after the grid-auto-stretch fix
+   above still left View profile/Edit/Delete unevenly sized to their own
+   text — a real CSS Grid quirk: 1fr tracks reserve an implicit min-width
+   equal to their content's own min-content size before splitting
+   remaining space evenly, so a longer label like "View profile" claims
+   more than its fair third even inside repeat(3,1fr)). One fixed width,
+   applied unconditionally (no media query — same value at every
+   breakpoint), replaces both the desktop auto-track sizing and the
+   mobile 100%-of-1fr stretch, so all three actions render identically
+   sized everywhere rather than merely "not wider than mobile."
+   Two more real bugs surfaced getting here, both caught only by live
+   measurement, not by a page-level overflow check: (1) the mobile
+   3-column media-query override needs its own explicit
+   justify-content:normal!important — the desktop justify-content:start
+   lives in an inline style (which a non-!important stylesheet rule can
+   never outrank regardless of media query), and start collapses 1fr
+   tracks to their content size instead of letting them fill the row,
+   the opposite of what 3-across mobile needs; a bare page-level
+   document.body.scrollWidth check missed this entirely, since the
+   overflow was contained inside the card and never widened the page —
+   only measuring .admin-table-actions-grid's own clientWidth vs
+   scrollWidth caught it. (2) once that was fixed, the grid's real
+   available width at a 390px card (~316px, after the row's own 6px/12px
+   padding) turned out too narrow for three 113px-wide buttons plus
+   gaps (351px needed) — "View profile"'s own unpadded text needs
+   ~89px at 13px/12px-horizontal-padding, more than a three-way split of
+   316px allows. Fixed by shrinking these three buttons' padding
+   (12px->8px horizontal) and font-size (13px->12px, matching the
+   smaller font this same list/edit/delete row pattern already uses
+   everywhere else on the admin side) and the fixed width itself
+   (113px->100px) — confirmed by measuring the unpadded text's own
+   natural width first, not by trial and error, so the new value has a
+   real margin (~3px) rather than being tuned to fit exactly. */
+.admin-table-actions-grid a,
+.admin-table-actions-grid form{{width:100px;}}
+.admin-table-actions-grid form button{{width:100%;}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
   .admin-table-responsive, .admin-table-responsive tbody,
@@ -14550,10 +14624,10 @@ applySortFilter('communities');
      Review status's pill+button go row instead of column, since a mobile
      card's own full width has plenty of room neither narrow desktop table
      cell has. */
-  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;}}
-  .admin-table-actions .admin-table-actions-grid a,
-  .admin-table-actions .admin-table-actions-grid form,
-  .admin-table-actions .admin-table-actions-grid button{{width:100%;}}
+  /* Row/column COUNT still flips (2 cols desktop, 3 cols mobile) — only
+     the WIDTH-stretching part is gone now, replaced by the unconditional
+     fixed-width rule above that already applies at every breakpoint. */
+  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
   .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
 }}
 </style>
