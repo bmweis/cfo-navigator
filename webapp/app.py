@@ -10910,17 +10910,17 @@ def admin_software(request: Request, filter: str = ""):
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<div class="admin-header-row" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Software vendors</h1>
-  <a href="/admin/tools/software/new" class="btn admin-header-add-btn" style="font-size:14px;padding:8px 18px;">+ Add software</a>
-</div>
-<p style="margin:0 0 24px;">
+<h1 style="margin:0 0 4px;">Software vendors</h1>
+<p style="margin:0 0 12px;">
   <a href="/tools/software" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/software/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/software/name-duplicates" style="font-size:13px;color:{'#92400e' if n_name_dupes else 'var(--muted)'};font-weight:{'700' if n_name_dupes else '400'};">Check for name duplicates{f' ({n_name_dupes})' if n_name_dupes else ''} →</a>
   {review_filter_link}{clear_filter_link}
+</p>
+<p style="margin:0 0 24px;">
+  <a href="/admin/tools/software/new" class="btn admin-header-add-btn" style="font-size:14px;padding:8px 18px;">+ Add software</a>
 </p>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
@@ -11042,20 +11042,25 @@ applySortFilter('software');
      fixed-width rule above that already applies at every breakpoint. */
   .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
   .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
-  /* "+ Add software"/"+ Add community" overlapped the page h1 on mobile
-     (2026-08 follow-up, Brian's explicit ask) — the header row's inline
-     display:flex;align-items:center;justify-content:space-between never
-     had a mobile override, so once the h1 wrapped to two lines at a
-     narrow viewport ("Software" / "vendors"), the vertically-centered
-     button sat on top of the wrapped second line instead of clearing it.
-     Drops the button below the h1 (column direction, left-aligned) and
-     gives it one shared fixed width — sized to the longer of the two
-     labels ("+ Add community"), not full-width — so both pages' buttons
-     render identically sized on mobile, matching the "consistent, not
-     excessively wide" ask from the Actions-button round above. */
-  .admin-header-row{{flex-direction:column!important;align-items:flex-start!important;justify-content:flex-start!important;gap:10px;}}
-  .admin-header-add-btn{{width:186px;text-align:center;white-space:nowrap;}}
 }}
+/* "+ Add software"/"+ Add community" (2026-08 follow-up, Brian's explicit
+   ask — two rounds). First round put the button beside the h1 and
+   dropped it below on mobile only via a fixed width tuned against this
+   sandbox's own font metrics — Brian reported it still wrapping to two
+   lines in the real browser, since a real (non-fallback) font can render
+   the same text wider than this sandbox's headless Chromium measured it
+   (a known, already-documented sandbox-networking limitation: Google
+   Fonts can silently fail to load here). Second round: moved the button
+   below the "View public directory / ..." links line entirely, at every
+   breakpoint, not just mobile — it no longer competes with the h1 or
+   anything else for horizontal space, so there's nothing left to overlap.
+   Sized to the longer of the two labels ("+ Add community") without
+   guessing a brittle exact pixel width a second time: min-width (not a
+   fixed width) plus white-space:nowrap is mathematically guaranteed
+   never to wrap regardless of which font actually renders — a narrower
+   real font just leaves a little extra padding inside the same
+   200px floor; a wider one simply grows past it instead of wrapping. */
+.admin-header-add-btn{{min-width:200px;text-align:center;white-space:nowrap;}}
 </style>
 </div>"""
     return HTMLResponse(_page("Software vendors—CFO Toolbox Admin", "", body, authed=True))
@@ -14505,15 +14510,15 @@ def admin_communities(request: Request, filter: str = ""):
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<div class="admin-header-row" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Communities</h1>
-  <a href="/admin/tools/communities/new" class="btn admin-header-add-btn" style="font-size:14px;padding:8px 18px;">+ Add community</a>
-</div>
-<p style="margin:0 0 24px;">
+<h1 style="margin:0 0 4px;">Communities</h1>
+<p style="margin:0 0 12px;">
   <a href="/tools/communities" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/communities/categories" style="font-size:13px;color:var(--muted);">Manage categories →</a>
   {review_filter_link}{clear_filter_link}
+</p>
+<p style="margin:0 0 24px;">
+  <a href="/admin/tools/communities/new" class="btn admin-header-add-btn" style="font-size:14px;padding:8px 18px;">+ Add community</a>
 </p>
 
 <details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
@@ -14642,20 +14647,25 @@ applySortFilter('communities');
      fixed-width rule above that already applies at every breakpoint. */
   .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
   .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
-  /* "+ Add software"/"+ Add community" overlapped the page h1 on mobile
-     (2026-08 follow-up, Brian's explicit ask) — the header row's inline
-     display:flex;align-items:center;justify-content:space-between never
-     had a mobile override, so once the h1 wrapped to two lines at a
-     narrow viewport ("Software" / "vendors"), the vertically-centered
-     button sat on top of the wrapped second line instead of clearing it.
-     Drops the button below the h1 (column direction, left-aligned) and
-     gives it one shared fixed width — sized to the longer of the two
-     labels ("+ Add community"), not full-width — so both pages' buttons
-     render identically sized on mobile, matching the "consistent, not
-     excessively wide" ask from the Actions-button round above. */
-  .admin-header-row{{flex-direction:column!important;align-items:flex-start!important;justify-content:flex-start!important;gap:10px;}}
-  .admin-header-add-btn{{width:186px;text-align:center;white-space:nowrap;}}
 }}
+/* "+ Add software"/"+ Add community" (2026-08 follow-up, Brian's explicit
+   ask — two rounds). First round put the button beside the h1 and
+   dropped it below on mobile only via a fixed width tuned against this
+   sandbox's own font metrics — Brian reported it still wrapping to two
+   lines in the real browser, since a real (non-fallback) font can render
+   the same text wider than this sandbox's headless Chromium measured it
+   (a known, already-documented sandbox-networking limitation: Google
+   Fonts can silently fail to load here). Second round: moved the button
+   below the "View public directory / ..." links line entirely, at every
+   breakpoint, not just mobile — it no longer competes with the h1 or
+   anything else for horizontal space, so there's nothing left to overlap.
+   Sized to the longer of the two labels ("+ Add community") without
+   guessing a brittle exact pixel width a second time: min-width (not a
+   fixed width) plus white-space:nowrap is mathematically guaranteed
+   never to wrap regardless of which font actually renders — a narrower
+   real font just leaves a little extra padding inside the same
+   200px floor; a wider one simply grows past it instead of wrapping. */
+.admin-header-add-btn{{min-width:200px;text-align:center;white-space:nowrap;}}
 </style>
 </div>"""
     return HTMLResponse(_page("Communities—CFO Toolbox Admin", "", body, authed=True))
