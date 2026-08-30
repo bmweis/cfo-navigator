@@ -3759,6 +3759,69 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   first draft's solid-coral pill, which is what surfaced the CI-check
   detail this whole correction turned on.
 
+- **Admin list table-width investigation (2026-08, PR 465 fast-follow) —
+  the Communities admin list's Review status/Actions columns ran off the
+  right edge at ordinary desktop widths; root cause was column count, not
+  missing responsive handling, and the real fix ended up being a shared
+  minimal-default column state rather than the reorder/scroll-shadow
+  approach first proposed.** Phase 0 investigation (Playwright, computed
+  styles, real scroll widths — not assumed): both admin lists already wrap
+  their table in `<div style="overflow-x:auto;">`, and that container was
+  already working correctly — `document.body.scrollWidth` never exceeded
+  the viewport at either 1280px or 1024px on either page, so the *page*
+  was never actually breaking BRAND.md's "wide content scrolls in its own
+  container" rule. The real problem was narrower: Software's table (7
+  columns) genuinely fits at both widths and never needs scroll; Communities'
+  (11 columns, several with explicit `min-width`s) measured 1549px wide and
+  needed internal scroll at *both* widths, with zero visual cue that more
+  columns existed off-screen — and the two columns that vanish first
+  (Review status, Actions) are exactly the ones an admin acts on. Communities
+  also has no mobile-card fallback below 700px at all (Software's
+  `admin-table-responsive` class, confirmed absent from Communities' HTML).
+  **First proposed fix (reorder Review status/Actions earlier + a CSS
+  scroll-shadow affordance) was reported to Brian but never built** — a
+  follow-up message proposed something better before implementation started,
+  and Brian confirmed it should replace rather than supplement the reorder
+  work. **What shipped instead**: both admin lists now default to showing
+  only Name, Review status, and Actions (Name/Actions have no `data-col` at
+  all on either table, so they're always visible regardless; Review status
+  is the one optional column marked default-visible) — unless the admin has
+  explicitly saved a wider view. A new "Save view for next time" button
+  (reusing the existing `_admin_column_picker_html`/`initColPicker`/
+  `toggleColumn` mechanism — already the single shared implementation for
+  both tables, confirmed before extending rather than assumed) persists the
+  *current* checkbox state to `localStorage`; `toggleColumn` itself no
+  longer auto-persists on every checkbox change (it used to) — a column
+  toggle is now session-only exploration, and only the explicit Save click
+  commits it, so peeking at a wider view can never silently overwrite (or
+  silently revert away from) a view someone already saved. `initColPicker`
+  falls back to the shared `ADMIN_DEFAULT_VISIBLE_COLS = ['review_status']`
+  constant only when nothing is saved yet; a stored view is always honored
+  exactly as saved. Verified live (not just reasoned about) that under the
+  new default, Communities' table's `scrollWidth` exactly equals its
+  container's `clientWidth` at both 1280px and 1024px — the 11-vs-7-column
+  overflow this investigation started from simply doesn't occur for the
+  default view any more. **This is why the reorder/scroll-shadow proposal
+  was dropped, not kept alongside the new default**: a wider *saved* view
+  can still need to scroll on a narrow viewport, but the existing
+  `overflow-x:auto` container already handles that correctly (confirmed
+  both before this fix and unmodified by it) — building a scroll-shadow
+  affordance for that comparatively rare case was judged premature/
+  speculative rather than a real gap, and can be added later if it's ever
+  actually needed. **Communities' missing mobile-card breakpoint was
+  explicitly scoped OUT of this PR** (per its own author's ask, not
+  silently dropped) — recommended as worth doing but as a separate,
+  single-purpose follow-up: the new minimal default (4 columns, well under
+  700px) substantially closes the everyday mobile gap already, and building
+  the stacked-card CSS treatment is a large enough, separable change to
+  deserve its own PR rather than being bundled in reactively. A real
+  brand-check false positive recurred during this work (the third time
+  this exact pattern has hit this repo, per this doc's own earlier
+  entries): a `#465` PR-number reference in a code comment parsed as a
+  valid 3-digit hex color and normalized to `#446655`, tripping
+  `tests/test_brand_standards.py`; fixed the same way as every prior
+  instance — reworded to "PR 465" in prose, not suppressed.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded

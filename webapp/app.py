@@ -10176,11 +10176,25 @@ def admin_email_failure_dismiss(request: Request, failure_id: int):
 # (_COMMUNITY_BULK_FIELDS / _SOFTWARE_BULK_FIELDS below); the JS is generic
 # over a "table key" so both pages share one script block.
 _ADMIN_BULK_EDIT_JS = """
+// Shared across every admin list table (Software, Communities, and any
+// future one) — same default, same save-view mechanism, one implementation.
+// Communities genuinely has more optional columns than Software (11 vs. 7),
+// and that's fine; what has to match is this behavior, not the column
+// count. See CLAUDE.md's admin-list column-defaults follow-up for the
+// full write-up (table-width investigation after PR 465).
+var ADMIN_DEFAULT_VISIBLE_COLS = ['review_status'];
 function initColPicker(tableKey, cols) {
   var stored = localStorage.getItem('cfo_admin_cols_' + tableKey);
-  if (!stored) return;
   var active;
-  try { active = JSON.parse(stored); } catch (e) { return; }
+  if (stored) {
+    try { active = JSON.parse(stored); } catch (e) { active = ADMIN_DEFAULT_VISIBLE_COLS.slice(); }
+  } else {
+    // No saved view yet — the minimal default (Name/Actions are always
+    // shown, no data-col; only Review status joins them here) rather than
+    // every column, so an admin list with a lot of optional metadata
+    // (Communities) doesn't overflow its container by default.
+    active = ADMIN_DEFAULT_VISIBLE_COLS.slice();
+  }
   cols.forEach(function(col) {
     var visible = active.indexOf(col) !== -1;
     document.querySelectorAll('[data-col="' + tableKey + ':' + col + '"]').forEach(function(el) {
@@ -10190,16 +10204,28 @@ function initColPicker(tableKey, cols) {
     if (cb) cb.checked = visible;
   });
 }
-function toggleColumn(tableKey, col, checked, allCols) {
+function toggleColumn(tableKey, col, checked) {
+  // Session-only — does NOT touch localStorage. Exploring a wider view is
+  // never silently persisted; only saveColumnView() (the explicit "Save
+  // view for next time" button) commits a selection, so returning to this
+  // page without saving reverts to whatever was last actually saved (or
+  // the minimal default if nothing ever was).
   document.querySelectorAll('[data-col="' + tableKey + ':' + col + '"]').forEach(function(el) {
     el.style.display = checked ? '' : 'none';
   });
-  var stored = localStorage.getItem('cfo_admin_cols_' + tableKey);
-  var active;
-  try { active = stored ? JSON.parse(stored) : allCols.slice(); } catch (e) { active = allCols.slice(); }
-  if (checked && active.indexOf(col) === -1) active.push(col);
-  if (!checked) active = active.filter(function(c) { return c !== col; });
+}
+function saveColumnView(tableKey, allCols) {
+  var active = allCols.filter(function(col) {
+    var cb = document.getElementById('colpick-' + tableKey + '-' + col);
+    return cb && cb.checked;
+  });
   localStorage.setItem('cfo_admin_cols_' + tableKey, JSON.stringify(active));
+  var msg = document.getElementById('colpick-saved-' + tableKey);
+  if (msg) {
+    msg.style.display = 'inline';
+    clearTimeout(msg._hideTimer);
+    msg._hideTimer = setTimeout(function() { msg.style.display = 'none'; }, 2000);
+  }
 }
 function updateBulkButton(tableKey) {
   var n = document.querySelectorAll('.' + tableKey + '-row-cb:checked').length;
@@ -10353,25 +10379,41 @@ function closeDeleteSelectedPanel(tableKey) {
 """
 
 
-def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]]) -> str:
-    """columns: (col_key, label) pairs, all default-visible. Toggled client-side
-    via data-col="{table_key}:{col_key}" on the corresponding <th>/<td>s and
-    persisted to localStorage by toggleColumn() in _ADMIN_BULK_EDIT_JS."""
-    # json.dumps() quotes with ", same as the onchange="" attribute itself—
-    # unescaped, that closes the attribute early at the first array element
-    # and leaves toggleColumn's 4th argument truncated, so the checkbox's
-    # onchange handler never actually runs. _esc() turns those into &quot;
-    # so the attribute parses whole.
+def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]],
+                               default_visible: tuple[str, ...] = ("review_status",)) -> str:
+    """columns: (col_key, label) pairs. `default_visible` names which of these
+    render checked — and are therefore visible — before any saved view exists
+    in localStorage; the rest start unchecked/hidden. Toggled client-side via
+    data-col="{table_key}:{col_key}" on the corresponding <th>/<td>s
+    (toggleColumn, session-only) and only actually persisted by the "Save
+    view for next time" button (saveColumnView) — both in
+    _ADMIN_BULK_EDIT_JS. Name and Actions have no data-col at all on either
+    admin list, so they're always visible regardless of this picker; only
+    the OPTIONAL columns (this function's `columns` list) are gated by it.
+    Same default_visible/mechanism on every admin list table by design (the
+    2026-08 column-defaults follow-up to PR 465) — Communities has more
+    optional columns than Software, but the behavior is identical."""
+    # json.dumps() quotes with ", same as the onclick/onchange attributes
+    # themselves — unescaped, that closes the attribute early at the first
+    # array element and truncates the handler's argument, so it never
+    # actually runs. _esc() turns those into &quot; so the attribute parses
+    # whole.
+    all_keys_json = _esc(json.dumps([k for k, _ in columns]))
     checks = "".join(
         f'<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">'
-        f'<input type="checkbox" id="colpick-{table_key}-{key}" checked '
-        f'onchange="toggleColumn(\'{table_key}\',\'{key}\',this.checked,{_esc(json.dumps([k for k, _ in columns]))})"> {_esc(label)}</label>'
+        f'<input type="checkbox" id="colpick-{table_key}-{key}" {"checked " if key in default_visible else ""}'
+        f'onchange="toggleColumn(\'{table_key}\',\'{key}\',this.checked)"> {_esc(label)}</label>'
         for key, label in columns
     )
     return f"""<details style="margin:0 0 12px;">
   <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;">Columns <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
-  <div style="display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:8px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);max-width:520px;">
-    {checks}
+  <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);max-width:520px;">
+    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;">{checks}</div>
+    <div style="display:flex;align-items:center;gap:10px;padding-top:8px;border-top:1px solid var(--line);">
+      <button type="button" id="colpick-save-{table_key}" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;"
+              onclick="saveColumnView('{table_key}',{all_keys_json})">Save view for next time</button>
+      <span id="colpick-saved-{table_key}" style="display:none;font-size:12px;color:var(--seafoam-deep);font-weight:600;">Saved</span>
+    </div>
   </div>
 </details>"""
 
