@@ -3822,6 +3822,48 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `tests/test_brand_standards.py`; fixed the same way as every prior
   instance — reworded to "PR 465" in prose, not suppressed.
 
+  **Two same-PR follow-ups, both requested live during review rather than
+  planned up front.** (1) **Software's Actions column (View profile/Edit/
+  Delete) was on a 2-column CSS grid, wrapping the three buttons onto two
+  rows** — Communities' own Actions column already used a single-row flex
+  layout for the identical three buttons, so this was a real inconsistency
+  between the two tables' otherwise-matching designs, not a new decision.
+  Switched Software to the same `display:flex;flex-wrap:nowrap` treatment
+  Communities already had, with the `<700px` card-layout override changed
+  from forcing a 1-column grid to `flex-direction:column` + full-width
+  children so the stacked mobile card view is unaffected — verified live at
+  both 1280px (one row now) and a real 390px mobile viewport (unchanged
+  stacking, no overflow). (2) **The mobile-card fallback explicitly scoped
+  OUT above got built after all**, once Brian offered to fold it in and a
+  live 390px check of the *new minimal default* found it still genuinely
+  needed: even at just 4 columns, Communities' plain (non-card) table forced
+  the `overflow-x:auto` container into a real internal horizontal scroll at
+  390px, with Review status/Actions cut off exactly as before — the minimal
+  default closed the *page-breaking* version of the problem, not the
+  *mobile-usability* one. Software's `admin-table-responsive` treatment
+  (already shipped, already tested) was extended to Communities' approved-
+  communities table rather than building a second implementation: every
+  `<td>` gained `class="admin-table-cell"` and (for the previously-`data-col`-
+  only optional columns) a matching `data-label`, the `<table>` gained
+  `class="admin-table-responsive"`, and the identical `@media(max-width:700px)`
+  block Software's own `<style>` tag carries was added to the Communities
+  admin route's `<style>` tag — this page had never had one before, since
+  nothing on it needed page-specific CSS until now. Verified live: the
+  default 4-column view stacks as clean full-width cards on a real 390px
+  viewport (matching Software's card treatment exactly), AND a wider
+  *saved* column view (Cost band + Format checked and saved) still stacks
+  correctly at 390px too — the stress case for the whole mobile-card
+  mechanism, not just the default state. Desktop (1280px) confirmed
+  unaffected by either change. **Communities' separate "Pending
+  submissions" table (a different table, different columns, no
+  column-picker mechanism) was investigated and found to have the identical
+  unresponsive-table gap on BOTH admin lists** — deliberately left alone in
+  this pass: it's usually empty, structurally separate from the
+  column-picker/review-status work this whole thread is about, and fixing
+  it doubles the surface area of an already-two-part follow-up for a
+  rarely-visited state — flagged here as a genuine, real, still-open gap
+  rather than silently found and dropped.
+
 - **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
   comp-benchmarking-vendor removal investigation, fixed as its own PR before any
   tool was actually deleted.** `Library.delete_tool()` already cascaded

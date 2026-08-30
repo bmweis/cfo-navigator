@@ -14361,25 +14361,25 @@ def admin_communities(request: Request, filter: str = ""):
             "search": f"{c['name']} {c['url']}",
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
-  <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
-  <td style="padding:10px 12px;font-weight:600;min-width:250px;">
+  <td class="admin-table-cell" style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
+  <td class="admin-table-cell" style="padding:10px 12px;font-weight:600;min-width:250px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
       <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{low_conf_badge}
     </div>
   </td>
-  <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
-  <td data-col="communities:cost_band" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
-  <td data-col="communities:access" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
-  <td data-col="communities:categories" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
-  <td data-col="communities:sponsorship_type" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['sponsorship_type'] or '—')}</td>
-  <td data-col="communities:format" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
-  <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
-  <td data-col="communities:review_status" style="padding:10px 12px;">
+  <td data-col="communities:notes" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
+  <td data-col="communities:cost_band" data-label="Cost band" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
+  <td data-col="communities:access" data-label="Access" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
+  <td data-col="communities:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+  <td data-col="communities:sponsorship_type" data-label="Sponsorship type" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['sponsorship_type'] or '—')}</td>
+  <td data-col="communities:format" data-label="Format" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
+  <td data-col="communities:reach" data-label="Reach" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
+  <td data-col="communities:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;">
     <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
   </td>
-  <td style="padding:10px 12px;min-width:210px;">
+  <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;min-width:210px;">
     <div style="display:flex;flex-direction:column;gap:6px;">
-      <div style="display:flex;flex-wrap:nowrap;align-items:center;gap:6px;">
+      <div class="admin-table-actions-grid" style="display:flex;flex-wrap:nowrap;align-items:center;gap:6px;">
         <a href="/tools/communities/{c['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">View profile</a>
         <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;white-space:nowrap;">Edit</a>
         <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
@@ -14488,7 +14488,7 @@ def admin_communities(request: Request, filter: str = ""):
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
 <div style="overflow-x:auto;">
 <form id="communities-approved-form">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:250px;">Name</th>
@@ -14516,6 +14516,31 @@ applySortFilter('communities');
   <strong>notes</strong> here automatically on the next deploy. No manual re-seed needed.
   <strong>Everything else is database-only</strong>: edit it here (Edit above), and this sync will never touch it.
 </p>
+
+<style>
+/* Stacked-card responsive table (2026-08 mobile follow-up to the admin
+   list column-defaults PR) — same admin-table-responsive/admin-table-cell/
+   admin-table-actions-grid classes and rules as the Software admin list's
+   own copy of this block (webapp/app.py, admin_software), so both tables
+   share identical mobile behavior; this page just never had its own
+   <style> block to carry them before now. Below the breakpoint, rows
+   become blocks and each cell gets a label from its data-label attribute
+   instead of relying on a <thead> the layout no longer has room for. */
+@media(max-width:700px){{
+  .admin-table-responsive thead{{display:none;}}
+  .admin-table-responsive, .admin-table-responsive tbody,
+  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;}}
+  .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
+  .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
+    font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin-bottom:3px;}}
+  .admin-table-actions .admin-table-actions-grid{{flex-direction:column!important;align-items:stretch!important;}}
+  .admin-table-actions .admin-table-actions-grid a,
+  .admin-table-actions .admin-table-actions-grid form,
+  .admin-table-actions .admin-table-actions-grid button{{width:100%;}}
+}}
+</style>
 </div>"""
     return HTMLResponse(_page("Communities—CFO Toolbox Admin", "", body, authed=True))
 
