@@ -274,64 +274,121 @@ def test_mcp_401_body_never_echoes_presented_credential(appmod):
     assert "super-secret-guess" not in r.text
 
 
-# -- TEMPORARY diagnostic logging (2026-09) -----------------------------
+# -- Path matching: only /mcp or /mcp/... reaches the gate -------------------
 #
-# Chasing a real report: Claude's connector gets 401 from this gate while
-# curl with the SAME token gets 200. These pin the logging added to
-# diagnose that — which reject branch fired, and that only a LENGTH is
-# logged, never the credential itself.
+# Evidence from prod logs: a scanner probe to POST /mcp-builder was
+# captured by the auth gate (401'd) under a loose startswith("/mcp") match.
+# Path matching is exact ("/mcp" or "/mcp/...") end to end via the shared
+# _mcp_path helper — these pin that a lookalike path falls through to
+# ordinary routing instead of ever reaching the MCP auth gate.
 
-def test_mcp_auth_reject_logs_branch_for_missing_header(appmod, caplog):
-    with caplog.at_level("WARNING", logger="webapp.mcp_auth"):
-        r = _client(appmod).post("/mcp", follow_redirects=False)
+def test_mcp_lookalike_path_not_captured_by_auth_gate(appmod):
+    """/mcp-builder must 404 through normal routing, never a 401 from the
+    MCP auth gate — even with no Authorization header at all, which would
+    401 on a real /mcp path."""
+    r = _client(appmod).post("/mcp-builder", follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_mcp_lookalike_path_not_captured_even_with_bad_auth(appmod):
+    r = _client(appmod).get("/mcp-builder", headers={"authorization": "Bearer whatever"},
+                             follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_mcp_path_with_trailing_segment_still_gated(appmod):
+    """Sanity check the exact match isn't over-tightened: /mcp/anything is
+    still a real MCP path and still gated."""
+    r = _client(appmod).post("/mcp/", follow_redirects=False)
     assert r.status_code == 401
-    assert any("no Authorization header" in rec.message for rec in caplog.records)
 
 
-def test_mcp_auth_reject_logs_branch_and_length_for_malformed_header(appmod, caplog):
-    """Regression pin for a real leak caught while building this: a header
-    with no space at all (exactly this case — a token pasted with no
-    "Bearer " prefix) puts the ENTIRE header into `scheme` after
-    `partition(" ")`. An earlier version of the log line logged `scheme`
-    verbatim, which meant logging the credential itself in exactly this
-    shape — caught by this test failing against that code, before it
-    shipped."""
-    secret = "not-a-bearer-token"
-    with caplog.at_level("WARNING", logger="webapp.mcp_auth"):
-        r = _client(appmod).post("/mcp", headers={"authorization": secret},
-                                  follow_redirects=False)
-    assert r.status_code == 401
-    messages = [rec.message for rec in caplog.records]
-    assert any("wrong scheme" in m for m in messages)
-    assert any(str(len(secret)) in m for m in messages)
-    assert not any(secret in m for m in messages)
+# -- Bearer-tolerant auth value parsing ---------------------------------------
+#
+# Real prod diagnostics traced a connector-vs-curl auth mismatch to format
+# variance, not a token problem: one client sent a bare token with no
+# "Bearer " scheme, another sent "Bearer"+token with the separating space
+# lost in transit. webapp.mcp_server.bearer_token_candidates tries the
+# trimmed header as the token first, then a leading-bearer-stripped retry.
+# These confirm each shape now passes the gate (i.e. is never itself the
+# reason for a 401 — status 400 downstream just means FastMCP's own
+# streamable-HTTP handling wants a real protocol body/Content-Type, which
+# these tests don't send), while a non-bearer scheme and an empty value are
+# still rejected.
 
-
-def test_mcp_auth_reject_logs_branch_and_length_for_unknown_token(appmod, caplog):
-    secret = "totally-unknown-token-value"
-    with caplog.at_level("WARNING", logger="webapp.mcp_auth"):
-        r = _client(appmod).post("/mcp", headers={"authorization": f"Bearer {secret}"},
-                                  follow_redirects=False)
-    assert r.status_code == 401
-    messages = [rec.message for rec in caplog.records]
-    assert any("token not found" in m for m in messages)
-    assert any(str(len(secret)) in m for m in messages)
-    assert not any(secret in m for m in messages)
-
-
-def test_mcp_auth_reject_logs_revoked_reason_distinctly(appmod, caplog):
+@pytest.fixture
+def token_appmod(appmod):
     db = appmod.DB_PATH
     lib = Library(db)
-    _, token_id, token = _mint(lib, "revoked_user", "admin")
-    lib.revoke_api_token(token_id)
+    _, _, token = _mint(lib, "bearer_variant_user", "admin")
     lib.close()
-    with caplog.at_level("WARNING", logger="webapp.mcp_auth"):
-        r = _client(appmod).post("/mcp", headers={"authorization": f"Bearer {token}"},
-                                  follow_redirects=False)
+    return appmod, token
+
+
+def _post_mcp_with_auth(appmod, header_value=None, headers=None):
+    with _client(appmod) as c:
+        h = dict(headers or {})
+        if header_value is not None:
+            h["authorization"] = header_value
+        return c.post("/mcp", headers=h, follow_redirects=False)
+
+
+def test_bearer_scheme_with_space_passes_gate(token_appmod):
+    appmod, token = token_appmod
+    r = _post_mcp_with_auth(appmod, f"Bearer {token}")
+    assert r.status_code != 401
+
+
+def test_bare_token_with_no_scheme_passes_gate(token_appmod):
+    appmod, token = token_appmod
+    r = _post_mcp_with_auth(appmod, token)
+    assert r.status_code != 401
+
+
+def test_lowercase_bearer_scheme_passes_gate(token_appmod):
+    appmod, token = token_appmod
+    r = _post_mcp_with_auth(appmod, f"bearer {token}")
+    assert r.status_code != 401
+
+
+def test_bearer_scheme_with_extra_whitespace_passes_gate(token_appmod):
+    appmod, token = token_appmod
+    r = _post_mcp_with_auth(appmod, f"  Bearer   {token}  ")
+    assert r.status_code != 401
+
+
+def test_bearer_scheme_with_lost_space_passes_gate(token_appmod):
+    """The exact shape one real connector attempt sent: "Bearer"+token with
+    no separating space at all."""
+    appmod, token = token_appmod
+    r = _post_mcp_with_auth(appmod, f"Bearer{token}")
+    assert r.status_code != 401
+
+
+def test_basic_scheme_still_rejected(token_appmod):
+    appmod, token = token_appmod
+    r = _post_mcp_with_auth(appmod, f"Basic {token}")
     assert r.status_code == 401
-    messages = [rec.message for rec in caplog.records]
-    assert any("revoked" in m for m in messages)
-    assert not any(token in m for m in messages)
+
+
+def test_empty_authorization_value_rejected(token_appmod):
+    appmod, _ = token_appmod
+    r = _post_mcp_with_auth(appmod, "")
+    assert r.status_code == 401
+
+
+def test_whitespace_only_authorization_value_rejected(token_appmod):
+    appmod, _ = token_appmod
+    r = _post_mcp_with_auth(appmod, "   ")
+    assert r.status_code == 401
+
+
+def test_unknown_bare_token_still_rejected(token_appmod):
+    """Bearer tolerance widens what shapes are ACCEPTED, not what tokens
+    verify — an unknown token in any format is still a 401."""
+    appmod, _ = token_appmod
+    r = _post_mcp_with_auth(appmod, "totally-unknown-token-value")
+    assert r.status_code == 401
 
 
 # -- End-to-end: real streamable-HTTP client against a real running server --
@@ -381,6 +438,7 @@ def live_server(monkeypatch):
         base_url = f"http://127.0.0.1:{port}"
         admin = admin_token
         plain_user = plain_token
+        db_path = db
 
     try:
         yield Bundle
@@ -524,3 +582,63 @@ def test_non_admin_role_refused_by_introspection_tools(live_server):
     result = _call_tool(live_server.base_url, live_server.plain_user, "list_tables")
     assert result.isError
     assert "admin" in result.content[0].text.lower()
+
+
+# -- list_tables: extension shadow-table labeling -----------------------------
+
+def test_list_tables_labels_fts5_shadow_tables(live_server):
+    """FTS5's own bookkeeping tables (_data/_idx/_docsize/_config) must be
+    labeled shadow_of the parent virtual table, derived dynamically from
+    the actually-detected virtual table names — not a hardcoded suffix
+    list — so a consumer doesn't misread their row counts as independent
+    article content."""
+    result = _call_tool(live_server.base_url, live_server.admin, "list_tables")
+    assert not result.isError
+    tables = result.structuredContent["result"]
+    by_name = {t["name"]: t for t in tables}
+    for suffix in ("_data", "_idx", "_docsize", "_config"):
+        shadow = by_name[f"articles_fts{suffix}"]
+        assert shadow["shadow_of"] == "articles_fts"
+    # The virtual table itself is not its own shadow.
+    assert by_name["articles_fts"]["shadow_of"] is None
+    # An ordinary content table is never mislabeled as a shadow.
+    assert by_name["users"]["shadow_of"] is None
+
+
+# -- sample_rows: per-cell truncation -----------------------------------------
+
+def test_sample_rows_truncates_long_cells_by_default(live_server):
+    lib = Library(live_server.db_path)
+    long_value = "x" * 900
+    lib.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)",
+                      ("mcp_truncation_test", long_value))
+    lib.conn.commit()
+    lib.close()
+
+    result = _call_tool(live_server.base_url, live_server.admin, "sample_rows",
+                         {"name": "settings", "n": 25})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    row = next(r for r in payload["rows"] if r["key"] == "mcp_truncation_test")
+    assert len(row["value"]) < len(long_value)
+    assert "truncated" in row["value"]
+    assert payload["truncated"] is True
+
+
+def test_sample_rows_max_cell_chars_zero_disables_truncation(live_server):
+    lib = Library(live_server.db_path)
+    long_value = "y" * 900
+    lib.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)",
+                      ("mcp_no_truncation_test", long_value))
+    lib.conn.commit()
+    lib.close()
+
+    result = _call_tool(live_server.base_url, live_server.admin, "sample_rows",
+                         {"name": "settings", "n": 25, "max_cell_chars": 0})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    row = next(r for r in payload["rows"] if r["key"] == "mcp_no_truncation_test")
+    assert row["value"] == long_value
+    assert payload["truncated"] is False
