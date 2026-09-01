@@ -2729,6 +2729,73 @@ not assumed) — so the "real deployed curl" confirmation this fix's own
 build brief required could not be run directly from this session; see the
 PR for the exact command and Brian's own confirmation once deployed.
 
+### MCP server, connector-vs-curl 401 mismatch (2026-09, in progress)
+
+A follow-up report, once the 421 fix above confirmed working: Claude's own
+MCP connector gets `401` from `_mcp_auth_gate` while a plain `curl` call
+using the SAME token gets `200` — Railway's own logs confirmed the token
+matches and that no `421`s are involved (so the 421 fix above holds; this
+is a different failure inside the auth gate itself). The gate's own
+`verify_api_token` collapses "unknown hash" / "revoked" / "owning user
+inactive" into one `None` return by deliberate design (the 401 response
+must never hint at *why* a token failed — see CLAUDE.md's token-auth
+bullet), which meant there was no way to tell, from the outside, which of
+those (or something else — a header the connector sends differently than
+curl does) was actually happening for the connector specifically.
+
+**Fix — temporary diagnostic logging, not a permanent addition.**
+`_mcp_auth_gate` (`webapp/app.py`) now logs, at WARNING level via a
+dedicated `webapp.mcp_auth` logger, which reject branch fired on every
+`401`: no `Authorization` header at all; a malformed header (wrong scheme
+or an empty token after the scheme); or — for a token that parsed fine but
+didn't verify — a new diagnostic-only helper, `_mcp_diagnose_token_miss`,
+runs a SEPARATE read-only query (never used for the actual auth decision,
+which `verify_api_token`'s own `None` already made) to classify "token not
+found" vs. "token revoked" vs. "owning user inactive", so the log line can
+say which one without changing what the 401 response itself reveals.
+**Only a length is ever logged, never the credential's value or hash** —
+this is a hard constraint the logging was built to, not an afterthought:
+a first draft of the malformed-header branch logged the parsed `scheme`
+value directly (`scheme=%r`), which looked safe until a regression test
+(`tests/test_mcp_server.py::
+test_mcp_auth_reject_logs_branch_and_length_for_malformed_header`) caught
+that a header with NO space at all — exactly what a bearer token pasted
+without its `"Bearer "` prefix looks like — puts the ENTIRE header string
+into `scheme` after `.partition(" ")`, so logging it verbatim would have
+logged the credential itself in precisely that shape. Fixed by logging
+`has_space` (a bool) and `header_len` instead of the scheme value at all.
+This is exactly the kind of failure mode length-only logging is meant to
+close off, and it slipped through in a first pass anyway — worth
+remembering the constraint has to be verified against the actual malformed
+input shapes, not just the well-formed ones.
+
+**This logging is explicitly temporary** — added to diagnose one specific
+live mismatch, not a standing observability feature. Remove
+`_mcp_auth_logger`/`_mcp_diagnose_token_miss` and the log calls in
+`_mcp_auth_gate` once the connector-vs-curl difference is understood and
+fixed (or once it's clear the auth gate itself isn't the actual cause —
+e.g. if the real difference turns out to be in what header the connector
+sends, which the "no Authorization header"/"wrong scheme" branches above
+are exactly positioned to reveal from the next live reproduction).
+
+**Also fixed in the same pass, found while investigating**: `/.well-known/
+oauth-*` on `mcp.bmweis.com` was 301-redirecting to the apex via the
+general canonical-host-redirect carve-out, the same as any other
+non-`/mcp`/non-`/health` path there. This server has no OAuth layer at all
+(a plain bearer token, not FastMCP's `TokenVerifier`/`AuthSettings`
+framework — see the Key architecture decisions bullet above for why), so
+an MCP client's RFC 8414/9728 discovery probe against those paths should
+get a clean, same-origin `404` — "no OAuth here" — rather than a redirect
+that sends it chasing onto `bmweis.com`, where Cloudflare's Bot Fight Mode
+either `403`s it outright or serves the apex's own unrelated `404`,
+neither of which reads the same way to a client trying to conclude
+"discovery failed, fall back to whatever auth this server does support."
+Scoped narrowly: only the `/.well-known/oauth-` path prefix, only on
+`mcp.bmweis.com` specifically (not extended to the raw Railway origin's
+own `/mcp` exemption, a separate carve-out this fix didn't touch) — every
+other `/.well-known/*` path on that host still redirects normally, pinned
+by `tests/test_mcp_server.py::test_other_well_known_paths_on_mcp_host_still_redirect`.
+
 ### Archive save / enrichment pipeline
 
 All capture paths converge on `linklib/pipeline.py::ingest_url` or the

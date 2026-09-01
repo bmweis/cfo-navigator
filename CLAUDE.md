@@ -5016,6 +5016,37 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   than silently skipped or claimed done without evidence. Full trace in
   ARCHITECTURE.md's "MCP server, production 421 fix" section and
   `webapp/mcp_server.py`'s `build_mcp` docstring.
+- **MCP server, connector-vs-curl 401 mismatch (2026-09, in progress) — a
+  new report, past the 421 fix above: Claude's own connector gets 401 from
+  `_mcp_auth_gate` on the SAME token a `curl` call gets 200 with** (Railway
+  logs confirmed the token matches; no 421s, so the earlier fix holds).
+  Nothing in `verify_api_token` distinguishes *why* a token failed — it
+  collapses "unknown hash"/"revoked"/"inactive user" into one `None` by
+  design, so there was no way to tell from the 401 alone which branch was
+  actually firing for the connector. Added **temporary** diagnostic
+  logging to `_mcp_auth_gate` (`webapp.mcp_auth` logger, WARNING level) —
+  every reject branch logs which branch fired, plus a LENGTH only, never
+  the credential's value or hash: no-header, wrong-scheme/empty-token
+  (deliberately logs `has_space` + `header_len`, never the raw `scheme`
+  value itself — an earlier draft logged `scheme` directly and a
+  regression test caught that a header with no space at all puts the
+  ENTIRE header into `scheme` after `partition(" ")`, which would have
+  logged the credential verbatim in exactly that shape), and — via a new
+  diagnostic-only `_mcp_diagnose_token_miss` helper that runs a SEPARATE
+  read-only query purely for the log line, never feeding back into the
+  actual auth decision — "token not found" vs. "token revoked" vs. "owning
+  user inactive" for a token that parsed fine but didn't verify.
+  **Remove this logging once the mismatch is diagnosed** — it's
+  intentionally temporary, not a permanent observability addition.
+  Same PR also fixed a real, unrelated gap the same investigation
+  surfaced: `/.well-known/oauth-*` on `mcp.bmweis.com` was 301-redirecting
+  to the apex (this server has no OAuth layer — see mcp_server.py's
+  auth-model docstring — so an MCP client's RFC 8414/9728 discovery probe
+  should get a clean same-origin 404, not a redirect that chases it into
+  Cloudflare's Bot Fight Mode on bmweis.com). Scoped narrowly to that one
+  path prefix, on `mcp.bmweis.com` only (not the raw Railway origin's own
+  `/mcp` exemption, which wasn't asked for and is a separate carve-out) —
+  see ARCHITECTURE.md's matching bullet for the full write-up.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
