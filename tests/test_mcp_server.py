@@ -286,6 +286,63 @@ def test_mcp_external_path_is_exactly_mcp_not_double_mounted(live_server):
     assert not result.isError
 
 
+def _call_tool_with_host_header(base_url: str, token: str, host_header: str, tool_name: str):
+    """Like _call_tool, but with an explicit Host header — simulating a
+    request that physically connects to this address but arrives with a
+    different Host (exactly what Cloudflare/Railway routing produces for
+    mcp.bmweis.com and cfo-navigator-production.up.railway.app in
+    production, and what a real DNS-rebinding attack looks like from the
+    server's point of view). This is the regression case for the 2026-09
+    production incident: FastMCP's own DNS-rebinding-protection allowlist
+    defaults to 127.0.0.1/localhost/::1 only, so a real production request
+    (Host: mcp.bmweis.com, connecting to the app's real address, not
+    127.0.0.1) previously got rejected with a bare-text 421 before our own
+    auth gate ever mattered — invisible to local testing, which always
+    connects AND sends Host: 127.0.0.1, matching FastMCP's default
+    allowlist by construction."""
+    from mcp.client.session import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    async def go():
+        headers = {"Authorization": f"Bearer {token}", "Host": host_header}
+        async with streamablehttp_client(f"{base_url}/mcp", headers=headers) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return await session.call_tool(tool_name, {})
+
+    return asyncio.run(go())
+
+
+def test_mcp_allowed_production_host_header_succeeds_from_non_matching_address(live_server):
+    """Regression pin for the 2026-09 421 incident: a request that connects
+    to 127.0.0.1 (this test server's real address) but carries
+    Host: mcp.bmweis.com must succeed — that's exactly the shape of a real
+    production request, and it's the case that broke before
+    extra_allowed_hosts was wired through build_mcp."""
+    result = _call_tool_with_host_header(live_server.base_url, live_server.admin,
+                                          "mcp.bmweis.com", "list_tables")
+    assert not result.isError
+
+
+def test_mcp_allowed_railway_origin_host_header_succeeds(live_server):
+    """Same regression, for the raw Railway origin — the DNS-outage
+    fallback host the canonical-host-redirect carve-out also exempts."""
+    result = _call_tool_with_host_header(
+        live_server.base_url, live_server.admin,
+        "cfo-navigator-production.up.railway.app", "list_tables",
+    )
+    assert not result.isError
+
+
+def test_mcp_unrecognized_host_header_still_rejected(live_server):
+    """The allowlist genuinely restricts, rather than the fix accidentally
+    disabling DNS-rebinding protection wholesale — an arbitrary Host that
+    isn't in the allowlist must still be refused."""
+    with pytest.raises(Exception):
+        _call_tool_with_host_header(live_server.base_url, live_server.admin,
+                                     "evil.example.com", "list_tables")
+
+
 def test_list_tables_labels_virtual_tables(live_server):
     result = _call_tool(live_server.base_url, live_server.admin, "list_tables")
     assert not result.isError
