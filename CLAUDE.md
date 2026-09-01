@@ -66,6 +66,9 @@ scripts/           # CLI entry points
   ask.py              # FP&A Buddy from the terminal
   voice_review.py     # check a file/stdin against the voice standards
   mcp_server.py       # stdio MCP server wrapping GET /api/search for Claude Desktop/Code
+                      #   (untouched by the /mcp remote server below — see that bullet
+                      #   for how the two relate; this one stays as-is for now)
+  mint_api_token.py   # mint/list/revoke a /mcp API token — human-run via `railway ssh`
   archive/            # (Phase N) one-time migrations and closed-investigation reports
                       #   whose job is done — kept for history via `git mv`, never run
                       #   again in the ordinary course
@@ -84,6 +87,10 @@ webapp/
                    #   (/tools/fpa-buddy, /save, /api/search, /bookmarklet — plus
                    #   the merged Reader, /read and /read/{article_id}, admin-only)
                    #   + auth (/login, /logout) + the /admin back office (~40 pages)
+                   #   + /mcp (Phase 1) — the remote MCP server, mounted in-process
+  mcp_server.py    # webapp's own module (distinct from scripts/mcp_server.py above) —
+                   #   builds the FastMCP instance + its three read-only introspection
+                   #   tools; webapp/app.py mounts it at /mcp (Phase 1)
   checks.py        # aggregates the automated checks for /admin/checks (mirrors CI)
   tasks.py         # open-task badge counts for the admin hub
   thought_leadership_data.py  # curated content for /thought-leadership's lists
@@ -4929,6 +4936,58 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   manual per-item "Refresh" button in the reader toolbar — re-fetches on
   click only (no automatic staleness detection), non-destructive on failure.
   See ARCHITECTURE.md's matching section and `tests/test_read_later_caching.py`.
+- **MCP server, Phase 1 (2026-09) — a read-only remote MCP server at `/mcp`,
+  mounted in-process (same app, same deploy, no second service), with its
+  own user-bound token auth and three admin-gated schema-introspection
+  tools.** The goal, stated up front: let Brian use CFO Navigator from
+  Claude the way he already uses the admin web UI, starting with the
+  smallest useful slice — schema introspection — rather than building
+  every capability's MCP surface at once. Full write-up (mount mechanics,
+  the two independent auth checks, the mcp.bmweis.com hosting carve-out) is
+  in ARCHITECTURE.md's "MCP server — `/mcp` (Phase 1)" flow section; the
+  points worth repeating here:
+  - **A new `api_tokens` table, not a reuse of `LINKLIB_SAVE_TOKEN`.** The
+    legacy flat token carries no identity — reusing it for MCP would have
+    silently bypassed FP&A Buddy's and the matchmaker's per-user dollar
+    caps the moment a later phase adds those tools, the exact
+    quiet-degradation pattern this project's own standing rules ban. Every
+    `api_tokens` row resolves, on every verify, to a real `users.id` and
+    that user's CURRENT role (not one snapshotted at mint time); only a
+    sha256 hash of the plaintext is ever stored. No admin UI yet —
+    `scripts/mint_api_token.py` (mint/list/revoke, human-run via
+    `railway ssh`) is the only way to manage tokens this phase.
+  - **Fails closed, with two independent checks, not one.** A transport-
+    level middleware 401s an unauthenticated `/mcp` request before any MCP
+    protocol handling starts (the build brief's own requirement); each
+    tool ALSO independently re-derives its caller from the live request it
+    was handed and re-verifies the token itself, never trusting the
+    middleware's decision. There is no default identity anywhere in this
+    path — a missing/invalid/revoked token or a non-admin role calling an
+    admin-gated tool is always refused, never defaulted to admin.
+  - **`mcp.bmweis.com` is a second custom domain, deliberately DNS-only
+    (unproxied) in Cloudflare** — the same reasoning that already sent the
+    daily backup cron around Cloudflare's Bot Fight Mode applies to MCP
+    traffic (automated, non-browser callers by definition). The existing
+    canonical-host-redirect middleware got a dedicated carve-out: `/mcp`
+    and `/health` serve directly on that host and the raw Railway origin
+    (a DNS-outage fallback); every other path 301s to the apex rather than
+    shadow-mirroring the whole site on the MCP subdomain.
+  - **Mount path is exactly `/mcp`, not `/mcp/mcp` and not a redirect** —
+    a real gotcha, not a style choice: FastMCP's default internal
+    streamable-HTTP route is itself `/mcp`, so a naive `Mount("/mcp", ...)`
+    doubles the segment, and the alternative (override the internal path
+    to `/`) produces a `307` on every call instead. Fixed by mounting the
+    sub-app at an empty prefix, registered as the very last route in
+    `webapp/app.py`, so every literal route still matches first and only a
+    genuinely unmatched request ever reaches FastMCP's own router.
+  - **`scripts/mcp_server.py` (the existing stdio server wrapping
+    `GET /api/search` for Claude Desktop/Code) is untouched** — its
+    retirement, if it happens, is a later decision, not bundled into this
+    phase.
+  - **Deliberately out of scope this phase**: any Toolbox/Communities/
+    Library/Feed/Buddy/matchmaker tool, any write capability, any change
+    to cap logic or existing routes beyond the redirect carve-out, and an
+    admin UI for tokens.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -5011,6 +5070,23 @@ tables, no third-party dependency.
     request has no session, and Read Later is `user_id`-scoped, the write is
     attributed to `Library.default_admin_user_id()` (the earliest admin account) —
     see ARCHITECTURE.md's matching bullet for the full write-up.
+  - **`/mcp` (Phase 1) is its own mechanism, separate from every route above —
+    not session cookies, not `LINKLIB_SAVE_TOKEN`.** A `Authorization:
+    Bearer <token>` header, verified against the `api_tokens` table
+    (`Library.verify_api_token` — sha256 hash comparison, resolves to a
+    real `users.id` + that user's CURRENT role). No cookie fallback, no
+    `X-Save-Token`/`?token=` fallback — this is deliberate: the whole
+    point of a dedicated token table is that an MCP caller is never
+    anonymous or unmetered the way the legacy flat token is (see the Key
+    architecture decisions bullet above). Two independent checks apply on
+    every call — a transport-level 401 before any MCP protocol handling,
+    and a per-tool re-verification that never trusts the first check — and
+    the three introspection tools this phase ships additionally require
+    `role == "admin"`, refused with a clean MCP-level tool error otherwise
+    (never a crash, never a silent downgrade to a lesser view). Minting/
+    revoking is `scripts/mint_api_token.py`, human-run via `railway ssh` —
+    no admin UI yet. Full mount/auth mechanics are in ARCHITECTURE.md's
+    "MCP server — `/mcp` (Phase 1)" flow section.
 - **No secret in rendered HTML.** Internal links no longer carry `?token=`; the cookie
   authorizes navigation. Token comparison is constant-time (`hmac.compare_digest`).
 - **⚠️ Bookmarklet caveat (by design).** The `/bookmarklet` snippet embeds
@@ -5221,6 +5297,9 @@ instead, off that page — kept for git history, not meant to run again.
 - Hosting/deployment on Railway (see Deployment below)
 - bmweis.com custom domain pointed at Railway (July 2026)
 - MCP server (`scripts/mcp_server.py`) wrapping `/api/search` for Claude Desktop/Code
+- Remote MCP server (Phase 1, `/mcp`, mounted in-process) with user-bound API-token auth
+  and three admin-gated schema-introspection tools (`list_tables`, `describe_table`,
+  `sample_rows`) — see the Key architecture decisions bullet above
 - Daily off-site Drive backup (bumped from weekly, 2026-08), scheduled via a
   Railway Cron Service (Phase O — originally a GitHub Action, migrated 2026-08;
   see Key architecture decisions above), with retention pruning

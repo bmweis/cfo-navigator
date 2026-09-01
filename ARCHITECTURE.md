@@ -20,11 +20,13 @@ sits in front of Railway serving the `bmweis.com` domain.
 
 ```mermaid
 flowchart LR
-    B["Browser"] --> CF["Cloudflare<br/>bmweis.com"]
+    B["Browser"] --> CF["Cloudflare<br/>bmweis.com<br/>(proxied, Bot Fight Mode)"]
     CF --> R
+    MC["Claude<br/>(claude.ai / Claude Code,<br/>MCP connector)"] --> CFM["Cloudflare<br/>mcp.bmweis.com<br/>(DNS-only, unproxied)"]
+    CFM --> R
 
     subgraph Railway ["Railway (single instance, auto-deploys from main)"]
-        R["FastAPI app<br/>webapp/app.py<br/>uvicorn, Dockerfile"]
+        R["FastAPI app<br/>webapp/app.py<br/>uvicorn, Dockerfile<br/>+ /mcp (Phase 1)"]
         V[("SQLite + FTS5<br/>library.db on a<br/>Railway volume")]
         R <--> V
     end
@@ -75,6 +77,27 @@ Notes on the edges:
   the CDN on purpose rather than trying to carve out a Bot Fight Mode
   exception for a rotating set of runner/caller IPs. This is the first
   deliberate consumer of the "accepted risk" above, not an accident.
+- **`mcp.bmweis.com` (Phase 1) is a second custom domain on the same Railway
+  service, deliberately configured differently from the apex.** Its
+  Cloudflare DNS record is **DNS-only (unproxied, "grey cloud")**, not
+  proxied like `bmweis.com`/`www` — so Bot Fight Mode, the edge Redirect
+  Rule, and every other Cloudflare-layer behavior above never touch MCP
+  traffic. This is a deliberate choice, not an oversight: MCP clients are
+  automated, non-browser HTTP callers by definition, and Bot Fight Mode
+  exists specifically to challenge exactly that kind of traffic — the same
+  reasoning that already sent the backup cron around Cloudflare entirely
+  (see below) applies here, just via a DNS-level bypass instead of a
+  same-origin one. Railway terminates TLS for this domain the same way it
+  does for the apex. App-side, this only required one thing: making sure
+  the existing canonical-host-redirect middleware — which otherwise 301s
+  *every* non-canonical hostname to the apex — treats `mcp.bmweis.com`
+  specially (serve `/mcp` and `/health` directly, redirect everything else
+  to the apex rather than shadow-mirroring the whole site) instead of
+  either redirecting `/mcp` away (which Cloudflare's Bot Fight Mode would
+  then 403, the exact silent-failure shape the backup cron already hit
+  once) or serving the full public+admin site on an MCP-branded subdomain.
+  See the "MCP server" flow section below for the auth model and mount
+  mechanics; see CLAUDE.md's MCP bullet for the full write-up.
 - **The volume path** is Railway configuration, not code: the app reads
   `LINKLIB_DB` (default `./library.db`); production points it at the mounted
   volume. The DB is deliberately not in git — it's personal reading history.
@@ -135,7 +158,7 @@ Every table in the file, grouped by feature area:
 | Content spine | `articles`, `articles_fts`, `articles_vec`, `article_embeddings`, `enrichment_cost`, `library_queue`, `dedupe_decisions`, `read_later`, `content_refetch_log`, `url_correction_log` |
 | FP&A Buddy (Ask) | `ask_questions`, `ask_feedback` |
 | Chat Matchmaker | `matchmaker_questions` |
-| Accounts | `users`, `password_reset_requests` |
+| Accounts | `users`, `password_reset_requests`, `api_tokens` |
 | CFO Toolbox | `tools`, `tool_categories`, `tool_audit_log`, `benchmarks`, `tool_leads`, `communities`, `community_categories`, `community_audit_log`, `community_profiles`, `community_gap_submissions`, `community_profile_views`, `field_reviews`, `narrative_review_log` |
 | Thought Leadership | `thought_leadership`, `original_content` |
 | Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log`, `backup_log`, `integrity_check_log`, `job_run_log` |
@@ -1501,6 +1524,7 @@ erDiagram
     users ||--o{ read_later : "user_id"
     users ||--o{ game_runs : "user_id"
     users ||--o{ password_reset_requests : "user_id"
+    users ||--o{ api_tokens : "user_id — MCP server tokens (Phase 1)"
     users ||--o{ archive_audit_log : "admin_id (nullable)"
     users ||--o{ contact_audit_log : "admin_id (nullable)"
     users ||--o{ tool_audit_log : "admin_id (nullable)"
@@ -1604,6 +1628,14 @@ erDiagram
         text role "user | admin"
         real ask_cap_usd "NULL = global default"
         real matchmaker_cap_usd "NULL = global default; tracks separately from ask_cap_usd"
+    }
+    api_tokens {
+        int id PK
+        text token_hash UK "sha256 of the plaintext — never the plaintext itself"
+        int user_id FK "users.id — resolves to a real user, never anonymous"
+        text label
+        text revoked_at "'' = active"
+        text last_used_at
     }
     library_queue {
         int id PK
@@ -2516,6 +2548,125 @@ Details worth knowing:
   over live API responses) — that's a different layer; keep them separate. The
   admin CSV export deliberately keeps raw literal `[n]` markers (no HTML in a
   CSV) and instead appends a plain-text `citations` column resolving them.
+
+### MCP server — `/mcp` (Phase 1)
+
+A read-only remote MCP server, mounted **in-process** inside the same
+FastAPI app/deploy (no second service, no second process) at the path
+`/mcp`, reachable both at `mcp.bmweis.com` (see the deployment-diagram note
+above for why that subdomain is deliberately unproxied at the DNS level)
+and at the raw Railway origin as a fallback. This phase ships exactly three
+admin-gated, read-only schema-introspection tools (`list_tables`,
+`describe_table`, `sample_rows`) — no Toolbox/Communities/Library/Feed/
+Buddy tools, no writes of any kind, per the phase's own explicit scope.
+
+**Why a new auth mechanism instead of reusing `LINKLIB_SAVE_TOKEN`.** The
+existing flat token carries no identity — a call authenticated with it is
+unmetered, unlogged, and can't be attributed to a real user. Reusing it for
+MCP would have silently bypassed FP&A Buddy's and the matchmaker's
+per-user dollar caps the moment those tools exist (a later phase), and
+would leave no "who ran this" trail even for the read-only tools this
+phase ships. So MCP gets its own mechanism: a new `api_tokens` table (see
+the ER diagram/schema table above) where every token resolves, on every
+verify, to a **real, currently-active `users` row** and that user's
+**current** role — not a role snapshotted at mint time. Only a sha256 hash
+of the plaintext is ever stored (`Library.create_api_token`/
+`verify_api_token`/`revoke_api_token` in `linklib/db.py`); the plaintext
+(`secrets.token_urlsafe(32)`, 256 bits of entropy) is shown exactly once,
+at mint time, by `scripts/mint_api_token.py` — there is no admin UI for
+tokens yet, minting/revoking is a human-run `railway ssh` action.
+
+**Two independent auth checks, deliberately not one.**
+
+1. **Transport-level gate** (`_mcp_auth_gate`, a `@app.middleware("http")`
+   in `webapp/app.py`, scoped to any path `/mcp` or `/mcp/*`): rejects a
+   request with a missing, malformed, unknown, or revoked bearer token
+   with a plain `401` **before FastMCP's session/protocol handling ever
+   starts** — the build brief's own requirement, and a real efficiency
+   win (an unauthenticated caller never gets to spend a session
+   negotiation). The 401 body never echoes the presented credential or
+   hints at *why* it failed (unknown vs. revoked vs. malformed all look
+   identical from outside).
+2. **Per-tool re-verification** (`webapp/mcp_server.py`'s `_caller_from_ctx`/
+   `_require_admin`, called at the top of every tool): each tool
+   independently re-derives its caller from the **live request FastMCP
+   handed that specific call** (`ctx.request_context.request.headers`,
+   confirmed by tracing the streamable-HTTP transport's own code — the
+   raw Starlette `Request` really is threaded through per-call, not just
+   MCP-level session metadata) and re-calls `verify_api_token` itself,
+   never trusting anything the transport-level gate might have already
+   decided. This is deliberate defense in depth, not redundancy for its
+   own sake: a bug or a future refactor of the middleware can never turn
+   into a tool silently trusting an unauthenticated or under-privileged
+   caller, because the tool never reads from a shared/cached value in the
+   first place. **Fails closed in every direction** — a missing request
+   object, a missing/malformed header, an unresolvable token, or (for
+   these three tools) a non-admin role all raise `mcp.server.fastmcp.
+   exceptions.ToolError` and refuse the call outright. There is no
+   default identity and no fallback to an admin role anywhere in this
+   path.
+
+**Mount mechanics — two real gotchas, both confirmed by running the real
+transport locally before shipping, not assumed from the SDK's docs.**
+
+- **FastMCP's streamable-HTTP session manager needs to be `run()` for the
+  life of the process** (`session_manager.run()`, an async context
+  manager wrapping its own internal task group). `webapp/app.py` uses the
+  legacy `@app.on_event("startup")` style throughout, not a `lifespan=`
+  callable, and — confirmed by mounting the sub-app under a bare FastAPI
+  app with no explicit lifespan wiring — Starlette does **not** forward
+  ASGI lifespan events into a `Mount`-ed sub-app for free: the very first
+  request fails with `RuntimeError: Task group is not initialized. Make
+  sure to use run().` So the session manager is started explicitly, as a
+  background `asyncio.Task` kicked off from one more `@app.on_event
+  ("startup")` hook alongside the app's existing ones, and cancelled on
+  `"shutdown"`.
+- **The external path had to be exactly `/mcp`, not `/mcp/mcp` and not a
+  redirect — and a first fix for that broke a real, unrelated route.**
+  FastMCP's default internal route for its streamable-HTTP app is itself
+  `/mcp`; mounting that sub-app at `Mount("/mcp", ...)` would make the real
+  external path `/mcp/mcp`, and overriding the internal path to `/` instead
+  produces a `307` redirect from `/mcp` to `/mcp/` on every call (both
+  confirmed against a real running server) — fragile for any client that
+  doesn't reliably follow a redirect on `POST`. Reading Starlette's own
+  source confirms why neither is avoidable with a *plain* `Mount`: its path
+  regex is literally `{prefix}/{path:path}`, so it can never match a bare
+  string equal to its own prefix with nothing after it — the `307` above
+  IS Starlette's router falling back to "no route fully matched, but adding
+  a slash would make one match" and redirecting, and that fallback is the
+  *only* way a plain `Mount` ever serves that exact path at all.
+  So an empty-prefix `Mount` (`app.mount("", _mcp_asgi_app)`) is the only
+  way to make Starlette's `Mount` primitive match a bare `/mcp` — **but the
+  first version built that way shipped a real bug**: an empty-prefix
+  `Mount.matches()` reports `Match.FULL` for literally any path, unconditionally
+  (it has no method awareness at all). Starlette's router uses the FIRST
+  full match across *all* registered routes — not registration order among
+  full matches, since there's only ever meant to be one — to decide 404 vs.
+  405 for a path that matches some OTHER route but not its method (e.g.
+  `GET /ask` when only `POST /ask` is registered: normally a `405`, from
+  Starlette's own partial-match fallback). An always-FULL-matching Mount
+  silently wins that decision for every such case in the entire app,
+  handing the request to FastMCP's router instead — which, not recognizing
+  `/ask`, 404s it. Caught by a real regression in `tests/test_access_tiers.py::
+  test_retired_ask_routes_are_gone` (which asserts `GET /ask` is a `405`,
+  not a `404`) the first time the full suite ran against this mount.
+  **Fixed with `_McpOnlyMount`, a one-method subclass of Starlette's
+  `Mount`** that overrides `matches()` to return `Match.NONE` immediately
+  for any path that isn't `/mcp` or `/mcp/...`, before ever delegating to
+  the parent class — so it never participates in ANY routing decision for
+  the rest of the app, full or partial, while still matching `/mcp` itself
+  exactly the way an unrestricted empty-prefix Mount did. Registered as the
+  last route in `webapp/app.py` (`app.router.routes.append(_McpOnlyMount
+  ("", app=_mcp_asgi_app))`) — though because of its own path restriction,
+  registration order no longer actually matters the way it would for an
+  unrestricted catch-all. `tests/test_mcp_server.py::
+  test_mcp_mount_does_not_steal_405_for_other_routes` pins this going
+  forward. Verified locally end to end with the real `mcp` client library
+  (a full streamable-HTTP handshake + a tool call) against a real running
+  server, not just a `TestClient`: a request to exactly `/mcp` reaches
+  FastMCP's own `/mcp` route with zero redirects and zero double segments,
+  a genuinely bogus path still 404s normally, and `/ask`'s own 405 is
+  intact.
 
 ### Archive save / enrichment pipeline
 

@@ -38,6 +38,7 @@ Private routes (require login cookie; API routes also accept a token):
 from __future__ import annotations
 
 import ast
+import asyncio
 import difflib
 import hashlib
 import hmac
@@ -294,6 +295,15 @@ app = FastAPI(title="bmweis.com")
 # bmweis.com (apex) is canonical — decided at domain migration, July 2026.
 _LEGACY_HOSTS = {"www.bmweis.com", "cfo-navigator-production.up.railway.app"}
 
+# The MCP server's own custom subdomain (Phase 1). Cloudflare's DNS record
+# for this host is deliberately DNS-only/unproxied (Brian-side, outside this
+# repo) so Bot Fight Mode never touches MCP traffic the way it 403s the
+# apex's own automated-traffic detection — see CLAUDE.md's MCP hosting
+# bullet. That only works if the app itself never redirects /mcp traffic
+# away from this host, hence the dedicated carve-out below (distinct from
+# _LEGACY_HOSTS, which exists to redirect AWAY from a host, not serve one).
+_MCP_HOST = "mcp.bmweis.com"
+
 
 @app.middleware("http")
 async def _canonical_host_redirect(request: Request, call_next):
@@ -314,12 +324,31 @@ async def _canonical_host_redirect(request: Request, call_next):
     stayed empty despite the trigger reporting green). Scoped to this one
     path on purpose, not a blanket exemption for every token-authenticated
     route — see CLAUDE.md's Phase O bullet before widening this list.
+
+    A second, independent carve-out (Phase 1, MCP server) handles the
+    mcp.bmweis.com subdomain: /mcp and /health are served directly there
+    (never redirected — the exact silent-failure shape the backup cron hit
+    once already, see the /admin/backup-now paragraph above, and the reason
+    this doesn't just fold /mcp into that tuple: /mcp also has to work on
+    the raw Railway origin, which IS a _LEGACY_HOSTS entry and would
+    otherwise 301 it away), while every OTHER path on that host 301s to the
+    apex rather than silently serving the full public+admin site as a
+    shadow mirror on the MCP subdomain.
     """
     host = (request.headers.get("host") or "").split(":")[0].lower()
+    if host == _MCP_HOST:
+        if request.url.path == "/mcp" or request.url.path.startswith("/mcp/") \
+                or request.url.path == "/health":
+            return await call_next(request)
+        target = PUBLIC_BASE.rstrip("/") + request.url.path
+        if request.url.query:
+            target += "?" + request.url.query
+        return RedirectResponse(target, status_code=301)
     if (host in _LEGACY_HOSTS
             and PUBLIC_BASE.startswith("https://")
             and host != PUBLIC_BASE.removeprefix("https://").split("/")[0]
-            and request.url.path not in ("/health", "/admin/backup-now")):
+            and request.url.path not in ("/health", "/admin/backup-now")
+            and request.url.path != "/mcp" and not request.url.path.startswith("/mcp/")):
         target = PUBLIC_BASE.rstrip("/") + request.url.path
         if request.url.query:
             target += "?" + request.url.query
@@ -20764,6 +20793,8 @@ _OPEN_SOURCE = [
          "Reads the form posts—login, contact, and tool submissions."),
         ("Markdown", "Markdown", "BSD-3-Clause", "https://python-markdown.github.io",
          "Renders an Original Content piece's markdown body—headings, fenced code blocks, tables—into the shared article template."),
+        ("MCP Python SDK", "mcp", "MIT", "https://github.com/modelcontextprotocol/python-sdk",
+         "Powers the read-only /mcp server (Phase 1)—mounted in-process alongside the rest of the app, no second service."),
     ]),
     ("Stores & searches", "Where your archive lives and how it's searched.", [
         ("SQLite + FTS5", None, "Public Domain", "https://www.sqlite.org",
@@ -21175,6 +21206,7 @@ def admin_system_scripts(request: Request):
 # discipline as ARCHITECTURE.md). Each entry is (table, column, references_table).
 _DB_RELATIONSHIPS = [
     ("read_later", "user_id", "users"),
+    ("api_tokens", "user_id", "users"),
     ("password_reset_requests", "user_id", "users"),
     ("ask_questions", "user_id", "users"),
     ("game_runs", "user_id", "users"),
@@ -21535,7 +21567,7 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 #     into either Toolbox bucket would be arbitrary, so they sit in Site
 #     utilities & system alongside the other audit/log tables instead.
 _TABLE_GROUPS: list[tuple[str, list[str]]] = [
-    ("Users & auth", ["users", "password_reset_requests", "read_later"]),
+    ("Users & auth", ["users", "password_reset_requests", "read_later", "api_tokens"]),
     ("Toolbox — Software", ["tools", "tool_categories", "tool_leads", "tool_audit_log",
                              "tool_competitors", "tool_name_dedupe_decisions",
                              "benchmarks", "category_features", "tool_feature_links",
@@ -30373,3 +30405,147 @@ def favicon():
     if not os.path.isfile(path):
         raise HTTPException(status_code=404)
     return FileResponse(path, media_type="image/x-icon")
+
+
+# -- MCP server (Phase 1) ----------------------------------------------------
+#
+# Read-only schema-introspection tools (list_tables/describe_table/
+# sample_rows — webapp/mcp_server.py) mounted at /mcp, same process, same
+# deploy. See CLAUDE.md's MCP section and ARCHITECTURE.md for the full
+# write-up; this block covers only the transport-level wiring:
+#
+# 1. A dedicated auth-gate middleware rejects any /mcp request with no
+#    valid Bearer token with a 401 BEFORE any MCP protocol/session handling
+#    happens — required by the build brief. Every tool ALSO independently
+#    re-derives its caller from the live request (see mcp_server.py's
+#    module docstring) rather than trusting this gate, so this middleware
+#    is a fast-reject optimization and a defense-in-depth layer, never the
+#    sole authorization decision.
+# 2. FastMCP's streamable-HTTP transport needs its session manager RUN
+#    (`session_manager.run()`, an async context manager) for the lifetime
+#    of the process — webapp/app.py uses the legacy `@app.on_event(...)`
+#    style throughout, not a `lifespan=` callable, and Starlette does NOT
+#    forward ASGI lifespan events into a Mount-ed sub-app for free (confirmed
+#    locally: mounting FastMCP's app under a FastAPI app with no explicit
+#    lifespan wiring produces "RuntimeError: Task group is not initialized.
+#    Make sure to use run()." on the very first request). So the session
+#    manager is started explicitly here, as a background task kicked off
+#    from a startup hook alongside the others already in this file.
+# 3. Mount path: FastMCP's default `streamable_http_path` is "/mcp". Mounting
+#    that sub-app at Starlette `Mount("/mcp", ...)` would make the EXTERNAL
+#    path "/mcp/mcp" (or, worse, a 307 redirect from "/mcp" to "/mcp/" if the
+#    path is overridden to "/" instead — confirmed locally, and fragile for
+#    any client that doesn't follow redirects on POST). A plain Starlette
+#    `Mount` can only ever match a path with something AFTER the prefix
+#    (its own path_regex is literally `{prefix}/{path:path}` — confirmed by
+#    reading Starlette's source, not guessed), which is exactly why the
+#    "/mcp"-with-no-trailing-slash case has to go through the 307 in the
+#    first place: there's no way to make a normal Mount match that exact
+#    string. So this uses `_McpOnlyMount` (below), a one-method Mount
+#    subclass registered at an EMPTY prefix — that's the only way to get a
+#    Mount to match a bare "/mcp" outright — but restricted, in its own
+#    `matches()`, to paths that are actually "/mcp" or "/mcp/..." rather
+#    than the literal-everything an empty-prefix Mount matches by default.
+#    That restriction is not cosmetic: an earlier version of this file used
+#    a plain, unrestricted `app.mount("", _mcp_asgi_app)` and it broke a
+#    real, unrelated route — Starlette's router picks the first FULL match
+#    across ALL registered routes (not just the first-declared one) to
+#    decide 404 vs. 405 for a method that doesn't match some other route
+#    (e.g. `GET /ask` when only `POST /ask` is registered), and an
+#    unrestricted empty-prefix Mount always reports FULL for every path,
+#    method-blind — so it silently stole that decision from the router's
+#    own partial-match/405 logic and turned `GET /ask` into a 404 (from
+#    FastMCP's own router, which doesn't recognize the path either) instead
+#    of the correct 405. `_McpOnlyMount` closes that by returning `NONE`
+#    immediately for any path outside `/mcp`, so it never participates in
+#    routing decisions for the rest of the app at all — confirmed by the
+#    regression test this caused, `tests/test_access_tiers.py::
+#    test_retired_ask_routes_are_gone`, and pinned going forward by
+#    `tests/test_mcp_server.py::test_mcp_mount_does_not_steal_405_for_other_routes`.
+#    Registered as the LAST route in this file so it's the last thing
+#    checked, though its own path restriction means order barely matters
+#    here (unlike the unrestricted version, it can't shadow anything).
+#    Verified locally with a real client end to end (streamable HTTP
+#    handshake + a tool call): a request to exactly "/mcp" reaches
+#    FastMCP's own "/mcp" route with zero redirects and zero double
+#    segments, and a genuinely bogus path still 404s normally.
+
+from starlette.routing import Match as _StarletteMatch, Mount as _StarletteMount  # noqa: E402
+
+from webapp import mcp_server as _mcp_server  # noqa: E402
+
+_mcp = _mcp_server.build_mcp(_lib)
+_mcp_asgi_app = _mcp.streamable_http_app()
+
+
+def _mcp_path(path: str) -> bool:
+    return path == "/mcp" or path.startswith("/mcp/")
+
+
+class _McpOnlyMount(_StarletteMount):
+    """A Starlette Mount restricted to /mcp paths — see point 3 above for
+    why an unrestricted empty-prefix Mount is unsafe to register at all."""
+
+    def matches(self, scope):
+        if scope.get("type") in ("http", "websocket") and not _mcp_path(scope.get("path", "")):
+            return _StarletteMatch.NONE, {}
+        return super().matches(scope)
+
+
+@app.middleware("http")
+async def _mcp_auth_gate(request: Request, call_next):
+    """401s any /mcp request with a missing/malformed/invalid/revoked
+    Bearer token before it ever reaches FastMCP's session/protocol
+    handling. See the block comment above for why each tool ALSO
+    independently re-verifies — this is a fast-reject layer, not the sole
+    authorization decision, and it fails closed: any problem resolving a
+    caller is a 401, never a pass-through."""
+    if not _mcp_path(request.url.path):
+        return await call_next(request)
+    auth_header = request.headers.get("authorization") or ""
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    lib = _lib()
+    try:
+        caller = lib.verify_api_token(token)
+    finally:
+        lib.close()
+    if not caller:
+        # Deliberately no detail on *why* (unknown vs. revoked vs.
+        # malformed) — never echo the presented credential or hint at
+        # which part of it was wrong; see CLAUDE.md's token-auth bullet.
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+@app.on_event("startup")
+async def _start_mcp_session_manager():
+    """Runs FastMCP's streamable-HTTP session manager for the life of the
+    process. See the block comment above (point 2) for why this can't be
+    left to Starlette's default lifespan propagation."""
+    app.state.mcp_session_task = asyncio.create_task(_run_mcp_session_manager())
+
+
+async def _run_mcp_session_manager():
+    async with _mcp.session_manager.run():
+        # The context manager itself does the real work (spinning up the
+        # transport's internal task group); this task just needs to stay
+        # alive for as long as the manager should keep running.
+        stop_event = asyncio.Event()
+        app.state.mcp_session_stop_event = stop_event
+        await stop_event.wait()
+
+
+@app.on_event("shutdown")
+async def _stop_mcp_session_manager():
+    stop_event = getattr(app.state, "mcp_session_stop_event", None)
+    if stop_event is not None:
+        stop_event.set()
+    task = getattr(app.state, "mcp_session_task", None)
+    if task is not None:
+        task.cancel()
+
+
+# Registered LAST, deliberately — see point 3 in the block comment above.
+app.router.routes.append(_McpOnlyMount("", app=_mcp_asgi_app))

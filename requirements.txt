@@ -9,6 +9,7 @@ sqlite-vec>=0.1.6
 openai>=1.50
 playwright>=1.45
 Markdown>=3.5
+mcp==1.29.1
 
 # Optional — higher-quality full-text extraction
 # pip install trafilatura
