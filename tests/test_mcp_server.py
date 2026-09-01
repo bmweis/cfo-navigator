@@ -171,6 +171,73 @@ def test_mcp_path_on_canonical_host_untouched(appmod):
     assert r.status_code != 301
 
 
+def test_well_known_oauth_404s_directly_on_mcp_host(appmod):
+    """An MCP client probes /.well-known/oauth-* (RFC 8414/9728 discovery)
+    before concluding there's no OAuth layer here. Left as a redirect, the
+    client would chase it onto bmweis.com and into Cloudflare's Bot Fight
+    Mode instead of getting a clean, same-origin 'no OAuth here' answer."""
+    r = _client(appmod).get(
+        "/.well-known/oauth-authorization-server",
+        headers={"host": "mcp.bmweis.com"}, follow_redirects=False,
+    )
+    assert r.status_code == 404
+    assert "location" not in r.headers
+
+
+def test_well_known_oauth_protected_resource_404s_directly_on_mcp_host(appmod):
+    r = _client(appmod).get(
+        "/.well-known/oauth-protected-resource",
+        headers={"host": "mcp.bmweis.com"}, follow_redirects=False,
+    )
+    assert r.status_code == 404
+    assert "location" not in r.headers
+
+
+def test_other_well_known_paths_on_mcp_host_still_redirect(appmod):
+    """The exemption is scoped to /.well-known/oauth-*, not the whole
+    /.well-known/ tree — anything else on the MCP host still 301s to the
+    apex like every other non-/mcp, non-/health path there."""
+    r = _client(appmod).get(
+        "/.well-known/something-unrelated",
+        headers={"host": "mcp.bmweis.com"}, follow_redirects=False,
+    )
+    assert r.status_code == 301
+
+
+def test_well_known_oauth_404s_directly_on_raw_railway_origin(appmod):
+    """The raw Railway origin is the documented DNS-outage fallback for
+    /mcp (see test_raw_railway_origin_serves_mcp_path_directly) — an MCP
+    client falling back to it hits the identical OAuth-discovery-chased-
+    into-Cloudflare problem, so it gets the same 404 carve-out."""
+    r = _client(appmod).get(
+        "/.well-known/oauth-authorization-server",
+        headers={"host": "cfo-navigator-production.up.railway.app"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 404
+    assert "location" not in r.headers
+
+
+def test_other_well_known_paths_on_railway_origin_still_redirect(appmod):
+    r = _client(appmod).get(
+        "/.well-known/something-unrelated",
+        headers={"host": "cfo-navigator-production.up.railway.app"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 301
+
+
+def test_well_known_oauth_on_www_still_redirects_not_exempted(appmod):
+    """www.bmweis.com never serves /mcp at all — the exemption must not
+    accidentally widen to every _LEGACY_HOSTS entry, only the one that's
+    actually a documented /mcp fallback."""
+    r = _client(appmod).get(
+        "/.well-known/oauth-authorization-server",
+        headers={"host": "www.bmweis.com"}, follow_redirects=False,
+    )
+    assert r.status_code == 301
+
+
 # -- Transport-level auth gate (401 before any MCP handling) -----------------
 
 def test_mcp_mount_does_not_steal_405_for_other_routes(appmod):
@@ -205,6 +272,66 @@ def test_mcp_401_body_never_echoes_presented_credential(appmod):
     r = _client(appmod).post("/mcp", headers={"authorization": "Bearer super-secret-guess"},
                               follow_redirects=False)
     assert "super-secret-guess" not in r.text
+
+
+# -- TEMPORARY diagnostic logging (2026-09) -----------------------------
+#
+# Chasing a real report: Claude's connector gets 401 from this gate while
+# curl with the SAME token gets 200. These pin the logging added to
+# diagnose that — which reject branch fired, and that only a LENGTH is
+# logged, never the credential itself.
+
+def test_mcp_auth_reject_logs_branch_for_missing_header(appmod, caplog):
+    with caplog.at_level("WARNING", logger="webapp.mcp_auth"):
+        r = _client(appmod).post("/mcp", follow_redirects=False)
+    assert r.status_code == 401
+    assert any("no Authorization header" in rec.message for rec in caplog.records)
+
+
+def test_mcp_auth_reject_logs_branch_and_length_for_malformed_header(appmod, caplog):
+    """Regression pin for a real leak caught while building this: a header
+    with no space at all (exactly this case — a token pasted with no
+    "Bearer " prefix) puts the ENTIRE header into `scheme` after
+    `partition(" ")`. An earlier version of the log line logged `scheme`
+    verbatim, which meant logging the credential itself in exactly this
+    shape — caught by this test failing against that code, before it
+    shipped."""
+    secret = "not-a-bearer-token"
+    with caplog.at_level("WARNING", logger="webapp.mcp_auth"):
+        r = _client(appmod).post("/mcp", headers={"authorization": secret},
+                                  follow_redirects=False)
+    assert r.status_code == 401
+    messages = [rec.message for rec in caplog.records]
+    assert any("wrong scheme" in m for m in messages)
+    assert any(str(len(secret)) in m for m in messages)
+    assert not any(secret in m for m in messages)
+
+
+def test_mcp_auth_reject_logs_branch_and_length_for_unknown_token(appmod, caplog):
+    secret = "totally-unknown-token-value"
+    with caplog.at_level("WARNING", logger="webapp.mcp_auth"):
+        r = _client(appmod).post("/mcp", headers={"authorization": f"Bearer {secret}"},
+                                  follow_redirects=False)
+    assert r.status_code == 401
+    messages = [rec.message for rec in caplog.records]
+    assert any("token not found" in m for m in messages)
+    assert any(str(len(secret)) in m for m in messages)
+    assert not any(secret in m for m in messages)
+
+
+def test_mcp_auth_reject_logs_revoked_reason_distinctly(appmod, caplog):
+    db = appmod.DB_PATH
+    lib = Library(db)
+    _, token_id, token = _mint(lib, "revoked_user", "admin")
+    lib.revoke_api_token(token_id)
+    lib.close()
+    with caplog.at_level("WARNING", logger="webapp.mcp_auth"):
+        r = _client(appmod).post("/mcp", headers={"authorization": f"Bearer {token}"},
+                                  follow_redirects=False)
+    assert r.status_code == 401
+    messages = [rec.message for rec in caplog.records]
+    assert any("revoked" in m for m in messages)
+    assert not any(token in m for m in messages)
 
 
 # -- End-to-end: real streamable-HTTP client against a real running server --

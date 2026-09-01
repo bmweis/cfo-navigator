@@ -44,6 +44,7 @@ import hashlib
 import hmac
 import inspect
 import json
+import logging
 import math
 import os
 import re
@@ -304,6 +305,19 @@ _LEGACY_HOSTS = {"www.bmweis.com", "cfo-navigator-production.up.railway.app"}
 # _LEGACY_HOSTS, which exists to redirect AWAY from a host, not serve one).
 _MCP_HOST = "mcp.bmweis.com"
 
+# The raw Railway origin also serves /mcp, as a documented DNS-outage
+# fallback (see the /mcp exemption in the _LEGACY_HOSTS branch below) — so
+# it needs the SAME /.well-known/oauth-* 404 carve-out mcp.bmweis.com gets,
+# for the identical reason (see _canonical_host_redirect's docstring).
+# Named explicitly here rather than derived from _LEGACY_HOSTS at use time,
+# since that set also holds www.bmweis.com, which never serves /mcp and
+# shouldn't get this exemption.
+_MCP_RAILWAY_FALLBACK_HOST = "cfo-navigator-production.up.railway.app"
+
+
+def _is_mcp_well_known_oauth_path(path: str) -> bool:
+    return path.startswith("/.well-known/oauth-")
+
 
 @app.middleware("http")
 async def _canonical_host_redirect(request: Request, call_next):
@@ -334,16 +348,36 @@ async def _canonical_host_redirect(request: Request, call_next):
     otherwise 301 it away), while every OTHER path on that host 301s to the
     apex rather than silently serving the full public+admin site as a
     shadow mirror on the MCP subdomain.
+
+    A third exemption, `/.well-known/oauth-*`, ALSO 404s directly on that
+    host — and, per the same reasoning, on the raw Railway origin too —
+    rather than falling into the general redirect above (2026-09): an MCP
+    client probes these paths (RFC 8414/9728 OAuth discovery) before
+    concluding a server has no OAuth layer — this server doesn't (see
+    mcp_server.py's auth-model docstring: a plain bearer token, not
+    FastMCP's OAuth framework), so the honest, cheap answer is a direct
+    404. Left as a 301 to the apex, the client would instead chase the
+    redirect onto bmweis.com, straight into Cloudflare's Bot Fight Mode —
+    which either 403s it outright or, best case, serves the apex's own
+    unrelated 404, neither of which reads as "no OAuth here" the way a
+    same-origin 404 does. Scoped narrowly to this one path prefix on these
+    two /mcp-serving hosts specifically — not the whole /.well-known/ tree,
+    and not www.bmweis.com, which never serves /mcp at all.
     """
     host = (request.headers.get("host") or "").split(":")[0].lower()
     if host == _MCP_HOST:
         if request.url.path == "/mcp" or request.url.path.startswith("/mcp/") \
                 or request.url.path == "/health":
             return await call_next(request)
+        if _is_mcp_well_known_oauth_path(request.url.path):
+            return PlainTextResponse("Not Found", status_code=404)
         target = PUBLIC_BASE.rstrip("/") + request.url.path
         if request.url.query:
             target += "?" + request.url.query
         return RedirectResponse(target, status_code=301)
+    if (host == _MCP_RAILWAY_FALLBACK_HOST
+            and _is_mcp_well_known_oauth_path(request.url.path)):
+        return PlainTextResponse("Not Found", status_code=404)
     if (host in _LEGACY_HOSTS
             and PUBLIC_BASE.startswith("https://")
             and host != PUBLIC_BASE.removeprefix("https://").split("/")[0]
@@ -30524,6 +30558,37 @@ class _McpOnlyMount(_StarletteMount):
         return super().matches(scope)
 
 
+_mcp_auth_logger = logging.getLogger("webapp.mcp_auth")
+
+
+def _mcp_diagnose_token_miss(lib: Library, token: str) -> str:
+    """TEMPORARY diagnostic-only helper (2026-09) — classifies why a
+    presented token failed verify_api_token, for the auth-gate's log line
+    only. Added to chase a real report: Claude's own connector gets 401
+    from this gate while a curl with the SAME token (Railway logs
+    confirmed the token) gets 200 — a mismatch nothing in verify_api_token
+    itself distinguishes, since it collapses "unknown hash" / "revoked" /
+    "owning user inactive" into one None return by design (never leak which
+    one to the 401 response body — see the reject branch below). This
+    helper runs the same classification as a SEPARATE read-only query,
+    purely for the log line; it never feeds back into the actual auth
+    decision, which verify_api_token's own None already made. Remove once
+    the Claude-connector-vs-curl mismatch is understood — see CLAUDE.md's
+    MCP section for the incident writeup."""
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    row = lib.conn.execute(
+        "SELECT t.revoked_at, u.active FROM api_tokens t JOIN users u ON u.id = t.user_id "
+        "WHERE t.token_hash=?", (token_hash,),
+    ).fetchone()
+    if not row:
+        return "token not found (unknown hash)"
+    if row["revoked_at"]:
+        return "token revoked"
+    if not row["active"]:
+        return "owning user inactive"
+    return "matched an active, unrevoked row but verify_api_token still returned None (unexpected)"
+
+
 @app.middleware("http")
 async def _mcp_auth_gate(request: Request, call_next):
     """401s any /mcp request with a missing/malformed/invalid/revoked
@@ -30531,22 +30596,49 @@ async def _mcp_auth_gate(request: Request, call_next):
     handling. See the block comment above for why each tool ALSO
     independently re-verifies — this is a fast-reject layer, not the sole
     authorization decision, and it fails closed: any problem resolving a
-    caller is a 401, never a pass-through."""
+    caller is a 401, never a pass-through.
+
+    TEMPORARY diagnostic logging (2026-09, see _mcp_diagnose_token_miss's
+    docstring for the incident): every reject branch logs which branch
+    fired plus the length of whatever credential was presented — never the
+    credential's value or hash, only its length, so these logs can never
+    themselves leak a usable token even at DEBUG-adjacent verbosity."""
     if not _mcp_path(request.url.path):
         return await call_next(request)
     auth_header = request.headers.get("authorization") or ""
     scheme, _, token = auth_header.partition(" ")
+    if not auth_header:
+        _mcp_auth_logger.warning("mcp auth reject: no Authorization header present")
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
     if scheme.lower() != "bearer" or not token:
+        # Never log `scheme` itself: when the header has no space at all
+        # (e.g. a token pasted without a "Bearer " prefix), partition(" ")
+        # puts the ENTIRE header into `scheme` — logging it verbatim would
+        # leak exactly the credential value this is supposed to protect
+        # (caught by this fix's own regression test). Length + a boolean
+        # is enough to tell "no space at all" apart from "wrong scheme
+        # word" without ever risking the value itself.
+        _mcp_auth_logger.warning(
+            "mcp auth reject: wrong scheme or empty token (has_space=%s, header_len=%d)",
+            " " in auth_header, len(auth_header),
+        )
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     lib = _lib()
     try:
         caller = lib.verify_api_token(token)
+        if not caller:
+            reason = _mcp_diagnose_token_miss(lib, token)
+            _mcp_auth_logger.warning(
+                "mcp auth reject: %s (token_len=%d)", reason, len(token),
+            )
     finally:
         lib.close()
     if not caller:
         # Deliberately no detail on *why* (unknown vs. revoked vs.
         # malformed) — never echo the presented credential or hint at
         # which part of it was wrong; see CLAUDE.md's token-auth bullet.
+        # (The diagnostic detail above goes to the server log only, never
+        # into this response.)
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return await call_next(request)
 
