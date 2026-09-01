@@ -5037,16 +5037,21 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   actual auth decision — "token not found" vs. "token revoked" vs. "owning
   user inactive" for a token that parsed fine but didn't verify.
   **Remove this logging once the mismatch is diagnosed** — it's
-  intentionally temporary, not a permanent observability addition.
+  intentionally temporary, not a permanent observability addition; logged
+  as its own follow-up task ("Remove temporary MCP auth-gate diagnostic
+  logging") rather than left to be remembered informally.
   Same PR also fixed a real, unrelated gap the same investigation
-  surfaced: `/.well-known/oauth-*` on `mcp.bmweis.com` was 301-redirecting
-  to the apex (this server has no OAuth layer — see mcp_server.py's
-  auth-model docstring — so an MCP client's RFC 8414/9728 discovery probe
-  should get a clean same-origin 404, not a redirect that chases it into
-  Cloudflare's Bot Fight Mode on bmweis.com). Scoped narrowly to that one
-  path prefix, on `mcp.bmweis.com` only (not the raw Railway origin's own
-  `/mcp` exemption, which wasn't asked for and is a separate carve-out) —
-  see ARCHITECTURE.md's matching bullet for the full write-up.
+  surfaced: `/.well-known/oauth-*` was 301-redirecting to the apex on both
+  `mcp.bmweis.com` and the raw Railway origin (the documented `/mcp`
+  DNS-outage fallback — same failure mode, same fix, extended once
+  flagged) — this server has no OAuth layer at all (see mcp_server.py's
+  auth-model docstring), so an MCP client's RFC 8414/9728 discovery probe
+  should get a clean same-origin 404 on either host, not a redirect that
+  chases it into Cloudflare's Bot Fight Mode on bmweis.com. Scoped
+  narrowly to that one path prefix, on those two `/mcp`-serving hosts only
+  — `www.bmweis.com` (a `_LEGACY_HOSTS` entry that never serves `/mcp`)
+  deliberately does not get this exemption — see ARCHITECTURE.md's
+  matching bullet for the full write-up.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

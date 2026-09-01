@@ -204,6 +204,40 @@ def test_other_well_known_paths_on_mcp_host_still_redirect(appmod):
     assert r.status_code == 301
 
 
+def test_well_known_oauth_404s_directly_on_raw_railway_origin(appmod):
+    """The raw Railway origin is the documented DNS-outage fallback for
+    /mcp (see test_raw_railway_origin_serves_mcp_path_directly) — an MCP
+    client falling back to it hits the identical OAuth-discovery-chased-
+    into-Cloudflare problem, so it gets the same 404 carve-out."""
+    r = _client(appmod).get(
+        "/.well-known/oauth-authorization-server",
+        headers={"host": "cfo-navigator-production.up.railway.app"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 404
+    assert "location" not in r.headers
+
+
+def test_other_well_known_paths_on_railway_origin_still_redirect(appmod):
+    r = _client(appmod).get(
+        "/.well-known/something-unrelated",
+        headers={"host": "cfo-navigator-production.up.railway.app"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 301
+
+
+def test_well_known_oauth_on_www_still_redirects_not_exempted(appmod):
+    """www.bmweis.com never serves /mcp at all — the exemption must not
+    accidentally widen to every _LEGACY_HOSTS entry, only the one that's
+    actually a documented /mcp fallback."""
+    r = _client(appmod).get(
+        "/.well-known/oauth-authorization-server",
+        headers={"host": "www.bmweis.com"}, follow_redirects=False,
+    )
+    assert r.status_code == 301
+
+
 # -- Transport-level auth gate (401 before any MCP handling) -----------------
 
 def test_mcp_mount_does_not_steal_405_for_other_routes(appmod):

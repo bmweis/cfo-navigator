@@ -2776,7 +2776,10 @@ live mismatch, not a standing observability feature. Remove
 fixed (or once it's clear the auth gate itself isn't the actual cause —
 e.g. if the real difference turns out to be in what header the connector
 sends, which the "no Authorization header"/"wrong scheme" branches above
-are exactly positioned to reveal from the next live reproduction).
+are exactly positioned to reveal from the next live reproduction). Logged
+as an explicit follow-up task ("Remove temporary MCP auth-gate diagnostic
+logging") rather than left to be remembered informally, so it doesn't
+linger past the point it's served its purpose.
 
 **Also fixed in the same pass, found while investigating**: `/.well-known/
 oauth-*` on `mcp.bmweis.com` was 301-redirecting to the apex via the
@@ -2790,11 +2793,20 @@ that sends it chasing onto `bmweis.com`, where Cloudflare's Bot Fight Mode
 either `403`s it outright or serves the apex's own unrelated `404`,
 neither of which reads the same way to a client trying to conclude
 "discovery failed, fall back to whatever auth this server does support."
-Scoped narrowly: only the `/.well-known/oauth-` path prefix, only on
-`mcp.bmweis.com` specifically (not extended to the raw Railway origin's
-own `/mcp` exemption, a separate carve-out this fix didn't touch) — every
-other `/.well-known/*` path on that host still redirects normally, pinned
-by `tests/test_mcp_server.py::test_other_well_known_paths_on_mcp_host_still_redirect`.
+Scoped narrowly to the `/.well-known/oauth-` path prefix, on the two hosts
+that actually serve `/mcp` — `mcp.bmweis.com` and the raw Railway origin
+(the documented DNS-outage fallback, per the `/mcp` exemption above) —
+extended to the latter in the same PR once flagged: an MCP client falling
+back to the raw origin hits the identical redirect-into-Cloudflare problem
+discovery-probing it. `www.bmweis.com` (a `_LEGACY_HOSTS` entry that never
+serves `/mcp` at all) deliberately does NOT get this exemption — named
+explicitly via `_MCP_RAILWAY_FALLBACK_HOST` rather than derived from
+`_LEGACY_HOSTS` at use time, specifically so it can't accidentally widen to
+every legacy host. Every other `/.well-known/*` path on either host still
+redirects normally, pinned by `tests/test_mcp_server.py::
+test_other_well_known_paths_on_mcp_host_still_redirect` and
+`test_other_well_known_paths_on_railway_origin_still_redirect`; `www.bmweis.com`
+staying un-exempted is pinned by `test_well_known_oauth_on_www_still_redirects_not_exempted`.
 
 ### Archive save / enrichment pipeline
 

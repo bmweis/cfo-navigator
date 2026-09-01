@@ -305,6 +305,19 @@ _LEGACY_HOSTS = {"www.bmweis.com", "cfo-navigator-production.up.railway.app"}
 # _LEGACY_HOSTS, which exists to redirect AWAY from a host, not serve one).
 _MCP_HOST = "mcp.bmweis.com"
 
+# The raw Railway origin also serves /mcp, as a documented DNS-outage
+# fallback (see the /mcp exemption in the _LEGACY_HOSTS branch below) — so
+# it needs the SAME /.well-known/oauth-* 404 carve-out mcp.bmweis.com gets,
+# for the identical reason (see _canonical_host_redirect's docstring).
+# Named explicitly here rather than derived from _LEGACY_HOSTS at use time,
+# since that set also holds www.bmweis.com, which never serves /mcp and
+# shouldn't get this exemption.
+_MCP_RAILWAY_FALLBACK_HOST = "cfo-navigator-production.up.railway.app"
+
+
+def _is_mcp_well_known_oauth_path(path: str) -> bool:
+    return path.startswith("/.well-known/oauth-")
+
 
 @app.middleware("http")
 async def _canonical_host_redirect(request: Request, call_next):
@@ -337,8 +350,9 @@ async def _canonical_host_redirect(request: Request, call_next):
     shadow mirror on the MCP subdomain.
 
     A third exemption, `/.well-known/oauth-*`, ALSO 404s directly on that
-    host rather than falling into the general redirect above (2026-09):
-    an MCP client probes these paths (RFC 8414/9728 OAuth discovery) before
+    host — and, per the same reasoning, on the raw Railway origin too —
+    rather than falling into the general redirect above (2026-09): an MCP
+    client probes these paths (RFC 8414/9728 OAuth discovery) before
     concluding a server has no OAuth layer — this server doesn't (see
     mcp_server.py's auth-model docstring: a plain bearer token, not
     FastMCP's OAuth framework), so the honest, cheap answer is a direct
@@ -346,19 +360,24 @@ async def _canonical_host_redirect(request: Request, call_next):
     redirect onto bmweis.com, straight into Cloudflare's Bot Fight Mode —
     which either 403s it outright or, best case, serves the apex's own
     unrelated 404, neither of which reads as "no OAuth here" the way a
-    same-origin 404 does.
+    same-origin 404 does. Scoped narrowly to this one path prefix on these
+    two /mcp-serving hosts specifically — not the whole /.well-known/ tree,
+    and not www.bmweis.com, which never serves /mcp at all.
     """
     host = (request.headers.get("host") or "").split(":")[0].lower()
     if host == _MCP_HOST:
         if request.url.path == "/mcp" or request.url.path.startswith("/mcp/") \
                 or request.url.path == "/health":
             return await call_next(request)
-        if request.url.path.startswith("/.well-known/oauth-"):
+        if _is_mcp_well_known_oauth_path(request.url.path):
             return PlainTextResponse("Not Found", status_code=404)
         target = PUBLIC_BASE.rstrip("/") + request.url.path
         if request.url.query:
             target += "?" + request.url.query
         return RedirectResponse(target, status_code=301)
+    if (host == _MCP_RAILWAY_FALLBACK_HOST
+            and _is_mcp_well_known_oauth_path(request.url.path)):
+        return PlainTextResponse("Not Found", status_code=404)
     if (host in _LEGACY_HOSTS
             and PUBLIC_BASE.startswith("https://")
             and host != PUBLIC_BASE.removeprefix("https://").split("/")[0]
