@@ -8,8 +8,10 @@ libSQL/Turso/D1 database later — only the connection changes.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import secrets
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -486,6 +488,26 @@ CREATE INDEX IF NOT EXISTS idx_pwreset_resolved ON password_reset_requests(resol
 -- yet on any pre-existing DB and crash on every boot. Any index on a column
 -- that's only ever added via the ALTER TABLE migration list below must be
 -- created in _POST_MIGRATION_INDEXES instead, never in this schema string.
+
+-- API tokens for the MCP server (/mcp, Phase 1). Each token resolves to a
+-- real users.id + its current role — the whole point being that an MCP
+-- caller is never anonymous or unmetered the way the legacy flat
+-- LINKLIB_SAVE_TOKEN is (see CLAUDE.md's MCP auth bullet). Only token_hash
+-- (sha256 hex digest of the plaintext) is stored, never the plaintext
+-- itself — same reasoning as password_reset_requests.token_hash above: a
+-- leaked DB backup must not hand out usable tokens. Minted/revoked by
+-- scripts/mint_api_token.py (human-run via `railway ssh`); no admin UI yet.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash    TEXT NOT NULL UNIQUE,
+    user_id       INTEGER NOT NULL,        -- FK convention -> users.id
+    label         TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT '',
+    revoked_at    TEXT NOT NULL DEFAULT '', -- '' = active, matching password_reset_requests' convention
+    last_used_at  TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
 
 -- Durable record of failed outbound-email attempts (contact form, tool
 -- submissions, welcome emails, password resets, warm intros). Every send
@@ -3864,6 +3886,82 @@ class Library:
             "FROM users WHERE username=?", ((username or "").strip().lower(),)
         ).fetchone()
         return dict(row) if row else None
+
+    # -- MCP server API tokens (/mcp, Phase 1) --
+    #
+    # A token resolves to a real users.id + that user's CURRENT role (read
+    # live off `users` on every verify, not snapshotted at mint time) so a
+    # role change or deactivation takes effect on the very next call, not
+    # after the token is re-minted.
+
+    def create_api_token(self, user_id: int, label: str = "") -> tuple[int, str]:
+        """Mint a new token for user_id. Returns (token row id, plaintext) —
+        the plaintext is returned exactly once and never stored; only its
+        sha256 hash lands in the DB. Caller (scripts/mint_api_token.py) is
+        responsible for printing it and never logging/persisting it again."""
+        token = secrets.token_urlsafe(32)  # 256 bits of entropy
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now = datetime.now(timezone.utc).isoformat()
+        cur = self.conn.execute(
+            "INSERT INTO api_tokens (token_hash, user_id, label, created_at) VALUES (?, ?, ?, ?)",
+            (token_hash, user_id, (label or "").strip(), now),
+        )
+        self.conn.commit()
+        return cur.lastrowid, token
+
+    def verify_api_token(self, token: str) -> Optional[dict]:
+        """Resolve a presented plaintext token to {id, user_id, username,
+        role} — or None if it's missing, unknown, revoked, or its owning
+        user is inactive. Never raises on a bad token; the caller (the /mcp
+        auth gate and each tool's own re-check) treats None as "refuse."
+
+        Updates last_used_at on a successful verify (best-effort — a failed
+        UPDATE here must never turn a valid token into a rejected one, so
+        it's wrapped defensively rather than left to propagate)."""
+        if not token:
+            return None
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        row = self.conn.execute(
+            "SELECT t.id AS token_id, t.user_id AS user_id, u.username AS username, "
+            "u.role AS role, u.active AS active "
+            "FROM api_tokens t JOIN users u ON u.id = t.user_id "
+            "WHERE t.token_hash=? AND t.revoked_at=''",
+            (token_hash,),
+        ).fetchone()
+        if not row or not row["active"]:
+            return None
+        try:
+            self.conn.execute(
+                "UPDATE api_tokens SET last_used_at=? WHERE id=?",
+                (datetime.now(timezone.utc).isoformat(), row["token_id"]),
+            )
+            self.conn.commit()
+        except Exception:
+            pass
+        return {"user_id": row["user_id"], "username": row["username"], "role": row["role"]}
+
+    def revoke_api_token(self, token_id: int) -> bool:
+        """Marks a token revoked. Returns True iff a row was actually
+        updated (an unknown/already-revoked id is a no-op, not an error)."""
+        cur = self.conn.execute(
+            "UPDATE api_tokens SET revoked_at=? WHERE id=? AND revoked_at=''",
+            (datetime.now(timezone.utc).isoformat(), token_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def list_api_tokens(self, user_id: Optional[int] = None) -> list[dict]:
+        """Never returns token_hash — this is for a human/script to see
+        labels, owners, and usage, not to recover or compare tokens."""
+        sql = ("SELECT t.id, t.user_id, u.username, t.label, t.created_at, "
+               "t.revoked_at, t.last_used_at FROM api_tokens t "
+               "JOIN users u ON u.id = t.user_id")
+        args: tuple = ()
+        if user_id is not None:
+            sql += " WHERE t.user_id=?"
+            args = (user_id,)
+        sql += " ORDER BY t.created_at DESC"
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
 
     def default_admin_user_id(self) -> Optional[int]:
         """The earliest-created admin account's id, or None if there isn't
