@@ -27,15 +27,23 @@ full stop.
 from __future__ import annotations
 
 import sqlite3
-from typing import Callable
+from typing import Callable, Sequence
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 
 from linklib.db import Library
 
 _DEFAULT_SAMPLE_N = 5
 _MAX_SAMPLE_N = 25
+
+# DNS-rebinding-protection host allowlist, used ONLY when the caller doesn't
+# pass its own (webapp.app always does — see build_mcp's docstring). Kept
+# here too so this module stays independently correct/testable without
+# webapp.app's constants.
+_DEFAULT_ALLOWED_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+_DEFAULT_ALLOWED_ORIGINS = ("http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*")
 
 
 def _caller_from_ctx(ctx: Context, lib_factory: Callable[[], Library]) -> dict:
@@ -81,9 +89,39 @@ def _is_virtual(create_sql: str | None) -> bool:
     return bool(create_sql) and create_sql.strip().upper().startswith("CREATE VIRTUAL TABLE")
 
 
-def build_mcp(lib_factory: Callable[[], Library]) -> FastMCP:
+def build_mcp(
+    lib_factory: Callable[[], Library],
+    extra_allowed_hosts: Sequence[str] = (),
+    extra_allowed_origins: Sequence[str] = (),
+) -> FastMCP:
     """Build the FastMCP instance with its three tools registered. Called
-    once from webapp.app at import time, after `_lib` exists."""
+    once from webapp.app at import time, after `_lib` exists.
+
+    `extra_allowed_hosts`/`extra_allowed_origins` — production incident,
+    2026-09: the very first live authenticated call returned a bare-text
+    `421 Invalid Host header` from BEFORE our own auth gate even mattered
+    (an unauthenticated request still got our JSON 401; /health was fine)
+    — traced to `FastMCP.__init__` itself, not anything in this codebase:
+    with no `transport_security=` passed and the default `host="127.0.0.1"`,
+    it auto-enables DNS-rebinding protection with an allowlist of ONLY
+    `127.0.0.1`/`localhost`/`::1` (confirmed by reading `FastMCP.__init__`
+    directly, not guessed) — exactly why local end-to-end testing against
+    `127.0.0.1` never caught this: the allowlist that broke production is
+    the same one local testing was implicitly running inside. Fixed by
+    always passing an explicit `TransportSecuritySettings` — protection
+    stays ON (never disabled wholesale), just with `mcp.bmweis.com` and the
+    raw Railway origin added to the Host/Origin allowlist alongside the
+    same localhost entries FastMCP would have auto-added, so local dev and
+    `tests/test_mcp_server.py`'s real-server tests keep working unchanged.
+    webapp.app passes the concrete production hostnames; any other caller
+    (a test, a future embedder) gets localhost-only, matching FastMCP's own
+    default posture for an unspecified deployment target.
+    """
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[*_DEFAULT_ALLOWED_HOSTS, *extra_allowed_hosts],
+        allowed_origins=[*_DEFAULT_ALLOWED_ORIGINS, *extra_allowed_origins],
+    )
 
     # streamable_http_path stays the library default ("/mcp") deliberately —
     # see webapp.app's mount-order comment for why: mounting this sub-app at
@@ -94,7 +132,7 @@ def build_mcp(lib_factory: Callable[[], Library]) -> FastMCP:
     # 307 redirect to "/mcp/" on every call (confirmed locally against a
     # running server) — fragile for a client that doesn't follow redirects
     # on POST, so it's not what's used here.
-    mcp = FastMCP("cfo-navigator")
+    mcp = FastMCP("cfo-navigator", transport_security=transport_security)
 
     @mcp.tool()
     async def list_tables(ctx: Context) -> list[dict]:

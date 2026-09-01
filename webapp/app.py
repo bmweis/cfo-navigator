@@ -30469,12 +30469,44 @@ def favicon():
 #    handshake + a tool call): a request to exactly "/mcp" reaches
 #    FastMCP's own "/mcp" route with zero redirects and zero double
 #    segments, and a genuinely bogus path still 404s normally.
+# 4. Production incident (2026-09): the first live authenticated call after
+#    mcp.bmweis.com went live returned a bare-text `421 Invalid Host header`
+#    — from BEFORE `_mcp_auth_gate` below could have mattered (an
+#    unauthenticated call still got our own JSON 401; /health was fine), so
+#    the 421 was coming from something else in the stack entirely. Traced to
+#    FastMCP itself: with no `transport_security=` passed, `FastMCP.__init__`
+#    auto-enables DNS-rebinding protection allowlisting ONLY `127.0.0.1`/
+#    `localhost`/`::1` (confirmed by reading the constructor directly, not
+#    guessed) — exactly why local end-to-end testing against `127.0.0.1`
+#    never caught this. Fixed by always passing an explicit
+#    `TransportSecuritySettings` (`_mcp_server.build_mcp`'s new
+#    `extra_allowed_hosts`/`extra_allowed_origins` params, computed just
+#    below from `_MCP_HOST`/`_LEGACY_HOSTS` so this list can't drift from
+#    the redirect carve-out's own host list) — protection stays ON, just
+#    with the real production hostnames added alongside the same localhost
+#    entries FastMCP would have auto-added, so local dev and
+#    `tests/test_mcp_server.py` are unaffected. See mcp_server.py's
+#    `build_mcp` docstring for the full trace.
 
 from starlette.routing import Match as _StarletteMatch, Mount as _StarletteMount  # noqa: E402
 
 from webapp import mcp_server as _mcp_server  # noqa: E402
 
-_mcp = _mcp_server.build_mcp(_lib)
+# Every real hostname /mcp is meant to be served on: the MCP subdomain and
+# the raw Railway origin (the DNS-outage fallback the redirect carve-out
+# above already exempts) — filtering _LEGACY_HOSTS rather than a second
+# hardcoded literal, so this can't silently drift from the redirect logic
+# it has to match. www.bmweis.com never serves /mcp (it only ever redirects
+# to the apex), so it's excluded. See mcp_server.build_mcp's own docstring
+# for the incident (a real 421 in production) this list exists to prevent —
+# FastMCP's DNS-rebinding-protection allowlist defaults to localhost only.
+_mcp_production_hosts = [_MCP_HOST] + [h for h in _LEGACY_HOSTS if h != "www.bmweis.com"]
+
+_mcp = _mcp_server.build_mcp(
+    _lib,
+    extra_allowed_hosts=_mcp_production_hosts,
+    extra_allowed_origins=[f"https://{h}" for h in _mcp_production_hosts],
+)
 _mcp_asgi_app = _mcp.streamable_http_app()
 
 

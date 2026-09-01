@@ -4988,6 +4988,34 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     Library/Feed/Buddy/matchmaker tool, any write capability, any change
     to cap logic or existing routes beyond the redirect carve-out, and an
     admin UI for tokens.
+- **MCP server, production 421 fix (2026-09) — a bug the Phase 1 build's own
+  local end-to-end testing structurally could not have caught.** The very
+  first live authenticated call after `mcp.bmweis.com` went live returned a
+  bare-text `421 Invalid Host header` — traced (by reading FastMCP's own
+  constructor, not guessed) to `FastMCP.__init__` auto-enabling its
+  DNS-rebinding-protection Host/Origin allowlist whenever `host` is left at
+  its default `127.0.0.1`, restricted to `127.0.0.1`/`localhost`/`::1` —
+  which is exactly, and only, what every local test connects to AND sends
+  as its `Host` header, so the one allowlist that happened to work locally
+  is the one that broke in production. Fixed by always passing an explicit
+  `TransportSecuritySettings` (`webapp/mcp_server.py`'s `build_mcp()` gained
+  `extra_allowed_hosts`/`extra_allowed_origins` params) — protection stays
+  on, just with `mcp.bmweis.com` and the raw Railway origin added, derived
+  from the SAME `_MCP_HOST`/`_LEGACY_HOSTS` constants the canonical-host-
+  redirect carve-out already uses so the two host lists can't drift apart.
+  Three new regression tests in `tests/test_mcp_server.py` prove this with
+  a real server: a request that physically connects to `127.0.0.1` but
+  carries `Host: mcp.bmweis.com` (or the Railway origin) now succeeds — the
+  actual shape of a production request — while a genuinely unrecognized
+  `Host` still gets rejected, confirming the allowlist is real and
+  restrictive, not DNS-rebinding protection quietly disabled. **This
+  session's sandbox has no network path to the live Railway origin at all**
+  (its egress policy denies the host outright), so the "confirm with a real
+  deployed curl" step this fix required could not be run from this session
+  directly — flagged to Brian to run and confirm once this deploys, rather
+  than silently skipped or claimed done without evidence. Full trace in
+  ARCHITECTURE.md's "MCP server, production 421 fix" section and
+  `webapp/mcp_server.py`'s `build_mcp` docstring.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

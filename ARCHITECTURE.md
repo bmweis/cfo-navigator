@@ -2668,6 +2668,67 @@ transport locally before shipping, not assumed from the SDK's docs.**
   a genuinely bogus path still 404s normally, and `/ask`'s own 405 is
   intact.
 
+### MCP server, production 421 fix (2026-09) — FastMCP's DNS-rebinding-protection host allowlist
+
+**Production incident, caught on the very first live authenticated call**
+after `mcp.bmweis.com` went live: `POST /mcp` with a valid bearer token
+returned a bare-text `HTTP 421 Invalid Host header` — not JSON, not this
+app's own error shape. Two facts pinned the cause fast: an unauthenticated
+request to the same path still got this app's own JSON `401` (so
+`_mcp_auth_gate` was running fine and wasn't the source), and `/health`
+still returned `200` (so this wasn't the canonical-host-redirect carve-out
+either). A `421` this codebase never emits, on a path only FastMCP's own
+transport handles past those two checks, pointed straight at the SDK
+itself — confirmed by reading `mcp.server.fastmcp.server.FastMCP.__init__`
+directly (the same discipline the Phase 1 build used for `ctx.request_context
+.request` and the `Mount` path-matching gotcha, not a guess): with no
+`transport_security=` argument passed, the constructor auto-enables DNS-
+rebinding protection (`TransportSecuritySettings(enable_dns_rebinding_protection
+=True, allowed_hosts=["127.0.0.1:*","localhost:*","[::1]:*"], ...)`) — but
+**only** when `host` is `127.0.0.1`/`localhost`/`::1`, which it always is
+here (`FastMCP("cfo-navigator")` never overrides the SDK's own default
+`host` parameter — the app doesn't bind a socket through FastMCP at all,
+`uvicorn` does that, so this `host` value only ever fed the security
+auto-detection). Any real request whose `Host` header is `mcp.bmweis.com`
+or the raw Railway origin (rather than `127.0.0.1`) fails
+`TransportSecurityMiddleware._validate_host` and gets the `421` — before
+FastMCP's own MCP-protocol handling, let alone this app's tools, ever run.
+**Exactly why local end-to-end testing never caught this**: every local
+test connects to `127.0.0.1` AND sends `Host: 127.0.0.1` (or `localhost`)
+by construction — the same host FastMCP's auto-enabled allowlist already
+covers, so local testing was, without anyone intending it, always running
+inside the one allowlist that happened to work.
+
+**Fix, not a workaround**: `webapp/mcp_server.py`'s `build_mcp()` now
+always passes an explicit `TransportSecuritySettings` — protection stays
+**on** (never disabled wholesale, which would reopen the actual DNS-
+rebinding attack this exists to prevent), with two new parameters
+(`extra_allowed_hosts`/`extra_allowed_origins`) added to whatever hosts
+FastMCP would have auto-allowed for `127.0.0.1`. `webapp/app.py` computes
+the concrete production list by filtering `_LEGACY_HOSTS` down to
+`cfo-navigator-production.up.railway.app` (dropping `www.bmweis.com`,
+which never serves `/mcp` — it only ever redirects to the apex) and adding
+`_MCP_HOST` (`mcp.bmweis.com`) — deliberately derived from the SAME
+constants the canonical-host-redirect carve-out already uses, rather than
+a second hand-typed hostname list, so the two can't silently drift apart.
+`allowed_origins` mirrors the same list with an `https://` prefix (an
+`Origin` header is optional per the SDK's own validation — absent passes —
+so this only matters for a browser-based MCP client, which Claude's own
+connector isn't, but costs nothing to get right).
+`tests/test_mcp_server.py` gained three regression tests, all against the
+real live-server fixture (the only way to exercise this middleware at
+all): a request that connects to the test server's real `127.0.0.1`
+address but carries `Host: mcp.bmweis.com` now succeeds (the exact shape
+of a real production request, and the case that broke); the same for the
+Railway origin host; and a genuinely unrecognized `Host` (`evil.example.com`)
+still gets rejected — proving the fix is a real, restrictive allowlist,
+not DNS-rebinding protection quietly turned off. **This session's sandbox
+cannot reach the live Railway origin at all** — its egress policy denies
+the host outright (confirmed via the sandbox's own proxy status endpoint,
+not assumed) — so the "real deployed curl" confirmation this fix's own
+build brief required could not be run directly from this session; see the
+PR for the exact command and Brian's own confirmation once deployed.
+
 ### Archive save / enrichment pipeline
 
 All capture paths converge on `linklib/pipeline.py::ingest_url` or the
