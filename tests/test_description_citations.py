@@ -439,17 +439,14 @@ def test_admin_edit_page_shows_empty_note_when_no_citations(app_module):
     assert "No citations recorded for this draft" in r.text
 
 
-def test_description_hidden_from_public_when_unverified(app_module):
-    """Superseded by the Description/Community profile publish-gate
-    follow-up (see CLAUDE.md): Description now gets the same Abacum-fix
-    publish gate Agent taxonomy already had — an unverified draft is
-    hidden from a public visitor. Was
-    test_description_renders_publicly_regardless_of_needs_verification,
-    which pinned the old no-gate behavior as a deliberate, flagged
-    follow-up; rewritten now that the follow-up has shipped, same as the
-    2026-08 confidence-indicator tests were renamed/rewritten when their
-    own pinned behavior changed. See tests/test_review_state_publish_gates.py
-    for the full gate coverage."""
+def test_description_shown_under_review_to_public_when_unverified(app_module):
+    """Superseded again by Brian's radical-transparency review standard
+    (Gate-Extraction Phase 0/PR A, see CLAUDE.md): Description's
+    hide-from-visitors gate (added in the earlier Description/Community
+    profile publish-gate follow-up this docstring used to describe) is
+    itself now superseded — an unverified draft always renders for every
+    viewer, labeled "under review" for a visitor instead of hidden. See
+    tests/test_review_state_publish_gates.py for the full coverage."""
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "An unverified AI-drafted description.", "https://runway.com", [],
                            approved=1, summary="Summary.",
@@ -460,4 +457,6 @@ def test_description_hidden_from_public_when_unverified(app_module):
     client = _client(app_module)   # no login — a signed-out public visitor
     r = client.get(f"/tools/software/{slug}")
     assert r.status_code == 200
-    assert "An unverified AI-drafted description." not in r.text
+    assert "An unverified AI-drafted description." in r.text
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text

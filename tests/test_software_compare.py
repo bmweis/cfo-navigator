@@ -74,7 +74,10 @@ def test_agent_taxonomy_shown_on_profile_and_searchable_on_card(env):
     assert "Agent-assisted, not fully autonomous." in r.text   # present in the embedded ALL_TOOLS JSON
 
 
-def test_agent_taxonomy_hidden_when_empty(env):
+def test_agent_taxonomy_shows_placeholder_when_empty(env):
+    """Radical-transparency review standard: an empty section used to be
+    omitted from the page entirely for every viewer. It now shows an honest
+    placeholder to every viewer instead of vanishing."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Solo Co", "No agent taxonomy set.", "https://solo.example", [], approved=1)
@@ -83,7 +86,7 @@ def test_agent_taxonomy_hidden_when_empty(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
-    assert "Agent taxonomy" not in r.text
+    assert "Agent taxonomy not yet available." in r.text
 
 
 # -- compare route ------------------------------------------------------------
@@ -141,14 +144,15 @@ def test_compare_gives_agent_involvement_its_own_section(env):
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     assert "AI / Agent involvement" in r.text
     assert "Fully independent agent that runs the whole workflow." in r.text
-    assert "Not documented yet" in r.text
+    assert "Not yet documented." in r.text
     assert "not have" not in r.text.lower() and "no agent" not in r.text.lower()
 
 
-def test_agent_taxonomy_unverified_hidden_from_public_profile(env):
-    """A drafted (unconfirmed) agent_taxonomy_note is a publish gate, not
-    just a badge — added after a confirmed fabrication (Abacum) sat
-    unreviewed and publicly visible. A public visitor never sees it."""
+def test_agent_taxonomy_unverified_shown_under_review_on_public_profile(env):
+    """Radical-transparency review standard (supersedes the old Abacum-
+    fabrication-finding publish gate, which hid a drafted/unconfirmed note
+    from a public visitor entirely): the note now always renders, labeled
+    "under review" for a visitor rather than hidden."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -156,13 +160,15 @@ def test_agent_taxonomy_unverified_hidden_from_public_profile(env):
     lib.close()
 
     r = _client(env).get("/tools/software/runway")
-    assert "Uses an LLM-drafted agent summary." not in r.text
+    assert "Uses an LLM-drafted agent summary." in r.text
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text
 
 
-def test_agent_taxonomy_unverified_visible_to_admin_labeled_hidden(env):
-    """The same unconfirmed note IS visible to a signed-in admin, clearly
-    labeled as hidden from public visitors — so it can actually be
-    reviewed and verified."""
+def test_agent_taxonomy_unverified_visible_to_admin_labeled_unverified(env):
+    """The same unconfirmed note is also visible to a signed-in admin,
+    labeled "unverified, visible to visitors" — truthful under the
+    radical-transparency standard, since it's now shown to everyone."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -173,7 +179,7 @@ def test_agent_taxonomy_unverified_visible_to_admin_labeled_hidden(env):
     _login(client)
     r = client.get("/tools/software/runway")
     assert "Uses an LLM-drafted agent summary." in r.text
-    assert "hidden from visitors" in r.text
+    assert "unverified, visible to visitors" in r.text
     assert ".tp-verify{" in r.text   # profile page has its own <style> block
 
 
@@ -190,9 +196,11 @@ def test_agent_taxonomy_no_flag_once_verified(env):
     assert '<span class="tp-verify">unverified' not in r.text
 
 
-def test_compare_hides_unverified_agent_taxonomy_from_public(env):
-    """Same publish gate on the compare matrix: an unverified note reads as
-    "Not documented yet" to a public visitor, never the drafted text."""
+def test_compare_shows_unverified_agent_taxonomy_under_review_to_public(env):
+    """Radical-transparency review standard: an unverified note on the
+    compare matrix always renders now, labeled "under review" for a public
+    visitor rather than collapsed into the empty-tool "Not yet documented."
+    cell — the third, previously-missing distinguishable state."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -202,9 +210,10 @@ def test_compare_hides_unverified_agent_taxonomy_from_public(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
-    assert "Drafted agent note for Runway." not in r.text
+    assert "Drafted agent note for Runway." in r.text
     assert "Confirmed agent note for Datarails." in r.text
-    assert "Not documented yet" in r.text
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text
 
 
 def test_compare_shows_agent_taxonomy_verification_flag_to_admin(env):

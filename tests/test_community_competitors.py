@@ -227,7 +227,10 @@ def test_profile_page_shows_similar_communities(env):
     assert "Beta Guild" in r.text
 
 
-def test_profile_page_hides_similar_communities_when_empty(env):
+def test_profile_page_shows_placeholder_for_similar_communities_when_empty(env):
+    """Radical-transparency review standard: an empty section used to be
+    omitted entirely for every viewer. It now shows an honest placeholder
+    instead of vanishing."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = _add_community(lib, "Alpha Guild", "https://a.example", ["Finance"])
@@ -237,4 +240,4 @@ def test_profile_page_hides_similar_communities_when_empty(env):
     client = _client(env)
     r = client.get(f"/tools/communities/{a_slug}")
     assert r.status_code == 200
-    assert "Similar communities" not in r.text
+    assert "Similar communities not yet available." in r.text

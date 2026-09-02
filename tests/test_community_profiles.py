@@ -111,7 +111,9 @@ def test_profile_page_falls_back_to_minimal_when_no_profile(env):
     r = c.get(f"/tools/communities/{community['slug']}")
     assert r.status_code == 200
     assert "Bare Community" in r.text
-    assert "Bottom line" not in r.text
+    # Radical-transparency review standard: an empty Bottom line used to be
+    # omitted from the page entirely. It now shows an honest placeholder.
+    assert "Bottom line not yet available." in r.text
 
 
 def test_profile_page_falls_back_when_profile_row_all_blank(env):
@@ -128,7 +130,7 @@ def test_profile_page_falls_back_when_profile_row_all_blank(env):
     c = _client(env)
     r = c.get(f"/tools/communities/{community['slug']}")
     assert r.status_code == 200
-    assert "Bottom line" not in r.text
+    assert "Bottom line not yet available." in r.text
 
 
 def test_profile_page_404_for_unknown_slug(env):

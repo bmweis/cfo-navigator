@@ -55,13 +55,25 @@ VOICE_MATCHMAKER_DEFAULT = """You are matching the visitor with the right fit fr
 - If nothing here is a good fit, say so. A weak match wastes the visitor's time."""
 
 
-def _build_communities_context(lib: Library) -> str:
+def _build_communities_context(lib: Library) -> tuple[str, bool]:
     """Every approved community plus its profile, formatted as compact
     plaintext blocks — the full dataset, not a retrieved subset (see module
     docstring). NEEDS_VERIFICATION-sentinel and empty fields are skipped
     rather than shown, so an unresearched field doesn't read as a real
-    (empty/placeholder) answer to the model."""
+    (empty/placeholder) answer to the model.
+
+    Radical-transparency review standard (supersedes the old whole-profile
+    publish gate, which used to swap an unreviewed profile to {} — see
+    CLAUDE.md's transparency-standard note): a community's profile draft
+    always ships to the model now, whether reviewed or not. When
+    `needs_review` is set, one leading note line marks the whole block
+    unverified (matching the single whole-profile flag — no per-line
+    marking, since one flag governs all nine profile lines together, unlike
+    Software's three independent per-field flags below) and the returned
+    bool flips True so `_build_system` can append its standing disclaimer.
+    """
     communities = lib.list_communities(approved_only=True)
+    has_unverified = False
 
     def _line(label: str, value) -> str:
         if not value or value == NEEDS_VERIFICATION:
@@ -71,19 +83,7 @@ def _build_communities_context(lib: Library) -> str:
     blocks = []
     for c in communities:
         profile = lib.get_community_profile(c["id"]) or {}
-        # Publish-gate parity: `community_profiles.needs_review` gates the
-        # ENTIRE drafted profile at once on every public render site
-        # (webapp.app's `_profile_hidden`/`_display_profile` swap on the
-        # profile page and compare matrix — see CLAUDE.md's "Description/
-        # Community profile publish gates" note). The matchmaker feeds this
-        # same profile text into a Claude prompt whose synthesized answer
-        # goes out to any visitor, admin or not — so it's exactly the kind
-        # of public-facing surface that gate exists to cover, and gets the
-        # same whole-profile-or-nothing treatment rather than a per-field
-        # one (per-field would read as a half-reviewed profile, the same
-        # reasoning the original gate decision used).
         profile_unverified = bool(profile.get("needs_review"))
-        display_profile = {} if profile_unverified else profile
         lines = [f"### {c['name']} (slug: {c['slug']})"]
         lines.append(_line("URL", c.get("url")))
         lines.append(_line("Who it's for", c.get("demographic")))
@@ -97,31 +97,46 @@ def _build_communities_context(lib: Library) -> str:
         lines.append(_line("Sponsorship", c.get("sponsorship_type")))
         lines.append(_line("Sponsor", c.get("sponsor_name")))
         lines.append(_line("Notes", c.get("notes")))
-        if display_profile:
-            lines.append(_line("Ideal member", display_profile.get("ideal_member")))
-            lines.append(_line("Not a fit for", display_profile.get("anti_fit")))
-            lines.append(_line("Value proposition", display_profile.get("value_prop")))
-            lines.append(_line("What it's actually like", display_profile.get("format_reality")))
-            lines.append(_line("Engagement level", display_profile.get("engagement_level")))
-            lines.append(_line("Application friction", display_profile.get("application_friction")))
-            lines.append(_line("Cost vs. value", display_profile.get("cost_value_verdict")))
-            lines.append(_line("Business model", display_profile.get("business_model")))
-            lines.append(_line("Founded", display_profile.get("founded_year")))
+        if profile:
+            if profile_unverified:
+                has_unverified = True
+                lines.append("Note: this community's profile is unverified; treat the following details as provisional.\n")
+            lines.append(_line("Ideal member", profile.get("ideal_member")))
+            lines.append(_line("Not a fit for", profile.get("anti_fit")))
+            lines.append(_line("Value proposition", profile.get("value_prop")))
+            lines.append(_line("What it's actually like", profile.get("format_reality")))
+            lines.append(_line("Engagement level", profile.get("engagement_level")))
+            lines.append(_line("Application friction", profile.get("application_friction")))
+            lines.append(_line("Cost vs. value", profile.get("cost_value_verdict")))
+            lines.append(_line("Business model", profile.get("business_model")))
+            lines.append(_line("Founded", profile.get("founded_year")))
         blocks.append("".join(l for l in lines if l))
-    return "\n".join(blocks)
+    return "\n".join(blocks), has_unverified
 
 
-def _build_software_context(lib: Library) -> str:
+def _build_software_context(lib: Library) -> tuple[str, bool]:
     """Every approved Software entry plus its features, formatted as compact
     plaintext blocks — the full dataset, not a retrieved subset (see module
     docstring). NEEDS_VERIFICATION-sentinel and empty fields are skipped,
-    same reasoning as _build_communities_context."""
-    tools = lib.list_tools(approved_only=True)
+    same reasoning as _build_communities_context.
 
-    def _line(label: str, value) -> str:
+    Radical-transparency review standard: each of the three per-field flags
+    used to exclude that field's content from the matchmaker's context
+    entirely when unverified. All three now always ship, each with its own
+    inline "(unverified)" marker when its flag is set (unlike Communities'
+    single whole-profile note above, since these are three independent
+    flags, not one) — the returned bool flips True whenever any tool in the
+    dataset carries at least one such marker, so `_build_system` can append
+    its standing disclaimer.
+    """
+    tools = lib.list_tools(approved_only=True)
+    has_unverified = False
+
+    def _line(label: str, value, unverified: bool = False) -> str:
         if not value or value == NEEDS_VERIFICATION:
             return ""
-        return f"{label}: {value}\n"
+        suffix = " (unverified)" if unverified else ""
+        return f"{label}{suffix}: {value}\n"
 
     blocks = []
     for t in tools:
@@ -136,19 +151,13 @@ def _build_software_context(lib: Library) -> str:
         lines = [f"### {t['name']} (slug: {t['slug']})"]
         lines.append(_line("URL", t.get("url")))
         lines.append(_line("Categories", ", ".join(t.get("categories") or [])))
-        # Publish-gate parity, per-field (unlike the Communities profile
-        # swap above, these three fields each carry their own independent
-        # *_needs_verification flag on `tools` — see the Agent taxonomy
-        # publish gate and Description/Community profile publish gates
-        # notes in CLAUDE.md): an unverified field never enters the
-        # matchmaker's Claude context, the same reasoning as the directory
-        # card and profile page not rendering it to a public visitor.
-        if not t.get("description_needs_verification"):
-            lines.append(_line("What it does", t.get("summary") or t.get("description")))
-        if not t.get("competitive_differentiation_needs_verification"):
-            lines.append(_line("How it differs from competitors", t.get("competitive_differentiation")))
-        if not t.get("agent_taxonomy_needs_verification"):
-            lines.append(_line("Agent/automation taxonomy", t.get("agent_taxonomy_note")))
+        desc_unverified = bool(t.get("description_needs_verification"))
+        diff_unverified = bool(t.get("competitive_differentiation_needs_verification"))
+        taxonomy_unverified = bool(t.get("agent_taxonomy_needs_verification"))
+        has_unverified = has_unverified or desc_unverified or diff_unverified or taxonomy_unverified
+        lines.append(_line("What it does", t.get("summary") or t.get("description"), desc_unverified))
+        lines.append(_line("How it differs from competitors", t.get("competitive_differentiation"), diff_unverified))
+        lines.append(_line("Agent/automation taxonomy", t.get("agent_taxonomy_note"), taxonomy_unverified))
         if links:
             feature_bits = []
             for link in links:
@@ -161,7 +170,7 @@ def _build_software_context(lib: Library) -> str:
                 feature_bits.append(f"{link['feature_name']}{suffix}")
             lines.append(_line("Features", ", ".join(feature_bits)))
         blocks.append("".join(l for l in lines if l))
-    return "\n".join(blocks)
+    return "\n".join(blocks), has_unverified
 
 
 def _build_system(lib: Library, kind: str) -> str:
@@ -179,19 +188,31 @@ def _build_system(lib: Library, kind: str) -> str:
     voice = f"{voice_core}\n\n{voice_matchmaker}"
 
     if kind == "software":
-        directory = _build_software_context(lib)
+        directory, has_unverified = _build_software_context(lib)
         subject = "the right software tool or vendor"
         link_form = "[Tool Name](/tools/software/<slug>)"
         directory_label = "every approved Software entry"
         browse_path = "/tools/software"
         clarify_hint = "the finance function it needs to cover, must-have integrations, budget"
     else:
-        directory = _build_communities_context(lib)
+        directory, has_unverified = _build_communities_context(lib)
         subject = "the right community (peer group, association, or Slack community)"
         link_form = "[Community Name](/tools/communities/<slug>)"
         directory_label = "every approved community"
         browse_path = "/tools/communities"
         clarify_hint = "role or stage, budget, what kind of access they want, anything more specific"
+
+    # Radical-transparency review standard: the directory above now always
+    # includes unreviewed content (marked inline — see _build_software_context/
+    # _build_communities_context), where it used to be stripped out entirely.
+    # This standing disclaimer only appears when at least one entry actually
+    # carries an unverified marker, so a fully-reviewed catalog never gets a
+    # disclaimer with nothing behind it.
+    unverified_notice = (
+        "\n\nSome catalog details above are marked unverified. Treat them as "
+        "provisional, and say so if you reference them in your answer."
+        if has_unverified else ""
+    )
 
     return (
         f"You are a matchmaker helping a finance professional find {subject} from a "
@@ -211,8 +232,13 @@ def _build_system(lib: Library, kind: str) -> str:
         "https:// URL.\n"
         "- If nothing in the directory is a good fit, say so plainly rather than force a "
         f"weak match, and suggest the visitor browse the full directory at {browse_path} "
-        "instead.\n\n"
-        f"DIRECTORY ({directory_label}, current as of this conversation):\n{directory}\n\n"
+        "instead.\n"
+        "- If you suggest an entry with a detail marked (unverified) or from a community "
+        "block noted as unverified, call that out inline in your answer (e.g. \"this hasn't "
+        "been independently confirmed yet\") rather than presenting it as a confirmed fact."
+        "\n\n"
+        f"DIRECTORY ({directory_label}, current as of this conversation):\n{directory}"
+        f"{unverified_notice}\n\n"
         "Voice — write every message this way:\n"
         f"{voice}"
     )

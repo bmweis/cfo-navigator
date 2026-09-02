@@ -269,7 +269,10 @@ def test_profile_page_shows_competitors_and_differentiation(env):
     assert "Human-readable formulas set it apart." in r.text
 
 
-def test_profile_page_hides_sections_when_empty(env):
+def test_profile_page_shows_placeholders_for_sections_when_empty(env):
+    """Radical-transparency review standard: an empty section used to be
+    omitted from the page entirely for every viewer. It now shows an
+    honest placeholder instead of vanishing."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Solo Co", "No competitors curated.", "https://solo.example", [], approved=1)
@@ -278,5 +281,5 @@ def test_profile_page_hides_sections_when_empty(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
-    assert "Competitors" not in r.text
-    assert "Bottom line" not in r.text
+    assert "Competitors not yet available." in r.text
+    assert "Bottom line not yet available." in r.text

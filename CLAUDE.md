@@ -954,6 +954,87 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   unverified description/summary — both are UI/search-level gates on a
   payload meant for a signed-in admin to read verbatim, not full data
   removal. See ARCHITECTURE.md's matching bullet for the full write-up.
+- **Radical-transparency review standard (Gate-Extraction Phase 0/PR A,
+  2026-09) — "nothing ever disappears," replacing every hide-from-visitors
+  gate above, and fixing a real gap the Phase 0 gate inventory found:
+  Competitive differentiation had no gate at all, on any surface, for
+  either viewer.** Ratified by Brian as a fixed 3-state × 2-viewer table:
+
+  | State | Visitor | Admin |
+  |---|---|---|
+  | Verified | content | content |
+  | Populated, pending review | content + "under review" label | content + "unverified, visible to visitors" badge |
+  | Empty | "{Field} not yet available." placeholder (two deliberate contextual variants: "Description coming soon." and "This section hasn't been researched yet.") | same placeholder + a "go fill this in" prompt |
+
+  Applied identically everywhere a gate existed: tools' Description/Agent
+  taxonomy (per-field, unchanged column) now always render, badge-only;
+  Competitive differentiation joins them for the first time (previously the
+  one field the Phase 0 investigation found completely ungated — an
+  unreviewed "Bottom line" rendered identically to a verified one, to every
+  visitor, with no admin badge either); Communities' whole-profile
+  `needs_review` no longer swaps `_display_profile` to `{}` — it's always
+  the real profile, with the same badge applied per-card (the verdict
+  eyebrow, each of the 4 group cards, the Founded/CPE-eligible Details
+  lines) — **one flag driving N badges, deliberately kept as the one
+  cross-entity divergence from tools' N-independent-flags-driving-N-
+  independent-badges shape**, since collapsing the two into one mechanism
+  would be a real data-model change (a future per-field community
+  verification schema, sketched but explicitly parked below, not this PR's
+  scope) rather than a copy change. Sources render alongside pending
+  content now (previously suppressed by the same swap). The compare
+  matrix's three per-field cells (`_agent_cell`/`_desc_cell`, plus a new
+  `_diff_cell` — Differentiation's own compare row used to share the
+  fully-generic, gate-blind `_row`/`_cell` with every other directory-level
+  field) share one `_reviewed_cell` helper; Communities' `_profile_cell`
+  mirrors it. **A real, previously-invisible bug this fixes as a side
+  effect**: a populated-pending cell and a genuinely-empty cell used to
+  render byte-identical text ("Not documented yet"/"Not available yet") to
+  a visitor — indistinguishable, and the reason Competitive differentiation's
+  missing gate went unnoticed for as long as it did. Since pending content
+  now always shows its real text, this collision structurally can't happen
+  anymore; the empty-only strings were also reworded for word-order parity
+  ("Not yet available."/"Not yet documented.") as part of the same pass.
+  Tier-2's "No details available." (a single empty field inside an
+  otherwise-populated card) is unchanged — already visitor-visible, no
+  admin prompt added, since the surrounding populated card already implies
+  the edit page is one click away.
+  **Matchmaker** (`linklib/matchmaker.py`) — the deferred follow-up named in
+  the bullet above is now fixed by inclusion-with-disclosure, not exclusion:
+  `_build_communities_context`/`_build_software_context` both return
+  `(context, has_unverified)`; Software marks each unverified field inline
+  (`"How it differs from competitors (unverified): ..."`); Communities
+  (one whole-profile flag) adds a single leading note per unreviewed
+  community (`"Note: this community's profile is unverified; treat the
+  following details as provisional."`) rather than marking all nine
+  profile lines individually. `_build_system` appends a standing
+  disclaimer to the system prompt — `"Some catalog details above are
+  marked unverified. Treat them as provisional, and say so if you
+  reference them in your answer."` — only when at least one marker is
+  actually present, plus an instruction to call out unverified content
+  inline in the synthesized answer rather than presenting it as confirmed.
+  **Read-only sketch, parked, not scoped for any PR** (per Brian's explicit
+  call — the sketch obligation is satisfied by this note, not a future
+  ticket): moving Communities to per-field verification, matching tools'
+  shape, would need N new `*_needs_verification` columns (one per narrative
+  field, replacing the single `needs_review`), a per-field "Mark
+  reviewed"/badge UI (`_narrative_verify_widget` already generalizes to
+  this — it was built for exactly this on the tools side), and a real
+  regen-auto-trigger redesign: `generate_community_profile` drafts all 23
+  fields in ONE Claude call, so "field X was freshly redrafted" is
+  currently an all-or-nothing fact from that call, not independently
+  knowable per field the way tools' three separate generation calls make
+  it — the real trigger for ever doing this is Community profile
+  generation itself moving to per-field calls, which hasn't happened and
+  isn't scheduled.
+  **Purely cosmetic/copy, no new gating mechanism**: every
+  `*_needs_verification`/`needs_review` column, every write path, and
+  `tools.needs_review` (the separate whole-record admin bookkeeping pill,
+  confirmed during Phase 0 investigation to never gate visitor-facing
+  content and untouched by this standard) are all unchanged — only what
+  renders for a given (state, viewer) pair changed. See ARCHITECTURE.md's
+  matching bullet for the full per-surface write-up and
+  `tests/test_review_state_publish_gates.py`/
+  `tests/test_matchmaker_publish_gate.py` for the regression coverage.
 - **Community profile edit page — grouped into 5 labeled sections, a
   consistent width rule, and confidence badges moved inline (2026-08
   follow-up).** Live testing found the page's 23 fields rendering as one

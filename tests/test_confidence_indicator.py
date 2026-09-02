@@ -271,11 +271,13 @@ def test_confidence_line_shows_not_yet_assessed_when_no_signal_ever_reported(env
 # -- Agent taxonomy confidence line (2026-08 follow-up) ----------------------
 # Same permanent-display treatment as Description/Differentiation, added to
 # the field this whole effort started from (the Abacum finding). Deliberately
-# does NOT touch agent_taxonomy_needs_verification's two existing mechanisms:
-# the "Mark verified" badge/button on this same edit page, and the public
-# profile page's publish gate (hides an unverified note from visitors
-# entirely) — both stay exactly as they were before this change. This is a
-# second, independent admin-facing fact, not a replacement for either.
+# does NOT touch agent_taxonomy_needs_verification's "Mark verified"
+# badge/button on this same edit page. The public profile page's own
+# treatment of an unverified note (originally: hide it from visitors
+# entirely) was later superseded by Brian's radical-transparency review
+# standard (Gate-Extraction Phase 0/PR A) — see
+# test_agent_taxonomy_review_standard_unaffected_by_confidence_display_change
+# below, which now asserts the current label-not-hide behavior.
 
 def test_agent_taxonomy_confidence_line_shown_on_edit_page_regardless_of_verification(env):
     from linklib.db import Library
@@ -311,27 +313,31 @@ def test_agent_taxonomy_confidence_line_shows_not_yet_assessed_when_no_signal_ev
     assert "Claude confidence: Not yet assessed" in r.text
 
 
-def test_agent_taxonomy_publish_gate_unaffected_by_confidence_display_change(env):
+def test_agent_taxonomy_review_standard_unaffected_by_confidence_display_change(env):
     """The confidence line is admin-edit-page-only. The public profile page's
-    Abacum-fix publish gate (agent_taxonomy_needs_verification hides the note
-    from visitors) must keep working exactly as before — a low-confidence,
-    unverified note still never reaches a signed-out visitor."""
+    review-state treatment of an unverified note (radical-transparency
+    standard: content always renders, labeled "under review" for a visitor
+    and "unverified, visible to visitors" for an admin) must keep working
+    exactly as before this confidence-display change — unaffected either
+    way, since these are two independent display facts."""
     from linklib.db import Library
     lib_ = Library(os.environ["LINKLIB_DB"])
     tid = lib_.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
     lib_.set_tool_agent_taxonomy_draft(
-        tid, "Fabricated-sounding claim about a page that doesn't exist.",
+        tid, "A drafted claim awaiting human review.",
         needs_verification=1, ai_confident=0)
     slug = lib_.get_tool(tid)["slug"]
     lib_.close()
 
     client = _client(env)
-    # Signed out — the unverified note must not appear at all.
+    # Signed out — content renders, labeled "under review".
     r = client.get(f"/tools/software/{slug}")
-    assert "Fabricated-sounding claim" not in r.text
+    assert "A drafted claim awaiting human review." in r.text
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text
 
-    # Signed in — visible, explicitly labeled as hidden from visitors.
+    # Signed in — same content, labeled "unverified, visible to visitors".
     _login(client)
     r = client.get(f"/tools/software/{slug}")
-    assert "Fabricated-sounding claim" in r.text
-    assert "hidden from visitors" in r.text
+    assert "A drafted claim awaiting human review." in r.text
+    assert "unverified, visible to visitors" in r.text
