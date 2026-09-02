@@ -26,6 +26,7 @@ full stop.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Callable, Sequence
 
@@ -37,6 +38,54 @@ from linklib.db import Library
 
 _DEFAULT_SAMPLE_N = 5
 _MAX_SAMPLE_N = 25
+_DEFAULT_MAX_CELL_CHARS = 500
+
+# Matches a leading "bearer" scheme, case-insensitive, with 0+ whitespace
+# after it — deliberately tolerant of the scheme/token boundary going
+# missing in transit (see bearer_token_candidates' docstring).
+_BEARER_PREFIX_RE = re.compile(r"^bearer\s*", re.IGNORECASE)
+
+
+def bearer_token_candidates(header: str) -> list[str]:
+    """Extract candidate bearer tokens from a raw Authorization header
+    value, tolerant of real-world format variance — case, a missing
+    "Bearer " scheme entirely, and the scheme/token space going missing in
+    transit.
+
+    Shared by webapp.app's `_mcp_auth_gate` (transport-level fast reject)
+    and this module's own `_caller_from_ctx` (per-tool re-verification) so
+    the two can't drift into accepting different things.
+
+    2026-09 production diagnostics (now removed — see CLAUDE.md's MCP
+    section) traced a real connector-vs-curl auth mismatch to exactly this:
+    one client sent a bare 43-char token with no scheme at all; another
+    sent "Bearer"+token with the separating space lost in transit
+    (`header_len=49, has_space=False`). Formatting ceremony isn't a real
+    security boundary here — the token itself is the only secret, and it's
+    hashed and compared server-side regardless of how it arrived — so this
+    tries the trimmed header AS the token first (the bare-token case), and
+    only if that fails to verify does it strip a leading "bearer" scheme
+    and retry. A non-bearer scheme (e.g. "Basic ...") never matches the
+    bearer-prefix strip, so it only ever produces the one, failing,
+    candidate — rejected the same as before, just by the token failing to
+    verify rather than an upfront scheme check.
+
+    IMPORTANT: never log a `scheme` value split out of a header this way —
+    a header with no space at all puts the ENTIRE header (i.e. the
+    credential itself) into whatever a naive `partition(" ")` calls
+    "scheme". This function deliberately returns only token candidates,
+    never a parsed-out scheme, so there's nothing here a caller could
+    accidentally log that would leak a credential.
+    """
+    trimmed = header.strip()
+    if not trimmed:
+        return []
+    candidates = [trimmed]
+    stripped = _BEARER_PREFIX_RE.sub("", trimmed).strip()
+    if stripped and stripped != trimmed:
+        candidates.append(stripped)
+    return candidates
+
 
 # DNS-rebinding-protection host allowlist, used ONLY when the caller doesn't
 # pass its own (webapp.app always does — see build_mcp's docstring). Kept
@@ -54,12 +103,16 @@ def _caller_from_ctx(ctx: Context, lib_factory: Callable[[], Library]) -> dict:
     if request is None:
         raise ToolError("unauthorized: no HTTP request context available for this call")
     auth_header = request.headers.get("authorization") or ""
-    scheme, _, token = auth_header.partition(" ")
-    if scheme.lower() != "bearer" or not token:
+    candidates = bearer_token_candidates(auth_header)
+    if not candidates:
         raise ToolError("unauthorized: missing or malformed Authorization header")
     lib = lib_factory()
     try:
-        caller = lib.verify_api_token(token)
+        caller = None
+        for candidate in candidates:
+            caller = lib.verify_api_token(candidate)
+            if caller:
+                break
     finally:
         lib.close()
     if not caller:
@@ -87,6 +140,27 @@ def _table_rows(lib: Library) -> list[sqlite3.Row]:
 
 def _is_virtual(create_sql: str | None) -> bool:
     return bool(create_sql) and create_sql.strip().upper().startswith("CREATE VIRTUAL TABLE")
+
+
+def _shadow_of(name: str, virtual_names: set[str]) -> str | None:
+    """Is `name` an extension-internal bookkeeping table for one of
+    `virtual_names`? Derived from the virtual table names actually present
+    in this schema — not a hardcoded suffix list — so it labels correctly
+    whatever FTS5/sqlite-vec (or a future virtual-table extension) actually
+    creates, rather than needing its own maintenance the next time a
+    virtual table is added. FTS5 always creates exactly
+    `{name}_data`/`_idx`/`_docsize`/`_config`; sqlite-vec's vec0 creates
+    `{name}_rowids`/`_chunks`/`_vector_chunksNN`/`_info` — both families
+    are, in every case, real SQL tables whose name starts with
+    `{virtual_table_name}_`, which is the one property this checks. A false
+    positive would need an unrelated real table deliberately named to start
+    with e.g. `articles_fts_...` — nothing in this schema does, and nothing
+    ever should, since that naming convention is exactly what marks a table
+    as extension-owned."""
+    for v in virtual_names:
+        if name.startswith(v + "_"):
+            return v
+    return None
 
 
 def build_mcp(
@@ -138,17 +212,30 @@ def build_mcp(
     async def list_tables(ctx: Context) -> list[dict]:
         """List every table/view in the live database with row counts.
         Virtual tables (FTS5 — articles_fts; sqlite-vec — articles_vec) are
-        labeled `"virtual": true`. `row_count` is null (with
-        `row_count_error` explaining why) when it can't be determined —
-        e.g. sqlite-vec's extension isn't loaded in this environment.
+        labeled `"virtual": true`. Their extension-internal bookkeeping
+        tables (FTS5's `articles_fts_data`/`_idx`/`_docsize`/`_config`;
+        sqlite-vec's `articles_vec_rowids`/`_chunks`/`_vector_chunks00`/
+        `_info`) are labeled `"shadow_of": "<virtual table name>"` — they're
+        real SQL tables with their own row counts, but that count reflects
+        the extension's internal storage layout, not independent content,
+        so don't read it as "N more rows of real data". `row_count` is null
+        (with `row_count_error` explaining why) when it can't be determined
+        — e.g. sqlite-vec's extension isn't loaded in this environment.
         Admin-role only."""
         _require_admin(ctx, lib_factory)
         lib = lib_factory()
         try:
+            rows = _table_rows(lib)
+            virtual_names = {r["name"] for r in rows if _is_virtual(r["sql"])}
             out = []
-            for row in _table_rows(lib):
+            for row in rows:
                 name, kind, sql = row["name"], row["type"], row["sql"]
-                entry: dict = {"name": name, "kind": kind, "virtual": _is_virtual(sql)}
+                entry: dict = {
+                    "name": name,
+                    "kind": kind,
+                    "virtual": _is_virtual(sql),
+                    "shadow_of": _shadow_of(name, virtual_names),
+                }
                 if kind == "table":
                     try:
                         n = lib.conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
@@ -219,11 +306,20 @@ def build_mcp(
 
     @mcp.tool()
     async def sample_rows(ctx: Context, name: str, n: int = _DEFAULT_SAMPLE_N,
-                           from_end: bool = False) -> dict:
+                           from_end: bool = False,
+                           max_cell_chars: int = _DEFAULT_MAX_CELL_CHARS) -> dict:
         """Return up to n rows from a table or view (default 5, hard cap
         25). Strictly read-only — SELECT ... LIMIT only. `name` is
         validated against the live table/view list before it's ever used
         in a query; no raw tool input is interpolated without that check.
+
+        Each string cell is capped at `max_cell_chars` (default 500) with a
+        visible `"...[truncated, showing X of Y chars]"` marker appended —
+        a production sample of 25 `articles` rows came back at 523KB with
+        no cap, most of it full article body text nobody asked to see.
+        Pass `max_cell_chars<=0` to disable truncation and get full cell
+        content. `truncated` on the response is true if any cell was cut.
+
         Admin-role only — returning real row contents is this tool's whole
         purpose, and it must never be exposed below admin in any future
         role model."""
@@ -246,7 +342,24 @@ def build_mcp(
             result_rows = [dict(r) for r in rows]
             if from_end:
                 result_rows.reverse()
-            return {"name": name, "count": len(result_rows), "rows": result_rows}
+            truncated = False
+            if max_cell_chars > 0:
+                for result_row in result_rows:
+                    for key, value in result_row.items():
+                        if isinstance(value, str) and len(value) > max_cell_chars:
+                            omitted = len(value) - max_cell_chars
+                            result_row[key] = (
+                                value[:max_cell_chars]
+                                + f"...[truncated, showing {max_cell_chars} of "
+                                  f"{len(value)} chars, {omitted} omitted]"
+                            )
+                            truncated = True
+            return {
+                "name": name,
+                "count": len(result_rows),
+                "rows": result_rows,
+                "truncated": truncated,
+            }
         finally:
             lib.close()
 

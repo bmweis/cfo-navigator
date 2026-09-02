@@ -5016,30 +5016,20 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   than silently skipped or claimed done without evidence. Full trace in
   ARCHITECTURE.md's "MCP server, production 421 fix" section and
   `webapp/mcp_server.py`'s `build_mcp` docstring.
-- **MCP server, connector-vs-curl 401 mismatch (2026-09, in progress) — a
-  new report, past the 421 fix above: Claude's own connector gets 401 from
-  `_mcp_auth_gate` on the SAME token a `curl` call gets 200 with** (Railway
-  logs confirmed the token matches; no 421s, so the earlier fix holds).
+- **MCP server, connector-vs-curl 401 mismatch (2026-09, resolved) — a
+  report, past the 421 fix above: Claude's own connector got 401 from
+  `_mcp_auth_gate` on the SAME token a `curl` call got 200 with** (Railway
+  logs confirmed the token matched; no 421s, so the earlier fix held).
   Nothing in `verify_api_token` distinguishes *why* a token failed — it
   collapses "unknown hash"/"revoked"/"inactive user" into one `None` by
   design, so there was no way to tell from the 401 alone which branch was
-  actually firing for the connector. Added **temporary** diagnostic
-  logging to `_mcp_auth_gate` (`webapp.mcp_auth` logger, WARNING level) —
-  every reject branch logs which branch fired, plus a LENGTH only, never
-  the credential's value or hash: no-header, wrong-scheme/empty-token
-  (deliberately logs `has_space` + `header_len`, never the raw `scheme`
-  value itself — an earlier draft logged `scheme` directly and a
-  regression test caught that a header with no space at all puts the
-  ENTIRE header into `scheme` after `partition(" ")`, which would have
-  logged the credential verbatim in exactly that shape), and — via a new
-  diagnostic-only `_mcp_diagnose_token_miss` helper that runs a SEPARATE
-  read-only query purely for the log line, never feeding back into the
-  actual auth decision — "token not found" vs. "token revoked" vs. "owning
-  user inactive" for a token that parsed fine but didn't verify.
-  **Remove this logging once the mismatch is diagnosed** — it's
-  intentionally temporary, not a permanent observability addition; logged
-  as its own follow-up task ("Remove temporary MCP auth-gate diagnostic
-  logging") rather than left to be remembered informally.
+  actually firing for the connector. Diagnosed with **temporary** logging
+  added to `_mcp_auth_gate` (now removed — see the cleanup/hardening PR
+  below), which traced it to real format variance in what was actually
+  arriving: one connector attempt sent a bare token with no `"Bearer "`
+  scheme at all, another sent `"Bearer"` + token with the separating space
+  lost in transit (`header_len=49, has_space=False`) — the old gate
+  required an exact `Bearer <token>` shape and 401'd both.
   Same PR also fixed a real, unrelated gap the same investigation
   surfaced: `/.well-known/oauth-*` was 301-redirecting to the apex on both
   `mcp.bmweis.com` and the raw Railway origin (the documented `/mcp`
@@ -5050,8 +5040,44 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   chases it into Cloudflare's Bot Fight Mode on bmweis.com. Scoped
   narrowly to that one path prefix, on those two `/mcp`-serving hosts only
   — `www.bmweis.com` (a `_LEGACY_HOSTS` entry that never serves `/mcp`)
-  deliberately does not get this exemption — see ARCHITECTURE.md's
-  matching bullet for the full write-up.
+  deliberately does not get this exemption.
+- **MCP server, cleanup/hardening PR (2026-09) — the permanent fix for the
+  mismatch above, plus three smaller post-launch items.** (1) The temporary
+  diagnostic logging (`_mcp_auth_logger`, `_mcp_diagnose_token_miss`, and
+  the WARNING calls in `_mcp_auth_gate`) is removed now that the mismatch
+  is diagnosed and fixed. (2) In its place,
+  `webapp.mcp_server.bearer_token_candidates(header)` is a small, shared,
+  never-logging parser used by both `_mcp_auth_gate` and each tool's own
+  `_caller_from_ctx` re-verification: it tries the trimmed header AS the
+  token first (the bare-token case), and only on a miss strips a leading
+  `bearer` scheme (case-insensitive, tolerant of the separating space going
+  missing) and retries — a non-bearer scheme like `Basic ...` never matches
+  that strip, so it's rejected the same as before, just via the token
+  failing to verify rather than an explicit scheme check. **The
+  credential-leak lesson the temporary logging surfaced is preserved as a
+  standing constraint, not just history**: this helper returns only token
+  candidates, never a parsed-out `scheme` — a header with no space at all
+  puts the ENTIRE header (the credential itself) into whatever a naive
+  `partition(" ")` would call `scheme`, so nothing in this codepath has a
+  `scheme` value available to accidentally log in the first place. (3) Exact
+  `/mcp` path matching was verified end to end (`_mcp_auth_gate`, the
+  canonical-host-redirect carve-outs, `_McpOnlyMount`) — already
+  `path == "/mcp" or path.startswith("/mcp/")` everywhere via the shared
+  `_mcp_path` helper, not a loose `startswith("/mcp")`, confirmed by
+  inventory rather than assumed; a scanner probe to `POST /mcp-builder` had
+  been captured by the auth gate in prod logs before this was verified, now
+  pinned by a regression test that such a path falls through to normal
+  404/405 handling instead. (4) `list_tables` labels FTS5's/sqlite-vec's
+  extension-internal shadow tables (`articles_fts_data`/`_idx`/`_docsize`/
+  `_config`, `articles_vec_rowids`/`_chunks`/`_vector_chunks00`/`_info`)
+  with `"shadow_of": "<virtual table name>"`, derived dynamically from
+  whichever virtual table names are actually present rather than a
+  hardcoded suffix list, so a caller doesn't misread their row counts as
+  independent content. (5) `sample_rows` caps each string cell at
+  `max_cell_chars` (default 500, `<=0` disables it) with a visible
+  truncation marker — a production sample of 25 `articles` rows had come
+  back at 523KB uncapped. See ARCHITECTURE.md's matching section for the
+  full write-up.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -5108,9 +5134,14 @@ tables, no third-party dependency.
     now 405s rather than 404s since `POST /ask` still lives there.) The
     `/library` hub route was removed outright in Phase 1 — no redirect.
   - Private API → **401** when unauthenticated, but also accept a valid token (cookie OR
-    `X-Save-Token`/`?token=`): `/ask`, `/post`, `/feed/save`, `/api/search`,
+    `X-Save-Token`): `/ask`, `/post`, `/feed/save`, `/api/search`,
     `/library/{article_id}/tags` (the Reader's inline tag editor, Phase 5c —
-    the route predates it but had no callers until then).
+    the route predates it but had no callers until then). Of these, only
+    `/api/search` also accepts a `?token=` query param as a fallback
+    (`token: str | None = None` on the route itself) — the others check
+    only the `X-Save-Token` header (2026-09 correction: this line previously
+    claimed `?token=` worked for all of them, verified false in code for
+    `/ask` specifically during the MCP cleanup/hardening PR's Phase 0).
   - **Session-cookie-only** (401 when unauthenticated, no token fallback at all — these are
     reached only from inside the already-authenticated `/read` UI, never cross-origin):
     `/api/read-article` and `/read-later/refresh` (2026-08 follow-up — the per-item Read

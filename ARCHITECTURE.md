@@ -2560,6 +2560,19 @@ admin-gated, read-only schema-introspection tools (`list_tables`,
 `describe_table`, `sample_rows`) — no Toolbox/Communities/Library/Feed/
 Buddy tools, no writes of any kind, per the phase's own explicit scope.
 
+**Two ergonomics fixes from live production use (cleanup/hardening PR,
+2026-09).** `list_tables` now labels FTS5's/sqlite-vec's extension-internal
+bookkeeping tables (`articles_fts_data`/`_idx`/`_docsize`/`_config`,
+`articles_vec_rowids`/`_chunks`/`_vector_chunks00`/`_info`) with
+`"shadow_of": "<virtual table name>"` so a caller doesn't misread their row
+counts as independent content — derived dynamically from whichever virtual
+table names are actually present in the schema (`{name}_` prefix match),
+not a hardcoded suffix list, so it labels correctly for any future virtual
+table too. `sample_rows` caps each string cell at `max_cell_chars` (default
+500, disable with `<=0`) with a visible truncation marker — a production
+sample of 25 `articles` rows came back at 523KB with no cap, mostly full
+article body text nobody asked to see.
+
 **Why a new auth mechanism instead of reusing `LINKLIB_SAVE_TOKEN`.** The
 existing flat token carries no identity — a call authenticated with it is
 unmetered, unlogged, and can't be attributed to a real user. Reusing it for
@@ -2729,7 +2742,7 @@ not assumed) — so the "real deployed curl" confirmation this fix's own
 build brief required could not be run directly from this session; see the
 PR for the exact command and Brian's own confirmation once deployed.
 
-### MCP server, connector-vs-curl 401 mismatch (2026-09, in progress)
+### MCP server, connector-vs-curl 401 mismatch (2026-09, resolved) and cleanup/hardening
 
 A follow-up report, once the 421 fix above confirmed working: Claude's own
 MCP connector gets `401` from `_mcp_auth_gate` while a plain `curl` call
@@ -2743,43 +2756,61 @@ bullet), which meant there was no way to tell, from the outside, which of
 those (or something else — a header the connector sends differently than
 curl does) was actually happening for the connector specifically.
 
-**Fix — temporary diagnostic logging, not a permanent addition.**
-`_mcp_auth_gate` (`webapp/app.py`) now logs, at WARNING level via a
-dedicated `webapp.mcp_auth` logger, which reject branch fired on every
-`401`: no `Authorization` header at all; a malformed header (wrong scheme
-or an empty token after the scheme); or — for a token that parsed fine but
-didn't verify — a new diagnostic-only helper, `_mcp_diagnose_token_miss`,
-runs a SEPARATE read-only query (never used for the actual auth decision,
-which `verify_api_token`'s own `None` already made) to classify "token not
-found" vs. "token revoked" vs. "owning user inactive", so the log line can
-say which one without changing what the 401 response itself reveals.
-**Only a length is ever logged, never the credential's value or hash** —
-this is a hard constraint the logging was built to, not an afterthought:
-a first draft of the malformed-header branch logged the parsed `scheme`
-value directly (`scheme=%r`), which looked safe until a regression test
-(`tests/test_mcp_server.py::
-test_mcp_auth_reject_logs_branch_and_length_for_malformed_header`) caught
-that a header with NO space at all — exactly what a bearer token pasted
-without its `"Bearer "` prefix looks like — puts the ENTIRE header string
-into `scheme` after `.partition(" ")`, so logging it verbatim would have
-logged the credential itself in precisely that shape. Fixed by logging
-`has_space` (a bool) and `header_len` instead of the scheme value at all.
-This is exactly the kind of failure mode length-only logging is meant to
-close off, and it slipped through in a first pass anyway — worth
-remembering the constraint has to be verified against the actual malformed
-input shapes, not just the well-formed ones.
+**Temporary diagnostic logging (now removed)** — `_mcp_auth_gate`
+(`webapp/app.py`) logged, at WARNING level via a dedicated `webapp.mcp_auth`
+logger, which reject branch fired on every `401`, plus a diagnostic-only
+`_mcp_diagnose_token_miss` helper that ran a SEPARATE read-only query (never
+used for the actual auth decision) to classify "token not found" / "token
+revoked" / "owning user inactive" for the log line. **Only a length was ever
+logged, never the credential's value or hash** — a hard constraint the
+logging was built to, not an afterthought: a first draft of the
+malformed-header branch logged the parsed `scheme` value directly
+(`scheme=%r`), which looked safe until a regression test caught that a
+header with NO space at all — exactly what a bearer token pasted without
+its `"Bearer "` prefix looks like — puts the ENTIRE header string into
+`scheme` after `.partition(" ")`, so logging it verbatim would have logged
+the credential itself in precisely that shape. Fixed by logging `has_space`
+(a bool) and `header_len` instead.
 
-**This logging is explicitly temporary** — added to diagnose one specific
-live mismatch, not a standing observability feature. Remove
-`_mcp_auth_logger`/`_mcp_diagnose_token_miss` and the log calls in
-`_mcp_auth_gate` once the connector-vs-curl difference is understood and
-fixed (or once it's clear the auth gate itself isn't the actual cause —
-e.g. if the real difference turns out to be in what header the connector
-sends, which the "no Authorization header"/"wrong scheme" branches above
-are exactly positioned to reveal from the next live reproduction). Logged
-as an explicit follow-up task ("Remove temporary MCP auth-gate diagnostic
-logging") rather than left to be remembered informally, so it doesn't
-linger past the point it's served its purpose.
+**Diagnosis, from real production log lines.** Two distinct malformed-request
+shapes were actually hitting the gate, neither a bug in `verify_api_token`
+itself: one connector attempt arrived as a bare 43-char token with no
+`"Bearer "` scheme at all; another arrived as `"Bearer"` + the token with the
+separating space lost in transit (`header_len=49, has_space=False`). The
+old gate required an exact `Bearer <token>` shape and 401'd both — formatting
+ceremony, not a real security boundary, since the token itself (hashed and
+compared server-side) is the only actual secret.
+
+**Permanent fix, cleanup/hardening PR (2026-09).** The temporary logging
+(`_mcp_auth_logger`, `_mcp_diagnose_token_miss`, and the WARNING calls in
+`_mcp_auth_gate`) is removed — its job was done once the shapes above were
+identified. In its place, `webapp/mcp_server.bearer_token_candidates(header)`
+is a small, shared, non-logging parser used by BOTH the transport-level gate
+(`_mcp_auth_gate`) and each tool's own independent re-verification
+(`_caller_from_ctx`) — the same auth model as before (defense in depth, two
+independent checks), just tolerant of format variance now: it tries the
+trimmed header AS the token first (the bare-token case), and only if that
+fails to verify does it strip a leading `bearer` scheme (case-insensitive,
+tolerant of the separating whitespace going missing) and retry. A non-bearer
+scheme (e.g. `Basic ...`) never matches the strip, so it produces only the
+one, failing, candidate — rejected exactly as before, just via the token
+failing to verify rather than an upfront scheme check. **The credential-leak
+lesson from the temporary-logging phase is preserved as a standing
+constraint, not just history**: `bearer_token_candidates` returns only token
+candidates, never a parsed-out `scheme`, specifically so there is nothing a
+future caller could accidentally log that would leak a credential — see the
+function's own docstring and CLAUDE.md's MCP section.
+
+**Also tightened in the same PR: exact `/mcp` path matching everywhere it's
+checked** (`_mcp_auth_gate`, the canonical-host-redirect carve-outs for
+`mcp.bmweis.com` and the raw Railway origin, and the `_McpOnlyMount`
+restriction) — already `path == "/mcp" or path.startswith("/mcp/")`
+end to end (via the shared `_mcp_path` helper) rather than a loose
+`startswith("/mcp")`, confirmed by inventory in this PR rather than assumed;
+a scanner probe to `POST /mcp-builder` was captured by the auth gate in
+prod logs before this was verified, and a regression test now pins that
+such a path 405s/404s through normal routing instead of hitting the MCP
+gate at all.
 
 **Also fixed in the same pass, found while investigating**: `/.well-known/
 oauth-*` on `mcp.bmweis.com` was 301-redirecting to the apex via the
