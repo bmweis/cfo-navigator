@@ -2335,6 +2335,50 @@ Details worth knowing:
   and `tests/test_review_state_publish_gates.py`/
   `tests/test_matchmaker_publish_gate.py` for the regression coverage
   (every state × viewer pair, plus the new third compare-cell state).
+- **PR A.1 — empty-state consistency + visual QA fixes (2026-09), fast-follow
+  to PR A above.** Six items from Brian's post-deploy review of the live
+  site; no gate/state logic changes, no schema changes. **`_profile_admin_
+  nudge` is retired outright**, replaced by `_empty_state_card(title, text)`
+  — every empty profile-page section (Software: Competitors, Bottom line,
+  Agent taxonomy, Description; Communities: Bottom line, each of the 4
+  profile-group cards, Similar communities) now renders as its own normal
+  `.tp-card` + `<h2>` header holding one muted italic placeholder line,
+  instead of the old dashed floating box with no header at all — "nothing
+  disappears" now also means "nothing looks structurally different just
+  because it's empty," per Brian's own framing (accents mark content, not
+  its absence). A Community profile-group card shows its own group title
+  even when empty now — previously the one site of the seven where a
+  visitor couldn't tell which section was missing. Key features' existing
+  (already-`.tp-card`) coming-soon prose gained the same `font-style:italic`
+  for one visual language across all eight sites, and its "Suggest one" link
+  no longer renders against an empty list (nothing shown to be missing
+  *from*). The tool profile page's Bottom line seafoam callout gained a
+  matching `margin-top:22px` (previously bottom-only), so the category
+  chips row above it isn't flush against its top edge. Community
+  Description's "No description yet." — the one string in the whole
+  standard that never matched the approved family — is now "Description
+  coming soon." / "...Add one from the edit page.", same as Software's.
+  Separately, root-caused and fixed a real CSS bug on the Key features
+  card: `.tp-feature-flag-btn` (the per-row flag icon, invisible at rest via
+  `opacity:0`) was an ordinary flex item pushed to the row's end via
+  `margin-left:auto` inside a `flex-wrap` `<li>` — when a row's visible
+  content didn't leave room for it on the same line, it wrapped onto its
+  own line, invisible but real height, rendering as a "phantom" blank row
+  before the next feature (reported on Numeric's card). Fixed by taking the
+  button out of the flex flow entirely (`position:absolute`, top-right of
+  the `<li>`, which reserves the space via `padding-right`) — confirmed via
+  live Playwright bounding-box height comparison before and after, not
+  guessed at. Also ships `scripts/audit_tool_logo_dimensions.py` (item 6,
+  investigate-first per Brian's amendment) — read-only, stdlib-only (no
+  Pillow, parses PNG/JPEG/GIF/WEBP/ICO headers and SVG width/viewBox by
+  hand), flags undersized/lopsided-aspect-ratio logo assets already on disk
+  as a hand-replacement worklist for the existing manual logo-override
+  process; makes no Brand API calls and changes nothing about how logos are
+  fetched or rendered. `_logo_box()`'s CSS (`object-fit:contain`) was
+  confirmed correct and untouched — a tiny logo is a property of the source
+  asset, not the renderer. See CLAUDE.md's matching bullet for the full
+  item-by-item write-up and `tests/test_empty_state_visual_qa.py`/
+  `tests/test_audit_tool_logo_dimensions.py` for the regression coverage.
 - **Citation-tag investigation + generation-path fix (2026-08) — supersedes
   Phase 1b/2's `inject_markers=False` decision for Agent taxonomy and
   Description; Community profile (Phase 3) is unchanged and still on the
