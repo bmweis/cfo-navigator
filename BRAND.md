@@ -290,9 +290,24 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
 - **Inputs** — white surface, `--line` border, radius 10px. Focus = navy border + soft seafoam
   ring `0 0 0 3px rgba(163,229,212,.55)`.
 - **Tags / badges** — seafoam fill, navy text, radius 6px, 600 weight, ~11px.
+- **Review-status pill** — a whole-record admin bookkeeping signal (Software/Communities admin
+  list rows, both public profile view pages when signed in as admin, and the top of both edit
+  pages): `--seafoam` fill + navy text for "Reviewed", `--coral-wash` fill + navy text for "Needs
+  review" (optionally with an "(n/total)" breakdown). Radius 999px (a true pill, not the 6px tag
+  radius) — deliberately larger/rounder than the per-field badge below, so the two read as
+  distinct component families even though they share the same color language. Coral-wash pairs
+  with navy text, never `--coral-deep`, since `small_coral_text_spans` (§8) mechanically bans
+  coral/coral-deep text under 18px. Helper: `_review_status_pill_html()` in `webapp/app.py`.
+- **Per-field review badge** — the radical-transparency review standard's (§9-adjacent; see
+  ARCHITECTURE.md/CLAUDE.md for the full mechanism) small trailing indicator on a Software/
+  Communities field or card that hasn't been human-reviewed yet: `--coral-wash` fill, navy text,
+  radius 5px, uppercase, 10px, 700 weight. Reads "under review" to a visitor, "unverified, visible
+  to visitors" to an admin — populated content always renders regardless of review state; only
+  this trailing badge differs by audience. Helper: `_review_state_badge()` in `webapp/app.py`
+  (`.tp-verify`/`.cc-verify` CSS classes).
 - **Admin section headings** — an informal sub-heading role used to break up an admin page into
   named sections (e.g. "Pending submissions" / "Approved software" on the Toolbox review pages,
-  "AI research" / "Screenshot" / "Competitors" / "Features" on the tool-edit page, dependency-group
+  "Competition" / "Screenshots" / "Feature taxonomy" on the tool-edit page, dependency-group
   titles on `/admin/open-source`). 16px, 600 weight — smaller and lighter than the base `h2` (21px/600),
   since these mark subsections within a page rather than the page's own top-level sections.
 - **Cards** — white surface, `--line` border, radius 12–16px.
@@ -334,18 +349,20 @@ system landed — the GER calculator was never actually 820px, it used plain 780
 
 | Tier | CSS class | Width | Pages |
 |---|---|---|---|
-| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), Library landing (+ past questions, ask history), article reader (`/read`), CFO Toolbox community profile pages, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard) |
-| Card grids | `.page-grid` | ~1200–1400px | CFO Toolbox landing + Software directory, Benchmarks directory, Communities directory (+ compare, find-results), `/admin/open-source` |
+| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), `/ask/history`, CFO Toolbox community profile pages, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard) |
+| Card grids | `.page-grid` | ~1200–1400px | CFO Toolbox landing + Software directory, Resources directory, Communities directory (+ compare, find-results), `/admin/open-source` |
 | Forms | `.page-form` | ~600–700px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit), admin single-record add/edit forms |
 | Admin data tables | `.page-admin` | ~1400–1600px | All remaining `/admin/*` list, dashboard, and report pages |
 
 Combine with `.page` for its margin/padding (e.g. `class="page page-full"`). Generous
 page padding (≈48px top). Whitespace before density. Admin/data pages get the width
 bump for scannability, not decoration — they never get any part of the graffiti layer
-(§4). Two pages (`/library/archive`, `/library/feed`) use a bespoke full-bleed layout
-outside the `.page` system entirely and aren't part of this tier table — their own
-internal content widths (960px and 860px respectively) were left alone or adjusted in
-place rather than forced into a tier that doesn't fit their structure.
+(§4). One page (`/read`, the merged Reader) uses a bespoke full-bleed `.rr-shell` app
+layout outside the `.page` system entirely and isn't part of this tier table — it's a
+fixed-height three-pane shell (rail/list/reader), not reading-width content, so no
+single width constraint applies. (Its two predecessor pages, `/library/archive` and
+`/library/feed`, used this same carve-out at 960px and 860px respectively before the
+Phase 5 Reader merge retired both routes and replaced them with `/read`.)
 
 The former `.page-tool` tier (960px, "functional tools") was retired in Phase 9b —
 those pages (FP&A Buddy, GER calculator, Sail, don't row + leaderboard) now sit on
@@ -364,8 +381,10 @@ section in `.tool-prose`, while diagrams and tables stay at the full `page-admin
 so they don't get squeezed into a 760px column meant for reading text.
 
 The brand audit's Phase 4 also found four pages with *no* reading-width constraint at
-all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, and
-`/library/past-questions` — rendering body copy at the full `page-full` measure
+all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, and the
+since-retired `/library/past-questions` (folded into `/tools/fpa-buddy`'s "Search past
+questions" section in the Phase 2 Library/Toolbox restructure, after this fix already
+landed) — rendering body copy at the full `page-full` measure
 (~1850px). A brief attempt at a new sitewide 1500px prose ceiling was tried and reverted
 (too wide for comfortable reading, outside the usual 60–75-character-per-line
 guidance); the interim fix is the same `.tool-prose` (760px) wrapper already proven on

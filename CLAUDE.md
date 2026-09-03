@@ -5741,7 +5741,19 @@ docs honest, **in the same PR as the change** (never a follow-up):
    copy — no generator, but **any PR that adds/renames/removes an
    `/admin/voice*` route or changes what's editable there must update §9 by
    hand** in the same PR, the same way ARCHITECTURE.md gets updated for other
-   route changes.
+   route changes. **§5's width-tier table and any other BRAND.md passage that
+   names a specific route or UI section is hand-written, not generated, and
+   drifts the same way ARCHITECTURE.md would if this rule didn't cover it —
+   so it's covered by the same rule 1 trigger**: any PR that adds, removes, or
+   renames a route, or renames a UI section/page BRAND.md names by title
+   (a width-tier table entry, a component-catalog example, a named-product
+   exception in §3.2), must `grep BRAND.md` for the old name/path and update
+   or remove the reference in that same PR — same "in the same PR, never a
+   follow-up" discipline as every other rule here. (A 2026-09 brand/voice-doc
+   audit found BRAND.md's width-tier table still naming three routes retired
+   across earlier phases — `/library`, `/library/archive`, `/library/feed` —
+   plus a stale admin-page section-heading example; this is the standing fix
+   for that class of drift, not a one-time cleanup.)
 4. **The Communities feature reference** — a collapsible "How this works"
    block at the top of `/admin/tools/communities` (`_COMMUNITIES_REFERENCE_HTML`
    in `webapp/app.py`) documents every user-facing prompt/CTA/copy block
@@ -5772,7 +5784,7 @@ docs honest, **in the same PR as the change** (never a follow-up):
 The voice guide (`BRAND.md` §9, rubric text in `linklib.agent.VOICE_CORE_DEFAULT`)
 is enforced two ways: mechanical (deterministic banned words/filler/performative
 phrases, `tests/test_voice_standards.py`) and holistic (Claude judges tone on
-demand, `/admin/brand`'s "Check content against your voice"). Em dash usage
+demand, `/admin/voice`'s "Check content against your voice"). Em dash usage
 doesn't fit either bucket cleanly — a scan of the live site found 63 lines of
 Brian's own existing copy using spaced em dashes inconsistent with the rubric's
 literal "no surrounding spaces" line, so a mechanical rule would false-positive
