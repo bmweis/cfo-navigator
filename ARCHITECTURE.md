@@ -2257,6 +2257,84 @@ Details worth knowing:
   in this PR) — both are UI/search-level gates, not data-removal, on a
   payload only ever meant for a signed-in admin's Quick Edit panel to read
   verbatim regardless of verification state.
+- **Radical-transparency review standard (Gate-Extraction Phase 0/PR A,
+  2026-09) — supersedes every hide-from-visitors publish gate above with
+  "nothing ever disappears," and fixes a real, independently-confirmed gap
+  the gate-extraction Phase 0 investigation found: Competitive
+  differentiation had NO gate at all.** Brian's ratified standard, applied
+  identically to every gated field/surface: a 3-state table (verified /
+  populated-pending-review / empty) × 2 viewers (visitor / admin), where
+  content always renders for both viewers at every state — only a trailing
+  review-state badge differs ("under review" for a visitor, "unverified,
+  visible to visitors" for an admin, via the new shared `_review_state_badge`
+  helper in `webapp/app.py`), and the Empty row adds an admin-only "go fill
+  this in" sentence (`_empty_state_text`). This replaces every "hidden from
+  visitors"/"hidden—hidden from visitors until reviewed" gate the three
+  bullets above describe — those bullets are kept for their historical
+  root-cause narrative (the Abacum fabrication finding, the original
+  Phase 1b/2/3 build order) but no longer describe current behavior; this
+  bullet is canon for what actually renders today.
+  **Per-surface changes**: Description/Agent taxonomy (tools' per-field
+  flags) — profile card, hero subhead, directory card (`_tool_entry` no
+  longer strips text to `""` for an anon response; the `ALL_TOOLS` JSON
+  always carries the real text now, gated only by the trailing badge) and
+  its search-match string, and the compare matrix's `_agent_cell`/
+  `_desc_cell` (rebuilt on a shared `_reviewed_cell` helper). **Competitive
+  differentiation** — the real fix: `differentiation_block` on the profile
+  page and the compare matrix's "How this differs" row (a new dedicated
+  `_diff_cell`, replacing the generic ungated `_row`/`_cell` it used to
+  share with every other directory-level field) both now read
+  `competitive_differentiation_needs_verification` for the first time.
+  **Community profile** (`needs_review`, still a single whole-profile
+  flag — no schema change) — `_display_profile` is no longer swapped to
+  `{}`; it's always `profile`, and the same badge is applied per-card (the
+  verdict eyebrow, each of the 4 group cards, and the Founded/CPE-eligible
+  Details-card lines) — one flag driving N badges, mirroring tools' N
+  independent flags driving N independent badges with identical copy.
+  Sources render alongside pending content now too (previously suppressed
+  by the same swap). The compare matrix's `display_profiles` is likewise
+  always the real profiles dict, with `_profile_cell` badging per cell.
+  **Every empty-state placeholder is now visitor-visible** (`_profile_admin_
+  nudge`, previously admin-only by design) — Description ("Description
+  coming soon.", a deliberate contextual variant), Agent taxonomy/
+  Differentiation/Competitors/Similar communities/Bottom line/each Community
+  profile card ("This section hasn't been researched yet.", also a
+  deliberate contextual variant) all use the standardized "{Field} not yet
+  available." pattern otherwise, with an admin-only trailing prompt sentence.
+  Tier-2's existing "No details available." (a single empty field inside an
+  otherwise-populated card) is unchanged — it was already visitor-visible
+  and needed no admin prompt, since the surrounding populated card already
+  implies the edit page is one click away. Compare-page empty strings were
+  reworded for parity ("Not available yet"/"Not documented yet" →
+  "Not yet available."/"Not yet documented.") — this also closes the third
+  distinguishable-state gap the Phase 0 investigation flagged: a
+  populated-pending cell and a genuinely-empty cell used to render
+  identical text; they can't collide anymore since pending content now
+  renders its real text.
+  **Matchmaker** (`linklib/matchmaker.py`) — `_build_communities_context`/
+  `_build_software_context` no longer exclude unverified content from
+  Claude's system prompt; both now return `(context: str, has_unverified:
+  bool)`. Software's three per-field flags each add an inline `(unverified)`
+  marker to that field's own line; Communities' one whole-profile flag adds
+  a single leading note (`"Note: this community's profile is unverified;
+  treat the following details as provisional."`) covering all nine profile
+  lines together, mirroring the badge-cardinality split above. `_build_system`
+  appends a standing disclaimer to the system prompt only when at least one
+  entry actually carries a marker, plus a standing instruction to call out
+  unverified content inline in the synthesized answer rather than presenting
+  it as confirmed — closing the real matchmaker leak the Phase 0
+  investigation named as a deferred follow-up in the bullet above (raw,
+  unverified text reaching a public visitor via a synthesized answer), now
+  fixed by inclusion-with-disclosure rather than exclusion.
+  **This is a strictly cosmetic/copy-and-badge change, not a new gating
+  mechanism** — every `*_needs_verification`/`needs_review` column, every
+  write path, and the shared `tools.needs_review` whole-record admin
+  bookkeeping pill are all unchanged; only what renders for a given
+  (state, viewer) pair changed. See CLAUDE.md's matching bullet for the
+  full copy-approval record and the cross-entity flag-cardinality write-up,
+  and `tests/test_review_state_publish_gates.py`/
+  `tests/test_matchmaker_publish_gate.py` for the regression coverage
+  (every state × viewer pair, plus the new third compare-cell state).
 - **Citation-tag investigation + generation-path fix (2026-08) — supersedes
   Phase 1b/2's `inject_markers=False` decision for Agent taxonomy and
   Description; Community profile (Phase 3) is unchanged and still on the

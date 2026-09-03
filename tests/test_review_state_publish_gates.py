@@ -1,17 +1,26 @@
-"""Review-state publish gates for Description (tools) and Community profile —
-extends the same Abacum-fabrication-finding pattern Agent taxonomy already
-uses (tests/test_software_compare.py) to two more AI-drafted fields that
-previously rendered publicly regardless of review state. See CLAUDE.md's
-"Agent taxonomy publish gate" bullet for the original mechanism and the
-Phase 2/Phase 3 PRs that flagged Description/Community profile as follow-ups.
+"""Review-state display for Description, Agent taxonomy, Competitive
+differentiation (tools) and Community profile — Brian's ratified
+radical-transparency review standard (Gate-Extraction Phase 0/PR A):
+"nothing ever disappears." A populated field always renders for every
+viewer now, at every state (verified / populated-pending-review / empty),
+with the difference between viewers limited to a trailing review-state
+badge ("under review" for a visitor, "unverified, visible to visitors" for
+an admin) or, for the Empty row, an extra admin-only "go fill this in"
+sentence.
 
-Covers, for each field, at every public render site found in the Phase 0
-investigation: the profile page, the compare matrix, and (Description only —
-Community profile's directory card sources from `communities`, not
-`community_profiles`, so it was never a leak) the `/tools/software` directory
-card's visible render and client-side search-match string. Also covers the
-review-state columns' NOT NULL DEFAULT 0 null-safety, per the task's explicit
-ask, even though there is no real NULL case in practice for either column.
+This supersedes the earlier hide-from-visitors publish gate this file used
+to cover (added after a confirmed fabrication on Abacum's record) —
+Description/Agent taxonomy/Community profile all previously hid unverified
+content from a public visitor entirely; Competitive differentiation never
+had a gate at all (a real, independently-confirmed pre-existing bug this
+standard fixes as part of the same PR, not a separate one).
+
+Covers, for each field, at every public render site: the profile page, the
+compare matrix, and (Description/Agent taxonomy only — Community profile's
+directory card sources from `communities`, not `community_profiles`, so it
+was never part of this) the `/tools/software` directory card's visible
+render and client-side search-match string. Also covers the review-state
+columns' NOT NULL DEFAULT 0 null-safety.
 """
 import os
 import pathlib
@@ -49,7 +58,7 @@ def _login(client):
 
 # -- Description: profile page -------------------------------------------------
 
-def test_description_unverified_hidden_from_public_profile(env):
+def test_description_unverified_shown_under_review_to_public_profile(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "An LLM-drafted description of Runway's platform.",
@@ -60,11 +69,13 @@ def test_description_unverified_hidden_from_public_profile(env):
 
     r = _client(env).get(f"/tools/software/{slug}")
     assert r.status_code == 200
-    assert "An LLM-drafted description of Runway's platform." not in r.text
-    assert "LLM-drafted short summary." not in r.text  # hero subhead, same gate
+    assert "An LLM-drafted description of Runway's platform." in r.text
+    assert "LLM-drafted short summary." in r.text  # hero subhead, same field
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text
 
 
-def test_description_unverified_visible_to_admin_labeled_hidden(env):
+def test_description_unverified_visible_to_admin_labeled_unverified(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "An LLM-drafted description of Runway's platform.",
@@ -78,11 +89,11 @@ def test_description_unverified_visible_to_admin_labeled_hidden(env):
     r = client.get(f"/tools/software/{slug}")
     assert "An LLM-drafted description of Runway's platform." in r.text
     assert "LLM-drafted short summary." in r.text
-    assert "hidden from visitors" in r.text
+    assert "unverified, visible to visitors" in r.text
     assert ".tp-verify{" in r.text
 
 
-def test_description_no_flag_once_verified(env):
+def test_description_no_badge_once_verified(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "A confirmed, human-reviewed description.",
@@ -93,12 +104,29 @@ def test_description_no_flag_once_verified(env):
 
     r = _client(env).get(f"/tools/software/{slug}")
     assert "A confirmed, human-reviewed description." in r.text
-    assert '<span class="tp-verify">unverified' not in r.text
+    assert '<span class="tp-verify">' not in r.text
+
+
+def test_description_empty_shows_placeholder_to_both_viewers_admin_gets_prompt(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "", "https://runway.com", ["FP&A"], approved=1)
+    slug = lib.get_tool(a)["slug"]
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/{slug}")
+    assert "Description coming soon." in r.text
+    assert "Add one from the edit page." not in r.text
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{slug}")
+    assert "Description coming soon. Add one from the edit page." in r.text
 
 
 # -- Description: compare matrix -----------------------------------------------
 
-def test_compare_hides_unverified_description_from_public(env):
+def test_compare_shows_unverified_description_under_review_to_public(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "Drafted description for Runway.", "https://runway.com",
@@ -108,9 +136,28 @@ def test_compare_hides_unverified_description_from_public(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
-    assert "Drafted description for Runway." not in r.text
+    assert "Drafted description for Runway." in r.text
     assert "Confirmed description for Datarails." in r.text
-    assert "Not available yet" in r.text
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text
+
+
+def test_compare_distinguishes_pending_from_truly_empty_description(env):
+    """The third compare-cell state: a tool with a pending-review description
+    and a tool with NO description at all must render two different cells —
+    they used to collapse into the same "Not available yet" text for a
+    public visitor, indistinguishable from each other."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "Drafted description for Runway.", "https://runway.com",
+                      ["FP&A"], approved=1, description_needs_verification=1)
+    b = lib.add_tool("Empty Co", "", "https://empty.example", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "Drafted description for Runway." in r.text
+    assert "under review" in r.text
+    assert "Not yet available." in r.text
 
 
 def test_compare_shows_description_verification_flag_to_admin(env):
@@ -133,22 +180,12 @@ def test_compare_shows_description_verification_flag_to_admin(env):
 
 
 # -- Description: /tools/software directory card -------------------------------
-# The card's ALL_TOOLS JSON payload used to keep the raw description/summary/
-# agent_taxonomy_note text regardless of verification state, relying only on
-# client-side JS (AUTHED) to hide what had already been sent — a real leak,
-# since the JSON lands in page source either way, indexable by a crawler and
-# readable via view-source by anyone. Fixed (page-source leak fix, same PR as
-# the matchmaker context filter): the server already knows AUTHED when
-# building this page, so an unverified field is now stripped to "" in the
-# JSON itself for an anonymous/non-admin response — the admin Quick Edit
-# panel, which needs the raw text verbatim even when unverified, still gets
-# it because an authed response is never stripped. The client-side
-# render/search gates stay in place as defense in depth for the admin case
-# (there's nothing left to hide for anon now that the payload itself is
-# stripped) — the actual DOM/search behavior for each visitor type was
-# verified live with Playwright during development (see the PR description),
-# consistent with this repo's own testing-standard precedent for
-# client-side-only behavior (tests/test_play_route.py's module docstring).
+# The card's ALL_TOOLS JSON payload used to strip unverified description/
+# summary/agent_taxonomy_note text to "" for an anonymous response (a
+# page-source leak fix under the old hide-from-visitors gate). Under the
+# radical-transparency standard the text is visible content for every
+# viewer, so it always ships now — the *_needs_verification booleans still
+# ship too, driving only the client-side badge, never a content strip.
 
 def test_directory_card_json_carries_description_verification_flag(env):
     from linklib.db import Library
@@ -169,15 +206,15 @@ def test_directory_card_json_carries_description_verification_flag(env):
     assert tools["Datarails"]["description_needs_verification"] is False
 
 
-def test_directory_card_json_strips_unverified_text_for_anon_keeps_for_admin(env):
-    """The actual page-source leak fix: an unverified description/summary/
-    agent_taxonomy_note is stripped to "" in the JSON payload itself for an
-    anonymous response, not just hidden by client JS — and an authed
-    response still carries the raw text, since admin Quick Edit needs it."""
+def test_directory_card_json_carries_unverified_text_for_every_viewer(env):
+    """Radical-transparency review standard: an unverified description/
+    summary/agent_taxonomy_note always ships in the JSON payload now, for
+    both an anonymous and an authed response — visible content for every
+    viewer, not stripped for anyone."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     tid = lib.add_tool(
-        "Runway", "A fabricated-sounding drafted description for Runway.",
+        "Runway", "A drafted description for Runway awaiting review.",
         "https://runway.com", ["FP&A"], approved=1,
         summary="A drafted short summary.",
         description_needs_verification=1,
@@ -192,36 +229,160 @@ def test_directory_card_json_strips_unverified_text_for_anon_keeps_for_admin(env
     anon = _client(env).get("/tools/software")
     m = re.search(r"var ALL_TOOLS = (\[.*?\]);", anon.text)
     tool = _json.loads(m.group(1))[0]
-    assert tool["description"] == ""
-    assert tool["summary"] == ""
-    assert tool["agent_taxonomy_note"] == ""
-    assert "fabricated-sounding" not in anon.text
-    assert "drafted, unverified agent taxonomy note" not in anon.text
+    assert tool["description"] == "A drafted description for Runway awaiting review."
+    assert tool["summary"] == "A drafted short summary."
+    assert tool["agent_taxonomy_note"] == "A drafted, unverified agent taxonomy note."
+    assert "A drafted description for Runway awaiting review." in anon.text
 
     client = _client(env)
     _login(client)
     admin = client.get("/tools/software")
     m = re.search(r"var ALL_TOOLS = (\[.*?\]);", admin.text)
     tool = _json.loads(m.group(1))[0]
-    assert tool["description"] == "A fabricated-sounding drafted description for Runway."
+    assert tool["description"] == "A drafted description for Runway awaiting review."
     assert tool["summary"] == "A drafted short summary."
     assert tool["agent_taxonomy_note"] == "A drafted, unverified agent taxonomy note."
 
 
-def test_directory_card_gates_visible_render_and_search_on_authed(env):
-    """Structural check that the card-render and search-filter JS both branch
-    on description_needs_verification && !AUTHED — the actual DOM outcome for
-    each visitor type was verified live with a real headless-browser session
-    (Playwright), not re-derived from a TestClient-rendered string here."""
+def test_directory_card_shows_under_review_badge_and_search_matches_for_public(env):
+    """The card's own render badge and search-match text both cover
+    unverified content for every viewer now — a visitor's search can match
+    an unverified description/agent taxonomy note the same as an admin's,
+    since the text is visible content either way."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.add_tool(
+        "Runway", "A drafted description mentioning zzsearchable.",
+        "https://runway.com", ["FP&A"], approved=1,
+        description_needs_verification=1,
+    )
+    lib.close()
+
     r = _client(env).get("/tools/software")
-    assert "descHiddenFromVisitor" in r.text
-    assert "descHiddenFromSearch" in r.text
-    assert "t.description_needs_verification && !AUTHED" in r.text
+    assert "descUnverified" in r.text
+    assert "tool-desc-verify" in r.text
+    assert "A drafted description mentioning zzsearchable." in r.text
 
 
-# -- Community profile: profile page --------------------------------------------
+# -- Competitive differentiation: profile page -----------------------------------
+# The one field with NO gate at all before this standard — an unverified
+# "Bottom line" callout rendered identically to a verified one, to every
+# viewer, with no badge for anyone (Phase 0 investigation's headline
+# finding). Fixed here as a labeling fix, not a hiding fix, consistent with
+# every other field.
 
-def test_community_profile_unverified_hidden_from_public(env):
+def test_differentiation_unverified_shown_under_review_to_public(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "A description.", "https://runway.com", ["FP&A"], approved=1)
+    lib.update_tool_differentiation(a, "A drafted differentiation note.", needs_verification=1)
+    slug = lib.get_tool(a)["slug"]
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/{slug}")
+    assert "A drafted differentiation note." in r.text
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text
+
+
+def test_differentiation_unverified_visible_to_admin_labeled_unverified(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "A description.", "https://runway.com", ["FP&A"], approved=1)
+    lib.update_tool_differentiation(a, "A drafted differentiation note.", needs_verification=1)
+    slug = lib.get_tool(a)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{slug}")
+    assert "A drafted differentiation note." in r.text
+    assert "unverified, visible to visitors" in r.text
+
+
+def test_differentiation_no_badge_once_verified(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "A description.", "https://runway.com", ["FP&A"], approved=1)
+    lib.update_tool_differentiation(a, "A confirmed differentiation note.", needs_verification=0)
+    slug = lib.get_tool(a)["slug"]
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/{slug}")
+    assert "A confirmed differentiation note." in r.text
+    assert '<span class="tp-verify">' not in r.text
+
+
+def test_differentiation_empty_shows_placeholder_to_both_viewers_admin_gets_prompt(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "A description.", "https://runway.com", ["FP&A"], approved=1)
+    slug = lib.get_tool(a)["slug"]
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/{slug}")
+    assert "Bottom line not yet available." in r.text
+    assert "Add one from the edit page." not in r.text
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{slug}")
+    assert "Bottom line not yet available." in r.text
+    assert "Add one from the edit page." in r.text
+
+
+# -- Competitive differentiation: compare matrix ---------------------------------
+
+def test_compare_shows_unverified_differentiation_under_review_to_public(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "d", "https://datarails.com", ["FP&A"], approved=1)
+    lib.update_tool_differentiation(a, "Drafted differentiation for Runway.", needs_verification=1)
+    lib.update_tool_differentiation(b, "Confirmed differentiation for Datarails.", needs_verification=0)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "Drafted differentiation for Runway." in r.text
+    assert "Confirmed differentiation for Datarails." in r.text
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text
+
+
+def test_compare_distinguishes_pending_from_truly_empty_differentiation(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Empty Co", "d", "https://empty.example", ["FP&A"], approved=1)
+    lib.update_tool_differentiation(a, "Drafted differentiation for Runway.", needs_verification=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "Drafted differentiation for Runway." in r.text
+    assert "under review" in r.text
+    assert "Not yet available." in r.text
+
+
+def test_compare_shows_differentiation_verification_flag_to_admin(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "d", "https://datarails.com", ["FP&A"], approved=1)
+    lib.update_tool_differentiation(a, "Drafted differentiation for Runway.", needs_verification=1)
+    lib.update_tool_differentiation(b, "Confirmed differentiation for Datarails.", needs_verification=0)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/compare?ids={a},{b}")
+    assert '<span class="cc-verify">unverified' in r.text
+    confirmed_idx = r.text.index("Confirmed differentiation for Datarails.")
+    assert "cc-verify" not in r.text[confirmed_idx:confirmed_idx + 80]
+
+
+# -- Community profile: whole-profile pending, per-card badges -------------------
+
+def test_community_profile_unverified_shown_under_review_to_public(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     c = lib.add_community("Peer CFOs", "https://peercfos.example", "Series B+ CFOs",
@@ -237,13 +398,15 @@ def test_community_profile_unverified_hidden_from_public(env):
 
     r = _client(env).get(f"/tools/communities/{slug}")
     assert r.status_code == 200
-    assert "A drafted ideal-member note." not in r.text
-    assert "A drafted bottom-line verdict." not in r.text
-    assert "2019" not in r.text
-    assert "CPE eligible" not in r.text
+    assert "A drafted ideal-member note." in r.text
+    assert "A drafted bottom-line verdict." in r.text
+    assert "2019" in r.text
+    assert "CPE eligible" in r.text
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text
 
 
-def test_community_profile_unverified_visible_to_admin_labeled_hidden(env):
+def test_community_profile_unverified_visible_to_admin_labeled_unverified(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     c = lib.add_community("Peer CFOs", "https://peercfos.example", "Series B+ CFOs",
@@ -264,10 +427,10 @@ def test_community_profile_unverified_visible_to_admin_labeled_hidden(env):
     assert "A drafted bottom-line verdict." in r.text
     assert "2019" in r.text
     assert "CPE eligible" in r.text
-    assert "hidden from visitors" in r.text
+    assert "unverified, visible to visitors" in r.text
 
 
-def test_community_profile_no_flag_once_reviewed(env):
+def test_community_profile_no_badge_once_reviewed(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     c = lib.add_community("Peer CFOs", "https://peercfos.example", "Series B+ CFOs",
@@ -284,12 +447,51 @@ def test_community_profile_no_flag_once_reviewed(env):
     r = _client(env).get(f"/tools/communities/{slug}")
     assert "A reviewed ideal-member note." in r.text
     assert "A reviewed bottom-line verdict." in r.text
-    assert '<span class="tp-verify">unverified' not in r.text
+    assert '<span class="tp-verify">' not in r.text
 
 
-# -- Community profile: compare matrix ------------------------------------------
+def test_community_profile_empty_shows_placeholder_to_both_viewers_admin_gets_prompt(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    c = lib.add_community("Peer CFOs", "https://peercfos.example", "Series B+ CFOs",
+                           "Free", [], approved=1)
+    slug = lib.get_community(c)["slug"]
+    lib.close()
 
-def test_compare_hides_unverified_community_profile_from_public(env):
+    r = _client(env).get(f"/tools/communities/{slug}")
+    assert "Bottom line not yet available." in r.text
+    assert "This section hasn't been researched yet." in r.text
+    assert "Generate a draft from the edit page." not in r.text
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/communities/{slug}")
+    assert "Bottom line not yet available. Generate a draft from the edit page." in r.text
+    assert "This section hasn't been researched yet. Generate a draft from the edit page." in r.text
+
+
+def test_community_profile_sources_render_alongside_pending_content(env):
+    """Sources render alongside pending content now — they used to be
+    suppressed by the same whole-profile gate that hid the draft itself."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    c = lib.add_community("Peer CFOs", "https://peercfos.example", "Series B+ CFOs",
+                           "Free", [], approved=1)
+    slug = lib.get_community(c)["slug"]
+    lib.upsert_community_profile(c, verdict_summary="A drafted verdict.", needs_review=1)
+    lib.set_entity_citations("community", c, "community_profile", [
+        {"url": "https://source.example/a", "title": "A source", "n": 1},
+    ])
+    lib.close()
+
+    r = _client(env).get(f"/tools/communities/{slug}")
+    assert "A drafted verdict." in r.text
+    assert "source.example" in r.text
+
+
+# -- Community profile: compare matrix, per-cell badges --------------------------
+
+def test_compare_shows_unverified_community_profile_under_review_to_public(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_community("Peer CFOs", "https://peercfos.example", "Series B+ CFOs",
@@ -303,11 +505,28 @@ def test_compare_hides_unverified_community_profile_from_public(env):
     lib.close()
 
     r = _client(env).get(f"/tools/communities/compare?ids={a},{b}")
-    assert "Drafted note for Peer CFOs." not in r.text
-    assert "2020" not in r.text
+    assert "Drafted note for Peer CFOs." in r.text
+    assert "2020" in r.text
     assert "Confirmed note for Finance Guild." in r.text
     assert "2015" in r.text
-    assert "Not available yet" in r.text
+    assert "under review" in r.text
+    assert "unverified, visible to visitors" not in r.text
+
+
+def test_compare_distinguishes_pending_from_truly_empty_community_profile(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_community("Peer CFOs", "https://peercfos.example", "Series B+ CFOs",
+                           "Free", [], approved=1)
+    b = lib.add_community("Finance Guild", "https://financeguild.example", "Late-stage CFOs",
+                           "Free", [], approved=1)
+    lib.upsert_community_profile(a, ideal_member="Drafted note for Peer CFOs.", needs_review=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/communities/compare?ids={a},{b}")
+    assert "Drafted note for Peer CFOs." in r.text
+    assert "under review" in r.text
+    assert "Not yet available." in r.text
 
 
 def test_compare_shows_community_profile_verification_flag_to_admin(env):
@@ -328,8 +547,8 @@ def test_compare_shows_community_profile_verification_flag_to_admin(env):
     assert "Confirmed note for Finance Guild." in r.text
     # .cc-verify, not .comm-verify (2026-08 brand-consistency pass split the
     # two: .comm-verify is the unrelated data-completeness "Needs
-    # verification" flag; .cc-verify is this publish-gate "unverified—hidden
-    # from visitors" flag, matching every other surface that renders it).
+    # verification" flag; .cc-verify is this review-state badge, matching
+    # every other surface that renders it).
     assert '<span class="cc-verify">unverified' in r.text
     confirmed_idx = r.text.index("Confirmed note for Finance Guild.")
     assert "cc-verify" not in r.text[confirmed_idx:confirmed_idx + 80]
@@ -384,7 +603,7 @@ def test_description_missing_column_key_treated_as_verified_not_unverified(env, 
 
     r = _client(env).get(f"/tools/software/{slug}")
     assert "A description with no verification signal." in r.text
-    assert '<span class="tp-verify">unverified' not in r.text
+    assert '<span class="tp-verify">' not in r.text
 
 
 def test_community_profile_missing_column_key_treated_as_verified_not_unverified(env, monkeypatch):
@@ -410,4 +629,4 @@ def test_community_profile_missing_column_key_treated_as_verified_not_unverified
 
     r = _client(env).get(f"/tools/communities/{slug}")
     assert "A note with no verification signal." in r.text
-    assert '<span class="tp-verify">unverified' not in r.text
+    assert '<span class="tp-verify">' not in r.text

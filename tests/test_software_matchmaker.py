@@ -161,8 +161,9 @@ def test_build_software_context_includes_tool_fields(tmp_path):
     lib.close()
 
     lib = Library(str(tmp_path / "t.db"))
-    ctx = _build_software_context(lib)
+    ctx, has_unverified = _build_software_context(lib)
     lib.close()
+    assert has_unverified is False
     assert "Numeric" in ctx
     assert "numeric" in ctx   # slug
     assert "Close checklists, reconciliations, flux analysis." in ctx

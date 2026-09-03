@@ -51,7 +51,7 @@ def test_compare_renders_two_communities_side_by_side(env):
     assert "Solo CFOs at Series A/B" in r.text
     assert "Free-to-join funnel monetized via paid tiers." in r.text
     assert "Business model" in r.text
-    assert "Not available yet" in r.text  # Community Two has no profile
+    assert "Not yet available." in r.text  # Community Two has no profile
 
 
 def test_compare_works_with_three_communities(env):

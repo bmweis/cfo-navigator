@@ -1699,17 +1699,49 @@ def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
 
 
 def _profile_admin_nudge(text: str) -> str:
-    """Admin-only placeholder for a whole profile-page section that's never
-    been generated/populated at all (Software and Communities profile pages,
-    Phase 3b follow-up) — same visibility rule as the page's Edit button.
-    Deliberately not styled as a real `.tp-card` (no solid border/shadow) so
-    it reads as a placeholder, not populated content; a public visitor never
-    sees this — the section is simply omitted for them. Distinct from a
-    single empty field inside an otherwise-populated section, which shows
-    muted "No details available" text to everyone instead (an honest
-    "doesn't apply here," not a research gap)."""
+    """Visitor-and-admin-visible placeholder for a whole profile-page
+    section that's never been generated/populated at all (Software and
+    Communities profile pages). Originally admin-only (Phase 3b) — the
+    radical-transparency review standard retired that: nothing disappears
+    for a visitor anymore, so an empty section now reads as an honest
+    placeholder for everyone instead of being omitted. Callers pass the
+    admin-suffixed text themselves (see `_empty_state_text` below) — this
+    helper only renders whatever string it's given. Deliberately not styled
+    as a real `.tp-card` (no solid border/shadow) so it reads as a
+    placeholder, not populated content. Distinct from a single empty field
+    inside an otherwise-populated section, which shows muted "No details
+    available" text — that case was already visitor-visible before this
+    standard and needed no change."""
     return (f'<p style="font-size:12px;color:var(--muted);font-style:italic;margin:0;'
             f'padding:12px 16px;border:1px dashed var(--line-strong);border-radius:10px;">{_esc(text)}</p>')
+
+
+def _empty_state_text(visitor_text: str, admin_suffix: str = "", authed: bool = False) -> str:
+    """Builds the text for `_profile_admin_nudge`: the visitor-facing
+    sentence alone, or with an admin-only trailing "go fill this in"
+    sentence appended, per the radical-transparency review standard's
+    3-state table (verified / populated-pending-review / empty), whose
+    Empty row is "same placeholder + a prompt to fill it in" for admin."""
+    return f"{visitor_text} {admin_suffix}".strip() if (authed and admin_suffix) else visitor_text
+
+
+def _review_state_badge(unverified: bool, authed: bool, cls: str = "tp-verify") -> str:
+    """Radical-transparency review-state badge, reused verbatim at every
+    per-field (Software's 3 independent flags) and whole-profile
+    (Communities' single `needs_review`) gate site. Populated content
+    always renders now, regardless of viewer or review state — only this
+    trailing badge differs by who's looking: nothing for a verified field,
+    "under review" for a visitor when the content hasn't been human-
+    reviewed yet, "unverified, visible to visitors" for an admin (replacing
+    the old "unverified" + "hidden from visitors" copy, which the standard
+    made false — see CLAUDE.md's transparency-standard note). Reuses the
+    existing .tp-verify/.cc-verify/.tool-desc-verify coral-wash/navy badge
+    classes for both viewers, deliberately — the visual signal is the same
+    "this needs a look," only the words change with the audience."""
+    if not unverified:
+        return ""
+    text = "unverified, visible to visitors" if authed else "under review"
+    return f' <span class="{cls}">{text}</span>'
 
 
 # CFO Toolbox logo rendering (Phase F) — turns a tools.logo_path/
@@ -6054,34 +6086,27 @@ def tools_directory(request: Request, warn: str = ""):
     # Serialize to JSON for client-side filtering
     import json as _json
     def _tool_entry(t: dict) -> dict:
-        # Description/Agent taxonomy publish gate, page-source leak fix: an
-        # unverified field's raw text used to ride into this JSON payload
-        # regardless of who was asking, relying on client JS to hide what
-        # was already sent — but the payload lands in page source either
-        # way, which a crawler indexes and any visitor can read via
-        # view-source, gate or no gate. The server already knows AUTHED
-        # when building this page, so an unverified field is now stripped
-        # to "" here for anyone who isn't signed in; admin Quick Edit still
-        # needs the raw text verbatim, so an authed response keeps it. The
-        # client-side render/search gates below are left in place as
-        # defense in depth — they're redundant for an anonymous visitor now
-        # (there's nothing left to hide) but still do real work for an
-        # authed admin, who does receive the raw text and the "unverified"
-        # badge.
+        # Radical-transparency review standard: an unverified field's text
+        # used to be stripped to "" in this JSON payload for anyone not
+        # signed in (a page-source leak fix from the earlier hide-from-
+        # visitors gate, which relied on the client never receiving the
+        # text at all). The standard replaces hiding with labeling
+        # everywhere, so the text now always ships to every viewer — the
+        # *_needs_verification booleans still ship too, driving only the
+        # client-side "under review"/"unverified, visible to visitors"
+        # badge below, never a content strip.
         desc_unverified = bool(t.get("description_needs_verification"))
         taxonomy_unverified = bool(t.get("agent_taxonomy_needs_verification"))
-        strip_desc = desc_unverified and not authed
-        strip_taxonomy = taxonomy_unverified and not authed
         entry = {
             "id": t["id"],
             "name": t["name"],
-            "description": "" if strip_desc else t["description"],
-            "summary": "" if strip_desc else (t.get("summary") or ""),
+            "description": t["description"],
+            "summary": t.get("summary") or "",
             "url": t["url"],
             "slug": t["slug"],
             "logo_url": _tool_logo_url(t),
             "categories": t["categories"],
-            "agent_taxonomy_note": "" if strip_taxonomy else (t.get("agent_taxonomy_note") or ""),
+            "agent_taxonomy_note": t.get("agent_taxonomy_note") or "",
             "description_needs_verification": desc_unverified,
             "agent_taxonomy_needs_verification": taxonomy_unverified,
             "advisor": bool(t.get("advisor")),
@@ -6353,13 +6378,13 @@ function renderTools(tools) {{
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
     var star = t.advisor ? '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' : '';
-    // Description publish gate (Citations-API grounding fix follow-up): an
-    // unverified/unreviewed description is never rendered or searchable
-    // for a public visitor, same Abacum-fabrication-finding pattern as the
-    // profile page and compare matrix. An admin still sees the text, with
-    // a small unverified label.
+    // Radical-transparency review standard: an unverified/unreviewed
+    // description used to be hidden from a public visitor entirely, same
+    // as the profile page and compare matrix used to. It now always
+    // renders for both viewers, with a trailing review-state badge below
+    // ("under review" for a visitor, "unverified, visible to visitors" for
+    // an admin).
     var descUnverified = !!t.description_needs_verification;
-    var descHiddenFromVisitor = descUnverified && !AUTHED;
     var cats = (t.categories || []).map(function(c) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
     }}).join('');
@@ -6459,8 +6484,8 @@ function renderTools(tools) {{
           ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-top:2px;">' + promotedBadge + star + '</div>'
           : '')
       + '</div>'
-      + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(descHiddenFromVisitor ? '' : (t.summary || t.description)) + '</p>'
-      + (descUnverified && AUTHED ? '<span class="tool-desc-verify">Unverified&mdash;hidden from visitors</span>' : '')
+      + '<p class="tool-desc" id="desc-' + t.id + '">' + esc((t.summary || t.description) || 'Description coming soon.') + '</p>'
+      + (descUnverified ? '<span class="tool-desc-verify">' + (AUTHED ? 'Unverified, visible to visitors' : 'Under review') + '</span>' : '')
       + '<div style="margin-top:auto;">'
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;min-height:24px;margin-bottom:10px;">'
       + '<div class="tool-cats">' + cats + '</div>' + fullProfileLink
@@ -6528,17 +6553,15 @@ function filtered() {{
       if (!hit) return false;
     }}
     if (!q) return true;
-    // Description/Agent taxonomy publish gate: an unverified field is never
-    // part of the public search-match text, same as it's never rendered on
-    // the card — an admin's search still matches it (AUTHED skips the gate
-    // here the same way it skips the render gate above). As of the
-    // page-source leak fix, ALL_TOOLS itself already has these fields
-    // stripped to '' for a non-admin response, so this check is now
-    // defense in depth rather than the only thing hiding the text.
-    var descHiddenFromSearch = t.description_needs_verification && !AUTHED;
-    var descMatchText = descHiddenFromSearch ? '' : (t.summary || '') + ' ' + t.description;
-    var taxonomyHiddenFromSearch = t.agent_taxonomy_needs_verification && !AUTHED;
-    var taxonomyMatchText = taxonomyHiddenFromSearch ? '' : (t.agent_taxonomy_note || '');
+    // Radical-transparency review standard: Description/Agent taxonomy
+    // text is visible content for every viewer now (see descUnverified
+    // above), so it's searchable for every viewer too — an unverified
+    // field used to be excluded from search-match text for a visitor,
+    // matching the old hide-from-visitors render gate; that gate is gone,
+    // so this exclusion would now be a visitor/admin inconsistency with no
+    // purpose, not a real gate.
+    var descMatchText = (t.summary || '') + ' ' + t.description;
+    var taxonomyMatchText = t.agent_taxonomy_note || '';
     return (t.name + ' ' + descMatchText + ' ' + (t.categories || []).join(' ') + ' ' + taxonomyMatchText).toLowerCase().indexOf(q) !== -1;
   }});
 }}
@@ -6775,7 +6798,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
 </div>"""
         return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
-    def _cell(text: str, empty_label: str = "Not available yet") -> str:
+    def _cell(text: str, empty_label: str = "Not yet available.") -> str:
         text = (text or "").strip()
         if not text:
             return f'<td class="cc-cell cc-empty">{_esc(empty_label)}</td>'
@@ -6792,7 +6815,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         for t in tools
     )
 
-    def _row(label: str, values: list[str], empty_label: str = "Not available yet") -> str:
+    def _row(label: str, values: list[str], empty_label: str = "Not yet available.") -> str:
         if not any((v or "").strip() for v in values):
             return ""
         return (f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>'
@@ -6809,17 +6832,27 @@ to compare them side by side. Check the box on any card, then use the compare ba
     # tracked yet."
     _compare_authed = _is_authed(request)
 
+    def _reviewed_cell(text: str, unverified: bool, empty_text: str) -> str:
+        """Shared cell renderer for every per-field review-gated Compare
+        column (Agent taxonomy, Description, Competitive differentiation).
+        Radical-transparency review standard: content always renders for
+        both viewers now — a pending review no longer collapses into the
+        same empty-looking cell as a tool with no content at all, which is
+        what let Competitive differentiation's missing gate go unnoticed
+        (see the "How this differs" row below)."""
+        text = (text or "").strip()
+        if not text:
+            return f'<td class="cc-cell cc-empty">{_esc(empty_text)}</td>'
+        badge = _review_state_badge(unverified, _compare_authed, "cc-verify")
+        badge_html = f'<div style="margin-top:4px;">{badge.strip()}</div>' if badge else ""
+        return f'<td class="cc-cell">{_esc(text)}{badge_html}</td>'
+
     def _agent_cell(t: dict) -> str:
-        note = (t.get("agent_taxonomy_note") or "").strip()
-        unverified = bool(t.get("agent_taxonomy_needs_verification"))
-        # Publish gate (Abacum fabrication finding): a self-reported
-        # low-confidence/unverified agent-taxonomy note is never shown to a
-        # public visitor, same as the profile page below — only an admin
-        # sees the drafted-but-unconfirmed text, clearly labeled as hidden.
-        if not note or (unverified and not _compare_authed):
-            return '<td class="cc-cell cc-empty">Not documented yet</td>'
-        verify = '<div style="margin-top:4px;"><span class="cc-verify">unverified&mdash;hidden from visitors</span></div>' if unverified else ""
-        return f'<td class="cc-cell">{_esc(note)}{verify}</td>'
+        return _reviewed_cell(
+            t.get("agent_taxonomy_note"),
+            bool(t.get("agent_taxonomy_needs_verification")),
+            "Not yet documented.",
+        )
 
     agent_row = ""
     if any((t.get("agent_taxonomy_note") or "").strip() for t in tools):
@@ -6833,30 +6866,40 @@ to compare them side by side. Check the box on any card, then use the compare ba
         agent_section = (
             f'<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>'
             f'<tr><td class="cc-cell cc-label"></td>'
-            + "".join('<td class="cc-cell cc-empty">Not documented yet</td>' for _ in tools) + "</tr>"
+            + "".join('<td class="cc-cell cc-empty">Not yet documented.</td>' for _ in tools) + "</tr>"
         )
 
     def _desc_cell(t: dict) -> str:
-        text = (t.get("summary") or t.get("description") or "").strip()
-        unverified = bool(t.get("description_needs_verification"))
-        # Same publish gate as Agent taxonomy above, extended to Description
-        # (Citations-API grounding fix follow-up): a self-reported
-        # low-confidence/unreviewed draft is never shown to a public
-        # visitor, only an admin, clearly labeled as hidden.
-        if not text or (unverified and not _compare_authed):
-            return '<td class="cc-cell cc-empty">Not available yet</td>'
-        verify = '<div style="margin-top:4px;"><span class="cc-verify">unverified&mdash;hidden from visitors</span></div>' if unverified else ""
-        return f'<td class="cc-cell">{_esc(text)}{verify}</td>'
+        return _reviewed_cell(
+            t.get("summary") or t.get("description"),
+            bool(t.get("description_needs_verification")),
+            "Not yet available.",
+        )
 
     description_row = ""
     if any((t.get("summary") or t.get("description") or "").strip() for t in tools):
         description_row = (f'<tr><td class="cc-cell cc-label">{_esc("Description")}</td>'
                             + "".join(_desc_cell(t) for t in tools) + "</tr>")
 
-    other_rows = (
-        description_row
-        + _row("How this differs", [t.get("competitive_differentiation", "") for t in tools])
-    )
+    def _diff_cell(t: dict) -> str:
+        # Competitive differentiation ("How this differs") previously used
+        # the generic _row/_cell helpers below with no review-gate logic at
+        # all — the one field that rendered an unverified draft identically
+        # to a verified one, to every viewer, with no badge for anyone. Now
+        # brought in line with Agent taxonomy/Description above via the
+        # same shared _reviewed_cell.
+        return _reviewed_cell(
+            t.get("competitive_differentiation"),
+            bool(t.get("competitive_differentiation_needs_verification")),
+            "Not yet available.",
+        )
+
+    differentiation_row = ""
+    if any((t.get("competitive_differentiation") or "").strip() for t in tools):
+        differentiation_row = (f'<tr><td class="cc-cell cc-label">{_esc("How this differs")}</td>'
+                                + "".join(_diff_cell(t) for t in tools) + "</tr>")
+
+    other_rows = description_row + differentiation_row
 
     # Legacy tool_features-driven Features comparison row was removed here
     # (Feature Taxonomy Phase 1b PR 2 legacy retirement) rather than migrated
@@ -7244,33 +7287,46 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
   <h2 class="tp-card-h">Competitors</h2>
   <table class="tp-competitor-table"><tbody>{comp_rows}</tbody></table>
 </div>"""
-    elif authed:
-        competitors_block = _profile_admin_nudge("No competitors curated yet.")
+    else:
+        competitors_block = _profile_admin_nudge(_empty_state_text(
+            "Competitors not yet available.", "Curate them from the edit page.", authed))
 
     # "Bottom line" callout — same seafoam treatment as the Communities
     # profile page's verdict_summary callout (Phase 3b), replacing the old
     # buried italic sub-paragraph inside the Description card so the
     # differentiation note actually reads as the scannable takeaway it is.
+    # Radical-transparency review standard: `competitive_differentiation_
+    # needs_verification` previously had NO gate at all on this surface —
+    # an unreviewed draft rendered identically to a verified one, with no
+    # badge for either viewer. Now brought in line with Description/Agent
+    # taxonomy below: content always renders, with a trailing review-state
+    # badge.
+    _diff_unverified = bool(tool.get("competitive_differentiation_needs_verification"))
     differentiation_block = ""
     if (tool.get("competitive_differentiation") or "").strip():
+        _diff_badge = _review_state_badge(_diff_unverified, authed, "tp-verify")
         differentiation_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
-  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line</div>
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_diff_badge}</div>
   <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(tool['competitive_differentiation'])}</p>
 </div>"""
-    elif authed:
-        differentiation_block = (f'<div style="margin-bottom:22px;">'
-                                  f'{_profile_admin_nudge("Bottom line not yet written (hand-written, not auto-drafted).")}</div>')
+    else:
+        _diff_empty_html = _profile_admin_nudge(_empty_state_text(
+            "Bottom line not yet available.",
+            "This field is written by hand, not auto-drafted. Add one from the edit page.",
+            authed))
+        differentiation_block = f'<div style="margin-bottom:22px;">{_diff_empty_html}</div>'
 
-    # Publish gate (added after a confirmed fabrication on Abacum's record —
-    # invented, quoted-sounding language attributed to a page that never
-    # existed, sitting in an unverified field): agent_taxonomy_needs_verification
-    # now GATES public visibility, not just a badge. A note the model itself
-    # flagged low-confidence (or that simply hasn't been human-reviewed yet)
-    # is shown only to a signed-in admin, clearly labeled as hidden from
-    # visitors — never to a public profile visitor, however plausible it
-    # reads. Verified notes render exactly as before, with no badge at all
-    # (a visible note is now itself the verified signal).
+    # Radical-transparency review standard (supersedes the old Abacum-
+    # fabrication-finding publish gate): `agent_taxonomy_needs_verification`
+    # used to GATE public visibility outright — an unreviewed note was
+    # shown only to a signed-in admin, never a visitor. Brian's ratified
+    # standard replaces hiding with labeling everywhere: content always
+    # renders for both viewers now, with a trailing review-state badge that
+    # reads "under review" for a visitor and "unverified, visible to
+    # visitors" for an admin. Verified notes render exactly as before, with
+    # no badge at all (a visible note with no badge is itself the verified
+    # signal).
     # white-space:pre-wrap (voice enforcement + structure pass, 2026-08): the
     # generation prompt now asks for paragraph breaks and, where genuinely
     # list-like, "- " bulleted lines instead of one dense block — a bare <p>
@@ -7282,24 +7338,20 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     _at_unverified = bool(tool.get("agent_taxonomy_needs_verification"))
     # Public citation list, capped at 5 (first-use order, already deduped
     # by url) — Citations-API grounding fix, Phase 1b. Shown alongside the
-    # note in both visibility branches below: a signed-in admin deciding
-    # whether to verify an unverified note benefits from seeing sources
-    # too, not just a public visitor once the note is live.
+    # note to both viewers — a signed-in admin deciding whether to mark an
+    # unverified note reviewed benefits from seeing sources too, not just a
+    # public visitor once the note is verified.
     _at_citations_html = _citations_list_html(agent_taxonomy_citations, cap=5)
-    if _at_note and not _at_unverified:
+    if _at_note:
+        _at_badge = _review_state_badge(_at_unverified, authed, "tp-verify")
         agent_taxonomy_block = f"""<div class="tp-card">
-  <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy</h2>
+  <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy{_at_badge}</h2>
   <p style="margin:0;white-space:pre-wrap;">{_esc(tool['agent_taxonomy_note'])}</p>
   {_at_citations_html}
 </div>"""
-    elif _at_note and _at_unverified and authed:
-        agent_taxonomy_block = f"""<div class="tp-card">
-  <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy <span class="tp-verify">unverified&mdash;hidden from visitors until reviewed</span></h2>
-  <p style="margin:0;white-space:pre-wrap;">{_esc(tool['agent_taxonomy_note'])}</p>
-  {_at_citations_html}
-</div>"""
-    elif authed and not _at_note:
-        agent_taxonomy_block = _profile_admin_nudge("Agent taxonomy not yet generated.")
+    else:
+        agent_taxonomy_block = _profile_admin_nudge(_empty_state_text(
+            "Agent taxonomy not yet available.", "Generate a draft from the edit page.", authed))
 
     # Key features card (Feature Taxonomy Phase 2) — replaces the legacy
     # free-text tool_features card (retired outright in Phase 1b PR 2, see
@@ -7469,16 +7521,17 @@ function submitIntroForm() {{
         action_row_parts.append(f'<a class="tp-admin-btn" href="/tools/software/{tool["slug"]}/edit">&#9998; Edit</a>')
     action_row = "".join(action_row_parts)
 
-    # Description publish gate (same Abacum-fabrication-finding pattern as
-    # Agent taxonomy above): an unreviewed/self-flagged-low-confidence
-    # description is never shown to a public visitor — an admin sees it,
-    # clearly labeled as hidden. Computed once here and reused by the
-    # hero subhead (below) and the Description card further down, since
-    # both are driven by the same description_needs_verification column.
+    # Radical-transparency review standard (supersedes the old Abacum-
+    # fabrication-finding publish gate): an unreviewed/self-flagged-low-
+    # confidence description used to be hidden from a public visitor
+    # entirely. It now always renders for both viewers — the hero subhead
+    # doesn't carry its own badge (the Description card right below it
+    # does; duplicating the badge here would just be noise), but computed
+    # once here since the Description card further down reuses the same
+    # description_needs_verification flag.
     _desc_unverified = bool(tool.get("description_needs_verification"))
-    _desc_hidden = _desc_unverified and not authed
 
-    subhead = "" if _desc_hidden else (tool.get("summary") or tool.get("description") or "").strip()
+    subhead = (tool.get("summary") or tool.get("description") or "").strip()
 
     # Review status (2026-08 consolidation) — the shared pill+action, now
     # also visible on the profile VIEW page itself, not just the edit page
@@ -7539,14 +7592,20 @@ function submitIntroForm() {{
     # the identical comment on agent_taxonomy_block above; same reasoning
     # applies to a structured Description draft.
     description_card = ""
-    if not _desc_hidden:
-        _desc_verify = (' <span class="tp-verify">unverified&mdash;hidden from visitors until reviewed</span>'
-                         if _desc_unverified else "")
+    if (tool.get("description") or "").strip():
+        _desc_badge = _review_state_badge(_desc_unverified, authed, "tp-verify")
         description_card = f"""<div class="tp-card">
-  <h2 class="tp-card-h">Description{_desc_verify}</h2>
+  <h2 class="tp-card-h">Description{_desc_badge}</h2>
   <p style="margin:0;white-space:pre-wrap;">{_esc(tool['description'])}</p>
   {_citations_list_html(description_citations, cap=5)}
 </div>"""
+    else:
+        # "Description coming soon." is a deliberate contextual variant of
+        # the standardized "{Field} not yet available." pattern — approved
+        # verbatim, kept distinct from every other field's placeholder
+        # wording (see CLAUDE.md's transparency-standard note).
+        description_card = _profile_admin_nudge(_empty_state_text(
+            "Description coming soon.", "Add one from the edit page.", authed))
 
     # Competitors sits right under Bottom Line now (Phase F6), not at the
     # bottom of the right column — both are "how does this stack up" content,
@@ -8793,17 +8852,16 @@ def tools_communities_compare(request: Request, ids: str = ""):
     finally:
         lib.close()
 
-    # Community profile publish gate (Citations-API grounding fix
-    # follow-up, same whole-profile gate as /tools/communities/{slug}):
-    # needs_review=1 hides that community's ENTIRE profile draft from a
-    # public visitor here too, not just the fields it happens to have —
-    # display_profiles is what every row below reads from. An admin still
-    # sees every field, with an inline "unverified" label.
+    # Radical-transparency review standard (same whole-profile flag as
+    # /tools/communities/{slug}, applied the same way): `needs_review=1`
+    # used to hide that community's ENTIRE profile draft from a public
+    # visitor here — display_profiles swapped to {} for them. It now always
+    # shows every field to every viewer; `_profile_unverified_ids` still
+    # tracks which communities carry an unreviewed profile so `_profile_cell`
+    # below can badge them ("under review" for a visitor, "unverified,
+    # visible to visitors" for an admin) instead of hiding anything.
     _profile_unverified_ids = {cid for cid, p in profiles.items() if p.get("needs_review")}
-    display_profiles = {
-        cid: ({} if (cid in _profile_unverified_ids and not authed) else p)
-        for cid, p in profiles.items()
-    }
+    display_profiles = profiles
 
     back_link = '<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>'
 
@@ -8820,7 +8878,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
     def _cell(text: str) -> str:
         text = (text or "").strip()
         if not text:
-            return '<td class="cc-cell cc-empty">Not available yet</td>'
+            return '<td class="cc-cell cc-empty">Not yet available.</td>'
         if text == _NEEDS_VERIFICATION:
             return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
         return f'<td class="cc-cell">{_esc(text)}</td>'
@@ -8861,21 +8919,22 @@ to compare them side by side. Check the box on any card, then use the compare ba
     def _profile_cell(text: str, unverified: bool) -> str:
         text = (text or "").strip()
         if not text:
-            return '<td class="cc-cell cc-empty">Not available yet</td>'
+            return '<td class="cc-cell cc-empty">Not yet available.</td>'
         if text == _NEEDS_VERIFICATION:
             return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
-        # .cc-verify (publish-gate "unverified—hidden from visitors"), not
-        # .comm-verify (the data-completeness flag above) — these are two
-        # different concepts that used to incorrectly share one style; see
-        # the .cc-verify definition's own comment for the split.
-        verify = '<div style="margin-top:4px;"><span class="cc-verify">unverified&mdash;hidden from visitors</span></div>' if unverified else ""
-        return f'<td class="cc-cell" style="white-space:pre-wrap;">{_esc(text)}{verify}</td>'
+        # .cc-verify (radical-transparency review badge) is a DIFFERENT
+        # concept from .comm-verify (the data-completeness flag above) —
+        # these were incorrectly sharing one style once, see the .cc-verify
+        # definition's own comment for the split; kept apart here too.
+        badge = _review_state_badge(unverified, authed, "cc-verify")
+        badge_html = f'<div style="margin-top:4px;">{badge.strip()}</div>' if badge else ""
+        return f'<td class="cc-cell" style="white-space:pre-wrap;">{_esc(text)}{badge_html}</td>'
 
     def _profile_row(label: str, values: list) -> str:
         if not any((v or "").strip() for v in values):
             return ""
         cells = "".join(
-            _profile_cell(v, (c["id"] in _profile_unverified_ids) and authed)
+            _profile_cell(v, c["id"] in _profile_unverified_ids)
             for v, c in zip(values, communities)
         )
         return f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>{cells}</tr>'
@@ -9367,50 +9426,52 @@ def tools_community_profile(request: Request, slug: str):
   <p style="margin:0;">{_esc(notes_text) if notes_text else '<span style="color:var(--muted);font-style:italic;">No description yet.</span>'}</p>
 </div>"""
 
-    # Community profile publish gate (Citations-API grounding fix
-    # follow-up, same Abacum-fabrication-finding pattern as Agent taxonomy/
-    # Description): needs_review is a single whole-profile flag, not a
-    # per-field one, so this gates the ENTIRE drafted profile at once — the
-    # Bottom line callout, its Sources list, every grouped card below, and
-    # the profile-sourced Details-card lines (Founded/CPE eligible/the
-    # Format row's platform_type+meeting_format contribution) further
-    # down — rather than hiding some fields and leaving others visible,
-    # which would read as a half-reviewed page instead of a clean
-    # not-yet-reviewed state. An admin still sees every field, clearly
-    # labeled as hidden from visitors; a public visitor sees exactly what
-    # they'd see if the profile had never been drafted at all.
+    # Radical-transparency review standard (supersedes the old Abacum-
+    # fabrication-finding whole-profile publish gate): `needs_review` is a
+    # single whole-profile flag, not a per-field one, so it used to GATE
+    # the ENTIRE drafted profile at once — the Bottom line callout, its
+    # Sources list, every grouped card below, and the profile-sourced
+    # Details-card lines (Founded/CPE eligible) — swapped to {} for a
+    # public visitor. It now always shows every field to every viewer, with
+    # the same badge applied per-card (mirroring Software's per-field
+    # badges): "under review" for a visitor, "unverified, visible to
+    # visitors" for an admin. One flag drives N badges here, instead of N
+    # independent flags driving N independent badges the way Software's
+    # three fields do — same copy, different flag cardinality (see
+    # CLAUDE.md's transparency-standard note for the cross-entity write-up).
     _profile_unverified = bool(profile.get("needs_review"))
-    _profile_hidden = _profile_unverified and not authed
-    _profile_verify = (' <span class="tp-verify">unverified&mdash;hidden from visitors until reviewed</span>'
-                        if (_profile_unverified and authed) else "")
-    _display_profile: dict = {} if _profile_hidden else profile
+    _profile_badge = _review_state_badge(_profile_unverified, authed, "tp-verify")
+    _display_profile: dict = profile
 
     # Whole-section-missing (Bottom line, and each Community Profile card
-    # independently) gets an admin-only nudge rather than nothing at all —
-    # same rule as Software's Competitors/Agent taxonomy/Features. A field
-    # empty within a card that DOES have other populated fields is a
+    # independently) gets a placeholder rather than nothing at all — same
+    # rule as Software's Competitors/Agent taxonomy/Features, now visible to
+    # every viewer (an admin's placeholder adds a "go fill this in" prompt).
+    # A field empty within a card that DOES have other populated fields is a
     # different case (Tier 2 below): shown to everyone as muted "No details
-    # available" text, an honest "doesn't apply here," not a research gap.
+    # available" text, an honest "doesn't apply here," not a research gap —
+    # unchanged by this standard, since it was already visitor-visible.
     verdict_block = ""
     if (_display_profile.get("verdict_summary") or "").strip():
         verdict_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
-  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_profile_verify}</div>
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_profile_badge}</div>
   <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;">{_esc(_display_profile['verdict_summary'])}</p>
 </div>"""
-    elif authed:
+    else:
         verdict_block = (f'<div style="margin-bottom:22px;">'
-                          f'{_profile_admin_nudge("Bottom line not yet generated.")}</div>')
+                          f'{_profile_admin_nudge(_empty_state_text("Bottom line not yet available.", "Generate a draft from the edit page.", authed))}</div>')
     # Citations-API grounding fix, Phase 3 — ONE shared "Sources" list for
     # the whole profile draft (decision 5), not one per card, rendered once
     # right after the Bottom line callout, public-capped at 5. Empty when
     # the profile was never grounded (hand-written, or predates this
     # feature) — same "render nothing, not even the label" default as every
-    # other _citations_list_html public call site. Also part of the
-    # whole-profile publish gate above: hidden from a public visitor along
-    # with everything else the draft grounds.
+    # other _citations_list_html public call site. Radical-transparency
+    # review standard: now renders alongside pending content the same as
+    # verified content — sources are useful context for judging an
+    # unreviewed claim, not something to withhold until review is done.
     profile_citations_block = ""
-    _pc_html = "" if _profile_hidden else _citations_list_html(profile_citations, cap=5)
+    _pc_html = _citations_list_html(profile_citations, cap=5)
     if _pc_html:
         profile_citations_block = f'<div>{_pc_html}</div>'
 
@@ -9437,11 +9498,15 @@ def tools_community_profile(request: Request, slug: str):
                 if not (_display_profile.get(key) or "").strip()
             )
             cards.append(f"""<div class="tp-card">
-  <h2 class="tp-card-h">{_esc(group_title)}{_profile_verify}</h2>
+  <h2 class="tp-card-h">{_esc(group_title)}{_profile_badge}</h2>
   {sections}{missing}
 </div>""")
-        elif authed:
-            cards.append(_profile_admin_nudge(f"{group_title} not yet generated."))
+        else:
+            # "This section hasn't been researched yet." is a deliberate
+            # contextual variant of the standardized "{Field} not yet
+            # available." pattern — approved verbatim.
+            cards.append(_profile_admin_nudge(_empty_state_text(
+                "This section hasn't been researched yet.", "Generate a draft from the edit page.", authed)))
     profile_cards = "\n".join(cards)
 
     # Details card: the fixed directory-metadata fields as label/value rows,
@@ -9452,11 +9517,11 @@ def tools_community_profile(request: Request, slug: str):
     # doesn't earn a whole card), and CPE eligibility is a single line, not
     # a section (Phase 3b.0 follow-up resolutions).
     detail_rows = []
-    def _detail_row(label: str, value: str) -> None:
+    def _detail_row(label: str, value: str, badge: str = "") -> None:
         if not value:
             return
         detail_rows.append(f'<div class="tp-detail-row"><span class="tp-detail-label">{_esc(label)}</span>'
-                            f'<span class="tp-detail-value">{_verify_html(value, "tp-verify-inline")}</span></div>')
+                            f'<span class="tp-detail-value">{_verify_html(value, "tp-verify-inline")}{badge}</span></div>')
     _detail_row("Cost band", community.get("cost_band"))
     _detail_row("Access", community.get("access"))
     sponsorship = community.get("sponsorship_type") or ""
@@ -9464,9 +9529,12 @@ def tools_community_profile(request: Request, slug: str):
         sponsorship += f" ({community['sponsor_name']})"
     _detail_row("Sponsorship", sponsorship)
     fmt = community.get("format") or ""
-    # platform_type/meeting_format come from the gated community_profiles
-    # draft (_display_profile, not profile) — part of the same whole-profile
-    # publish gate above.
+    # platform_type/meeting_format come from the community_profiles draft
+    # (_display_profile) — under the whole-profile review standard above,
+    # always visible now; not individually badged here since the two bits
+    # are blended into one composite Format string, not a standalone value
+    # (Founded/CPE eligible below get the inline badge since each is its
+    # own atomic profile-sourced value).
     extra_fmt_bits = [b for b in [_display_profile.get("platform_type"), _display_profile.get("meeting_format")]
                        if (b or "").strip()]
     if fmt and fmt != _NEEDS_VERIFICATION and extra_fmt_bits:
@@ -9477,9 +9545,9 @@ def tools_community_profile(request: Request, slug: str):
     geo_line = _community_geo_line(community)
     _detail_row("Reach", geo_line)
     if _display_profile.get("founded_year"):
-        _detail_row("Founded", str(_display_profile["founded_year"]))
+        _detail_row("Founded", str(_display_profile["founded_year"]), _profile_badge)
     if (_display_profile.get("cpe_eligible") or "").strip():
-        _detail_row("CPE eligible", _display_profile["cpe_eligible"])
+        _detail_row("CPE eligible", _display_profile["cpe_eligible"], _profile_badge)
     details_card = ""
     if detail_rows:
         details_card = f"""<div class="tp-card">
@@ -9507,8 +9575,13 @@ def tools_community_profile(request: Request, slug: str):
   <h2 class="tp-card-h">Similar communities</h2>
   <div class="tp-chip-row">{similar_chips}</div>
 </div>"""
-    elif authed:
-        similar_communities_block = _profile_admin_nudge("No similar communities curated yet.")
+    else:
+        # Extrapolated from the approved Competitors visitor-counterpart
+        # pattern (same structural shape: an admin-curated empty list on a
+        # profile page) — flagged in the PR description as applying the
+        # approved pattern by analogy rather than a literally-quoted string.
+        similar_communities_block = _profile_admin_nudge(_empty_state_text(
+            "Similar communities not yet available.", "Curate them from the edit page.", authed))
 
     footnote_block = ""
     if community.get("advisor"):
@@ -9594,8 +9667,9 @@ def tools_community_profile(request: Request, slug: str):
 .tp-detail-value{{color:var(--ink-soft);text-align:left;overflow-wrap:break-word;word-break:break-word;min-width:0;}}
 .tp-verify-inline{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
 /* Brand-consistency pass (2026-08) — this page renders .tp-verify (the
-   whole-profile "unverified—hidden from visitors" badge, via _profile_verify
-   on the verdict callout and each of the 4 grouped section cards) but
+   whole-profile review-state badge, via _profile_badge on the verdict
+   callout, each of the 4 grouped section cards, and the Founded/CPE
+   eligible detail rows) but
    never actually defined it in this page's own <style> block, so it was
    rendering completely unstyled (a real pre-existing bug, found while
    auditing every "unverified" indicator for this pass — not introduced by
