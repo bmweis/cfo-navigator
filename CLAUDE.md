@@ -1035,6 +1035,102 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   matching bullet for the full per-surface write-up and
   `tests/test_review_state_publish_gates.py`/
   `tests/test_matchmaker_publish_gate.py` for the regression coverage.
+- **PR A.1 — empty-state consistency + visual QA fixes (2026-09), a fast-
+  follow to the radical-transparency review standard above, from Brian's
+  own post-deploy review of the live site.** No gate/state logic, no copy
+  changes beyond one string, no schema changes — six small visual-QA items.
+  1. **Key features' "Suggest one" link no longer renders against an empty
+     list** — it made no sense when there's nothing shown for a missing
+     feature to be missing *from*.
+  2. **One empty-state visual treatment, everywhere — the dashed floating
+     box (`_profile_admin_nudge`) is retired entirely**, replaced by
+     `_empty_state_card(title, text)`: every empty profile-page section
+     (Software: Competitors, Bottom line, Agent taxonomy, Description;
+     Communities: Bottom line, each of the 4 profile-group cards, Similar
+     communities) now renders as its OWN normal `.tp-card` + `<h2>` header
+     holding one muted italic placeholder line — the same container it'd
+     use if it had content — rather than a headerless dashed box. Per
+     Brian's own ratified framing for this call: an accent (the dashed
+     border before, the seafoam Bottom Line callout) marks real content,
+     not its absence — empty now goes quiet instead of drawing a second
+     kind of attention to itself. A Community profile-group card shows its
+     own group title even when empty now, closing the one site of the
+     seven where a visitor previously couldn't tell which section was
+     missing (there was no header of any kind on that dashed box). Key
+     features' pre-existing coming-soon prose (already `.tp-card`-wrapped)
+     picked up the same `font-style:italic` for one visual language across
+     all eight sites.
+  3. **A real CSS bug on the Key features card, root-caused live before
+     fixing**: `.tp-feature-flag-btn` (the per-row flag icon, invisible at
+     rest via `opacity:0`) was an ordinary flex item pushed to the row's
+     end via `margin-left:auto`, inside a `<li>` that's `display:flex;
+     flex-wrap:wrap`. When a row's visible content (name + an Add-on/AI
+     tag) didn't leave room for the button on the same line, flex-wrap
+     pushed it — invisible, but still a real box with real height — onto a
+     line of its own, rendering as a "phantom" blank row between features
+     (reported on Numeric's card, between "Continuous reconciliation
+     monitoring [ADD-ON]" and the next feature). Confirmed via a real
+     Playwright bounding-box height comparison (a row with a tag measured
+     59px vs. 35px for a plain row) before writing any fix — not assumed
+     from a data explanation, since the MCP introspection tool available
+     this session has no WHERE/offset support and couldn't pull the exact
+     production rows to check for a data artifact directly. Fixed by
+     taking the button out of the flex flow entirely
+     (`position:absolute`, top-right of the `<li>`, which reserves the
+     space via a new `padding-right`) — re-verified the same way post-fix:
+     the phantom line is gone, genuine text-wrap for a long feature name is
+     unaffected.
+  4. **Equal 22px spacing above and below the tool profile page's "Bottom
+     line" seafoam callout** — it had `margin-bottom` but no `margin-top`,
+     so the category chips row directly above it sat flush against its top
+     edge. Applied to both the populated and empty states.
+  5. **Community Description's "No description yet." joins the approved
+     cross-entity string family** — the one empty-state string in the
+     whole standard that never matched any of the others — now
+     "Description coming soon." / "...Add one from the edit page.", same
+     as Software's, inside the same `.tp-card` it always used.
+  6. **Logo audit (investigate-first, per Brian's explicit amendment to the
+     original ask)** — `_logo_box()`'s CSS (`object-fit:contain`, correctly
+     upscale-capable at every on-site tile size) was confirmed NOT the bug:
+     a logo rendering tiny inside its tile (Airbase, Airwallex reported on
+     the directory) is a property of the source asset — a low-resolution
+     raster, or (more likely for a wordmark) a lot of built-in transparent
+     padding around a small mark, which `contain` faithfully preserves.
+     Brandfetch itself is presumed working, and a manual logo-override
+     process already exists as the designed fallback, so this ships an
+     audit, not a pipeline change: `scripts/audit_tool_logo_dimensions.py`
+     — read-only, **no new dependency** (parses PNG/JPEG/GIF/WEBP/ICO
+     headers and SVG width/viewBox attributes by hand — the project has
+     deliberately avoided Pillow before, see the App screenshot Phase E
+     note on choosing client-side Cropper.js for the same reason) — flags
+     any already-downloaded logo whose smaller pixel dimension is below a
+     floor or whose aspect ratio is too lopsided for a square tile, as a
+     hand-replacement worklist for the existing manual-override admin UI.
+     Makes no Brand API calls, no file writes, no DB writes. **Genuinely
+     unverified against the real corpus from this session** — the logo
+     files live on the Railway volume beside `library.db`, which this
+     session has no filesystem or network path to (confirmed: this
+     session's `/mcp` DB-introspection access covers tables, not the
+     filesystem) — only the header-parsing logic itself is unit-tested,
+     against small hand-built sample files in each format. Registered in
+     `/admin/system/scripts` per the standing scripts-registry rule. Run it
+     against the real database via `railway ssh` (opens a shell in the
+     service container, same convention as `mint_api_token.py`'s own
+     docstring — the absolute `/data/library.db` path matters, since a
+     relative `--db` silently resolves against whatever directory the
+     shell happens to be in and fails with no error), then inside that
+     shell: `python -m scripts.audit_tool_logo_dimensions --db
+     /data/library.db` (add `--csv /data/logo_audit.csv` for a full
+     per-row export, or `--min-px`/`--max-ratio` to tune the two
+     thresholds — see the script's own module docstring for the reasoning
+     behind each).
+
+  See ARCHITECTURE.md's matching bullet for the same write-up in that
+  doc's own voice, and `tests/test_empty_state_visual_qa.py` (13 tests,
+  covering all six items end-to-end via TestClient) /
+  `tests/test_audit_tool_logo_dimensions.py` (10 tests, covering the
+  header-parser against hand-built PNG/GIF/JPEG/WEBP/SVG samples) for the
+  regression coverage.
 - **Community profile edit page — grouped into 5 labeled sections, a
   consistent width rule, and confidence badges moved inline (2026-08
   follow-up).** Live testing found the page's 23 fields rendering as one
