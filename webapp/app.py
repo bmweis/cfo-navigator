@@ -1698,26 +1698,30 @@ def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
     )
 
 
-def _profile_admin_nudge(text: str) -> str:
+def _empty_state_card(title: str, text: str) -> str:
     """Visitor-and-admin-visible placeholder for a whole profile-page
     section that's never been generated/populated at all (Software and
-    Communities profile pages). Originally admin-only (Phase 3b) — the
-    radical-transparency review standard retired that: nothing disappears
-    for a visitor anymore, so an empty section now reads as an honest
-    placeholder for everyone instead of being omitted. Callers pass the
-    admin-suffixed text themselves (see `_empty_state_text` below) — this
-    helper only renders whatever string it's given. Deliberately not styled
-    as a real `.tp-card` (no solid border/shadow) so it reads as a
-    placeholder, not populated content. Distinct from a single empty field
-    inside an otherwise-populated section, which shows muted "No details
-    available" text — that case was already visitor-visible before this
-    standard and needed no change."""
-    return (f'<p style="font-size:12px;color:var(--muted);font-style:italic;margin:0;'
-            f'padding:12px 16px;border:1px dashed var(--line-strong);border-radius:10px;">{_esc(text)}</p>')
+    Communities profile pages). Originally a dashed floating box, admin-only
+    (Phase 3b); the radical-transparency review standard made it
+    visitor-visible; the empty-state visual QA pass (PR A.1) retired the
+    dashed-box treatment entirely in favor of ONE empty-state look
+    everywhere: the section's own normal `.tp-card` and `<h2>` header — the
+    same container it would use if it had content — holding a single muted
+    italic line instead. "Nothing disappears" now also means "nothing looks
+    different structurally just because it's empty": an accent (the dashed
+    border, the seafoam Bottom Line callout) marks real content, not its
+    absence — empty sections go quiet rather than drawing a second kind of
+    attention to themselves. Callers pass the admin-suffixed text themselves
+    (see `_empty_state_text` below) — this helper only renders whatever
+    string it's given. Distinct from a single empty field inside an
+    otherwise-populated section, which shows muted "No details available"
+    text inline — that case predates this standard and needed no change."""
+    return (f'<div class="tp-card"><h2 class="tp-card-h">{_esc(title)}</h2>'
+            f'<p style="margin:0;color:var(--muted);font-style:italic;">{_esc(text)}</p></div>')
 
 
 def _empty_state_text(visitor_text: str, admin_suffix: str = "", authed: bool = False) -> str:
-    """Builds the text for `_profile_admin_nudge`: the visitor-facing
+    """Builds the text for `_empty_state_card`: the visitor-facing
     sentence alone, or with an admin-only trailing "go fill this in"
     sentence appended, per the radical-transparency review standard's
     3-state table (verified / populated-pending-review / empty), whose
@@ -2330,17 +2334,22 @@ def _software_key_features_card(feature_links: list[dict]) -> str:
     trigger (openFeatureSuggest, defined alongside the shared modal built by
     _feature_suggest_modal_html) that opens the shared modal pre-scoped to
     that feature, defaulting to Flag mode. A card-level "propose a new
-    feature" link sits below the list, and below the coming-soon fallback
-    too — a category with no seeded list yet can still take a proposal."""
+    feature" link sits below the list — but NOT below the coming-soon
+    fallback (empty-state visual QA pass, PR A.1, item 1): "suggest a
+    feature that should be here" doesn't make sense against an empty list,
+    since there's nothing shown for a missing feature to be missing FROM,
+    so the link only renders once at least one feature is actually listed."""
     suggest_footer = ('<p class="tp-feature-suggest-cta">'
                        '<button type="button" class="tp-link-btn" onclick="openFeatureSuggest(\'new_feature\',this)">'
                        'Don&rsquo;t see a feature that should be here? Suggest one &rarr;</button></p>')
 
     if not feature_links:
-        return f"""<div class="tp-card">
+        # font-style:italic (item 2, empty-state visual QA pass): matches
+        # the muted-italic treatment every other empty-state line on this
+        # pass uses, for one visual language across the whole card.
+        return """<div class="tp-card">
   <h2 class="tp-card-h">Key features</h2>
-  <p style="margin:0;color:var(--muted);">Coming soon&mdash;we&rsquo;re mapping this tool against our curated feature taxonomy.</p>
-  {suggest_footer}
+  <p style="margin:0;color:var(--muted);font-style:italic;">Coming soon&mdash;we&rsquo;re mapping this tool against our curated feature taxonomy.</p>
 </div>"""
 
     def _tag(label: str, cls: str) -> str:
@@ -7288,7 +7297,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
   <table class="tp-competitor-table"><tbody>{comp_rows}</tbody></table>
 </div>"""
     else:
-        competitors_block = _profile_admin_nudge(_empty_state_text(
+        competitors_block = _empty_state_card("Competitors", _empty_state_text(
             "Competitors not yet available.", "Curate them from the edit page.", authed))
 
     # "Bottom line" callout — same seafoam treatment as the Communities
@@ -7301,21 +7310,27 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # badge for either viewer. Now brought in line with Description/Agent
     # taxonomy below: content always renders, with a trailing review-state
     # badge.
+    # Spacing fix (item 4, empty-state visual QA pass): the seafoam callout
+    # had margin-bottom but no margin-top, so the category chips row right
+    # above it (tp-hero-cats, margin-top only) left it sitting flush against
+    # the chips with no breathing room above — equal 22px on both sides now,
+    # matching its own margin-bottom, in both the populated and empty
+    # states.
     _diff_unverified = bool(tool.get("competitive_differentiation_needs_verification"))
     differentiation_block = ""
     if (tool.get("competitive_differentiation") or "").strip():
         _diff_badge = _review_state_badge(_diff_unverified, authed, "tp-verify")
         differentiation_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
-  border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
+  border-radius:0 0 10px 10px;padding:18px 22px;margin-top:22px;margin-bottom:22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_diff_badge}</div>
   <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(tool['competitive_differentiation'])}</p>
 </div>"""
     else:
-        _diff_empty_html = _profile_admin_nudge(_empty_state_text(
+        _diff_empty_html = _empty_state_card("Bottom line", _empty_state_text(
             "Bottom line not yet available.",
             "This field is written by hand, not auto-drafted. Add one from the edit page.",
             authed))
-        differentiation_block = f'<div style="margin-bottom:22px;">{_diff_empty_html}</div>'
+        differentiation_block = f'<div style="margin-top:22px;margin-bottom:22px;">{_diff_empty_html}</div>'
 
     # Radical-transparency review standard (supersedes the old Abacum-
     # fabrication-finding publish gate): `agent_taxonomy_needs_verification`
@@ -7350,7 +7365,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
   {_at_citations_html}
 </div>"""
     else:
-        agent_taxonomy_block = _profile_admin_nudge(_empty_state_text(
+        agent_taxonomy_block = _empty_state_card("Agent taxonomy", _empty_state_text(
             "Agent taxonomy not yet available.", "Generate a draft from the edit page.", authed))
 
     # Key features card (Feature Taxonomy Phase 2) — replaces the legacy
@@ -7604,7 +7619,7 @@ function submitIntroForm() {{
         # the standardized "{Field} not yet available." pattern — approved
         # verbatim, kept distinct from every other field's placeholder
         # wording (see CLAUDE.md's transparency-standard note).
-        description_card = _profile_admin_nudge(_empty_state_text(
+        description_card = _empty_state_card("Description", _empty_state_text(
             "Description coming soon.", "Add one from the edit page.", authed))
 
     # Competitors sits right under Bottom Line now (Phase F6), not at the
@@ -7697,7 +7712,10 @@ function submitIntroForm() {{
   .tp-shot-card.has-app .tp-shot-toggle{{display:inline-block;}}
 }}
 .tp-feature-list{{list-style:none;margin:0;padding:0;font-size:14px;}}
-.tp-feature-list li{{padding:8px 0;border-bottom:1px solid var(--line);color:var(--ink-soft);
+/* padding-right (item 3, empty-state visual QA pass): reserves room for
+   .tp-feature-flag-btn, now position:absolute rather than a flex item —
+   see that rule's own comment for why. */
+.tp-feature-list li{{position:relative;padding:8px 28px 8px 0;border-bottom:1px solid var(--line);color:var(--ink-soft);
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;}}
 .tp-feature-list li:last-child{{border-bottom:none;}}
 .tp-feature-group+.tp-feature-group{{margin-top:18px;}}
@@ -7728,8 +7746,23 @@ function submitIntroForm() {{
    "Suggest one" footer link already covers the card-level, new-feature
    case. Hidden at rest, revealed on row hover OR keyboard focus (not
    hover-only) so it stays reachable without a mouse — a bare opacity
-   toggle, not display:none, so it's never removed from the tab order. */
-.tp-feature-flag-btn{{margin-left:auto;background:none;border:none;cursor:pointer;font-size:14px;
+   toggle, not display:none, so it's never removed from the tab order.
+
+   position:absolute (item 3 fix, empty-state visual QA pass): this button
+   used to be an ordinary flex item, pushed to the row's end via
+   margin-left:auto, inside a li that's `display:flex;flex-wrap:wrap`. When
+   a row's visible content (name + an Add-on/AI tag) didn't leave room for
+   the button on the same line, flex-wrap pushed the button — invisible at
+   rest, opacity:0, but still a real box with real height — onto a line of
+   its own, which rendered as a blank gap between the row's content and its
+   border-bottom (reported as a "phantom" extra row on Numeric's Key
+   features card, e.g. between "Continuous reconciliation monitoring
+   [ADD-ON]" and the next feature). Taking the button out of the flex flow
+   entirely — absolutely positioned at the li's own top-right corner, with
+   the li's own padding-right above reserving its space — means it can
+   never wrap onto a line by itself again; genuine text wrap for a long
+   feature name is unaffected. */
+.tp-feature-flag-btn{{position:absolute;top:8px;right:0;background:none;border:none;cursor:pointer;font-size:14px;
   color:var(--muted);padding:2px 4px;line-height:1;opacity:0;transition:opacity .15s ease;}}
 .tp-feature-list li:hover .tp-feature-flag-btn,
 .tp-feature-list li:focus-within .tp-feature-flag-btn{{opacity:1;}}
@@ -9420,10 +9453,20 @@ def tools_community_profile(request: Request, slug: str):
   <div>{screenshot_block}</div>
 </div>"""
 
+    # "Description coming soon." / "...Add one from the edit page." joins
+    # the cross-entity approved empty-state string family (empty-state
+    # visual QA pass, PR A.1) — was the fourth, unapproved "No description
+    # yet." phrasing, the one string in this whole standard that never
+    # matched any of the others. Still rendered inside the same `.tp-card`
+    # it always used, matching the target treatment applied everywhere
+    # else on this pass.
     notes_text = " ".join(filter(None, [community.get("notes"), community.get("cost_note")]))
+    _desc_body = (f'<p style="margin:0;">{_esc(notes_text)}</p>' if notes_text else
+                  f'<p style="margin:0;color:var(--muted);font-style:italic;">'
+                  f'{_esc(_empty_state_text("Description coming soon.", "Add one from the edit page.", authed))}</p>')
     description_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Description</h2>
-  <p style="margin:0;">{_esc(notes_text) if notes_text else '<span style="color:var(--muted);font-style:italic;">No description yet.</span>'}</p>
+  {_desc_body}
 </div>"""
 
     # Radical-transparency review standard (supersedes the old Abacum-
@@ -9460,7 +9503,7 @@ def tools_community_profile(request: Request, slug: str):
 </div>"""
     else:
         verdict_block = (f'<div style="margin-bottom:22px;">'
-                          f'{_profile_admin_nudge(_empty_state_text("Bottom line not yet available.", "Generate a draft from the edit page.", authed))}</div>')
+                          f'{_empty_state_card("Bottom line", _empty_state_text("Bottom line not yet available.", "Generate a draft from the edit page.", authed))}</div>')
     # Citations-API grounding fix, Phase 3 — ONE shared "Sources" list for
     # the whole profile draft (decision 5), not one per card, rendered once
     # right after the Bottom line callout, public-capped at 5. Empty when
@@ -9504,8 +9547,12 @@ def tools_community_profile(request: Request, slug: str):
         else:
             # "This section hasn't been researched yet." is a deliberate
             # contextual variant of the standardized "{Field} not yet
-            # available." pattern — approved verbatim.
-            cards.append(_profile_admin_nudge(_empty_state_text(
+            # available." pattern — approved verbatim. Uses the section's
+            # own group_title as the card header (empty-state visual QA
+            # pass, PR A.1) — previously this rendered as a bare dashed box
+            # with no heading at all, the only one of the seven empty-state
+            # sites where a visitor couldn't tell WHICH section was missing.
+            cards.append(_empty_state_card(group_title, _empty_state_text(
                 "This section hasn't been researched yet.", "Generate a draft from the edit page.", authed)))
     profile_cards = "\n".join(cards)
 
@@ -9580,7 +9627,7 @@ def tools_community_profile(request: Request, slug: str):
         # pattern (same structural shape: an admin-curated empty list on a
         # profile page) — flagged in the PR description as applying the
         # approved pattern by analogy rather than a literally-quoted string.
-        similar_communities_block = _profile_admin_nudge(_empty_state_text(
+        similar_communities_block = _empty_state_card("Similar communities", _empty_state_text(
             "Similar communities not yet available.", "Curate them from the edit page.", authed))
 
     footnote_block = ""
@@ -21056,6 +21103,19 @@ _SCRIPT_REGISTRY = [
      ["python -m scripts.backfill_logos --db library.db                 # preview (default limit 90)",
       "python -m scripts.backfill_logos --db library.db --apply          # fetch + save for real",
       "python -m scripts.backfill_logos --db library.db --status         # coverage report only"]),
+    ("audit_tool_logo_dimensions.py", "scripts.audit_tool_logo_dimensions", "Reusable diagnostic",
+     "Read-only: reads every already-downloaded tool/community logo file on disk (PNG/JPEG/GIF/"
+     "WEBP/ICO/SVG, parsed by hand — no Pillow) and flags ones that are undersized or have a "
+     "lopsided aspect ratio (the likely cause of a logo rendering tiny inside its object-fit:"
+     "contain tile, e.g. Airbase/Airwallex on the directory) — a hand-replacement worklist for "
+     "the existing manual logo-override process. Makes no Brand API calls, no file writes, no "
+     "DB writes.",
+     "Recurring-manual — run whenever a batch of tiny/lopsided logos is reported, or as a "
+     "periodic sweep after a backfill_logos.py run.",
+     ["LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.audit_tool_logo_dimensions --db library.db",
+      "python -m scripts.audit_tool_logo_dimensions --db library.db --min-px 96 --max-ratio 2.0",
+      "python -m scripts.audit_tool_logo_dimensions --db library.db --csv logo_audit.csv"]),
     ("capture_tool_screenshots.py", "scripts.capture_tool_screenshots", "Recurring & actively useful",
      "Bulk homepage screenshot capture for the Software directory — the same "
      "capture_homepage() logic the live \"Recapture\" admin button uses, run across many "
