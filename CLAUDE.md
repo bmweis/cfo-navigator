@@ -5403,6 +5403,56 @@ never reads as something to tap.
   full write-up and `tests/test_markdown_render.py`/`tests/
   test_narrative_field_markdown.py` for the coverage.
 
+- **Tool Profile Layout: Sidebar Consolidation (2026-09) — the Software profile
+  page now uses the same "reference sidebar" pattern the Community profile
+  page already established, replacing the Aug 2026 UI pass's arrangement.**
+  Brian's live review of the production Abacum page found two problems with
+  that arrangement: Competitors (typically a short list) was paired with
+  Key features (typically a long one) in a two-column band, leaving visible
+  whitespace under the shorter column and stranding Description as a
+  disconnected full-width block below both; and the category tag sat alone
+  between the admin review pills and the Bottom line callout, orphaned with
+  no clear grouping. Investigation (Step 0) confirmed the Community profile
+  page already solves this shape — a wide main column carrying continuous
+  narrative content, alongside a narrower sidebar carrying independently-
+  scannable reference/lookup cards (Details, Categories, Similar
+  communities) — so this PR names that the **"reference sidebar"
+  pattern** and brings Software in line with it rather than inventing a
+  second layout. Software's version: **main column** — Bottom line ->
+  Description -> Agent taxonomy, one continuous flow (`main_col` in
+  `tools_software_profile`); **sidebar** — screenshot -> Key features ->
+  Competitors, each independently scannable (`sidebar_col`). The hero
+  (logo/name/tags/subhead/review-status/actions) is now full-width above
+  the two-column band — screenshot no longer sits beside it the way it
+  used to (that was hero-paired-with-screenshot; it now opens the sidebar
+  instead). Category tags moved to sit directly under the tool name, above
+  the subhead — mirroring where Compare already places entity tags
+  (`_cmp_tag_chips_html`, right under the linked name) — since a category
+  is an identity fact about the tool, not action-row furniture. Software
+  has no shared-vs-unique tag distinction the way Compare does (a solo
+  profile page has nothing to compare against), so it keeps the existing
+  solid-seafoam `.tp-cat-pill` treatment rather than adopting Compare's
+  outline variant. The Bottom line callout's spacing rule changed
+  alongside the move: it used to carry its own `margin-top/bottom:22px`
+  (designed for its old spot between the category pills and the action
+  row); now that it's the first card in `main_col`'s `tp-col-stack`, the
+  stack's own `gap:22px` already produces even spacing against its
+  neighbors, so a self-margin there would have double-spaced it — dropped
+  in favor of the shared mechanism every other card in the column uses.
+  Mobile (`@media(max-width:800px)`, `.tp-band` collapses to one column):
+  DOM order is main column first, sidebar second — narrative content
+  before reference content — which was confirmed as the right call in the
+  Step 0 investigation and needed no JS reordering (unlike the homepage's
+  own mobile-only DOM-order fix elsewhere in this doc, which needed one
+  because its grid used explicit `grid-column`/`grid-row` placement;
+  here plain DOM order was already correct). Content, gating, and
+  admin-only elements are unchanged — this is a layout-only PR: no
+  `linklib/gates.py` changes, no schema changes, no changes to Compare
+  pages or the markdown renderer. Verified live at desktop (1400px) and
+  mobile (390px) viewports, logged in and out, on both a fully-populated
+  tool and a sparse/empty one — all four combinations screenshot-checked
+  before merge.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
