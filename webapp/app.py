@@ -71,6 +71,7 @@ from linklib.purge_csv import parse_purge_confirmations_csv, MAX_PURGE_PER_RUN
 from linklib.library_delete_csv import parse_library_delete_csv, MAX_DELETE_PER_RUN
 from linklib.extract import _MIN_CONTENT_WORDS
 from linklib.pipeline import ingest_url
+from linklib.original_content_sync import sync_original_content_article
 from linklib import backup
 from webapp.markdown_render import render_narrative_markdown
 # webapp/thought_leadership_data.py is no longer imported here — the four
@@ -14403,11 +14404,15 @@ async def admin_original_content_new_submit(request: Request):
         if slug_error:
             return _reject(slug_error)
 
-        lib.add_original_content(
+        new_id = lib.add_original_content(
             v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
             v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
             v["display_order"],
         )
+        # Mirror into articles for FP&A Buddy retrieval — synchronous, at the
+        # mutation point, same convention as write_opml() on feed mutation.
+        # See linklib/original_content_sync.py.
+        sync_original_content_article(lib, new_id)
     finally:
         lib.close()
     return RedirectResponse("/admin/original-content", status_code=303)
@@ -14480,6 +14485,9 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
             v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
             v["display_order"] or 0,
         )
+        # Re-sync the mirrored articles row — overwrites in place (never
+        # merges), so an edit always wins. See linklib/original_content_sync.py.
+        sync_original_content_article(lib, item_id)
     finally:
         lib.close()
     return RedirectResponse("/admin/original-content", status_code=303)
@@ -14491,6 +14499,12 @@ def admin_original_content_delete(request: Request, item_id: int):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
     try:
+        # Cascade the mirrored articles row too — orphaning it would violate
+        # CLAUDE.md's "No dead data" standard (a mirror with no
+        # original_content row behind it, silently stale forever).
+        it = lib.get_original_content(item_id)
+        if it and it.get("mirrored_article_id"):
+            lib.delete_article(it["mirrored_article_id"])
         lib.delete_original_content(item_id)
     finally:
         lib.close()
@@ -20353,6 +20367,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-src-list li{{font-size:12px;}}
 .ask-src-list a, .ask-src-list span.ask-src-static{{display:inline-flex;align-items:center;gap:5px;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
 .ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}
+.ask-src-own{{margin-left:4px;font-size:11px;color:var(--muted);font-weight:500;}}
 .ask-src-caption{{margin:6px 0 0;font-size:11px;color:var(--muted);}}
 
 .ask-loading{{display:flex;align-items:center;gap:10px;padding:2px 0;}}
@@ -20490,11 +20505,18 @@ function mdToHtml(raw) {{
 // web_search_20250305 fallback also produces type "web" citations when Exa
 // is toggled off or EXA_API_KEY is missing, and those get no caption at all
 // (a normal citation, just no "Powered by Exa" line).
+// Published-content ingestion (2026-09): a citation carrying own_content
+// (Brian's own mirrored/matched writing — see
+// linklib.original_content_sync) gets a small "(own writing)" label — a
+// citation-list label only, never an inline prose mention (flagged as a
+// real voice-integrity risk during design and deliberately left out; see
+// CLAUDE.md's Published-Content Ingestion entry).
 function srcListHtml(d) {{
   var icons = {{library: '&#128218;', feed: '&#128240;', web: '&#127760;'}};
   var cites = d.citations || [];
   var items = cites.map(function(c) {{
-    return '<li>' + (icons[c.type] || '') + ' <a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">[' + c.n + '] ' + escapeHtml(c.title) + '</a></li>';
+    var ownTag = c.own_content ? ' <span class="ask-src-own">(own writing)</span>' : '';
+    return '<li>' + (icons[c.type] || '') + ' <a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">[' + c.n + '] ' + escapeHtml(c.title) + '</a>' + ownTag + '</li>';
   }});
   if (!items.length) return '';
   var caption = cites.some(function(c) {{ return c.type === 'web' && c.provider === 'exa'; }})
@@ -25750,11 +25772,17 @@ def _render_cited_answer(answer: str, citations_json: str,
                                f'archive #{int(c["article_id"])}</span>')
             except (TypeError, ValueError):
                 archive_ref = ""
+        # Published-content ingestion (2026-09): same citation-list-only
+        # label as the client-side srcListHtml renderer — see that
+        # function's own comment for why this never became an inline
+        # prose mention.
+        own_tag = (' <span style="color:var(--muted);font-size:11px;">(own writing)</span>'
+                   if c.get("own_content") else "")
         items.append(
             f'<li>{_ASK_SOURCE_ICONS.get(c.get("type"), "")} '
             f'<a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener">'
             f'[{_esc(c.get("n") if c.get("n") is not None else "")}] '
-            f'{_esc(c.get("title") or c.get("url") or "")}</a>{archive_ref}</li>'
+            f'{_esc(c.get("title") or c.get("url") or "")}</a>{archive_ref}{own_tag}</li>'
         )
     sources_html = ('<ul style="margin:8px 0 0;padding-left:18px;list-style:none;font-size:13px;'
                     f'display:flex;flex-direction:column;gap:4px;">{"".join(items)}</ul>')

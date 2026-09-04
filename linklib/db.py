@@ -2273,6 +2273,24 @@ class Library:
             # draft): tools already have the three per-field gates doing
             # that job.
             "ALTER TABLE tools ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0",
+            # FP&A Buddy published-content ingestion (2026-09) — provenance
+            # flag, not a ranking signal (see linklib/agent.py's
+            # _build_source_documents/_rrf_merge — nothing in retrieval reads
+            # this column; it's read only post-retrieval, for citation
+            # labeling). Set unconditionally on the 3 original_content
+            # mirror rows by sync_original_content_article(), and set (never
+            # cleared) by pipeline.ingest_url() whenever a saved URL matches
+            # a thought_leadership.url — see
+            # linklib/original_content_sync.py and Library.
+            # is_thought_leadership_url/set_article_own_content.
+            "ALTER TABLE articles ADD COLUMN is_own_content INTEGER NOT NULL DEFAULT 0",
+            # The mirrored articles.id for this original_content row, or NULL
+            # before the first sync. Tracked explicitly (rather than
+            # re-deriving it via a URL lookup on every sync) so a later slug
+            # rename — which legitimately changes the canonical URL, see the
+            # admin form's own warning copy — doesn't strand the mirror or
+            # require re-matching by URL.
+            "ALTER TABLE original_content ADD COLUMN mirrored_article_id INTEGER",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -3877,6 +3895,43 @@ class Library:
         return self.conn.execute(
             "SELECT COUNT(*) FROM articles WHERE needs_content_check=1"
         ).fetchone()[0]
+
+    def set_article_own_content(self, article_id: int, is_own: bool = True) -> None:
+        """Mark (or, in principle, unmark) an article as Brian's own published
+        writing — a provenance flag only, read solely by
+        linklib.agent._build_source_documents/citations.extract_citations for
+        citation labeling and never by retrieve()/_rrf_merge (no ranking
+        effect — see the articles.is_own_content migration comment).
+
+        Every real caller only ever sets True: sync_original_content_article
+        (the 3 mirrored original_content rows, unconditionally, by
+        construction) and pipeline.ingest_url (a future bookmarklet save
+        whose URL matches a thought_leadership.url — see
+        is_thought_leadership_url). Like needs_content_check's own clearing
+        rule, this is a durable fact once learned; nothing clears it
+        automatically."""
+        self.conn.execute(
+            "UPDATE articles SET is_own_content=? WHERE id=?",
+            (int(bool(is_own)), article_id),
+        )
+        self.conn.commit()
+
+    def is_thought_leadership_url(self, url: str) -> bool:
+        """True when `url` (after the same normalize_url() canonicalization
+        upsert() applies) matches a thought_leadership.url — the generic
+        provenance-setting logic pipeline.ingest_url() uses to flag a future
+        bookmarklet save of one of the externally-hosted pieces. A plain
+        Python scan over thought_leadership (a few dozen rows) rather than a
+        SQL comparison, since URLs need normalize_url() applied to both sides
+        before comparing and thought_leadership.url is stored verbatim
+        (whatever was typed into the admin form)."""
+        target = normalize_url(url)
+        if not target:
+            return False
+        rows = self.conn.execute(
+            "SELECT url FROM thought_leadership WHERE url != ''"
+        ).fetchall()
+        return any(normalize_url(r["url"]) == target for r in rows)
 
     def recent_articles_by_source(self, source: str, limit: int = 20) -> list[dict]:
         """Most-recently-saved articles from one source — the 'what I keep' examples
@@ -6151,6 +6206,51 @@ class Library:
 
     def delete_original_content(self, item_id: int) -> None:
         self.conn.execute("DELETE FROM original_content WHERE id = ?", (item_id,))
+        self.conn.commit()
+
+    def set_original_content_mirrored_article_id(self, item_id: int, article_id: int | None) -> None:
+        """Narrow single-column setter tracking which articles.id (if any)
+        currently mirrors this piece — see linklib/original_content_sync.py.
+        Deliberately not folded into add/update_original_content's own
+        signature: those two are driven by the admin form, which knows
+        nothing about the mirrored article's id."""
+        self.conn.execute(
+            "UPDATE original_content SET mirrored_article_id=? WHERE id=?",
+            (article_id, item_id),
+        )
+        self.conn.commit()
+
+    def insert_mirrored_article(self, url: str, title: str, content: str) -> int:
+        """Create the articles row backing a mirrored original_content piece.
+        Deliberately NOT Library.upsert() — upsert's merge-into-existing-row
+        path keeps whatever the existing row already has (existing["content"]
+        or art.content), which is correct for an external re-fetch but wrong
+        here: a brand-new mirror has nothing to merge with, so a plain INSERT
+        is simplest and clearest about that. is_own_content is set separately
+        by the caller (set_article_own_content), same as every other flag on
+        a freshly-inserted article."""
+        url = normalize_url(url)
+        now = _now()
+        cur = self.conn.execute(
+            "INSERT INTO articles (url, title, content, saved_at, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (url, title, content, now, now, now),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_mirrored_article(self, article_id: int, title: str, url: str, content: str) -> None:
+        """Overwrite (never merge) an existing mirrored article's title/url/
+        content — the re-sync-on-edit path. Deliberately NOT
+        Library.upsert()/update_content(): upsert()'s merge keeps existing
+        non-empty content, and update_content() only ever touches `content`.
+        A re-sync must always win, the same way an admin's own edit to a
+        draft always should — the mirrored row is a reflection of body_md,
+        not independently-editable content of its own."""
+        self.conn.execute(
+            "UPDATE articles SET title=?, url=?, content=?, updated_at=? WHERE id=?",
+            (title, normalize_url(url), content, _now(), article_id),
+        )
         self.conn.commit()
 
     # -- communities (the /tools/communities directory) ---------------------

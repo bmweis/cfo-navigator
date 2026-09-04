@@ -130,6 +130,55 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   and for anything embed-on-save missed. A content hash on `article_embeddings` detects
   when an article's embeddable text has changed, so re-running the backfill only
   re-embeds what's actually stale.
+- **FP&A Buddy Published-Content Ingestion (2026-09) — Brian's own writing joins
+  retrieval by mirroring `original_content` into `articles`, not a parallel
+  index or a fourth retrieval branch.** Investigated first: neither
+  `original_content` (the 3 native `/thought-leadership` pieces) nor
+  `thought_leadership` (the ~30 rows describing externally-hosted work) was
+  ever in Buddy's Library/Feed/Web retrieval path, and bmweis.com can't be
+  self-fetched (Cloudflare Bot Fight Mode), so a URL-fetch ingestion path
+  can't reach the 3 native pieces at all — `linklib/original_content_sync.py`'s
+  `sync_original_content_article()` mirrors `original_content.body_md`
+  directly into `articles` instead, called synchronously right after each
+  admin save (`POST /admin/original-content/new`/`{id}/edit`), same
+  "regenerate at the mutation point" convention `write_opml()` established.
+  A new `original_content.mirrored_article_id` tracks the mirror; re-syncing
+  on edit is a direct overwrite (`Library.update_mirrored_article`), never
+  `Library.upsert()`'s merge-keeps-existing-content semantics, which are
+  right for an external re-fetch but wrong for a deliberate edit. Clearing
+  `body_md` back to `NULL` (card-metadata-only) deletes the mirror outright
+  rather than orphaning it, and the admin delete route cascades the same
+  way — CLAUDE.md's "No dead data" rule. Indexed text comes from
+  `plain_text_from_body_md()`: the same `python-markdown` render the public
+  page uses, then stripped with BeautifulSoup using a plain `" "` separator
+  — deliberately not the newline-losing-paragraphs bug the Reader's own
+  `get_text(" ", strip=True)` had (that was about *display* text; this is
+  *index* text, where a space separator is actually correct — it keeps an
+  inline run's words together while still preventing adjacent block
+  elements from gluing at a tag boundary). **Provenance, not priority — the
+  rule this feature exists to enforce**: a new `articles.is_own_content`
+  flag is read ONLY by `linklib.agent._build_source_documents`/
+  `linklib.citations.extract_citations`, for citation labeling — nothing in
+  `retrieve()`/`_rrf_merge()`/`Library.search()`/`Library.vector_search()`
+  reads it, so a mirrored article surfaces and ranks purely on merit, same
+  as any other. A cited own-content source gets a small "(own writing)"
+  label in the citation list (both `srcListHtml`'s client-side render and
+  `_render_cited_answer`'s server-side one) — **deliberately not an inline
+  first-person prose mention** ("as I wrote…"): flagged and explicitly
+  rejected as a real voice-integrity risk during design, since first-person
+  narration about Brian's own writing is exactly the kind of thing that
+  could land off-register in front of a real reader; revisit only if the
+  citation label alone proves too quiet. The provenance flag is also set
+  generically for later use: `pipeline.ingest_url()` checks every save's
+  URL against `thought_leadership.url` (`Library.is_thought_leadership_url`,
+  normalized both sides) and flags a match — this is how the ~9
+  externally-hosted, text-fetchable `thought_leadership` pieces will get the
+  same label once Brian bookmarklet-saves them (unchanged save flow — no
+  code path beyond this generic match needs his attention). Set-only, like
+  `needs_content_check` — never cleared once learned. See ARCHITECTURE.md's
+  "Published-content ingestion" write-up (under FP&A Buddy) for the full
+  mechanism and `tests/test_original_content_ingestion.py` for coverage,
+  including the RRF-non-interference regression.
 - **Embedding costs are split by who pays for them.** Embed-on-save/backfill cost is
   Brian's overhead (`article_embeddings.cost_usd`) and never touches a user's Ask
   budget. Embedding the retrieval QUESTION at ask-time is a user-cap cost — it folds
