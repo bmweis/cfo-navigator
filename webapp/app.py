@@ -1913,6 +1913,121 @@ def _cmp_key_facts_cell_html(entity: "compare.CompareEntity") -> str:
     return "".join(parts) if parts else '<span class="cc-empty">Not yet available.</span>'
 
 
+# ---------------------------------------------------------------------------
+# Compare Redesign Phase 2 — the AI overlap/contrast summary block rendered
+# above both Compare tables. Purely additive: reads the same `entities`
+# list `tools_software_compare`/`tools_communities_compare` already build
+# from `linklib.compare`, and inserts one new block above the existing
+# `<table>` — no existing cell-rendering function here is touched.
+# ---------------------------------------------------------------------------
+
+# Approved verbatim (Brian, no further sign-off needed): the exact string is
+# "AI-generated summary, not human-verified. Includes catalog content still
+# under review. Flag an issue" (unverified-content variant) / "AI-generated
+# summary, not human-verified. Flag an issue" (verified variant). Split into
+# a prefix constant + a hardcoded "Flag an issue" link label so the link
+# only ever wraps that exact trailing phrase, never re-typed or duplicated.
+_CMP_SUMMARY_FOOTNOTE_PREFIX = "AI-generated summary, not human-verified. Includes catalog content still under review. "
+_CMP_SUMMARY_FOOTNOTE_PREFIX_VERIFIED = "AI-generated summary, not human-verified. "
+_CMP_SUMMARY_CAP_HIT_NOTE = "Comparison summary temporarily unavailable—daily budget reached. Check back tomorrow."
+
+
+def _cmp_entities_for_summary(entities: list["compare.CompareEntity"]) -> list[dict]:
+    """Convert `CompareEntity` objects into the plain-dict shape
+    `linklib.enrich.generate_compare_summary` expects — that module can't
+    import `linklib.compare` directly (compare.py already imports enrich.py
+    for NEEDS_VERIFICATION, so the reverse import would be circular).
+    Skips EMPTY fields (nothing to summarize); a PENDING field is included
+    with its unverified flag set so the model can hedge on it."""
+    out = []
+    for e in entities:
+        sections = []
+        for section in e.sections:
+            for f in section.fields:
+                if f.state == gates.GateState.EMPTY:
+                    continue
+                sections.append((f.label, f.text, f.state == gates.GateState.PENDING))
+        out.append({"name": e.name, "tags": e.tags, "sections": sections})
+    return out
+
+
+def _cmp_summary_content_text(entities_data: list[dict]) -> str:
+    """The exact text the cache's content hash is computed over — every
+    field's label + text (never the unverified flag, on purpose: per
+    Brian's approval, has_unverified is decoupled from the content-hash key
+    so a verify-only action, no text edit, doesn't force a wasteful regen).
+    Tags are included since they're part of what the model actually reads."""
+    parts = []
+    for e in entities_data:
+        parts.append(e.get("name", ""))
+        parts.append(",".join(e.get("tags") or []))
+        for label, text, _unverified in e.get("sections", []):
+            parts.append(f"{label}:{text}")
+    return "\n".join(parts)
+
+
+def _cmp_summary_block_html(request: Request, entities: list["compare.CompareEntity"], entity_type: str) -> str:
+    """Look up (or generate) the cached overlap/contrast summary for this
+    exact set of entities, and render the block — or "" if there's nothing
+    to show (cap hit renders a labeled note instead of "", every other
+    unavailability reason renders "" silently, since only the cap-hit case
+    has approved copy for a visible message). Never raises: any failure
+    here must not take down the whole Compare page (requirement 3 — "never
+    fail the page; the summary is additive")."""
+    entity_ids = ",".join(str(e.id) for e in sorted(entities, key=lambda e: e.id))
+    entities_data = _cmp_entities_for_summary(entities)
+    content_hash = Library.compare_summary_content_hash(_cmp_summary_content_text(entities_data))
+
+    # has_unverified is computed live from the CURRENT entities' gate state,
+    # deliberately decoupled from the cache key/content hash (per Brian's
+    # approval) — a verify-only action changes no field text, so it can't
+    # miss the cache, but the footnote still has to reflect today's real
+    # review state, not whatever it was at generation time.
+    has_unverified = any(unverified for e in entities_data for _l, _t, unverified in e["sections"])
+
+    lib = _lib()
+    try:
+        cached = lib.get_compare_summary(entity_type, entity_ids, content_hash)
+        if cached is None:
+            cap = lib.get_default_compare_summary_cap()
+            spent = lib.compare_summary_cost_today()
+            if spent >= cap:
+                return (
+                    '<div class="cmp-summary cmp-summary-capped">'
+                    f'<p style="margin:0;">{_esc(_CMP_SUMMARY_CAP_HIT_NOTE)}</p></div>'
+                )
+            model = lib.get_enrich_model()
+            from linklib.voice_settings import VoicePromptMissing, require_voice_setting
+            try:
+                voice_core = require_voice_setting(lib, "voice_core")
+            except VoicePromptMissing:
+                return ""
+            from linklib.enrich import generate_compare_summary
+            draft = generate_compare_summary(entity_type, entities_data, model=model, voice_core=voice_core)
+            if draft is None:
+                return ""
+            lib.set_compare_summary(entity_type, entity_ids, content_hash, draft.summary, draft.model,
+                                     draft.input_tokens, draft.output_tokens, draft.cost_usd)
+            lib.record_enrichment_cost(None, draft.model, draft.input_tokens, draft.output_tokens, draft.cost_usd)
+            summary_text = draft.summary
+        else:
+            summary_text = cached["summary"]
+    except Exception:
+        return ""
+    finally:
+        lib.close()
+
+    if not summary_text.strip():
+        return ""
+
+    footnote_prefix = _CMP_SUMMARY_FOOTNOTE_PREFIX if has_unverified else _CMP_SUMMARY_FOOTNOTE_PREFIX_VERIFIED
+    feedback_href = f"/compare-summary/feedback?type={entity_type}&ids={_esc(entity_ids)}&hash={content_hash}"
+    return f"""<div class="cmp-summary">
+<p class="cmp-summary-text">{_esc(summary_text)}</p>
+<p class="cmp-summary-footnote">{_esc(footnote_prefix)}<a href="{feedback_href}">Flag an issue</a></p>
+</div>"""
+
+
 # Shared CSS for both Compare matrices (Compare Redesign Phase 1) — the
 # grouped-section layout, narrative-excerpt clamp, citation chips, and
 # shared/unique tag treatment are visually identical on Software and
@@ -2007,6 +2122,16 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 @media (max-width:700px){{
   .cmp-swipe-hint{{display:flex;}}
 }}
+/* AI comparison summary (Compare Redesign Phase 2) — a light seafoam card
+   above the table, same register as this page's own intro paragraph, not a
+   loud callout: this is a heads-up, not the page's main content. */
+.cmp-summary{{background:var(--seafoam-wash);border:1px solid var(--seafoam-mid);border-radius:12px;
+  padding:16px 20px;margin:0 0 20px;}}
+.cmp-summary-text{{margin:0 0 8px;font-size:14.5px;line-height:1.6;color:var(--ink);}}
+.cmp-summary-footnote{{margin:0;font-size:12px;color:var(--muted);}}
+.cmp-summary-footnote a{{color:var(--muted);text-decoration:underline;}}
+.cmp-summary-capped{{background:var(--bg);border:1px dashed var(--line);}}
+.cmp-summary-capped p{{color:var(--muted);font-size:13px;font-style:italic;}}
 """
 
 # Swipe hint markup + dismiss logic, shared by both Compare pages (Compare
@@ -7189,6 +7314,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
 Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
 confirmed yet.</p>
 
+{_cmp_summary_block_html(request, entities, "tool")}
 {_CMP_SWIPE_HINT_HTML}
 <div style="overflow-x:auto;" id="cmp-scroll-wrap">
 <table class="cc-table">
@@ -9182,6 +9308,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
 Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
 confirmed yet.</p>
 
+{_cmp_summary_block_html(request, entities, "community")}
 {_CMP_SWIPE_HINT_HTML}
 <div style="overflow-x:auto;" id="cmp-scroll-wrap">
 <table class="cc-table">
@@ -9202,6 +9329,129 @@ confirmed yet.</p>
 </style>
 <script>{_CMP_SWIPE_HINT_JS}</script>"""
     return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+# Compare Redesign Phase 2 — the AI comparison summary's feedback mechanism.
+# Public, no token/login required, same trust level as /contact (there's
+# nothing to abuse beyond spam — a stored free-text note reviewed by hand,
+# not an action that costs money or changes anything on submit).
+@app.get("/compare-summary/feedback", response_class=HTMLResponse)
+def compare_summary_feedback_form(request: Request, type: str = "", ids: str = "", hash: str = ""):
+    if type not in ("tool", "community") or not ids or not hash:
+        raise HTTPException(status_code=400, detail="Missing or invalid comparison reference.")
+    lib = _lib()
+    try:
+        cached = lib.get_compare_summary(type, ids, hash)
+    finally:
+        lib.close()
+    if not cached:
+        raise HTTPException(status_code=404, detail="That comparison summary is no longer available.")
+    back_href = f"/tools/{'software' if type == 'tool' else 'communities'}/compare?ids={ids}"
+    body = f"""<div class="page page-form">
+<p style="margin:0 0 4px;"><a href="{_esc(back_href)}" style="font-size:13px;color:var(--muted);">&larr; Back to comparison</a></p>
+<h1>Flag an issue</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">This is the AI-generated summary you're flagging:</p>
+<blockquote style="border-left:3px solid var(--seafoam-mid);margin:0 0 20px;padding:4px 0 4px 16px;
+  color:var(--ink-soft);font-style:italic;">{_esc(cached['summary'])}</blockquote>
+<form method="post" action="/compare-summary/feedback">
+<input type="hidden" name="type" value="{_esc(type)}">
+<input type="hidden" name="ids" value="{_esc(ids)}">
+<input type="hidden" name="hash" value="{_esc(hash)}">
+<label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">What's wrong with this summary? <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+<textarea name="note" rows="4" style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;
+  font:inherit;font-size:14px;background:var(--bg);resize:vertical;margin-bottom:16px;"></textarea>
+<button type="submit" class="btn">Submit feedback</button>
+</form>
+</div>"""
+    return HTMLResponse(_page("Flag an issue—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.post("/compare-summary/feedback")
+async def compare_summary_feedback_submit(request: Request):
+    form = await request.form()
+    entity_type = (form.get("type") or "").strip()
+    entity_ids = (form.get("ids") or "").strip()
+    content_hash = (form.get("hash") or "").strip()
+    note = (form.get("note") or "").strip()
+    if entity_type not in ("tool", "community") or not entity_ids or not content_hash:
+        raise HTTPException(status_code=400, detail="Missing or invalid comparison reference.")
+    lib = _lib()
+    try:
+        cached = lib.get_compare_summary(entity_type, entity_ids, content_hash)
+        summary_text = cached["summary"] if cached else ""
+        lib.add_compare_summary_feedback(entity_type, entity_ids, content_hash, summary_text, note)
+    finally:
+        lib.close()
+    back_href = f"/tools/{'software' if entity_type == 'tool' else 'communities'}/compare?ids={entity_ids}"
+    body = f"""<div class="page page-form">
+<h1>Thanks—flagged for review.</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">I'll take a look.</p>
+<a href="{_esc(back_href)}" class="btn btn-ghost">Back to comparison</a>
+</div>"""
+    return HTMLResponse(_page("Thanks—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.get("/admin/compare-summary-feedback", response_class=HTMLResponse)
+def admin_compare_summary_feedback(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        rows = lib.list_compare_summary_feedback(include_reviewed=True)
+    finally:
+        lib.close()
+
+    def _row_html(r: dict) -> str:
+        back_href = f"/tools/{'software' if r['entity_type'] == 'tool' else 'communities'}/compare?ids={r['entity_ids']}"
+        reviewed = bool(r["reviewed_at"])
+        action = (
+            f'<span style="color:var(--muted);font-size:12px;">Reviewed {_esc(r["reviewed_at"][:10])}</span>' if reviewed else
+            f'<form method="post" action="/admin/compare-summary-feedback/{r["id"]}/mark-reviewed">'
+            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;">Mark reviewed</button></form>'
+        )
+        return f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(r['created_at'][:10])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            <a href="{_esc(back_href)}" target="_blank" rel="noopener">{_esc(r['entity_type'])} &middot; {_esc(r['entity_ids'])}</a>
+          </td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-style:italic;color:var(--ink-soft);">{_esc(r['summary_text'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:pre-wrap;">{_esc(r['note']) or '<span style="color:var(--muted);">&mdash;</span>'}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{action}</td>
+        </tr>"""
+
+    rows_html = "".join(_row_html(r) for r in rows) or (
+        '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No feedback submitted yet.</td></tr>'
+    )
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Compare summary feedback</h1>
+<p style="color:var(--muted);margin:8px 0 20px;">Flags on the AI-generated Compare-page overlap/contrast summary. No automated action&mdash;review each and mark it reviewed once handled.</p>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Comparison</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Summary flagged</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Note</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
+</tr></thead>
+<tbody>{rows_html}</tbody>
+</table>
+</div>
+</div>"""
+    return HTMLResponse(_page("Compare summary feedback—Admin", "", body, role=_role(request)))
+
+
+@app.post("/admin/compare-summary-feedback/{feedback_id}/mark-reviewed")
+def admin_compare_summary_feedback_mark_reviewed(request: Request, feedback_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.mark_compare_summary_feedback_reviewed(feedback_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/compare-summary-feedback", status_code=303)
 
 
 # Chat Matchmaker (linklib/matchmaker.py): replaces the old 4-question quiz at
@@ -21907,6 +22157,10 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 #     communities-find quiz via a `kind` column) — splitting any of them
 #     into either Toolbox bucket would be arbitrary, so they sit in Site
 #     utilities & system alongside the other audit/log tables instead.
+#   - compare_summary_cache/compare_summary_feedback (Compare Redesign
+#     Phase 2) are the same shared-across-both-entity-types shape as
+#     entity_citations/matchmaker_questions above (entity_type='tool'|
+#     'community'), so they sit here for the identical reason.
 _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Users & auth", ["users", "password_reset_requests", "read_later", "api_tokens"]),
     ("Toolbox — Software", ["tools", "tool_categories", "tool_leads", "tool_audit_log",
@@ -21925,7 +22179,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
-                                  "narrative_review_log", "entity_citations", "matchmaker_questions"]),
+                                  "narrative_review_log", "entity_citations", "matchmaker_questions",
+                                  "compare_summary_cache", "compare_summary_feedback"]),
 ]
 
 
@@ -22989,6 +23244,15 @@ def admin_page(request: Request):
                               f"Build, curate, enrich, and back up your archive&mdash;{len(_LIBRARY_TOOLS)} tools.",
                               _group_badge(task_counts, library_hrefs))
 
+    # Compare Redesign Phase 2 — spans both Software and Communities Compare
+    # pages, so it's a direct CFO Toolbox card rather than nested under
+    # either sub-group, same placement precedent as Library above.
+    compare_summary_feedback_card = _card(
+        "/admin/compare-summary-feedback", "Compare summary feedback",
+        "Reader-flagged issues with the AI-generated Compare-page overlap/contrast summary.",
+        _badge_for_href("/admin/compare-summary-feedback", task_counts.get("/admin/compare-summary-feedback", 0)),
+    )
+
     # FP&A Buddy moves from its own standalone top-level group into a nested
     # sub-group inside CFO Toolbox — the same group, same 4 items, same
     # description, just reparented.
@@ -23021,8 +23285,11 @@ def admin_page(request: Request):
     right_html = ""
     for gname, gdesc, items in _ADMIN_GROUPS:
         if gname == "CFO Toolbox":
-            toolbox_hrefs = [href for href, _, _ in items] + software_hrefs + fpa_hrefs + library_hrefs
-            html = _group_html(gname, gdesc, [software_subgroup_html] + list(items) + [fpa_subgroup_html, library_link_card],
+            toolbox_hrefs = ([href for href, _, _ in items] + software_hrefs + fpa_hrefs + library_hrefs
+                              + ["/admin/compare-summary-feedback"])
+            html = _group_html(gname, gdesc,
+                               [software_subgroup_html] + list(items)
+                               + [fpa_subgroup_html, library_link_card, compare_summary_feedback_card],
                                badge_hrefs=toolbox_hrefs)
         else:
             html = _group_html(gname, gdesc, items)

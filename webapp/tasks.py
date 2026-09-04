@@ -86,6 +86,7 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/tools/software/feature-review-queue": lib.count_feature_review_queue(status="pending"),
         "/admin/library/backfill-content": lib.count_needs_content_check() + lib.count_articles_needing_manual_review(),
         "/admin/tools/software/name-duplicates": len(lib.find_tool_name_duplicate_candidates()),
+        "/admin/compare-summary-feedback": lib.count_compare_summary_feedback(reviewed=False),
     }
     return {href: n for href, n in counts.items() if n}
 
