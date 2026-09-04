@@ -342,8 +342,8 @@ def test_logo_upload_route_rejects_non_image_and_sets_override_on_success(env):
 
 # --- "Revert & re-fetch from Brandfetch" (2026-08 follow-up) -----------
 
-def _fake_asset(src_url="https://cdn.example/logo.svg", ext="svg"):
-    return (src_url, ext)
+def _fake_asset(src_url="https://cdn.example/logo.svg", ext="svg", asset_type="icon"):
+    return (src_url, ext, asset_type)
 
 
 def _fake_download_asset(src_url, dest_path, session=None):
