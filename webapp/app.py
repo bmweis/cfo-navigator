@@ -7651,15 +7651,16 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # Community Profile cards further down), which shows muted text to
     # everyone instead of hiding.
     # Competitors: a Logo/Name table rather than the old chip row (Phase F).
-    # It used to sit right below Bottom Line, both being "how does this
-    # stack up" content — Bottom Line itself moved up into the hero band
-    # (item 5, Aug 2026 UI pass), so Competitors is now the first thing in
-    # lower_band_left, ahead of sitting at the bottom of the right column.
-    # Competitors are always
-    # full `tools` rows (list_tool_competitors joins tool_competitors back to
-    # tools), never free text, so each row is a real profile link with its
-    # own logo_path — the same _logo_box fallback as F2/F3 covers a
-    # competitor that hasn't been through the Brandfetch backfill yet.
+    # Sidebar Consolidation pass (2026-09): Competitors moved into the
+    # sidebar (last of screenshot -> Key features -> Competitors) rather
+    # than sitting in the main narrative column below Bottom Line/
+    # Description/Agent taxonomy — it's typically a short reference list,
+    # not part of the tool's own story, so it belongs with the other
+    # scannable-reference cards. Competitors are always full `tools` rows
+    # (list_tool_competitors joins tool_competitors back to tools), never
+    # free text, so each row is a real profile link with its own
+    # logo_path — the same _logo_box fallback as F2/F3 covers a competitor
+    # that hasn't been through the Brandfetch backfill yet.
     competitors_block = ""
     if competitors:
         comp_rows = "".join(
@@ -7688,26 +7689,30 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # badge for either viewer. Now brought in line with Description/Agent
     # taxonomy below: content always renders, with a trailing review-state
     # badge.
-    # Spacing fix (item 4, empty-state visual QA pass): the seafoam callout
-    # had margin-bottom but no margin-top, so the category chips row right
-    # above it (tp-hero-cats, margin-top only) left it sitting flush against
-    # the chips with no breathing room above — equal 22px on both sides now,
-    # matching its own margin-bottom, in both the populated and empty
-    # states.
+    # Spacing (item 4, empty-state visual QA pass; revisited in the Sidebar
+    # Consolidation pass, 2026-09): the seafoam callout used to sit inline in
+    # the hero, between the category chips and the action row, where its own
+    # margin-top/margin-bottom:22px gave it equal breathing room on both
+    # sides. It now opens the main column's tp-col-stack instead (Sidebar
+    # Consolidation — see the tp-band comment below), whose own `gap:22px`
+    # already spaces every stacked card evenly; a self-margin on top of that
+    # gap would double the space above/below this one card versus its
+    # neighbors. So no margin here — the stack's gap alone produces the same
+    # equal spacing, just via the shared mechanism every other card in the
+    # column uses too.
     _diff_unverified = bool(tool.get("competitive_differentiation_needs_verification"))
     differentiation_block = ""
     if (tool.get("competitive_differentiation") or "").strip():
         _diff_badge = _review_state_badge(_diff_unverified, authed, "tp-verify")
         differentiation_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
-  border-radius:0 0 10px 10px;padding:18px 22px;margin-top:22px;margin-bottom:22px;">
+  border-radius:0 0 10px 10px;padding:18px 22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_diff_badge}</div>
   <div class="narrative-md" style="color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{render_narrative_markdown(tool['competitive_differentiation'])}</div>
 </div>"""
     else:
         _diff_copy = gates.EMPTY_COPY["tool_differentiation"]
-        _diff_empty_html = _empty_state_card("Bottom line", _empty_state_text(
+        differentiation_block = _empty_state_card("Bottom line", _empty_state_text(
             _diff_copy.visitor_text, _diff_copy.admin_suffix, authed))
-        differentiation_block = f'<div style="margin-top:22px;margin-bottom:22px;">{_diff_empty_html}</div>'
 
     # Radical-transparency review standard (supersedes the old Abacum-
     # fabrication-finding publish gate): `agent_taxonomy_needs_verification`
@@ -7760,12 +7765,18 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # redundant sub-heading repeating what the tool already is.
     features_card = _software_key_features_card(feature_links)
 
-    # Category tags (Phase F4): moved from their own right-column card down
-    # next to the Visit/Compare/Edit button group instead — the card by
-    # itself was one of the two things (along with the missing logo) leaving
-    # the hero band visibly sparser than the screenshot card beside it. Chips
-    # render right after tp-hero-actions in source order, so the same
-    # placement holds on mobile once the two-column grid collapses to one.
+    # Category tags: Phase F4 moved these from their own right-column card
+    # to sit next to the Visit/Compare/Edit button group; the Sidebar
+    # Consolidation pass (2026-09) moved them again, this time to sit
+    # directly under the tool name/above the subhead — mirroring where
+    # Compare already places entity tags (`_cmp_tag_chips_html`, right under
+    # the linked name) — since a category is an identity fact about the
+    # tool, not something that belongs down by the action buttons. Compare's
+    # tags distinguish shared-vs-unique across compared entities
+    # (`.cmp-tag-shared`/`.cmp-tag-unique`); a solo profile page has no such
+    # comparison to draw, so this keeps the existing solid-seafoam
+    # `.tp-cat-pill` treatment rather than adopting Compare's outline
+    # variant, which has no meaning here.
     cats = tool.get("categories") or []
     cats_html = ("".join(f'<span class="tp-cat-pill">{_esc(c)}</span>' for c in cats)
                  if cats else "")
@@ -7930,11 +7941,15 @@ function submitIntroForm() {{
     # also visible on the profile VIEW page itself, not just the edit page
     # and the admin list. Admin-only, same _is_authed gating as every other
     # admin-facing element on this page (the meta line, the Edit button).
-    # Placement (2026-08 follow-up, per Brian's review of the first draft):
-    # moved from the bottom of the page (after all card content) to the
-    # hero, above the category pills — computed here, before hero_text is
-    # built, so it can be spliced in above tp-hero-cats rather than buried
-    # under everything else.
+    # Placement (2026-08 follow-up, per Brian's review of the first draft;
+    # revisited by the Sidebar Consolidation pass, 2026-09): moved from the
+    # bottom of the page to the hero — computed here, before hero_text is
+    # built, so it can be spliced in right after the header row (name/tags/
+    # subhead) and before the action row, rather than buried under
+    # everything else. Category tags moved out of this same hero flow in
+    # the Sidebar Consolidation pass (now directly under the name instead —
+    # see the cats_html/hero_text comments below), so this no longer sits
+    # "above tp-hero-cats" the way it once did.
     review_status_html = ""
     if authed:
         _needs_review = bool(tool.get("needs_review"))
@@ -7954,32 +7969,37 @@ function submitIntroForm() {{
     # monogram fallback as the directory cards and Competitors table when
     # logo_path is still empty.
     tool_logo_url = _tool_logo_url(tool)
-    # Item 5 (Aug 2026 UI pass): Bottom Line moved up into the hero, right
-    # after the category pills and before the action row — was previously
-    # the first thing in lower_band_left, which meant crossing into a
-    # separate .tp-band (its own margin-top:22px) after the pills' own
-    # margin-top:14px, reading as an oddly large gap for two adjacent
-    # "about this tool" facts. Category pills moved up alongside it (were
-    # previously the last thing in hero_text, after the action row) so the
-    # two stay adjacent with only their own small margins between them,
-    # rather than splitting Bottom Line from its nearest context by the
-    # width of the whole Visit/Compare/Edit row.
+    # Sidebar Consolidation pass (2026-09) — full rework of the hero/band
+    # structure, replacing the Aug 2026 UI pass's arrangement (Bottom Line +
+    # category pills in the hero, Competitors paired with Key features in a
+    # two-column band below). Two problems drove it, both from Brian's live
+    # review of the production Abacum page: (1) Competitors (typically a
+    # short list) was paired with Key features (typically long) in a
+    # two-column row, leaving visible whitespace under the shorter column
+    # and stranding Description as a disconnected full-width block below
+    # both; (2) the category tag sat alone between the admin review pills
+    # and the Bottom line callout, orphaned with no clear grouping.
+    #
+    # Fix: match the Community profile page's already-proven sidebar
+    # pattern (narrative content in a wide main column, reference/lookup
+    # content in a narrower sidebar) instead of inventing a new one. Category
+    # tags move to sit directly under the name, above the subhead — mirroring
+    # where Compare places entity tags (see the cats_html comment above).
+    # The hero itself is now full-width, holding only identity (name, tags,
+    # subhead) and actions (review status, Visit/Warm intro/Compare/Edit) —
+    # screenshot no longer sits beside it (that was the *hero*/hero pairing;
+    # it now opens the sidebar instead, alongside Key features and
+    # Competitors, per Brian's approved Step 0 proposal).
     hero_text = f"""<div class="tp-header-row">
   {_logo_box(tool['name'], tool_logo_url, 56, radius=12)}
   <div>
     <h1 class="tp-h1">{_esc(tool['name'])}{advisor_mark_html}</h1>
+    {f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}
     {f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
   </div>
 </div>
 {review_status_html}
-{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}
-{differentiation_block}
 <div class="tp-hero-actions">{action_row}</div>"""
-
-    top_band = f"""<div class="tp-band">
-  <div>{hero_text}</div>
-  <div>{screenshot_block}</div>
-</div>"""
 
     # white-space:pre-wrap (voice enforcement + structure pass, 2026-08) — see
     # the identical comment on agent_taxonomy_block above; same reasoning
@@ -8001,43 +8021,39 @@ function submitIntroForm() {{
         description_card = _empty_state_card("Description", _empty_state_text(
             _desc_copy.visitor_text, _desc_copy.admin_suffix, authed))
 
-    # Competitors sits right under Bottom Line now (Phase F6), not at the
-    # bottom of the right column — both are "how does this stack up" content,
-    # so grouping them reads as one thought instead of two.
-    #
-    # F5 follow-up: Categories and Competitors used to be what filled this
-    # right column; now that both moved (F4 to the hero, F6 up next to
-    # Bottom Line), Features is the column's only remaining occupant — and
-    # for a public visitor on a tool with no features yet, that's nothing at
-    # all, which is a wasted-whitespace regression, not a fix. Collapse to a
-    # single full-width column whenever the right side would otherwise be
-    # empty, rather than leaving a dead 1fr gap beside a full left column.
-    # Bottom Line (differentiation_block) moved into hero_text above (item 5,
-    # Aug 2026 UI pass) — no longer the first thing here.
-    lower_band_left = f"""{competitors_block}
+    # Main column (narrative, continuous flow) vs. sidebar (reference/lookup
+    # content) — the same "reference sidebar" pattern the Community profile
+    # page already established (Details/Categories/Similar communities
+    # beside its own narrative column). Bottom line -> Description -> Agent
+    # taxonomy read as one continuous story about the tool; screenshot ->
+    # Key features -> Competitors are each independently-scannable reference
+    # material, not something a reader works through top to bottom. The
+    # screenshot card always renders something (a "No screenshot yet" frame
+    # when none is captured — see _screenshot_card_html), so unlike the old
+    # lower_band this sidebar is never empty and needs no single-column
+    # collapse branch.
+    main_col = f"""{differentiation_block}
 {description_card}
 {agent_taxonomy_block}"""
-    if features_card.strip():
-        lower_band = f"""<div class="tp-band">
+    sidebar_col = f"""{screenshot_block}
+{features_card}
+{competitors_block}"""
+    main_band = f"""<div class="tp-band">
   <div class="tp-col-stack">
-    {lower_band_left}
+    {main_col}
   </div>
   <div class="tp-col-stack">
-    {features_card}
+    {sidebar_col}
   </div>
 </div>"""
-    else:
-        lower_band = f"""<div class="tp-col-stack" style="margin-top:22px;">
-    {lower_band_left}
-  </div>"""
 
     # review_status_html is now computed above, before hero_text, and
-    # spliced into the hero above the category pills (item 4, 2026-08
+    # spliced into the hero right after the header row (item 4, 2026-08
     # placement follow-up) — see that comment for the full reasoning.
 
     main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
-{top_band}
-{lower_band}
+{hero_text}
+{main_band}
 {f'<p style="font-size:13px;color:var(--muted);margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}
 {footnote_block}"""
 
@@ -8065,7 +8081,12 @@ function submitIntroForm() {{
 .tp-fn-mark{{font-size:18px;color:var(--navy-light);font-weight:600;margin-left:3px;transform:translateY(2px);line-height:1;}}
 .tp-subhead{{font-size:17px;color:var(--ink-soft);margin:0 0 18px;overflow-wrap:break-word;word-break:break-word;}}
 .tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
-.tp-hero-cats{{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}}
+/* Sidebar Consolidation pass (2026-09): tags moved from mid-hero (below the
+   action row) to directly under the name — this rule's margin shrank to
+   match (was margin-top:14px, spacing it away from the action row above
+   it; now it sits between .tp-h1's own 8px margin-bottom and .tp-subhead
+   right below, so a small margin-bottom is what's needed instead). */
+.tp-hero-cats{{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px;}}
 .tp-cat-pill{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
 .tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
