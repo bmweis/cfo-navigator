@@ -5290,6 +5290,35 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   truncation marker — a production sample of 25 `articles` rows had come
   back at 523KB uncapped. See ARCHITECTURE.md's matching section for the
   full write-up.
+- **Compare Redesign, Phase 1 (2026-09) — both Compare pages rebuilt on a
+  new `linklib/compare.py` serializer; the shared contract Compare Phase 2
+  (AI summary generation) and MCP Phase 3 (compare tools) will also build
+  on, not just this page's own HTML.** Fixed three real bugs Brian's
+  review found: dead `[1]`/`[2]` citation markers (now the same
+  `entity_citations` + `_citations_list_html` "Sources" chip list the
+  profile pages already render — no new mechanism), flattened bulleted
+  text in Software's compare cells (missing `white-space:pre-wrap`,
+  matched to what profile pages already do — a real markdown-to-HTML
+  renderer is deliberately NOT built here, it's scoped as its own
+  immediate follow-up PR since it'd be a site-wide rendering change), and
+  an orphaned section header (every section — Key facts, Description,
+  AI / Agent involvement, Bottom line, Competitors/Similar communities,
+  Communities' 4 themed groups — now shares one `.cc-section` band, not
+  just Agent taxonomy). Added: a Key facts band with shared-vs-unique tag
+  chips (solid seafoam = every compared entity has it, outline = only this
+  one does), and a `-webkit-line-clamp` excerpt (~4 lines, approved over a
+  fixed character count) on the full untruncated text. Communities'
+  Compare collapsed its old flat 11-field list into the same 4 themed
+  groups (`compare.COMMUNITY_PROFILE_GROUPS`) the profile page already
+  uses — that constant, and `community_geo_line()`, moved out of
+  `webapp/app.py` into `linklib/compare.py` so the profile page and
+  Compare can't drift apart. Every section renders for every entity, even
+  fully empty (mirroring the profile pages' "nothing ever disappears"
+  standard), through `linklib/gates.py` exactly as before — this PR
+  extends `gates.COMPARE_EMPTY_LABELS` with four new keys for sections
+  Compare didn't previously render, but never touches the module's actual
+  decision logic. See ARCHITECTURE.md's matching bullet for the full
+  write-up.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

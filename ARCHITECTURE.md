@@ -2493,6 +2493,128 @@ Details worth knowing:
   test_review_state_publish_gates.py`/`tests/test_matchmaker_publish_gate.py`
   (PR A's own end-to-end suite) pass unchanged — the actual proof this
   extraction is behavior-identical, not just internally consistent.
+- **Compare Redesign Phase 1 (2026-09) — a new `linklib/compare.py`
+  serializer replaces both compare matrices' hand-assembled row logic, and
+  the pages themselves are rebuilt on it: grouped section headers (fixing
+  the orphaned-header bug — previously only "AI / Agent involvement" got
+  a `.cc-section` band), a Key facts band with shared/unique tag chips,
+  working citation chips, and a narrative-excerpt clamp. Not just an HTML
+  change — the module is the shared contract this redesign was built to
+  establish for two later, separate PRs: Compare Phase 2's AI-summary
+  generation prompt, and MCP Phase 3's Toolbox/Communities compare tools —
+  both need the identical curated field set this module selects, not a
+  re-derived approximation of it.
+
+  **Investigation (Step 0) found three of Brian's four reported problems
+  were real rendering bugs, not design gaps — and the fourth's "fix" was
+  simpler than it looked:**
+  1. **Dead citation markers** — `[1]`/`[2]` rendered as plain `_esc()`'d
+     text in Compare with no Sources chips, even though profile pages
+     don't hyperlink the inline marker either — the entire "citations
+     work" mechanism on a profile page is a separate `_citations_list_html`
+     "Sources" chip list rendered alongside the text, fed by
+     `Library.get_entity_citations`. Compare's old `_compare_cell_html`
+     never called it. Fix: fetch the same citations the profile route
+     fetches, render the same chip list.
+  2. **Flattened markdown** — investigation found there is no real
+     markdown-to-HTML renderer anywhere for these narrative fields, on
+     profile pages either; "renders correctly" there just means
+     `white-space:pre-wrap` on a `<p>`, preserving newlines/dash-prefixed
+     lines as visible lines with no real `<ul><li>`. The actual bug: only
+     Communities' old `_profile_cell` passed `pre_wrap=True` to
+     `_compare_cell_html`; Software's `_agent_cell`/`_desc_cell`/
+     `_diff_cell` never did, so a bulleted note's newlines collapsed per
+     ordinary HTML whitespace rules into run-on prose. Fix, per Brian's
+     explicit instruction: match profile pages' existing pre-wrap
+     treatment (`.cmp-clamp-inner{white-space:pre-wrap;}`) — do NOT build
+     a real markdown renderer in this PR. A genuine markdown pass (reusing
+     `python-markdown`, already a dependency via Original Content) is
+     scoped as its own immediate follow-up PR, deliberately not a rider
+     here, since it's a site-wide rendering change (profile pages too)
+     deserving its own before/after review.
+  3. **Orphaned section header** — real, fixed by giving every section
+     (Key facts, Description, AI / Agent involvement, Bottom line,
+     Competitors/Similar communities, and Communities' 4 themed groups)
+     the identical `.cc-section` teal band, not just Agent taxonomy.
+  4. **Wall-of-text cells** — real; fixed with a pure-CSS
+     `-webkit-line-clamp` (`compare.EXCERPT_LINE_CLAMP = 4`, approved by
+     Brian over a fixed character count so the clamp adapts to each
+     table's real column width) on the full, untruncated text — the
+     serializer never truncates `CompareField.text` itself, so citations,
+     accessibility, and copy/paste all still see the whole field; only the
+     visual presentation is clamped.
+
+  **`linklib/compare.py`** is deliberately HTML-free (the `linklib/gates.py`
+  precedent, enforced by import path — MCP Phase 3's tools import this
+  module directly, never `webapp/app.py`): `CompareField`/`CompareSection`/
+  `CompareChipList`/`CompareChipItem`/`CompareKeyFact`/`CompareEntity`/
+  `CompareTagDiff` dataclasses, `tag_diff()` (shared-vs-unique tag split —
+  the intersection across every compared entity is "shared," each entity's
+  own remainder is "unique"), and `build_software_compare`/
+  `build_communities_compare`, which take already-fetched `Library` dicts
+  (tools/communities/profiles/citations/competitors — the caller's job,
+  same as `gates.py`'s callers) and return a curated `CompareEntity` list
+  plus one `CompareTagDiff`. Every section renders for every entity, even
+  fully empty — no row is omitted the way the old `_row`/`gates.
+  any_populated` check used to hide Tags/Description/Differentiation
+  entirely when nobody had content; this mirrors the profile pages' own
+  "nothing ever disappears" radical-transparency standard, and incidentally
+  fixes the pre-existing inconsistency where only Agent taxonomy's section
+  was hardcoded to always render.
+
+  **Two moves from `webapp/app.py` into `linklib/compare.py`, both to stop
+  the profile page and Compare from being able to drift apart**:
+  `COMMUNITY_PROFILE_GROUPS` (the profile page's 4 themed field groups —
+  Compare's old flat 11-field list, `_COMMUNITY_PROFILE_PUBLIC_FIELDS`, is
+  retired outright, its own comment having already named this exact
+  consolidation as "Phase 8.5's job") and `community_geo_line()` (the
+  Region key-fact's reach/local_markets logic). `webapp/app.py` re-exports
+  both under their original names for their one remaining call site each.
+
+  **`gates.COMPARE_EMPTY_LABELS` gained four keys** (`tool_competitors`,
+  `community_bottom_line`, `community_profile_group`,
+  `community_similar_communities`) for the sections Compare didn't
+  previously render at all — additive only, the short/no-admin-suffix
+  convention the dict's own docstring already established; the retired
+  `community_profile_field` key (the old flat-per-field empty label) is
+  gone, since an empty Community profile field now either triggers its
+  whole GROUP's placeholder or, inside a populated group, the profile
+  page's own fixed Tier-2 "No details available." literal (rendered
+  directly by the HTML layer, no lookup needed — it has no admin-suffix
+  variant). `linklib/gates.py`'s actual decision logic
+  (`state_for`/`field_state`/`badge_text`/`any_populated`) is untouched —
+  this is a copy-table extension, the same category of change PR A.1 made
+  repeatedly when a new section needed a placeholder, not a change to how
+  the gate decides anything.
+
+  **Renamed**: Software's "How this differs" row is now "Bottom line" —
+  matching the tool profile page's own heading for
+  `competitive_differentiation` exactly (both the section title and
+  `gates.EMPTY_COPY["tool_differentiation"]`'s "Bottom line not yet
+  available." text were already using "Bottom line"; only the compare
+  row's own label had drifted).
+
+  **Shared/unique tags** (`_cmp_key_facts_cell_html`): a tag every compared
+  entity has gets a solid seafoam-fill pill (`.cmp-tag-shared`); a tag
+  only one entity has gets a seafoam-outline pill (`.cmp-tag-unique`) —
+  approved by Brian in Step 0 as the visual pairing, so overlap and
+  contrast are visible at a glance without reading every pill.
+
+  **Key facts band**: one row, one cell per entity (not one row per fact,
+  which would just reintroduce the orphaned-row problem) — tags plus, for
+  Communities, Region/Access/Sponsor/Cost/Cost detail/Founded. A fact whose
+  raw value is `linklib.enrich.NEEDS_VERIFICATION` (the data-completeness
+  sentinel — a different concept from the review-state gate: "never
+  researched," not "AI draft awaiting human review") renders the existing
+  `.comm-verify` badge instead of the sentinel string.
+
+  See CLAUDE.md's matching bullet for the pointer note,
+  `tests/test_compare_serializer.py` for the serializer's own unit
+  coverage (independent of any HTML), and `tests/test_software_compare.py`/
+  `tests/test_community_compare.py` for the rebuilt pages' end-to-end
+  coverage (grouped headers, clamp/pre-wrap, citation chips, tag diff, all
+  three gate states, competitors/similar-communities chip lists, the
+  full-profile link).
 - **Citation-tag investigation + generation-path fix (2026-08) — supersedes
   Phase 1b/2's `inject_markers=False` decision for Agent taxonomy and
   Description; Community profile (Phase 3) is unchanged and still on the

@@ -61,7 +61,7 @@ import markdown as _markdown
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-from linklib import gates
+from linklib import compare, gates
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS
@@ -1758,31 +1758,163 @@ def _review_state_badge(unverified: bool, authed: bool, cls: str = "tp-verify") 
     return f' <span class="{cls}">{text}</span>'
 
 
-def _compare_cell_html(text: str | None, unverified: bool, authed: bool,
-                        empty_label: str = "Not yet available.",
-                        cls: str = "cc-verify", pre_wrap: bool = False) -> str:
-    """Shared `<td>` renderer for every per-field review-gated Compare
-    matrix column, on both Software (`_agent_cell`/`_desc_cell`/
-    `_diff_cell`) and Communities (`_profile_cell`). Radical-transparency
-    review standard: content always renders for both viewers now — a
-    pending review no longer collapses into the same empty-looking cell as
-    an entity with no content at all (see linklib.gates' module docstring).
-
-    `pre_wrap` covers the one real markup difference between the two
-    matrices' cells: Communities' profile fields can carry embedded
-    newlines (drafted narrative text), Software's compare fields don't —
-    kept as a caller-chosen flag rather than two near-duplicate functions.
-    Callers that need to check the OTHER, unrelated `_NEEDS_VERIFICATION`
-    data-completeness sentinel (Communities' `.comm-verify`) do that
-    themselves before ever calling this — this function only ever handles
-    the review-state gate."""
-    text = (text or "").strip()
-    if not text:
-        return f'<td class="cc-cell cc-empty">{_esc(empty_label)}</td>'
-    badge = _review_state_badge(unverified, authed, cls)
+def _cmp_populated_field_html(f: "compare.CompareField", authed: bool) -> str:
+    """One populated `CompareField`'s inner markup — clamped pre-wrap text
+    (Compare Redesign Phase 1: `.cmp-clamp` applies a CSS
+    `-webkit-line-clamp` matching `compare.EXCERPT_LINE_CLAMP`, so a long
+    draft scans as an excerpt instead of a full essay; the full text is
+    still in the DOM, just visually clamped, so copy/paste and
+    accessibility both see the whole field), the same review-state badge
+    every profile page uses, and — the fix for Compare's dead citation
+    markers — the same `_citations_list_html` "Sources" chip list a
+    profile page renders right alongside the field, fed by the exact
+    `entity_citations` rows the caller already fetched. Caller guarantees
+    `f.state != GateState.EMPTY`."""
+    badge = _review_state_badge(f.state == gates.GateState.PENDING, authed, "cc-verify")
     badge_html = f'<div style="margin-top:4px;">{badge.strip()}</div>' if badge else ""
-    style_attr = ' style="white-space:pre-wrap;"' if pre_wrap else ""
-    return f'<td class="cc-cell"{style_attr}>{_esc(text)}{badge_html}</td>'
+    citations_html = _citations_list_html(f.citations, cap=5) if f.citations else ""
+    return (f'<div class="cmp-clamp"><div class="cmp-clamp-inner">{_esc(f.text)}</div></div>'
+            f'{badge_html}{citations_html}')
+
+
+def _cmp_empty_html(empty_copy_key: str, authed: bool) -> str:
+    """One empty section/field's placeholder — reuses `gates.
+    COMPARE_EMPTY_LABELS`, the shorter, no-admin-suffix family gates.py
+    already defines specifically for compare-matrix cells (a compare cell
+    never carries a "go fill this in" prompt — that only ever appears on
+    the field's own profile/edit page). `authed` is accepted for a
+    consistent call signature with `_cmp_populated_field_html` even though
+    this family doesn't vary by viewer."""
+    del authed
+    return f'<span class="cc-empty">{_esc(gates.COMPARE_EMPTY_LABELS.get(empty_copy_key, "Not yet available."))}</span>'
+
+
+def _cmp_section_cell_html(section: "compare.CompareSection", authed: bool, empty_copy_key: str) -> str:
+    """One `<td>`'s inner markup for one `CompareSection` — a single field
+    (every tool section; Communities' Bottom line) renders directly; a
+    themed group of several sub-fields (Communities' 4 profile groups)
+    mirrors the profile page's own two-tier empty handling exactly: the
+    WHOLE group empty -> one group-level placeholder (the profile page's
+    "This section hasn't been researched yet."); some fields populated,
+    some not -> each populated field renders normally and each empty one
+    gets the profile page's Tier-2 "No details available." inline, with no
+    admin suffix (a single missing fact inside an otherwise-populated card
+    doesn't warrant a "go fill this in" prompt)."""
+    fields = section.fields
+    if len(fields) == 1:
+        f = fields[0]
+        if f.state == gates.GateState.EMPTY:
+            return _cmp_empty_html(empty_copy_key, authed)
+        return _cmp_populated_field_html(f, authed)
+    if all(f.state == gates.GateState.EMPTY for f in fields):
+        return _cmp_empty_html(empty_copy_key, authed)
+    parts = []
+    for f in fields:
+        body = ('<div class="cmp-tier2">No details available.</div>'
+                if f.state == gates.GateState.EMPTY else _cmp_populated_field_html(f, authed))
+        parts.append(f'<div class="cmp-subfield"><div class="cmp-subfield-label">{_esc(f.label)}</div>{body}</div>')
+    return "".join(parts)
+
+
+def _cmp_chip_list_html(chips: "compare.CompareChipList", authed: bool) -> str:
+    if not chips.items:
+        return _cmp_empty_html(chips.empty_copy_key, authed)
+    return '<div class="cmp-chip-row">' + "".join(
+        f'<a href="{_esc(i.url)}" class="cmp-chip" target="_blank" rel="noopener">{_esc(i.name)}</a>'
+        for i in chips.items
+    ) + '</div>'
+
+
+def _cmp_key_facts_cell_html(entity: "compare.CompareEntity", diff: "compare.CompareTagDiff") -> str:
+    """The Key facts band's one `<td>` per entity — shared-vs-unique tag
+    chips (Compare Redesign Phase 1: shared tags across every compared
+    entity get a solid seafoam fill, an entity's own unique tags get a
+    seafoam outline, so overlap and contrast are visible at a glance
+    without reading every pill) plus, for Communities, the small
+    Region/Access/Sponsor/Cost/Founded facts — bundled into ONE row instead
+    of five separate ones, so Key facts reads as a compact summary band,
+    not another wall of lonely rows."""
+    parts = []
+    shared_set = set(diff.shared)
+    tag_chips = "".join(f'<span class="cmp-tag cmp-tag-shared">{_esc(t)}</span>'
+                         for t in entity.tags if t in shared_set)
+    tag_chips += "".join(f'<span class="cmp-tag cmp-tag-unique">{_esc(t)}</span>'
+                          for t in diff.unique.get(entity.id, []))
+    if tag_chips:
+        parts.append(f'<div class="cmp-tag-row">{tag_chips}</div>')
+    for kf in entity.key_facts:
+        if kf.needs_verification:
+            parts.append(f'<div class="cmp-fact"><span class="cmp-fact-label">{_esc(kf.label)}</span> '
+                          f'<span class="comm-verify">Needs verification</span></div>')
+        else:
+            parts.append(f'<div class="cmp-fact"><span class="cmp-fact-label">{_esc(kf.label)}</span> '
+                          f'<span class="cmp-fact-value">{_esc(kf.value)}</span></div>')
+    return "".join(parts) if parts else '<span class="cc-empty">Not yet available.</span>'
+
+
+# Shared CSS for both Compare matrices (Compare Redesign Phase 1) — the
+# grouped-section layout, narrative-excerpt clamp, citation chips, and
+# shared/unique tag treatment are visually identical on Software and
+# Communities, so this is one constant both routes' <style> blocks include
+# rather than two copies that could drift.
+_CMP_SHARED_CSS = f"""
+.cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
+.cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
+  color:var(--ink-soft);line-height:1.55;min-width:220px;}}
+.cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  min-width:140px;white-space:nowrap;background:var(--bg);}}
+.cc-empty{{color:var(--muted);font-style:italic;}}
+.cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);
+  background:var(--seafoam);padding:8px 16px;}}
+/* Brand-consistency pass (2026-08): was #92400e/#fef3c7 (off-palette amber)
+   — recolored to --coral-wash bg + --navy text (navy, not coral-deep,
+   because BRAND.md's own mechanical CI check bans coral/coral-deep text
+   under 18px — same sanctioned coral-wash+navy callout pairing), the same
+   small per-field "unverified" badge language used everywhere this concept
+   renders (.tp-verify, .tool-desc-verify), deliberately distinct in
+   size/shape from the larger pill-shaped whole-record _review_status_pill_html
+   so the two read as different signal types even though they now share one
+   color rule. */
+.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
+  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;
+  border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
+thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
+.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
+.comm-name:hover{{color:var(--accent);}}
+.tool-star{{font-size:14px;color:#b8860b;}}
+/* Narrative-excerpt clamp (Compare Redesign Phase 1) — ~{compare.EXCERPT_LINE_CLAMP} lines via
+   -webkit-line-clamp, approved over a fixed character count so it adapts
+   to each table's real column width. white-space:pre-wrap on the inner div
+   (not the clamped outer box, which needs display:-webkit-box) is the fix
+   for the flattened-markdown bug: a "- " bulleted line now keeps its own
+   line instead of running together with the next one — the same treatment
+   profile pages already give this text, not a new markdown renderer (a
+   real markdown-to-HTML pass for these fields is scoped as its own
+   follow-up PR, deliberately not built here). */
+.cmp-clamp{{display:-webkit-box;-webkit-line-clamp:{compare.EXCERPT_LINE_CLAMP};-webkit-box-orient:vertical;overflow:hidden;}}
+.cmp-clamp-inner{{white-space:pre-wrap;}}
+.cmp-subfield{{margin-bottom:14px;}}
+.cmp-subfield:last-child{{margin-bottom:0;}}
+.cmp-subfield-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;}}
+.cmp-tier2{{color:var(--muted);font-style:italic;font-size:13px;}}
+.cmp-chip-row{{display:flex;flex-wrap:wrap;gap:6px;}}
+.cmp-chip{{font-size:13px;font-weight:600;color:var(--navy);background:var(--seafoam-wash);border-radius:999px;
+  padding:4px 12px;text-decoration:none;}}
+.cmp-chip:hover{{background:var(--seafoam);}}
+.cmp-tag-row{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}}
+.cmp-tag{{font-size:11.5px;font-weight:600;border-radius:999px;padding:3px 10px;white-space:nowrap;}}
+/* Shared-vs-unique tag treatment (Compare Redesign Phase 1, approved in
+   Step 0): solid seafoam fill for a tag every compared entity shares,
+   outline-only for a tag only this entity has — a glance at fill vs.
+   outline shows overlap and contrast without reading every pill. */
+.cmp-tag-shared{{background:var(--seafoam);color:var(--navy);}}
+.cmp-tag-unique{{background:transparent;color:var(--seafoam-deep);border:1px solid var(--seafoam-mid);}}
+.cmp-fact{{font-size:13px;color:var(--ink-soft);margin-bottom:4px;}}
+.cmp-fact-label{{font-weight:600;color:var(--muted);}}
+.cmp-full-link{{display:block;margin-top:4px;font-size:12.5px;font-weight:600;color:var(--navy);text-decoration:none;}}
+.cmp-full-link:hover{{text-decoration:underline;}}
+"""
 
 
 # CFO Toolbox logo rendering (Phase F) — turns a tools.logo_path/
@@ -6836,6 +6968,17 @@ def tools_software_compare(request: Request, ids: str = ""):
             t = lib.get_tool(tid)
             if t and t.get("approved"):
                 tools.append(t)
+        # Citations and competitors, fetched once per tool up front — the
+        # serializer (linklib.compare) is pure data, it never touches the DB
+        # itself. Only description/agent_taxonomy have a real Citations-API
+        # grounding mechanism (competitive_differentiation doesn't, per
+        # CLAUDE.md), so those are the only two field names fetched.
+        citations = {}
+        competitors = {}
+        for t in tools:
+            citations[(t["id"], "description")] = lib.get_entity_citations("tool", t["id"], "description")
+            citations[(t["id"], "agent_taxonomy")] = lib.get_entity_citations("tool", t["id"], "agent_taxonomy")
+            competitors[t["id"]] = lib.list_tool_competitors(t["id"])
     finally:
         lib.close()
 
@@ -6851,151 +6994,88 @@ to compare them side by side. Check the box on any card, then use the compare ba
 </div>"""
         return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
-    def _cell(text: str, empty_label: str = "Not yet available.") -> str:
-        text = (text or "").strip()
-        if not text:
-            return f'<td class="cc-cell cc-empty">{_esc(empty_label)}</td>'
-        return f'<td class="cc-cell">{_esc(text)}</td>'
+    _compare_authed = _is_authed(request)
+    entities, tag_diff = compare.build_software_compare(tools, citations, competitors)
 
     header_cells = "".join(
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
-    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if t.get('promoted') else ''}
-    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if t.get('advisor') else ''}
+    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if e.promoted else ''}
+    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if e.advisor else ''}
   </div>
-  <a href="/tools/software/{_esc(t['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(t['name'])}</a>
+  <a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(e.name)}</a>
 </th>'''
-        for t in tools
+        for e in entities
     )
 
-    def _row(label: str, values: list[str], empty_label: str = "Not yet available.") -> str:
-        if not gates.any_populated(values):
-            return ""
-        return (f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>'
-                + "".join(_cell(v, empty_label) for v in values) + "</tr>")
+    key_facts_row = (
+        '<tr><td class="cc-cell cc-section" colspan="' + str(len(entities) + 1) + '">Key facts</td></tr>'
+        '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(f'<td class="cc-cell">{_cmp_key_facts_cell_html(e, tag_diff)}</td>' for e in entities)
+        + "</tr>"
+    )
 
-    tags_row = _row("Tags", [", ".join(t.get("categories") or []) for t in tools])
-
-    # AI/agent involvement gets its own section, same visual weight as
-    # Features, rather than sitting alongside Description/How this differs
-    # as just another text field — this is a comparison dimension buyers
-    # increasingly ask about first, not an afterthought. An empty value is
-    # "not documented yet," never treated as "this vendor has no agent
-    # capability" — the same sparse-data honesty rule as Features' "Not
-    # tracked yet."
-    _compare_authed = _is_authed(request)
-
-    def _agent_cell(t: dict) -> str:
-        return _compare_cell_html(
-            t.get("agent_taxonomy_note"),
-            bool(t.get("agent_taxonomy_needs_verification")),
-            _compare_authed,
-            gates.COMPARE_EMPTY_LABELS["tool_agent_taxonomy"],
+    # Grouped sections (Compare Redesign Phase 1 — fixes the orphaned-header
+    # bug: every section now gets the same .cc-section teal band, not just
+    # AI / Agent involvement). Every entity's `sections` list is built by
+    # build_software_compare in the same fixed order (Description, AI /
+    # Agent involvement, Bottom line), so zipping by index is safe.
+    _section_empty_keys = ["tool_description", "tool_agent_taxonomy", "tool_differentiation"]
+    section_rows = []
+    for idx, section_title in enumerate(s.title for s in entities[0].sections):
+        empty_key = _section_empty_keys[idx]
+        cells = "".join(
+            f'<td class="cc-cell">{_cmp_section_cell_html(e.sections[idx], _compare_authed, empty_key)}</td>'
+            for e in entities
+        )
+        section_rows.append(
+            f'<tr><td class="cc-cell cc-section" colspan="{len(entities) + 1}">{_esc(section_title)}</td></tr>'
+            f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
         )
 
-    agent_row = ""
-    if gates.any_populated([t.get("agent_taxonomy_note") for t in tools]):
-        agent_row = (f'<tr><td class="cc-cell cc-label">{_esc("How agents are involved")}</td>'
-                     + "".join(_agent_cell(t) for t in tools) + "</tr>")
-    agent_section = ""
-    if agent_row:
-        agent_section = f"""<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>
-{agent_row}"""
-    else:
-        _agent_empty_label = gates.COMPARE_EMPTY_LABELS["tool_agent_taxonomy"]
-        agent_section = (
-            f'<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>'
-            f'<tr><td class="cc-cell cc-label"></td>'
-            + "".join(f'<td class="cc-cell cc-empty">{_esc(_agent_empty_label)}</td>' for _ in tools) + "</tr>"
+    competitors_row = (
+        '<tr><td class="cc-cell cc-section" colspan="' + str(len(entities) + 1) + '">Competitors</td></tr>'
+        '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(
+            f'<td class="cc-cell">{_cmp_chip_list_html(e.chip_lists[0], _compare_authed)}</td>'
+            for e in entities
         )
+        + "</tr>"
+    )
 
-    def _desc_cell(t: dict) -> str:
-        return _compare_cell_html(
-            t.get("summary") or t.get("description"),
-            bool(t.get("description_needs_verification")),
-            _compare_authed,
-            gates.COMPARE_EMPTY_LABELS["tool_description"],
+    full_profile_row = (
+        '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(
+            f'<td class="cc-cell"><a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" '
+            f'class="cmp-full-link">Full profile &rarr;</a></td>'
+            for e in entities
         )
-
-    description_row = ""
-    if gates.any_populated([t.get("summary") or t.get("description") for t in tools]):
-        description_row = (f'<tr><td class="cc-cell cc-label">{_esc("Description")}</td>'
-                            + "".join(_desc_cell(t) for t in tools) + "</tr>")
-
-    def _diff_cell(t: dict) -> str:
-        # Competitive differentiation ("How this differs") previously used
-        # the generic _row/_cell helpers below with no review-gate logic at
-        # all — the one field that rendered an unverified draft identically
-        # to a verified one, to every viewer, with no badge for anyone. Now
-        # brought in line with Agent taxonomy/Description above via the
-        # same shared _compare_cell_html.
-        return _compare_cell_html(
-            t.get("competitive_differentiation"),
-            bool(t.get("competitive_differentiation_needs_verification")),
-            _compare_authed,
-            gates.COMPARE_EMPTY_LABELS["tool_differentiation"],
-        )
-
-    differentiation_row = ""
-    if gates.any_populated([t.get("competitive_differentiation") for t in tools]):
-        differentiation_row = (f'<tr><td class="cc-cell cc-label">{_esc("How this differs")}</td>'
-                                + "".join(_diff_cell(t) for t in tools) + "</tr>")
-
-    other_rows = description_row + differentiation_row
-
-    # Legacy tool_features-driven Features comparison row was removed here
-    # (Feature Taxonomy Phase 1b PR 2 legacy retirement) rather than migrated
-    # to the governed tool_feature_links model — a governed-model Compare
-    # view is deliberately later/out-of-scope work (docs/BUILD_PLAN.md Phase
-    # 8), not something this retirement PR builds. The public profile page's
-    # "Key features" card (_software_key_features_card) is the only public
-    # rendering surface for tool_feature_links today.
+        + "</tr>"
+    )
 
     body = f"""<div class="page page-grid">
 {back_link}
 <h1 style="margin:0;">Compare software</h1>
-<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Side by side, the same fields you'd see on each
-tool's own profile page, including how (and whether) AI agents are actually involved—not just a tagline, since
-that's increasingly a deciding factor. Rows still marked
-<span class="cc-verify">unverified</span> came from an LLM first pass and haven't been confirmed yet.</p>
+<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">A quick read on overlap and contrast across
+{len(entities)} tools&mdash;not the full profile. Click a name, or "Full profile," to read the whole thing.
+Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
+confirmed yet.</p>
 
 <div style="overflow-x:auto;">
 <table class="cc-table">
 <thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
 <tbody>
-{tags_row}
-{agent_section}
-{other_rows}
+{key_facts_row}
+{"".join(section_rows)}
+{competitors_row}
+{full_profile_row}
 </tbody>
 </table>
 </div>
 </div>
 
 <style>
-.cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
-.cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
-  color:var(--ink-soft);line-height:1.55;min-width:200px;}}
-.cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  min-width:140px;white-space:nowrap;background:var(--bg);}}
-.cc-empty{{color:var(--muted);font-style:italic;}}
-.cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);
-  background:var(--seafoam);padding:8px 16px;}}
-/* Brand-consistency pass (2026-08): was #92400e/#fef3c7 (off-palette amber)
-   — recolored to --coral-wash bg + --navy text (navy, not coral-deep,
-   because BRAND.md's own mechanical CI check bans coral/coral-deep text
-   under 18px — same sanctioned coral-wash+navy callout pairing), the same
-   small per-field
-   "unverified" badge language used everywhere this concept renders
-   (.tp-verify, .tool-desc-verify, the Communities compare page's own
-   .cc-verify below), deliberately distinct in size/shape from the larger
-   pill-shaped whole-record _review_status_pill_html so the two read as
-   different signal types even though they now share one color rule. */
-.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
-  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
-thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
-.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
-.comm-name:hover{{color:var(--accent);}}
-.tool-star{{font-size:14px;color:#b8860b;}}
+{_CMP_SHARED_CSS}
 </style>"""
     return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
@@ -8580,46 +8660,24 @@ renderCommunities(ALL_COMMUNITIES);
 def _community_geo_line(c: dict) -> str:
     """Python mirror of the /tools/communities card's commGeoLine JS helper,
     for server-rendering the same geography summary on the profile page.
-    An unresearched reach must return the verification flag rather than
-    falling through to the "no local_markets" branch below, which would
-    otherwise render a guessed "National · online" as if it were confirmed."""
-    if c.get("reach") == _NEEDS_VERIFICATION:
-        return "Needs verification"
-    local_markets = (c.get("local_markets") or "").strip()
-    reach = c.get("reach") or "National"
-    if reach == "Regional":
-        return local_markets if local_markets else "Regional"
-    if not local_markets:
-        return "Global" if reach == "Global" else "National · online"
-    return f"{reach} · {local_markets}"
+    Compare Redesign Phase 1 moved the actual logic to
+    `linklib.compare.community_geo_line` (a pure function over a community
+    dict, no reason for it to be webapp-private) so the profile page and
+    Compare's Key facts band can never drift apart — this stays as a thin
+    re-export for the one pre-existing call site below, translating the
+    shared module's raw `NEEDS_VERIFICATION` sentinel back into this
+    function's own pre-existing "Needs verification" return value."""
+    line = compare.community_geo_line(c)
+    return "Needs verification" if line == _NEEDS_VERIFICATION else line
 
 
-# The deep profile fields, in the order the public page presents them —
-# verdict up top as the scannable takeaway, then fit, then the practical
-# details. (label, key, is_multiline) — founded_year is handled separately
-# since it's numeric, not a text block.
-_COMMUNITY_PROFILE_PUBLIC_FIELDS = [
-    ("Ideal member", "ideal_member"),
-    ("Who should skip it", "anti_fit"),
-    ("Value proposition", "value_prop"),
-    ("Format, in practice", "format_reality"),
-    ("Engagement level", "engagement_level"),
-    ("Cost vs. value", "cost_value_verdict"),
-    ("Application friction", "application_friction"),
-    ("Sponsor relationship", "sponsor_relationship_note"),
-    ("Business model", "business_model"),
-    ("Notable members", "notable_members"),
-    ("Public criticism", "public_criticism"),
-]
-
-
-# Themed grouping for the redesigned Communities profile page (Phase 3b) —
-# _COMMUNITY_PROFILE_PUBLIC_FIELDS above stays untouched and is still used
-# by the old /tools/communities/compare page (a flat label/value table,
-# Phase 8.5's job to rebuild, not this phase's). Fourteen flat sections read
-# as a wall of text regardless of how many cards they're split across, so
-# this groups them by theme instead — four cards, each with real breathing
-# room, mirroring the Software profile page's one-concept-per-card pattern.
+# Themed grouping for the Community profile page (Phase 3b) and Compare
+# (Compare Redesign Phase 1 — the old flat _COMMUNITY_PROFILE_PUBLIC_FIELDS
+# list this constant's own comment used to call out as "Phase 8.5's job to
+# rebuild" is gone; Compare now groups by this same theme, not a flat list).
+# Moved to linklib/compare.py (COMMUNITY_PROFILE_GROUPS) so the profile page
+# and Compare share one definition instead of two that could drift — this
+# name stays as a local alias for the one pre-existing call site below.
 # event_style has no row of its own — merged into "Format, in practice"
 # text at render time, since it's texture on that fact, not a new one.
 # platform_type/meeting_format fold into the Details card's Format row
@@ -8628,30 +8686,7 @@ _COMMUNITY_PROFILE_PUBLIC_FIELDS = [
 # _community_details_card. Notable members / Public criticism don't name-match
 # either of Brian's four groups perfectly; placed here as the closest
 # semantic fit (social proof / trade-off caveat).
-_COMMUNITY_PROFILE_GROUPS = [
-    ("Who it's for", [
-        ("Ideal member", "ideal_member"),
-        ("Who should skip it", "anti_fit"),
-        ("Who it targets", "seniority_band"),
-    ]),
-    ("What you get", [
-        ("Value proposition", "value_prop"),
-        ("Primary purpose", "primary_purpose"),
-        ("Resources included", "resources_included"),
-        ("Notable members", "notable_members"),
-    ]),
-    ("How it works", [
-        ("Format, in practice", "format_reality"),
-        ("Engagement level", "engagement_level"),
-        ("Application friction", "application_friction"),
-    ]),
-    ("Cost & structure", [
-        ("Cost vs. value", "cost_value_verdict"),
-        ("Sponsor relationship", "sponsor_relationship_note"),
-        ("Business model", "business_model"),
-        ("Public criticism", "public_criticism"),
-    ]),
-]
+_COMMUNITY_PROFILE_GROUPS = compare.COMMUNITY_PROFILE_GROUPS
 
 
 # Native gap-collection form (Phase 5): replaces the old /community
@@ -8923,19 +8958,15 @@ def tools_communities_compare(request: Request, ids: str = ""):
             if c and c.get("approved"):
                 communities.append(c)
         profiles = {c["id"]: (lib.get_community_profile(c["id"]) or {}) for c in communities}
+        # Communities' Citations-API grounding fix is ONE shared citation
+        # set for the whole 23-field draft (field_name="community_profile"),
+        # not one per field — same as the profile page's single Sources
+        # list. Similar communities is the profile page's own curated
+        # cross-link list, reused verbatim.
+        citations = {c["id"]: lib.get_entity_citations("community", c["id"], "community_profile") for c in communities}
+        similar = {c["id"]: lib.list_community_competitors(c["id"]) for c in communities}
     finally:
         lib.close()
-
-    # Radical-transparency review standard (same whole-profile flag as
-    # /tools/communities/{slug}, applied the same way): `needs_review=1`
-    # used to hide that community's ENTIRE profile draft from a public
-    # visitor here — display_profiles swapped to {} for them. It now always
-    # shows every field to every viewer; `_profile_unverified_ids` still
-    # tracks which communities carry an unreviewed profile so `_profile_cell`
-    # below can badge them ("under review" for a visitor, "unverified,
-    # visible to visitors" for an admin) instead of hiding anything.
-    _profile_unverified_ids = {cid for cid, p in profiles.items() if p.get("needs_review")}
-    display_profiles = profiles
 
     back_link = '<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>'
 
@@ -8949,125 +8980,89 @@ to compare them side by side. Check the box on any card, then use the compare ba
 </div>"""
         return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
-    def _cell(text: str) -> str:
-        text = (text or "").strip()
-        if not text:
-            return '<td class="cc-cell cc-empty">Not yet available.</td>'
-        if text == _NEEDS_VERIFICATION:
-            return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
-        return f'<td class="cc-cell">{_esc(text)}</td>'
-
-    def _cost_badge(c: dict) -> str:
-        if c["cost_band"] == _NEEDS_VERIFICATION:
-            return '<span class="comm-verify" style="display:inline-block;margin-top:6px;">Needs verification</span>'
-        return f'<span class="comm-cost" style="display:inline-block;margin-top:6px;">{_esc(c["cost_band"])}</span>'
+    entities, tag_diff = compare.build_communities_compare(communities, profiles, citations, similar)
 
     header_cells = "".join(
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
-    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if c.get('featured') else ''}
-    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if c.get('advisor') else ''}
+    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if e.promoted else ''}
+    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if e.advisor else ''}
   </div>
-  <a href="/tools/communities/{_esc(c['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(c['name'])}</a>
-  {_cost_badge(c)}
+  <a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(e.name)}</a>
 </th>'''
-        for c in communities
+        for e in entities
     )
 
-    def _row(label: str, values: list[str]) -> str:
-        if not gates.any_populated(values):
-            return ""
-        return f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>' + "".join(_cell(v) for v in values) + "</tr>"
-
-    directory_rows = (
-        _row("Region", [_community_geo_line(c) for c in communities])
-        + _row("Access", [c.get("access", "") for c in communities])
-        + _row("Sponsor", [
-            (c["sponsorship_type"] + (f" ({c['sponsor_name']})" if c.get("sponsor_name") else ""))
-            if c.get("sponsorship_type") else ""
-            for c in communities
-        ])
-        + _row("Cost detail", [c.get("cost_note", "") for c in communities])
+    key_facts_row = (
+        '<tr><td class="cc-cell cc-section" colspan="' + str(len(entities) + 1) + '">Key facts</td></tr>'
+        '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(f'<td class="cc-cell">{_cmp_key_facts_cell_html(e, tag_diff)}</td>' for e in entities)
+        + "</tr>"
     )
 
-    def _profile_cell(text: str, unverified: bool) -> str:
-        text = (text or "").strip()
-        if text == _NEEDS_VERIFICATION:
-            return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
-        # .cc-verify (radical-transparency review badge) is a DIFFERENT
-        # concept from .comm-verify (the data-completeness flag above) —
-        # these were incorrectly sharing one style once, see the .cc-verify
-        # definition's own comment for the split; kept apart here too. The
-        # sentinel check above has to run first, before _compare_cell_html
-        # ever sees the text — that's a different gate entirely, not part
-        # of the review-state module.
-        return _compare_cell_html(
-            text, unverified, authed,
-            gates.COMPARE_EMPTY_LABELS["community_profile_field"],
-            pre_wrap=True,
-        )
-
-    def _profile_row(label: str, values: list) -> str:
-        if not gates.any_populated(values):
-            return ""
+    # Grouped sections (Compare Redesign Phase 1 — collapses the old flat
+    # 11-field list into the same 4 themed cards the profile page already
+    # groups by, per Step 0's approved plan, instead of 11 ungrouped rows).
+    # Bottom line (verdict_summary) first, then the 4 COMMUNITY_PROFILE_GROUPS
+    # themes — build_communities_compare builds this same fixed order for
+    # every entity, so zipping by index is safe.
+    _section_empty_keys = ["community_bottom_line"] + ["community_profile_group"] * len(compare.COMMUNITY_PROFILE_GROUPS)
+    section_rows = []
+    for idx, section_title in enumerate(s.title for s in entities[0].sections):
+        empty_key = _section_empty_keys[idx]
         cells = "".join(
-            _profile_cell(v, c["id"] in _profile_unverified_ids)
-            for v, c in zip(values, communities)
+            f'<td class="cc-cell">{_cmp_section_cell_html(e.sections[idx], authed, empty_key)}</td>'
+            for e in entities
         )
-        return f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>{cells}</tr>'
+        section_rows.append(
+            f'<tr><td class="cc-cell cc-section" colspan="{len(entities) + 1}">{_esc(section_title)}</td></tr>'
+            f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
+        )
 
-    profile_rows = "".join(
-        _profile_row(label, [display_profiles.get(c["id"], {}).get(key, "") for c in communities])
-        for label, key in _COMMUNITY_PROFILE_PUBLIC_FIELDS
+    similar_row = (
+        '<tr><td class="cc-cell cc-section" colspan="' + str(len(entities) + 1) + '">Similar communities</td></tr>'
+        '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(
+            f'<td class="cc-cell">{_cmp_chip_list_html(e.chip_lists[0], authed)}</td>'
+            for e in entities
+        )
+        + "</tr>"
     )
-    founded_row = _profile_row("Founded", [
-        str(display_profiles.get(c["id"], {}).get("founded_year") or "") for c in communities
-    ])
+
+    full_profile_row = (
+        '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(
+            f'<td class="cc-cell"><a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" '
+            f'class="cmp-full-link">Full profile &rarr;</a></td>'
+            for e in entities
+        )
+        + "</tr>"
+    )
 
     body = f"""<div class="page page-grid">
 {back_link}
 <h1 style="margin:0;">Compare communities</h1>
-<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Side by side, the same fields you'd see on each
-community's own profile page.</p>
+<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">A quick read on overlap and contrast across
+{len(entities)} communities&mdash;not the full profile. Click a name, or "Full profile," to read the whole thing.
+Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
+confirmed yet.</p>
 
 <div style="overflow-x:auto;">
 <table class="cc-table">
 <thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
 <tbody>
-{directory_rows}
-{profile_rows}
-{founded_row}
+{key_facts_row}
+{"".join(section_rows)}
+{similar_row}
+{full_profile_row}
 </tbody>
 </table>
 </div>
 </div>
 
 <style>
-.cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
-.cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
-  color:var(--ink-soft);line-height:1.55;min-width:200px;}}
-.cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  min-width:140px;white-space:nowrap;background:var(--bg);}}
-.cc-empty{{color:var(--muted);font-style:italic;}}
-thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
-.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
-.comm-name:hover{{color:var(--navy);}}
+{_CMP_SHARED_CSS}
 .comm-star{{font-size:14px;color:#b8860b;}}
-.comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
-.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
-/* Brand-consistency pass (2026-08) — .comm-verify (above) is a DIFFERENT
-   concept from "unverified—hidden from visitors": it's the dashed/muted
-   "field was never auto-fill-researched" flag (_verify_html's
-   _NEEDS_VERIFICATION sentinel), which stays visible (not gated) and
-   deliberately quiet since it's a data-completeness note, not a
-   publish-gate warning — left untouched. _profile_cell below was
-   incorrectly reusing this same class for the OTHER, publish-gated
-   concept too (a real pre-existing bug: two different meanings sharing
-   one style). Split: this new .cc-verify is the small coral-wash/navy
-   badge every other "unverified—hidden from visitors" surface
-   uses (.tp-verify, the Software compare page's own .cc-verify, etc.). */
-.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
-  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 </style>"""
     return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
