@@ -1851,3 +1851,138 @@ def test_model_connection(model_id: str) -> dict:
     except Exception:
         cost = 0.0
     return {"ok": True, "error": "", "cost_usd": cost}
+
+
+# ---------------------------------------------------------------------------
+# Compare Redesign Phase 2 — the AI overlap/contrast summary shown above the
+# Software/Communities Compare tables. Reuses the same field text the
+# Compare page already renders (linklib.compare.CompareEntity/CompareField),
+# passed in here as plain dicts by the caller (webapp/app.py) rather than by
+# importing linklib.compare directly — that module already imports THIS one
+# (for NEEDS_VERIFICATION), so enrich.py importing compare.py back would be
+# circular. No new page fetch: the input is entirely the already-drafted
+# Description/Agent taxonomy/Bottom line (and, for Communities, the profile
+# group) text those entities already carry.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CompareSummaryDraft:
+    summary: str
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+_COMPARE_SUMMARY_PROMPT = """You are drafting a short orientation note that sits above a side-by-side
+comparison table on the CFO Toolbox, a directory read by finance leaders
+deciding between {noun}. The reader is about to scan the full table below —
+your job is a 1-3 sentence heads-up on the single most useful shape of the
+comparison, not a restatement of each entry's own description.
+
+The most useful thing you can usually say is a breadth-vs-depth distinction:
+one entry may specialize narrowly in something the other treats as one
+capability among many, or the entries may genuinely overlap closely with only
+minor differences, or they may serve different enough use cases that "compare"
+undersells how different they are. Say whichever of these is actually true
+based on the content below — don't force a breadth-vs-depth framing onto
+entries that don't have one.
+
+Hard rules:
+1. 1-3 sentences total. No headers, no bullets, no bold/italic markdown.
+2. Never recommend one over another ("X is better," "go with X") — describe
+   the shape of the difference, not a verdict. "X specializes in A; Y bundles
+   A within a broader B" is the right register. "X is better for teams that
+   need A" is not — that is you making the call, not describing a fact.
+3. Neutral, factual framing — no marketing language, no editor-facing asides
+   ("as shown above," "based on my analysis").
+4. Base this only on the content given below. Do not invent capabilities,
+   pricing, or claims not present in it.
+5. Plain prose, no markdown formatting at all — this renders as plain text.
+{voice_core}
+
+Compared {noun}:
+
+{entities_block}
+
+Write only the 1-3 sentence summary, nothing else."""
+
+
+def generate_compare_summary(entity_type: str, entities: list[dict], model: str = DEFAULT_MODEL,
+                              voice_core: str = "") -> CompareSummaryDraft | None:
+    """Draft the Compare-page overlap/contrast summary, or None if the
+    SDK/key is unavailable, voice_core is unresolved, fewer than 2 entities
+    are given, or the call fails. Never auto-saved — the caller
+    (webapp/app.py) is responsible for caching via
+    Library.set_compare_summary and logging cost via
+    Library.record_enrichment_cost, same never-auto-saved contract as every
+    other generate_* function here.
+
+    `entities` is a list of plain dicts, not linklib.compare.CompareEntity —
+    see the module comment above for why (avoiding a circular import).
+    Each dict: {"name": str, "tags": list[str], "sections": list[(label,
+    text, unverified)]}. A field with empty text should simply be omitted
+    from `sections` by the caller (nothing to summarize); `unverified` marks
+    a field whose content hasn't been human-reviewed yet, so the model can
+    hedge on it rather than presenting it as settled fact."""
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    if len(entities) < 2:
+        return None
+
+    resolved_voice_core = _resolve_voice_core(voice_core)
+    if not resolved_voice_core:
+        _logger.warning("generate_compare_summary() aborted: voice_core is empty")
+        return None
+
+    noun = "software tools" if entity_type == "tool" else "communities"
+    blocks: list[str] = []
+    for e in entities:
+        lines = [f"### {e.get('name', '')}"]
+        tags = e.get("tags") or []
+        if tags:
+            lines.append("Categories: " + ", ".join(tags))
+        for label, text, unverified in e.get("sections", []):
+            text = (text or "").strip()
+            if not text:
+                continue
+            suffix = " (unverified — human review pending)" if unverified else ""
+            lines.append(f"{label}{suffix}: {text}")
+        blocks.append("\n".join(lines))
+    entities_block = "\n\n".join(blocks)
+
+    prompt = _COMPARE_SUMMARY_PROMPT.format(
+        noun=noun, entities_block=entities_block, voice_core=resolved_voice_core,
+    )
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model,
+            max_tokens=_checked_max_tokens(MIN_GENERATE_MAX_TOKENS),
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        raw = raw.strip().removeprefix("```").removesuffix("```").strip()
+        if not raw:
+            raise ValueError("empty compare summary")
+
+        from .pricing import compute_cost
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
+        return CompareSummaryDraft(
+            summary=raw, model=model,
+            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+        )
+    except Exception as e:
+        _logger.warning("generate_compare_summary() failed: %s: %s", type(e).__name__, e)
+        return None

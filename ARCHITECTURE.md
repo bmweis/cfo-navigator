@@ -382,6 +382,8 @@ Cost figures are computed from **real API token usage** at call time
 | `community_profile_views` | Session-scoped, no-login view tracking for `/tools/communities/{slug}`: which profile pages a visitor opened before (maybe) submitting the gap form above. Keyed by an anonymous `cfo_visitor` cookie (`webapp/app.py`, 30-day TTL, not signed — the first anonymous-session primitive in the codebase; everything else, e.g. `read_later`, requires a logged-in `user_id`). No cleanup job for stale sessions yet — rows are small and carry no PII. | `session_id` + `community_id` (composite PK, dedups repeat views), `viewed_at` |
 | `field_reviews` | Review-status audit trail for every AI-drafted field on Software/Communities profiles — the standing principle that AI drafts a first pass into the edit form and nothing publishes without Brian reviewing and saving it. One generic table rather than a `{field}_reviewed_at`/`_by` column pair per field, since there are 15+ generatable fields across two record types (Software's `description`/`summary`/`competitive_differentiation`, Communities' full narrative profile) and more likely to come later. Written by `Library.record_field_review`, called from an edit-submit route whenever the submitted form's `ai_drafted_fields` hidden input names a field — that input is populated client-side by `markAiDrafted()` inside each Generate button's success handler (`_MARK_AI_DRAFTED_JS`, shared across every generate-button script), never inferred from content after the fact. Read by `Library.list_field_reviews` for a future "last reviewed" admin display. Cleaned up on delete alongside `tools`/`communities` rows, no SQL-level FK (same pattern as `community_profiles`). | `entity_type` (`'tool'`\|`'community'`), `entity_id`, `field_name` (composite PK), `reviewed_at`, `reviewed_by` (stored even though there's only one admin today, so the schema doesn't need revisiting if that changes) |
 | `entity_citations` | Citations-API grounding fix, Phase 1b (2026-08) — the API-verified citation set for one AI-drafted, grounded field, shared across entity types/fields rather than a `*_citations` column per field (a per-field column would have needed migrating off when Description/Community profile joined in Phase 2/3). Composite natural key, upsert-on-write (current state, not an append-only log the way `narrative_review_log` is — a fresh draft replaces the row wholesale). `citations_json` always holds the FULL deduped-by-url list, uncapped; a 5-source display cap is a render-time-only slice (`webapp.app._citations_list_html(cap=5)` on the public profile page; the admin edit page passes no cap, rendered next to the "Mark verified" action so a reviewer sees every source before publishing). Written by `Library.set_entity_citations` (direct write, not COALESCE'd — a fresh draft's citations always replace a stale prior draft's) from `webapp.app._run_tool_research` alongside every fresh `agent_taxonomy_note` draft; cleared by `Library.clear_entity_citations`, called from `update_tool_agent_taxonomy` when a human hand-edits the field (no citation trace to keep). `entity_type='tool'`/`field_name='agent_taxonomy'` since Phase 1b; `field_name='description'` joined in Phase 2 (2026-08) — written/cleared from the `/tools/software/{slug}/edit` and `/admin/tools/software/new` submit routes instead of a server-side refresh route, since Description's Generate call is stateless AJAX with no `tool_id` at draft time (see the Description grounding fix bullet above for the full browser-round-trip + server-side revalidation mechanism); `'community'`/`'community_profile'` still pending for Phase 3 as one shared row per profile draft (not per-field), per the "one shared citation set per profile" decision. **`Library.delete_tool`'s cascade fix (2026-08, see the `tool_audit_log` row above) deletes a deleted tool's `entity_type='tool'` rows here** rather than leaving them orphaned. | `entity_type`, `entity_id`, `field_name` (composite PK), `citations_json` (`[{n, title, url, type}]`, `'[]'` default), `model` + `generated_at` (the generation run reference — no separate run/log table, since nothing else in this codebase has a run-id concept to reference instead) |
+| `compare_summary_cache` | Compare Redesign Phase 2 (2026-09) — permanent cache for the AI overlap/contrast summary shown above the Software/Communities Compare tables. Composite natural key `(entity_type, entity_ids, content_hash)` — `entity_ids` is a sorted, comma-joined list of the compared entities' ids; `content_hash` (`Library.compare_summary_content_hash`, sha256) is computed over every included field's label+text (never the unverified flag), so an edit to any compared entity's underlying content misses the cache on the next view with no separate invalidation mechanism. Upsert-on-write via `Library.set_compare_summary`, which also runs the stored summary through the same `linklib.voice_mechanics.normalize_voice_mechanics` backstop every other prose-capable `Library` write applies. No `has_unverified` column — that disclosure is computed live at render time from the current entities' `gates.GateState`, deliberately decoupled from this cache key (see the Compare Redesign Phase 2 bullet above). | `entity_type` (`'tool'`\|`'community'`), `entity_ids`, `content_hash` (composite PK), `summary`, `model`, `input_tokens`, `output_tokens`, `cost_usd` (also summed by `Library.compare_summary_cost_today` against the shared daily generation cap), `created_at` |
+| `compare_summary_feedback` | Compare Redesign Phase 2 — a minimal, manually-reviewed flag on one cached comparison summary. `summary_text` snapshots the flagged summary verbatim so `/admin/compare-summary-feedback`'s review list still shows exactly what was flagged even if that cache row is later regenerated (a content edit changes the hash, which would otherwise orphan this row's context). No automated action on a submission — `reviewed_at` (blank until an admin clicks "Mark reviewed") is the only state this table tracks. | `id` (PK, autoincrement), `entity_type`, `entity_ids`, `content_hash`, `summary_text`, `note`, `created_at`, `reviewed_at` (blank = unreviewed) |
 **Phase P column rename.** `tools.differentiation_note`/`differentiation_needs_verification`
 were renamed to `competitive_differentiation`/`competitive_differentiation_needs_verification`
 (the table above already reflects the new names) to match the Software edit
@@ -2746,6 +2748,101 @@ Details worth knowing:
   for the regression coverage (tag placement, no-Key-facts-band-on-
   Software, the sticky-label markup and CSS, the swipe hint's markup and
   its localStorage-based dismiss logic).
+- **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
+  overlap/contrast summary rendered above both Compare tables, cached
+  permanently and capped by a shared daily dollar budget.** Purely
+  additive on top of Phase 1: `_cmp_summary_block_html(request, entities,
+  entity_type)` inserts one new block between each route's intro paragraph
+  and its `<table>` — no existing cell-rendering function
+  (`_cmp_section_cell_html`, `_cmp_tag_chips_html`, `_cmp_key_facts_cell_html`,
+  `_cmp_chip_list_html`) is touched, and `linklib/compare.py`/`linklib/gates.py`
+  are read-only dependencies, not modified.
+  - **Generation** (`linklib.enrich.generate_compare_summary`) reuses the
+    exact `CompareEntity`/`CompareField` data the page already built via
+    `linklib.compare.build_software_compare`/`build_communities_compare` —
+    no second DB round trip, no re-fetch. Since `linklib/compare.py`
+    already imports `linklib/enrich.py` (for `NEEDS_VERIFICATION`), the
+    reverse import would be circular, so `webapp.app._cmp_entities_for_summary`
+    converts the `CompareEntity` list into plain dicts
+    (`{"name", "tags", "sections": [(label, text, unverified)]}`, EMPTY
+    fields skipped) before handing them to the generator. The prompt (in
+    `linklib/enrich.py`) is voice-governed the same way every other
+    `generate_*` function here is — `voice_core` resolved via
+    `linklib.voice_settings.require_voice_setting`, refusing (returns
+    `None`, never raises) rather than silently falling back when the
+    setting is empty — with hard rules against ever recommending one
+    entity over another (describing the shape of a difference, e.g.
+    "specializes in A" vs. "bundles A within a broader B," is fine;
+    "X is better" is not) and against inventing anything not present in
+    the given content.
+  - **Cache** (`compare_summary_cache`, `linklib/db.py`) — permanent, no
+    TTL, keyed by `(entity_type, sorted-and-joined entity_ids,
+    content_hash)`. `content_hash` (`Library.compare_summary_content_hash`,
+    a plain sha256, no DB access) is computed over every included field's
+    label+text (and tags) — never over the unverified flag — so an edit to
+    any compared entity's underlying fields changes the hash and misses
+    the cache on the next view, with no separate invalidation mechanism.
+    `Library.set_compare_summary` runs the stored summary through the same
+    `linklib.voice_mechanics.normalize_voice_mechanics` backstop every
+    other prose-capable `Library` write applies before persisting.
+    **`has_unverified` (the footnote's unverified-content disclosure) is
+    deliberately NOT part of the cache row or the cache key** — per
+    Brian's explicit approval during Step 0, it's computed live at render
+    time from the CURRENT entities' `gates.GateState`, decoupled from the
+    content hash: a verify-only action (no text edit) can't miss the cache
+    and force a wasteful regen, but the footnote still reflects today's
+    real review state rather than whatever it was at generation time.
+  - **Cost cap**: a global, shared daily dollar budget (`settings` key
+    `compare_summary_default_cap_usd`, `Library.get_default_compare_summary_cap`/
+    `set_default_compare_summary_cap`, default $2.00), same
+    settings-backed pattern as `get_default_ask_cap`/
+    `get_default_matchmaker_cap` — deliberately NOT a per-user cap like
+    those two, since this is one shared cached resource everyone reads,
+    not a per-visitor cost. `Library.compare_summary_cost_today` sums
+    `compare_summary_cache.cost_usd` since the current UTC calendar day.
+    On cap hit: generation is skipped (never attempted) and the block
+    renders a labeled, dashed-border note instead
+    ("Comparison summary temporarily unavailable—daily budget reached.
+    Check back tomorrow.") — the page itself always renders normally,
+    cap hit or not. Every other unavailability reason (missing SDK/key,
+    `voice_core` empty, fewer than 2 approved entities, a generation
+    exception, an empty response) omits the block entirely and silently —
+    only the cap-hit case has approved copy for a visible message. The
+    whole function is wrapped in a bare `except Exception: return ""` at
+    the top level, so a failure anywhere in this path can never take down
+    the Compare page itself (requirement: "never fail the page; the
+    summary is additive").
+  - **Cost logging**: `Library.record_enrichment_cost(None, ...)` on every
+    real generation call, the same convention Description/Agent
+    taxonomy/Community profile generation already use (`article_id=None`
+    for non-article generation).
+  - **Footnote** (exact copy, Brian-approved, no further sign-off needed):
+    "AI-generated summary, not human-verified. Flag an issue" when every
+    included field is verified; "AI-generated summary, not human-verified.
+    Includes catalog content still under review. Flag an issue" when at
+    least one isn't — split into a prefix constant
+    (`_CMP_SUMMARY_FOOTNOTE_PREFIX`/`_CMP_SUMMARY_FOOTNOTE_PREFIX_VERIFIED`)
+    plus a hardcoded "Flag an issue" link label, so the link only ever
+    wraps that exact trailing phrase.
+  - **Feedback** (`compare_summary_feedback`, `linklib/db.py`) — a minimal
+    stored-submission mechanism: what was flagged (`entity_type`/
+    `entity_ids`/`content_hash`, plus a `summary_text` snapshot so the
+    admin list still shows what was flagged even if the cache row is later
+    regenerated), optional free text (`note`). `GET`/`POST
+    /compare-summary/feedback` are public, no token/login required — same
+    trust level as `/contact` (a stored free-text note reviewed by hand,
+    nothing that costs money or changes anything on submit). No automated
+    action on a submission — `/admin/compare-summary-feedback` is a plain
+    list-with-mark-reviewed admin page, badged in the admin hub's CFO
+    Toolbox group (`webapp.tasks.open_task_counts`) the same way every
+    other pending-review queue in this codebase is.
+  See `tests/test_enrich_compare_summary.py` (generation: SDK/key/voice-core/
+  entity-count guards, cost accounting, the unverified marker reaching the
+  prompt) and `tests/test_compare_summary.py` (cache round-trip/upsert/
+  content-hash sensitivity, the em-dash backstop, the daily cap, cost
+  logging, live-computed `has_unverified` surviving a cache hit, the
+  feedback submit + admin review flow, the open-task badge) for the
+  regression coverage.
 - **Citation-tag investigation + generation-path fix (2026-08) — supersedes
   Phase 1b/2's `inject_markers=False` decision for Agent taxonomy and
   Description; Community profile (Phase 3) is unchanged and still on the
