@@ -154,7 +154,7 @@ def test_compare_groups_fields_into_the_four_profile_page_themes(env):
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
     for title in ("Key facts", "Bottom line", "Who it's for", "What you get", "How it works",
                   "Cost &amp; structure", "Similar communities"):
-        assert f'cc-section" colspan="3">{title}</td>' in r.text, title
+        assert f'cc-section" colspan="3"><span class="cmp-sticky-label">{title}</span></td>' in r.text, title
 
 
 def test_compare_whole_group_empty_shows_group_placeholder(env):
@@ -188,7 +188,10 @@ def test_compare_populated_group_shows_tier2_for_missing_subfield(env):
     assert "No details available." in r.text
 
 
-def test_compare_key_facts_band_shows_region_access_sponsor_cost_and_tags(env):
+def test_compare_key_facts_band_shows_region_access_sponsor_cost(env):
+    """Compare Redesign Phase 1 follow-up: tags moved out of Key facts into
+    the header row (see test_compare_tags_render_under_entity_name_in_header
+    below) — this band now holds only Region/Access/Sponsor/Cost/Founded."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     c1 = lib.add_community("Community One", "https://example.com/one", "Finance leaders", "<$1k/yr",
@@ -200,8 +203,65 @@ def test_compare_key_facts_band_shows_region_access_sponsor_cost_and_tags(env):
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
     assert "Invite-only" in r.text
     assert "&lt;$1k/yr" in r.text
-    assert '<span class="cmp-tag cmp-tag-shared">FP&amp;A</span>' in r.text
+    assert 'cc-section" colspan="3"><span class="cmp-sticky-label">Key facts</span></td>' in r.text  # Communities keeps this band, unlike Software
+
+
+def test_compare_tags_render_under_entity_name_in_header(env):
+    """Tags moved out of Key facts and into the header row, directly under
+    each entity's name — same shared/unique chip treatment, new location."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    c1 = lib.add_community("Community One", "https://example.com/one", "Finance leaders", "<$1k/yr",
+                            ["FP&A", "CFO"], access="Invite-only", approved=1)
+    c2 = lib.add_community("Community Two", "https://example.com/two", "Finance leaders", "Free",
+                            ["FP&A"], access="Open", approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
+    name_idx = r.text.index('>Community One</a>')
+    tag_idx = r.text.index('<span class="cmp-tag cmp-tag-shared">FP&amp;A</span>')
+    assert name_idx < tag_idx < name_idx + 400
     assert '<span class="cmp-tag cmp-tag-unique">CFO</span>' in r.text
+
+
+def test_compare_mobile_sticky_section_label_css(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    c1 = lib.add_community("Community One", "https://example.com/one", "Finance leaders", "Free", [], approved=1)
+    c2 = lib.add_community("Community Two", "https://example.com/two", "Finance leaders", "Free", [], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
+    assert "@media (max-width:700px)" in r.text
+    assert ".cmp-sticky-label{position:sticky;left:16px;" in r.text
+    assert '<span class="cmp-sticky-label">Description</span>' in r.text or \
+           '<span class="cmp-sticky-label">Bottom line</span>' in r.text
+
+
+def test_compare_swipe_hint_present_and_not_styled_like_a_link(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    c1 = lib.add_community("Community One", "https://example.com/one", "Finance leaders", "Free", [], approved=1)
+    c2 = lib.add_community("Community Two", "https://example.com/two", "Finance leaders", "Free", [], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
+    assert '<div class="cmp-swipe-hint" id="cmp-swipe-hint">' in r.text
+    assert "Swipe to compare" in r.text
+    assert 'id="cmp-scroll-wrap"' in r.text
+
+
+def test_compare_swipe_hint_dismiss_js_uses_localstorage(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    c1 = lib.add_community("Community One", "https://example.com/one", "Finance leaders", "Free", [], approved=1)
+    c2 = lib.add_community("Community Two", "https://example.com/two", "Finance leaders", "Free", [], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
+    assert "cmp_swipe_hint_seen" in r.text
+    assert "localStorage.getItem(KEY)" in r.text
+    assert "localStorage.setItem(KEY, '1')" in r.text
 
 
 def test_compare_key_fact_needs_verification_sentinel_shows_badge(env):

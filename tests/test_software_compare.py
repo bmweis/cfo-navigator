@@ -162,9 +162,11 @@ def test_compare_gives_agent_involvement_its_own_section(env):
 
 def test_compare_every_section_gets_a_real_header_band(env):
     """Regression for the orphaned-header bug: previously only "AI / Agent
-    involvement" got a .cc-section teal band; Description/Bottom line/Key
-    facts/Competitors floated with no visual hierarchy. Now every section
-    shares the identical band treatment."""
+    involvement" got a .cc-section teal band; Description/Bottom line/
+    Competitors floated with no visual hierarchy. Now every section shares
+    the identical band treatment. (Key facts is Software's tags-only band
+    from the initial Compare Redesign Phase 1 build — it was retired once
+    tags moved into the header row; see test_compare_no_key_facts_band.)"""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -172,8 +174,105 @@ def test_compare_every_section_gets_a_real_header_band(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
-    for title in ("Key facts", "Description", "AI / Agent involvement", "Bottom line", "Competitors"):
-        assert f'cc-section" colspan="3">{title}</td>' in r.text, title
+    for title in ("Description", "AI / Agent involvement", "Bottom line", "Competitors"):
+        assert f'cc-section" colspan="3"><span class="cmp-sticky-label">{title}</span></td>' in r.text, title
+
+
+def test_compare_no_key_facts_band(env):
+    """Compare Redesign Phase 1 follow-up: once tags moved into the header
+    row, Software had nothing left for a Key facts band, so it's retired
+    outright — unlike Communities, which keeps its own (Region/Access/
+    Sponsor/Cost), Software's page has no "Key facts" section at all."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert 'cc-section" colspan="3"><span class="cmp-sticky-label">Key facts</span></td>' not in r.text
+
+
+def test_compare_tags_render_under_entity_name_in_header(env):
+    """Tags moved out of Key facts and into the header row, directly under
+    each entity's name — same shared/unique chip treatment, new location."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A", "ERP"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    name_idx = r.text.index('>Runway</a>')
+    tag_idx = r.text.index('<span class="cmp-tag cmp-tag-shared">FP&amp;A</span>')
+    # The shared tag chip must appear in the DOM shortly after Runway's own
+    # name link (inside the same header <th>), not down in a separate band.
+    assert name_idx < tag_idx < name_idx + 400
+    assert '<span class="cmp-tag cmp-tag-unique">ERP</span>' in r.text
+
+
+def test_compare_no_tags_no_empty_tag_row(env):
+    """An entity with no tags at all renders no .cmp-tag-row markup —
+    _cmp_tag_chips_html returns "" rather than an empty wrapper div."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", [], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert '<div class="cmp-tag-row">' not in r.text
+
+
+def test_compare_mobile_sticky_section_label_css(env):
+    """Mobile follow-up: the .cc-label column (every row's field name, plus
+    the blank corner cell) gets position:sticky below the 700px breakpoint,
+    so swiping to a second/third entity never loses the row's own label."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "@media (max-width:700px)" in r.text
+    assert ".cmp-sticky-label{position:sticky;left:16px;" in r.text
+    assert '<span class="cmp-sticky-label">Description</span>' in r.text or \
+           '<span class="cmp-sticky-label">Bottom line</span>' in r.text
+
+
+def test_compare_swipe_hint_present_and_not_styled_like_a_link(env):
+    """The swipe hint is a passive affordance, deliberately not styled like
+    this page's own "Full profile →" link (navy, bold) — muted text, a
+    two-directional icon, no href, no cmp-full-link class anywhere near it."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert '<div class="cmp-swipe-hint" id="cmp-swipe-hint">' in r.text
+    assert "Swipe to compare" in r.text
+    assert "<a " not in r.text[r.text.index('id="cmp-swipe-hint"'):r.text.index("Swipe to compare")]
+    assert 'id="cmp-scroll-wrap"' in r.text
+
+
+def test_compare_swipe_hint_dismiss_js_uses_localstorage(env):
+    """The dismiss-on-first-scroll logic follows this codebase's existing
+    plain-localStorage convention (reader-fs, cfo_admin_cols_*, the play
+    high-score keys) — no new persistence mechanism invented."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "cmp_swipe_hint_seen" in r.text
+    assert "localStorage.getItem(KEY)" in r.text
+    assert "localStorage.setItem(KEY, '1')" in r.text
+    assert "addEventListener('scroll'" in r.text
 
 
 def test_compare_differentiation_renamed_to_bottom_line(env):
@@ -193,18 +292,6 @@ def test_compare_differentiation_renamed_to_bottom_line(env):
     assert "Bottom line" in r.text
     assert "How this differs" not in r.text
     assert "Keeps teams in a native workflow." in r.text
-
-
-def test_compare_key_facts_band_shows_shared_and_unique_tags(env):
-    from linklib.db import Library
-    lib = Library(os.environ["LINKLIB_DB"])
-    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A", "ERP"], approved=1)
-    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
-    lib.close()
-
-    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
-    assert '<span class="cmp-tag cmp-tag-shared">FP&amp;A</span>' in r.text
-    assert '<span class="cmp-tag cmp-tag-unique">ERP</span>' in r.text
 
 
 def test_compare_narrative_field_gets_clamp_class_and_preserves_line_breaks(env):

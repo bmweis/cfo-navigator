@@ -1816,6 +1816,27 @@ def _cmp_section_cell_html(section: "compare.CompareSection", authed: bool, empt
     return "".join(parts)
 
 
+def _cmp_section_band_row_html(title: str, n_entities: int) -> str:
+    """One full-width `.cc-section` band row (Key facts / Description /
+    AI / Agent involvement / Bottom line / Competitors / Similar
+    communities / a Community profile group). Mobile follow-up: the title
+    is wrapped in a `.cmp-sticky-label` inner span, not just given to the
+    plain `<td>` — this table has no separate per-row label COLUMN the way
+    the pre-redesign flat-row table did (that text now lives entirely in
+    this band, which spans every column via `colspan`), so on a narrow
+    viewport a plain band scrolls its own title out of view exactly like
+    every other cell the moment the visitor swipes right to see a second
+    entity — the real shape of the "you lose the label while comparing"
+    bug, traced by comparing a real before/after-scroll screenshot rather
+    than assumed from the ticket's own description of a literal label
+    column (this layout doesn't have one; the band *is* the label here).
+    The inner span sticks to the scroll container's left edge instead, so
+    "Description"/"AI / Agent involvement"/etc. stays on screen the whole
+    time a visitor is swiping between entities."""
+    return (f'<tr><td class="cc-cell cc-section" colspan="{n_entities + 1}">'
+            f'<span class="cmp-sticky-label">{_esc(title)}</span></td></tr>')
+
+
 def _cmp_chip_list_html(chips: "compare.CompareChipList", authed: bool) -> str:
     if not chips.items:
         return _cmp_empty_html(chips.empty_copy_key, authed)
@@ -1825,23 +1846,33 @@ def _cmp_chip_list_html(chips: "compare.CompareChipList", authed: bool) -> str:
     ) + '</div>'
 
 
-def _cmp_key_facts_cell_html(entity: "compare.CompareEntity", diff: "compare.CompareTagDiff") -> str:
-    """The Key facts band's one `<td>` per entity — shared-vs-unique tag
-    chips (Compare Redesign Phase 1: shared tags across every compared
-    entity get a solid seafoam fill, an entity's own unique tags get a
-    seafoam outline, so overlap and contrast are visible at a glance
-    without reading every pill) plus, for Communities, the small
-    Region/Access/Sponsor/Cost/Founded facts — bundled into ONE row instead
-    of five separate ones, so Key facts reads as a compact summary band,
-    not another wall of lonely rows."""
-    parts = []
+def _cmp_tag_chips_html(entity: "compare.CompareEntity", diff: "compare.CompareTagDiff") -> str:
+    """Shared-vs-unique category tag chips (shared tags across every
+    compared entity get a solid seafoam fill, an entity's own unique tags
+    get a seafoam outline, so overlap and contrast are visible at a glance
+    without reading every pill) — Compare Redesign Phase 1 follow-up: moved
+    out of the Key facts band into the header row, directly under each
+    entity's name, since a category tag is an identity fact about the
+    entity, not a "key fact" row alongside Region/Access/Cost. Returns ""
+    when the entity has no tags at all, so a caller can skip the wrapping
+    markup entirely rather than rendering an empty row."""
     shared_set = set(diff.shared)
     tag_chips = "".join(f'<span class="cmp-tag cmp-tag-shared">{_esc(t)}</span>'
                          for t in entity.tags if t in shared_set)
     tag_chips += "".join(f'<span class="cmp-tag cmp-tag-unique">{_esc(t)}</span>'
                           for t in diff.unique.get(entity.id, []))
-    if tag_chips:
-        parts.append(f'<div class="cmp-tag-row">{tag_chips}</div>')
+    return f'<div class="cmp-tag-row">{tag_chips}</div>' if tag_chips else ""
+
+
+def _cmp_key_facts_cell_html(entity: "compare.CompareEntity") -> str:
+    """The Key facts band's one `<td>` per entity — Communities' small
+    Region/Access/Sponsor/Cost/Founded facts, bundled into ONE row instead
+    of five separate ones so Key facts reads as a compact summary band, not
+    another wall of lonely rows. Tags moved out of this band (Compare
+    Redesign Phase 1 follow-up, see `_cmp_tag_chips_html`) — Software has
+    no other key facts, so its Key facts band is retired outright (see
+    `tools_software_compare`); Communities keeps this one, tag-free."""
+    parts = []
     for kf in entity.key_facts:
         if kf.needs_verification:
             parts.append(f'<div class="cmp-fact"><span class="cmp-fact-label">{_esc(kf.label)}</span> '
@@ -1902,7 +1933,11 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .cmp-chip{{font-size:13px;font-weight:600;color:var(--navy);background:var(--seafoam-wash);border-radius:999px;
   padding:4px 12px;text-decoration:none;}}
 .cmp-chip:hover{{background:var(--seafoam);}}
-.cmp-tag-row{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}}
+/* .cmp-tag-row now renders only in the header cell, directly under each
+   entity's name (Compare Redesign Phase 1 follow-up — tags moved out of
+   the Key facts band, since a category tag is an identity fact about the
+   entity, not a "key fact" alongside Region/Access/Cost). */
+.cmp-tag-row{{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 0;}}
 .cmp-tag{{font-size:11.5px;font-weight:600;border-radius:999px;padding:3px 10px;white-space:nowrap;}}
 /* Shared-vs-unique tag treatment (Compare Redesign Phase 1, approved in
    Step 0): solid seafoam fill for a tag every compared entity shares,
@@ -1914,6 +1949,69 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .cmp-fact-label{{font-weight:600;color:var(--muted);}}
 .cmp-full-link{{display:block;margin-top:4px;font-size:12.5px;font-weight:600;color:var(--navy);text-decoration:none;}}
 .cmp-full-link:hover{{text-decoration:underline;}}
+/* Mobile follow-up: sticky section labels + swipe hint. This table has no
+   separate per-row label COLUMN the way a flat label/value table would —
+   every row's "label" is a full-width .cc-section band (colspan across
+   every column), not a narrow leftmost cell, so a first pass that made
+   .cc-label sticky pinned nothing (those cells are blank; the real text
+   lives in the band). Confirmed live, before/after a real horizontal
+   scroll: a plain band's title scrolled out of view exactly like every
+   other cell the moment a visitor swiped right, which is the actual
+   "you lose the label while comparing" bug. Fixed by sticking the band's
+   own TEXT (.cmp-sticky-label, an inline-block span nested inside the
+   wide .cc-section cell) to the scroll container's left edge below 700px
+   (the same breakpoint the admin tables' own responsive treatment uses)
+   — "Description"/"AI / Agent involvement"/etc. now stays on screen for
+   the whole swipe, not just for the initial, unscrolled view. */
+@media (max-width:700px){{
+  .cmp-sticky-label{{position:sticky;left:16px;display:inline-block;}}
+}}
+/* Swipe hint (Compare Redesign Phase 1 follow-up) — a passive, non-link
+   affordance shown once (until the visitor's first horizontal scroll of
+   the table, tracked in localStorage — see _CMP_SWIPE_HINT_JS), mobile
+   only. Deliberately NOT styled like this page's own "Full profile →"
+   link (navy, bold, bare arrow) — a two-directional icon plus muted,
+   non-bold text reads as "FYI," never as something to tap. */
+.cmp-swipe-hint{{display:none;align-items:center;gap:6px;color:var(--muted);font-size:12.5px;margin:0 0 8px;}}
+.cmp-swipe-hint svg{{flex-shrink:0;}}
+@media (max-width:700px){{
+  .cmp-swipe-hint{{display:flex;}}
+}}
+"""
+
+# Swipe hint markup + dismiss logic, shared by both Compare pages (Compare
+# Redesign Phase 1 follow-up). The icon is a plain two-headed horizontal
+# arrow (Lucide's "move-horizontal" shape), drawn in the same flat,
+# two-tone line-icon style as every other icon in this file (viewBox 0 0
+# 24 24, stroke-width 2, round caps/joins) — chosen specifically because
+# it reads as "this scrolls both ways," not as a directional "go here"
+# link arrow.
+_CMP_SWIPE_HINT_HTML = (
+    '<div class="cmp-swipe-hint" id="cmp-swipe-hint">'
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round"><polyline points="18 8 22 12 18 16"/>'
+    '<polyline points="6 8 2 12 6 16"/><line x1="2" y1="12" x2="22" y2="12"/></svg>'
+    '<span>Swipe to compare</span></div>'
+)
+
+_CMP_SWIPE_HINT_JS = """
+(function(){
+  var hint = document.getElementById('cmp-swipe-hint');
+  var wrap = document.getElementById('cmp-scroll-wrap');
+  if (!hint || !wrap) return;
+  var KEY = 'cmp_swipe_hint_seen';
+  try {
+    if (localStorage.getItem(KEY)) { hint.style.display = 'none'; return; }
+  } catch (e) {}
+  var dismissed = false;
+  function dismiss(){
+    if (dismissed) return;
+    dismissed = true;
+    hint.style.display = 'none';
+    try { localStorage.setItem(KEY, '1'); } catch (e) {}
+  }
+  wrap.addEventListener('scroll', dismiss, {passive: true});
+})();
 """
 
 
@@ -6997,6 +7095,12 @@ to compare them side by side. Check the box on any card, then use the compare ba
     _compare_authed = _is_authed(request)
     entities, tag_diff = compare.build_software_compare(tools, citations, competitors)
 
+    # Tags render directly under each entity's name now (Compare Redesign
+    # Phase 1 follow-up) — a category tag is an identity fact, not a "key
+    # fact" row alongside Region/Access/Cost the way Communities has. Once
+    # tags move out, Software has nothing left for a Key facts band at
+    # all, so that whole section is retired below (Communities keeps its
+    # own, tag-free — see tools_communities_compare).
     header_cells = "".join(
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
@@ -7004,15 +7108,9 @@ to compare them side by side. Check the box on any card, then use the compare ba
     {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if e.advisor else ''}
   </div>
   <a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(e.name)}</a>
+  {_cmp_tag_chips_html(e, tag_diff)}
 </th>'''
         for e in entities
-    )
-
-    key_facts_row = (
-        '<tr><td class="cc-cell cc-section" colspan="' + str(len(entities) + 1) + '">Key facts</td></tr>'
-        '<tr><td class="cc-cell cc-label"></td>'
-        + "".join(f'<td class="cc-cell">{_cmp_key_facts_cell_html(e, tag_diff)}</td>' for e in entities)
-        + "</tr>"
     )
 
     # Grouped sections (Compare Redesign Phase 1 — fixes the orphaned-header
@@ -7029,13 +7127,13 @@ to compare them side by side. Check the box on any card, then use the compare ba
             for e in entities
         )
         section_rows.append(
-            f'<tr><td class="cc-cell cc-section" colspan="{len(entities) + 1}">{_esc(section_title)}</td></tr>'
-            f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
+            _cmp_section_band_row_html(section_title, len(entities))
+            + f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
         )
 
     competitors_row = (
-        '<tr><td class="cc-cell cc-section" colspan="' + str(len(entities) + 1) + '">Competitors</td></tr>'
-        '<tr><td class="cc-cell cc-label"></td>'
+        _cmp_section_band_row_html("Competitors", len(entities))
+        + '<tr><td class="cc-cell cc-label"></td>'
         + "".join(
             f'<td class="cc-cell">{_cmp_chip_list_html(e.chip_lists[0], _compare_authed)}</td>'
             for e in entities
@@ -7061,11 +7159,11 @@ to compare them side by side. Check the box on any card, then use the compare ba
 Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
 confirmed yet.</p>
 
-<div style="overflow-x:auto;">
+{_CMP_SWIPE_HINT_HTML}
+<div style="overflow-x:auto;" id="cmp-scroll-wrap">
 <table class="cc-table">
 <thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
 <tbody>
-{key_facts_row}
 {"".join(section_rows)}
 {competitors_row}
 {full_profile_row}
@@ -7076,7 +7174,8 @@ confirmed yet.</p>
 
 <style>
 {_CMP_SHARED_CSS}
-</style>"""
+</style>
+<script>{_CMP_SWIPE_HINT_JS}</script>"""
     return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
@@ -8982,6 +9081,10 @@ to compare them side by side. Check the box on any card, then use the compare ba
 
     entities, tag_diff = compare.build_communities_compare(communities, profiles, citations, similar)
 
+    # Tags render directly under each entity's name now (Compare Redesign
+    # Phase 1 follow-up), same as Software — see _cmp_tag_chips_html.
+    # Communities' Key facts band stays, holding only Region/Access/
+    # Sponsor/Cost/Founded, unaffected by the tag move.
     header_cells = "".join(
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
@@ -8989,14 +9092,15 @@ to compare them side by side. Check the box on any card, then use the compare ba
     {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if e.advisor else ''}
   </div>
   <a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(e.name)}</a>
+  {_cmp_tag_chips_html(e, tag_diff)}
 </th>'''
         for e in entities
     )
 
     key_facts_row = (
-        '<tr><td class="cc-cell cc-section" colspan="' + str(len(entities) + 1) + '">Key facts</td></tr>'
-        '<tr><td class="cc-cell cc-label"></td>'
-        + "".join(f'<td class="cc-cell">{_cmp_key_facts_cell_html(e, tag_diff)}</td>' for e in entities)
+        _cmp_section_band_row_html("Key facts", len(entities))
+        + '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(f'<td class="cc-cell">{_cmp_key_facts_cell_html(e)}</td>' for e in entities)
         + "</tr>"
     )
 
@@ -9015,13 +9119,13 @@ to compare them side by side. Check the box on any card, then use the compare ba
             for e in entities
         )
         section_rows.append(
-            f'<tr><td class="cc-cell cc-section" colspan="{len(entities) + 1}">{_esc(section_title)}</td></tr>'
-            f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
+            _cmp_section_band_row_html(section_title, len(entities))
+            + f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
         )
 
     similar_row = (
-        '<tr><td class="cc-cell cc-section" colspan="' + str(len(entities) + 1) + '">Similar communities</td></tr>'
-        '<tr><td class="cc-cell cc-label"></td>'
+        _cmp_section_band_row_html("Similar communities", len(entities))
+        + '<tr><td class="cc-cell cc-label"></td>'
         + "".join(
             f'<td class="cc-cell">{_cmp_chip_list_html(e.chip_lists[0], authed)}</td>'
             for e in entities
@@ -9047,7 +9151,8 @@ to compare them side by side. Check the box on any card, then use the compare ba
 Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
 confirmed yet.</p>
 
-<div style="overflow-x:auto;">
+{_CMP_SWIPE_HINT_HTML}
+<div style="overflow-x:auto;" id="cmp-scroll-wrap">
 <table class="cc-table">
 <thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
 <tbody>
@@ -9063,7 +9168,8 @@ confirmed yet.</p>
 <style>
 {_CMP_SHARED_CSS}
 .comm-star{{font-size:14px;color:#b8860b;}}
-</style>"""
+</style>
+<script>{_CMP_SWIPE_HINT_JS}</script>"""
     return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 

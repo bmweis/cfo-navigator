@@ -2594,19 +2594,23 @@ Details worth knowing:
   available." text were already using "Bottom line"; only the compare
   row's own label had drifted).
 
-  **Shared/unique tags** (`_cmp_key_facts_cell_html`): a tag every compared
-  entity has gets a solid seafoam-fill pill (`.cmp-tag-shared`); a tag
-  only one entity has gets a seafoam-outline pill (`.cmp-tag-unique`) —
-  approved by Brian in Step 0 as the visual pairing, so overlap and
-  contrast are visible at a glance without reading every pill.
+  **Shared/unique tags** (`_cmp_tag_chips_html`, originally
+  `_cmp_key_facts_cell_html` before the pre-merge follow-up below moved
+  tags out of that function): a tag every compared entity has gets a solid
+  seafoam-fill pill (`.cmp-tag-shared`); a tag only one entity has gets a
+  seafoam-outline pill (`.cmp-tag-unique`) — approved by Brian in Step 0 as
+  the visual pairing, so overlap and contrast are visible at a glance
+  without reading every pill.
 
-  **Key facts band**: one row, one cell per entity (not one row per fact,
-  which would just reintroduce the orphaned-row problem) — tags plus, for
-  Communities, Region/Access/Sponsor/Cost/Cost detail/Founded. A fact whose
-  raw value is `linklib.enrich.NEEDS_VERIFICATION` (the data-completeness
-  sentinel — a different concept from the review-state gate: "never
-  researched," not "AI draft awaiting human review") renders the existing
-  `.comm-verify` badge instead of the sentinel string.
+  **Key facts band** (`_cmp_key_facts_cell_html`): one row, one cell per
+  entity (not one row per fact, which would just reintroduce the
+  orphaned-row problem) — Region/Access/Sponsor/Cost/Cost detail/Founded,
+  Communities only (tags moved out in the pre-merge follow-up below;
+  Software has no other key facts, so its band was retired outright). A
+  fact whose raw value is `linklib.enrich.NEEDS_VERIFICATION` (the
+  data-completeness sentinel — a different concept from the review-state
+  gate: "never researched," not "AI draft awaiting human review") renders
+  the existing `.comm-verify` badge instead of the sentinel string.
 
   See CLAUDE.md's matching bullet for the pointer note,
   `tests/test_compare_serializer.py` for the serializer's own unit
@@ -2615,6 +2619,73 @@ Details worth knowing:
   coverage (grouped headers, clamp/pre-wrap, citation chips, tag diff, all
   three gate states, competitors/similar-communities chip lists, the
   full-profile link).
+- **Compare Redesign Phase 1, pre-merge follow-up (2026-09) — three
+  changes requested from a first live review, before this PR's own
+  merge: tags out of Key facts and into the header, and a real mobile
+  fix (the original ~4-line line-clamp/pre-wrap PR never addressed mobile
+  layout at all).**
+  1. **Tags moved out of the Key facts band into the header row**, directly
+     under each entity's name — a category tag is an identity fact about
+     the entity, not a "key fact" alongside Region/Access/Cost. Software's
+     Key facts band had nothing left once tags left it, so it's retired
+     outright; Communities keeps its own, tag-free.
+     `_cmp_key_facts_cell_html` lost its tag-rendering half to a new
+     `_cmp_tag_chips_html(entity, diff)`, called from both routes' header-
+     cell builders instead of the old Key facts row.
+  2. **A real mobile fix, found by literally scrolling the rendered page
+     and comparing screenshots, not assumed from the ticket's own
+     description.** The ticket asked for "a sticky label column" — but
+     this table has no separate per-row label COLUMN at all: every row's
+     field name lives in a full-width `.cc-section` band (`colspan` across
+     every column), a design choice from the original PR that fixed the
+     *desktop* orphaned-header bug. A first pass made `.cc-label` (the
+     blank leftmost cell in every body row) sticky, per the ticket's
+     literal wording — and it compiled, rendered, and did nothing,
+     because those cells are empty; the text a visitor actually needs
+     while swiping lives entirely in the band, which isn't a narrow
+     column and was never made sticky. Caught by comparing a real
+     before-scroll and after-scroll screenshot on a real mobile viewport:
+     after scrolling right to see a second entity, every `.cc-section`
+     band was still visible as a colored bar with no legible text in it
+     — "DESCRIPTION"/"AI / AGENT INVOLVEMENT" had scrolled off with
+     everything else. **This is the general lesson worth carrying
+     forward**: when a bug report describes a fix in terms of a UI
+     element ("the label column"), confirm that element still exists in
+     the CURRENT markup before implementing the literal instruction — a
+     redesign two commits prior can silently invalidate the assumption
+     the report was written against. Fixed properly: a new
+     `_cmp_section_band_row_html(title, n_entities)` helper (replacing 5
+     near-duplicate inline band-row constructions across both routes)
+     wraps the band's title in an inner `<span class="cmp-sticky-label">`;
+     `.cmp-sticky-label{position:sticky;left:16px;display:inline-block;}`
+     inside a `@media(max-width:700px)` block — the *inner span* sticks to
+     the scroll container's left edge while the wide `<td>` around it
+     keeps scrolling normally, so the section label stays on screen for
+     the whole swipe. This is a reusable pattern for any future wide,
+     horizontally-scrolling table in this codebase where the "row label"
+     is a full-width band rather than a narrow first column — see
+     CLAUDE.md's mobile-table-patterns note.
+  3. **A one-time swipe-hint affordance** (`cmp-swipe-hint`,
+     `<700px` only): a plain two-headed-arrow icon (Lucide's
+     "move-horizontal" shape, drawn inline in this file's existing flat
+     two-tone icon style — `viewBox 0 0 24 24`, `stroke-width 2`, round
+     caps/joins) plus muted, non-bold "Swipe to compare" text — chosen
+     specifically to NOT resemble this page's own "Full profile →" link
+     (navy, bold, bare arrow), since a passive hint that looks like a
+     tappable link invites a mis-tap. Dismissed permanently on the
+     visitor's first horizontal scroll of the table
+     (`wrap.addEventListener('scroll', dismiss, {passive:true})`),
+     tracked via a plain `localStorage.setItem('cmp_swipe_hint_seen','1')`
+     — this codebase's existing convention for this kind of client-only
+     preference (`reader-fs`, `cfo_admin_cols_*`), not a new persistence
+     mechanism. `_CMP_SWIPE_HINT_HTML`/`_CMP_SWIPE_HINT_JS` are shared
+     constants (the `_JS` naming convention means the JS is automatically
+     covered by `webapp.checks.script_syntax_problems`'s Node syntax
+     check, same as every other shared inline script in this file).
+  See `tests/test_software_compare.py`/`tests/test_community_compare.py`
+  for the regression coverage (tag placement, no-Key-facts-band-on-
+  Software, the sticky-label markup and CSS, the swipe hint's markup and
+  its localStorage-based dismiss logic).
 - **Citation-tag investigation + generation-path fix (2026-08) — supersedes
   Phase 1b/2's `inject_markers=False` decision for Agent taxonomy and
   Description; Community profile (Phase 3) is unchanged and still on the

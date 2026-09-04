@@ -5319,6 +5319,41 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Compare didn't previously render, but never touches the module's actual
   decision logic. See ARCHITECTURE.md's matching bullet for the full
   write-up.
+- **Compare Redesign Phase 1, pre-merge follow-up (2026-09) — tags moved
+  out of Key facts into the header row, and a real mobile fix.** Tags
+  (shared-vs-unique chips, same visual treatment) now render directly
+  under each entity's name in the header, not in the Key facts band — a
+  category tag is an identity fact, not a "key fact" alongside
+  Region/Access/Cost. Software's Key facts band had nothing left once tags
+  moved out, so it's retired outright; Communities keeps its own,
+  tag-free. **The mobile fix targeted the wrong element on the first
+  pass, caught only by comparing a real before/after-scroll screenshot**:
+  the original ask was "a sticky label column," but this table has no
+  per-row label COLUMN — every row's field name lives in a full-width
+  `.cc-section` band (the fix for the desktop orphaned-header bug), so
+  making the blank leftmost `.cc-label` cell sticky pinned nothing. Fixed
+  by sticking the band's own title text instead (`.cmp-sticky-label`, an
+  inner `<span>` inside the wide band `<td>`) — see **Mobile
+  swipeable-table pattern** below, the reusable version of this fix. A
+  new swipe-hint affordance (two-headed-arrow icon + muted "Swipe to
+  compare" text, deliberately not styled like this page's own bold navy
+  "Full profile →" link) shows once per visitor, dismissed on first
+  horizontal scroll via a plain `localStorage` flag — this codebase's
+  existing convention for a client-only "seen it once" preference, not a
+  new mechanism. See ARCHITECTURE.md's matching bullet for the full
+  write-up.
+
+**Mobile swipeable-table pattern** (established by the follow-up above,
+reusable for any future wide table on a narrow viewport): when a table's
+"row label" is a full-width band (`colspan` across every column) rather
+than a narrow first column, `position:sticky` belongs on an inner
+`<span>` wrapping the band's TEXT, not on the band `<td>` itself or on any
+per-row label cell — the `<td>` already spans the whole row and doesn't
+need to move; it's the text inside it that needs to stay in the viewport
+while the row scrolls under it. Pair with a one-time swipe-hint affordance
+(icon + muted text, `localStorage`-dismissed) styled deliberately unlike
+any bare-arrow link convention already on the page, so a passive hint
+never reads as something to tap.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
