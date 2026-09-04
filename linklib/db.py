@@ -925,6 +925,51 @@ CREATE TABLE IF NOT EXISTS enrichment_cost (
 );
 CREATE INDEX IF NOT EXISTS idx_enrichment_cost_article ON enrichment_cost(article_id);
 
+-- Compare Redesign Phase 2 — the AI overlap/contrast summary shown above the
+-- Software/Communities Compare tables. Cached permanently (no TTL), keyed by
+-- the exact set of compared entities plus a content hash of what actually
+-- went into the prompt (see Library.compare_summary_content_hash) — an edit
+-- to any compared entity's underlying fields changes the hash and naturally
+-- misses the cache on the next view, with no separate invalidation mechanism
+-- needed. `has_unverified` is deliberately NOT stored here: it's derived live
+-- from the CURRENT entities' gate state at render time (see
+-- webapp.app._cmp_summary_block_html), decoupled from the content-hash key,
+-- so a verify-only action (no text edit — the hash is unchanged) doesn't
+-- force a wasteful regen but the footnote's unverified-content disclosure
+-- still reflects today's real review state, not the state at generation time.
+CREATE TABLE IF NOT EXISTS compare_summary_cache (
+    entity_type   TEXT NOT NULL,             -- 'tool' | 'community'
+    entity_ids    TEXT NOT NULL,             -- sorted, comma-joined entity ids, e.g. "12,47"
+    content_hash  TEXT NOT NULL,             -- sha256 of the concatenated prompt input text
+    summary       TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    input_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd      REAL NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (entity_type, entity_ids, content_hash)
+);
+
+-- Manual, free-text feedback on one cached compare summary — "what was
+-- flagged, on which comparison, optional free text" per the Phase 2 spec.
+-- No automated action on a submission; Brian reviews the list by hand at
+-- /admin/compare-summary-feedback and marks each one reviewed once handled.
+-- `summary_text` snapshots the flagged summary verbatim so the review list
+-- still shows exactly what was flagged even if that cache row is later
+-- regenerated (a content edit changes the hash, which would otherwise orphan
+-- the feedback row's own context).
+CREATE TABLE IF NOT EXISTS compare_summary_feedback (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type   TEXT NOT NULL DEFAULT '',
+    entity_ids    TEXT NOT NULL DEFAULT '',
+    content_hash  TEXT NOT NULL DEFAULT '',
+    summary_text  TEXT NOT NULL DEFAULT '',
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT '',
+    reviewed_at   TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_compare_summary_feedback_reviewed ON compare_summary_feedback(reviewed_at);
+
 -- Manual vendor-spend ledger for /admin/overhead-spend "Vendor totals" —
 -- one row per real charge (Railway, Cloudflare, Google Workspace, domain
 -- registration, Anthropic, OpenAI, Exa, anything else). amount is the actual
@@ -2971,6 +3016,111 @@ class Library:
             f"SELECT COALESCE(SUM(cost_usd),0) FROM enrichment_cost {clause}", params
         ).fetchone()
         return float(row[0])
+
+    # -- Compare Redesign Phase 2 — AI comparison summary: cache, daily cap,
+    # and manual feedback triage. See compare_summary_cache's schema comment
+    # for the cache-key/invalidation design. --
+
+    _DEFAULT_COMPARE_SUMMARY_CAP_USD = 2.00  # small, shared daily budget —
+    # this is one cached artifact per unique entity-set, not a per-visitor
+    # cost like Ask/matchmaker, so it doesn't need their larger per-user caps.
+
+    @staticmethod
+    def compare_summary_content_hash(text: str) -> str:
+        """sha256 of the exact text handed to the generator — the cache
+        key's content component. A pure function (no DB access) so the
+        caller can compute it before deciding whether a lookup is even
+        needed."""
+        import hashlib
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def get_compare_summary(self, entity_type: str, entity_ids: str, content_hash: str) -> Optional[dict]:
+        row = self.conn.execute(
+            """SELECT * FROM compare_summary_cache
+               WHERE entity_type=? AND entity_ids=? AND content_hash=?""",
+            (entity_type, entity_ids, content_hash),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_compare_summary(self, entity_type: str, entity_ids: str, content_hash: str,
+                             summary: str, model: str, input_tokens: int = 0,
+                             output_tokens: int = 0, cost_usd: float = 0.0) -> None:
+        """Upsert one cached summary. `summary` is run through the same
+        mechanical voice backstop (linklib.voice_mechanics) every other
+        prose-capable Library write applies before persisting — a freshly
+        generated summary is exactly the kind of AI-drafted text that
+        backstop exists for."""
+        from .voice_mechanics import normalize_voice_mechanics
+        self.conn.execute(
+            """INSERT INTO compare_summary_cache
+               (entity_type, entity_ids, content_hash, summary, model,
+                input_tokens, output_tokens, cost_usd, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(entity_type, entity_ids, content_hash) DO UPDATE SET
+                 summary=excluded.summary, model=excluded.model,
+                 input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
+                 cost_usd=excluded.cost_usd, created_at=excluded.created_at""",
+            (entity_type, entity_ids, content_hash, normalize_voice_mechanics(summary), model,
+             input_tokens, output_tokens, cost_usd, _now()),
+        )
+        self.conn.commit()
+
+    def get_default_compare_summary_cap(self) -> float:
+        raw = self.get_setting("compare_summary_default_cap_usd")
+        try:
+            return float(raw) if raw else self._DEFAULT_COMPARE_SUMMARY_CAP_USD
+        except ValueError:
+            return self._DEFAULT_COMPARE_SUMMARY_CAP_USD
+
+    def set_default_compare_summary_cap(self, cap_usd: float) -> None:
+        self.set_setting("compare_summary_default_cap_usd", str(cap_usd))
+
+    def compare_summary_cost_today(self) -> float:
+        """Total compare-summary generation spend so far today (UTC calendar
+        day) — a shared, global figure, not per-user, since this is one
+        cached resource everyone reads. Mirrors matchmaker_cost_this_month's
+        shape at a daily grain instead of monthly."""
+        day_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) FROM compare_summary_cache WHERE created_at >= ?",
+            (day_start,),
+        ).fetchone()
+        return float(row[0])
+
+    def add_compare_summary_feedback(self, entity_type: str, entity_ids: str, content_hash: str,
+                                      summary_text: str, note: str = "") -> int:
+        cur = self.conn.execute(
+            """INSERT INTO compare_summary_feedback
+               (entity_type, entity_ids, content_hash, summary_text, note, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (entity_type, entity_ids, content_hash, summary_text, note.strip(), _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_compare_summary_feedback(self, include_reviewed: bool = True) -> list[dict]:
+        where = "" if include_reviewed else "WHERE reviewed_at=''"
+        rows = self.conn.execute(
+            f"SELECT * FROM compare_summary_feedback {where} ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_compare_summary_feedback(self, reviewed: Optional[bool] = None) -> int:
+        if reviewed is None:
+            clause, params = "", ()
+        elif reviewed:
+            clause, params = "WHERE reviewed_at!=''", ()
+        else:
+            clause, params = "WHERE reviewed_at=''", ()
+        return self.conn.execute(
+            f"SELECT COUNT(*) FROM compare_summary_feedback {clause}", params
+        ).fetchone()[0]
+
+    def mark_compare_summary_feedback_reviewed(self, feedback_id: int) -> None:
+        self.conn.execute(
+            "UPDATE compare_summary_feedback SET reviewed_at=? WHERE id=?", (_now(), feedback_id)
+        )
+        self.conn.commit()
 
     def overhead_cost_breakdown(self) -> list[dict]:
         """One row per internal cost-attribution source (embeddings,
