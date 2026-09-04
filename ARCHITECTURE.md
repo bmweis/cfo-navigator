@@ -1847,6 +1847,59 @@ Details worth knowing:
   regeneration Brian plans to run later, test-batch-first, per the pattern
   `scripts/enrich_agent_taxonomy.py`'s own cost-estimate-first convention
   already established.
+- **Real Markdown/List Rendering for Narrative Fields (2026-09) — the
+  `white-space:pre-wrap` approach two bullets above described is retired in
+  favor of a genuine markdown renderer, `webapp/markdown_render.py`'s
+  `render_narrative_markdown()`.** This is the "immediate follow-up PR" the
+  Compare Redesign Phase 1 bullet below flagged as deliberately out of
+  scope for that PR. Reuses `python-markdown` (already a dependency, via
+  `original_content`'s `_render_original_content_markdown`) rather than a
+  bespoke parser, but with a genuinely different config from that function:
+  `original_content.body_md` is Brian-authored and trusted, so that renderer
+  allows raw HTML passthrough by design; the fields this new module serves
+  (tool Description/Agent taxonomy/Bottom line, community profile group
+  fields) are AI-drafted, so the input is HTML-escaped first and the
+  `Markdown` instance has every block/inline processor deregistered except
+  the ones that produce paragraphs, unordered/ordered lists, and bold/
+  italic — no headers, blockquotes, links/images, code, or raw HTML, since
+  no generation prompt this module serves is ever asked to produce any of
+  those (Description/Agent taxonomy's own `_STRUCTURE_GUIDANCE` asks only
+  for paragraph breaks and `"- "` bulleted lines; Bottom line/community
+  profile fields are prompted "plain prose only — no markdown syntax," so
+  they're rendered through the same helper for consistency, not because
+  they're expected to ever contain a list). Deliberately `webapp`-side, not
+  `linklib`-side — `linklib/gates.py`'s design principle (nothing
+  HTML-producing reachable from `linklib`, so a future MCP tool importing
+  `linklib` directly can never pull in an HTML fragment) is enforced by
+  import path, and this module's whole job is producing HTML.
+  Four call sites in `webapp/app.py` switched from `_esc(text)` inside a
+  `white-space:pre-wrap` `<p>` to `render_narrative_markdown(text)` inside a
+  `<div class="narrative-md">` (or, for the two seafoam Bottom Line
+  callouts, the same wrapping div carrying the inline
+  color/font-size/line-height/overflow-wrap/word-break style the single
+  `<p>` it replaced used to carry — those are inherited CSS properties, so
+  they still reach every child `<p>`/`<li>` unchanged): tool Description,
+  tool Agent taxonomy, tool Bottom line (`competitive_differentiation`),
+  and the community profile group-fields loop (covers the community's own
+  Bottom line, `verdict_summary`, too). A new shared `_NARRATIVE_MD_CSS`
+  constant (spliced into both the tool-profile and community-profile
+  `<style>` blocks, immediately after each page's own `.tp-card p{...}`
+  rule) supplies only spacing between consecutive rendered elements
+  (`.narrative-md p`/`ul`/`ol`/`li` margins, zeroed on each block's own last
+  child) and list-marker padding — never color/font-size, which stays with
+  whatever wraps `.narrative-md` at each call site, matching the pre-change
+  typography exactly (verified via screenshot on the Bottom Line callout
+  specifically, since it's the one surface with its own custom seafoam
+  typography rather than `.tp-card`'s defaults).
+  **Compare's clamped narrative excerpt is deliberately excluded** — see the
+  Compare Redesign Phase 1 bullet below's own note that `-webkit-line-clamp`
+  doesn't reliably clamp block-level children like `<ul><li>` the way it
+  clamps a text run; `_cmp_populated_field_html` still renders `_esc(f.text)`
+  inside `.cmp-clamp-inner`, completely unchanged by this PR. The real
+  rendered version is one click away via the excerpt's own "Full profile →"
+  link. `linklib/compare.py` and `linklib/gates.py` are both untouched by
+  this PR — this is a rendering-layer change only, with no change to what
+  gates a field's visibility or how Compare selects/states a field.
 - **`voice_core`/`voice_fpa_buddy`/`voice_matchmaker` visibility (2026-08) —
   the silent code-constant fallback described in the two bullets above is
   retired for all three settings, not just `voice_core`.** Prompted by the
@@ -2533,7 +2586,14 @@ Details worth knowing:
      `python-markdown`, already a dependency via Original Content) is
      scoped as its own immediate follow-up PR, deliberately not a rider
      here, since it's a site-wide rendering change (profile pages too)
-     deserving its own before/after review.
+     deserving its own before/after review. **That follow-up shipped as
+     "Real Markdown/List Rendering for Narrative Fields" (2026-09, see the
+     dedicated bullet above)** — it deliberately did NOT touch Compare's
+     own clamped excerpt, though: `-webkit-line-clamp` doesn't reliably
+     clamp block-level children (`<ul><li>`) the way it clamps a text run,
+     so `_cmp_populated_field_html` still renders plain `_esc()`'d text
+     here. Only the profile pages (and the community profile group fields)
+     got the real renderer.
   3. **Orphaned section header** — real, fixed by giving every section
      (Key facts, Description, AI / Agent involvement, Bottom line,
      Competitors/Similar communities, and Communities' 4 themed groups)

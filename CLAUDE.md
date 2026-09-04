@@ -5374,6 +5374,35 @@ while the row scrolls under it. Pair with a one-time swipe-hint affordance
 any bare-arrow link convention already on the page, so a passive hint
 never reads as something to tap.
 
+- **Real Markdown/List Rendering for Narrative Fields (2026-09) — the
+  follow-up PR flagged (and deliberately deferred) by Compare Redesign
+  Phase 1's own "flattened markdown" finding above.** `webapp/
+  markdown_render.py`'s `render_narrative_markdown()` is now the single
+  shared mechanism for tool Description/Agent taxonomy/Bottom line and
+  every community profile group field (including the community's own
+  Bottom line) — real `<ul><li>`/`<strong>`/`<p>` in place of the old
+  `_esc(text)` + `white-space:pre-wrap` approximation. It reuses
+  `python-markdown` (already a dependency via `original_content`) but with
+  a genuinely different, more restrictive config than
+  `_render_original_content_markdown`'s: input is HTML-escaped first (these
+  fields are AI-drafted, not Brian-authored-trusted the way
+  `original_content.body_md` is), and the `Markdown` instance has every
+  block/inline processor deregistered except paragraphs, lists, and bold/
+  italic — no headers, blockquotes, links/images, code, or raw HTML, since
+  no generation prompt this serves is ever asked to produce any of those.
+  Lives in `webapp/`, not `linklib/`, on purpose — `linklib/gates.py`'s
+  HTML-free boundary is enforced by import path specifically so nothing
+  HTML-producing is reachable from `linklib` (a future MCP tool safety
+  concern), and this module's whole job is producing HTML.
+  **Compare's own clamped excerpt is deliberately NOT rendered through
+  this** — `-webkit-line-clamp` doesn't reliably clamp block-level children
+  the way it clamps a text run, so `_cmp_populated_field_html` still
+  renders plain `_esc()` text; the real rendered version is one click away
+  via "Full profile →". `linklib/compare.py` and `linklib/gates.py` are
+  both untouched by this PR. See ARCHITECTURE.md's matching bullet for the
+  full write-up and `tests/test_markdown_render.py`/`tests/
+  test_narrative_field_markdown.py` for the coverage.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
