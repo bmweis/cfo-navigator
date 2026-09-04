@@ -6,7 +6,9 @@ Covers: linklib.enrich.generate_community_listing (unit, mocked Claude call),
 the /admin/tools/communities/generate-listing route, and the NEEDS_VERIFICATION
 sentinel rendering visibly (not hidden) on public-facing pages, flagged with the
 "comm-verify" styling rather than looking like a confirmed value
-(webapp/app.py::_public_community, _verify_html).
+(webapp/app.py::_verify_html — the old _public_community() choke point that used
+to blank this sentinel was confirmed a true no-op and retired outright in
+Gate-Extraction PR B; see that PR's own tests for the retirement itself).
 """
 import pathlib
 import sys
@@ -251,8 +253,8 @@ def test_needs_verification_sentinel_renders_flagged_on_public_directory(env):
     assert r.status_code == 200
     # The directory card is JS-templated client-side from an embedded JSON
     # blob, so a plain (non-browser) request can't see the rendered DOM —
-    # what it can confirm is that _public_community no longer blanks the
-    # sentinel out of that JSON before it reaches the page.
+    # what it can confirm is that the sentinel isn't blanked out of that
+    # JSON before it reaches the page.
     assert enrich.NEEDS_VERIFICATION in r.text
     assert 'function commVerify' in r.text  # the JS helper that renders the flag from it
 

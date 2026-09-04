@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from .db import Library
 from .enrich import NEEDS_VERIFICATION
+from .gates import MATCHMAKER_COMMUNITY_NOTE, MATCHMAKER_DISCLAIMER, MATCHMAKER_FIELD_SUFFIX
 from .voice_settings import VoicePromptMissing, require_voice_setting
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
@@ -100,7 +101,7 @@ def _build_communities_context(lib: Library) -> tuple[str, bool]:
         if profile:
             if profile_unverified:
                 has_unverified = True
-                lines.append("Note: this community's profile is unverified; treat the following details as provisional.\n")
+                lines.append(MATCHMAKER_COMMUNITY_NOTE)
             lines.append(_line("Ideal member", profile.get("ideal_member")))
             lines.append(_line("Not a fit for", profile.get("anti_fit")))
             lines.append(_line("Value proposition", profile.get("value_prop")))
@@ -135,7 +136,7 @@ def _build_software_context(lib: Library) -> tuple[str, bool]:
     def _line(label: str, value, unverified: bool = False) -> str:
         if not value or value == NEEDS_VERIFICATION:
             return ""
-        suffix = " (unverified)" if unverified else ""
+        suffix = MATCHMAKER_FIELD_SUFFIX if unverified else ""
         return f"{label}{suffix}: {value}\n"
 
     blocks = []
@@ -208,11 +209,7 @@ def _build_system(lib: Library, kind: str) -> str:
     # This standing disclaimer only appears when at least one entry actually
     # carries an unverified marker, so a fully-reviewed catalog never gets a
     # disclaimer with nothing behind it.
-    unverified_notice = (
-        "\n\nSome catalog details above are marked unverified. Treat them as "
-        "provisional, and say so if you reference them in your answer."
-        if has_unverified else ""
-    )
+    unverified_notice = MATCHMAKER_DISCLAIMER if has_unverified else ""
 
     return (
         f"You are a matchmaker helping a finance professional find {subject} from a "
