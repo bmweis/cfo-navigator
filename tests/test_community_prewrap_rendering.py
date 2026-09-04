@@ -5,6 +5,21 @@ embedded newlines in stored text, flattening any paragraph breaks or
 "- " bulleted lines a regenerated field might contain. Covers all three
 locations found by the follow-up investigation: the profile page's grouped
 cards, its Bottom line callout, and the /tools/communities/compare table.
+
+Real Markdown/List Rendering for Narrative Fields (2026-09) superseded the
+pre-wrap approach for the first two of those three locations — the profile
+page's grouped cards and its Bottom line callout now render through
+`webapp.markdown_render.render_narrative_markdown` (real <ul><li>/<strong>/
+<p>, not literal dashes preserved as visible text), so
+`test_profile_group_field_has_pre_wrap`/`test_bottom_line_callout_has_pre_wrap`
+below were updated to assert the new markup instead of the retired one — see
+`tests/test_narrative_field_markdown.py` for the fuller markdown-specific
+coverage (bold, HTML-escaping, etc.) of the same two surfaces. The
+`/tools/communities/compare` table is the one location that's deliberately
+UNCHANGED by that PR (`-webkit-line-clamp` doesn't reliably clamp block-level
+list markup) — `test_compare_table_cell_has_pre_wrap`/
+`test_compare_table_empty_cell_unaffected` below still assert the original
+pre-wrap markup and still pass unmodified.
 """
 import os
 import pathlib
@@ -38,6 +53,11 @@ MULTILINE = "First idea.\n\nSecond idea in its own paragraph.\n\n- Bullet one\n-
 
 
 def test_profile_group_field_has_pre_wrap(env):
+    """Renamed in spirit, not in name (keeps its place in this file's
+    location-by-location coverage) — the profile page's grouped cards now
+    render real markdown, not pre-wrap, per the 2026-09 module docstring
+    note above. Real paragraph breaks and bulleted lines still survive,
+    just as genuine <p>/<ul><li> now instead of preserved literal text."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     c1 = lib.add_community("Finance Leaders Guild", "https://example.com/one",
@@ -48,10 +68,21 @@ def test_profile_group_field_has_pre_wrap(env):
 
     r = _client(env).get(f"/tools/communities/{slug}")
     assert r.status_code == 200
-    assert f'<p style="margin:0;white-space:pre-wrap;">{MULTILINE}</p>' in r.text
+    assert '<div class="narrative-md">' in r.text
+    assert "<p>First idea.</p>" in r.text
+    assert "<p>Second idea in its own paragraph.</p>" in r.text
+    assert "<li>Bullet one</li>" in r.text
+    assert "<li>Bullet two</li>" in r.text
+    assert "white-space:pre-wrap" not in r.text
 
 
 def test_bottom_line_callout_has_pre_wrap(env):
+    """See test_profile_group_field_has_pre_wrap's docstring — the Bottom
+    line callout now renders real markdown too, with its own inline
+    color/font-size/line-height/overflow-wrap/word-break style carried on
+    the wrapping .narrative-md div instead of the single <p> it replaced
+    (those are inherited properties, so every child <p>/<li> still gets
+    them)."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     c1 = lib.add_community("Finance Leaders Guild", "https://example.com/one",
@@ -62,9 +93,9 @@ def test_bottom_line_callout_has_pre_wrap(env):
 
     r = _client(env).get(f"/tools/communities/{slug}")
     assert r.status_code == 200
-    assert "white-space:pre-wrap;" in r.text
-    # the Bottom line callout's own <p> tag carries it alongside its other inline styles
-    assert 'overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;">' in r.text
+    assert 'class="narrative-md" style="color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">' in r.text
+    assert "<li>Bullet one</li>" in r.text
+    assert "white-space:pre-wrap" not in r.text
 
 
 def test_compare_table_cell_has_pre_wrap(env):

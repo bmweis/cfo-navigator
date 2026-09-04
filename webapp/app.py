@@ -72,6 +72,7 @@ from linklib.library_delete_csv import parse_library_delete_csv, MAX_DELETE_PER_
 from linklib.extract import _MIN_CONTENT_WORDS
 from linklib.pipeline import ingest_url
 from linklib import backup
+from webapp.markdown_render import render_narrative_markdown
 # webapp/thought_leadership_data.py is no longer imported here — the four
 # /thought-leadership columns now read from the thought_leadership DB table
 # (Phase 1, see CLAUDE.md). The module itself stays in the repo, unused, as
@@ -1058,6 +1059,35 @@ def _low_confidence_indicator_html(low_confidence: object) -> str:
     color = "#92400e" if failed else "#065f46"
     return (f'<p style="font-size:12px;color:{color};margin:2px 0 0;font-weight:500;">'
             f'Source page fetch: {value}</p>')
+
+
+# Real Markdown/List Rendering for Narrative Fields (2026-09) — shared CSS
+# for `render_narrative_markdown()`'s output (webapp/markdown_render.py):
+# real <p>/<ul>/<ol>/<li> tags where the field previously rendered as one
+# white-space:pre-wrap <p>. `.tp-card p{margin:0;...}` (defined immediately
+# above each of the two places this is spliced in) already gives every <p>
+# tag inside a .tp-card its correct font-size/color/line-height via a plain
+# descendant selector — that part needs no change. What's missing without
+# this block is spacing BETWEEN consecutive rendered elements (margin:0
+# would otherwise run every paragraph/list straight into the next with no
+# gap) and basic list-marker layout, so this only adds bottom-margin (zeroed
+# on each block's own last child, so the block's outer spacing — set by
+# whatever wraps .narrative-md, e.g. the Bottom Line callout's own
+# margin-bottom — isn't doubled) and list padding/marker spacing. Colors and
+# font sizing are deliberately NOT set here — each call site still wraps its
+# rendered HTML in a div carrying the same inline style properties as the
+# single <p> it replaces (e.g. the Bottom Line callout's navy/16px/1.5), and
+# those inherit down through the real, inherited CSS properties
+# (color/font-size/line-height/overflow-wrap/word-break) to every child
+# <p>/<li> untouched.
+_NARRATIVE_MD_CSS = (
+    '.narrative-md p{margin:0 0 12px;}'
+    '.narrative-md p:last-child{margin-bottom:0;}'
+    '.narrative-md ul,.narrative-md ol{margin:0 0 12px;padding-left:22px;}'
+    '.narrative-md ul:last-child,.narrative-md ol:last-child{margin-bottom:0;}'
+    '.narrative-md li{margin-bottom:5px;}'
+    '.narrative-md li:last-child{margin-bottom:0;}'
+)
 
 
 def _citations_list_html(citations: list, cap: int | None = None, empty_note: str = "") -> str:
@@ -7536,7 +7566,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
         differentiation_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-top:22px;margin-bottom:22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_diff_badge}</div>
-  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(tool['competitive_differentiation'])}</p>
+  <div class="narrative-md" style="color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{render_narrative_markdown(tool['competitive_differentiation'])}</div>
 </div>"""
     else:
         _diff_copy = gates.EMPTY_COPY["tool_differentiation"]
@@ -7573,7 +7603,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
         _at_badge = _review_state_badge(_at_unverified, authed, "tp-verify")
         agent_taxonomy_block = f"""<div class="tp-card">
   <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy{_at_badge}</h2>
-  <p style="margin:0;white-space:pre-wrap;">{_esc(tool['agent_taxonomy_note'])}</p>
+  <div class="narrative-md">{render_narrative_markdown(tool['agent_taxonomy_note'])}</div>
   {_at_citations_html}
 </div>"""
     else:
@@ -7824,7 +7854,7 @@ function submitIntroForm() {{
         _desc_badge = _review_state_badge(_desc_unverified, authed, "tp-verify")
         description_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Description{_desc_badge}</h2>
-  <p style="margin:0;white-space:pre-wrap;">{_esc(tool['description'])}</p>
+  <div class="narrative-md">{render_narrative_markdown(tool['description'])}</div>
   {_citations_list_html(description_citations, cap=5)}
 </div>"""
     else:
@@ -7912,6 +7942,7 @@ function submitIntroForm() {{
 .tp-card-h small{{display:block;font-family:var(--font-body);font-weight:500;font-size:12px;color:var(--muted);
   text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}}
 .tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;overflow-wrap:break-word;word-break:break-word;}}
+{_NARRATIVE_MD_CSS}
 .tp-shot-card{{padding:12px;text-align:center;position:relative;overflow:visible;}}
 .tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
   aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
@@ -9644,7 +9675,7 @@ def tools_community_profile(request: Request, slug: str):
         verdict_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_profile_badge}</div>
-  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;">{_esc(_display_profile['verdict_summary'])}</p>
+  <div class="narrative-md" style="color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{render_narrative_markdown(_display_profile['verdict_summary'])}</div>
 </div>"""
     else:
         _comm_bl_copy = gates.EMPTY_COPY["community_bottom_line"]
@@ -9669,7 +9700,7 @@ def tools_community_profile(request: Request, slug: str):
         sections = "".join(
             f"""<div style="margin-bottom:16px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
-  <p style="margin:0;white-space:pre-wrap;">{_esc(_display_profile[key])}</p>
+  <div class="narrative-md">{render_narrative_markdown(_display_profile[key])}</div>
 </div>"""
             for label, key in fields
             if (_display_profile.get(key) or "").strip()
@@ -9837,6 +9868,7 @@ def tools_community_profile(request: Request, slug: str):
 .tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
 .tp-card-h{{font-family:var(--font-head);font-weight:600;font-size:18px;color:var(--ink);margin:0 0 14px;letter-spacing:-0.01em;}}
 .tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;overflow-wrap:break-word;word-break:break-word;}}
+{_NARRATIVE_MD_CSS}
 .tp-shot-card{{padding:12px;text-align:center;position:relative;overflow:visible;}}
 .tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
   aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
