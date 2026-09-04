@@ -131,10 +131,17 @@ def test_profile_page_shows_homepage_captured_caption(env):
     assert "no product screenshot available" not in r.text.lower()
 
 
-def test_profile_page_shows_homepage_not_yet_captured_caption(env):
+def test_profile_page_shows_homepage_manually_set_caption(env):
     """A manually-pasted homepage URL with no capture timestamp — the old
     caption here was 'Homepage screenshot (no product screenshot available
-    yet)', which anticipated this exact phase and is now obsolete wording."""
+    yet)', which anticipated this exact phase and is now obsolete wording.
+
+    Edit-page-fixes item 3 (2026-09): the caption briefly read "Homepage
+    screenshot (not yet captured)" for this exact state, which is wrong — a
+    real image is rendering right above it; the URL is present, just
+    hand-pasted rather than machine-captured (Library.update_tool_screenshot
+    always clears screenshot_captured_at, same as update_tool_screenshot_url).
+    Now matches the edit page's own wording for this state exactly."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -144,7 +151,8 @@ def test_profile_page_shows_homepage_not_yet_captured_caption(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert "https://example.com/homepage.png" in r.text
-    assert "Homepage screenshot (not yet captured)" in r.text
+    assert "Homepage screenshot, manually set—no capture date" in r.text
+    assert "not yet captured" not in r.text
     assert "no product screenshot available" not in r.text.lower()
 
 

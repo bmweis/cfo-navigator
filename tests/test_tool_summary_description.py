@@ -279,3 +279,120 @@ def test_directory_page_serializes_summary(env):
     r = client.get("/tools/software")
     assert r.status_code == 200
     assert "Short card summary." in r.text
+
+
+# -- Edit-page-fixes item 1: Short summary won't accept input (2026-09) -----------
+#
+# Root cause: a legacy `summary` value can already exceed the textarea's
+# `maxlength="400"` (the one-time column-introducing migration backfilled
+# `summary` from the full, uncapped `description`, and nothing server-side
+# has ever enforced a length limit). HTML `maxlength` blocks appending any
+# new character once the field's current value is already at or past the
+# cap — the textarea still focuses and shows a blinking cursor, but nothing
+# typed lands. Fixed by rendering `maxlength="400"` only when the stored
+# value already fits inside it.
+
+def test_edit_page_omits_maxlength_when_summary_already_exceeds_it(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    over_cap = "A" * 450
+    tool_id = lib.add_tool("Runway", "Long description.", "https://runway.com", [],
+                           approved=1, summary=over_cap)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{slug}/edit")
+    assert r.status_code == 200
+    assert '<textarea id="tool-summary" name="summary" required rows="4"' in r.text
+    assert 'maxlength="400"' not in r.text
+    assert over_cap in r.text
+
+
+def test_edit_page_keeps_maxlength_when_summary_fits(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "Long description.", "https://runway.com", [],
+                           approved=1, summary="A normal, compliant short summary.")
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{slug}/edit")
+    assert r.status_code == 200
+    assert '<textarea id="tool-summary" name="summary" required maxlength="400" rows="4"' in r.text
+
+
+def test_admin_can_save_a_trimmed_summary_after_it_was_over_the_cap(env):
+    """End-to-end: the field being unblocked in the browser is only useful if
+    the resulting save actually works — confirms the whole round trip, not
+    just the rendered attribute."""
+    lib = Library(os.environ["LINKLIB_DB"])
+    over_cap = "A" * 450
+    tool_id = lib.add_tool("Runway", "Long description.", "https://runway.com", [],
+                           approved=1, summary=over_cap)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/tools/software/{slug}/edit", data={
+        "name": "Runway", "url": "https://runway.com",
+        "description": "Long description.",
+        "summary": "Trimmed, compliant short summary.",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool = lib.get_tool(tool_id)
+    assert tool["summary"] == "Trimmed, compliant short summary."
+    lib.close()
+
+    # And now that it's compliant, the guardrail is back on the next load.
+    client2 = _client(env)
+    _login(client2)
+    r2 = client2.get(f"/tools/software/{slug}/edit")
+    assert 'maxlength="400"' in r2.text
+
+
+# -- Edit-page-fixes item 2: "Bottom line" label mismatch (2026-09) ---------------
+#
+# tools.competitive_differentiation renders verbatim as the profile page's
+# "Bottom line" callout — confirmed a direct 1:1 mapping, no transformation.
+# The edit page's field was still labeled "Competitive differentiation",
+# which didn't match what admins actually see once it ships. Renamed to
+# "Bottom line" — label only, no schema/route/display-logic change.
+
+def test_edit_page_labels_the_field_bottom_line(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "Long description.", "https://runway.com", [],
+                           approved=1, summary="Short summary.")
+    lib.update_tool_differentiation(tool_id, "Best for finance teams that want speed.", 0)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{slug}/edit")
+    assert r.status_code == 200
+    assert ">Bottom line<" in r.text
+    assert "Competitive differentiation<" not in r.text
+
+
+def test_edit_page_label_matches_public_profile_display_name(env):
+    """The label an admin edits under should read exactly like the heading a
+    visitor sees on the public profile page — that's the whole point of the
+    fix (item 2)."""
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "Long description.", "https://runway.com", [],
+                           approved=1, summary="Short summary.")
+    lib.update_tool_differentiation(tool_id, "Best for finance teams that want speed.", 0)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    edit_html = client.get(f"/tools/software/{slug}/edit").text
+    profile_html = client.get(f"/tools/software/{slug}").text
+    assert "Bottom line" in edit_html
+    assert "Bottom line" in profile_html

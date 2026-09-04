@@ -2082,12 +2082,21 @@ def _screenshot_slot_caption(url: str, captured_at: str, label: str) -> str:
     there's no more "(no product screenshot available yet)" hedge — that
     sentence was anticipating this exact feature and reads as obsolete once
     an app screenshot is a real, separate thing rather than a hoped-for
-    override."""
+    override.
+
+    Edit-page-fixes item 3: a URL present with no captured_at is not "not
+    yet captured" — it's the deliberate, normal result of a hand-pasted
+    screenshot URL (Library.update_tool_screenshot_url explicitly clears
+    captured_at on a manual paste, since a hand-pasted URL has no capture
+    date). The old wording implied the slot was still empty even while a
+    real image rendered right above it. Now says exactly what the edit
+    page's own (already-correct) caption for this same state says, so both
+    surfaces describe it identically."""
     if not (url or "").strip():
         return ""
     if (captured_at or "").strip():
         return f"{label} screenshot, captured {captured_at[:10]}"
-    return f"{label} screenshot (not yet captured)"
+    return f"{label} screenshot, manually set—no capture date"
 
 
 def _screenshot_card_html(entity: dict, featured_sticker: str = "") -> str:
@@ -16930,6 +16939,23 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     _taxonomy_confidence_html = (_confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
         + _low_confidence_indicator_html(tool.get("agent_taxonomy_low_confidence")))
 
+    # Edit-page-fixes item 1: a hand-authored HTML `maxlength` blocks any
+    # NEW keystroke once the field's current value is already at or past the
+    # cap — it doesn't clear or trim existing content, so a cursor still
+    # blinks on click but nothing typed lands. `summary`'s 400-char cap was
+    # added after the column already existed; the one-time migration that
+    # introduced the column (see linklib/db.py's summary-backfill comment)
+    # copied the full, uncapped `description` into any empty `summary`, and
+    # neither add_tool nor update_tool enforce a length limit server-side —
+    # so a tool whose summary was never redrafted since can still carry a
+    # legacy value well over 400 chars, permanently locking out typing in
+    # the browser. Only render the attribute when the stored value already
+    # fits inside it; once an admin saves a compliant value, the guardrail
+    # reapplies on the next page load.
+    _summary_maxlength_attr = (
+        ' maxlength="400"' if len(tool.get("summary") or "") <= 400 else ""
+    )
+
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
         _cap_note = (f"Captured {tool['screenshot_captured_at'][:10]}" if tool.get("screenshot_captured_at")
@@ -17050,7 +17076,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       <div id="gen-host-tool-business-summary" style="display:grid;gap:20px;">
         <div>
           <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
-          <textarea id="tool-summary" name="summary" required maxlength="400" rows="4"
+          <textarea id="tool-summary" name="summary" required{_summary_maxlength_attr} rows="4"
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
           <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—shares its verification status, not tracked separately.</p>
@@ -17126,7 +17152,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
   <div id="gen-host-tool-differentiation">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Competitive differentiation{_differentiation_verify_badge}</label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Bottom line{_differentiation_verify_badge}</label>
       <span>
         <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err', 'gen-host-tool-differentiation')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>

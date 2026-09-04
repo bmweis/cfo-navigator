@@ -5384,6 +5384,47 @@ never reads as something to tap.
   full write-up and `tests/test_markdown_render.py`/`tests/
   test_narrative_field_markdown.py` for the coverage.
 
+- **Tool edit page fixes (2026-09) — three independent small bugs, no shared root
+  cause beyond "found in the same live-use session."**
+  1. **Short summary textarea silently rejected typed input** for any tool whose
+     `summary` already exceeded the field's `maxlength="400"` — a real, reproduced
+     bug, not a guess. The one-time migration that introduced the `summary` column
+     (`linklib/db.py`'s `UPDATE tools SET summary=description WHERE summary='' AND
+     description!=''`) copied the full, uncapped `description` into any empty
+     `summary`, with no length limit anywhere server-side; `description` has since
+     grown into 8-12 sentence write-ups, so a tool never redrafted via "Generate
+     summary" since can carry a legacy `summary` well past 400 chars. HTML
+     `maxlength` blocks *appending* once a field's value is already at or over the
+     cap — the cursor still blinks, nothing typed lands, and nothing in the markup
+     said why. Fixed by rendering `maxlength="400"` only when the stored value
+     already fits inside it; an admin can always edit/trim an over-length legacy
+     value, and the guardrail returns once it's saved back under 400.
+  2. **The public profile page's "Bottom line" callout had no edit-page field
+     literally named "Bottom line"** — confirmed a direct 1:1, no-transformation
+     mapping from `tools.competitive_differentiation` (the profile page renders
+     `tool['competitive_differentiation']` verbatim under the header "Bottom
+     line{badge}"). Pure label mismatch: the edit-page field was still labeled
+     "Competitive differentiation." Renamed the edit-page label to "Bottom line" —
+     no schema, route, or display-logic change. First instance of a class of
+     internal/external name mismatch worth watching for elsewhere over time (not
+     swept for here — only this one was in scope).
+  3. **Homepage screenshot caption read "(not yet captured)" over a live image** —
+     the literal string exists in exactly one place in the codebase,
+     `_screenshot_slot_caption()` (`webapp/app.py`), used only by the public
+     Software/Communities **profile** pages' screenshot card — not the actual
+     `/tools/software/{slug}/edit` route, which already had correct wording
+     ("Manually set—no capture date") for this same state. `_screenshot_slot_caption`
+     shows this text whenever a screenshot URL is populated but `screenshot_captured_at`
+     is empty — the deliberate, normal result of a hand-pasted URL
+     (`Library.update_tool_screenshot_url` explicitly clears `captured_at` on a
+     manual paste), not a rare or broken state. So every manually-set screenshot —
+     completely normal — read as "not yet captured" on the profile page, right next
+     to the live image and the "Edit" admin link, which is almost certainly what
+     got called "the edit page" here. Fixed the wording to match the edit page's own
+     phrase exactly, so both surfaces describe the state identically — same class of
+     bug as the `seed_tools.py` description-sync incident (a caption/string not
+     reflecting live state), just one navigation hop from where it was reported.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
