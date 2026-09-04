@@ -220,8 +220,17 @@ def test_feature_flag_button_taken_out_of_flex_flow(env):
 
 
 # -- Item 4: equal spacing above/below the Bottom line callout -------------------
+#
+# Sidebar Consolidation pass (2026-09): the Bottom line callout moved out of
+# the hero into the main column's tp-col-stack (see tools_software_profile's
+# main_col comment), where the stack's own `gap:22px` now produces equal
+# spacing between it and its neighbors instead of a self-margin — so these
+# two tests now assert the callout sits inside that stack (no more
+# self-margin string to look for) rather than checking a specific inline
+# style. The spacing itself is exercised live via screenshots, not text
+# assertions — a flex `gap` can't be observed from response text alone.
 
-def test_bottom_line_callout_has_equal_top_and_bottom_margin_populated(env):
+def test_bottom_line_callout_is_first_in_main_column_stack(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
@@ -230,12 +239,13 @@ def test_bottom_line_callout_has_equal_top_and_bottom_margin_populated(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/{slug}")
-    idx = r.text.index("A confirmed differentiation note.")
-    preceding = r.text[max(0, idx - 400):idx]
-    assert "margin-top:22px;margin-bottom:22px;" in preceding
+    stack_idx = r.text.index('<div class="tp-col-stack">')
+    diff_idx = r.text.index("A confirmed differentiation note.")
+    desc_idx = r.text.index('<h2 class="tp-card-h">Description')
+    assert stack_idx < diff_idx < desc_idx
 
 
-def test_bottom_line_callout_has_equal_top_and_bottom_margin_empty(env):
+def test_bottom_line_callout_empty_is_first_in_main_column_stack(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "d", "https://runway.com", ["FP&A"], approved=1)
@@ -243,9 +253,10 @@ def test_bottom_line_callout_has_equal_top_and_bottom_margin_empty(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/{slug}")
-    idx = r.text.index("Bottom line not yet available.")
-    preceding = r.text[max(0, idx - 400):idx]
-    assert 'style="margin-top:22px;margin-bottom:22px;"' in preceding
+    stack_idx = r.text.index('<div class="tp-col-stack">')
+    diff_idx = r.text.index("Bottom line not yet available.")
+    desc_idx = r.text.index('<h2 class="tp-card-h">Description')
+    assert stack_idx < diff_idx < desc_idx
 
 
 # -- Item 5: Community Description joins the approved string family -------------
