@@ -2379,6 +2379,120 @@ Details worth knowing:
   asset, not the renderer. See CLAUDE.md's matching bullet for the full
   item-by-item write-up and `tests/test_empty_state_visual_qa.py`/
   `tests/test_audit_tool_logo_dimensions.py` for the regression coverage.
+- **Gate-Extraction PR B (2026-09) — the radical-transparency review-state
+  decision moves into a new shared module, `linklib/gates.py`, the single
+  source of truth for the three-state table PR A ratified. Behavior-
+  identical to the post-PR-A baseline; every existing PR A/A.1 test stays
+  green unchanged.**
+
+  | State     | Visitor                          | Admin                                       |
+  |-----------|-----------------------------------|-----------------------------------------------|
+  | Verified  | content                           | content                                       |
+  | Pending   | content + "under review"          | content + "unverified, visible to visitors"   |
+  | Empty     | placeholder                       | placeholder + a "go fill this in" prompt      |
+
+  **Module split, enforced by import path, not discipline** — `linklib/gates.py`
+  is deliberately HTML-free: `GateState` (an enum: `VERIFIED`/`PENDING`/
+  `EMPTY`), `field_state`/`state_for` (the decision), `badge_text` (the
+  badge copy, by viewer), `EMPTY_COPY`/`COMPARE_EMPTY_LABELS` (the frozen
+  placeholder-copy registry), `any_populated` (the compare-matrix
+  row-existence primitive), and the Matchmaker's three copy constants
+  (`MATCHMAKER_FIELD_SUFFIX`/`MATCHMAKER_COMMUNITY_NOTE`/
+  `MATCHMAKER_DISCLAIMER`). This is the module MCP Phase 3's Toolbox/
+  Communities content tools will import — since it returns structured
+  data, never a `<span class="tp-verify">` fragment, there is nothing
+  importable from it that could leak HTML into a tool result. The actual
+  `<span>`/`<div>` markup stays webapp-side, in `webapp/app.py`:
+  `_review_state_badge`/`_empty_state_card`/`_empty_state_text` (renamed-
+  in-place, now thin wrappers delegating to `gates.state_for`/
+  `gates.badge_text`) and a new `_compare_cell_html`, the one shared `<td>`
+  renderer both compare matrices' per-field cells now call, replacing the
+  near-duplicate `_reviewed_cell` (Software) and `_profile_cell`'s own
+  inline badge logic (Communities) — `pre_wrap` is the one real markup
+  difference kept as a caller-chosen flag (Communities' profile fields
+  carry embedded newlines, Software's compare fields don't) rather than
+  forking two functions.
+
+  **Consolidations from the approved Phase 0 inventory:**
+  - **Item #10** (row-existence vs. per-cell content gating) — both
+    matrices' `any((v or "").strip() for v in values)` row checks became
+    one shared `gates.any_populated`; both matrices' per-field cell
+    renderers now share `_compare_cell_html`. The two checks stay
+    architecturally separate primitives, not collapsed into one function —
+    a row can exist while an individual entity's own cell for it is still
+    empty. `tests/test_gates_compare_equivalence.py` asserts this directly
+    on both entity types with matching fixture shapes, plus explicit
+    admin-vs-visitor equivalence (identical content, badge word only).
+  - **Item #6** (the "stale-comment choke point") was mis-targeted in the
+    original inventory at PR A's own comments (all of which were found,
+    on investigation, to already be correctly past-tensed — a negative
+    finding, reported rather than forced). The real target, per Brian's
+    correction: `_public_community(c)` (`webapp/app.py`, historically
+    blanked a `_NEEDS_VERIFICATION` sentinel before a community dict
+    reached a visitor). Confirmed a true no-op before touching it — its
+    `return dict(c)` body, and all 3 callers (the directory list, the
+    compare matrix's per-id lookup, the profile page) only ever read
+    fields off the result afterward, never mutate it in a way that
+    depended on a distinct dict object. Retired outright; its 3 call
+    sites now use the `Library` read result directly. Its own docstring
+    was already accurate; the genuinely stale comment was a *different*
+    one, a few hundred lines away in `_community_form_fields_parts`
+    ("`_public_community` strips it back out before any of these fields
+    reach a public page") — false since `_verify_html` started rendering
+    the sentinel as a visible "Needs verification" flag rather than
+    blanking it; corrected in place.
+
+  **Copy centralization, zero copy changes**: every `EMPTY_COPY`/
+  `COMPARE_EMPTY_LABELS` entry is a verbatim move of the string already
+  live at each call site (`tool_description`/`tool_agent_taxonomy`/
+  `tool_differentiation`/`tool_competitors`/`community_description`/
+  `community_bottom_line`/`community_profile_group`/
+  `community_similar_communities` — the last two weren't named in the
+  original inventory but follow the identical hand-assembled pattern, so
+  they're centralized too, same discipline). `linklib/matchmaker.py`'s
+  `_build_communities_context`/`_build_software_context`/`_build_system`
+  now import their three copy strings from `gates` instead of carrying
+  local literals — same text, single source. **One real, pre-existing
+  divergence surfaced and deliberately NOT unified**: the Software
+  directory card's client-side JS badge (`tools_directory`'s
+  `<script>` block, since the card renders from client-fetched
+  `ALL_TOOLS` JSON) has always used a capitalized variant
+  ("Unverified, visible to visitors"/"Under review") of the same copy
+  the profile-page/compare-matrix badge uses lowercase
+  ("unverified, visible to visitors"/"under review") — confirmed still
+  present as of PR A, out of scope for "zero copy changes." Both variants
+  are frozen as separate named constants
+  (`gates.DIRECTORY_JS_BADGE_TEXT_ADMIN`/`_VISITOR` vs.
+  `gates.BADGE_TEXT_ADMIN`/`_VISITOR`), and the JS literal is now
+  generated from the Python-side constant via `json.dumps()` interpolation
+  into the `<script>` text rather than carrying its own independent
+  hardcoded string — one source, two languages, divergence preserved and
+  pinned by `tests/test_gates.py::TestDirectoryJsBadgeDivergence`.
+
+  **Deliberately out of scope, confirmed by Phase 0 investigation and
+  restated in the approved plan**: the whole-record admin review-workflow
+  mechanism — `_narrative_verify_widget` (the edit-page per-field
+  badge/button), `_review_status_pill_html`/`_action_html`/`_block_html`
+  (the whole-record "Mark reviewed"/"Flag for review" pill), and
+  `_confidence_indicator_html`/`_confidence_badge_html` (Claude's
+  self-reported confidence, an independent fact) — none of these implement
+  the viewer-facing verified/pending/empty display gate; PR A never
+  touched them, and this extraction doesn't either. `.comm-verify` (the
+  unrelated `_NEEDS_VERIFICATION` data-completeness sentinel) stays
+  entirely separate from `.tp-verify`/`.cc-verify`/`.tool-desc-verify`, as
+  it always has. The `tp-verify`/`cc-verify`/`tool-desc-verify` CSS class
+  names themselves are unchanged — a rename was proposed as an optional
+  rider and explicitly deferred rather than expanding this PR's scope.
+
+  See CLAUDE.md's matching bullet for the pointer note and
+  `tests/test_gates.py` (pure-function unit coverage: all three states ×
+  both viewers, both entity shapes, edge rows) and
+  `tests/test_gates_compare_equivalence.py` (compare-matrix consolidation
+  + `_public_community` retirement, admin/visitor equivalence, auth state
+  always explicit) for the regression coverage. `tests/
+  test_review_state_publish_gates.py`/`tests/test_matchmaker_publish_gate.py`
+  (PR A's own end-to-end suite) pass unchanged — the actual proof this
+  extraction is behavior-identical, not just internally consistent.
 - **Citation-tag investigation + generation-path fix (2026-08) — supersedes
   Phase 1b/2's `inject_markers=False` decision for Agent taxonomy and
   Description; Community profile (Phase 3) is unchanged and still on the

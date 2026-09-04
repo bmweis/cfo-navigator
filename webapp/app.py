@@ -61,6 +61,7 @@ import markdown as _markdown
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
+from linklib import gates
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS
@@ -1725,7 +1726,9 @@ def _empty_state_text(visitor_text: str, admin_suffix: str = "", authed: bool = 
     sentence alone, or with an admin-only trailing "go fill this in"
     sentence appended, per the radical-transparency review standard's
     3-state table (verified / populated-pending-review / empty), whose
-    Empty row is "same placeholder + a prompt to fill it in" for admin."""
+    Empty row is "same placeholder + a prompt to fill it in" for admin.
+    Thin HTML-side wrapper — the copy/decision logic lives in
+    `linklib.gates` (Gate-Extraction PR B); this just formats it."""
     return f"{visitor_text} {admin_suffix}".strip() if (authed and admin_suffix) else visitor_text
 
 
@@ -1741,11 +1744,45 @@ def _review_state_badge(unverified: bool, authed: bool, cls: str = "tp-verify") 
     made false — see CLAUDE.md's transparency-standard note). Reuses the
     existing .tp-verify/.cc-verify/.tool-desc-verify coral-wash/navy badge
     classes for both viewers, deliberately — the visual signal is the same
-    "this needs a look," only the words change with the audience."""
-    if not unverified:
+    "this needs a look," only the words change with the audience.
+
+    Thin HTML-side wrapper (Gate-Extraction PR B) — the verified/pending
+    decision and the actual badge copy live in `linklib.gates` (`state_for`/
+    `badge_text`), which is what MCP Phase 3's tools will import instead of
+    this function. `unverified` here is content already known non-empty by
+    the caller (every call site checks that itself first), so `state_for`
+    (not the full `field_state`) is the right half of the module to use."""
+    text = gates.badge_text(gates.state_for(unverified), authed)
+    if not text:
         return ""
-    text = "unverified, visible to visitors" if authed else "under review"
     return f' <span class="{cls}">{text}</span>'
+
+
+def _compare_cell_html(text: str | None, unverified: bool, authed: bool,
+                        empty_label: str = "Not yet available.",
+                        cls: str = "cc-verify", pre_wrap: bool = False) -> str:
+    """Shared `<td>` renderer for every per-field review-gated Compare
+    matrix column, on both Software (`_agent_cell`/`_desc_cell`/
+    `_diff_cell`) and Communities (`_profile_cell`). Radical-transparency
+    review standard: content always renders for both viewers now — a
+    pending review no longer collapses into the same empty-looking cell as
+    an entity with no content at all (see linklib.gates' module docstring).
+
+    `pre_wrap` covers the one real markup difference between the two
+    matrices' cells: Communities' profile fields can carry embedded
+    newlines (drafted narrative text), Software's compare fields don't —
+    kept as a caller-chosen flag rather than two near-duplicate functions.
+    Callers that need to check the OTHER, unrelated `_NEEDS_VERIFICATION`
+    data-completeness sentinel (Communities' `.comm-verify`) do that
+    themselves before ever calling this — this function only ever handles
+    the review-state gate."""
+    text = (text or "").strip()
+    if not text:
+        return f'<td class="cc-cell cc-empty">{_esc(empty_label)}</td>'
+    badge = _review_state_badge(unverified, authed, cls)
+    badge_html = f'<div style="margin-top:4px;">{badge.strip()}</div>' if badge else ""
+    style_attr = ' style="white-space:pre-wrap;"' if pre_wrap else ""
+    return f'<td class="cc-cell"{style_attr}>{_esc(text)}{badge_html}</td>'
 
 
 # CFO Toolbox logo rendering (Phase F) — turns a tools.logo_path/
@@ -6302,6 +6339,13 @@ Not sure which tool's for you? {(
 var ALL_TOOLS = {tools_json};
 var AUTHED = {'true' if authed else 'false'};
 var MEMBER = {'true' if is_member else 'false'};
+// Badge copy generated from linklib.gates' single source (Gate-Extraction
+// PR B) rather than a hardcoded literal here — see that module's own
+// comment on why this JS-side capitalized variant is a genuine,
+// pre-existing divergence from the profile-page/compare-matrix badge and
+// not something this extraction unifies.
+var DIRECTORY_BADGE_ADMIN = {_json.dumps(gates.DIRECTORY_JS_BADGE_TEXT_ADMIN)};
+var DIRECTORY_BADGE_VISITOR = {_json.dumps(gates.DIRECTORY_JS_BADGE_TEXT_VISITOR)};
 var activeCats = new Set();
 var advisorOnly = false;
 var PAGE_SIZE = 12;
@@ -6494,7 +6538,7 @@ function renderTools(tools) {{
           : '')
       + '</div>'
       + '<p class="tool-desc" id="desc-' + t.id + '">' + esc((t.summary || t.description) || 'Description coming soon.') + '</p>'
-      + (descUnverified ? '<span class="tool-desc-verify">' + (AUTHED ? 'Unverified, visible to visitors' : 'Under review') + '</span>' : '')
+      + (descUnverified ? '<span class="tool-desc-verify">' + (AUTHED ? DIRECTORY_BADGE_ADMIN : DIRECTORY_BADGE_VISITOR) + '</span>' : '')
       + '<div style="margin-top:auto;">'
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;min-height:24px;margin-bottom:10px;">'
       + '<div class="tool-cats">' + cats + '</div>' + fullProfileLink
@@ -6825,7 +6869,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
     )
 
     def _row(label: str, values: list[str], empty_label: str = "Not yet available.") -> str:
-        if not any((v or "").strip() for v in values):
+        if not gates.any_populated(values):
             return ""
         return (f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>'
                 + "".join(_cell(v, empty_label) for v in values) + "</tr>")
@@ -6841,30 +6885,16 @@ to compare them side by side. Check the box on any card, then use the compare ba
     # tracked yet."
     _compare_authed = _is_authed(request)
 
-    def _reviewed_cell(text: str, unverified: bool, empty_text: str) -> str:
-        """Shared cell renderer for every per-field review-gated Compare
-        column (Agent taxonomy, Description, Competitive differentiation).
-        Radical-transparency review standard: content always renders for
-        both viewers now — a pending review no longer collapses into the
-        same empty-looking cell as a tool with no content at all, which is
-        what let Competitive differentiation's missing gate go unnoticed
-        (see the "How this differs" row below)."""
-        text = (text or "").strip()
-        if not text:
-            return f'<td class="cc-cell cc-empty">{_esc(empty_text)}</td>'
-        badge = _review_state_badge(unverified, _compare_authed, "cc-verify")
-        badge_html = f'<div style="margin-top:4px;">{badge.strip()}</div>' if badge else ""
-        return f'<td class="cc-cell">{_esc(text)}{badge_html}</td>'
-
     def _agent_cell(t: dict) -> str:
-        return _reviewed_cell(
+        return _compare_cell_html(
             t.get("agent_taxonomy_note"),
             bool(t.get("agent_taxonomy_needs_verification")),
-            "Not yet documented.",
+            _compare_authed,
+            gates.COMPARE_EMPTY_LABELS["tool_agent_taxonomy"],
         )
 
     agent_row = ""
-    if any((t.get("agent_taxonomy_note") or "").strip() for t in tools):
+    if gates.any_populated([t.get("agent_taxonomy_note") for t in tools]):
         agent_row = (f'<tr><td class="cc-cell cc-label">{_esc("How agents are involved")}</td>'
                      + "".join(_agent_cell(t) for t in tools) + "</tr>")
     agent_section = ""
@@ -6872,21 +6902,23 @@ to compare them side by side. Check the box on any card, then use the compare ba
         agent_section = f"""<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>
 {agent_row}"""
     else:
+        _agent_empty_label = gates.COMPARE_EMPTY_LABELS["tool_agent_taxonomy"]
         agent_section = (
             f'<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>'
             f'<tr><td class="cc-cell cc-label"></td>'
-            + "".join('<td class="cc-cell cc-empty">Not yet documented.</td>' for _ in tools) + "</tr>"
+            + "".join(f'<td class="cc-cell cc-empty">{_esc(_agent_empty_label)}</td>' for _ in tools) + "</tr>"
         )
 
     def _desc_cell(t: dict) -> str:
-        return _reviewed_cell(
+        return _compare_cell_html(
             t.get("summary") or t.get("description"),
             bool(t.get("description_needs_verification")),
-            "Not yet available.",
+            _compare_authed,
+            gates.COMPARE_EMPTY_LABELS["tool_description"],
         )
 
     description_row = ""
-    if any((t.get("summary") or t.get("description") or "").strip() for t in tools):
+    if gates.any_populated([t.get("summary") or t.get("description") for t in tools]):
         description_row = (f'<tr><td class="cc-cell cc-label">{_esc("Description")}</td>'
                             + "".join(_desc_cell(t) for t in tools) + "</tr>")
 
@@ -6896,15 +6928,16 @@ to compare them side by side. Check the box on any card, then use the compare ba
         # all — the one field that rendered an unverified draft identically
         # to a verified one, to every viewer, with no badge for anyone. Now
         # brought in line with Agent taxonomy/Description above via the
-        # same shared _reviewed_cell.
-        return _reviewed_cell(
+        # same shared _compare_cell_html.
+        return _compare_cell_html(
             t.get("competitive_differentiation"),
             bool(t.get("competitive_differentiation_needs_verification")),
-            "Not yet available.",
+            _compare_authed,
+            gates.COMPARE_EMPTY_LABELS["tool_differentiation"],
         )
 
     differentiation_row = ""
-    if any((t.get("competitive_differentiation") or "").strip() for t in tools):
+    if gates.any_populated([t.get("competitive_differentiation") for t in tools]):
         differentiation_row = (f'<tr><td class="cc-cell cc-label">{_esc("How this differs")}</td>'
                                 + "".join(_diff_cell(t) for t in tools) + "</tr>")
 
@@ -7297,8 +7330,9 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
   <table class="tp-competitor-table"><tbody>{comp_rows}</tbody></table>
 </div>"""
     else:
+        _comp_copy = gates.EMPTY_COPY["tool_competitors"]
         competitors_block = _empty_state_card("Competitors", _empty_state_text(
-            "Competitors not yet available.", "Curate them from the edit page.", authed))
+            _comp_copy.visitor_text, _comp_copy.admin_suffix, authed))
 
     # "Bottom line" callout — same seafoam treatment as the Communities
     # profile page's verdict_summary callout (Phase 3b), replacing the old
@@ -7326,10 +7360,9 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
   <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(tool['competitive_differentiation'])}</p>
 </div>"""
     else:
+        _diff_copy = gates.EMPTY_COPY["tool_differentiation"]
         _diff_empty_html = _empty_state_card("Bottom line", _empty_state_text(
-            "Bottom line not yet available.",
-            "This field is written by hand, not auto-drafted. Add one from the edit page.",
-            authed))
+            _diff_copy.visitor_text, _diff_copy.admin_suffix, authed))
         differentiation_block = f'<div style="margin-top:22px;margin-bottom:22px;">{_diff_empty_html}</div>'
 
     # Radical-transparency review standard (supersedes the old Abacum-
@@ -7365,8 +7398,9 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
   {_at_citations_html}
 </div>"""
     else:
+        _at_copy = gates.EMPTY_COPY["tool_agent_taxonomy"]
         agent_taxonomy_block = _empty_state_card("Agent taxonomy", _empty_state_text(
-            "Agent taxonomy not yet available.", "Generate a draft from the edit page.", authed))
+            _at_copy.visitor_text, _at_copy.admin_suffix, authed))
 
     # Key features card (Feature Taxonomy Phase 2) — replaces the legacy
     # free-text tool_features card (retired outright in Phase 1b PR 2, see
@@ -7619,8 +7653,9 @@ function submitIntroForm() {{
         # the standardized "{Field} not yet available." pattern — approved
         # verbatim, kept distinct from every other field's placeholder
         # wording (see CLAUDE.md's transparency-standard note).
+        _desc_copy = gates.EMPTY_COPY["tool_description"]
         description_card = _empty_state_card("Description", _empty_state_text(
-            "Description coming soon.", "Add one from the edit page.", authed))
+            _desc_copy.visitor_text, _desc_copy.admin_suffix, authed))
 
     # Competitors sits right under Bottom Line now (Phase F6), not at the
     # bottom of the right column — both are "how does this stack up" content,
@@ -8079,7 +8114,13 @@ def tools_communities(request: Request):
     is_member = _is_member(request)  # submit is account-only
     lib = _lib()
     try:
-        communities = [_public_community(c) for c in lib.list_communities(approved_only=True)]
+        # Gate-Extraction PR B: `_public_community()` (a shallow-copy
+        # choke point that used to strip _NEEDS_VERIFICATION before it
+        # reached a visitor) was confirmed a true no-op — every one of its
+        # 3 callers only ever reads fields afterward, never mutates in a
+        # way that depended on it being a distinct dict object — and
+        # retired outright.
+        communities = lib.list_communities(approved_only=True)
         categories = lib.list_community_categories()
     finally:
         lib.close()
@@ -8880,7 +8921,7 @@ def tools_communities_compare(request: Request, ids: str = ""):
         for cid in id_list:
             c = lib.get_community(cid)
             if c and c.get("approved"):
-                communities.append(_public_community(c))
+                communities.append(c)
         profiles = {c["id"]: (lib.get_community_profile(c["id"]) or {}) for c in communities}
     finally:
         lib.close()
@@ -8934,7 +8975,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
     )
 
     def _row(label: str, values: list[str]) -> str:
-        if not any((v or "").strip() for v in values):
+        if not gates.any_populated(values):
             return ""
         return f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>' + "".join(_cell(v) for v in values) + "</tr>"
 
@@ -8951,20 +8992,23 @@ to compare them side by side. Check the box on any card, then use the compare ba
 
     def _profile_cell(text: str, unverified: bool) -> str:
         text = (text or "").strip()
-        if not text:
-            return '<td class="cc-cell cc-empty">Not yet available.</td>'
         if text == _NEEDS_VERIFICATION:
             return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
         # .cc-verify (radical-transparency review badge) is a DIFFERENT
         # concept from .comm-verify (the data-completeness flag above) —
         # these were incorrectly sharing one style once, see the .cc-verify
-        # definition's own comment for the split; kept apart here too.
-        badge = _review_state_badge(unverified, authed, "cc-verify")
-        badge_html = f'<div style="margin-top:4px;">{badge.strip()}</div>' if badge else ""
-        return f'<td class="cc-cell" style="white-space:pre-wrap;">{_esc(text)}{badge_html}</td>'
+        # definition's own comment for the split; kept apart here too. The
+        # sentinel check above has to run first, before _compare_cell_html
+        # ever sees the text — that's a different gate entirely, not part
+        # of the review-state module.
+        return _compare_cell_html(
+            text, unverified, authed,
+            gates.COMPARE_EMPTY_LABELS["community_profile_field"],
+            pre_wrap=True,
+        )
 
     def _profile_row(label: str, values: list) -> str:
-        if not any((v or "").strip() for v in values):
+        if not gates.any_populated(values):
             return ""
         cells = "".join(
             _profile_cell(v, c["id"] in _profile_unverified_ids)
@@ -9369,7 +9413,6 @@ def tools_community_profile(request: Request, slug: str):
         community = lib.get_community_by_slug(slug)
         if not community:
             raise HTTPException(status_code=404, detail="Community not found")
-        community = _public_community(community)
         profile = lib.get_community_profile(community["id"]) or {}
         similar_communities = lib.list_community_competitors(community["id"])
         profile_citations = lib.get_entity_citations("community", community["id"], "community_profile")
@@ -9461,9 +9504,10 @@ def tools_community_profile(request: Request, slug: str):
     # it always used, matching the target treatment applied everywhere
     # else on this pass.
     notes_text = " ".join(filter(None, [community.get("notes"), community.get("cost_note")]))
+    _comm_desc_copy = gates.EMPTY_COPY["community_description"]
     _desc_body = (f'<p style="margin:0;">{_esc(notes_text)}</p>' if notes_text else
                   f'<p style="margin:0;color:var(--muted);font-style:italic;">'
-                  f'{_esc(_empty_state_text("Description coming soon.", "Add one from the edit page.", authed))}</p>')
+                  f'{_esc(_empty_state_text(_comm_desc_copy.visitor_text, _comm_desc_copy.admin_suffix, authed))}</p>')
     description_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Description</h2>
   {_desc_body}
@@ -9502,8 +9546,9 @@ def tools_community_profile(request: Request, slug: str):
   <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;">{_esc(_display_profile['verdict_summary'])}</p>
 </div>"""
     else:
+        _comm_bl_copy = gates.EMPTY_COPY["community_bottom_line"]
         verdict_block = (f'<div style="margin-bottom:22px;">'
-                          f'{_empty_state_card("Bottom line", _empty_state_text("Bottom line not yet available.", "Generate a draft from the edit page.", authed))}</div>')
+                          f'{_empty_state_card("Bottom line", _empty_state_text(_comm_bl_copy.visitor_text, _comm_bl_copy.admin_suffix, authed))}</div>')
     # Citations-API grounding fix, Phase 3 — ONE shared "Sources" list for
     # the whole profile draft (decision 5), not one per card, rendered once
     # right after the Bottom line callout, public-capped at 5. Empty when
@@ -9552,8 +9597,9 @@ def tools_community_profile(request: Request, slug: str):
             # pass, PR A.1) — previously this rendered as a bare dashed box
             # with no heading at all, the only one of the seven empty-state
             # sites where a visitor couldn't tell WHICH section was missing.
+            _group_copy = gates.EMPTY_COPY["community_profile_group"]
             cards.append(_empty_state_card(group_title, _empty_state_text(
-                "This section hasn't been researched yet.", "Generate a draft from the edit page.", authed)))
+                _group_copy.visitor_text, _group_copy.admin_suffix, authed)))
     profile_cards = "\n".join(cards)
 
     # Details card: the fixed directory-metadata fields as label/value rows,
@@ -9627,8 +9673,9 @@ def tools_community_profile(request: Request, slug: str):
         # pattern (same structural shape: an admin-curated empty list on a
         # profile page) — flagged in the PR description as applying the
         # approved pattern by analogy rather than a literally-quoted string.
+        _similar_copy = gates.EMPTY_COPY["community_similar_communities"]
         similar_communities_block = _empty_state_card("Similar communities", _empty_state_text(
-            "Similar communities not yet available.", "Curate them from the edit page.", authed))
+            _similar_copy.visitor_text, _similar_copy.admin_suffix, authed))
 
     footnote_block = ""
     if community.get("advisor"):
@@ -14066,17 +14113,6 @@ _COMMUNITY_VERIFIABLE_FIELDS = (
 )
 
 
-def _public_community(c: dict) -> dict:
-    """Shallow-copy of a community dict. Historically this blanked any
-    _NEEDS_VERIFICATION sentinel field before it reached a visitor; per
-    Brian's call, unresearched fields now render visibly with a "Needs
-    verification" flag instead of being hidden (see _verify_html and its
-    call sites) — so this function is currently a no-op copy, kept as the
-    one choke point every public-facing community route already calls, in
-    case a future field needs public-side handling again."""
-    return dict(c)
-
-
 def _verify_html(value: str, cls: str = "comm-verify") -> str:
     """Render a Community listing field for public display: the escaped
     value normally, or a muted "Needs verification" flag (dashed border,
@@ -14146,8 +14182,13 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     # enum field — distinct from each select's real default — so the
     # generate-listing draft (see generateCommunityListing JS below) has a
     # way to flag "the page didn't make this clear" instead of silently
-    # landing on a real-looking value. _public_community strips it back out
-    # before any of these fields reach a public page.
+    # landing on a real-looking value. It does reach public pages: a field
+    # still carrying the sentinel renders as a "Needs verification" flag
+    # (_verify_html and its call sites), not blanked — the old
+    # `_public_community` choke point that used to strip it was a
+    # documented no-op even before this comment was corrected (Gate-
+    # Extraction PR B retired it outright, since nothing downstream of it
+    # had done any stripping in a long time).
     cost_opts = "".join(
         f'<option value="{_esc(b)}"{" selected" if c.get("cost_band", "Undisclosed dues") == b else ""}>{_esc(b)}</option>'
         for b in _COMMUNITY_COST_BANDS + [_NEEDS_VERIFICATION]

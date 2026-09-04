@@ -1131,6 +1131,41 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `tests/test_audit_tool_logo_dimensions.py` (10 tests, covering the
   header-parser against hand-built PNG/GIF/JPEG/WEBP/SVG samples) for the
   regression coverage.
+- **Gate-Extraction PR B (2026-09) — the radical-transparency review-state
+  decision (verified / populated-pending-review / empty, PR A above)
+  extracted into `linklib/gates.py`, the single source of truth for the
+  state, badge copy, empty-state placeholder copy, and the matchmaker's
+  unverified-content markers/disclaimer.** Route-level gate logic is
+  retired — `webapp/app.py`'s `_review_state_badge`/`_empty_state_card`/
+  `_empty_state_text` are now thin HTML-side wrappers over `gates.state_for`/
+  `gates.badge_text`, and the compare matrices' near-duplicate `_reviewed_cell`/
+  `_profile_cell` logic collapsed into one shared `_compare_cell_html`.
+  Behavior-identical to the post-PR-A baseline — see ARCHITECTURE.md's
+  matching bullet for the full write-up, including: the module-split
+  rationale (linklib stays HTML-free so MCP Phase 3's tools can import
+  `gates` directly without risking an HTML fragment leaking into a tool
+  result); the two consolidations from the approved Phase 0 inventory
+  (#10, row-existence vs. per-cell gating, now `gates.any_populated` +
+  `_compare_cell_html` shared by both entity types; #6, corrected mid-PR
+  from a mis-targeted "stale PR A comment" to its real target —
+  `_public_community()`, a confirmed-no-op community-dict choke point,
+  retired outright, plus a genuinely stale comment elsewhere that had
+  claimed it still stripped a sentinel); and the one real, pre-existing
+  copy divergence found and deliberately preserved rather than unified
+  (the Software directory card's client-side JS badge has always used a
+  capitalized variant of the profile-page/compare-matrix badge copy —
+  frozen as a second named constant, not merged, per "zero copy changes").
+  Deliberately out of scope, per the approved plan: the whole-record
+  admin review-workflow mechanism (`_narrative_verify_widget`,
+  `_review_status_pill_html`/`_action_html`/`_block_html`,
+  `_confidence_indicator_html`/`_confidence_badge_html`) — none of it
+  implements this display gate, PR A never touched it, and this
+  extraction doesn't either — and the `tp-verify`/`cc-verify`/
+  `tool-desc-verify` CSS class names (a rename rider, explicitly
+  deferred). See `tests/test_gates.py` and `tests/
+  test_gates_compare_equivalence.py` for the new coverage; PR A's own
+  `tests/test_review_state_publish_gates.py`/
+  `tests/test_matchmaker_publish_gate.py` pass unchanged.
 - **Community profile edit page — grouped into 5 labeled sections, a
   consistent width rule, and confidence badges moved inline (2026-08
   follow-up).** Live testing found the page's 23 fields rendering as one

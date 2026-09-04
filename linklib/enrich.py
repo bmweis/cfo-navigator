@@ -1538,8 +1538,10 @@ def _parse_community_confidence(raw) -> dict:
 # Sentinel drafted into a listing field the model isn't confident about,
 # instead of guessing — distinct from community_profiles.needs_review (a
 # whole-profile, human-toggled sign-off flag): this is a per-field, machine-set
-# gap marker on the basic directory listing. webapp/app.py strips it back out
-# before any field reaches a public page (see _public_community).
+# gap marker on the basic directory listing. It reaches public pages —
+# webapp/app.py's _verify_html renders it as a visible "Needs verification"
+# flag rather than blanking it (the old choke point that used to strip it,
+# _public_community, was a confirmed no-op, retired in Gate-Extraction PR B).
 NEEDS_VERIFICATION = "Needs verification"
 
 _COMMUNITY_LISTING_PROMPT = """You are drafting the basic directory-listing fields for a peer community in
