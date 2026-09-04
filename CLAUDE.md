@@ -5342,6 +5342,25 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   existing convention for a client-only "seen it once" preference, not a
   new mechanism. See ARCHITECTURE.md's matching bullet for the full
   write-up.
+- **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
+  overlap/contrast summary above both Compare tables, cached permanently
+  and capped by a shared daily dollar budget.** Purely additive on top of
+  Phase 1 — no existing cell-rendering function, and no `linklib/compare.py`/
+  `linklib/gates.py` logic, is touched. Generation reuses the exact
+  `CompareEntity`/`CompareField` data the page already built (no
+  re-fetch), is voice-governed via `require_voice_setting` like every
+  other `generate_*` call, and never recommends one entity over another —
+  only describes the shape of a difference. Cached in `compare_summary_cache`,
+  keyed by the compared entity set plus a content hash of what was
+  actually summarized; the footnote's unverified-content disclosure is
+  computed live at render time, decoupled from that cache key, so a
+  verify-only action can't miss the cache but still shows an accurate
+  disclosure. A cap hit renders a labeled note instead of failing the
+  page; every other unavailability reason omits the block silently.
+  Feedback is a public, no-token stored-submission mechanism
+  (`compare_summary_feedback`) reviewed by hand at
+  `/admin/compare-summary-feedback` — no automated action. See
+  ARCHITECTURE.md's matching bullet for the full write-up.
 
 **Mobile swipeable-table pattern** (established by the follow-up above,
 reusable for any future wide table on a narrow viewport): when a table's
