@@ -3495,6 +3495,134 @@ test_other_well_known_paths_on_mcp_host_still_redirect` and
 `test_other_well_known_paths_on_railway_origin_still_redirect`; `www.bmweis.com`
 staying un-exempted is pinned by `test_well_known_oauth_on_www_still_redirects_not_exempted`.
 
+### MCP server — Toolbox & Communities content tools (Phase 3)
+
+Six new read-only tools — `search_tools`, `get_tool`, `search_communities`,
+`get_community`, `compare_tools`, `compare_communities` — registered onto
+the same `/mcp` FastMCP instance the Phase 1 introspection tools live on,
+via a new `webapp/mcp_toolbox.py` module (`register_toolbox_tools(mcp,
+lib_factory)`, called from `webapp/app.py` right after `_mcp_server.
+build_mcp(...)`). Kept in a separate module from `webapp/mcp_server.py` on
+purpose: that module's scope is the three admin-gated introspection tools
+plus the transport/auth-security plumbing every `/mcp` tool shares; this
+module is pure Toolbox/Communities domain content, reusing that plumbing
+(the transport-level `_mcp_auth_gate`, `bearer_token_candidates`) rather
+than duplicating it.
+
+**Auth model — the one deliberate departure from the three introspection
+tools.** Those three require `role == "admin"` (`_require_admin`); these
+six require only **a valid, active, unrevoked token — any role**
+(`webapp.mcp_server.require_caller`, a new public wrapper over the same
+fail-closed `_caller_from_ctx` `_require_admin` already uses, minus the
+role check). This isn't a weaker security posture — it mirrors the
+underlying web pages exactly, which are fully public: `/tools/software`,
+`/tools/communities`, both entities' profile pages, and both Compare
+pages have no auth gate at all today. The caller's role only changes what
+content is visible **within** a result, never whether the tool can be
+called: `authed = caller.get("role") == "admin"` (the identical mapping
+`webapp.app._is_authed` uses — "admin" is the only role that counts as
+"authed" for gating purposes) feeds every `linklib.gates` call the tool
+makes, so a pending field's badge reads "under review" for a non-admin
+caller and "unverified, visible to visitors" for an admin caller — content
+itself is never hidden either way, per the radical-transparency standard.
+
+**Zero parallel gating logic — every review-state decision goes through
+`linklib.gates` exactly as the HTML routes do.** `gates.field_state`
+decides EMPTY/PENDING/VERIFIED; `gates.badge_text` produces the
+audience-specific badge text; `gates.EMPTY_COPY` (profile-page family,
+with an admin-only "go fill this in" suffix) and `gates.
+COMPARE_EMPTY_LABELS` (compare-matrix family, shorter, no admin suffix)
+supply empty-state placeholder text — the same two families, used at
+exactly the same two call sites (a full single-entity get vs. a
+compare-matrix cell) the web routes themselves use. No HTML/markup is ever
+produced or imported — `linklib/gates.py` and `linklib/compare.py` are
+both HTML-free by design specifically so a tool result can never leak a
+`<span class="tp-verify">` fragment by accident (see `gates.py`'s own
+module docstring).
+
+**Two different content strategies for single-entity vs. comparison, both
+deliberate:**
+
+- `get_tool`/`get_community` build their own lightweight dicts directly
+  over `linklib.gates`, using the FULL field text (`tools.description`,
+  not `linklib.compare`'s summary-preferring excerpt) — matching the real
+  profile page's own field selection. `get_tool` assembles this by hand
+  (description/agent_taxonomy/bottom_line/competitors/key_features);
+  `get_community` instead calls `linklib.compare.build_communities_compare`
+  with a single-entity list and takes `entities[0]` — reusable as-is here
+  because, unlike the tool builder, the community builder already selects
+  full, untruncated profile-field text (`profile.get(key)` directly, no
+  summary substitution), so single-entity reuse costs nothing in fidelity
+  and buys byte-for-byte parity with the Compare page's own gating and
+  Key-facts logic.
+- `compare_tools`/`compare_communities` call `linklib.compare.
+  build_software_compare`/`build_communities_compare` **completely
+  unmodified** — confirmed in Step 0 that neither function accepts or
+  needs a role/authed parameter at all: they only ever compute the
+  role-agnostic `GateState`, and the admin-vs-visitor badge text is
+  applied afterward, per field, via `gates.badge_text(field.state,
+  authed)` — exactly mirroring how `webapp/app.py`'s own `_cmp_populated_
+  field_html` does it for the HTML Compare page. The existing entity caps
+  (4 tools / 3 communities) are enforced by **rejecting** an out-of-range
+  request with `ToolError` — not silently truncating the way the web
+  route's own `id_list[:4]` does — since an agentic caller should learn
+  its request was malformed rather than silently receive a partial
+  comparison.
+
+**Compare Phase 2's cached AI summary — cache-hit only, by Brian's
+explicit approval (Step 0 item 6).** `Library.get_compare_summary` is a
+plain, free, read-only cache lookup keyed by the same `(entity_type,
+sorted-entity-ids, content_hash)` triple the web Compare route computes —
+`webapp/mcp_toolbox.py`'s `_cached_compare_summary` reproduces that exact
+key derivation, so an MCP call hits the cache precisely when the web
+page's own would. On a miss, the `summary` field is `None` — **`linklib.
+enrich.generate_compare_summary` is never called from this module, full
+stop.** This is a hard boundary, not a soft preference: an agentic
+conversation comparing many different tool/community pairs could
+otherwise spend against the shared global daily cost cap
+(`compare_summary_cache`'s `_DEFAULT_COMPARE_SUMMARY_CAP_USD`) with no
+human ever seeing a web page or a cap-hit banner.
+
+**Serialization** is hand-written, not `dataclasses.asdict` — every
+`CompareField`/`CompareEntity`/etc. needs its `GateState` enum turned into
+a plain string, its citations list conditionally attached only when
+non-empty, and (for `compare_tools`/`compare_communities`) its badge text
+computed live from the caller's role — a blind `asdict()` pass would still
+need a second pass for all three, so explicit per-field serializer
+functions (`_gated_field`, `_compare_field`, `_serialize_compare_entity`,
+etc.) were simpler and more auditable than asdict-plus-postprocessing.
+
+**Resolution matches each entity's own approved-only convention.**
+`get_tool_by_slug`/`get_community_by_slug` already filter `approved=1`
+(an unapproved entity has no public profile page, so its MCP-visible
+profile shouldn't be reachable either); `get_tool`/`get_community` (by
+numeric id) do not, so `webapp/mcp_toolbox.py`'s `_resolve_tool`/
+`_resolve_community` add that same approved-only check when the caller
+passes a bare id, closing what would otherwise be a real gap (an id-based
+lookup bypassing the approved-only rule a slug-based one already
+enforces).
+
+**No server-side search index — confirmed still unnecessary at this
+scale.** `search_tools`/`search_communities` are an in-memory, case-
+insensitive substring match over `Library.list_tools(approved_only=True)`/
+`list_communities(approved_only=True)` (name/summary/description, or
+name/demographic/notes for communities) plus an exact category match —
+mirroring the public directory pages' own purely client-side JS filtering
+(`ALL_TOOLS.filter(...)`) rather than introducing a new FTS5 index or any
+other indexing infrastructure for a ~155-tool / ~40-community corpus.
+`limit` is capped at 50 either way.
+
+Deliberately out of scope, per the approved plan: Feed search (parked for
+its own mini-investigation, Phase 4), any Buddy/matchmaker proxy tool
+(Phase 5), any write of any kind, and any change to `linklib/gates.py` or
+`linklib/compare.py`'s existing logic, or to the entity caps, or to the
+three introspection tools' admin-only requirement.
+
+See `tests/test_mcp_toolbox.py` for the full coverage — most notably the
+gate-enforcement tests proving a pending field's content and badge, and an
+empty field's placeholder copy, come back identical in shape and wording
+to what the HTML routes render, for both a non-admin and an admin caller.
+
 ### Archive save / enrichment pipeline
 
 All capture paths converge on `linklib/pipeline.py::ingest_url` or the

@@ -5339,6 +5339,30 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   truncation marker — a production sample of 25 `articles` rows had come
   back at 523KB uncapped. See ARCHITECTURE.md's matching section for the
   full write-up.
+- **MCP server, Phase 3 (2026-09) — six read-only Toolbox/Communities
+  content tools (`search_tools`, `get_tool`, `search_communities`,
+  `get_community`, `compare_tools`, `compare_communities`), a new
+  `webapp/mcp_toolbox.py` registered onto the same `/mcp` FastMCP instance
+  the Phase 1 introspection tools live on.** Deliberately **not**
+  admin-only like those three — any valid, active, unrevoked token may
+  call these six (`webapp.mcp_server.require_caller`, same fail-closed
+  resolution minus the role check), mirroring the fully-public web pages
+  they replicate; the caller's role only changes what's visible *within* a
+  result (a pending field's badge text — "under review" vs. "unverified,
+  visible to visitors" — via `linklib.gates`, never whether the tool runs
+  at all). `get_tool`/`get_community` build their own gated dicts over the
+  full profile-page field text; `compare_tools`/`compare_communities` call
+  `linklib.compare.build_software_compare`/`build_communities_compare`
+  completely unmodified (confirmed neither takes a role parameter — badge
+  text is applied afterward, per field) and reject rather than silently
+  truncate a request outside the existing 4-tool/3-community cap. Compare
+  Phase 2's cached AI summary is included cache-hit-only — a free
+  `Library.get_compare_summary` lookup against the same cache key the web
+  route computes; `generate_compare_summary` is never called from here, so
+  an agentic conversation can't spend against the shared daily cost cap.
+  See ARCHITECTURE.md's "MCP server — Toolbox & Communities content tools
+  (Phase 3)" section for the full write-up and `tests/test_mcp_toolbox.py`
+  for the gate-enforcement coverage.
 - **Compare Redesign, Phase 1 (2026-09) — both Compare pages rebuilt on a
   new `linklib/compare.py` serializer; the shared contract Compare Phase 2
   (AI summary generation) and MCP Phase 3 (compare tools) will also build
