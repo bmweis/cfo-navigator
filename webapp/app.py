@@ -31190,6 +31190,19 @@ _mcp = _mcp_server.build_mcp(
     extra_allowed_hosts=_mcp_production_hosts,
     extra_allowed_origins=[f"https://{h}" for h in _mcp_production_hosts],
 )
+
+# MCP Phase 3: six read-only Toolbox/Communities content tools (search_tools,
+# get_tool, search_communities, get_community, compare_tools,
+# compare_communities), registered onto the same FastMCP instance — see
+# webapp/mcp_toolbox.py's module docstring for the auth-model distinction
+# from the three admin-gated introspection tools above (any valid token,
+# any role, may call these six; the caller's role only changes what's
+# visible *within* a result, via linklib.gates — never whether the tool can
+# be called at all).
+from webapp import mcp_toolbox as _mcp_toolbox  # noqa: E402
+
+_mcp_toolbox.register_toolbox_tools(_mcp, _lib)
+
 _mcp_asgi_app = _mcp.streamable_http_app()
 
 
