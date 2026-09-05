@@ -427,7 +427,7 @@ fact — nothing clears it once learned.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `users` | Member accounts. Passwords are scrypt-hashed (`linklib/passwords.py`, stdlib only). | `role` (`user` \| `admin`), `active`, `ask_cap_usd` (per-user monthly dollar-cap override; `NULL` = inherit the global default from `settings`) |
+| `users` | Member accounts. Passwords are scrypt-hashed (`linklib/passwords.py`, stdlib only). | `role` (`user` \| `admin`), `active`, `ask_cap_usd` (per-user monthly dollar-cap override; `NULL` = inherit the global default from `settings`), `password_change_recommended` (Encourage-password-change, 2026-09 — set whenever the current password was chosen by someone other than the account holder: `create_user`'s default, and `POST /admin/users/{id}/password`; cleared the moment the holder sets their own — self-service `/reset-password` or the in-session `/change-password` form. Drives `webapp.app._password_change_nudge_html`'s dismissible banner only — never a login block, per Brian's explicit call) |
 | `password_reset_requests` | Self-service "forgot password" requests. | `token_hash` (SHA-256 of the emailed token — never the raw token, so a DB leak alone can't reset a password), `expires_at`, `resolved_at` (`''` = pending — the empty-string-sentinel idiom used throughout) |
 
 ### CFO Toolbox
@@ -3690,13 +3690,18 @@ mcp_server.require_admin` (a thin alias for the same `_require_admin` the
 three introspection tools use internally — added so a second module can
 reach the same fail-closed admin check without importing a name that reads
 as module-private; the three introspection tools' own calls are untouched).
-**One real, pre-existing inconsistency found and deliberately left alone**:
-`GET /api/search` — an older route wrapping the same `Library.search()` —
-is gated at member-tier (`_require_member`), a likely-unintentional
-survivor of the Library/Toolbox Phase 1 restructure that moved the Reader
-itself to admin-only without revisiting this API route. These new MCP
-tools follow `/read`'s current, actual enforcement (admin-only), not that
-older route's; fixing `/api/search`'s own gating is out of scope here.
+**One real, pre-existing inconsistency found here, and since fixed
+(2026-09)**: `GET /api/search` — an older route wrapping the same
+`Library.search()` — was gated at member-tier (`_require_member`), a
+likely-unintentional survivor of the Library/Toolbox Phase 1 restructure
+that moved the Reader itself to admin-only without revisiting this API
+route. These new MCP tools always followed `/read`'s current, actual
+enforcement (admin-only); fixing `/api/search`'s own gating was flagged as
+out of scope for this phase at the time, then done as its own urgent PR
+once a real non-admin (`role=user`) account made the gap live rather than
+theoretical — `/api/search` now uses `_require_api` (admin cookie OR the
+save token), matching `/read`'s access tier exactly while keeping its
+existing token-based callers (e.g. `scripts/mcp_server.py`) working.
 
 **Why Phase 4's tools are admin-gated while Phase 3's six Toolbox/
 Communities tools are any-valid-token — worth stating explicitly, since
@@ -6201,6 +6206,38 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   prompt pointing at `/login?next=<matchmaker path>`; the matchmaker routes
   themselves stay public (see below) — this is a soft, discovery-level nudge
   toward signing in, not a hard gate on the chat itself.
+- **Encourage password change (2026-09)** — `users.password_change_recommended`
+  (see the Accounts schema table above) drives a dismissible reminder banner,
+  never a login block (Brian's explicit call over a hard-block alternative
+  that was proposed and rejected). `_password_change_nudge_html(lib, request)`
+  is wired into exactly the two pages `_login_redirect`'s role-based default
+  actually lands on — `homepage()` (role `user`/guest) and `admin_page()`
+  (role `admin`) — rather than threaded through `_page()`'s ~250 call sites,
+  the smallest surface that still shows it on the very next page after login.
+  Dismissal is client-only (`localStorage`, keyed `pw_nudge_dismissed_<user
+  id>` so one shared browser's dismiss can't hide it for a different account
+  signed in later) — same convention as the Compare page's swipe-hint
+  (`_CMP_SWIPE_HINT_JS`). The banner's own link, and the flag's clear path,
+  is a new session-cookie-only `GET/POST /change-password` (member-gated, no
+  token fallback — same tier as `/api/read-article`/`/read-later/refresh`):
+  re-verifies the current password via `authenticate()` before accepting a
+  new one, distinct from and independent of the token-based self-service
+  `/forgot-password` → `/reset-password` email flow. The flag is set by
+  `create_user` (default `True` — every admin-created account starts
+  flagged) and by `POST /admin/users/{id}/password` (an admin resetting an
+  *existing* account's password sets it back to `True`, since the account
+  holder didn't choose that password either); it's cleared by
+  `set_user_password`'s two self-chosen-password call sites
+  (`reset_password_submit`, `change_password_submit`) — deliberately NOT
+  folded into `set_user_password` itself, since its two existing call sites
+  want opposite outcomes for the flag. `POST /admin/users/{id}/password` also
+  sends `linklib.email_utils.send_admin_password_reset_email` (a new
+  variant, same admin-editable-template mechanism as `send_welcome_email`/
+  `send_password_reset_email` via `_email_template_registry()`) when the
+  account has an email on file — closing the "encourage via email" loop:
+  account creation already emailed a similar nudge (`send_welcome_email`);
+  an existing account's admin-triggered reset now gets the equivalent
+  treatment instead of resetting silently.
 - **Three surfaces**:
   - *Public* — no auth: `/`, `/thought-leadership`,
     `/thought-leadership/growth-engine-ratio`, `/thought-leadership/growth-engine-calculator`
@@ -6441,9 +6478,12 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     PR — see "Admin URL convention, Phase 1b PR 1" below.
 - **Token auth in parallel**: `POST /save` is token-only
   (`X-Save-Token`/`?token=`) because the bookmarklet calls it cross-origin
-  where the cookie can't be sent; member/admin APIs (`/ask`, `/api/search`,
-  `/feed/save`) accept the token as an alternative to the cookie. All token
-  comparisons are constant-time (`hmac.compare_digest`).
+  where the cookie can't be sent; member/admin APIs (`/ask`, `/feed/save`)
+  accept the token as an alternative to the cookie. `/api/search` is
+  admin-only as of 2026-09 (`_require_api` — admin cookie or the token, not
+  any member cookie; see the MCP-server Phase 4 note above), matching
+  `/read`'s access tier. All token comparisons are constant-time
+  (`hmac.compare_digest`).
 - If **no password is configured at all**, private routes are open — a
   local-development convenience, never the hosted configuration.
 - Three middlewares wrap everything: a canonical-host 301 (www + legacy Railway

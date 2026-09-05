@@ -260,10 +260,16 @@ def test_retired_reader_routes_are_gone(env):
 
 
 def test_member_api_gating(env):
-    anon, member = _client(env), _member_client(env)
-    # /api/search: 401 anon, 200 member
+    anon, member, admin = _client(env), _member_client(env), _admin_client(env)
+    # /api/search is admin-only (matches /read's real access tier — Library
+    # content includes articles behind Brian's own paid subscriptions, and a
+    # signed-in non-admin member must never be able to search/browse it
+    # directly). Previously gated at member-tier, a likely-unintentional
+    # survivor of the Phase 1 restructure — see ARCHITECTURE.md's MCP-server
+    # Phase 4 note (now corrected to match).
     assert anon.get("/api/search?q=x", follow_redirects=False).status_code == 401
-    assert member.get("/api/search?q=x", follow_redirects=False).status_code == 200
+    assert member.get("/api/search?q=x", follow_redirects=False).status_code == 401
+    assert admin.get("/api/search?q=x", follow_redirects=False).status_code == 200
     # admin-only curation API stays 401 for members
     assert member.post("/library/1/delete", follow_redirects=False).status_code in (401, 303)
 

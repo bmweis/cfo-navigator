@@ -5745,6 +5745,44 @@ never reads as something to tap.
   covered by `webapp.checks.script_syntax_problems()` — same standing
   caveat as the Reader's own inline script).
 
+- **Encourage password change (2026-09) — a dismissible nudge, both via email
+  and via a login-flow banner, not a hard block.** Investigated first, per the
+  standing gate: `password_reset_requests` (the "pending password-reset
+  requests" concept) turned out to be an unrelated, already-fully-built
+  self-service mechanism (`/forgot-password` → `/reset-password`, tokenized,
+  emailed) with no connection to account creation or admin-set passwords;
+  outbound email infrastructure (`linklib/email_utils.py`, Gmail REST API,
+  already used for welcome emails and self-service resets) already existed in
+  full, so no new dependency/service decision was needed — confirmed rather
+  than assumed, and reported before any build. Two decisions Brian made
+  explicitly, both flagged rather than picked unilaterally: (1) a **dismissible
+  reminder banner**, never a hard block that would gate every private route
+  behind a forced change — a real, considered trade-off, not the default;
+  (2) the admin's existing "Reset password" action
+  (`POST /admin/users/{id}/password`) gets the same email nudge account
+  creation already sent, closing the loop so "encourage via email" covers
+  both account creation AND an existing account's admin-triggered reset, not
+  just the former. Mechanism: `users.password_change_recommended`
+  (`create_user`'s default = `True`; set back to `True` by an admin reset;
+  cleared only when the account holder sets their own password — self-service
+  `/reset-password`, or the new session-only `GET/POST /change-password` form)
+  drives `_password_change_nudge_html`'s banner, wired into just the two pages
+  a post-login redirect actually lands on (`homepage()`, `admin_page()`) —
+  deliberately not threaded through `_page()`'s ~250 call sites, since a nudge
+  only needs to appear once, on the very next page after login. Dismissal is
+  client-only (`localStorage`, keyed per user id — same convention as the
+  Compare page's swipe-hint), so nothing server-side tracks "seen it." The
+  email itself is a new `send_admin_password_reset_email` (mirrors
+  `send_welcome_email`'s shape: name/username/temp_password/login_url),
+  admin-editable like every other outbound template via
+  `_email_template_registry()`/`/admin/emails`. See ARCHITECTURE.md's "Auth:
+  three tiers, one cookie" section and the `users` schema-table row for the
+  full write-up, and `tests/test_password_change_recommended.py` for the
+  regression coverage (flag defaults/set/clear across all four call sites,
+  the admin-reset email, the in-session change-password form, and the
+  banner's presence/absence including the break-glass admin login, which has
+  no `users` row and so can never carry the flag).
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
@@ -5786,7 +5824,8 @@ tables, no third-party dependency.
     it — it was never part of the `original_content` system, so there's no slug collision to
     guard against).
   - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
-    `/admin/contacts` (member-gated), and
+    `/admin/contacts`, `/change-password` (all member-gated — see the Encourage
+    password change note in Key architecture decisions above), and
     `/read`, `/read/{article_id}` (**admin-only**, Phase 1 access level, merged into
     the single Reader in Phase 5 — see the Library access-level note and the Phase 5
     Reader-merge note in Key architecture decisions above). (The old flat
@@ -5800,19 +5839,35 @@ tables, no third-party dependency.
     now 405s rather than 404s since `POST /ask` still lives there.) The
     `/library` hub route was removed outright in Phase 1 — no redirect.
   - Private API → **401** when unauthenticated, but also accept a valid token (cookie OR
-    `X-Save-Token`): `/ask`, `/post`, `/feed/save`, `/api/search`,
+    `X-Save-Token`): `/ask`, `/post`, `/feed/save`,
     `/library/{article_id}/tags` (the Reader's inline tag editor, Phase 5c —
     the route predates it but had no callers until then). Of these, only
-    `/api/search` also accepts a `?token=` query param as a fallback
+    `/api/search` (see below) also accepts a `?token=` query param as a fallback
     (`token: str | None = None` on the route itself) — the others check
     only the `X-Save-Token` header (2026-09 correction: this line previously
     claimed `?token=` worked for all of them, verified false in code for
     `/ask` specifically during the MCP cleanup/hardening PR's Phase 0).
+  - **`/api/search` is now admin-only (`_require_api`), matching `/read`'s real
+    access tier (2026-09 fix)** — previously gated at member-tier
+    (`_require_member`, any signed-in user), a likely-unintentional survivor
+    of the Phase 1 restructure that moved the Reader itself to admin-only
+    without revisiting this API route (flagged but deliberately left alone by
+    the MCP-server Phase 4 investigation — see ARCHITECTURE.md's matching
+    note, now corrected). A signed-in non-admin member could search/read
+    Library content, including articles behind Brian's own paid subscriptions
+    (OnlyCFO, Mostly Metrics), directly through this route even though `/read`
+    itself already blocked them — closed. Still accepts a valid admin cookie
+    OR the save token (`X-Save-Token` header or `?token=` query param), same
+    as before — only the cookie-tier requirement changed, from any member to
+    admin specifically.
   - **Session-cookie-only** (401 when unauthenticated, no token fallback at all — these are
     reached only from inside the already-authenticated `/read` UI, never cross-origin):
     `/api/read-article` and `/read-later/refresh` (2026-08 follow-up — the per-item Read
     Later "Refresh" action deliberately doesn't accept `X-Save-Token`/`?token=`, unlike
     `/save-later`, since it's a button in the signed-in Reader, not the bookmarklet).
+    `/change-password` (2026-09) is the same tier for the same reason — a self-service
+    password change only ever makes sense from inside an already-authenticated session,
+    never cross-origin, so it never needed a token fallback either.
   - `/save` is **token-only** (`X-Save-Token` header or `?token=`) because the bookmarklet
     calls it cross-origin, where the login cookie can't be sent. It also carries a
     dedicated, `/save`-only CORS middleware (`_save_cors` in `webapp/app.py`, 2026-08

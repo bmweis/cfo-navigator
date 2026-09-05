@@ -30,6 +30,8 @@ Private routes (require login cookie; API routes also accept a token):
     POST /save                 Capture a link into the Archive (token auth — used by bookmarklet)
     POST /save-later           Capture a link into Read Later (token auth — used by its own bookmarklet)
     POST /read-later/refresh   Re-fetch and replace a Read Later item's cached content (session auth)
+    GET  /change-password / POST /change-password  Set a new password while signed in
+                                       (member-gated, session auth only — no token fallback)
     GET  /api/search           JSON search API
     GET  /bookmarklet          One-click Archive saver script
     GET  /read-later-bookmarklet  One-click Read Later saver script
@@ -1633,6 +1635,32 @@ def _group_badge(task_counts: dict[str, int], hrefs) -> str:
         return _task_badge(numeric_total)
     dot_pending = any(task_counts.get(h, 0) for h in hrefs if h in _tasks.DOT_ONLY_HREFS)
     return _task_badge_dot() if dot_pending else ""
+
+
+def _password_change_nudge_html(lib: Library, request: Request) -> str:
+    """Dismissible reminder banner for a signed-in member whose current
+    password was chosen by someone other than them (a brand-new account, or
+    an admin reset) — see users.password_change_recommended's migration
+    comment. Wired into the two pages a login redirect actually lands on
+    (homepage() for role="user", admin_page() for role="admin") rather than
+    threaded through _page()'s ~250 call sites — the smallest surface that
+    still shows it on the very next page after login. A deliberate nudge
+    only, never a block, per Brian's explicit call: dismissal is client-only
+    (localStorage, keyed per user id so one shared browser's dismiss can't
+    hide it for a different account signed in later) — same convention as
+    the Compare page's swipe-hint (_CMP_SWIPE_HINT_JS)."""
+    claims = _current_claims(request)
+    if not claims or not claims.get("username"):
+        return ""
+    user = lib.get_user(claims["username"])
+    if not user or not user.get("password_change_recommended"):
+        return ""
+    key = f"pw_nudge_dismissed_{user['id']}"
+    return f"""<div id="pw-nudge-banner" style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:12px 18px;margin:0 0 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+<span style="font-size:14px;color:var(--ink-soft);">Your password was set for you&mdash;worth changing it to one only you know. <a href="/change-password" style="font-weight:600;color:var(--navy);">Change it now &rarr;</a></span>
+<button type="button" onclick="try{{localStorage.setItem('{key}','1');}}catch(e){{}}var b=document.getElementById('pw-nudge-banner');if(b)b.style.display='none';" style="background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:4px 8px;">Dismiss</button>
+</div>
+<script>(function(){{try{{if(localStorage.getItem('{key}')){{var b=document.getElementById('pw-nudge-banner');if(b)b.style.display='none';}}}}catch(e){{}}}})();</script>"""
 
 
 def _has_open_admin_tasks() -> bool:
@@ -3305,6 +3333,10 @@ async def reset_password_submit(request: Request):
         if len(password) < 8:
             return RedirectResponse(f"/reset-password?token={quote(token)}&error=1", status_code=303)
         lib.set_user_password(req["user_id"], password)
+        # The account holder just chose their own password — clear the
+        # nudge (mirrors admin_users_password setting it True for the
+        # opposite case: an admin choosing it for them).
+        lib.set_password_change_recommended(req["user_id"], False)
         lib.resolve_password_resets_for_user(req["user_id"])
     finally:
         lib.close()
@@ -3353,6 +3385,69 @@ def logout():
     resp = RedirectResponse("/", status_code=303)
     resp.delete_cookie(COOKIE_NAME, path="/")
     return resp
+
+
+# ---------------------------------------------------------------------------
+# In-session "change my password" — session-cookie-only (no token fallback,
+# same tier as /api/read-article and /read-later/refresh), distinct from the
+# token-based self-service /forgot-password -> /reset-password email flow.
+# Reached from the dismissible password-change-recommended nudge banner
+# (_password_change_nudge_html), but also directly reachable by any signed-in
+# member any time — not gated on the nudge flag being set.
+# ---------------------------------------------------------------------------
+
+@app.get("/change-password", response_class=HTMLResponse)
+def change_password_page(request: Request, error: str = ""):
+    if not _is_member(request):
+        return _login_redirect(request)
+    if request.query_params.get("done") == "1":
+        body = """<div class="page page-form">
+<h1>Password updated</h1>
+<p style="color:var(--muted);margin:4px 0 20px;">Your password has been changed.</p>
+<p><a href="/" style="font-size:14px;">&larr; Back to the site</a></p>
+</div>"""
+        return HTMLResponse(_page("Password updated—Brian Weisberg", "", body, authed=_is_authed(request)))
+    err = ""
+    if error == "current":
+        err = '<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That current password isn&rsquo;t right—try again.</p>'
+    elif error == "short":
+        err = '<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">New password must be at least 8 characters.</p>'
+    body = f"""<div class="page page-form">
+<h1>Change your password</h1>
+<p style="color:var(--muted);margin:4px 0 28px;">Enter your current password and choose a new one.</p>
+{err}
+<form method="post" action="/change-password" style="display:grid;gap:16px;">
+  <input name="current_password" type="password" required autocomplete="current-password" placeholder="Current password"
+         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <input name="new_password" type="password" required minlength="8" autocomplete="new-password" placeholder="New password"
+         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <button type="submit" class="btn">Update password</button>
+</form>
+</div>"""
+    return HTMLResponse(_page("Change password—Brian Weisberg", "", body, authed=_is_authed(request)))
+
+
+@app.post("/change-password")
+async def change_password_submit(request: Request):
+    if not _is_member(request):
+        return _login_redirect(request)
+    claims = _current_claims(request)
+    username = (claims or {}).get("username") or ""
+    form = await request.form()
+    current_password = form.get("current_password") or ""
+    new_password = form.get("new_password") or ""
+    lib = _lib()
+    try:
+        user = lib.authenticate(username, current_password) if username else None
+        if not user:
+            return RedirectResponse("/change-password?error=current", status_code=303)
+        if len(new_password) < 8:
+            return RedirectResponse("/change-password?error=short", status_code=303)
+        lib.set_user_password(user["id"], new_password)
+        lib.set_password_change_recommended(user["id"], False)
+    finally:
+        lib.close()
+    return RedirectResponse("/change-password?done=1", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -3470,6 +3565,7 @@ def homepage(request: Request):
         # logic works, not a bug to guard against.
         tl_reps = [lib.get_thought_leadership_representative(t) for t, _label in _TL_TYPES]
         original_content_home = lib.list_original_content_for_home()
+        password_nudge_html = _password_change_nudge_html(lib, request)
     finally:
         lib.close()
 
@@ -3502,6 +3598,7 @@ def homepage(request: Request):
       </a>""" if is_admin else "")
 
     body = f"""<div class="page page-full">
+{password_nudge_html}
 <style>
 {_TL_SHARED_CSS}
 /* Mobile (default): plain stacked flow, DOM order = hero -> photo card ->
@@ -20060,7 +20157,13 @@ def health():
 
 @app.get("/api/search")
 def api_search(request: Request, q: str = "", limit: int = 50, token: str | None = None):
-    _require_member(request, token)
+    # Admin-only, matching /read's real access tier (Library content includes
+    # articles behind Brian's own paid subscriptions — see _is_authed's
+    # docstring). Previously _require_member (any signed-in user), a
+    # likely-unintentional survivor of the Phase 1 restructure that moved
+    # the Reader itself to admin-only without revisiting this API route —
+    # see ARCHITECTURE.md's MCP-server Phase 4 note (now corrected to match).
+    _require_api(request, token)
     lib = _lib()
     try:
         return {"query": q, "results": lib.search(q, limit=limit)}
@@ -23146,6 +23249,7 @@ def admin_page(request: Request):
     lib = _lib()
     try:
         task_counts = _tasks.open_task_counts(lib)
+        password_nudge_html = _password_change_nudge_html(lib, request)
     finally:
         lib.close()
 
@@ -23267,6 +23371,7 @@ def admin_page(request: Request):
             right_html += html
 
     body = f"""<div class="page page-admin">
+{password_nudge_html}
 <style>
 .admin-group summary:hover{{background:var(--surface);}}
 .admin-group[open] .group-badge{{display:none;}}
@@ -27426,10 +27531,33 @@ async def admin_users_password(request: Request, user_id: int):
     password = form.get("password") or ""
     msg = "Password too short (8+ characters)." if len(password) < 8 else "Password reset."
     if len(password) >= 8:
+        from linklib.email_utils import send_admin_password_reset_email
         lib = _lib()
         try:
             lib.set_user_password(user_id, password)
+            # An admin chose this password, not the account holder — flag it
+            # for the dismissible change-password nudge, same as a brand-new
+            # account (see users.password_change_recommended's migration
+            # comment). Self-service resets (reset_password_submit) and the
+            # in-session /change-password form both clear this instead, since
+            # there the holder chose their own password.
+            lib.set_password_change_recommended(user_id, True)
             lib.resolve_password_resets_for_user(user_id)
+            user = lib.get_user_by_id(user_id)
+            if user and user.get("email"):
+                login_url = f"{PUBLIC_BASE.rstrip('/')}/login"
+                sent = _send_email_safely(
+                    lib, "admin_password_reset", send_admin_password_reset_email,
+                    user["email"], username=user["username"], temp_password=password,
+                    login_url=login_url, name=user.get("name") or "",
+                    subject_template=lib.get_setting("admin_password_reset_subject_template") or None,
+                    body_template=lib.get_setting("admin_password_reset_body_template") or None,
+                    signoff=lib.get_setting("admin_password_reset_signoff") or None,
+                )
+                msg += (f" Emailed {user['email']}." if sent
+                        else f" Couldn't email {user['email']}—share the new password directly.")
+            elif user:
+                msg += " No email on file—share the new password with them directly."
         finally:
             lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
@@ -30655,6 +30783,16 @@ def _email_template_registry() -> list[dict]:
             "subject_default": eu.PASSWORD_RESET_SUBJECT_DEFAULT,
             "body_default": eu.PASSWORD_RESET_BODY_DEFAULT,
             "signoff_default": eu.PASSWORD_RESET_SIGNOFF_DEFAULT,
+        },
+        {
+            "id": "admin-password-reset", "prefix": "admin_password_reset", "title": "Admin password reset email",
+            "recipient": "Existing member",
+            "trigger": "An admin resets their password in /admin/users",
+            "blurb": "Sent to an existing member with their new temporary password when an admin resets it directly (distinct from the self-service “Forgot your password?” link above).",
+            "placeholders": eu.ADMIN_PW_RESET_PLACEHOLDERS,
+            "subject_default": eu.ADMIN_PW_RESET_SUBJECT_DEFAULT,
+            "body_default": eu.ADMIN_PW_RESET_BODY_DEFAULT,
+            "signoff_default": eu.ADMIN_PW_RESET_SIGNOFF_DEFAULT,
         },
         {
             "id": "tool-submission", "prefix": "tool_submission", "title": "Tool submission confirmation",

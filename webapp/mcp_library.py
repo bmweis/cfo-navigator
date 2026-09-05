@@ -15,10 +15,11 @@ assumed from an earlier planning note: `/read`, `/read/{id}`, and
 only**, via `webapp.mcp_server.require_admin` — matching what the Reader
 UI actually enforces today, not a stale "Library tools are admin-only"
 assumption. (`GET /api/search`, a separate, older route wrapping the same
-`Library.search()`, is member-tier-gated — a likely-unintentional survivor
-of the Phase 1 Library-goes-admin-only restructure. Deliberately not
-touched by this phase; these new MCP tools follow `/read`'s current
-enforcement, not that route's.)
+`Library.search()`, was member-tier-gated at the time this phase shipped —
+a likely-unintentional survivor of the Phase 1 Library-goes-admin-only
+restructure, deliberately left untouched by this phase. Fixed in a later,
+separate PR (2026-09): it now uses `_require_api`, matching `/read`'s
+admin-only enforcement.)
 
 Track A reuses `linklib.agent.retrieve()` (hybrid FTS5+vector, RRF-merged)
 and `Library.get_article`/`get_article_by_url` completely unmodified — no
