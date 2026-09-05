@@ -26787,6 +26787,32 @@ def admin_community_gap_toggle(request: Request, submission_id: int, reviewed: s
     return RedirectResponse(f"/admin/community-gaps{qs}", status_code=303)
 
 
+# Reference content for the "How to set up a new MCP user" disclosure block
+# on /admin/users. Static — documents the manual, cross-surface flow (this
+# page, then a railway ssh script, then the user's own Claude app) rather
+# than an editable setting, same "plain HTML, not DB-backed" reasoning as
+# _COMMUNITIES_REFERENCE_HTML above. Per CLAUDE.md's Documentation rule,
+# any PR that changes this flow (the mint_api_token.py invocation, the
+# connector URL/header shape, or the default-cap copy) must update this
+# block in the same PR.
+_MCP_USER_SETUP_HTML = """
+<ol style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.85;display:grid;gap:12px;">
+<li><strong>Create the account.</strong> Use &ldquo;Add a member&rdquo; below &mdash; pick a role and an active status.
+They can log in immediately with the temporary password you set. If you gave them an email, a welcome email with
+that password goes out automatically; otherwise, share it with them directly.</li>
+<li><strong>Raise their Ask/Matchmaker cap, if needed.</strong> There&rsquo;s no &ldquo;unlimited&rdquo; option
+&mdash; set a high dollar number instead of the default.</li>
+<li><strong>Mint their personal MCP token.</strong> <code>railway ssh</code>, then:<br>
+<code style="display:block;margin:6px 0;padding:8px 10px;background:var(--surface);border:1px solid var(--line);border-radius:6px;font-size:12.5px;overflow-x:auto;">python -m scripts.mint_api_token --db /data/library.db --username &lt;username&gt; --label &lt;label&gt;</code>
+The plaintext token is shown once &mdash; copy it to a password manager immediately. It can&rsquo;t be recovered
+later, only reissued.</li>
+<li><strong>They add the connector in their own Claude app:</strong> URL <code>https://mcp.bmweis.com/mcp</code>,
+header <code>authorization</code>, value <code>Bearer &lt;token&gt;</code> (the word &ldquo;Bearer&rdquo;, a space,
+the token &mdash; no other format), marked Required.</li>
+</ol>
+"""
+
+
 @app.get("/admin/users", response_class=HTMLResponse)
 def admin_users(request: Request, msg: str = ""):
     if not _is_authed(request):
@@ -26809,15 +26835,32 @@ def admin_users(request: Request, msg: str = ""):
     banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
               f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
 
-    def _card(u: dict) -> str:
+    # Same standard admin-table convention as /admin/tools/software and
+    # /admin/tools/communities (checkbox select, column picker, client-side
+    # sort/filter, a "Delete selected" bulk action) — see CLAUDE.md's
+    # admin-table-convention note. Username/Actions have no data-col, so
+    # they're always visible; everything else is picker-gated, same as the
+    # other two tables.
+    users_cols = [("realname", "Name"), ("email", "Email"), ("last_login", "Last login"),
+                  ("ask", "FP&A Buddy cap"), ("matchmaker", "Matchmaker cap")]
+    users_sort_fields = [("name", "Username"), ("last_login", "Last login"), ("created", "Created")]
+    users_scalar_filters = [
+        {"key": "role", "label": "Role", "options": ["Admin", "Member"]},
+        {"key": "status", "label": "Status", "options": ["Active", "Disabled"]},
+    ]
+    total_cols = 2 + len(users_cols) + 1  # checkbox + username + optional cols + actions
+
+    def _user_row(u: dict) -> str:
         uid = u["id"]
         active = u["active"]
-        status = ('<span class="user-badge" style="background:#d1fae5;color:#065f46;">active</span>' if active
-                  else '<span class="user-badge" style="background:#fee2e2;color:#b91c1c;">disabled</span>')
+        status_badge = ('<span class="user-badge" style="background:#d1fae5;color:#065f46;">active</span>' if active
+                         else '<span class="user-badge" style="background:#fee2e2;color:#b91c1c;">disabled</span>')
         role_badge = (f'<span class="user-badge" style="'
                       f'{"background:var(--coral-wash);color:var(--coral-deep);" if u["role"]=="admin" else "background:var(--seafoam-wash);color:var(--seafoam-deep);"}'
                       f'">{_esc(u["role"])}</span>')
-        last = _esc((u["last_login_at"] or "")[:10]) or "—"
+        last_raw = u["last_login_at"] or ""
+        last_display = _esc(last_raw[:10]) or "—"
+        created_raw = (u["created_at"] or "")[:10]
         cap_override = u.get("ask_cap_usd")
         effective_cap = cap_override if cap_override is not None else default_cap
         spent = ask_spend.get(uid, 0.0)
@@ -26825,100 +26868,128 @@ def admin_users(request: Request, msg: str = ""):
         mm_cap_override = u.get("matchmaker_cap_usd")
         mm_effective_cap = mm_cap_override if mm_cap_override is not None else default_mm_cap
         mm_spent = mm_spend.get(uid, 0.0)
-        meta_bits = [b for b in (_esc(u["name"] or ""), _esc(u["email"] or "")) if b]
-        meta_bits.append(f"Last in {last}")
-        meta_line = " &middot; ".join(meta_bits)
+        mm_cap_note = "override" if mm_cap_override is not None else "default"
         resets = resets_by_user.get(uid)
         reset_notice = ""
         if resets:
             when = _esc(resets[0]["created_at"][:10])
             reset_notice = (
-                f'<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:9px;'
-                f'padding:8px 12px;margin:8px 0 0;display:flex;align-items:center;justify-content:space-between;'
-                f'gap:10px;font-size:13px;color:var(--navy);">'
-                f'<span>Requested a password reset&mdash;{when}</span>'
+                f'<div style="margin-top:4px;display:flex;align-items:center;gap:8px;font-size:11.5px;'
+                f'color:var(--navy);flex-wrap:wrap;">'
+                f'<span>&#9888; Requested a password reset&mdash;{when}</span>'
                 f'<form method="post" action="/admin/users/{uid}/password-reset/dismiss" style="margin:0;">'
-                f'<button type="submit" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;'
-                f'color:var(--coral-deep);border-color:var(--coral);">Dismiss</button></form></div>'
+                f'<button type="submit" style="font-size:11px;padding:1px 8px;border:1px solid var(--line);'
+                f'border-radius:5px;background:transparent;color:var(--navy);cursor:pointer;">Dismiss</button>'
+                f'</form></div>'
             )
-        return f"""<div class="user-card" data-user-id="{uid}">
-  <div class="user-card-head">
-    <div style="min-width:0;">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span class="user-name">{_esc(u["username"])}</span>{role_badge}{status}
-      </div>
-      <div class="user-meta">{meta_line}</div>
-      {reset_notice}
-    </div>
-    <div style="display:flex;align-items:center;gap:14px;flex-shrink:0;">
-      <div style="text-align:right;font-size:12px;color:var(--muted);">
-        <div style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</div>
-        <div>Ask &middot; {cap_note}</div>
-        <div style="font-weight:600;color:var(--ink);margin-top:4px;">${mm_spent:.2f} / ${mm_effective_cap:.2f}</div>
-        <div>Matchmaker &middot; {"override" if mm_cap_override is not None else "default"}</div>
-      </div>
-      <button type="button" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;" onclick="toggleManage({uid})">Manage</button>
-    </div>
+        row_attrs = _admin_row_data_attrs({
+            "name": u["username"],
+            "role": "admin" if u["role"] == "admin" else "member",
+            "status": "active" if active else "disabled",
+            "last_login": last_raw[:10],
+            "created": created_raw,
+            "search": f"{u['username']} {u.get('name') or ''} {u.get('email') or ''}",
+        })
+        return f"""<tr class="admin-table-row" {row_attrs}>
+          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{uid}" class="users-row-cb" onchange="updateBulkButton('users')"></td>
+          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
+              <span class="user-name">{_esc(u["username"])}</span>{role_badge}{status_badge}
+            </div>
+            {reset_notice}
+          </td>
+          <td data-col="users:realname" data-label="Name" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(u.get('name') or '—')}</td>
+          <td data-col="users:email" data-label="Email" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(u.get('email') or '—')}</td>
+          <td data-col="users:last_login" data-label="Last login" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);white-space:nowrap;">{last_display}</td>
+          <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
+            <div style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</div>
+            <div style="color:var(--muted);">{cap_note}</div>
+          </td>
+          <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
+            <div style="font-weight:600;color:var(--ink);">${mm_spent:.2f} / ${mm_effective_cap:.2f}</div>
+            <div style="color:var(--muted);">{mm_cap_note}</div>
+          </td>
+          <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            <button type="button" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="toggleManage({uid})">Manage</button>
+          </td>
+        </tr>"""
+
+    def _manage_panel(u: dict) -> str:
+        uid = u["id"]
+        active = u["active"]
+        cap_override = u.get("ask_cap_usd")
+        mm_cap_override = u.get("matchmaker_cap_usd")
+        return f"""<div class="user-manage-panel" id="manage-{uid}" style="display:none;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
+    <h3 style="margin:0;font-size:14px;font-family:var(--font-head);color:var(--ink);">Manage {_esc(u['username'])}</h3>
+    <button type="button" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;" onclick="toggleManage({uid})">Close</button>
   </div>
-  <div class="user-manage" id="manage-{uid}" style="display:none;">
-    <div class="user-manage-row">
-      <label>Profile</label>
-      <form method="post" action="/admin/users/{uid}/edit" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" placeholder="username" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:120px;">
-        <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:130px;">
-        <input name="email" type="email" value="{_esc(u["email"] or "")}" maxlength="200" placeholder="email" title="email" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:170px;">
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Save</button>
-      </form>
-    </div>
-    <div class="user-manage-row">
-      <label>FP&amp;A Buddy cap</label>
-      <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:6px;align-items:center;">
-        <span style="font-size:13px;color:var(--muted);">$</span>
-        <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
-          placeholder="${default_cap:.2f}" title="Monthly cap override—blank inherits the site default"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-        <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
-      </form>
-    </div>
-    <div class="user-manage-row">
-      <label>Matchmaker cap</label>
-      <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:6px;align-items:center;">
-        <span style="font-size:13px;color:var(--muted);">$</span>
-        <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
-          placeholder="${default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-        <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
-      </form>
-    </div>
-    <div class="user-manage-row">
-      <label>Reset password</label>
-      <form method="post" action="/admin/users/{uid}/password" style="display:flex;gap:6px;align-items:center;">
-        <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:150px;">
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Reset</button>
-      </form>
-    </div>
-    <div class="user-manage-row">
-      <label>Account</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
-        <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Disable" if active else "Enable"}</button></form>
-        <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
-      </div>
+  <div class="user-manage-row">
+    <label>Profile</label>
+    <form method="post" action="/admin/users/{uid}/edit" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" placeholder="username" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:120px;">
+      <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:130px;">
+      <input name="email" type="email" value="{_esc(u["email"] or "")}" maxlength="200" placeholder="email" title="email" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:170px;">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Save</button>
+    </form>
+  </div>
+  <div class="user-manage-row">
+    <label>FP&amp;A Buddy cap</label>
+    <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:6px;align-items:center;">
+      <span style="font-size:13px;color:var(--muted);">$</span>
+      <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
+        placeholder="${default_cap:.2f}" title="Monthly cap override—blank inherits the site default"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+      <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
+    </form>
+  </div>
+  <div class="user-manage-row">
+    <label>Matchmaker cap</label>
+    <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:6px;align-items:center;">
+      <span style="font-size:13px;color:var(--muted);">$</span>
+      <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
+        placeholder="${default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+      <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
+    </form>
+  </div>
+  <div class="user-manage-row">
+    <label>Reset password</label>
+    <form method="post" action="/admin/users/{uid}/password" style="display:flex;gap:6px;align-items:center;">
+      <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:150px;">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Reset</button>
+    </form>
+  </div>
+  <div class="user-manage-row">
+    <label>Account</label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
+      <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Disable" if active else "Enable"}</button></form>
+      <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
     </div>
   </div>
 </div>"""
 
-    cards = "".join(_card(u) for u in users) or (
-        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
-        'padding:32px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</div>')
+    rows_html = "".join(_user_row(u) for u in users) or (
+        f'<tr><td colspan="{total_cols}" style="padding:20px;color:var(--muted);">No accounts yet. Create one below.</td></tr>')
+    manage_panels_html = "".join(_manage_panel(u) for u in users)
 
-    body = f"""<div class="page page-admin">
+    body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
+<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Users</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Member accounts for the gated sections. You create accounts here (no public sign-up yet). You always keep admin access via the host password, so you can&rsquo;t lock yourself out.</p>
 {banner}
+
+<details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
+  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>How to set up a new MCP user</summary>
+  <div style="margin-top:16px;">
+    {_MCP_USER_SETUP_HTML}
+  </div>
+</details>
+
 <form method="post" action="/admin/users/ask-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
   <span style="font-size:13px;color:var(--muted);">FP&amp;A Buddy default monthly cap, per user:</span>
   <span style="font-size:13px;">$</span>
@@ -26933,9 +27004,42 @@ def admin_users(request: Request, msg: str = ""):
   <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
   <span style="font-size:12px;color:var(--muted);">Anonymous visitors (no login) are capped the same way, keyed by session cookie instead of a user row.</span>
 </form>
-<div style="display:grid;gap:10px;margin-bottom:26px;">{cards}</div>
 
-<h2 style="font-size:18px;">Add a member</h2>
+{_admin_column_picker_html("users", users_cols, default_visible=("last_login",))}
+{_admin_sort_filter_toolbar_html("users", users_sort_fields, users_scalar_filters, search_placeholder="Search by username, name, or email…")}
+<div style="margin:0 0 16px;display:flex;gap:10px;flex-wrap:wrap;">
+  <button type="button" id="users-bulk-delete-btn" class="btn btn-ghost" disabled
+    style="font-size:13px;padding:6px 16px;color:#b91c1c;border-color:#fca5a5;" onclick="openUsersDeleteSelectedPanel()">Delete selected (0)</button>
+</div>
+<div id="users-delete-panel" style="display:none;border:1px solid #fca5a5;border-radius:12px;padding:16px 18px;margin:0 0 20px;background:var(--surface);max-width:520px;">
+  <div id="users-delete-body"></div>
+  <div style="margin-top:14px;">
+    <button type="button" id="users-delete-confirm-btn" class="btn" disabled
+      style="font-size:13px;padding:6px 16px;background:#b91c1c;border-color:#b91c1c;">Delete</button>
+    <button type="button" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;margin-left:6px;"
+      onclick="closeUsersDeleteSelectedPanel()">Cancel</button>
+  </div>
+</div>
+
+<div style="overflow-x:auto;">
+<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('users',this.checked)"></th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Username</th>
+  <th data-col="users:realname" style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th data-col="users:email" style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
+  <th data-col="users:last_login" style="padding:10px 12px;text-align:left;font-size:13px;">Last login</th>
+  <th data-col="users:ask" style="padding:10px 12px;text-align:left;font-size:13px;">FP&amp;A Buddy cap</th>
+  <th data-col="users:matchmaker" style="padding:10px 12px;text-align:left;font-size:13px;">Matchmaker cap</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody id="users-approved-tbody">{rows_html}</tbody>
+</table>
+</div>
+
+<div id="users-manage-panels" style="margin-top:16px;display:grid;gap:10px;">{manage_panels_html}</div>
+
+<h2 style="font-size:18px;margin-top:32px;">Add a member</h2>
 <form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
   <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
     <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
@@ -26955,21 +27059,94 @@ def admin_users(request: Request, msg: str = ""):
 </div>
 
 <style>
-.user-card{{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}}
-.user-card-head{{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}}
 .user-name{{font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);}}
 .user-badge{{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;}}
-.user-meta{{font-size:12px;color:var(--muted);margin-top:3px;}}
-.user-manage{{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:grid;gap:10px;}}
+.user-manage-panel{{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:10px;}}
 .user-manage-row{{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:center;}}
 .user-manage-row label{{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}}
 @media (max-width:600px){{.user-manage-row{{grid-template-columns:1fr;}}}}
+@media(max-width:700px){{
+  .admin-table-responsive thead{{display:none;}}
+  .admin-table-responsive, .admin-table-responsive tbody,
+  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;}}
+  .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
+  .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
+    font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin-bottom:3px;}}
+}}
 </style>
 
 <script>
+initColPicker('users', {json.dumps([k for k, _ in users_cols])});
+applySortFilter('users');
 function toggleManage(uid) {{
   var panel = document.getElementById('manage-' + uid);
-  if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  if (!panel) return;
+  var opening = panel.style.display === 'none';
+  panel.style.display = opening ? 'block' : 'none';
+  if (opening) panel.scrollIntoView({{behavior: 'smooth', block: 'nearest'}});
+}}
+async function openUsersDeleteSelectedPanel() {{
+  var ids = Array.prototype.map.call(document.querySelectorAll('.users-row-cb:checked'), function(cb) {{ return parseInt(cb.value, 10); }});
+  if (!ids.length) return;
+  document.getElementById('users-delete-panel').style.display = 'block';
+  var body = document.getElementById('users-delete-body');
+  body.innerHTML = '<p style="font-size:13px;color:var(--muted);">Checking admin-account safeguards…</p>';
+  var confirmBtn = document.getElementById('users-delete-confirm-btn');
+  confirmBtn.style.display = '';
+  confirmBtn.disabled = true; confirmBtn.textContent = 'Delete';
+  try {{
+    var r = await fetch('/admin/users/bulk-delete-check', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ids: ids}})
+    }});
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error();
+    renderUsersDeleteSelectedPanel(d);
+  }} catch (e) {{
+    body.innerHTML = '<p style="font-size:13px;color:#b91c1c;">Couldn\\'t load delete preview—try again.</p>';
+  }}
+}}
+function renderUsersDeleteSelectedPanel(d) {{
+  var esc = function(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
+  var body = document.getElementById('users-delete-body');
+  var blockedHtml = '';
+  if (d.blocked && d.blocked.length) {{
+    var items = d.blocked.map(function(b) {{ return '<li><strong>' + esc(b.username) + '</strong>&mdash;' + esc(b.reason) + '</li>'; }}).join('');
+    blockedHtml = '<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13px;">' +
+      '<strong>Not deleting these&mdash;it would leave no admin account:</strong>' +
+      '<ul style="margin:6px 0 0;padding-left:18px;">' + items + '</ul></div>';
+  }}
+  var confirmBtn = document.getElementById('users-delete-confirm-btn');
+  if (!d.users.length) {{
+    body.innerHTML = '<p style="font-size:14px;margin:0 0 8px;">Nothing left to delete.</p>' + blockedHtml;
+    confirmBtn.style.display = 'none';
+    return;
+  }}
+  var names = d.users.map(function(u) {{ return '<li>' + esc(u.username) + '</li>'; }}).join('');
+  body.innerHTML = '<p style="font-size:14px;margin:0 0 8px;">Delete these ' + d.users.length + ' account' + (d.users.length === 1 ? '' : 's') + '?</p>' +
+    '<ul style="margin:0 0 8px;padding-left:18px;font-size:14px;">' + names + '</ul>' + blockedHtml;
+  confirmBtn.style.display = '';
+  confirmBtn.disabled = false; confirmBtn.textContent = 'Delete ' + d.users.length + ' account' + (d.users.length === 1 ? '' : 's');
+  confirmBtn.onclick = function() {{ submitUsersBulkDelete(d.users.map(function(u) {{ return u.id; }})); }};
+}}
+async function submitUsersBulkDelete(ids) {{
+  var btn = document.getElementById('users-delete-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {{
+    var r = await fetch('/admin/users/bulk-delete', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ids: ids}})
+    }});
+    if (!r.ok) throw new Error();
+    window.location.reload();
+  }} catch (e) {{
+    btn.disabled = false; btn.textContent = 'Delete failed—try again';
+  }}
+}}
+function closeUsersDeleteSelectedPanel() {{
+  document.getElementById('users-delete-panel').style.display = 'none';
 }}
 </script>"""
     return HTMLResponse(_page("Users—Admin", "Admin", body, authed=True))
@@ -27209,6 +27386,87 @@ def admin_users_delete(request: Request, user_id: int):
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/users/bulk-delete-check")
+async def admin_users_bulk_delete_check(request: Request):
+    """Preview for the Users bulk-delete confirm step. Generalizes the
+    single-row Delete button's _is_last_active_admin guard to a batch:
+    rather than silently dropping or silently allowing a selection that
+    would zero out active admins, every selected active-admin row that
+    would do that is reported back as explicitly blocked, with the rest of
+    the selection still deletable — no silent partial failure, per
+    CLAUDE.md's standing "never silently fail" principle."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    try:
+        user_ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    selected = set(user_ids)
+    lib = _lib()
+    try:
+        all_users = lib.list_users()
+        by_id = {u["id"]: u for u in all_users}
+        other_active_admins = [u for u in all_users
+                                if u["role"] == "admin" and u["active"] and u["id"] not in selected]
+        blocked_ids: set[int] = set()
+        if not other_active_admins:
+            # Deleting every selected id would leave nobody — block every
+            # selected active admin (not just one) so the preview names
+            # all of them, not an arbitrary single row.
+            blocked_ids = {u["id"] for u in all_users
+                           if u["id"] in selected and u["role"] == "admin" and u["active"]}
+        users_out, blocked_out = [], []
+        for uid in user_ids:
+            u = by_id.get(uid)
+            if not u:
+                continue
+            if uid in blocked_ids:
+                blocked_out.append({"id": uid, "username": u["username"],
+                                     "reason": "would leave no active admin account"})
+            else:
+                users_out.append({"id": uid, "username": u["username"]})
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "users": users_out, "blocked": blocked_out})
+
+
+@app.post("/admin/users/bulk-delete")
+async def admin_users_bulk_delete(request: Request):
+    """Same delete path as the single-row Delete button (delete_user, gated
+    by _is_last_active_admin), just looped over the selection made in
+    /admin/users. Re-checks the guard fresh on every iteration rather than
+    trusting the bulk-delete-check preview's snapshot — deleting one
+    selected admin can change whether the next one is the last active
+    admin, so the guard has to be re-evaluated against live state as the
+    batch proceeds, not decided once up front."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    lib = _lib()
+    try:
+        deleted = 0
+        for raw_id in ids:
+            try:
+                user_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            users = lib.list_users()
+            if _is_last_active_admin(users, user_id):
+                continue
+            lib.delete_user(user_id)
+            deleted += 1
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "deleted": deleted})
 
 
 @app.post("/admin/library/queue/add")

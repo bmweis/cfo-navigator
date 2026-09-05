@@ -5627,6 +5627,83 @@ never reads as something to tap.
   tool and a sparse/empty one — all four combinations screenshot-checked
   before merge.
 
+- **Admin Users page: table redesign + MCP user setup docs (2026-09) — `/admin/users`
+  joins the standard admin-table convention, making it explicitly three-for-three
+  with `/admin/tools/software` and `/admin/tools/communities`.** `/admin/users` was
+  the last major admin list still on a bespoke one-card-per-user layout, with
+  per-user cap editing/role/active/delete tucked behind a card-header "Manage"
+  toggle. Rebuilt on the same shared machinery the other two tables already use —
+  `_admin_column_picker_html`/`_admin_sort_filter_toolbar_html`/
+  `_admin_row_data_attrs`, the `_ADMIN_BULK_EDIT_JS`/`_ADMIN_SORT_FILTER_JS` shared
+  scripts, and the `.admin-table-responsive` mobile-card breakpoint — checkbox
+  select, a column picker (Name/Email/Last login/FP&A Buddy cap/Matchmaker cap,
+  all optional; Username/Actions always visible, same "always-visible name +
+  actions" convention as the other two tables), sortable/filterable columns
+  (Username/Last login/Created; Role/Status scalar filters; a live search box),
+  and a "Delete selected" bulk action. This is a layout change, not a feature
+  change — every existing per-user action (profile edit, Ask/Matchmaker cap
+  override, password reset, role toggle, active toggle, single-row delete, the
+  pending-password-reset notice) works exactly as it did before, just reached via
+  a per-row "Manage" button instead of a card's own header button. Two deliberate
+  departures from the other two tables' exact mechanics, both approved up front:
+  (1) **no bulk "Edit selected"** — Software/Communities' bulk-edit assumes one
+  categorical field to set across every selected row (categories, a checkbox
+  flag); Users has no such field that's safe to bulk-set, since role/active both
+  carry the last-active-admin lockout guard, which is inherently a per-row
+  question, not a batch one — forcing a bulk version risked exactly the kind of
+  silent partial-failure mode this codebase avoids everywhere else (see "No dead
+  data"/the standing "never silently fail" principle above), so it's skipped
+  entirely rather than built unsafely. (2) **the shared `_ADMIN_BULK_EDIT_JS`
+  delete-confirm functions (`openDeleteSelectedPanel`/`renderDeleteSelectedPanel`/
+  `submitBulkDelete`) were NOT reused for the new "Delete selected" action** —
+  they hardcode the `/admin/tools/{tableKey}/...` URL prefix and a
+  Software/Communities-specific response shape (`d.tools`, competitor-reference
+  warnings), neither of which fits Users. Bespoke inline functions
+  (`openUsersDeleteSelectedPanel`/`renderUsersDeleteSelectedPanel`/
+  `submitUsersBulkDelete`, plus a generalized `toggleManage`) live in the route's
+  own `<script>` block instead — deliberately not touching the shared constant
+  Software/Communities still rely on. The generic pieces of that shared script
+  (`updateBulkButton`, `selectAllRows`, the column-picker functions, the sort/
+  filter functions) ARE reused as-is, since they're already table-agnostic
+  (keyed entirely by `tableKey`). New `POST /admin/users/bulk-delete-check`/
+  `/admin/users/bulk-delete` generalize the single-row Delete button's
+  `_is_last_active_admin` guard to a batch: rather than silently dropping or
+  silently allowing a selection that would zero out active admins, the preview
+  reports every such row back as explicitly blocked (with the rest of the
+  selection still deletable), and the commit route re-checks the guard fresh on
+  every iteration against live state rather than trusting the preview's
+  snapshot — deleting one selected admin can change whether the next one is the
+  last active admin. **Manage panels render grouped below the table, not nested
+  as a second `<tr>` under each row** — a deliberate choice to stay clear of the
+  shared sort/filter script's row-reordering: `applySortFilter` physically
+  `appendChild`s `tr[data-name]` rows to re-sort them, and a companion detail row
+  (no `data-name` of its own) would either get silently left behind at its old
+  position or need real changes to the shared, already-relied-upon sort/filter
+  mechanism to keep it paired with its owner row. Clicking "Manage" scrolls the
+  matching panel into view, so the panel-below-the-table layout doesn't cost
+  the admin any context. Also new: a collapsible "How to set up a new MCP user"
+  disclosure block, reusing the exact `<details>`/`<summary>`/`.disclosure-caret`
+  markup `/admin/tools/communities`' own "How this works" block established —
+  a `_MCP_USER_SETUP_HTML` constant (same "static reference content, not
+  DB-backed" precedent as `_COMMUNITIES_REFERENCE_HTML`) walks through creating
+  the account, raising the Ask/Matchmaker cap, minting a personal token via
+  `scripts/mint_api_token.py` over `railway ssh`, and adding the connector in
+  Claude (`https://mcp.bmweis.com/mcp`, header `authorization`, value
+  `Bearer <token>`). Per Step 0's own review, the copy never hardcodes the
+  default cap dollar amounts — both are admin-editable via this same page's
+  "Save default" forms, so a literal `$5`/`$2` in the instructions would drift
+  the moment either default changes; a regression test
+  (`test_mcp_setup_copy_does_not_hardcode_default_cap_amounts`) pins this. No
+  schema changes, no changes to cap logic or default cap amounts, and token
+  minting stays exactly as railway-ssh-only as before — this PR only changes how
+  the page is laid out and adds documentation for a flow that already existed.
+  See `tests/test_admin_users_table.py` for the full regression coverage,
+  including the rendered `<script>` block's own `node --check` validation (this
+  page's bulk-delete/manage-toggle script is inline in the route, not a
+  module-level `*_JS` constant, so it isn't covered by
+  `webapp.checks.script_syntax_problems()` — same standing caveat as the
+  Reader's own inline script).
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
