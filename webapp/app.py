@@ -20157,7 +20157,13 @@ def health():
 
 @app.get("/api/search")
 def api_search(request: Request, q: str = "", limit: int = 50, token: str | None = None):
-    _require_member(request, token)
+    # Admin-only, matching /read's real access tier (Library content includes
+    # articles behind Brian's own paid subscriptions — see _is_authed's
+    # docstring). Previously _require_member (any signed-in user), a
+    # likely-unintentional survivor of the Phase 1 restructure that moved
+    # the Reader itself to admin-only without revisiting this API route —
+    # see ARCHITECTURE.md's MCP-server Phase 4 note (now corrected to match).
+    _require_api(request, token)
     lib = _lib()
     try:
         return {"query": q, "results": lib.search(q, limit=limit)}
