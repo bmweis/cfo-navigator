@@ -127,7 +127,7 @@ def test_column_picker_lists_optional_columns(env):
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
     for col in ("users:realname", "users:email", "users:last_login", "users:access_level",
-                "users:status", "users:usage"):
+                "users:status", "users:ask", "users:matchmaker"):
         assert f'data-col="{col}"' in body
 
 
@@ -137,7 +137,7 @@ def test_optional_columns_default_visible(env):
     _seed_users(env)
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
-    for col in ("realname", "email", "last_login", "access_level", "status", "usage"):
+    for col in ("realname", "email", "last_login", "access_level", "status", "ask", "matchmaker"):
         assert f'id="colpick-users-{col}" checked' in body
 
 
@@ -160,7 +160,7 @@ def test_initcolpicker_call_passes_the_real_default_visible_list(env):
     assert m, "initColPicker('users', ...) call not found with a third argument"
     cols = json.loads(m.group(1))
     default_visible = json.loads(m.group(2))
-    for col in ("realname", "email", "last_login", "access_level", "status", "usage"):
+    for col in ("realname", "email", "last_login", "access_level", "status", "ask", "matchmaker"):
         assert col in cols
         assert col in default_visible
 
@@ -269,7 +269,10 @@ def test_ask_cap_override_still_works(env):
     finally:
         lib.close()
     body = admin.get("/admin/users").text
-    assert "$12.50" in body and "override" in body
+    # One-line-per-field redesign (2026-09): the override value lives in the
+    # cap <input>'s own value attribute, not a separately formatted "$12.50"
+    # text run — "$" and the number are two different nodes now.
+    assert 'value="12.50"' in body and "(override)" in body
 
 
 def test_matchmaker_cap_override_still_works(env):

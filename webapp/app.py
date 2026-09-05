@@ -27063,17 +27063,22 @@ def admin_users(request: Request, msg: str = ""):
     # table" ask reads as show-by-default, not hidden-behind-a-picker), but
     # the picker/toggle mechanism itself is unchanged from the other two
     # admin tables.
-    # 2026-09 mobile-tidiness follow-up: FP&A Buddy cap and Matchmaker cap
-    # merged into one "Usage limits" column/mobile-card section (was two
-    # separate columns, each rendering its own full label+value+edit-form
-    # block) — per Brian's ask to make this page's mobile cards feel like
-    # Software/Communities', whose own mobile cards group related info
-    # under ONE section label (see Review status: one label, a badge and
-    # its action button together) rather than a separate full section per
-    # field. See _user_row's "Usage limits" cell for the merged rendering.
+    # 2026-09 mobile-tidiness follow-up (superseded below): FP&A Buddy cap
+    # and Matchmaker cap were briefly merged into one "Usage limits" section,
+    # matching Software/Communities' own mobile cards (related info under
+    # ONE section label, e.g. Review status). Brian liked the mobile result
+    # but flagged the merged desktop column as crowded and asked for each
+    # cap to go back to being its own field — see the follow-up note right
+    # above _user_row's ask-cap/matchmaker-cap cells for how that's resolved
+    # (one compact single-line field each, identical at both breakpoints,
+    # rather than a device-specific merge).
+    #
+    # "Access level" shortened to "Access" here too (not just the mobile
+    # data-label from the earlier round) so the column-picker label and the
+    # <th> text both say the same short thing at every width.
     users_cols = [("realname", "Name"), ("email", "Email"), ("last_login", "Last login"),
-                  ("access_level", "Access level"), ("status", "Status"),
-                  ("usage", "Usage limits")]
+                  ("access_level", "Access"), ("status", "Status"),
+                  ("ask", "FP&A Buddy cap"), ("matchmaker", "Matchmaker cap")]
     users_default_visible = tuple(k for k, _ in users_cols)
     users_sort_fields = [("name", "Username"), ("last_login", "Last login"), ("created", "Created")]
     users_scalar_filters = [
@@ -27136,8 +27141,15 @@ def admin_users(request: Request, msg: str = ""):
         field_style = ("padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;"
                        "font-size:12.5px;background:var(--bg);width:100%;")
         cap_input_style = ("padding:5px 7px;border:1px solid var(--line);border-radius:6px;font:inherit;"
-                            "font-size:12.5px;background:var(--bg);width:64px;")
+                            "font-size:12.5px;background:var(--bg);width:72px;")
         action_btn_style = "font-size:12px;padding:5px 10px;white-space:nowrap;"
+        # 2026-09 follow-up to the Usage-limits merge: split back into two
+        # separate fields (FP&A Buddy cap / Matchmaker cap), each its own
+        # column again, per Brian's ask — the merged column read clean on
+        # mobile but crowded on desktop. Each field is now ONE line at
+        # both breakpoints instead: spend/cap/input/Set button/note all in
+        # a single flex row (wrapping only if the viewport is too narrow to
+        # fit it), rather than a label line + a separate form line.
         return f"""<tr class="admin-table-row" {row_attrs}>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{uid}" class="users-row-cb" onchange="updateBulkButton('users')"></td>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:130px;">
@@ -27157,25 +27169,23 @@ def admin_users(request: Request, msg: str = ""):
           <td data-col="users:last_login" data-label="Last login" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);white-space:nowrap;">{last_display}</td>
           <td data-col="users:access_level" data-label="Access" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{role_badge}</td>
           <td data-col="users:status" data-label="Status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{status_badge}</td>
-          <td data-col="users:usage" data-label="Usage limits" class="admin-table-cell users-usage-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;min-width:170px;">
-            <div class="users-usage-item">
-              <div style="margin-bottom:4px;"><strong style="color:var(--ink);">FP&amp;A Buddy</strong> <span style="color:var(--muted);">${spent:.2f} / ${effective_cap:.2f} ({cap_note})</span></div>
-              <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:5px;align-items:center;">
-                <span style="font-size:12px;color:var(--muted);">$</span>
-                <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
-                  placeholder="{default_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
-                <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
-              </form>
-            </div>
-            <div class="users-usage-item" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);">
-              <div style="margin-bottom:4px;"><strong style="color:var(--ink);">Matchmaker</strong> <span style="color:var(--muted);">${mm_spent:.2f} / ${mm_effective_cap:.2f} ({mm_cap_note})</span></div>
-              <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:5px;align-items:center;">
-                <span style="font-size:12px;color:var(--muted);">$</span>
-                <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
-                  placeholder="{default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
-                <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
-              </form>
-            </div>
+          <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
+            <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+              <span style="color:var(--muted);">${spent:.2f} / $</span>
+              <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else f'{cap_override:.2f}'}"
+                placeholder="{default_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
+              <span style="color:var(--muted);font-size:11px;">({cap_note})</span>
+            </form>
+          </td>
+          <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
+            <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+              <span style="color:var(--muted);">${mm_spent:.2f} / $</span>
+              <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else f'{mm_cap_override:.2f}'}"
+                placeholder="{default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
+              <span style="color:var(--muted);font-size:11px;">({mm_cap_note})</span>
+            </form>
           </td>
           <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
             <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
@@ -27276,9 +27286,10 @@ def admin_users(request: Request, msg: str = ""):
   <th data-col="users:realname" style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
   <th data-col="users:email" style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
   <th data-col="users:last_login" style="padding:10px 12px;text-align:left;font-size:13px;">Last login</th>
-  <th data-col="users:access_level" style="padding:10px 12px;text-align:left;font-size:13px;">Access level</th>
+  <th data-col="users:access_level" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th data-col="users:status" style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
-  <th data-col="users:usage" style="padding:10px 12px;text-align:left;font-size:13px;">Usage limits</th>
+  <th data-col="users:ask" style="padding:10px 12px;text-align:left;font-size:13px;">FP&amp;A Buddy cap</th>
+  <th data-col="users:matchmaker" style="padding:10px 12px;text-align:left;font-size:13px;">Matchmaker cap</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
 <tbody id="users-approved-tbody">{rows_html}</tbody>
@@ -27313,7 +27324,8 @@ def admin_users(request: Request, msg: str = ""):
   .admin-table-cell[data-col="users:last_login"],
   .admin-table-cell[data-col="users:access_level"],
   .admin-table-cell[data-col="users:status"]{{grid-column:span 1;order:2;}}
-  .admin-table-cell[data-col="users:usage"]{{order:4;}}
+  .admin-table-cell[data-col="users:ask"],
+  .admin-table-cell[data-col="users:matchmaker"]{{order:4;}}
   .admin-table-cell[data-label="Actions"]{{order:5;}}
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;

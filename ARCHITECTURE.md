@@ -892,28 +892,42 @@ and broke the desktop Actions column — buttons overlapping/clipped — caught
 by a desktop screenshot before shipping; desktop keeps its original natural
 wrapping layout, unaffected).
 
-**Usage limits merge (2026-09), same follow-up — the biggest of the three
-fixes, from feedback that the mobile card still read as "a long list of
-stuff."** Live screenshots of `/admin/tools/software` and
+**Usage limits: merged, then split back into two one-line fields (2026-09,
+same follow-up) — a real reversal, flagged rather than silently overwritten.**
+First pass: live screenshots of `/admin/tools/software` and
 `/admin/tools/communities`' own mobile cards (the explicit reference point)
-showed a consistent pattern this page wasn't following: related info groups
-under ONE section label (e.g. "Review status": one label, a badge and its
-action button together), never a full separate label+value+form block per
-field. FP&A Buddy cap and Matchmaker cap — previously two separate table
-columns, each rendering its own uppercase label, a bold spend/cap line, a
-muted default/override note on its own line, and a 3-element edit form —
-merged into ONE `users:usage` column/mobile-card section, "Usage limits".
-Each cap is now a compact two-line sub-item (`**FP&A Buddy** $0.00 / $5.00
-(default)` on one line, the `$ [input] [Set]` edit form on the next),
-separated from its sibling by a subtle 1px dashed divider rather than a
-second full section header — cuts the two fields from 6 stacked chunks
-down to a single visually-grouped block. `users_cols`' `("ask", ...)`/
-`("matchmaker", ...)` pair became one `("usage", "Usage limits")` entry;
-`total_cols` (checkbox + username + optional cols + actions) is derived from
-`len(users_cols)` and updates automatically. The two underlying routes
-(`POST /admin/users/{id}/ask-cap`/`/matchmaker-cap`) are completely
-unchanged — this is a display-layer merge only, each cap still posts to its
-own route independently.
+showed related info grouping under ONE section label (e.g. "Review status":
+one label, a badge and its action button together), so FP&A Buddy cap and
+Matchmaker cap were merged into one `users:usage` column/mobile-card section,
+"Usage limits" — each cap a two-line sub-item, separated by a dashed divider.
+Brian liked the mobile result but flagged the merged column as crowded on
+desktop and asked for each cap to be its own field again, with every field on
+one line. **Resolved by going back to two separate columns
+(`("ask", "FP&A Buddy cap")`/`("matchmaker", "Matchmaker cap")` in
+`users_cols`, matching every other admin table's "each column is a field"
+convention) but redesigning each cap's cell to be genuinely ONE line at both
+breakpoints** — `$0.00 / $` + an editable cap `<input>` (now the only place
+the cap number renders — no separate bold-formatted duplicate) + a "Set"
+button + a muted `(default)`/`(override)` note, all in one `flex-wrap:nowrap`
+row, instead of a label line followed by a separate form line. The row is
+allowed to render wider than the viewport on desktop, same as it already can
+(the table's own `overflow-x:auto` wrapper, unchanged, handles it) — verified
+live that the *page* never overflows even when the *table* does. `total_cols`
+is still derived from `len(users_cols)`, so it updated automatically back to
+9. Cap-override `<input>` values are now formatted to two decimals
+(`f"{cap_override:.2f}"`, e.g. "12.50") for display consistency, widened to
+72px so that doesn't clip. The two underlying routes (`POST
+/admin/users/{id}/ask-cap`/`/matchmaker-cap`) were never touched by either
+pass — this whole arc is display-layer only.
+
+**"Access level" shortened to "Access" everywhere, not just mobile (2026-09,
+same round).** The mobile-only round above shortened just the `data-label`
+attribute (only ever read by the mobile CSS) so "ACCESS LEVEL" would stop
+wrapping to two lines in the narrow mobile grid. Brian asked for the same
+short label at both breakpoints, for consistency — `users_cols`' own label
+and the desktop `<th>` text both now say "Access" too (the column-picker
+checkbox and the table header), so there's one canonical label instead of a
+mobile-only abbreviation living beside a longer desktop one.
 
 **Mobile mini-table for Last login/Access level/Status (2026-09), same
 follow-up — Brian's explicit ask: put these three "inline next to the name,
