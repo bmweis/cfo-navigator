@@ -31203,6 +31203,15 @@ from webapp import mcp_toolbox as _mcp_toolbox  # noqa: E402
 
 _mcp_toolbox.register_toolbox_tools(_mcp, _lib)
 
+# MCP Phase 4: Library (Archive) search + Feed browse/search (search_library,
+# get_article, browse_feed, search_feed) — admin-role only, re-verified
+# against /read's own actual enforcement rather than assumed. See
+# webapp/mcp_library.py's module docstring for the full auth-model
+# re-verification and the Track A/B reasoning.
+from webapp import mcp_library as _mcp_library  # noqa: E402
+
+_mcp_library.register_library_tools(_mcp, _lib, OPML_PATH)
+
 _mcp_asgi_app = _mcp.streamable_http_app()
 
 
