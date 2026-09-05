@@ -375,7 +375,7 @@ def test_tool_edit_page_shows_governed_checklist_only_for_seeded_categories(env)
 
     r = client.get(f"/tools/software/{slug}/edit")
     assert r.status_code == 200
-    assert "Feature taxonomy" in r.text
+    assert "Key features" in r.text
     assert "Real-Time Ledger" in r.text
     # FP&A has no curated features yet — no governed section for it, only ERP's.
     assert r.text.count('<h3 style="font-size:14px;font-weight:600;margin:0 0 4px;color:var(--navy);">') == 1

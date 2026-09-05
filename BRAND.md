@@ -307,7 +307,7 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
   (`.tp-verify`/`.cc-verify` CSS classes).
 - **Admin section headings** — an informal sub-heading role used to break up an admin page into
   named sections (e.g. "Pending submissions" / "Approved software" on the Toolbox review pages,
-  "Competition" / "Screenshots" / "Feature taxonomy" on the tool-edit page, dependency-group
+  "Competition" / "Screenshots" / "Key features" on the tool-edit page, dependency-group
   titles on `/admin/open-source`). 16px, 600 weight — smaller and lighter than the base `h2` (21px/600),
   since these mark subsections within a page rather than the page's own top-level sections.
 - **Cards** — white surface, `--line` border, radius 12–16px.

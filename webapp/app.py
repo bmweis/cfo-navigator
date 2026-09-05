@@ -2349,7 +2349,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     _gen_host_id = f"gen-host-app-screenshot-{idsfx}"
 
     in_form_html = f"""  <div id="{_gen_host_id}">
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Product</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">App screenshot</label>
     <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">No single reliable URL for "the app"—a login/demo/product-tour page you have public access to. This is inherently manual/curated, not something to fill in for every record.</p>
     <input name="app_screenshot_source_url"{_form_attr} type="text" maxlength="500" value="{_esc(source_url)}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
@@ -14862,7 +14862,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
   <div id="gen-host-community-profile" style="display:grid;gap:20px;">
 {_section_header("Who it's for")}
 {_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True, confidence_key='ideal_member')}
-{_field('anti_fit', 'Anti-fit', 'Who should probably skip it', confidence_key='anti_fit')}
+{_field('anti_fit', 'Who should skip it', 'Who should probably skip it', confidence_key='anti_fit')}
 {_field('value_prop', 'Value proposition', 'The primary thing members get out of it', confidence_key='value_prop')}
 {_section_header('The member experience')}
 {_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual', confidence_key='format_reality')}
@@ -14871,21 +14871,21 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 {_section_header('Business & sponsorship')}
 {_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.", confidence_key='business_model')}
 {_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.", confidence_key='sponsor_relationship_note')}
-{_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
+{_field('cost_value_verdict', 'Cost vs. value', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
 {_section_header('Reputation & verdict')}
 {_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.', confidence_key='notable_members')}
 {_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.', confidence_key='public_criticism')}
-{_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
+{_field('verdict_summary', 'Bottom line', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
 {_section_header('Quick facts')}
 {_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc.—or "No".', rows=2)}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-{_num_field('founded_year', 'Founded year', 1800, 2100)}
+{_num_field('founded_year', 'Founded', 1800, 2100)}
 {_short_field('primary_purpose', 'Primary purpose', 'e.g. networking, learning, both')}
-{_short_field('cpe_eligible', 'CPE', 'Yes / No / Unclear, with any qualifier')}
+{_short_field('cpe_eligible', 'CPE eligible', 'Yes / No / Unclear, with any qualifier')}
 {_short_field('platform_type', 'Platform', 'Slack, proprietary app, in-person only, …')}
 {_short_field('meeting_format', 'Programming', 'In-person / virtual / hybrid')}
 {_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
-{_short_field('seniority_band', 'Level', 'Who it targets by seniority')}
+{_short_field('seniority_band', 'Who it targets', 'Who it targets by seniority')}
 {_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus. Placeholder, not yet researched or weighted.')}
 {_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any. Placeholder, not yet researched or weighted.')}
 {_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both. Placeholder, not yet researched or weighted.')}
@@ -15846,7 +15846,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # right, deliberately with NO "Warm Intro"-style heading or any new
     # content in that column. Kept the "Community Details" heading rather than
     # renaming to "Company Details": a community isn't a company, same
-    # reasoning that kept "Similar communities" instead of "Core competition"
+    # reasoning that kept "Similar communities" instead of "Competitors"
     # below. The structured Reach/Cost/Sponsorship/Access/Format/Notes block
     # — the closest thing
     # Communities have to Software's "Business summary" — gets its own
@@ -15854,9 +15854,12 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # it is prose Brian writes; it's the factual/categorical fields a listing
     # needs. "Similar communities" (curated Community-to-Community links,
     # structurally identical to Software's Competitors block) is intentionally
-    # NOT relabeled "Core competition"—that Software rename tracks a display
-    # label change on the Software profile page ("Competitors" -> "Core
-    # competition"); the Community profile page has always said "Similar
+    # NOT relabeled "Competitors"—Phase P had briefly renamed the Software
+    # edit page's own subheading to "Core competition" (leaving the public
+    # profile page's own "Competitors" heading untouched the whole time), but
+    # the 2026-09 label-alignment sweep reverted that edit-page subheading
+    # back to "Competitors" to match the public label it was always meant to
+    # mirror. The Community profile page has always said "Similar
     # communities" instead, on the reasoning that communities don't compete
     # for a buyer's dollar the way software tools do, so there's no matching
     # display-label rename to mirror here. The 23-field Community profile
@@ -17085,7 +17088,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         _governed_features_html = f"""<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);" open>
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Feature taxonomy</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Key features</h2>
     </span>
     <span class="disclosure-caret">&#9654;</span>
   </summary>
@@ -17404,8 +17407,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Competition</h2>
 
   <div id="gen-host-tool-competitors" style="margin-bottom:28px;">
-    <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Core competition</div>
-    <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Closest competitors" on {_esc(tool['name'])}'s profile page. Curating from either tool's edit page links both directions.</p>
+    <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Competitors</div>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Competitors" on {_esc(tool['name'])}'s profile page. Curating from either tool's edit page links both directions.</p>
 
     {_competitors_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No competitors curated yet.</p>'}
 
