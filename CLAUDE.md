@@ -5891,14 +5891,27 @@ tables, no third-party dependency.
     now 405s rather than 404s since `POST /ask` still lives there.) The
     `/library` hub route was removed outright in Phase 1 — no redirect.
   - Private API → **401** when unauthenticated, but also accept a valid token (cookie OR
-    `X-Save-Token`): `/ask`, `/post`, `/feed/save`, `/api/search`,
+    `X-Save-Token`): `/ask`, `/post`, `/feed/save`,
     `/library/{article_id}/tags` (the Reader's inline tag editor, Phase 5c —
     the route predates it but had no callers until then). Of these, only
-    `/api/search` also accepts a `?token=` query param as a fallback
+    `/api/search` (see below) also accepts a `?token=` query param as a fallback
     (`token: str | None = None` on the route itself) — the others check
     only the `X-Save-Token` header (2026-09 correction: this line previously
     claimed `?token=` worked for all of them, verified false in code for
     `/ask` specifically during the MCP cleanup/hardening PR's Phase 0).
+  - **`/api/search` is now admin-only (`_require_api`), matching `/read`'s real
+    access tier (2026-09 fix)** — previously gated at member-tier
+    (`_require_member`, any signed-in user), a likely-unintentional survivor
+    of the Phase 1 restructure that moved the Reader itself to admin-only
+    without revisiting this API route (flagged but deliberately left alone by
+    the MCP-server Phase 4 investigation — see ARCHITECTURE.md's matching
+    note, now corrected). A signed-in non-admin member could search/read
+    Library content, including articles behind Brian's own paid subscriptions
+    (OnlyCFO, Mostly Metrics), directly through this route even though `/read`
+    itself already blocked them — closed. Still accepts a valid admin cookie
+    OR the save token (`X-Save-Token` header or `?token=` query param), same
+    as before — only the cookie-tier requirement changed, from any member to
+    admin specifically.
   - **Session-cookie-only** (401 when unauthenticated, no token fallback at all — these are
     reached only from inside the already-authenticated `/read` UI, never cross-origin):
     `/api/read-article` and `/read-later/refresh` (2026-08 follow-up — the per-item Read
