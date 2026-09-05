@@ -13268,7 +13268,7 @@ def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: s
 # webapp/thought_leadership_data.py). The `original_content` DB table is what
 # both pages actually render from now (via _oc_featured_cards_html); this
 # tuple's own shape (href, tag, tag_color, title, desc, cta) is still what
-# scripts/migrate_original_content.py reads to seed that table, and _tl_fcard/
+# scripts/archive/migrate_original_content.py reads to seed that table, and _tl_fcard/
 # _tl_featured_cards_html/_TL_SHARED_CSS below are still live, reused by the
 # DB-backed renderer — only the content source changed, not the markup.
 #
@@ -13313,7 +13313,7 @@ def _tl_featured_cards_html(cards) -> str:
 # Original Content (Phase 1) — _TL_FEATURED_CARDS above is no longer the live
 # source for the flagship row; it stays in the repo, unimported, purely as a
 # rollback reference (same precedent as webapp/thought_leadership_data.py).
-# scripts/migrate_original_content.py is the one-time migration that seeded
+# scripts/archive/migrate_original_content.py is the one-time migration that seeded
 # the `original_content` table from it. tag_color was never promoted to a
 # stored column (see that table's schema comment in linklib/db.py) — cycled
 # instead from the same 3 established colors by card position, so the three
