@@ -92,22 +92,25 @@ def test_expand_button_still_present_as_the_collapse_back_affordance(env):
     assert "RR_ICON_COLLAPSE" in body and "RR_ICON_EXPAND" in body
 
 
-def test_reader_title_and_body_use_outfit_not_serif(env):
+def test_reader_title_and_body_match_sitewide_typography(env):
     """2026-09: the merged reader's .rr-reader-title/.rr-reader-body-text
     both used to fall through to 'Source Serif 4',Georgia,serif — the title
     unintentionally (a leftover never updated to match the standalone
-    /read/{id} reader's own Outfit h1), the body intentionally at first
-    (a real, then-current BRAND.md exception) but reverted per direct
-    confirmation that it read wrong live. Both now use the site's own
-    heading font, var(--font-head)/Outfit — not a document-wide "no serif"
-    claim, just this specific pane. Distraction-free mode must not swap in
-    a different typeface either — it only changes which panes are visible,
-    so the same assertion holds in both states."""
+    /read/{id} reader's own Outfit h1), the body intentionally at first (a
+    real, then-current BRAND.md exception) but reverted per direct
+    confirmation that it read wrong live. A first pass moved the body to
+    Outfit alongside the title; checked against the site's actual published
+    long-form content (an Original Content article's .oc-body p) and found
+    body copy is DM Sans there, Outfit only for the heading — so this
+    settled on ordinary sitewide typography instead: Outfit heading,
+    DM Sans body, no reader-specific exception at all. Distraction-free
+    mode must not swap in a different typeface either — it only changes
+    which panes are visible, so the same assertion holds in both states."""
     c = _admin_client(env)
     html = c.get("/read").text
     assert "font-family:'Source Serif 4'" not in html
     assert ".rr-reader-title{font-family:var(--font-head)" in html
-    assert ".rr-reader-body-text{font-family:var(--font-head)" in html
+    assert ".rr-reader-body-text{font-family:var(--font-body)" in html
 
 
 def test_reader_expand_icon_points_nw_se_not_ne_sw(env):

@@ -135,18 +135,24 @@ accent-only fonts — approved dependency exceptions for the graffiti refresh �
 restricted to one specific use and never used for headings or body copy (that's still
 Outfit/DM Sans/Source Serif 4, unchanged).
 
-**2026-09 correction:** the merged Feed/Archive/Read Later reader at `/read` (title
-and body both) moved from Source Serif 4 to Outfit — confirmed wrong as serif on direct
-live-site review; this doc previously called that pairing out as the correct pattern
-and its reverse ("set body in Outfit") as the anti-pattern, exactly backwards from
-where it landed. Source Serif 4 survives only on the standalone single-article view at
-`/read/{article_id}` (a separate, older template, `webapp/app.py`'s `_READER_CSS`) —
-narrower scope than "the reader" broadly, so don't assume every reading surface still
-gets the serif; check which template a given page actually renders through first.
+**2026-09 correction (settled, two rounds):** the merged Feed/Archive/Read Later reader
+at `/read` used to render both title and body in Source Serif 4 — confirmed wrong on
+direct live-site review. A first pass moved both to Outfit; checked against the site's
+actual published long-form content (an Original Content article's `.oc-body p` — the
+same template the Growth Engine Ratio/Sail Don't Row/NetSuite MCP pieces render
+through) and found body copy is DM Sans there, Outfit reserved for the `<h1>` — so
+"Outfit for body" would have made this reader the one place on the whole site with
+body copy in a headings font, not a return to an existing pattern. Settled on ordinary
+sitewide typography instead: Outfit heading, DM Sans body — the merged reader is no
+longer a documented exception at all, just the site's normal type pairing. Source
+Serif 4 survives only on the standalone single-article view at `/read/{article_id}`
+(a separate, older template, `webapp/app.py`'s `_READER_CSS`) — narrower scope than
+"the reader" broadly, so don't assume every reading surface still gets the serif;
+check which template a given page actually renders through first.
 
 | Family | Role | Weights |
 |---|---|---|
-| **Outfit** | Headings, display, and the merged Feed/Archive/Read Later reader (`/read`) | 400 / 600 / 700 |
+| **Outfit** | Headings, display | 600 / 700 |
 | **DM Sans** | Body copy, UI, labels, eyebrows | 400 / 500 / 600 |
 | **Source Serif 4** | Long-form reading — standalone `/read/{article_id}` article view only | 400 / 500 / 600 |
 | **Caveat** | Sticker badges only — never headings or body | 700 |
@@ -166,14 +172,14 @@ gets the serif; check which template a given page actually renders through first
 | Body | DM Sans | 16px / 1.65 | 400 | — |
 | UI / labels | DM Sans | 13–15px | 500–600 | — |
 | Merged reader title (`/read`) | Outfit | 30px / 1.18 | 600 | -0.02em |
-| Merged reader body (`/read`) | Outfit | 17px / 1.75 (15–20px cycle) | 400 | — |
+| Merged reader body (`/read`) | DM Sans | 17px / 1.75 (15–20px cycle) | 400 | — |
 | Standalone reader body (`/read/{article_id}`) | Source Serif 4 | 18px / 1.75 | 400 | — |
 | Reader chrome | DM Sans | 13–14px | 400–500 | — |
 
 **Rules of thumb:** headings are tight (negative tracking) and Outfit; eyebrows are uppercase DM Sans
 with wide tracking and `--muted` or `--navy`; the serif is exclusively for the standalone
 single-article reader — everywhere else that reads like "the reader," including the merged
-Feed/Archive/Read Later view, is Outfit like the rest of the site.
+Feed/Archive/Read Later view, follows the site's ordinary Outfit-heading/DM-Sans-body pairing.
 
 ### 3.2 Copy casing
 
@@ -484,7 +490,7 @@ or a plain break device, even if it originated as a "pull-quote."
 | Let navy + off-white do most of the work | Reach for color to fill space |
 | Use coral once per screen, as a pop | Spread coral across a layout |
 | Keep status colors for status only | Use `--alert` red as a highlight, or coral as a *system* status/error color |
-| Serif reserved for the standalone single-article reader only; Outfit everywhere else, merged reader included | Spread the serif into the merged Feed/Archive/Read Later reader or any other UI |
+| Serif reserved for the standalone single-article reader only; the merged Feed/Archive/Read Later reader follows ordinary Outfit-heading/DM-Sans-body typography like the rest of the site | Spread the serif into the merged reader or any other UI, or put body copy in Outfit anywhere |
 | One marker-underline, one or two stickers per page, in a header/hero or card corner | Repeat the graffiti kit decoratively, or put it on admin/data surfaces |
 | Buttons navy or ghost | Make a seafoam or coral button |
 
