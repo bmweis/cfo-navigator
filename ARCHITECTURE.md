@@ -6571,6 +6571,64 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   exemption is scoped to this exact path, not a general carve-out for
   token-authenticated routes — widening it needs the same deliberateness as
   adding it did.
+- **Surface Hidden Community Profile Fields (2026-09) — Stage focus,
+  Jobs program, and Individual or team join `linklib.compare.
+  COMMUNITY_PROFILE_GROUPS`, and a real hero/screenshot spacing fix rides
+  along in the same PR.** Investigation found these three admin-editable
+  Quick-facts fields (`community_profiles.stage_focus`/`jobs_program`/
+  `team_or_individual`) had never rendered on any public surface, the last
+  three of the section's fields with no public home (every sibling field —
+  `founded_year`, `cpe_eligible`, `primary_purpose`, `seniority_band`,
+  `platform_type`/`meeting_format`/`event_style` — already had one, per
+  `webapp/app.py`'s own comment above `_COMMUNITY_PROFILE_GROUPS`). A live
+  query against production found real, substantive content already stored
+  for 36 of 40 communities — not the near-empty state the edit-page's own
+  `placeholder=` attribute text ("Placeholder, not yet researched or
+  weighted," now removed since it's misleading once the field renders
+  publicly) might suggest — so this shipped mostly as "surface content
+  that already exists," not "build empty-state scaffolding for an
+  unpopulated field," though the three-state standard (verified/pending/
+  empty) holds for the minority of communities still blank on one of the
+  three. Placed by semantic fit, not to balance group sizes: Stage focus
+  joins "Who it's for" (a company-stage targeting fact, a natural peer of
+  the existing seniority-band "Who it targets" entry); Jobs program joins
+  "What you get" (a member benefit, same category as Resources included);
+  Individual or team joins "Cost & structure" (a membership-structure/
+  purchasing fact, closer to Business model's "how this sustains itself"
+  than to who it's personally for). No new gating logic — `_narrative_field`/
+  `gates.field_state` handle all three exactly like every other group
+  field, off the same whole-profile `needs_review` flag `build_communities_
+  compare` already reads once per community.
+
+  **Same PR also fixed a real spacing bug this build surfaced**: the
+  Community profile page's hero (name/tags/actions) and its screenshot
+  card used to sit side by side in their own two-column `.tp-band`
+  (`top_band`), so the Bottom line callout directly below it couldn't
+  start until that whole grid ROW finished — gated behind the (usually
+  much taller) screenshot column's height rather than the hero column's
+  actual, much shorter, content height. This read as a large, unintentional
+  gap between the action row and the Bottom line box. Software's own
+  Sidebar Consolidation pass (CLAUDE.md's "Tool Profile Layout: Sidebar Consolidation" bullet) had already solved the identical
+  problem for the Software profile page — hero rendered full-width above
+  a single `.tp-band`, screenshot moved into the sidebar column alongside
+  Key features/Competitors — so this fix mirrors that exact pattern rather
+  than inventing a new one: `hero_text` now renders full-width (no band,
+  no screenshot alongside it), and `screenshot_block` opens the sidebar
+  column of the single remaining band (renamed `content_band`, from
+  `lower_band`), alongside Details/Categories/Similar communities — the
+  same reference-sidebar grouping this page already used for those three,
+  just extended to the screenshot. The CSS gained `.tp-band:first-of-type
+  {margin-top:20px;}`, matching Software's own override, since there's now
+  only one `.tp-band` on the page. On mobile (`<=800px`, unchanged
+  breakpoint), the sidebar (screenshot included) now falls after all the
+  main-column narrative content in DOM order rather than right after the
+  hero — the same "main column first, sidebar second" mobile order
+  Software's Sidebar Consolidation already established, not a new
+  decision. See `linklib/compare.py`'s own comment on
+  `COMMUNITY_PROFILE_GROUPS` for the placement reasoning and `tests/
+  test_surface_hidden_community_fields.py` for the regression coverage
+  (placement, verified/pending/empty on both the profile page and
+  Compare).
 
 ## 4. Design decisions and their reasons
 
