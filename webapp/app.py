@@ -27150,8 +27150,7 @@ def admin_users(request: Request, msg: str = ""):
           <td data-col="users:access_level" data-label="Access level" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{role_badge}</td>
           <td data-col="users:status" data-label="Status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{status_badge}</td>
           <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;min-width:150px;">
-            <div style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</div>
-            <div style="color:var(--muted);margin-bottom:4px;">{cap_note}</div>
+            <div style="margin-bottom:5px;"><span style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</span> <span style="color:var(--muted);">({cap_note})</span></div>
             <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:5px;align-items:center;">
               <span style="font-size:12px;color:var(--muted);">$</span>
               <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
@@ -27160,8 +27159,7 @@ def admin_users(request: Request, msg: str = ""):
             </form>
           </td>
           <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;min-width:150px;">
-            <div style="font-weight:600;color:var(--ink);">${mm_spent:.2f} / ${mm_effective_cap:.2f}</div>
-            <div style="color:var(--muted);margin-bottom:4px;">{mm_cap_note}</div>
+            <div style="margin-bottom:5px;"><span style="font-weight:600;color:var(--ink);">${mm_spent:.2f} / ${mm_effective_cap:.2f}</span> <span style="color:var(--muted);">({mm_cap_note})</span></div>
             <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:5px;align-items:center;">
               <span style="font-size:12px;color:var(--muted);">$</span>
               <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
@@ -27175,9 +27173,11 @@ def admin_users(request: Request, msg: str = ""):
                 <input type="password" name="password" placeholder="new password" minlength="8" title="Reset this account's password—8+ characters" style="{field_style}width:120px;">
                 <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Reset</button>
               </form>
-              <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
-              <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Disable" if active else "Enable"}</button></form>
-              <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="{action_btn_style}color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
+              <div class="users-action-btns" style="display:flex;gap:6px;flex-wrap:wrap;">
+                <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
+                <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Disable" if active else "Enable"}</button></form>
+                <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="{action_btn_style}color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
+              </div>
             </div>
           </td>
         </tr>"""
@@ -27205,7 +27205,7 @@ def admin_users(request: Request, msg: str = ""):
     <form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
       <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
         <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Temporary password *</label>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;white-space:nowrap;">Temp password *</label>
         <input name="password" type="text" required minlength="8" placeholder="at least 8 characters" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
       <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Name</label>
         <input name="name" maxlength="120" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
@@ -27290,6 +27290,9 @@ def admin_users(request: Request, msg: str = ""):
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
+  .users-action-btns{{flex-wrap:nowrap!important;width:100%;}}
+  .users-action-btns form{{flex:1 1 0!important;min-width:0!important;}}
+  .users-action-btns button{{width:100%!important;font-size:11px!important;padding:5px 4px!important;white-space:nowrap;}}
 }}
 </style>
 
