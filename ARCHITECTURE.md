@@ -3690,13 +3690,18 @@ mcp_server.require_admin` (a thin alias for the same `_require_admin` the
 three introspection tools use internally — added so a second module can
 reach the same fail-closed admin check without importing a name that reads
 as module-private; the three introspection tools' own calls are untouched).
-**One real, pre-existing inconsistency found and deliberately left alone**:
-`GET /api/search` — an older route wrapping the same `Library.search()` —
-is gated at member-tier (`_require_member`), a likely-unintentional
-survivor of the Library/Toolbox Phase 1 restructure that moved the Reader
-itself to admin-only without revisiting this API route. These new MCP
-tools follow `/read`'s current, actual enforcement (admin-only), not that
-older route's; fixing `/api/search`'s own gating is out of scope here.
+**One real, pre-existing inconsistency found here, and since fixed
+(2026-09)**: `GET /api/search` — an older route wrapping the same
+`Library.search()` — was gated at member-tier (`_require_member`), a
+likely-unintentional survivor of the Library/Toolbox Phase 1 restructure
+that moved the Reader itself to admin-only without revisiting this API
+route. These new MCP tools always followed `/read`'s current, actual
+enforcement (admin-only); fixing `/api/search`'s own gating was flagged as
+out of scope for this phase at the time, then done as its own urgent PR
+once a real non-admin (`role=user`) account made the gap live rather than
+theoretical — `/api/search` now uses `_require_api` (admin cookie OR the
+save token), matching `/read`'s access tier exactly while keeping its
+existing token-based callers (e.g. `scripts/mcp_server.py`) working.
 
 **Why Phase 4's tools are admin-gated while Phase 3's six Toolbox/
 Communities tools are any-valid-token — worth stating explicitly, since
@@ -6441,9 +6446,12 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     PR — see "Admin URL convention, Phase 1b PR 1" below.
 - **Token auth in parallel**: `POST /save` is token-only
   (`X-Save-Token`/`?token=`) because the bookmarklet calls it cross-origin
-  where the cookie can't be sent; member/admin APIs (`/ask`, `/api/search`,
-  `/feed/save`) accept the token as an alternative to the cookie. All token
-  comparisons are constant-time (`hmac.compare_digest`).
+  where the cookie can't be sent; member/admin APIs (`/ask`, `/feed/save`)
+  accept the token as an alternative to the cookie. `/api/search` is
+  admin-only as of 2026-09 (`_require_api` — admin cookie or the token, not
+  any member cookie; see the MCP-server Phase 4 note above), matching
+  `/read`'s access tier. All token comparisons are constant-time
+  (`hmac.compare_digest`).
 - If **no password is configured at all**, private routes are open — a
   local-development convenience, never the hosted configuration.
 - Three middlewares wrap everything: a canonical-host 301 (www + legacy Railway
