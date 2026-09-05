@@ -127,6 +127,17 @@ def _require_admin(ctx: Context, lib_factory: Callable[[], Library]) -> dict:
     return caller
 
 
+def require_admin(ctx: Context, lib_factory: Callable[[], Library]) -> dict:
+    """Public entry point for another module's admin-gated tools (MCP Phase
+    4's Library/Feed tools) — a thin, behavior-identical alias for
+    `_require_admin`. The three introspection tools above keep calling
+    `_require_admin` directly (unchanged, per Phase 4's own "don't touch
+    the existing five tools" scope); this just gives a later module the
+    same fail-closed admin check without importing a name that looks
+    module-private."""
+    return _require_admin(ctx, lib_factory)
+
+
 def require_caller(ctx: Context, lib_factory: Callable[[], Library]) -> dict:
     """Public entry point for MCP Phase 3's Toolbox/Communities content
     tools (webapp/mcp_toolbox.py) — the same fail-closed caller resolution

@@ -5363,6 +5363,32 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   See ARCHITECTURE.md's "MCP server — Toolbox & Communities content tools
   (Phase 3)" section for the full write-up and `tests/test_mcp_toolbox.py`
   for the gate-enforcement coverage.
+- **MCP server, Phase 4 (2026-09) — Library (Archive) search
+  (`search_library`, `get_article`) + Feed browse/search (`browse_feed`,
+  `search_feed`), a new `webapp/mcp_library.py`.** Wraps existing logic
+  completely unmodified: `linklib.agent.retrieve()` (hybrid FTS5+vector,
+  RRF-merged) and `Library.get_article`/`get_article_by_url` for Track A;
+  `linklib.feed.get_feed_items()` and `linklib.agent.retrieve_feed()` for
+  Track B. **Re-verified, not inherited, auth model**: `/read`/
+  `/read/{id}`/`/api/read-article` all gate on admin specifically
+  (`_is_authed`), confirming — rather than assuming — the "Library is
+  admin-only" planning note; all four tools require the admin role via a
+  new public `webapp.mcp_server.require_admin`. (`GET /api/search`, an
+  older route wrapping the same `Library.search()`, is member-tier-gated —
+  a likely-unintentional survivor of the Phase 1 restructure, left alone.)
+  Feed has no DB-backed item history (30-min in-memory cache only,
+  confirmed against the real `/read?view=feed` route) — hence two tools,
+  not one: `browse_feed` (chronological, optional category filter) and
+  `search_feed` (keyword-relevance, `retrieve_feed`'s existing
+  overlap-count scoring). `search_library` returns compact hits (an
+  excerpt, `is_own_content` included) with `get_article` as the full-text
+  companion — the published-content ingestion PR's `is_own_content` flag
+  needs no separate "own writing" tool, since it's just an `articles`
+  column. See ARCHITECTURE.md's "MCP server — Library (Archive) search &
+  Feed browse/search (Phase 4)" section for the full write-up (including
+  the disclosed, uncapped query-embedding cost on a non-empty
+  `search_library` call) and `tests/test_mcp_library.py` for the
+  auth-model regression coverage.
 - **Compare Redesign, Phase 1 (2026-09) — both Compare pages rebuilt on a
   new `linklib/compare.py` serializer; the shared contract Compare Phase 2
   (AI summary generation) and MCP Phase 3 (compare tools) will also build

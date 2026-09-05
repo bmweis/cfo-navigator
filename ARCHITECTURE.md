@@ -3613,15 +3613,109 @@ other indexing infrastructure for a ~155-tool / ~40-community corpus.
 `limit` is capped at 50 either way.
 
 Deliberately out of scope, per the approved plan: Feed search (parked for
-its own mini-investigation, Phase 4), any Buddy/matchmaker proxy tool
-(Phase 5), any write of any kind, and any change to `linklib/gates.py` or
-`linklib/compare.py`'s existing logic, or to the entity caps, or to the
-three introspection tools' admin-only requirement.
+its own mini-investigation, Phase 4 — now shipped, see below), any Buddy/
+matchmaker proxy tool (Phase 5), any write of any kind, and any change to
+`linklib/gates.py` or `linklib/compare.py`'s existing logic, or to the
+entity caps, or to the three introspection tools' admin-only requirement.
 
 See `tests/test_mcp_toolbox.py` for the full coverage — most notably the
 gate-enforcement tests proving a pending field's content and badge, and an
 empty field's placeholder copy, come back identical in shape and wording
 to what the HTML routes render, for both a non-admin and an admin caller.
+
+### MCP server — Library (Archive) search & Feed browse/search (Phase 4)
+
+Four new read-only tools — `search_library`, `get_article`, `browse_feed`,
+`search_feed` — registered onto the same `/mcp` FastMCP instance via a new
+`webapp/mcp_library.py` module (`register_library_tools(mcp, lib_factory,
+opml_path)`, called from `webapp/app.py` right after `_mcp_toolbox.
+register_toolbox_tools(...)`). Kept in its own module for the same reason
+`mcp_toolbox.py` is separate from `mcp_server.py`: pure domain content,
+reusing the shared auth/host-security plumbing rather than duplicating it.
+
+**Auth model — re-verified against the live route code, not inherited from
+an earlier planning note.** An early planning note asserted "Library tools
+are admin-only since non-admin users don't have Library access on the live
+site" — Step 0 confirmed this directly against the current code rather than
+trusting it: `/read`, `/read/{article_id}`, and `/api/read-article` all
+gate on `_is_authed` (admin specifically), not `_is_member` (any signed-in
+user, admin or plain member — the tier `/tools/fpa-buddy` uses). All four
+Phase 4 tools require `role == "admin"` via a new public `webapp.
+mcp_server.require_admin` (a thin alias for the same `_require_admin` the
+three introspection tools use internally — added so a second module can
+reach the same fail-closed admin check without importing a name that reads
+as module-private; the three introspection tools' own calls are untouched).
+**One real, pre-existing inconsistency found and deliberately left alone**:
+`GET /api/search` — an older route wrapping the same `Library.search()` —
+is gated at member-tier (`_require_member`), a likely-unintentional
+survivor of the Library/Toolbox Phase 1 restructure that moved the Reader
+itself to admin-only without revisiting this API route. These new MCP
+tools follow `/read`'s current, actual enforcement (admin-only), not that
+older route's; fixing `/api/search`'s own gating is out of scope here.
+
+**Track A — `search_library`/`get_article` wrap `linklib.agent.retrieve()`
+and `Library.get_article`/`get_article_by_url` completely unmodified.** No
+new search infrastructure: `retrieve()` is the exact hybrid FTS5 + vector
+search (RRF-merged) FP&A Buddy already uses for library retrieval. An empty
+query skips `retrieve()` entirely and calls `Library.search("", ...)`
+directly (which already returns most-recently-saved articles) — avoiding a
+wasted OpenAI query-embedding call for what's really a "browse recent"
+request, not a search. `search_library` returns compact hits (title/url/
+source/author/tags/dates/`is_own_content`/a truncated excerpt), never the
+full `content`/`content_html` — `get_article` (by numeric id or exact URL)
+is the full-detail companion, mirroring Phase 3's search-thin/get-full split
+(`search_tools`/`get_tool`). `is_own_content` rides along on every hit for
+free (it's a plain `articles` column, included in `Library._row_to_dict`'s
+`SELECT *`) — no separate "published content" tool exists or is needed:
+once a piece is mirrored/bookmarklet-saved into `articles` (see the
+Published-Content Ingestion bullet elsewhere in this doc), it's just an
+article with a flag. `get_article` returns the plain-text `content` field
+only, never `content_html` — no tool in this codebase ever returns HTML/
+markup, same discipline `mcp_toolbox.py` established.
+
+**A real, disclosed cost/tracking gap, not silently absorbed**: a
+non-empty `search_library` query can trigger one OpenAI query-embedding
+call (the vector half of hybrid retrieval) — a fraction of a cent, but
+unlike FP&A Buddy's own query-embed cost (which folds into
+`ask_questions.cost_usd`, under a user's dollar cap), this tool call has no
+cost ledger or cap of its own. Judged acceptable at admin-only, single-user
+(Brian) scale and flagged in the tool's own docstring rather than either
+building a new cap mechanism for one admin's own MCP usage, or silently
+having an uncapped cost with no visible ledger anywhere.
+
+**Track B — `browse_feed`/`search_feed` wrap `linklib.feed.get_feed_items()`
+and `linklib.agent.retrieve_feed()` completely unmodified.** Confirmed via
+the actual `/read?view=feed` route (not inferred from `retrieve_feed`'s
+Buddy-internal usage alone) that Feed has **no DB-backed history of
+items** — a 30-minute in-memory per-feed cache is the only persistence,
+and the Reader's own category/source/keyword filtering all happens
+client-side in JS over one fetched batch. That confirmed two separate,
+genuine shapes rather than one tool forced to cover both:
+`browse_feed(category?, limit≤50)` is chronological, optionally filtered to
+one category (an exact, case-sensitive match against a feed's own section
+name, same as the Reader's Sources tree); `search_feed(query, limit≤50)` is
+keyword-relevance ranked, wrapping `retrieve_feed`'s existing
+keyword-overlap-count scoring as-is (rejects an empty query outright,
+pointing the caller at `browse_feed` instead, rather than silently
+returning an arbitrary "no query" ordering under a search tool's name).
+Both always reflect "what's in the feed right now" (or was, within the
+last 30 minutes) — never a historical query. Item shape mirrors what
+`feed.py` already returns per item: title, url, source, category,
+published_at, summary, and `paywalled` (computed inside `get_feed_items`
+itself from `PAYWALLED_DOMAINS`, not re-derived).
+
+See `tests/test_mcp_library.py` for the full coverage — real-server tests
+(same pattern as `test_mcp_toolbox.py`) covering query matching, the
+empty-query "recent articles" fallback, `is_own_content` reflecting actual
+index state, excerpt truncation, `get_article`'s id/url resolution and
+unknown-id refusal, and — the most important coverage — that a plain
+`user`-role token is refused on all four tools, not just an admin one
+(pinning the re-verified auth-model finding as a real regression test, not
+just a docstring claim). `browse_feed`/`search_feed` are tested against a
+monkeypatched `linklib.feed.get_feed_items` (both call sites resolve it via
+a lazy `from .feed import get_feed_items` at call time, so patching the
+module attribute reaches both) rather than a live RSS fetch, since a real
+network fetch in CI would be flaky and slow for no additional coverage.
 
 ### Archive save / enrichment pipeline
 
