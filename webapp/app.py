@@ -19042,15 +19042,24 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
    -0.02em) and the standalone /read/{id} reader's own .reader-meta h1 —
    this used to fall through to 'Source Serif 4',Georgia,serif with no
    letter-spacing, a leftover that never got updated when the two readers'
-   heading treatments were established. Reader BODY correctly stays in
-   Source Serif 4 below — BRAND.md §3 sanctions serif for exactly this one
-   surface ("No serif anywhere except the reader" / "Reader body | Source
-   Serif 4"), so that one is deliberate, not a bug. */
+   heading treatments were established. */
 .rr-reader-title{font-family:var(--font-head);font-weight:600;font-size:30px;line-height:1.18;
   letter-spacing:-.02em;color:var(--ink);margin-bottom:16px;}
 .rr-reader-byline{font-size:13px;color:var(--muted);padding-bottom:22px;border-bottom:1px solid var(--line);
   margin-bottom:26px;font-family:var(--font-body);}
-.rr-reader-body-text{font-family:'Source Serif 4',Georgia,serif;font-size:var(--rr-fs,17px);line-height:1.75;color:var(--ink-soft);}
+/* Body font, corrected 2026-09: this rendered in 'Source Serif 4' — a
+   BRAND.md-documented exception at the time ("Reader body | Source Serif
+   4"), but confirmed wrong by direct live-site review; Brian wants this
+   merged Feed/Archive/Read Later reading pane in Outfit like the rest of
+   the site, not a serif. BRAND.md §3 is being updated in the same PR to
+   drop the "no serif anywhere except the reader" carve-out rather than
+   leave it contradicting the live page. Regular (400) weight — Outfit's
+   600/700 display weights read too heavy at reading length/size. The
+   standalone /read/{id} single-article view (a different template,
+   _READER_CSS/.reader-body) is NOT touched here — out of scope for this
+   fix, which was reported and verified against the merged reader only;
+   revisit if that page should match too. */
+.rr-reader-body-text{font-family:var(--font-head);font-weight:400;font-size:var(--rr-fs,17px);line-height:1.75;color:var(--ink-soft);}
 .rr-reader-body-text p{margin-bottom:1.3em;}
 .rr-reader-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;
   color:var(--muted);font-size:14px;padding:40px;text-align:center;}
@@ -19366,7 +19375,11 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
 
     body = (
         _READER_SHELL_CSS
-        + '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
+        # No dedicated Source Serif 4 <link> here any more (2026-09) — this
+        # merged reader's title and body both moved to Outfit, already
+        # loaded sitewide via _page()'s own font <link>; nothing on this
+        # page references the serif any more, so importing it would just
+        # be a wasted request.
         + tag_vocab_html
         + f"""<div class="rr-shell">
   {rail_html}
@@ -30018,8 +30031,8 @@ def admin_brand(request: Request):
         '<p style="margin:0;color:var(--ink-soft);">The quick brown fox jumps over the lazy dog. Body copy is DM Sans at 16px / 1.65—warm, readable, and quiet enough to disappear behind the content. Eyebrows and labels use the same family, uppercase, with wide tracking.</p>'
         '<div style="height:18px;"></div>'
         '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4—long-form reading only (/read)</div>'
-        '<p style="margin:0;font-family:\'Source Serif 4\',Georgia,serif;font-size:18px;line-height:1.75;color:var(--ink);">Revenue recognized today is the result of investments made over the past several quarters, not just last quarter. Features ship before they\'re sold; pipeline built in Q1 converts in Q3. The serif appears nowhere else in the system.</p>'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4—standalone single-article reader only (/read/{article_id})</div>'
+        '<p style="margin:0;font-family:\'Source Serif 4\',Georgia,serif;font-size:18px;line-height:1.75;color:var(--ink);">Revenue recognized today is the result of investments made over the past several quarters, not just last quarter. Features ship before they\'re sold; pipeline built in Q1 converts in Q3. The serif appears nowhere else in the system—not even the merged Feed/Archive/Read Later reader at /read, which is Outfit like the rest of the site (2026-09).</p>'
         '</div>'
     )
 
@@ -30070,7 +30083,7 @@ def admin_brand(request: Request):
         '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart—keep it that way.</li>'
         '<li><strong>Coral is display-only.</strong> It\'s too light for body text (2.8:1); use coral-deep, or navy-on-coral-wash, when text is involved.</li>'
         '<li><strong>Buttons are navy or ghost</strong>—never a seafoam or coral fill.</li>'
-        '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings, DM Sans for everything, Source Serif 4 for reading only, Caveat for stickers only.</li>'
+        '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings (including the merged Feed/Archive/Read Later reader), DM Sans for everything else, Source Serif 4 for the standalone single-article reader only, Caveat for stickers only.</li>'
         '</ul>'
     )
 

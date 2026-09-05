@@ -130,16 +130,25 @@ states, soft panels), ~10% — really less — coral (one highlight per screen).
 ## 3. Typography
 
 Three content families, one combined Google Fonts import in `<head>`. No serif anywhere
-except the reader. **Caveat** and **Permanent Marker** are accent-only fonts — approved
-dependency exceptions for the graffiti refresh — each restricted to one specific use
-and never used for headings or body copy (that's still Outfit/DM Sans/Source Serif 4,
-unchanged).
+except the standalone single-article reader. **Caveat** and **Permanent Marker** are
+accent-only fonts — approved dependency exceptions for the graffiti refresh — each
+restricted to one specific use and never used for headings or body copy (that's still
+Outfit/DM Sans/Source Serif 4, unchanged).
+
+**2026-09 correction:** the merged Feed/Archive/Read Later reader at `/read` (title
+and body both) moved from Source Serif 4 to Outfit — confirmed wrong as serif on direct
+live-site review; this doc previously called that pairing out as the correct pattern
+and its reverse ("set body in Outfit") as the anti-pattern, exactly backwards from
+where it landed. Source Serif 4 survives only on the standalone single-article view at
+`/read/{article_id}` (a separate, older template, `webapp/app.py`'s `_READER_CSS`) —
+narrower scope than "the reader" broadly, so don't assume every reading surface still
+gets the serif; check which template a given page actually renders through first.
 
 | Family | Role | Weights |
 |---|---|---|
-| **Outfit** | Headings, display | 600 / 700 |
+| **Outfit** | Headings, display, and the merged Feed/Archive/Read Later reader (`/read`) | 400 / 600 / 700 |
 | **DM Sans** | Body copy, UI, labels, eyebrows | 400 / 500 / 600 |
-| **Source Serif 4** | Long-form reading (`/read` only) | 400 / 500 / 600 |
+| **Source Serif 4** | Long-form reading — standalone `/read/{article_id}` article view only | 400 / 500 / 600 |
 | **Caveat** | Sticker badges only — never headings or body | 700 |
 | **Permanent Marker** | Sitewide wordmark (nav + footer logo) only — never headings or body | 400 |
 
@@ -156,11 +165,15 @@ unchanged).
 | Eyebrow / kicker | DM Sans | 11.5px uppercase | 600 | .1em |
 | Body | DM Sans | 16px / 1.65 | 400 | — |
 | UI / labels | DM Sans | 13–15px | 500–600 | — |
-| Reader body | Source Serif 4 | 18px / 1.75 | 400 | — |
+| Merged reader title (`/read`) | Outfit | 30px / 1.18 | 600 | -0.02em |
+| Merged reader body (`/read`) | Outfit | 17px / 1.75 (15–20px cycle) | 400 | — |
+| Standalone reader body (`/read/{article_id}`) | Source Serif 4 | 18px / 1.75 | 400 | — |
 | Reader chrome | DM Sans | 13–14px | 400–500 | — |
 
 **Rules of thumb:** headings are tight (negative tracking) and Outfit; eyebrows are uppercase DM Sans
-with wide tracking and `--muted` or `--navy`; the serif is *exclusively* for reading long articles.
+with wide tracking and `--muted` or `--navy`; the serif is exclusively for the standalone
+single-article reader — everywhere else that reads like "the reader," including the merged
+Feed/Archive/Read Later view, is Outfit like the rest of the site.
 
 ### 3.2 Copy casing
 
@@ -471,7 +484,7 @@ or a plain break device, even if it originated as a "pull-quote."
 | Let navy + off-white do most of the work | Reach for color to fill space |
 | Use coral once per screen, as a pop | Spread coral across a layout |
 | Keep status colors for status only | Use `--alert` red as a highlight, or coral as a *system* status/error color |
-| Headings in Outfit, reading in Source Serif 4 | Mix the serif into UI, or set body in Outfit |
+| Serif reserved for the standalone single-article reader only; Outfit everywhere else, merged reader included | Spread the serif into the merged Feed/Archive/Read Later reader or any other UI |
 | One marker-underline, one or two stickers per page, in a header/hero or card corner | Repeat the graffiti kit decoratively, or put it on admin/data surfaces |
 | Buttons navy or ghost | Make a seafoam or coral button |
 

@@ -5209,19 +5209,35 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   geometry; reverted once Brian clarified the direction/state mapping was
   already correct and only the diagonal axis was wrong — worth remembering
   that "icon points the wrong way" bug reports can mean either axis or
-  direction, and they're not interchangeable fixes. (2) **Typography**:
+  direction, and they're not interchangeable fixes. (2) **Typography — the
+  merged Feed/Archive/Read Later reader (`/read`) now uses Outfit for BOTH
+  title and body, reversing what shipped as the first pass here.**
   `.rr-reader-title` was hardcoded to `'Source Serif 4',Georgia,serif` with no
-  letter-spacing — a leftover that was never updated to Outfit when the
-  standalone `/read/{id}` reader's own `.reader-meta h1` (which already used
-  Outfit) and this merged reader's heading treatments diverged. Fixed to
-  `var(--font-head)` + `-.02em` tracking, matching BRAND.md's "Page title
-  (H1)" row and the standalone reader's h1. **`.rr-reader-body-text` was
-  correctly left on Source Serif 4** — BRAND.md §3 explicitly sanctions serif
-  for exactly this one surface ("No serif anywhere except the reader" /
-  "Reader body | Source Serif 4 | 18px/1.75"), so a bug report that says "the
-  reader's font doesn't match the site" can be right about the title and
-  wrong about the body in the same breath — check BRAND.md's own type-scale
-  table before assuming the whole reading pane needs to move to DM Sans/Outfit.
+  letter-spacing — a leftover never updated to Outfit when the standalone
+  `/read/{article_id}` reader's own `.reader-meta h1` (already Outfit) and this
+  merged reader's heading treatments diverged — fixed to `var(--font-head)` +
+  `-.02em` tracking, matching BRAND.md's "Page title (H1)" row. `.rr-reader-
+  body-text` was FIRST left on Source Serif 4 on the reasoning that BRAND.md
+  §3 explicitly sanctioned serif for exactly this surface ("No serif anywhere
+  except the reader" / "Reader body | Source Serif 4") — that reasoning was
+  live-site-correct at the time (BRAND.md really did say that), but wrong on
+  what the page should actually look like: Brian confirmed on seeing the
+  "after" screenshot that the body should be Outfit too, not serif. Flagging
+  the reversal explicitly, same precedent as the homepage "🚧 building" sticker
+  mix-up elsewhere in this doc: **BRAND.md §3 was updated in the same PR** to
+  drop the "reading in Source Serif 4"/"never set body in Outfit" guidance for
+  the merged reader — Source Serif 4 now survives ONLY on the standalone
+  `/read/{article_id}` single-article view (a separate, older template,
+  `_READER_CSS`/`.reader-body`, untouched by this fix), which is genuinely a
+  narrower scope than "the reader" as BRAND.md used to describe it. The
+  now-unused `<link>` that loaded Source Serif 4 specifically for the merged
+  reader page was also removed (nothing on that page references the font any
+  more; Outfit is already loaded sitewide via `_page()`'s own font link). If a
+  future report says "the reader's font doesn't match the site," check which
+  of the two reader templates it's actually about before assuming BRAND.md's
+  type-scale table still applies — verify against a live screenshot rather
+  than trusting the doc alone, since this is exactly the case where the doc
+  was itself stale.
 - **MCP server, Phase 1 (2026-09) — a read-only remote MCP server at `/mcp`,
   mounted in-process (same app, same deploy, no second service), with its
   own user-bound token auth and three admin-gated schema-introspection
