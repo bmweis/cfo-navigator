@@ -19038,8 +19038,16 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
 .rr-reader-body{max-width:min(92%,880px);margin:0 auto;padding:44px 32px 100px;}
 .rr-reader-category{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
   color:var(--seafoam-deep);margin-bottom:12px;}
-.rr-reader-title{font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:30px;line-height:1.18;
-  color:var(--ink);margin-bottom:16px;}
+/* Title uses Outfit, matching BRAND.md's "Page title (H1)" row (30px/600/
+   -0.02em) and the standalone /read/{id} reader's own .reader-meta h1 —
+   this used to fall through to 'Source Serif 4',Georgia,serif with no
+   letter-spacing, a leftover that never got updated when the two readers'
+   heading treatments were established. Reader BODY correctly stays in
+   Source Serif 4 below — BRAND.md §3 sanctions serif for exactly this one
+   surface ("No serif anywhere except the reader" / "Reader body | Source
+   Serif 4"), so that one is deliberate, not a bug. */
+.rr-reader-title{font-family:var(--font-head);font-weight:600;font-size:30px;line-height:1.18;
+  letter-spacing:-.02em;color:var(--ink);margin-bottom:16px;}
 .rr-reader-byline{font-size:13px;color:var(--muted);padding-bottom:22px;border-bottom:1px solid var(--line);
   margin-bottom:26px;font-family:var(--font-body);}
 .rr-reader-body-text{font-family:'Source Serif 4',Georgia,serif;font-size:var(--rr-fs,17px);line-height:1.75;color:var(--ink-soft);}
@@ -19427,8 +19435,17 @@ var rrFsSizes = [17, 15, 20];
 // point is it behaves identically whether the open article came from Feed
 // or Archive.
 var rrFocusMode = false;
-var RR_ICON_EXPAND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
-var RR_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+// RR_ICON_EXPAND's arrows point OUTWARD, toward the top-left/bottom-right
+// (NW/SE) corners; RR_ICON_COLLAPSE's point INWARD, tails anchored at the
+// same two corners. (Fixed 2026-09: these originally sat on the NE/SW
+// diagonal — Feather's stock "maximize-2"/"minimize-2" — which pointed the
+// wrong way live; mirrored horizontally onto NW/SE per direct confirmation,
+// keeping each icon's outward/inward direction otherwise unchanged.)
+// RR_ICON_EXPAND shows by default (not yet in focus mode) — clicking it
+// expands; RR_ICON_COLLAPSE shows once in focus mode — clicking it restores
+// the rail/list. See rrRenderArticle/rrSetFocusMode below for that mapping.
+var RR_ICON_EXPAND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 3 3 3 3 9"></polyline><polyline points="15 21 21 21 21 15"></polyline><line x1="3" y1="3" x2="10" y2="10"></line><line x1="21" y1="21" x2="14" y2="14"></line></svg>';
+var RR_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 14 14 14 14 20"></polyline><polyline points="4 10 10 10 10 4"></polyline><line x1="10" y1="10" x2="3" y2="3"></line><line x1="21" y1="21" x2="14" y2="14"></line></svg>';
 var RR_ICON_SEARCH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>';
 // Tag glyph for the reader toolbar — the collapsed state of the inline tag
 // editor, matching Instapaper's own toolbar tag affordance.

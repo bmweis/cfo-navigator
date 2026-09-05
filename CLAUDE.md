@@ -5197,6 +5197,31 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   manual per-item "Refresh" button in the reader toolbar — re-fetches on
   click only (no automatic staleness detection), non-destructive on failure.
   See ARCHITECTURE.md's matching section and `tests/test_read_later_caching.py`.
+- **Reader expand-mode icon + typography polish (2026-09).** Two small bugs on
+  the Instapaper-style expand toggle (`#rr-reader-expand`), found via live-site
+  screenshots, no schema/route change. (1) **Icon geometry**: `RR_ICON_EXPAND`/
+  `RR_ICON_COLLAPSE` originally sat on Feather's stock NE/SW diagonal (arrows
+  toward the top-right/bottom-left corners) — mirrored horizontally onto the
+  NW/SE diagonal instead (top-left/bottom-right), per Brian's direct
+  confirmation, keeping each icon's own outward (collapsed state)/inward
+  (focus-mode state) direction unchanged — only the axis rotated. First pass at
+  this bug swapped which icon renders in which STATE instead of touching the
+  geometry; reverted once Brian clarified the direction/state mapping was
+  already correct and only the diagonal axis was wrong — worth remembering
+  that "icon points the wrong way" bug reports can mean either axis or
+  direction, and they're not interchangeable fixes. (2) **Typography**:
+  `.rr-reader-title` was hardcoded to `'Source Serif 4',Georgia,serif` with no
+  letter-spacing — a leftover that was never updated to Outfit when the
+  standalone `/read/{id}` reader's own `.reader-meta h1` (which already used
+  Outfit) and this merged reader's heading treatments diverged. Fixed to
+  `var(--font-head)` + `-.02em` tracking, matching BRAND.md's "Page title
+  (H1)" row and the standalone reader's h1. **`.rr-reader-body-text` was
+  correctly left on Source Serif 4** — BRAND.md §3 explicitly sanctions serif
+  for exactly this one surface ("No serif anywhere except the reader" /
+  "Reader body | Source Serif 4 | 18px/1.75"), so a bug report that says "the
+  reader's font doesn't match the site" can be right about the title and
+  wrong about the body in the same breath — check BRAND.md's own type-scale
+  table before assuming the whole reading pane needs to move to DM Sans/Outfit.
 - **MCP server, Phase 1 (2026-09) — a read-only remote MCP server at `/mcp`,
   mounted in-process (same app, same deploy, no second service), with its
   own user-bound token auth and three admin-gated schema-introspection
