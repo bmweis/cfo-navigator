@@ -1,5 +1,5 @@
-"""scripts/migrate_original_content.py (Original Content Phase 1) — the
-one-time migration that seeds the `original_content` table from
+"""scripts/archive/migrate_original_content.py (Original Content Phase 1) —
+the one-time migration that seeds the `original_content` table from
 _TL_FEATURED_CARDS, plus the Library CRUD methods it and the eventual admin
 CRUD (Phase 3) both rely on.
 """
@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib.db import Library
-from scripts import migrate_original_content as script
+from scripts.archive import migrate_original_content as script
 from webapp.app import _TL_FEATURED_CARDS
 
 
