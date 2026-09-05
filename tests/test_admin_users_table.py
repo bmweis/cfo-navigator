@@ -30,6 +30,7 @@ the exact <details>/<summary> markup already established on
 /admin/tools/communities), documenting the full account-creation ->
 cap-raise -> `scripts/mint_api_token.py` -> connector-setup flow.
 """
+import json
 import os
 import pathlib
 import re
@@ -132,6 +133,30 @@ def test_optional_columns_default_visible(env):
     body = admin.get("/admin/users").text
     for col in ("realname", "email", "last_login", "access_level", "status", "ask", "matchmaker"):
         assert f'id="colpick-users-{col}" checked' in body
+
+
+def test_initcolpicker_call_passes_the_real_default_visible_list(env):
+    """Real bug, caught by a live mobile screenshot check, not by the
+    server-rendered-checkbox test above: initColPicker()'s own fallback (used
+    whenever nothing's saved in localStorage yet — i.e. every first visit)
+    unconditionally overwrote every checkbox AND every column's actual
+    display to the single shared ADMIN_DEFAULT_VISIBLE_COLS ('review_status')
+    regardless of what the server rendered as checked — Users has no
+    'review_status' column, so every optional column silently rendered
+    hidden on load despite this page's own checkboxes showing checked. Fixed
+    by passing this page's real default-visible list as initColPicker's new
+    third argument; this test pins the actual JS call, not just the
+    server-rendered (and, pre-fix, misleading) checkbox markup."""
+    _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    m = re.search(r"initColPicker\('users',\s*(\[.*?\]),\s*(\[.*?\])\);", body)
+    assert m, "initColPicker('users', ...) call not found with a third argument"
+    cols = json.loads(m.group(1))
+    default_visible = json.loads(m.group(2))
+    for col in ("realname", "email", "last_login", "access_level", "status", "ask", "matchmaker"):
+        assert col in cols
+        assert col in default_visible
 
 
 def test_rows_carry_username_role_and_status(env):

@@ -10880,17 +10880,30 @@ _ADMIN_BULK_EDIT_JS = """
 // count. See CLAUDE.md's admin-list column-defaults follow-up for the
 // full write-up (table-width investigation after PR 465).
 var ADMIN_DEFAULT_VISIBLE_COLS = ['review_status'];
-function initColPicker(tableKey, cols) {
+function initColPicker(tableKey, cols, defaultVisible) {
+  // defaultVisible (optional, 2026-09 Users-table fix): a per-table override
+  // of the fallback used when nothing's saved in localStorage yet. Before
+  // this parameter existed, EVERY table's fallback was the single shared
+  // ADMIN_DEFAULT_VISIBLE_COLS ('review_status') regardless of what
+  // _admin_column_picker_html's own `default_visible` pre-checked
+  // server-side — a real bug this fixes, not just a naming mismatch: this
+  // function's own `cb.checked = visible` line (below) OVERWRITES the
+  // server-rendered checkbox state to match `active` on every load, so a
+  // table with no `review_status` column (Users) silently ended up with
+  // every optional column hidden on first visit, contradicting its own
+  // rendered "checked" checkboxes. Software/Communities omit this argument
+  // and keep their exact original behavior (the global default, unchanged).
+  var fallback = defaultVisible || ADMIN_DEFAULT_VISIBLE_COLS;
   var stored = localStorage.getItem('cfo_admin_cols_' + tableKey);
   var active;
   if (stored) {
-    try { active = JSON.parse(stored); } catch (e) { active = ADMIN_DEFAULT_VISIBLE_COLS.slice(); }
+    try { active = JSON.parse(stored); } catch (e) { active = fallback.slice(); }
   } else {
     // No saved view yet — the minimal default (Name/Actions are always
     // shown, no data-col; only Review status joins them here) rather than
     // every column, so an admin list with a lot of optional metadata
     // (Communities) doesn't overflow its container by default.
-    active = ADMIN_DEFAULT_VISIBLE_COLS.slice();
+    active = fallback.slice();
   }
   cols.forEach(function(col) {
     var visible = active.indexOf(col) !== -1;
@@ -27281,7 +27294,7 @@ def admin_users(request: Request, msg: str = ""):
 </style>
 
 <script>
-initColPicker('users', {json.dumps([k for k, _ in users_cols])});
+initColPicker('users', {json.dumps([k for k, _ in users_cols])}, {json.dumps(list(users_default_visible))});
 applySortFilter('users');
 async function openUsersDeleteSelectedPanel() {{
   var ids = Array.prototype.map.call(document.querySelectorAll('.users-row-cb:checked'), function(cb) {{ return parseInt(cb.value, 10); }});
