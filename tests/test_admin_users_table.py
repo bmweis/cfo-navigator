@@ -13,10 +13,10 @@ Direct-edit follow-up: the separate "Manage {user}" click-through panel is
 retired entirely. Full name/Email are inline fields saved directly in the
 row (one shared form, since posting only one of the two would blank the
 other — admin_users_edit writes whatever it's handed); FP&A Buddy/Matchmaker
-caps get an inline input + Set button in their own cells; password reset is
-an inline field + button in the Actions column; Username stays read-only
-(it's the login identifier); Access level/Status render as their own badge
-columns, with the actual mutating actions (Make admin/member, Disable/Enable,
+caps get an inline input + Set button each; password reset is an inline
+field + button in the Actions column; Username stays read-only (it's the
+login identifier); Access level/Status render as their own badge columns,
+with the actual mutating actions (Make admin/member, Disable/Enable,
 password reset, Delete) bundled into the Actions column instead of living
 beside each badge. "Add a member" also moves to the top of the page, beside
 the two dollar-cap default forms (2/3 + 1/3 width). The one deliberately new
@@ -24,6 +24,12 @@ mechanism (unchanged by the direct-edit follow-up) is bulk delete (approved
 scope: "Delete selected" only, no bulk "Edit selected" — role/active toggles
 carry a last-active-admin guard that's inherently per-row, and a bulk version
 of it risks a silent partial-failure mode, per Brian's own call).
+
+Mobile-tidiness follow-up: FP&A Buddy cap and Matchmaker cap merged into one
+"Usage limits" column/mobile-card section — matching how Software/
+Communities' own mobile cards group related info under a single label
+(e.g. Review status: one label, a badge and its action button together)
+rather than a full separate section per field.
 
 Also: a collapsible "How to set up a new MCP user" disclosure block (reusing
 the exact <details>/<summary> markup already established on
@@ -121,7 +127,7 @@ def test_column_picker_lists_optional_columns(env):
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
     for col in ("users:realname", "users:email", "users:last_login", "users:access_level",
-                "users:status", "users:ask", "users:matchmaker"):
+                "users:status", "users:usage"):
         assert f'data-col="{col}"' in body
 
 
@@ -131,7 +137,7 @@ def test_optional_columns_default_visible(env):
     _seed_users(env)
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
-    for col in ("realname", "email", "last_login", "access_level", "status", "ask", "matchmaker"):
+    for col in ("realname", "email", "last_login", "access_level", "status", "usage"):
         assert f'id="colpick-users-{col}" checked' in body
 
 
@@ -154,7 +160,7 @@ def test_initcolpicker_call_passes_the_real_default_visible_list(env):
     assert m, "initColPicker('users', ...) call not found with a third argument"
     cols = json.loads(m.group(1))
     default_visible = json.loads(m.group(2))
-    for col in ("realname", "email", "last_login", "access_level", "status", "ask", "matchmaker"):
+    for col in ("realname", "email", "last_login", "access_level", "status", "usage"):
         assert col in cols
         assert col in default_visible
 

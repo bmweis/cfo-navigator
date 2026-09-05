@@ -27063,9 +27063,17 @@ def admin_users(request: Request, msg: str = ""):
     # table" ask reads as show-by-default, not hidden-behind-a-picker), but
     # the picker/toggle mechanism itself is unchanged from the other two
     # admin tables.
+    # 2026-09 mobile-tidiness follow-up: FP&A Buddy cap and Matchmaker cap
+    # merged into one "Usage limits" column/mobile-card section (was two
+    # separate columns, each rendering its own full label+value+edit-form
+    # block) — per Brian's ask to make this page's mobile cards feel like
+    # Software/Communities', whose own mobile cards group related info
+    # under ONE section label (see Review status: one label, a badge and
+    # its action button together) rather than a separate full section per
+    # field. See _user_row's "Usage limits" cell for the merged rendering.
     users_cols = [("realname", "Name"), ("email", "Email"), ("last_login", "Last login"),
                   ("access_level", "Access level"), ("status", "Status"),
-                  ("ask", "FP&A Buddy cap"), ("matchmaker", "Matchmaker cap")]
+                  ("usage", "Usage limits")]
     users_default_visible = tuple(k for k, _ in users_cols)
     users_sort_fields = [("name", "Username"), ("last_login", "Last login"), ("created", "Created")]
     users_scalar_filters = [
@@ -27149,23 +27157,25 @@ def admin_users(request: Request, msg: str = ""):
           <td data-col="users:last_login" data-label="Last login" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);white-space:nowrap;">{last_display}</td>
           <td data-col="users:access_level" data-label="Access level" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{role_badge}</td>
           <td data-col="users:status" data-label="Status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{status_badge}</td>
-          <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;min-width:150px;">
-            <div style="margin-bottom:5px;"><span style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</span> <span style="color:var(--muted);">({cap_note})</span></div>
-            <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:5px;align-items:center;">
-              <span style="font-size:12px;color:var(--muted);">$</span>
-              <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
-                placeholder="{default_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
-              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
-            </form>
-          </td>
-          <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;min-width:150px;">
-            <div style="margin-bottom:5px;"><span style="font-weight:600;color:var(--ink);">${mm_spent:.2f} / ${mm_effective_cap:.2f}</span> <span style="color:var(--muted);">({mm_cap_note})</span></div>
-            <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:5px;align-items:center;">
-              <span style="font-size:12px;color:var(--muted);">$</span>
-              <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
-                placeholder="{default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
-              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
-            </form>
+          <td data-col="users:usage" data-label="Usage limits" class="admin-table-cell users-usage-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;min-width:170px;">
+            <div class="users-usage-item">
+              <div style="margin-bottom:4px;"><strong style="color:var(--ink);">FP&amp;A Buddy</strong> <span style="color:var(--muted);">${spent:.2f} / ${effective_cap:.2f} ({cap_note})</span></div>
+              <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:5px;align-items:center;">
+                <span style="font-size:12px;color:var(--muted);">$</span>
+                <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
+                  placeholder="{default_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
+                <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
+              </form>
+            </div>
+            <div class="users-usage-item" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);">
+              <div style="margin-bottom:4px;"><strong style="color:var(--ink);">Matchmaker</strong> <span style="color:var(--muted);">${mm_spent:.2f} / ${mm_effective_cap:.2f} ({mm_cap_note})</span></div>
+              <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:5px;align-items:center;">
+                <span style="font-size:12px;color:var(--muted);">$</span>
+                <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
+                  placeholder="{default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
+                <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
+              </form>
+            </div>
           </td>
           <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
             <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
@@ -27268,8 +27278,7 @@ def admin_users(request: Request, msg: str = ""):
   <th data-col="users:last_login" style="padding:10px 12px;text-align:left;font-size:13px;">Last login</th>
   <th data-col="users:access_level" style="padding:10px 12px;text-align:left;font-size:13px;">Access level</th>
   <th data-col="users:status" style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
-  <th data-col="users:ask" style="padding:10px 12px;text-align:left;font-size:13px;">FP&amp;A Buddy cap</th>
-  <th data-col="users:matchmaker" style="padding:10px 12px;text-align:left;font-size:13px;">Matchmaker cap</th>
+  <th data-col="users:usage" style="padding:10px 12px;text-align:left;font-size:13px;">Usage limits</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
 <tbody id="users-approved-tbody">{rows_html}</tbody>

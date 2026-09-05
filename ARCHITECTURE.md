@@ -868,6 +868,53 @@ stacked in a 1/3-width column, now render side by side above the table in a
 900px — replacing the old top-to-bottom order (cap defaults → table →
 Add-a-member at the very bottom).
 
+**Mobile-polish follow-up (2026-09), from a live-screenshot review against
+Software/Communities' own mobile cards.** Three fixes, all verified with real
+Playwright screenshots at 390×844 and 1280px, not just reasoned about: (1)
+**`initColPicker()` had a real, pre-existing bug this page's own default
+depended on** — its no-saved-view fallback was hardcoded to the single shared
+`ADMIN_DEFAULT_VISIBLE_COLS = ['review_status']` for every admin table
+(Software/Communities/Users), and its own `cb.checked = visible` line
+overwrites the server-rendered checkbox state to match that fallback on every
+load. Users has no `review_status` column, so every optional column
+silently rendered hidden on first visit despite the page's own checkboxes
+showing checked. Fixed with a new optional third argument,
+`initColPicker(tableKey, cols, defaultVisible)` — Software/Communities omit
+it and keep their exact original behavior; Users passes its own real
+default-visible list. (2) **"Add a member"'s Username/Temp password inputs
+now align** — "Temporary password" (which wrapped to two lines in its narrow
+mobile column, pushing its input down out of alignment with Username's)
+shortened to "Temp password" with `white-space:nowrap`. (3) **Make
+member/admin, Disable/Enable, and Delete sit on one row on mobile** via a new
+`.users-action-btns` class — equal-width flex, smaller font/padding, scoped
+to the *existing* 700px breakpoint only (a first pass applied this globally
+and broke the desktop Actions column — buttons overlapping/clipped — caught
+by a desktop screenshot before shipping; desktop keeps its original natural
+wrapping layout, unaffected).
+
+**Usage limits merge (2026-09), same follow-up — the biggest of the three
+fixes, from feedback that the mobile card still read as "a long list of
+stuff."** Live screenshots of `/admin/tools/software` and
+`/admin/tools/communities`' own mobile cards (the explicit reference point)
+showed a consistent pattern this page wasn't following: related info groups
+under ONE section label (e.g. "Review status": one label, a badge and its
+action button together), never a full separate label+value+form block per
+field. FP&A Buddy cap and Matchmaker cap — previously two separate table
+columns, each rendering its own uppercase label, a bold spend/cap line, a
+muted default/override note on its own line, and a 3-element edit form —
+merged into ONE `users:usage` column/mobile-card section, "Usage limits".
+Each cap is now a compact two-line sub-item (`**FP&A Buddy** $0.00 / $5.00
+(default)` on one line, the `$ [input] [Set]` edit form on the next),
+separated from its sibling by a subtle 1px dashed divider rather than a
+second full section header — cuts the two fields from 6 stacked chunks
+down to a single visually-grouped block. `users_cols`' `("ask", ...)`/
+`("matchmaker", ...)` pair became one `("usage", "Usage limits")` entry;
+`total_cols` (checkbox + username + optional cols + actions) is derived from
+`len(users_cols)` and updates automatically. The two underlying routes
+(`POST /admin/users/{id}/ask-cap`/`/matchmaker-cap`) are completely
+unchanged — this is a display-layer merge only, each cap still posts to its
+own route independently.
+
 **Duplicate-URL blocking on save (both tables, create and edit).**
 `linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
 `_find_community_by_normalized_url` lookup on `Library` guard `add_tool`,
