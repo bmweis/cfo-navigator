@@ -18,7 +18,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 def _seed_flagship_original_content(appmod):
     """Seed the 3 flagship `original_content` rows a real
-    scripts/migrate_original_content.py --apply run would produce (Original
+    scripts/archive/migrate_original_content.py --apply run would produce (Original
     Content Phase 1). This test file exercises homepage/thought-leadership
     rendering as it looks post-migration, not the pre-seed empty-table
     state — a fresh test DB otherwise has zero flagship cards, since seeding
@@ -35,7 +35,7 @@ def _seed_flagship_original_content(appmod):
     shows once that migration is applied there. Phase 4a's netsuite-mcp
     migration needed no equivalent here since it never touched that row's
     title, only its body_md."""
-    from scripts.migrate_original_content import planned_rows
+    from scripts.archive.migrate_original_content import planned_rows
     from scripts.migrate_hackathon_playbook_content import TITLE as HACKATHON_TITLE
     lib = appmod._lib()
     try:

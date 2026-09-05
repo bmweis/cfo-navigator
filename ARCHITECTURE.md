@@ -427,7 +427,7 @@ fact — nothing clears it once learned.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `users` | Member accounts. Passwords are scrypt-hashed (`linklib/passwords.py`, stdlib only). | `role` (`user` \| `admin`), `active`, `ask_cap_usd` (per-user monthly dollar-cap override; `NULL` = inherit the global default from `settings`) |
+| `users` | Member accounts. Passwords are scrypt-hashed (`linklib/passwords.py`, stdlib only). | `role` (`user` \| `admin`), `active`, `ask_cap_usd` (per-user monthly dollar-cap override; `NULL` = inherit the global default from `settings`), `password_change_recommended` (Encourage-password-change, 2026-09 — set whenever the current password was chosen by someone other than the account holder: `create_user`'s default, and `POST /admin/users/{id}/password`; cleared the moment the holder sets their own — self-service `/reset-password` or the in-session `/change-password` form. Drives `webapp.app._password_change_nudge_html`'s dismissible banner only — never a login block, per Brian's explicit call) |
 | `password_reset_requests` | Self-service "forgot password" requests. | `token_hash` (SHA-256 of the emailed token — never the raw token, so a DB leak alone can't reset a password), `expires_at`, `resolved_at` (`''` = pending — the empty-string-sentinel idiom used throughout) |
 
 ### CFO Toolbox
@@ -1313,7 +1313,7 @@ effect.
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (originally "pin into the homepage teaser" — Phase 3 addendum; repurposed by the Homepage Restructure phase to mean "represents this type in the homepage's "Recent highlights" grid", see below; defaults to 0, no retroactive selection) |
-| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4c, all three flagship pieces — `netsuite-mcp` (4a), `ai-hackathon-playbook` (4b), and `growth-engine-ratio` (4c) — have real `body_md` and are served by the catch-all, their bespoke routes all retired; `growth-engine-ratio`'s own JS calculator moved to a brand-new standalone bespoke route, `/thought-leadership/growth-engine-calculator`, which is not part of this table at all), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. `mirrored_article_id` (FP&A Buddy published-content ingestion, 2026-09, nullable — `NULL` before the first sync) tracks which `articles.id` currently mirrors this piece for retrieval; see "Published-content ingestion" under FP&A Buddy above. |
+| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/archive/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4c, all three flagship pieces — `netsuite-mcp` (4a), `ai-hackathon-playbook` (4b), and `growth-engine-ratio` (4c) — have real `body_md` and are served by the catch-all, their bespoke routes all retired; `growth-engine-ratio`'s own JS calculator moved to a brand-new standalone bespoke route, `/thought-leadership/growth-engine-calculator`, which is not part of this table at all), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. `mirrored_article_id` (FP&A Buddy published-content ingestion, 2026-09, nullable — `NULL` before the first sync) tracks which `articles.id` currently mirrors this piece for retrieval; see "Published-content ingestion" under FP&A Buddy above. |
 
 **Original Content Phase 2 (2026-08) — markdown rendering + `GET /thought-leadership/{slug}`.**
 `_render_original_content_markdown` runs `body_md` through `python-markdown` with only
@@ -3690,13 +3690,18 @@ mcp_server.require_admin` (a thin alias for the same `_require_admin` the
 three introspection tools use internally — added so a second module can
 reach the same fail-closed admin check without importing a name that reads
 as module-private; the three introspection tools' own calls are untouched).
-**One real, pre-existing inconsistency found and deliberately left alone**:
-`GET /api/search` — an older route wrapping the same `Library.search()` —
-is gated at member-tier (`_require_member`), a likely-unintentional
-survivor of the Library/Toolbox Phase 1 restructure that moved the Reader
-itself to admin-only without revisiting this API route. These new MCP
-tools follow `/read`'s current, actual enforcement (admin-only), not that
-older route's; fixing `/api/search`'s own gating is out of scope here.
+**One real, pre-existing inconsistency found here, and since fixed
+(2026-09)**: `GET /api/search` — an older route wrapping the same
+`Library.search()` — was gated at member-tier (`_require_member`), a
+likely-unintentional survivor of the Library/Toolbox Phase 1 restructure
+that moved the Reader itself to admin-only without revisiting this API
+route. These new MCP tools always followed `/read`'s current, actual
+enforcement (admin-only); fixing `/api/search`'s own gating was flagged as
+out of scope for this phase at the time, then done as its own urgent PR
+once a real non-admin (`role=user`) account made the gap live rather than
+theoretical — `/api/search` now uses `_require_api` (admin cookie OR the
+save token), matching `/read`'s access tier exactly while keeping its
+existing token-based callers (e.g. `scripts/mcp_server.py`) working.
 
 **Why Phase 4's tools are admin-gated while Phase 3's six Toolbox/
 Communities tools are any-valid-token — worth stating explicitly, since
@@ -6201,6 +6206,38 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   prompt pointing at `/login?next=<matchmaker path>`; the matchmaker routes
   themselves stay public (see below) — this is a soft, discovery-level nudge
   toward signing in, not a hard gate on the chat itself.
+- **Encourage password change (2026-09)** — `users.password_change_recommended`
+  (see the Accounts schema table above) drives a dismissible reminder banner,
+  never a login block (Brian's explicit call over a hard-block alternative
+  that was proposed and rejected). `_password_change_nudge_html(lib, request)`
+  is wired into exactly the two pages `_login_redirect`'s role-based default
+  actually lands on — `homepage()` (role `user`/guest) and `admin_page()`
+  (role `admin`) — rather than threaded through `_page()`'s ~250 call sites,
+  the smallest surface that still shows it on the very next page after login.
+  Dismissal is client-only (`localStorage`, keyed `pw_nudge_dismissed_<user
+  id>` so one shared browser's dismiss can't hide it for a different account
+  signed in later) — same convention as the Compare page's swipe-hint
+  (`_CMP_SWIPE_HINT_JS`). The banner's own link, and the flag's clear path,
+  is a new session-cookie-only `GET/POST /change-password` (member-gated, no
+  token fallback — same tier as `/api/read-article`/`/read-later/refresh`):
+  re-verifies the current password via `authenticate()` before accepting a
+  new one, distinct from and independent of the token-based self-service
+  `/forgot-password` → `/reset-password` email flow. The flag is set by
+  `create_user` (default `True` — every admin-created account starts
+  flagged) and by `POST /admin/users/{id}/password` (an admin resetting an
+  *existing* account's password sets it back to `True`, since the account
+  holder didn't choose that password either); it's cleared by
+  `set_user_password`'s two self-chosen-password call sites
+  (`reset_password_submit`, `change_password_submit`) — deliberately NOT
+  folded into `set_user_password` itself, since its two existing call sites
+  want opposite outcomes for the flag. `POST /admin/users/{id}/password` also
+  sends `linklib.email_utils.send_admin_password_reset_email` (a new
+  variant, same admin-editable-template mechanism as `send_welcome_email`/
+  `send_password_reset_email` via `_email_template_registry()`) when the
+  account has an email on file — closing the "encourage via email" loop:
+  account creation already emailed a similar nudge (`send_welcome_email`);
+  an existing account's admin-triggered reset now gets the equivalent
+  treatment instead of resetting silently.
 - **Three surfaces**:
   - *Public* — no auth: `/`, `/thought-leadership`,
     `/thought-leadership/growth-engine-ratio`, `/thought-leadership/growth-engine-calculator`
@@ -6441,9 +6478,12 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     PR — see "Admin URL convention, Phase 1b PR 1" below.
 - **Token auth in parallel**: `POST /save` is token-only
   (`X-Save-Token`/`?token=`) because the bookmarklet calls it cross-origin
-  where the cookie can't be sent; member/admin APIs (`/ask`, `/api/search`,
-  `/feed/save`) accept the token as an alternative to the cookie. All token
-  comparisons are constant-time (`hmac.compare_digest`).
+  where the cookie can't be sent; member/admin APIs (`/ask`, `/feed/save`)
+  accept the token as an alternative to the cookie. `/api/search` is
+  admin-only as of 2026-09 (`_require_api` — admin cookie or the token, not
+  any member cookie; see the MCP-server Phase 4 note above), matching
+  `/read`'s access tier. All token comparisons are constant-time
+  (`hmac.compare_digest`).
 - If **no password is configured at all**, private routes are open — a
   local-development convenience, never the hosted configuration.
 - Three middlewares wrap everything: a canonical-host 301 (www + legacy Railway
@@ -6507,6 +6547,64 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   exemption is scoped to this exact path, not a general carve-out for
   token-authenticated routes — widening it needs the same deliberateness as
   adding it did.
+- **Surface Hidden Community Profile Fields (2026-09) — Stage focus,
+  Jobs program, and Individual or team join `linklib.compare.
+  COMMUNITY_PROFILE_GROUPS`, and a real hero/screenshot spacing fix rides
+  along in the same PR.** Investigation found these three admin-editable
+  Quick-facts fields (`community_profiles.stage_focus`/`jobs_program`/
+  `team_or_individual`) had never rendered on any public surface, the last
+  three of the section's fields with no public home (every sibling field —
+  `founded_year`, `cpe_eligible`, `primary_purpose`, `seniority_band`,
+  `platform_type`/`meeting_format`/`event_style` — already had one, per
+  `webapp/app.py`'s own comment above `_COMMUNITY_PROFILE_GROUPS`). A live
+  query against production found real, substantive content already stored
+  for 36 of 40 communities — not the near-empty state the edit-page's own
+  `placeholder=` attribute text ("Placeholder, not yet researched or
+  weighted," now removed since it's misleading once the field renders
+  publicly) might suggest — so this shipped mostly as "surface content
+  that already exists," not "build empty-state scaffolding for an
+  unpopulated field," though the three-state standard (verified/pending/
+  empty) holds for the minority of communities still blank on one of the
+  three. Placed by semantic fit, not to balance group sizes: Stage focus
+  joins "Who it's for" (a company-stage targeting fact, a natural peer of
+  the existing seniority-band "Who it targets" entry); Jobs program joins
+  "What you get" (a member benefit, same category as Resources included);
+  Individual or team joins "Cost & structure" (a membership-structure/
+  purchasing fact, closer to Business model's "how this sustains itself"
+  than to who it's personally for). No new gating logic — `_narrative_field`/
+  `gates.field_state` handle all three exactly like every other group
+  field, off the same whole-profile `needs_review` flag `build_communities_
+  compare` already reads once per community.
+
+  **Same PR also fixed a real spacing bug this build surfaced**: the
+  Community profile page's hero (name/tags/actions) and its screenshot
+  card used to sit side by side in their own two-column `.tp-band`
+  (`top_band`), so the Bottom line callout directly below it couldn't
+  start until that whole grid ROW finished — gated behind the (usually
+  much taller) screenshot column's height rather than the hero column's
+  actual, much shorter, content height. This read as a large, unintentional
+  gap between the action row and the Bottom line box. Software's own
+  Sidebar Consolidation pass (CLAUDE.md's "Tool Profile Layout: Sidebar Consolidation" bullet) had already solved the identical
+  problem for the Software profile page — hero rendered full-width above
+  a single `.tp-band`, screenshot moved into the sidebar column alongside
+  Key features/Competitors — so this fix mirrors that exact pattern rather
+  than inventing a new one: `hero_text` now renders full-width (no band,
+  no screenshot alongside it), and `screenshot_block` opens the sidebar
+  column of the single remaining band (renamed `content_band`, from
+  `lower_band`), alongside Details/Categories/Similar communities — the
+  same reference-sidebar grouping this page already used for those three,
+  just extended to the screenshot. The CSS gained `.tp-band:first-of-type
+  {margin-top:20px;}`, matching Software's own override, since there's now
+  only one `.tp-band` on the page. On mobile (`<=800px`, unchanged
+  breakpoint), the sidebar (screenshot included) now falls after all the
+  main-column narrative content in DOM order rather than right after the
+  hero — the same "main column first, sidebar second" mobile order
+  Software's Sidebar Consolidation already established, not a new
+  decision. See `linklib/compare.py`'s own comment on
+  `COMMUNITY_PROFILE_GROUPS` for the placement reasoning and `tests/
+  test_surface_hidden_community_fields.py` for the regression coverage
+  (placement, verified/pending/empty on both the profile page and
+  Compare).
 
 ## 4. Design decisions and their reasons
 
