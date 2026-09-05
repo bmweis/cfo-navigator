@@ -5627,6 +5627,30 @@ never reads as something to tap.
   tool and a sparse/empty one — all four combinations screenshot-checked
   before merge.
 
+- **Edit-page label alignment (2026-09) — nine internal edit-page labels renamed
+  to match their public/external display labels, from a dedicated label-
+  consistency sweep** (same precedent as "Competitive differentiation" ->
+  "Bottom line" on the tool edit page, earlier in this doc). Label-string-only,
+  no schema/logic/field-name changes: tool edit page's "Core competition" ->
+  "Competitors" (matching the profile page's own `<h2>` — this specifically
+  reverts Phase P's edit-page-only "Competitors" -> "Core competition" rename
+  above, restoring the match to the public label it was originally meant to
+  mirror; the stale help text claiming the profile page shows "Closest
+  competitors" — a rename that never actually happened — was corrected to say
+  "Competitors" too) and "Feature taxonomy" -> "Key features" (matching the
+  profile page's Key features card — label only, the governed-feature-link
+  mechanics underneath are untouched); the app-screenshot-source-URL field's
+  "Product" label -> "App screenshot" (matching the profile page's screenshot
+  card); and, on the Community profile edit page, "Anti-fit" -> "Who should
+  skip it", "Level"/`seniority_band` -> "Who it targets", "Verdict" ->
+  "Bottom line", "Cost vs. value verdict" -> "Cost vs. value", "Founded year"
+  -> "Founded", and "CPE" -> "CPE eligible" — all six matching the exact
+  labels `linklib/compare.py`'s `COMMUNITY_PROFILE_GROUPS`/the public profile
+  page's Details card already use. Three admin-collected-but-never-publicly-
+  rendered community fields found during the same sweep (Stage focus, Jobs
+  program, Individual-or-Team) are a separate, deliberately out-of-scope
+  question (why collect data that's never shown), not a label mismatch —
+  untouched by this PR.
 - **Admin Users page: table redesign + MCP user setup docs (2026-09) — `/admin/users`
   joins the standard admin-table convention, making it explicitly three-for-three
   with `/admin/tools/software` and `/admin/tools/communities`.** `/admin/users` was
