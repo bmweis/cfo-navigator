@@ -3653,6 +3653,26 @@ itself to admin-only without revisiting this API route. These new MCP
 tools follow `/read`'s current, actual enforcement (admin-only), not that
 older route's; fixing `/api/search`'s own gating is out of scope here.
 
+**Why Phase 4's tools are admin-gated while Phase 3's six Toolbox/
+Communities tools are any-valid-token — worth stating explicitly, since
+read cold this looks like an inconsistency rather than the deliberate
+pattern it is.** Both phases follow the identical rule: an MCP tool's
+gate matches its underlying web page's *real* access model, not a
+uniform policy applied across every tool. `/tools/software`, `/tools/
+communities`, both entities' profile pages, and both Compare pages have
+no auth gate at all — anyone can load them — so Phase 3's tools require
+only a valid, active, unrevoked token (any role), per `webapp.mcp_server.
+require_caller`. `/read` (and everything under it) requires a signed-in
+**admin** session — it is Brian's personal reading stash, deliberately
+taken off even signed-in-member visibility in the Library/Toolbox Phase 1
+restructure — so Phase 4's tools require the admin role specifically, per
+the new `require_admin`. Neither phase invented its own policy; each
+mirrors the page it wraps. A future MCP tool wrapping a member-tier page
+(e.g. `/tools/fpa-buddy`, gated on `_is_member`) would need a third
+tier — `require_admin`/`require_caller` cover exactly the two tiers that
+exist among the tools built so far, not every tier this app's route model
+supports.
+
 **Track A — `search_library`/`get_article` wrap `linklib.agent.retrieve()`
 and `Library.get_article`/`get_article_by_url` completely unmodified.** No
 new search infrastructure: `retrieve()` is the exact hybrid FTS5 + vector
