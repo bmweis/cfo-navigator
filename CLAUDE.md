@@ -3063,6 +3063,18 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     `webapp/thought_leadership_data.py` once nothing archived needs it
     either) actually become dead code safe to delete under this repo's own
     "no dead data"/no-dead-code discipline.
+  - **2026-09 update: confirmed and archived.** Brian confirmed the migration
+    ran in production — `original_content` has been in active use for weeks
+    (ingestion, MCP Phase 4/5, and the Buddy citation work all built on top of
+    it working) — so `scripts/migrate_original_content.py` was `git mv`'d into
+    `scripts/archive/migrate_original_content.py`, matching
+    `migrate_thought_leadership.py`'s own precedent, and
+    `tests/test_migrate_original_content.py`/
+    `tests/test_thought_leadership_homepage_teaser.py`'s imports were updated
+    to the new path. `_TL_FEATURED_CARDS` and `webapp/thought_leadership_data.py`
+    are still live dependencies of the now-archived script and its tests, so
+    neither is dead code yet — the "actually become dead code" condition above
+    is still unmet, just one script closer.
   - **Investigated, not deleted — the 3 Writing-column `thought_leadership`
     rows duplicating the flagship pieces.** This session has no access to
     the live `library.db` (same Railway-volume-only limitation as above),
@@ -5276,7 +5288,10 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   directly — flagged to Brian to run and confirm once this deploys, rather
   than silently skipped or claimed done without evidence. Full trace in
   ARCHITECTURE.md's "MCP server, production 421 fix" section and
-  `webapp/mcp_server.py`'s `build_mcp` docstring.
+  `webapp/mcp_server.py`'s `build_mcp` docstring. **2026-09 update: confirmed
+  working in production** — three subsequent MCP phases (3, 4, 5) built and
+  shipped successfully on top of a live `/mcp`, which wouldn't have been
+  possible if this fix hadn't held.
 - **MCP server, connector-vs-curl 401 mismatch (2026-09, resolved) — a
   report, past the 421 fix above: Claude's own connector got 401 from
   `_mcp_auth_gate` on the SAME token a `curl` call got 200 with** (Railway
