@@ -5246,7 +5246,8 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   single-article view (a separate, older template, `_READER_CSS`/
   `.reader-body`, untouched by any of this), which is genuinely a narrower
   scope than "the reader" as BRAND.md used to describe it — **BRAND.md §3 was
-  updated in the same PR** to match this final state. The now-unused `<link>`
+  updated in the same PR** to match this final state. (This holdout didn't
+  last — see the very next bullet, a same-day follow-up that retired it too.) The now-unused `<link>`
   that loaded Source Serif 4 specifically for the merged reader page was also
   removed (nothing on that page references the font any more; both Outfit and
   DM Sans are already loaded sitewide via `_page()`'s own font link). If a
@@ -5256,6 +5257,29 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   into a brand-standards change — BRAND.md was stale at round 1 of this fix,
   and an unverified precedent claim was wrong at round 2, so neither "the doc
   says so" nor "our other content proves it" was reliable on its own here.
+- **Source Serif 4 retired sitewide (2026-09 follow-up) — a real, explicit
+  standing rule from Brian, stated directly rather than derived from BRAND.md
+  or precedent: only Outfit or DM Sans, ever, for content/reading typography.
+  No third font, no exceptions.** Prompted by the reader-typography saga
+  immediately above, which left one holdout — the standalone `/read/{id}`
+  single-article view (`_READER_CSS`/`.reader-body`) — still on Source Serif
+  4 after the merged reader settled on DM Sans. Explicitly scoped before
+  building: this rule covers content/reading fonts only, NOT the decorative
+  Caveat (sticker badges)/Permanent Marker (nav+footer wordmark) layer, which
+  Brian confirmed stays untouched — a separate design language, not a content
+  font. Fixed: `_READER_CSS`'s `body{}` rule and its Google Fonts `@import`
+  both moved from Source Serif 4 to DM Sans (`.reader-meta h1` was already
+  Outfit, unchanged); the admin brand-showcase page's third type specimen
+  (which existed solely to show off the serif) removed outright, since no
+  font on the site renders in it any more; and — the part that makes this a
+  real, mechanically-enforced retirement rather than just an unused
+  declaration — `linklib/brand_check.py`'s `ALLOWED_FONTS` allowlist dropped
+  "Source Serif 4" entirely, so `test_brand_standards.py` now fails a future
+  reintroduction the same way it already fails Inter/Lora/Arial/etc., rather
+  than silently permitting it back in. BRAND.md §3 rewritten to describe
+  "two content families" as the standing rule, not three, with the full
+  three-pass history (serif → Outfit → DM Sans, twice, once per reader
+  template) kept as prose for context. No schema/route change.
 - **MCP server, Phase 1 (2026-09) — a read-only remote MCP server at `/mcp`,
   mounted in-process (same app, same deploy, no second service), with its
   own user-bound token auth and three admin-gated schema-introspection
