@@ -7371,7 +7371,8 @@ def tools_software_find(request: Request):
 <p style="margin:0 0 12px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
 <h1 style="margin-bottom:6px;">Software matchmaker</h1>
-<p style="color:var(--muted);margin:0 0 24px;">Tell us what you're trying to solve and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+<p style="color:var(--muted);margin:0 0 8px;">Tell us what you're trying to solve and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+<p style="color:var(--muted);font-size:12.5px;margin:0 0 24px;">Conversations here don&rsquo;t carry over to Claude or MCP (and vice versa); each one starts fresh.</p>
 
 <div id="mm-thread"></div>
 
@@ -9464,7 +9465,8 @@ def tools_communities_find(request: Request):
 <p style="margin:0 0 12px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
 <h1 style="margin-bottom:6px;">Community matchmaker</h1>
-<p style="color:var(--muted);margin:0 0 24px;">Tell us what you're looking for and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+<p style="color:var(--muted);margin:0 0 8px;">Tell us what you're looking for and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+<p style="color:var(--muted);font-size:12.5px;margin:0 0 24px;">Conversations here don&rsquo;t carry over to Claude or MCP (and vice versa); each one starts fresh.</p>
 
 <div id="mm-thread"></div>
 
@@ -11451,8 +11453,8 @@ def admin_software(request: Request, filter: str = ""):
         # .admin-table-responsive breakpoint (see its CSS)—unused above that
         # breakpoint, where the table renders normally.
         return f"""<tr class="admin-table-row" {row_attrs}>
-          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
-          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;max-width:200px;">
+          <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
+          <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:220px;">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
               <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}
             </div>
@@ -11461,10 +11463,10 @@ def admin_software(request: Request, filter: str = ""):
           <td data-col="software:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td data-col="software:intros" data-label="Intros" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
           <td data-col="software:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div class="admin-review-status-group" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
+            <div class="admin-review-status-group" style="display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px;">{review_pill}{mark_reviewed}</div>
           </td>
           <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
+            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:6px;">
               <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">View profile</a>
               <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">Edit</a>
               <form method="post" action="/admin/tools/software/{t['id']}/delete" style="margin:0;"
@@ -11554,12 +11556,12 @@ def admin_software(request: Request, filter: str = ""):
 {_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
-<div style="overflow-x:auto;">
+<div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
 <form id="software-approved-form">
-<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
+  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:220px;">Name</th>
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
@@ -11640,19 +11642,20 @@ applySortFilter('software');
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
-  /* Inverted from desktop on purpose (2026-08 follow-up, Brian's explicit
-     ask): desktop deliberately breaks Delete onto its own row below View/
-     Edit (a 2-column grid, matching the Review status pill/Mark reviewed
-     button's own always-stacked "break"); mobile does the opposite — all
-     three actions fit comfortably in one row at full card width, and
-     Review status's pill+button go row instead of column, since a mobile
-     card's own full width has plenty of room neither narrow desktop table
-     cell has. */
-  /* Row/column COUNT still flips (2 cols desktop, 3 cols mobile) — only
-     the WIDTH-stretching part is gone now, replaced by the unconditional
-     fixed-width rule above that already applies at every breakpoint. */
-  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
-  .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
+  /* View profile / Edit / Delete now stay on one row at every breakpoint
+     (2026-09 polish-bundle follow-up, reversing the 2026-08 "Delete breaks
+     onto its own row on desktop" decision above — Brian's explicit ask:
+     the earlier 2-column desktop grid was intentional at the time, but
+     reads as a wrapping bug now that three fixed-100px-wide buttons
+     comfortably fit one row at normal admin-table widths). The base
+     .admin-table-actions-grid rule (inline style on the div itself) is
+     already repeat(3,auto) with the same fixed-width buttons, so mobile
+     needs no override at all any more — one grid shape at every viewport.
+     The Review status pill/"Mark reviewed" button pair got the identical
+     treatment in the same follow-up — row+wrap is now the base style
+     (inline, on .admin-review-status-group itself), not just a
+     mobile-only override, so this media query has nothing left to add
+     for it either. */
 }}
 /* "+ Add software"/"+ Add community" (2026-08 follow-up, Brian's explicit
    ask — two rounds). First round put the button beside the h1 and
@@ -11672,6 +11675,26 @@ applySortFilter('software');
    real font just leaves a little extra padding inside the same
    200px floor; a wider one simply grows past it instead of wrapping. */
 .admin-header-add-btn{{min-width:200px;text-align:center;white-space:nowrap;}}
+/* Sticky first two columns + horizontal scroll (2026-09 polish-bundle,
+   item 1 follow-up — Brian's explicit ask, same day: the Software table
+   doesn't currently overflow at ordinary widths the way Communities' did
+   (fewer optional columns), but it should have the identical scroll
+   affordance available so a future column, a long category list, or a
+   narrower viewport doesn't silently clip Edit/Delete the same way.
+   Copy of the exact mechanism built for /admin/tools/communities (see
+   that page's own comment for the full write-up, including the real
+   `overflow:hidden`-on-<table> sticky-positioning gotcha this already
+   works around, and why neither table carries a swipe-hint affordance)
+   — same class names, same #cmp-scroll-wrap id, so both admin tables
+   behave identically rather than drifting into two near-duplicate
+   implementations. */
+.admin-sticky-col{{position:sticky;background:#fff;z-index:2;}}
+thead .admin-sticky-col{{background:var(--accent-light);z-index:3;}}
+.admin-sticky-col-1{{left:0;width:40px;}}
+.admin-sticky-col-2{{left:40px;box-shadow:2px 0 4px -2px rgba(0,0,0,.15);}}
+@media(max-width:700px){{
+  .admin-sticky-col{{position:static;box-shadow:none;width:auto;}}
+}}
 </style>
 </div>"""
     return HTMLResponse(_page("Software vendors—CFO Toolbox Admin", "", body, authed=True))
@@ -15052,13 +15075,13 @@ def admin_communities(request: Request, filter: str = ""):
             "search": f"{c['name']} {c['url']}",
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
-  <td class="admin-table-cell" style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
-  <td class="admin-table-cell" style="padding:10px 12px;font-weight:600;min-width:250px;">
+  <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
+  <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;font-weight:600;min-width:280px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
       <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{low_conf_badge}
     </div>
   </td>
-  <td data-col="communities:notes" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
+  <td data-col="communities:notes" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:320px;">{_esc(c['notes'] or '—')}</td>
   <td data-col="communities:cost_band" data-label="Cost band" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td data-col="communities:access" data-label="Access" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
   <td data-col="communities:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
@@ -15066,10 +15089,10 @@ def admin_communities(request: Request, filter: str = ""):
   <td data-col="communities:format" data-label="Format" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
   <td data-col="communities:reach" data-label="Reach" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
   <td data-col="communities:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;">
-    <div class="admin-review-status-group" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
+    <div class="admin-review-status-group" style="display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px;">{review_pill}{mark_reviewed}</div>
   </td>
   <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;min-width:210px;">
-    <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
+    <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:6px;">
       <a href="/tools/communities/{c['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">View profile</a>
       <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">Edit</a>
       <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
@@ -15175,13 +15198,13 @@ def admin_communities(request: Request, filter: str = ""):
 {_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
-<div style="overflow-x:auto;">
+<div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
 <form id="communities-approved-form">
-<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:250px;">Name</th>
-  <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;min-width:150px;">Short description</th>
+  <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
+  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:280px;">Name</th>
+  <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;min-width:320px;">Short description</th>
   <th data-col="communities:cost_band" style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th data-col="communities:access" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th data-col="communities:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
@@ -15261,19 +15284,20 @@ applySortFilter('communities');
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
-  /* Inverted from desktop on purpose (2026-08 follow-up, Brian's explicit
-     ask): desktop deliberately breaks Delete onto its own row below View/
-     Edit (a 2-column grid, matching the Review status pill/Mark reviewed
-     button's own always-stacked "break"); mobile does the opposite — all
-     three actions fit comfortably in one row at full card width, and
-     Review status's pill+button go row instead of column, since a mobile
-     card's own full width has plenty of room neither narrow desktop table
-     cell has. */
-  /* Row/column COUNT still flips (2 cols desktop, 3 cols mobile) — only
-     the WIDTH-stretching part is gone now, replaced by the unconditional
-     fixed-width rule above that already applies at every breakpoint. */
-  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
-  .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
+  /* View profile / Edit / Delete now stay on one row at every breakpoint
+     (2026-09 polish-bundle follow-up, reversing the 2026-08 "Delete breaks
+     onto its own row on desktop" decision above — Brian's explicit ask:
+     the earlier 2-column desktop grid was intentional at the time, but
+     reads as a wrapping bug now that three fixed-100px-wide buttons
+     comfortably fit one row at normal admin-table widths). The base
+     .admin-table-actions-grid rule (inline style on the div itself) is
+     already repeat(3,auto) with the same fixed-width buttons, so mobile
+     needs no override at all any more — one grid shape at every viewport.
+     The Review status pill/"Mark reviewed" button pair got the identical
+     treatment in the same follow-up — row+wrap is now the base style
+     (inline, on .admin-review-status-group itself), not just a
+     mobile-only override, so this media query has nothing left to add
+     for it either. */
 }}
 /* "+ Add software"/"+ Add community" (2026-08 follow-up, Brian's explicit
    ask — two rounds). First round put the button beside the h1 and
@@ -15293,6 +15317,54 @@ applySortFilter('communities');
    real font just leaves a little extra padding inside the same
    200px floor; a wider one simply grows past it instead of wrapping. */
 .admin-header-add-btn{{min-width:200px;text-align:center;white-space:nowrap;}}
+/* Sticky first two columns + horizontal scroll (2026-09 polish-bundle,
+   item 2, later extended to the Software table too on Brian's follow-up
+   ask — see admin_software's own copy of this comment) — the Approved
+   communities table has too many optional columns to fit at once
+   (Categories/Sponsorship type/Format/Reach in particular run wide), and
+   the table was already wrapped in overflow-x:auto with no visible cue
+   that Edit/Delete were being clipped off the right edge. Brian's own
+   preference: keep every column, widen Name/Short description now that
+   side-scrolling is available, and reuse the Compare page's
+   sticky-first-column + horizontal-scroll pattern rather than trimming
+   the default column set. This table's shape differs from Compare's own
+   (a conventional header row + per-column cells, not Compare's full-width
+   .cc-section band rows), so the sticky target here is the first two
+   actual columns — the row checkbox and Name — not a per-row label span;
+   .cmp-sticky-label doesn't apply. The checkbox column gets an explicit
+   40px width (global box-sizing:border-box makes that deterministic
+   given its own 10px/12px padding) so the Name column's left offset is
+   fixed and predictable rather than depending on the checkbox's natural
+   width. id="cmp-scroll-wrap" is reused verbatim from the Compare page's
+   own scroll-container id, but NOT its swipe-hint affordance — Compare's
+   table stays a real table and scrolls at every width, so "Swipe to
+   compare" is always accurate there; this table instead falls back to
+   admin-table-responsive's stacked-card layout below 700px (no
+   horizontal scroll at all once that happens), so a swipe hint tied to
+   the same breakpoint would show the wrong affordance for the exact
+   width range it targets — dropped rather than shown incorrectly, after
+   catching this live in a real mobile-viewport screenshot.
+   Real gotcha found live, not assumed: the table itself used to carry
+   its own background/border/border-radius/overflow:hidden (for the
+   rounded-card look) — but `overflow:hidden` on the <table> registers
+   IT as a scroll container too, so a sticky <td> inside it sticks
+   relative to the (non-scrolling) table box instead of #cmp-scroll-wrap,
+   and silently stops tracking the wrap's real horizontal scroll —
+   confirmed with a live scrollLeft test (position:sticky computed
+   correctly, but the element's bounding rect still moved off-screen).
+   Fixed by moving background/border/border-radius onto #cmp-scroll-wrap
+   itself (overflow-x:auto;overflow-y:hidden — y stays hidden rather
+   than auto since the table's never taller than its wrap) so the actual
+   scroll container is also the only overflow-clipping ancestor in the
+   sticky element's path; the plain <table> underneath now carries no
+   background/border/overflow of its own. */
+.admin-sticky-col{{position:sticky;background:#fff;z-index:2;}}
+thead .admin-sticky-col{{background:var(--accent-light);z-index:3;}}
+.admin-sticky-col-1{{left:0;width:40px;}}
+.admin-sticky-col-2{{left:40px;box-shadow:2px 0 4px -2px rgba(0,0,0,.15);}}
+@media(max-width:700px){{
+  .admin-sticky-col{{position:static;box-shadow:none;width:auto;}}
+}}
 </style>
 </div>"""
     return HTMLResponse(_page("Communities—CFO Toolbox Admin", "", body, authed=True))
@@ -20160,6 +20232,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
 <p style="color:var(--muted);margin:0 0 12px;">A digital library of finance content I curate by hand, kept structured and current by a content pipeline built on Claude, Exa, and the Internet Archive. Skip the digging, get your answer.</p>
 <p class="ask-teaser">Curious how this works? <a href="#fpa-features">Scroll down</a> or <a href="/tools/fpa-buddy/how-it-works">read the full breakdown &rarr;</a></p>
+<p style="color:var(--muted);font-size:12.5px;margin:-4px 0 12px;">Conversations continue seamlessly whether you ask here on the site or via Claude/MCP.</p>
 
 <div class="ask-example">
   <div class="ask-example-label">Illustrative example&mdash;not a captured real answer</div>
@@ -27906,9 +27979,22 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     job_total = job.get("total", 0)
     job_ok = job.get("ok", 0)
     job_failed = job.get("failed", 0)
-    job_error = job.get("error", "")
-    job_stopped = job.get("stopped", False)
 
+    # status_html only ever renders the LIVE in-progress view now (2026-09
+    # polish-bundle, item 3). It used to also render terminal "Error"/
+    # "Stopped"/"Done—X succeeded, Y failed out of Z processed" banners once
+    # the job finished — but _job_run_banner("content_backfill") below,
+    # reading the durable job_run_log row, already renders an equivalent
+    # (and durable-across-redeploys) message for every one of those same
+    # three outcomes: "Last run: succeeded/stopped/failed, N ago—<summary>",
+    # where <summary> is the identical "X succeeded, Y failed" text
+    # finish_job_run() was given (see backfill_content_job's own
+    # lib.finish_job_run(...) calls). The two banners stacked, saying the
+    # same thing twice, every time this page was viewed right after a run.
+    # The live poller (see the <script> below) already reloads the page on
+    # completion rather than rendering its own "Done" text client-side, so
+    # dropping the terminal branches here doesn't leave the polling JS out
+    # of sync — the reload picks up _job_run_banner's version.
     status_html = ""
     if running:
         prog_pct = round(job_done / job_total * 100) if job_total else 0
@@ -27923,12 +28009,6 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button>
   </form>
 </div>"""
-    elif job_error:
-        status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: {_esc(job_error)}</div>'
-    elif job_stopped:
-        status_html = f'<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#92400e;">Stopped after {job_done} / {job_total} &mdash; {job_ok} succeeded, {job_failed} failed. Already-succeeded articles are skipped on the next run, so it&rsquo;s safe to press Start again.</div>'
-    elif job_done and not running:
-        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done&mdash;{job_ok} succeeded, {job_failed} failed out of {job_done} processed.</div>'
 
     def _failure_pill(reason, count):
         labels = {"paywall": "Paywall", "bot-challenge": "Bot challenge",
@@ -28043,9 +28123,14 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     wb429_total = wb429_job.get("total", 0)
     wb429_ok = wb429_job.get("ok", 0)
     wb429_failed = wb429_job.get("failed", 0)
-    wb429_error = wb429_job.get("error", "")
-    wb429_stopped = wb429_job.get("stopped", False)
 
+    # Same consolidation as content_backfill's own status_html above
+    # (2026-09 polish-bundle, item 3) — only the LIVE in-progress view
+    # renders here; _job_run_banner("wayback_429_retry") below already
+    # covers the terminal Error/Stopped/Done outcomes durably, with the
+    # identical "X succeeded, Y failed" summary text finish_job_run() was
+    # given, so a second near-identical banner right above it was pure
+    # duplication.
     wb429_status_html = ""
     if wb429_running:
         wb429_pct = round(wb429_done / wb429_total * 100) if wb429_total else 0
@@ -28060,12 +28145,6 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button>
   </form>
 </div>"""
-    elif wb429_error:
-        wb429_status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#b91c1c;">Error: {_esc(wb429_error)}</div>'
-    elif wb429_stopped:
-        wb429_status_html = f'<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#92400e;">Stopped after {wb429_done} / {wb429_total} &mdash; {wb429_ok} succeeded, {wb429_failed} failed. Safe to press Start again&mdash;an article that already recovered won&rsquo;t be re-attempted.</div>'
-    elif wb429_done and not wb429_running:
-        wb429_status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#065f46;">Done&mdash;{wb429_ok} succeeded, {wb429_failed} failed out of {wb429_done} processed.</div>'
 
     wb429_disable = ('disabled style="opacity:.5;cursor:not-allowed;"'
                       if wb429_running or wayback_429_count == 0 else "")
