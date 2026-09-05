@@ -799,6 +799,51 @@ it applies. Pills and the dropdown both feed the same
 so the OR-within-categories / AND-with-everything-else filtering semantics
 are identical either way — only the affordance differs.
 
+**`/admin/users` joins this convention (2026-09) — a third table on the same
+machinery, with two deliberate divergences from the bulk-delete shape above.**
+`/admin/users` moved off a one-card-per-user layout onto the identical
+`_admin_column_picker_html`/`_admin_sort_filter_toolbar_html`/
+`_admin_row_data_attrs` stack (column picker: Name/Email/Last login/FP&A
+Buddy cap/Matchmaker cap, all optional, Username/Actions always visible;
+sort/filter: Username/Last login/Created plus Role/Status scalar filters and
+a username/name/email search box) — reusing the shared, table-agnostic pieces
+of `_ADMIN_BULK_EDIT_JS` (`updateBulkButton`, `selectAllRows`, the
+column-picker and sort/filter functions) exactly as Software/Communities do.
+Two things are NOT shared with the bulk-delete mechanism documented just
+above, both because they don't fit rather than by oversight: (1) **no
+"Edit selected"** — Software/Communities' bulk-edit assumes one shared
+categorical field to set across every selected row; Users has no such field
+that's safe to bulk-set, since the role/active toggles both carry the
+last-active-admin lockout guard (`_is_last_active_admin`), which is
+inherently a per-row question, not a batch one. (2) **the delete-confirm JS
+is bespoke, not the shared `openDeleteSelectedPanel`/
+`renderDeleteSelectedPanel`/`submitBulkDelete` trio** — those hardcode the
+`/admin/tools/{tableKey}/bulk-delete-*` URL prefix and a
+Software/Communities-specific response shape (a `tools` key, competitor-
+reference warnings), neither of which fits Users, so
+`openUsersDeleteSelectedPanel`/`renderUsersDeleteSelectedPanel`/
+`submitUsersBulkDelete` live inline in the route instead, wired to the same
+`{table}-bulk-delete-btn`/`{table}-delete-panel` id convention so
+`updateBulkButton()` still enables/disables the button unmodified. New
+`POST /admin/users/bulk-delete-check`/`/admin/users/bulk-delete` generalize
+the single-row Delete button's `_is_last_active_admin` guard to a batch:
+rather than the competitor-reference warning's non-blocking "shown but not
+stopped" treatment above, a selection that would zero out active admins is
+reported back as explicitly *blocked* (with the rest of the selection still
+deletable) — never silently dropped, never silently allowed — and the commit
+route re-derives the guard fresh via `Library.list_users()` on every
+iteration rather than trusting the preview's snapshot, since deleting one
+selected admin can change whether the next one is the last one. **Manage
+panels (the per-user profile/cap/password/role/delete forms, unchanged from
+the old card layout) render grouped in one block below the table, not nested
+as a second `<tr>` per row** — `applySortFilter()`'s `tbody.appendChild()`
+re-sort (see "Sort + filter" above) only touches `tr[data-name]` rows, so a
+sibling detail row with no `data-name` of its own would either get left
+behind at its old position on a re-sort or need real changes to that shared
+mechanism to stay paired with its owner row; clicking "Manage" calls
+`scrollIntoView()` on the matching panel so the panel-below-the-table layout
+costs the admin no context.
+
 **Duplicate-URL blocking on save (both tables, create and edit).**
 `linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
 `_find_community_by_normalized_url` lookup on `Library` guard `add_tool`,

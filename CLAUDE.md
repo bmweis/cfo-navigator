@@ -5697,12 +5697,14 @@ never reads as something to tap.
   schema changes, no changes to cap logic or default cap amounts, and token
   minting stays exactly as railway-ssh-only as before — this PR only changes how
   the page is laid out and adds documentation for a flow that already existed.
-  See `tests/test_admin_users_table.py` for the full regression coverage,
-  including the rendered `<script>` block's own `node --check` validation (this
-  page's bulk-delete/manage-toggle script is inline in the route, not a
-  module-level `*_JS` constant, so it isn't covered by
-  `webapp.checks.script_syntax_problems()` — same standing caveat as the
-  Reader's own inline script).
+  See ARCHITECTURE.md's "`/admin/users` joins this convention" bullet (under
+  the Software admin column-picker/bulk-edit/bulk-delete section) for the
+  full technical write-up, and `tests/test_admin_users_table.py` for the
+  regression coverage, including the rendered `<script>` block's own
+  `node --check` validation (this page's bulk-delete/manage-toggle script is
+  inline in the route, not a module-level `*_JS` constant, so it isn't
+  covered by `webapp.checks.script_syntax_problems()` — same standing
+  caveat as the Reader's own inline script).
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
