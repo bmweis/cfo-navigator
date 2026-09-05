@@ -1,4 +1,4 @@
-"""Admin Users page: table redesign + MCP user setup docs.
+"""Admin Users page: table redesign, direct-edit rows, and MCP user setup docs.
 
 /admin/users moves from a one-card-per-user layout to the same standard
 admin-table convention already used by /admin/tools/software and
@@ -7,15 +7,26 @@ sort/filter, a "Delete selected" bulk action) — see CLAUDE.md's admin-table
 note. This is a layout change, not a feature change: every existing
 per-user action (profile edit, Ask/Matchmaker cap override, password reset,
 role toggle, active toggle, single-row delete, the pending-password-reset
-notice) has to keep working identically, reachable now via a per-row
-"Manage" button instead of a card's own header button. The one deliberately
-new mechanism is bulk delete (approved scope: "Delete selected" only, no
-bulk "Edit selected" — role/active toggles carry a last-active-admin guard
-that's inherently per-row, and a bulk version of it risks a silent
-partial-failure mode, per Brian's own call).
+notice) has to keep working identically.
 
-Also new: a collapsible "How to set up a new MCP user" disclosure block
-(reusing the exact <details>/<summary> markup already established on
+Direct-edit follow-up: the separate "Manage {user}" click-through panel is
+retired entirely. Full name/Email are inline fields saved directly in the
+row (one shared form, since posting only one of the two would blank the
+other — admin_users_edit writes whatever it's handed); FP&A Buddy/Matchmaker
+caps get an inline input + Set button in their own cells; password reset is
+an inline field + button in the Actions column; Username stays read-only
+(it's the login identifier); Access level/Status render as their own badge
+columns, with the actual mutating actions (Make admin/member, Disable/Enable,
+password reset, Delete) bundled into the Actions column instead of living
+beside each badge. "Add a member" also moves to the top of the page, beside
+the two dollar-cap default forms (2/3 + 1/3 width). The one deliberately new
+mechanism (unchanged by the direct-edit follow-up) is bulk delete (approved
+scope: "Delete selected" only, no bulk "Edit selected" — role/active toggles
+carry a last-active-admin guard that's inherently per-row, and a bulk version
+of it risks a silent partial-failure mode, per Brian's own call).
+
+Also: a collapsible "How to set up a new MCP user" disclosure block (reusing
+the exact <details>/<summary> markup already established on
 /admin/tools/communities), documenting the full account-creation ->
 cap-raise -> `scripts/mint_api_token.py` -> connector-setup flow.
 """
@@ -108,8 +119,19 @@ def test_column_picker_lists_optional_columns(env):
     _seed_users(env)
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
-    for col in ("users:realname", "users:email", "users:last_login", "users:ask", "users:matchmaker"):
+    for col in ("users:realname", "users:email", "users:last_login", "users:access_level",
+                "users:status", "users:ask", "users:matchmaker"):
         assert f'data-col="{col}"' in body
+
+
+def test_optional_columns_default_visible(env):
+    """The 'expand the table' ask reads as show-by-default, not hidden
+    behind the picker — every optional column starts checked."""
+    _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    for col in ("realname", "email", "last_login", "access_level", "status", "ask", "matchmaker"):
+        assert f'id="colpick-users-{col}" checked' in body
 
 
 def test_rows_carry_username_role_and_status(env):
@@ -132,14 +154,24 @@ def test_empty_state_when_no_users(env):
 # 2. Per-user actions still work identically post-redesign.
 # ---------------------------------------------------------------------------
 
-def test_manage_button_and_panel_present_per_row(env):
+def test_manage_panel_is_retired(env):
+    """The separate "Manage {user}" click-through panel is gone — every
+    field it used to hold is edited directly in the row now."""
+    _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert "toggleManage(" not in body
+    assert 'id="manage-' not in body
+    assert "Manage jane" not in body
+    assert 'class="user-manage-panel"' not in body
+
+
+def test_row_posts_to_all_the_same_action_routes_inline(env):
     jane_id, bob_id = _seed_users(env)
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
-    assert f"toggleManage({jane_id})" in body
-    assert f'id="manage-{jane_id}"' in body
-    assert "Manage jane" in body
-    # The panel still posts to the same routes as before the redesign.
+    # Every action still posts to the same unchanged routes, now rendered
+    # directly in the row rather than behind a "Manage" click-through.
     assert f'action="/admin/users/{jane_id}/edit"' in body
     assert f'action="/admin/users/{jane_id}/ask-cap"' in body
     assert f'action="/admin/users/{jane_id}/matchmaker-cap"' in body
@@ -147,6 +179,53 @@ def test_manage_button_and_panel_present_per_row(env):
     assert f'action="/admin/users/{jane_id}/role"' in body
     assert f'action="/admin/users/{jane_id}/toggle"' in body
     assert f'action="/admin/users/{jane_id}/delete"' in body
+
+
+def test_username_is_read_only_no_input(env):
+    """Decision: username stays display-only — an accidental inline edit
+    of the login identifier is a bigger footgun than the convenience is
+    worth. Full name/Email get real <input>s; username does not."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    # A hidden username field still rides along with the Full name/Email
+    # save (the edit route requires it) — but no *editable* username input.
+    assert 'type="text" name="username"' not in body
+    assert 'type="hidden" name="username" value="jane">' in body
+    assert '<span class="user-name">jane</span>' in body
+
+
+def test_full_name_and_email_share_one_form_via_form_attribute(env):
+    """Full name and Email post together in one request (a shared <form>,
+    referenced from the Full name cell's <input> via the HTML `form=`
+    attribute) — admin_users_edit writes whatever name/email it's given, so
+    two independent per-field forms would silently blank whichever field
+    wasn't included in a given save."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    form_id = f"profile-form-{jane_id}"
+    assert f'<form id="{form_id}"' in body
+    assert f'form="{form_id}" name="name"' in body
+    assert f'<input type="hidden" name="username" value="jane">' in body
+
+
+def test_access_level_and_status_are_badge_only_columns(env):
+    """Judgment call, flagged in the PR: Access level/Status render as pure
+    badges (no action button beside them) — every mutating action (Make
+    admin/member, Disable/Enable) lives in the Actions column instead."""
+    jane_id, bob_id = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    # Badge columns render, but Make admin/Disable aren't wrapped inside
+    # them — they show up once, in the Actions cell's own action buttons
+    # (covered by test_row_posts_to_all_the_same_action_routes_inline).
+    assert 'data-col="users:access_level"' in body
+    assert 'data-col="users:status"' in body
+    # jane (role=user) gets a "Make admin" action; bob (role=admin) doesn't.
+    assert body.count(">Make admin<") == 1
+    # Both seeded accounts start active, so both rows offer "Disable".
+    assert body.count(">Disable<") == 2
 
 
 def test_ask_cap_override_still_works(env):

@@ -27022,8 +27022,19 @@ def admin_users(request: Request, msg: str = ""):
     # admin-table-convention note. Username/Actions have no data-col, so
     # they're always visible; everything else is picker-gated, same as the
     # other two tables.
+    # 2026-09 table-redesign follow-up: Access level/Status join the optional
+    # columns (their own badge columns, per Brian's decision — display only,
+    # scannable at a glance; the actual change still goes through an
+    # explicit action button, bundled into the Actions column below rather
+    # than living beside the badge — see the PR description for why).
+    # default_visible now covers every optional column (the "expand the
+    # table" ask reads as show-by-default, not hidden-behind-a-picker), but
+    # the picker/toggle mechanism itself is unchanged from the other two
+    # admin tables.
     users_cols = [("realname", "Name"), ("email", "Email"), ("last_login", "Last login"),
+                  ("access_level", "Access level"), ("status", "Status"),
                   ("ask", "FP&A Buddy cap"), ("matchmaker", "Matchmaker cap")]
+    users_default_visible = tuple(k for k, _ in users_cols)
     users_sort_fields = [("name", "Username"), ("last_login", "Last login"), ("created", "Created")]
     users_scalar_filters = [
         {"key": "role", "label": "Role", "options": ["Admin", "Member"]},
@@ -27071,91 +27082,76 @@ def admin_users(request: Request, msg: str = ""):
             "created": created_raw,
             "search": f"{u['username']} {u.get('name') or ''} {u.get('email') or ''}",
         })
+        # 2026-09 direct-edit redesign: the separate "Manage" click-through
+        # panel is retired — Full name/Email are inline fields, saved via
+        # one shared <form> (id below) that both cells' inputs reference by
+        # the HTML `form=` attribute, so a Save posts both fields together
+        # in one request. That matters here specifically: admin_users_edit
+        # writes whatever `name`/`email` it's given, so posting only one of
+        # the two would blank the other — two independent per-field forms
+        # would silently clobber whichever field wasn't included.
+        profile_form_id = f"profile-form-{uid}"
+        name_val = _esc(u.get("name") or "")
+        email_val = _esc(u.get("email") or "")
+        field_style = ("padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;"
+                       "font-size:12.5px;background:var(--bg);width:100%;")
+        cap_input_style = ("padding:5px 7px;border:1px solid var(--line);border-radius:6px;font:inherit;"
+                            "font-size:12.5px;background:var(--bg);width:64px;")
+        action_btn_style = "font-size:12px;padding:5px 10px;white-space:nowrap;"
         return f"""<tr class="admin-table-row" {row_attrs}>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{uid}" class="users-row-cb" onchange="updateBulkButton('users')"></td>
-          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">
-            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-              <span class="user-name">{_esc(u["username"])}</span>{role_badge}{status_badge}
-            </div>
+          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:130px;">
+            <span class="user-name">{_esc(u["username"])}</span>
             {reset_notice}
           </td>
-          <td data-col="users:realname" data-label="Name" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(u.get('name') or '—')}</td>
-          <td data-col="users:email" data-label="Email" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(u.get('email') or '—')}</td>
+          <td data-col="users:realname" data-label="Name" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:130px;">
+            <input type="text" form="{profile_form_id}" name="name" value="{name_val}" maxlength="120" placeholder="name" title="display name" style="{field_style}">
+          </td>
+          <td data-col="users:email" data-label="Email" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:210px;">
+            <form id="{profile_form_id}" method="post" action="/admin/users/{uid}/edit" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="hidden" name="username" value="{_esc(u['username'])}">
+              <input type="email" name="email" value="{email_val}" maxlength="200" placeholder="email" title="email" style="{field_style}flex:1 1 130px;">
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Save</button>
+            </form>
+          </td>
           <td data-col="users:last_login" data-label="Last login" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);white-space:nowrap;">{last_display}</td>
-          <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
+          <td data-col="users:access_level" data-label="Access level" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{role_badge}</td>
+          <td data-col="users:status" data-label="Status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{status_badge}</td>
+          <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;min-width:150px;">
             <div style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</div>
-            <div style="color:var(--muted);">{cap_note}</div>
+            <div style="color:var(--muted);margin-bottom:4px;">{cap_note}</div>
+            <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:5px;align-items:center;">
+              <span style="font-size:12px;color:var(--muted);">$</span>
+              <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
+                placeholder="{default_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
+            </form>
           </td>
-          <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
+          <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;min-width:150px;">
             <div style="font-weight:600;color:var(--ink);">${mm_spent:.2f} / ${mm_effective_cap:.2f}</div>
-            <div style="color:var(--muted);">{mm_cap_note}</div>
+            <div style="color:var(--muted);margin-bottom:4px;">{mm_cap_note}</div>
+            <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:5px;align-items:center;">
+              <span style="font-size:12px;color:var(--muted);">$</span>
+              <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
+                placeholder="{default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
+            </form>
           </td>
-          <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <button type="button" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="toggleManage({uid})">Manage</button>
+          <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
+            <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
+              <form method="post" action="/admin/users/{uid}/password" style="display:flex;gap:5px;align-items:center;">
+                <input type="password" name="password" placeholder="new password" minlength="8" title="Reset this account's password—8+ characters" style="{field_style}width:120px;">
+                <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Reset</button>
+              </form>
+              <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
+              <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Disable" if active else "Enable"}</button></form>
+              <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="{action_btn_style}color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
+            </div>
           </td>
         </tr>"""
 
-    def _manage_panel(u: dict) -> str:
-        uid = u["id"]
-        active = u["active"]
-        cap_override = u.get("ask_cap_usd")
-        mm_cap_override = u.get("matchmaker_cap_usd")
-        return f"""<div class="user-manage-panel" id="manage-{uid}" style="display:none;">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
-    <h3 style="margin:0;font-size:14px;font-family:var(--font-head);color:var(--ink);">Manage {_esc(u['username'])}</h3>
-    <button type="button" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;" onclick="toggleManage({uid})">Close</button>
-  </div>
-  <div class="user-manage-row">
-    <label>Profile</label>
-    <form method="post" action="/admin/users/{uid}/edit" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-      <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" placeholder="username" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:120px;">
-      <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:130px;">
-      <input name="email" type="email" value="{_esc(u["email"] or "")}" maxlength="200" placeholder="email" title="email" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:170px;">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Save</button>
-    </form>
-  </div>
-  <div class="user-manage-row">
-    <label>FP&amp;A Buddy cap</label>
-    <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:6px;align-items:center;">
-      <span style="font-size:13px;color:var(--muted);">$</span>
-      <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
-        placeholder="${default_cap:.2f}" title="Monthly cap override—blank inherits the site default"
-        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-      <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
-    </form>
-  </div>
-  <div class="user-manage-row">
-    <label>Matchmaker cap</label>
-    <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:6px;align-items:center;">
-      <span style="font-size:13px;color:var(--muted);">$</span>
-      <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
-        placeholder="${default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default"
-        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-      <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
-    </form>
-  </div>
-  <div class="user-manage-row">
-    <label>Reset password</label>
-    <form method="post" action="/admin/users/{uid}/password" style="display:flex;gap:6px;align-items:center;">
-      <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:150px;">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Reset</button>
-    </form>
-  </div>
-  <div class="user-manage-row">
-    <label>Account</label>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
-      <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Disable" if active else "Enable"}</button></form>
-      <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
-    </div>
-  </div>
-</div>"""
-
     rows_html = "".join(_user_row(u) for u in users) or (
         f'<tr><td colspan="{total_cols}" style="padding:20px;color:var(--muted);">No accounts yet. Create one below.</td></tr>')
-    manage_panels_html = "".join(_manage_panel(u) for u in users)
 
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
@@ -27171,22 +27167,50 @@ def admin_users(request: Request, msg: str = ""):
   </div>
 </details>
 
-<form method="post" action="/admin/users/ask-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-  <span style="font-size:13px;color:var(--muted);">FP&amp;A Buddy default monthly cap, per user:</span>
-  <span style="font-size:13px;">$</span>
-  <input type="number" name="cap" step="0.01" min="0" value="{default_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
-  <span style="font-size:12px;color:var(--muted);">Per-user overrides below take priority over this.</span>
-</form>
-<form method="post" action="/admin/users/matchmaker-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-  <span style="font-size:13px;color:var(--muted);">Matchmaker default monthly cap, per user (tracks separately from FP&amp;A Buddy&mdash;see CLAUDE.md):</span>
-  <span style="font-size:13px;">$</span>
-  <input type="number" name="cap" step="0.01" min="0" value="{default_mm_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
-  <span style="font-size:12px;color:var(--muted);">Anonymous visitors (no login) are capped the same way, keyed by session cookie instead of a user row.</span>
-</form>
+<div class="users-top-grid" style="display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:start;margin-bottom:24px;">
+  <div>
+    <h2 style="font-size:16px;margin:0 0 12px;">Add a member</h2>
+    <form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
+        <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Temporary password *</label>
+        <input name="password" type="text" required minlength="8" placeholder="at least 8 characters" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Name</label>
+        <input name="name" maxlength="120" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Email</label>
+        <input name="email" type="email" maxlength="200" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Role</label>
+        <select name="role" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+          <option value="user">Member (user)</option>
+          <option value="admin">Admin</option>
+        </select></div>
+      <div style="display:flex;align-items:flex-end;"><button type="submit" class="btn" style="font-size:14px;padding:9px 22px;">Create account</button></div>
+    </form>
+  </div>
+  <div style="display:grid;gap:14px;">
+    <form method="post" action="/admin/users/ask-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:8px;">
+      <span style="font-size:13px;color:var(--muted);">FP&amp;A Buddy default monthly cap, per user</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:13px;">$</span>
+        <input type="number" name="cap" step="0.01" min="0" value="{default_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
+      </div>
+      <span style="font-size:12px;color:var(--muted);">Per-user overrides below take priority over this.</span>
+    </form>
+    <form method="post" action="/admin/users/matchmaker-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:8px;">
+      <span style="font-size:13px;color:var(--muted);">Matchmaker default monthly cap, per user (tracks separately from FP&amp;A Buddy&mdash;see CLAUDE.md)</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:13px;">$</span>
+        <input type="number" name="cap" step="0.01" min="0" value="{default_mm_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
+      </div>
+      <span style="font-size:12px;color:var(--muted);">Anonymous visitors (no login) are capped the same way, keyed by session cookie instead of a user row.</span>
+    </form>
+  </div>
+</div>
 
-{_admin_column_picker_html("users", users_cols, default_visible=("last_login",))}
+<h2 style="font-size:18px;margin:0 0 12px;">Members</h2>
+{_admin_column_picker_html("users", users_cols, default_visible=users_default_visible)}
 {_admin_sort_filter_toolbar_html("users", users_sort_fields, users_scalar_filters, search_placeholder="Search by username, name, or email…")}
 <div style="margin:0 0 16px;display:flex;gap:10px;flex-wrap:wrap;">
   <button type="button" id="users-bulk-delete-btn" class="btn btn-ghost" disabled
@@ -27210,6 +27234,8 @@ def admin_users(request: Request, msg: str = ""):
   <th data-col="users:realname" style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
   <th data-col="users:email" style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
   <th data-col="users:last_login" style="padding:10px 12px;text-align:left;font-size:13px;">Last login</th>
+  <th data-col="users:access_level" style="padding:10px 12px;text-align:left;font-size:13px;">Access level</th>
+  <th data-col="users:status" style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
   <th data-col="users:ask" style="padding:10px 12px;text-align:left;font-size:13px;">FP&amp;A Buddy cap</th>
   <th data-col="users:matchmaker" style="padding:10px 12px;text-align:left;font-size:13px;">Matchmaker cap</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
@@ -27217,35 +27243,12 @@ def admin_users(request: Request, msg: str = ""):
 <tbody id="users-approved-tbody">{rows_html}</tbody>
 </table>
 </div>
-
-<div id="users-manage-panels" style="margin-top:16px;display:grid;gap:10px;">{manage_panels_html}</div>
-
-<h2 style="font-size:18px;margin-top:32px;">Add a member</h2>
-<form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
-    <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Temporary password *</label>
-    <input name="password" type="text" required minlength="8" placeholder="at least 8 characters" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Name</label>
-    <input name="name" maxlength="120" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Email</label>
-    <input name="email" type="email" maxlength="200" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Role</label>
-    <select name="role" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-      <option value="user">Member (user)</option>
-      <option value="admin">Admin</option>
-    </select></div>
-  <div style="display:flex;align-items:flex-end;"><button type="submit" class="btn" style="font-size:14px;padding:9px 22px;">Create account</button></div>
-</form>
 </div>
 
 <style>
 .user-name{{font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);}}
 .user-badge{{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;}}
-.user-manage-panel{{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:10px;}}
-.user-manage-row{{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:center;}}
-.user-manage-row label{{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}}
-@media (max-width:600px){{.user-manage-row{{grid-template-columns:1fr;}}}}
+@media(max-width:900px){{.users-top-grid{{grid-template-columns:1fr!important;}}}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
   .admin-table-responsive, .admin-table-responsive tbody,
@@ -27261,13 +27264,6 @@ def admin_users(request: Request, msg: str = ""):
 <script>
 initColPicker('users', {json.dumps([k for k, _ in users_cols])});
 applySortFilter('users');
-function toggleManage(uid) {{
-  var panel = document.getElementById('manage-' + uid);
-  if (!panel) return;
-  var opening = panel.style.display === 'none';
-  panel.style.display = opening ? 'block' : 'none';
-  if (opening) panel.scrollIntoView({{behavior: 'smooth', block: 'nearest'}});
-}}
 async function openUsersDeleteSelectedPanel() {{
   var ids = Array.prototype.map.call(document.querySelectorAll('.users-row-cb:checked'), function(cb) {{ return parseInt(cb.value, 10); }});
   if (!ids.length) return;

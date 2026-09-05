@@ -803,18 +803,18 @@ are identical either way — only the affordance differs.
 machinery, with two deliberate divergences from the bulk-delete shape above.**
 `/admin/users` moved off a one-card-per-user layout onto the identical
 `_admin_column_picker_html`/`_admin_sort_filter_toolbar_html`/
-`_admin_row_data_attrs` stack (column picker: Name/Email/Last login/FP&A
-Buddy cap/Matchmaker cap, all optional, Username/Actions always visible;
-sort/filter: Username/Last login/Created plus Role/Status scalar filters and
-a username/name/email search box) — reusing the shared, table-agnostic pieces
-of `_ADMIN_BULK_EDIT_JS` (`updateBulkButton`, `selectAllRows`, the
-column-picker and sort/filter functions) exactly as Software/Communities do.
-Two things are NOT shared with the bulk-delete mechanism documented just
-above, both because they don't fit rather than by oversight: (1) **no
-"Edit selected"** — Software/Communities' bulk-edit assumes one shared
-categorical field to set across every selected row; Users has no such field
-that's safe to bulk-set, since the role/active toggles both carry the
-last-active-admin lockout guard (`_is_last_active_admin`), which is
+`_admin_row_data_attrs` stack (column picker: Name/Email/Last login/Access
+level/Status/FP&A Buddy cap/Matchmaker cap, all optional, Username/Actions
+always visible; sort/filter: Username/Last login/Created plus Role/Status
+scalar filters and a username/name/email search box) — reusing the shared,
+table-agnostic pieces of `_ADMIN_BULK_EDIT_JS` (`updateBulkButton`,
+`selectAllRows`, the column-picker and sort/filter functions) exactly as
+Software/Communities do. Two things are NOT shared with the bulk-delete
+mechanism documented just above, both because they don't fit rather than by
+oversight: (1) **no "Edit selected"** — Software/Communities' bulk-edit
+assumes one shared categorical field to set across every selected row; Users
+has no such field that's safe to bulk-set, since the role/active toggles both
+carry the last-active-admin lockout guard (`_is_last_active_admin`), which is
 inherently a per-row question, not a batch one. (2) **the delete-confirm JS
 is bespoke, not the shared `openDeleteSelectedPanel`/
 `renderDeleteSelectedPanel`/`submitBulkDelete` trio** — those hardcode the
@@ -833,16 +833,40 @@ reported back as explicitly *blocked* (with the rest of the selection still
 deletable) — never silently dropped, never silently allowed — and the commit
 route re-derives the guard fresh via `Library.list_users()` on every
 iteration rather than trusting the preview's snapshot, since deleting one
-selected admin can change whether the next one is the last one. **Manage
-panels (the per-user profile/cap/password/role/delete forms, unchanged from
-the old card layout) render grouped in one block below the table, not nested
-as a second `<tr>` per row** — `applySortFilter()`'s `tbody.appendChild()`
-re-sort (see "Sort + filter" above) only touches `tr[data-name]` rows, so a
-sibling detail row with no `data-name` of its own would either get left
-behind at its old position on a re-sort or need real changes to that shared
-mechanism to stay paired with its owner row; clicking "Manage" calls
-`scrollIntoView()` on the matching panel so the panel-below-the-table layout
-costs the admin no context.
+selected admin can change whether the next one is the last one.
+
+**Direct-edit follow-up (2026-09) — the separate "Manage {user}" click-through
+panel is retired; every per-user field the panel used to hold is now edited
+directly in its own row/column, and "Add a member" moves to the top of the
+page beside the two dollar-cap default forms.** Three things worth recording
+about how the row itself is built, since none of them were needed by the old
+card-per-user layout: (1) **Full name and Email share one `<form>`, not two.**
+`admin_users_edit` writes whatever `name`/`email` values it's handed, so a
+per-field form that only posts one of the two would blank the other out on
+save. The `<form id="profile-form-{id}">` lives in the Email `<td>` (with a
+hidden `username` input, since the route still requires it, and the Save
+button); the Full name `<td>`'s `<input>` is outside that `<form>` element in
+the DOM but carries a matching `form="profile-form-{id}"` attribute — a
+standard HTML association, not a DOM-nesting trick — so one Save click submits
+both fields together regardless of which column the button visually sits in.
+(2) **Access level and Status are pure badge columns; every actual change —
+password reset, Make admin/member, Disable/Enable, Delete — lives in the
+Actions column instead**, a deliberate choice (flagged in the PR rather than
+assumed) over pairing each badge with its own action button inline: it keeps
+the two badge columns purely scannable and keeps every mutating control in
+one place, matching the literal column/notes split in the build brief. (3)
+**Username stays read-only** (display only, no input) — it is the login
+identifier, and an accidental inline edit is a bigger footgun than the
+convenience is worth; changing it would require deliberately opting into the
+Full name/Email pattern, which this PR does not do. The FP&A Buddy/Matchmaker
+cap columns keep their existing spend/cap display, now paired with their own
+inline cap-override input + "Set" button directly in the same cell (unchanged
+routes, `POST /admin/users/{id}/ask-cap`/`/matchmaker-cap`) instead of behind
+Manage. **Layout**: "Add a member" (2/3 width) and the two cap-default forms,
+stacked in a 1/3-width column, now render side by side above the table in a
+`grid-template-columns:2fr 1fr` container that collapses to one column under
+900px — replacing the old top-to-bottom order (cap defaults → table →
+Add-a-member at the very bottom).
 
 **Duplicate-URL blocking on save (both tables, create and edit).**
 `linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
