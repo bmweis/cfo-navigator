@@ -27076,8 +27076,16 @@ def admin_users(request: Request, msg: str = ""):
     # "Access level" shortened to "Access" here too (not just the mobile
     # data-label from the earlier round) so the column-picker label and the
     # <th> text both say the same short thing at every width.
-    users_cols = [("realname", "Name"), ("email", "Email"), ("last_login", "Last login"),
-                  ("access_level", "Access"), ("status", "Status"),
+    # 2026-09 view/edit-mode follow-up: the row is read-only by default now
+    # (badges, plain values) — a single per-row "Edit" button (in Actions,
+    # becomes "Save" once clicked) reveals every editable control at once:
+    # Name/Email inputs, Make admin/member (now directly under the Access
+    # badge instead of in Actions), Disable/Enable (directly under Status),
+    # the Password field's input+Reset, and both cap inputs' Save buttons.
+    # Password is a real field/column of its own now (was folded into
+    # Actions before). See _user_row for the actual reveal mechanics.
+    users_cols = [("realname", "Name"), ("email", "Email"), ("password", "Password"),
+                  ("last_login", "Last login"), ("access_level", "Access"), ("status", "Status"),
                   ("ask", "FP&A Buddy cap"), ("matchmaker", "Matchmaker cap")]
     users_default_visible = tuple(k for k, _ in users_cols)
     users_sort_fields = [("name", "Username"), ("last_login", "Last login"), ("created", "Created")]
@@ -27098,14 +27106,16 @@ def admin_users(request: Request, msg: str = ""):
         last_raw = u["last_login_at"] or ""
         last_display = _esc(last_raw[:10]) or "—"
         created_raw = (u["created_at"] or "")[:10]
+        # 2026-09: no more (default)/(override) note — per Brian's ask, the
+        # cap field just shows the current effective value (whichever it
+        # is) and lets you overwrite it directly; cap_override itself is
+        # only needed to compute that effective value now.
         cap_override = u.get("ask_cap_usd")
         effective_cap = cap_override if cap_override is not None else default_cap
         spent = ask_spend.get(uid, 0.0)
-        cap_note = "override" if cap_override is not None else "default"
         mm_cap_override = u.get("matchmaker_cap_usd")
         mm_effective_cap = mm_cap_override if mm_cap_override is not None else default_mm_cap
         mm_spent = mm_spend.get(uid, 0.0)
-        mm_cap_note = "override" if mm_cap_override is not None else "default"
         resets = resets_by_user.get(uid)
         reset_notice = ""
         if resets:
@@ -27138,18 +27148,28 @@ def admin_users(request: Request, msg: str = ""):
         profile_form_id = f"profile-form-{uid}"
         name_val = _esc(u.get("name") or "")
         email_val = _esc(u.get("email") or "")
-        field_style = ("padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;"
-                       "font-size:12.5px;background:var(--bg);width:100%;")
-        cap_input_style = ("padding:5px 7px;border:1px solid var(--line);border-radius:6px;font:inherit;"
-                            "font-size:12.5px;background:var(--bg);width:72px;")
+        # 2026-09 view/edit-mode follow-up: every field below now has a
+        # "view" look (transparent border/background — reads as plain text,
+        # even though it's still a real, readonly <input>) that JS
+        # (toggleUserEdit, in this page's own <script>) swaps to a
+        # bordered "edit" look — border-color/background only, same
+        # padding, so nothing reflows when edit mode opens. This one style
+        # string covers Name/Email; the cap inputs get their own narrower
+        # version below.
+        field_style_view = ("padding:6px 8px;border:1px solid transparent;border-radius:6px;font:inherit;"
+                             "font-size:12.5px;background:transparent;width:100%;color:var(--ink);")
+        cap_input_style_view = ("padding:5px 7px;border:1px solid transparent;border-radius:6px;font:inherit;"
+                                 "font-size:12.5px;background:transparent;width:72px;color:var(--ink);")
         action_btn_style = "font-size:12px;padding:5px 10px;white-space:nowrap;"
         # 2026-09 follow-up to the Usage-limits merge: split back into two
         # separate fields (FP&A Buddy cap / Matchmaker cap), each its own
         # column again, per Brian's ask — the merged column read clean on
         # mobile but crowded on desktop. Each field is now ONE line at
-        # both breakpoints instead: spend/cap/input/Set button/note all in
-        # a single flex row (wrapping only if the viewport is too narrow to
-        # fit it), rather than a label line + a separate form line.
+        # both breakpoints: spend / an editable cap input (pre-filled with
+        # the CURRENT effective value, never blank — the (default)/
+        # (override) note is gone, per Brian's ask; the value itself is
+        # the only signal now, and typing a new one + Save is the only way
+        # to change it) / a Save button, all in one flex row.
         return f"""<tr class="admin-table-row" {row_attrs}>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{uid}" class="users-row-cb" onchange="updateBulkButton('users')"></td>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:130px;">
@@ -27157,47 +27177,56 @@ def admin_users(request: Request, msg: str = ""):
             {reset_notice}
           </td>
           <td data-col="users:realname" data-label="Name" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:130px;">
-            <input type="text" form="{profile_form_id}" name="name" value="{name_val}" maxlength="120" placeholder="name" title="display name" style="{field_style}">
+            <input type="text" id="name-input-{uid}" form="{profile_form_id}" name="name" value="{name_val}" maxlength="120" placeholder="—" title="display name" readonly style="{field_style_view}">
           </td>
-          <td data-col="users:email" data-label="Email" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:210px;">
-            <form id="{profile_form_id}" method="post" action="/admin/users/{uid}/edit" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <td data-col="users:email" data-label="Email" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:190px;">
+            <form id="{profile_form_id}" method="post" action="/admin/users/{uid}/edit" style="margin:0;">
               <input type="hidden" name="username" value="{_esc(u['username'])}">
-              <input type="email" name="email" value="{email_val}" maxlength="200" placeholder="email" title="email" style="{field_style}flex:1 1 130px;">
-              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Save</button>
+              <input type="email" id="email-input-{uid}" name="email" value="{email_val}" maxlength="200" placeholder="—" title="email" readonly style="{field_style_view}">
+            </form>
+          </td>
+          <td data-col="users:password" data-label="Password" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
+            <span id="pw-view-{uid}" style="color:var(--muted);letter-spacing:2px;">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
+            <form id="pw-edit-{uid}" method="post" action="/admin/users/{uid}/password" style="display:flex;gap:5px;align-items:center;" hidden>
+              <input type="password" name="password" placeholder="new password" minlength="8" title="Reset this account's password—8+ characters" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:12.5px;background:var(--bg);width:120px;">
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Reset</button>
             </form>
           </td>
           <td data-col="users:last_login" data-label="Last login" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);white-space:nowrap;">{last_display}</td>
-          <td data-col="users:access_level" data-label="Access" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{role_badge}</td>
-          <td data-col="users:status" data-label="Status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{status_badge}</td>
+          <td data-col="users:access_level" data-label="Access" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            {role_badge}
+            <form id="role-form-{uid}" method="post" action="/admin/users/{uid}/role" style="margin-top:6px;" hidden>
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Make member" if u["role"]=="admin" else "Make admin"}</button>
+            </form>
+          </td>
+          <td data-col="users:status" data-label="Status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            {status_badge}
+            <form id="toggle-form-{uid}" method="post" action="/admin/users/{uid}/toggle" style="margin-top:6px;" hidden>
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Disable" if active else "Enable"}</button>
+            </form>
+          </td>
           <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
             <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
               <span style="color:var(--muted);">${spent:.2f} / $</span>
-              <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else f'{cap_override:.2f}'}"
-                placeholder="{default_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
-              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
-              <span style="color:var(--muted);font-size:11px;">({cap_note})</span>
+              <input type="number" id="ask-input-{uid}" name="cap" step="0.01" min="0" value="{effective_cap:.2f}" readonly
+                title="This user's current monthly cap" style="{cap_input_style_view}">
+              <button type="submit" id="ask-save-{uid}" class="btn btn-ghost" style="{action_btn_style}" hidden>Save</button>
             </form>
           </td>
           <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
             <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
               <span style="color:var(--muted);">${mm_spent:.2f} / $</span>
-              <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else f'{mm_cap_override:.2f}'}"
-                placeholder="{default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default" style="{cap_input_style}">
-              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Set</button>
-              <span style="color:var(--muted);font-size:11px;">({mm_cap_note})</span>
+              <input type="number" id="mm-input-{uid}" name="cap" step="0.01" min="0" value="{mm_effective_cap:.2f}" readonly
+                title="This user's current monthly cap" style="{cap_input_style_view}">
+              <button type="submit" id="mm-save-{uid}" class="btn btn-ghost" style="{action_btn_style}" hidden>Save</button>
             </form>
           </td>
           <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
-            <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
-              <form method="post" action="/admin/users/{uid}/password" style="display:flex;gap:5px;align-items:center;">
-                <input type="password" name="password" placeholder="new password" minlength="8" title="Reset this account's password—8+ characters" style="{field_style}width:120px;">
-                <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Reset</button>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <button type="button" id="edit-btn-{uid}" class="btn btn-ghost" style="{action_btn_style}" onclick="toggleUserEdit({uid}, this)">Edit</button>
+              <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');">
+                <button type="submit" class="btn btn-ghost" style="{action_btn_style}color:#b91c1c;border-color:#fca5a5;">Delete</button>
               </form>
-              <div class="users-action-btns" style="display:flex;gap:6px;flex-wrap:wrap;">
-                <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
-                <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Disable" if active else "Enable"}</button></form>
-                <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="{action_btn_style}color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
-              </div>
             </div>
           </td>
         </tr>"""
@@ -27285,6 +27314,7 @@ def admin_users(request: Request, msg: str = ""):
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Username</th>
   <th data-col="users:realname" style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
   <th data-col="users:email" style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
+  <th data-col="users:password" style="padding:10px 12px;text-align:left;font-size:13px;">Password</th>
   <th data-col="users:last_login" style="padding:10px 12px;text-align:left;font-size:13px;">Last login</th>
   <th data-col="users:access_level" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th data-col="users:status" style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
@@ -27298,6 +27328,17 @@ def admin_users(request: Request, msg: str = ""):
 </div>
 
 <style>
+/* 2026-09 view/edit-mode follow-up: the sitewide .btn rule sets
+   display:inline-block unconditionally — an author-origin style, which
+   always beats the browser's own [hidden]{{display:none}} UA-stylesheet
+   rule regardless of selector specificity, since origin outranks
+   specificity in the cascade. Without this, every hidden .btn (the cap
+   Save buttons) rendered visible from the very first page load, before
+   Edit was ever clicked — caught live, not assumed, by screenshotting the
+   page before clicking Edit and seeing them already showing. This one
+   rule restores the attribute's actual browser default wherever it's used
+   on this page. */
+[hidden]{{display:none!important;}}
 .user-name{{font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);}}
 .user-badge{{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;}}
 @media(max-width:900px){{.users-top-grid{{grid-template-columns:1fr!important;}}}}
@@ -27320,7 +27361,8 @@ def admin_users(request: Request, msg: str = ""):
     column-gap:10px;width:100%;border-bottom:2px solid var(--line);padding:10px 0;}}
   .admin-table-cell{{grid-column:1/-1;border-bottom:none!important;padding:6px 12px!important;}}
   .admin-table-cell[data-col="users:realname"],
-  .admin-table-cell[data-col="users:email"]{{order:3;}}
+  .admin-table-cell[data-col="users:email"],
+  .admin-table-cell[data-col="users:password"]{{order:3;}}
   .admin-table-cell[data-col="users:last_login"],
   .admin-table-cell[data-col="users:access_level"],
   .admin-table-cell[data-col="users:status"]{{grid-column:span 1;order:2;}}
@@ -27330,15 +27372,60 @@ def admin_users(request: Request, msg: str = ""):
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
-  .users-action-btns{{flex-wrap:nowrap!important;width:100%;}}
-  .users-action-btns form{{flex:1 1 0!important;min-width:0!important;}}
-  .users-action-btns button{{width:100%!important;font-size:11px!important;padding:5px 4px!important;white-space:nowrap;}}
 }}
 </style>
 
 <script>
 initColPicker('users', {json.dumps([k for k, _ in users_cols])}, {json.dumps(list(users_default_visible))});
 applySortFilter('users');
+// 2026-09 view/edit-mode follow-up: the row is read-only until this fires.
+// One click reveals every editable control for that row at once (Make
+// admin/member under the Access badge, Disable/Enable under Status, the
+// Password field's input+Reset, and both cap inputs' Save buttons) and
+// turns Name/Email/the cap inputs from plain-looking readonly fields into
+// bordered editable ones. The SAME button becomes "Save" and, on the next
+// click, submits the Name/Email <form> (id="profile-form-{{uid}}") — every
+// other field (Make admin/member, Disable/Enable, password Reset, each
+// cap's own Save) already gets its own visible submit button once
+// revealed, so this only needs to submit Name/Email on the toggle's behalf.
+//
+// Deliberately NOT done by turning this button into a real type="submit"
+// tied to the form via the `form=` attribute (the first version of this
+// did exactly that): mutating a button's type to "submit" while still
+// inside ITS OWN click handler makes the browser process the *current*
+// click as a submit too, the instant the handler returns — confirmed live
+// with a real Playwright click (not just reasoning about it): the page
+// navigated away on the very first "Edit" click, before anything was ever
+// revealed. Calling form.requestSubmit() explicitly, only on the second
+// click, avoids that footgun entirely — the button's type never changes.
+function toggleUserEdit(uid, btn) {{
+  var editing = btn.textContent === 'Save';
+  if (editing) {{
+    var form = document.getElementById('profile-form-' + uid);
+    if (form.requestSubmit) form.requestSubmit(); else form.submit();
+    return;
+  }}
+  ['name', 'email', 'ask', 'mm'].forEach(function(key) {{
+    var el = document.getElementById(key + '-input-' + uid);
+    if (!el) return;
+    el.readOnly = false;
+    el.style.borderColor = 'var(--line)';
+    el.style.background = 'var(--bg)';
+  }});
+  var pwView = document.getElementById('pw-view-' + uid);
+  var pwEdit = document.getElementById('pw-edit-' + uid);
+  if (pwView) pwView.hidden = true;
+  if (pwEdit) pwEdit.hidden = false;
+  ['role-form-', 'toggle-form-'].forEach(function(prefix) {{
+    var el = document.getElementById(prefix + uid);
+    if (el) el.hidden = false;
+  }});
+  ['ask-save-', 'mm-save-'].forEach(function(prefix) {{
+    var el = document.getElementById(prefix + uid);
+    if (el) el.hidden = false;
+  }});
+  btn.textContent = 'Save';
+}}
 async function openUsersDeleteSelectedPanel() {{
   var ids = Array.prototype.map.call(document.querySelectorAll('.users-row-cb:checked'), function(cb) {{ return parseInt(cb.value, 10); }});
   if (!ids.length) return;

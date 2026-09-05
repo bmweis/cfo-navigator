@@ -955,6 +955,70 @@ Last login's and Status's — exactly the kind of misalignment Brian was
 asking to fix, caught by measuring bounding boxes across the three cells
 before shipping, not just eyeballing a screenshot.
 
+**View/edit-mode redesign (2026-09), same page — the row is read-only by
+default; one "Edit" button per row reveals every editable control at once and
+becomes "Save"; Password becomes its own field/column.** A further reversal of
+the direct-edit design two rounds above: that design put Access/Status'
+mutating actions (Make admin/member, Disable/Enable) in the Actions column,
+separate from their badges, and showed every cap/name/email field as an
+always-editable input. Brian's ask moved five things at once — Make
+admin/member now renders directly under the Access badge (same `<td>`, not
+Actions), Disable/Enable directly under the Status badge, Password gets its
+own column (a view-mode bullet placeholder + a hidden input+Reset form,
+previously nowhere on the page as its own field), the cap `<input>`s drop
+their `(default)`/`(override)` note text entirely (the field just always
+holds the current effective value, editable in place), and every field
+(Name/Email/both caps, plus the two badge action forms and the password form)
+starts `readonly`/`hidden` until a single per-row "Edit" button — the only
+button left in Actions, immediately followed by Delete — reveals all of them
+and turns itself into "Save". A second click on "Save" submits the Name/Email
+`<form>` (`id="profile-form-{id}"`) specifically — every other revealed
+control already carries its own visible submit button (Make admin/member,
+Disable/Enable, password Reset, each cap's own Save), so the row-level
+Edit/Save toggle only needs to submit Name/Email on its own behalf. Implemented
+as `toggleUserEdit(uid, btn)` in the page's own `<script>`, checking
+`btn.textContent === 'Save'` rather than tracking a separate boolean, since the
+button's own visible label already is that state.
+
+**Two real, non-obvious browser bugs were caught here live (Playwright,
+before/after `getComputedStyle`), not by these rows' own passing test
+assertions** — both are exactly the kind of thing a rendered-HTML string check
+can't catch, per CLAUDE.md's own testing-standard note above:
+1. **Mutating a button's `type` to `"submit"` (with a `form=` attribute)
+   synchronously inside its OWN click handler submits the SAME click, not the
+   next one.** The first version of `toggleUserEdit` set `btn.type =
+   'submit'`/`btn.setAttribute('form', ...)` when entering edit mode, meaning
+   to make the *next* click submit. Chromium evaluates a button's activation
+   behavior using its state *after* the synchronous handler returns, so the
+   very first "Edit" click silently navigated the page away — nothing was ever
+   revealed. Fixed by never mutating the button's `type`; it stays
+   `type="button"` permanently, and the second click calls
+   `document.getElementById('profile-form-'+uid).requestSubmit()` explicitly.
+   A regression test (`test_edit_button_renders_as_type_button_not_submit`)
+   pins the rendered markup so this can't silently regress.
+2. **The sitewide `.btn{display:inline-block}` rule defeated the `hidden`
+   attribute on every button carrying that class — an author-origin-vs.-
+   user-agent-origin cascade fact, not a specificity fact.** After fixing (1),
+   a screenshot taken *before ever clicking Edit* still showed the cap Save
+   buttons and the password Reset field visible. The browser's own
+   `[hidden]{display:none}` rule is UA-stylesheet-origin; author-origin rules
+   always win regardless of selector specificity, so `.btn`'s unconditional
+   `display:inline-block` silently overrode `hidden` on every `.btn`-classed
+   element (and the password edit form's own inline
+   `style="display:flex"` did the same thing to itself, since an inline style
+   also beats a non-`!important` stylesheet rule). Fixed with one page-scoped
+   rule, `[hidden]{display:none!important;}` — `!important` is both necessary
+   and sufficient to beat both offending declarations. Verified live via
+   `getComputedStyle` before/after on an unedited row (all five gated elements
+   read `display:'none'`) and an edited row (all five flip to `block`/`flex`).
+   A regression test (`test_hidden_attribute_override_present`) pins the CSS
+   rule's presence.
+
+Both bugs were caught by this session's own live verification pass, not
+reported by Brian — a direct instance of CLAUDE.md's standing rule that an
+interactive change must be verified against what the browser actually
+receives, never just a rendered-HTML string.
+
 **Duplicate-URL blocking on save (both tables, create and edit).**
 `linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
 `_find_community_by_normalized_url` lookup on `Library` guard `add_tool`,
