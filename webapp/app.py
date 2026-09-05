@@ -27155,7 +27155,7 @@ def admin_users(request: Request, msg: str = ""):
             </form>
           </td>
           <td data-col="users:last_login" data-label="Last login" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);white-space:nowrap;">{last_display}</td>
-          <td data-col="users:access_level" data-label="Access level" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{role_badge}</td>
+          <td data-col="users:access_level" data-label="Access" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{role_badge}</td>
           <td data-col="users:status" data-label="Status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{status_badge}</td>
           <td data-col="users:usage" data-label="Usage limits" class="admin-table-cell users-usage-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;min-width:170px;">
             <div class="users-usage-item">
@@ -27293,9 +27293,28 @@ def admin_users(request: Request, msg: str = ""):
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
   .admin-table-responsive, .admin-table-responsive tbody,
-  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;}}
-  .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
-  .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
+  .admin-table-responsive td{{display:block;width:100%;}}
+  /* Last login / Access level / Status form a compact 3-column mini-table
+     right under the username (Brian's explicit ask, matching how a real
+     table lines values up across rows) — the <tr> itself becomes a grid so
+     those three specific cells can share one row instead of each stacking
+     as its own full-width block. Every OTHER cell keeps stacking full-width
+     via grid-column:1/-1 (a spanning item forces a fresh row, so the trio
+     — the only non-spanning items, consecutive in the DOM — auto-place
+     into one 3-column row of their own). `order` moves that row to sit
+     right after Username without touching DOM order (so desktop's column
+     order, sort/filter, and the column picker are all unaffected — this is
+     a pure visual reorder, scoped to this one breakpoint). */
+  .admin-table-responsive tr{{display:grid;grid-template-columns:repeat(3,1fr);
+    column-gap:10px;width:100%;border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-cell{{grid-column:1/-1;border-bottom:none!important;padding:6px 12px!important;}}
+  .admin-table-cell[data-col="users:realname"],
+  .admin-table-cell[data-col="users:email"]{{order:3;}}
+  .admin-table-cell[data-col="users:last_login"],
+  .admin-table-cell[data-col="users:access_level"],
+  .admin-table-cell[data-col="users:status"]{{grid-column:span 1;order:2;}}
+  .admin-table-cell[data-col="users:usage"]{{order:4;}}
+  .admin-table-cell[data-label="Actions"]{{order:5;}}
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}

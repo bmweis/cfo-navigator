@@ -915,6 +915,32 @@ down to a single visually-grouped block. `users_cols`' `("ask", ...)`/
 unchanged — this is a display-layer merge only, each cap still posts to its
 own route independently.
 
+**Mobile mini-table for Last login/Access level/Status (2026-09), same
+follow-up — Brian's explicit ask: put these three "inline next to the name,
+aligned vertically with one another, almost like a 3x2 table."** Each of the
+three was its own full-width stacked block on mobile; now the `<tr>` itself
+becomes a CSS grid (`grid-template-columns:repeat(3,1fr)`, scoped to the
+existing 700px breakpoint) so they can share one row. Every OTHER cell in the
+row (checkbox, username, name, email, usage limits, actions) gets
+`grid-column:1/-1` — a spanning item always starts a fresh grid row, so the
+three non-spanning cells (last_login/access_level/status), being consecutive
+in the DOM and immediately preceded by a spanning cell, auto-place into one
+row of their own with no markup restructuring needed. Each column still
+carries its own `[data-label]::before` caption above its own value (Last
+login/Access/Status), which is what gives the visual "2-row" read Brian
+asked for — a label row and a value row — without a second, separate label
+mechanism. `order` (also mobile-only) moves that row to sit directly under
+the username, ahead of Name/Email/Usage limits/Actions, **without touching
+DOM order** — desktop's column order, sort/filter, and the column picker are
+completely unaffected, confirmed by a desktop screenshot showing the
+original table layout unchanged. One label was shortened for this: "Access
+level" → "Access" (the `data-label` attribute only — the desktop `<th>` text
+stays "Access level"), since "ACCESS LEVEL" wrapped to two lines in a
+1/3-width mobile column and threw its badge out of vertical alignment with
+Last login's and Status's — exactly the kind of misalignment Brian was
+asking to fix, caught by measuring bounding boxes across the three cells
+before shipping, not just eyeballing a screenshot.
+
 **Duplicate-URL blocking on save (both tables, create and edit).**
 `linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
 `_find_community_by_normalized_url` lookup on `Library` guard `add_tool`,
