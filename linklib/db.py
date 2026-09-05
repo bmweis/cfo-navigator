@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS thought_leadership (
 -- feed) with sort_key only as a tiebreak — see Library.list_original_content.
 -- _TL_FEATURED_CARDS itself stays in the repo, unimported, as a rollback
 -- reference (same precedent as webapp/thought_leadership_data.py) — see
--- scripts/migrate_original_content.py for the one-time migration that seeds
+-- scripts/archive/migrate_original_content.py for the one-time migration that seeds
 -- this table from it, and CLAUDE.md's Original Content Phase 1 entry.
 CREATE TABLE IF NOT EXISTS original_content (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
