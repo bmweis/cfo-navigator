@@ -110,6 +110,17 @@ def ingest_url(
     )
     article_id = lib.upsert(art)
 
+    # Published-content provenance (2026-09): a save whose URL matches one of
+    # Brian's own externally-hosted pieces (thought_leadership.url — e.g. the
+    # bookmarklet path for the ~9 text-fetchable pieces) gets flagged the
+    # same way the 3 native original_content mirrors are — a citation-label
+    # signal only, never a ranking one (see linklib.agent._build_source_documents
+    # /_rrf_merge; nothing in retrieval reads this flag). Set-only, matching
+    # every other durable-fact flag in this codebase: a match here is never
+    # cleared by a later resave.
+    if lib.is_thought_leadership_url(art.url):
+        lib.set_article_own_content(article_id, True)
+
     if content_html:
         lib.set_article_content_html(article_id, content_html)
 

@@ -332,7 +332,7 @@ used manual check rather than a per-turn or overhead cost.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `articles` | The archive: ~1,500+ curated articles. **URL is the natural key** (`UNIQUE`, normalized) — upserts merge tags and fill empty fields, never duplicate. | `url`, `summary` (Claude-generated, the member-facing asset), `content` (fetched full text — internal input only, never served), `tags_json`/`tags_text` (structured list + flattened copy for FTS), `enriched`/`enrich_model`/`enrich_rules` (provenance), `in_scope`/`scope_reason` (off-audience review flags), `needs_content_check`/`content_check_reason` (durability audit item 1: set by `ingest_url` right after a fresh fetch fails `extract.assess_extraction_quality()` — never blocks the save, only flags it; cleared by `set_article_content_html` the moment a later backfill succeeds) |
+| `articles` | The archive: ~1,500+ curated articles. **URL is the natural key** (`UNIQUE`, normalized) — upserts merge tags and fill empty fields, never duplicate. | `url`, `summary` (Claude-generated, the member-facing asset), `content` (fetched full text — internal input only, never served), `tags_json`/`tags_text` (structured list + flattened copy for FTS), `enriched`/`enrich_model`/`enrich_rules` (provenance), `in_scope`/`scope_reason` (off-audience review flags), `needs_content_check`/`content_check_reason` (durability audit item 1: set by `ingest_url` right after a fresh fetch fails `extract.assess_extraction_quality()` — never blocks the save, only flags it; cleared by `set_article_content_html` the moment a later backfill succeeds), `is_own_content` (FP&A Buddy published-content ingestion, 2026-09 — a **provenance flag, not a ranking signal**; see "Published-content ingestion" under FP&A Buddy below) |
 | `articles_fts` | FTS5 virtual table (`content='articles'`, porter tokenizer) over title/author/source/summary/content/notes/tags_text. | Kept in sync by three triggers (`articles_ai`/`_ad`/`_au`) on insert/delete/update — no manual reindex, ever. |
 | `articles_vec` | `sqlite-vec` vec0 virtual table (#93) — one embedding vector per article, `rowid = articles.id` (same external-content-by-rowid idiom as `articles_fts`, minus trigger sync — see §4, "Hybrid retrieval..."). Powers the vector half of hybrid retrieval. | `embedding` (`float[1536]`, OpenAI `text-embedding-3-small`) |
 | `article_embeddings` | Companion ledger table (#93): which articles are embedded, with what text, and at what cost. Also **an overhead-cost ledger** for embed-on-save/backfill spend — never summed into `ask_questions`, never counts toward a user's Ask cap. Its sibling ledger, `enrichment_cost` (#105), covers enrichment spend; the two stay separate rather than sharing a schema — see §4, "Embedding cost is split by who pays for it" and "Enrichment cost gets its own ledger, not a shared one" below. | `article_id` (PK), `content_hash` (of the exact embedded text — detects staleness after an edit), `model`, `input_tokens`, `cost_usd` |
@@ -352,6 +352,76 @@ used manual check rather than a per-turn or overhead cost.
 
 Cost figures are computed from **real API token usage** at call time
 (`linklib/pricing.py`) — never estimates.
+
+**Published-content ingestion (2026-09) — Brian's own writing joins retrieval
+by mirroring, not a fourth retrieval branch.** Before this, FP&A Buddy was
+structurally blind to `original_content` (the 3 native `/thought-leadership`
+pieces) and `thought_leadership` (the ~30 rows describing externally-hosted
+work) — neither table was ever in the Library/Feed/Web retrieval path. Also,
+bmweis.com can't be self-fetched (Cloudflare Bot Fight Mode blocks it), so a
+URL-fetch-based ingestion path — the normal way an external piece gets into
+`articles` — can't reach the 3 native pieces at all; `original_content.body_md`
+is mirrored directly instead, never via HTTP.
+
+`linklib/original_content_sync.py`'s `sync_original_content_article(lib,
+item_id)` is the single call site both admin routes
+(`POST /admin/original-content/new`, `POST /admin/original-content/{id}/edit`)
+use, called synchronously right after the `Library` write — the same
+"regenerate at the point of mutation" convention `Library.write_opml()`
+already established for the OPML file, not a background job or a cron.
+`original_content.mirrored_article_id` tracks which `articles.id` (if any)
+currently mirrors a given piece, so a re-sync on edit is a direct, narrow
+overwrite (`Library.update_mirrored_article` — title/url/content, never
+`Library.upsert()`'s merge-into-existing-row semantics, which are correct
+for an external re-fetch but wrong for a deliberate edit: the edit must
+always win). A piece whose `body_md` is cleared back to `NULL` (card-
+metadata-only, one of the three literal bespoke routes) has its mirror
+deleted outright (`Library.delete_article`) rather than left orphaned — the
+delete route cascades the same way. `plain_text_from_body_md()` renders
+`body_md` through the identical `python-markdown` pass the public page uses
+(`_OC_MARKDOWN_EXTENSIONS`, duplicated in `original_content_sync.py` since
+`linklib` never imports from `webapp` — flagged on both ends so a future
+extension-list change is easy to notice needs mirroring), then strips it
+with BeautifulSoup (already a dependency) using a plain `" "` separator —
+deliberately not the newline separator the Reader's own past bug avoided:
+that was about *display* text losing paragraph structure, this is *index*
+text, where a space separator both keeps an inline run's words together
+("Some **bold** text" → "Some bold text") and stops adjacent block
+elements from gluing at a tag boundary.
+
+**Provenance, not priority — the one rule this whole feature exists to
+enforce.** `articles.is_own_content` is a citation-LABEL-only flag, read
+solely by `linklib.agent._build_source_documents` (which copies a hit's
+`is_own_content` onto its `sent_docs` entry as `own_content`) and
+`linklib.citations.extract_citations` (which copies that onto the final
+citation entry). **Nothing in retrieval reads this column** —
+`linklib.agent.retrieve()`, `_rrf_merge()`, `Library.search()`, and
+`Library.vector_search()` are all unmodified; a mirrored or matched article
+surfaces only when it's a genuine merit-based FTS5/vector match, exactly
+like any other article, and its rank among other hits is unaffected by the
+flag either way (`tests/test_original_content_ingestion.py`'s
+`test_rrf_merge_ignores_own_content_flag_entirely`/
+`test_retrieve_does_not_boost_own_content_articles` cover this directly).
+When a cited source does carry the flag, it renders with a small
+"(own writing)" label in the citation list (both the client-side `srcListHtml`
+renderer and the server-rendered `_render_cited_answer`) — a citation-list
+label only, deliberately not an inline first-person prose mention (e.g. "as
+I wrote…"): that was considered and explicitly rejected as a real
+voice-integrity risk — the model narrating in first person about Brian's
+own writing is exactly the kind of thing that could read off-register in
+front of a real user, and the citation label alone already makes the
+provenance visible and verifiable.
+
+The provenance flag is also **set generically**, for a case this PR's own
+data doesn't exercise but a future one will: `pipeline.ingest_url()` checks
+every save's URL against `thought_leadership.url` (`Library.
+is_thought_leadership_url`, comparing both sides through the same
+`normalize_url()` `Library.upsert()` already applies) and flags a match —
+this is how the ~9 externally-hosted, text-fetchable `thought_leadership`
+pieces get the same provenance treatment once Brian bookmarklet-saves them
+(see CLAUDE.md's "FP&A Buddy Published-Content Ingestion" entry for that
+follow-up note). Like `needs_content_check`, this is a set-only, durable
+fact — nothing clears it once learned.
 
 ### Accounts
 
@@ -1198,7 +1268,7 @@ effect.
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (originally "pin into the homepage teaser" — Phase 3 addendum; repurposed by the Homepage Restructure phase to mean "represents this type in the homepage's "Recent highlights" grid", see below; defaults to 0, no retroactive selection) |
-| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4c, all three flagship pieces — `netsuite-mcp` (4a), `ai-hackathon-playbook` (4b), and `growth-engine-ratio` (4c) — have real `body_md` and are served by the catch-all, their bespoke routes all retired; `growth-engine-ratio`'s own JS calculator moved to a brand-new standalone bespoke route, `/thought-leadership/growth-engine-calculator`, which is not part of this table at all), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. |
+| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4c, all three flagship pieces — `netsuite-mcp` (4a), `ai-hackathon-playbook` (4b), and `growth-engine-ratio` (4c) — have real `body_md` and are served by the catch-all, their bespoke routes all retired; `growth-engine-ratio`'s own JS calculator moved to a brand-new standalone bespoke route, `/thought-leadership/growth-engine-calculator`, which is not part of this table at all), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. `mirrored_article_id` (FP&A Buddy published-content ingestion, 2026-09, nullable — `NULL` before the first sync) tracks which `articles.id` currently mirrors this piece for retrieval; see "Published-content ingestion" under FP&A Buddy above. |
 
 **Original Content Phase 2 (2026-08) — markdown rendering + `GET /thought-leadership/{slug}`.**
 `_render_original_content_markdown` runs `body_md` through `python-markdown` with only
