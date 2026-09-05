@@ -3737,6 +3737,129 @@ a lazy `from .feed import get_feed_items` at call time, so patching the
 module attribute reaches both) rather than a live RSS fetch, since a real
 network fetch in CI would be flaky and slow for no additional coverage.
 
+### MCP server — FP&A Buddy & Matchmaker proxy tools (Phase 5)
+
+Two new tools — `ask_fpa_buddy`, `ask_matchmaker(kind, ...)` — registered
+onto the same `/mcp` FastMCP instance via a new `webapp/mcp_qa.py` module
+(`register_qa_tools(mcp, lib_factory, opml_path)`, called from
+`webapp/app.py` right after `_mcp_library.register_library_tools(...)`).
+Kept in its own module for the same reason `mcp_toolbox.py`/`mcp_library.py`
+are separate from `mcp_server.py`: pure Q&A-pipeline domain content,
+reusing the shared auth/host-security plumbing rather than duplicating it.
+
+**Why these can't be a simple HTTP self-call to `/ask` or the matchmaker
+routes — the finding that shaped this whole phase.** Both the original MCP
+Phase 0 investigation and this phase's own Step 0 report confirmed `/ask`'s
+auth (`_require_member`) and the matchmaker routes' `_current_user_id`
+resolve identity ONLY from a signed cookie session or the flat
+`X-Save-Token` header — neither has any notion of an MCP bearer token. An
+in-process HTTP self-call would therefore run as `user_id=None`: no dollar
+cap, no `ask_questions`/`matchmaker_questions` row, no conversation
+continuity — silently unmetered and unaudited. So these tools call the
+underlying pipeline **in-process**, passing the MCP-resolved `user_id`
+(from `verify_api_token` via `require_caller`) explicitly, exactly as
+`POST /ask` and the two `.../find/chat` routes now call it themselves.
+
+**Extraction, not a parallel implementation — and held to the gate-
+extraction PR's behavior-identical discipline.** Step 0 found neither
+`answer_question()` nor `linklib.matchmaker`'s `_answer()`/its two public
+wrappers were coupled to FastAPI at all — but ALL of the cap-checking,
+history-rebuild-from-DB, and `ask_questions`/`matchmaker_questions`
+recording that surrounds them was inline in the three HTTP routes, not in
+`linklib`, so nothing existed yet for an in-process, non-HTTP caller to
+call. Extracted verbatim (same order of operations, same return shapes)
+into two new modules:
+
+- `webapp/ask_orchestrator.py::run_ask(lib, user_id, question, *, model,
+  effort, use_library, use_feed, use_web, conversation_id, opml_path)` —
+  the whole of `POST /ask`'s former body minus payload parsing/auth.
+- `webapp/matchmaker_orchestrator.py::run_matchmaker(lib, kind, user_id,
+  session_id, question, *, conversation_id)` — the whole of both
+  `.../find/chat` routes' former bodies (the two were near-identical,
+  differing only in `kind`, which wrapper function to call, and the
+  "browse the directory" URL in the capped message).
+
+Each module defines its own `UnknownConversationError`/
+`ForbiddenConversationError` — a library-layer function has no business
+raising `HTTPException`, and the MCP tool needs to turn the same condition
+into a `ToolError`, not a 404/403. `POST /ask` and both `.../find/chat`
+routes now call these functions and translate those two exceptions back
+into their original `HTTPException(404)`/`HTTPException(403)` — a thin
+wrapper around the same logic, not a re-implementation of it.
+
+**Proven behavior-identical, the same way the radical-transparency
+gate-extraction PR was**: `tests/test_ask_conversations.py`,
+`tests/test_ask_feedback.py`, `tests/test_software_matchmaker.py`, and
+`tests/test_communities_matchmaker.py` all pass **unmodified** against the
+refactored routes — same status codes, same JSON shapes, same monkeypatch
+points (`run_ask`'s late `from linklib.agent import answer_question` inside
+the function body, exactly mirroring the pre-refactor route's own late
+import, is what keeps `monkeypatch.setattr(agent, "answer_question", ...)`
+working against the extracted code).
+
+**The "capped" condition is a normal JSON result, not a `ToolError`** —
+matching `/ask`'s own long-standing design (an over-budget turn is HTTP
+200 on the web, never an error response), both tools return the
+orchestrators' `{"capped": true, ...}` dict verbatim as their MCP result.
+
+**Auth model — a third tier, distinct from both existing ones, confirmed
+with Brian before building.** Neither `require_admin` (Phase 1/4) nor a
+new tier was used — these two tools use `require_caller` (Phase 3's own
+"any valid, active token, no role restriction"), reused rather than
+duplicated, since Step 0 confirmed no `require_member`-equivalent exists
+or is needed in the MCP layer: any valid token already clears the bar
+`/ask`'s own `_require_member` sets for a signed-in member. This is a
+deliberate choice, not an oversight — gating these two tools to admin-only
+would lock out a future, more limited non-admin MCP tier Brian has said
+may exist later. A caller with no valid token still gets nothing at all,
+per the standing rule; this is only about whether the token additionally
+must be `role=="admin"`.
+
+**One tool, `ask_matchmaker(kind, ...)`, not two** — a deliberate departure
+from Phase 3's own "separate tools per entity type" precedent
+(`search_tools`/`search_communities`, etc.), because `linklib.matchmaker`'s
+own `_answer()` is already one shared function differentiated by an
+internal `kind` string; mirroring that with one MCP tool matches the
+implementation it wraps more closely than two near-duplicate tool
+definitions for what's really one enum value. `kind` accepts `"tools"`/
+`"communities"` (matching Phase 3's own naming), mapped internally to
+`linklib.matchmaker`'s `"software"`/`"community"` kind strings.
+
+**A real, disclosed conversation-continuity asymmetry between the two
+tools.** `ask_fpa_buddy`'s conversation ownership is keyed purely on
+`user_id` (`ask_questions.user_id`) — a conversation started on the web
+and continued via MCP (or vice versa) works seamlessly for the same
+signed-in user. `ask_matchmaker`'s ownership check requires BOTH
+`session_id` and `user_id` to match (`matchmaker_questions.session_id`,
+the `cfo_visitor` cookie on the web) — pre-existing behavior, unrelated to
+MCP, that already means the same signed-in user on two different browsers
+can't resume one matchmaker conversation from the other. An MCP caller has
+no cookie, so `ask_matchmaker` synthesizes a stable per-user session key
+(`f"mcp:user:{user_id}"`), letting a conversation started via MCP be
+resumed via MCP — but not from a web session, and vice versa. This is
+inherited from the existing session-keyed design, not a new limitation
+introduced by this phase.
+
+**Response shapes** mirror the web routes' own JSON contracts field-for-
+field: `ask_fpa_buddy` returns `{answer, citations, sources, feed_sources,
+web_sources, followups_left, conversation_id, turn_id, usage}` (or the
+capped shape) — `own_content` rides through on any citation unmodified,
+since it's `answer_question()`'s own `Answer.citations` returned verbatim.
+`ask_matchmaker` returns `{answer, conversation_id, followups_left}` (or
+the capped shape) — no `citations` key at all, matching `linklib.
+matchmaker`'s own no-citations design.
+
+See `tests/test_mcp_qa.py` for the full coverage: cap enforcement (a
+capped user gets the capped shape, not an answer; an under-cap user gets a
+real answer with recorded cost) for both tools; conversation continuity
+and the follow-up cap for both; the `ask_questions`/`matchmaker_questions`
+audit row recorded under the correct MCP-resolved `user_id`; an
+unauthenticated/invalid-token call rejected at the transport level for
+both; and — the most important coverage, matching the extraction's own
+purpose — that `tests/test_ask_conversations.py`/`tests/
+test_software_matchmaker.py`/`tests/test_communities_matchmaker.py` still
+pass completely unmodified against the refactored routes.
+
 ### Archive save / enrichment pipeline
 
 All capture paths converge on `linklib/pipeline.py::ingest_url` or the

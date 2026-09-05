@@ -74,6 +74,16 @@ from linklib.pipeline import ingest_url
 from linklib.original_content_sync import sync_original_content_article
 from linklib import backup
 from webapp.markdown_render import render_narrative_markdown
+from webapp.ask_orchestrator import (
+    ForbiddenConversationError as _AskForbiddenConversationError,
+    UnknownConversationError as _AskUnknownConversationError,
+    run_ask,
+)
+from webapp.matchmaker_orchestrator import (
+    ForbiddenConversationError as _MatchmakerForbiddenConversationError,
+    UnknownConversationError as _MatchmakerUnknownConversationError,
+    run_matchmaker,
+)
 # webapp/thought_leadership_data.py is no longer imported here — the four
 # /thought-leadership columns now read from the thought_leadership DB table
 # (Phase 1, see CLAUDE.md). The module itself stays in the repo, unused, as
@@ -7538,7 +7548,6 @@ document.addEventListener('keydown', function(e) {
 
 @app.post("/tools/software/find/chat")
 async def tools_software_find_chat(request: Request):
-    from linklib.matchmaker import answer_software_question, MAX_FOLLOWUPS
     payload = await request.json()
     question = (payload.get("question") or "").strip()
     if not question:
@@ -7549,64 +7558,18 @@ async def tools_software_find_chat(request: Request):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
-
-        history: list[dict] = []
-        prior_questions = 0
-        if conversation_id:
-            turns = lib.list_matchmaker_conversation_turns(conversation_id)
-            if not turns:
-                raise HTTPException(status_code=404, detail="unknown conversation")
-            if turns[0]["session_id"] != session_id or turns[0]["user_id"] != user_id:
-                raise HTTPException(status_code=403, detail="not your conversation")
-            prior_questions = len(turns)
-            if prior_questions >= 1 + MAX_FOLLOWUPS:
-                body = {"capped": True,
-                        "answer": "We've reached the limit for this conversation. "
-                                  "Start a new question to keep going."}
-                resp = JSONResponse(body)
-                _set_visitor_cookie(request, resp, session_id)
-                return resp
-            for t in turns:
-                history.append({"role": "user", "content": t["question"]})
-                history.append({"role": "assistant", "content": t["answer"]})
-
-        # Same shared budget as the Communities matchmaker — kind='software'
-        # rows sum into the same per-user/per-session cap (matchmaker_cost_
-        # this_month[_session] doesn't filter by kind), a deliberate design
-        # choice (see matchmaker_questions in ARCHITECTURE.md) rather than a
-        # separate budget per matchmaker.
-        if user_id is not None:
-            cap = lib.get_effective_matchmaker_cap(user_id)
-            spent = lib.matchmaker_cost_this_month(user_id)
-        else:
-            cap = lib.get_default_matchmaker_cap()
-            spent = lib.matchmaker_cost_this_month_session(session_id)
-        if spent >= cap:
-            body = {"capped": True,
-                    "answer": (f"We've used ${spent:.2f} of this month's ${cap:.2f} matchmaker "
-                               "budget. It resets at the start of next month—in the meantime, "
-                               "browse the full directory at /tools/software.")}
-            resp = JSONResponse(body)
-            _set_visitor_cookie(request, resp, session_id)
-            return resp
-
-        ans = answer_software_question(lib, question, history=history)
-
-        row_id = lib.record_matchmaker_question(
-            session_id, "software", question, ans.text, ans.model,
-            user_id=user_id, conversation_id=conversation_id, turn_index=prior_questions,
-            input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
-            cache_creation_tokens=ans.cache_creation_tokens, cache_read_tokens=ans.cache_read_tokens,
-            cost_usd=ans.cost_usd,
-        )
-        new_conversation_id = conversation_id or str(row_id)
-        followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
-
-        body = {
-            "answer": ans.text,
-            "conversation_id": new_conversation_id,
-            "followups_left": followups_left,
-        }
+        # Orchestration (cap check, conversation-history rebuild, the
+        # answer_software_question() call, and matchmaker_questions
+        # recording — including the shared software+communities budget) is
+        # shared with the ask_matchmaker MCP tool — see
+        # webapp/matchmaker_orchestrator.py.
+        try:
+            body = run_matchmaker(lib, "software", user_id, session_id, question,
+                                   conversation_id=conversation_id)
+        except _MatchmakerUnknownConversationError:
+            raise HTTPException(status_code=404, detail="unknown conversation")
+        except _MatchmakerForbiddenConversationError:
+            raise HTTPException(status_code=403, detail="not your conversation")
         resp = JSONResponse(body)
         _set_visitor_cookie(request, resp, session_id)
         return resp
@@ -9678,7 +9641,6 @@ document.addEventListener('keydown', function(e) {
 
 @app.post("/tools/communities/find/chat")
 async def tools_communities_find_chat(request: Request):
-    from linklib.matchmaker import answer_communities_question, MAX_FOLLOWUPS
     payload = await request.json()
     question = (payload.get("question") or "").strip()
     if not question:
@@ -9689,69 +9651,22 @@ async def tools_communities_find_chat(request: Request):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
-
-        # Follow-up turn: rebuild history from the conversation's recorded
-        # rows, same server-side-source-of-truth pattern as POST /ask.
-        # Ownership requires BOTH the session cookie and (when set) the
-        # logged-in user_id to match — the cookie is the primary key since
-        # this page needs no login, but a signed-in conversation additionally
-        # can't be picked up by a different signed-in user sharing a device.
-        history: list[dict] = []
-        prior_questions = 0
-        if conversation_id:
-            turns = lib.list_matchmaker_conversation_turns(conversation_id)
-            if not turns:
-                raise HTTPException(status_code=404, detail="unknown conversation")
-            if turns[0]["session_id"] != session_id or turns[0]["user_id"] != user_id:
-                raise HTTPException(status_code=403, detail="not your conversation")
-            prior_questions = len(turns)
-            if prior_questions >= 1 + MAX_FOLLOWUPS:
-                body = {"capped": True,
-                        "answer": "We've reached the limit for this conversation. "
-                                  "Start a new question to keep going."}
-                resp = JSONResponse(body)
-                _set_visitor_cookie(request, resp, session_id)
-                return resp
-            for t in turns:
-                history.append({"role": "user", "content": t["question"]})
-                history.append({"role": "assistant", "content": t["answer"]})
-
-        # Dollar-based rate limit, mirroring POST /ask — but this page needs
-        # no login, so the common case has no user_id to key off of. Anonymous
-        # spend is tracked (and capped) by the cfo_visitor session cookie
-        # instead; a signed-in visitor still gets their own per-user cap.
-        if user_id is not None:
-            cap = lib.get_effective_matchmaker_cap(user_id)
-            spent = lib.matchmaker_cost_this_month(user_id)
-        else:
-            cap = lib.get_default_matchmaker_cap()
-            spent = lib.matchmaker_cost_this_month_session(session_id)
-        if spent >= cap:
-            body = {"capped": True,
-                    "answer": (f"We've used ${spent:.2f} of this month's ${cap:.2f} matchmaker "
-                               "budget. It resets at the start of next month—in the meantime, "
-                               "browse the full directory at /tools/communities.")}
-            resp = JSONResponse(body)
-            _set_visitor_cookie(request, resp, session_id)
-            return resp
-
-        ans = answer_communities_question(lib, question, history=history)
-
-        row_id = lib.record_matchmaker_question(
-            session_id, "community", question, ans.text, ans.model,
-            user_id=user_id, conversation_id=conversation_id, turn_index=prior_questions,
-            input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
-            cache_creation_tokens=ans.cache_creation_tokens, cache_read_tokens=ans.cache_read_tokens,
-            cost_usd=ans.cost_usd,
-        )
-        new_conversation_id = conversation_id or str(row_id)
-        followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
-
-        body = {
-            "answer": ans.text,
-            "conversation_id": new_conversation_id,
-            "followups_left": followups_left,
-        }
+        # Orchestration (cap check, conversation-history rebuild, the
+        # answer_communities_question() call, and matchmaker_questions
+        # recording — including the shared software+communities budget) is
+        # shared with the ask_matchmaker MCP tool — see
+        # webapp/matchmaker_orchestrator.py. Ownership requires BOTH the
+        # session cookie and (when set) the logged-in user_id to match — the
+        # cookie is the primary key since this page needs no login, but a
+        # signed-in conversation additionally can't be picked up by a
+        # different signed-in user sharing a device.
+        try:
+            body = run_matchmaker(lib, "community", user_id, session_id, question,
+                                   conversation_id=conversation_id)
+        except _MatchmakerUnknownConversationError:
+            raise HTTPException(status_code=404, detail="unknown conversation")
+        except _MatchmakerForbiddenConversationError:
+            raise HTTPException(status_code=403, detail="not your conversation")
         resp = JSONResponse(body)
         _set_visitor_cookie(request, resp, session_id)
         return resp
@@ -20756,7 +20671,6 @@ loadRecent();
 @app.post("/ask")
 async def ask(request: Request):
     _require_member(request)
-    from linklib.agent import answer_question, MAX_FOLLOWUPS
     payload = await request.json()
     question = (payload.get("question") or "").strip()
     if not question:
@@ -20781,117 +20695,26 @@ async def ask(request: Request):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
-
-        # Follow-up turn: rebuild history from the conversation's recorded
-        # rows (the server-side source of truth). Ownership mirrors the
-        # feedback endpoint — 404 for a conversation that doesn't exist, 403
-        # for someone else's. Token-only / break-glass access (user_id None)
-        # never has recorded turns, so it can't continue any conversation —
-        # each of its questions is one-shot.
-        history: list[dict] = []
-        prior_questions = 0
-        if conversation_id:
-            turns = lib.list_conversation_turns(conversation_id)
-            if not turns:
-                raise HTTPException(status_code=404, detail="unknown conversation")
-            if user_id is None or turns[0]["user_id"] != user_id:
-                raise HTTPException(status_code=403, detail="not your conversation")
-            # The follow-up cap counts recorded rows, never client-supplied
-            # turns (invisible cost guard) — a capped conversation never
-            # reaches the API.
-            prior_questions = len(turns)
-            if prior_questions >= 1 + MAX_FOLLOWUPS:
-                return {
-                    "capped": True,
-                    "answer": "We've reached the limit for this conversation. "
-                              "Start a new question to keep going.",
-                    "sources": [], "feed_sources": [], "web_sources": [],
-                }
-            for t in turns:
-                history.append({"role": "user", "content": t["question"]})
-                history.append({"role": "assistant", "content": t["answer"]})
-
-        # Dollar-based rate limit — real spend this calendar month vs. the
-        # user's effective cap (per-user override, else the global default).
-        # Skipped for token-only access and the break-glass admin login with
-        # no matching `users` row (no user_id to attribute cost to), matching
-        # today's unrestricted behavior for those cases.
-        if user_id is not None:
-            cap = lib.get_effective_ask_cap(user_id)
-            spent = lib.ask_cost_this_month(user_id)
-            if spent >= cap:
-                return {
-                    "capped": True,
-                    "answer": (f"You've used ${spent:.2f} of your ${cap:.2f} FP&A Buddy budget "
-                               "for this month. It resets at the start of next month."),
-                    "sources": [], "feed_sources": [], "web_sources": [],
-                }
-
-        ans = answer_question(
-            lib, question,
-            model=model,
-            effort=effort,
-            use_library=use_library,
-            use_feed=use_feed,
-            use_web=use_web,
-            opml_path=OPML_PATH if (use_feed or use_web) else None,
-            history=history,
-        )
-
-        # None for token-only / break-glass access: nothing was recorded, so
-        # there is no conversation to continue (the guards above already
-        # reject any conversation_id those callers send).
-        new_conversation_id = None
-        usage_line = None
-        turn_id = None
-        if user_id is not None:
-            row_id = lib.record_ask_question(
-                # ans.model is the resolved canonical model actually used —
-                # not the raw request field, which can be an alias or blank
-                # (the /archive quick-ask widget never sends one).
-                user_id, question, ans.text, ans.model, effort,
-                use_library, use_feed, use_web,
-                conversation_id=conversation_id, turn_index=prior_questions,
-                input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
-                cache_creation_tokens=ans.cache_creation_tokens,
-                cache_read_tokens=ans.cache_read_tokens,
-                # ans.cost_usd is the turn total (answer + follow-up query
-                # rewrite + query-time embedding for hybrid retrieval), so
-                # the monthly-cap SUM sees all of it.
-                cost_usd=ans.cost_usd,
-                rewrite_input_tokens=ans.rewrite_input_tokens,
-                rewrite_output_tokens=ans.rewrite_output_tokens,
-                rewrite_cost_usd=ans.rewrite_cost_usd,
-                embed_input_tokens=ans.embed_input_tokens,
-                embed_cost_usd=ans.embed_cost_usd,
-                # Persisted snapshot of what this answer actually cited, so a
-                # later feedback flag stays inspectable with its sources.
-                citations=ans.citations,
+        # Orchestration (cap check, conversation-history rebuild, the
+        # answer_question() call, and ask_questions recording) is shared
+        # with the ask_fpa_buddy MCP tool — see webapp/ask_orchestrator.py.
+        # Ownership mirrors the feedback endpoint — 404 for a conversation
+        # that doesn't exist, 403 for someone else's.
+        try:
+            return run_ask(
+                lib, user_id, question,
+                model=model,
+                effort=effort,
+                use_library=use_library,
+                use_feed=use_feed,
+                use_web=use_web,
+                conversation_id=conversation_id,
+                opml_path=OPML_PATH,
             )
-            new_conversation_id = conversation_id or str(row_id)
-            turn_id = row_id
-            cap = lib.get_effective_ask_cap(user_id)
-            spent = lib.ask_cost_this_month(user_id)
-            usage_line = {"spent": round(spent, 2), "cap": round(cap, 2)}
-
-        followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
-        return {
-            "answer": ans.text,
-            # API-verified citations only — what the answer's [n] markers map
-            # to. The full retrieved lists below stay for compatibility.
-            "citations": ans.citations,
-            "sources":      [{"title": s["title"], "url": s["url"]} for s in ans.sources],
-            "feed_sources": [{"title": s["title"], "url": s["url"]} for s in ans.feed_sources],
-            "web_sources":  [{"title": s["title"], "url": s["url"]} for s in ans.web_sources],
-            "followups_left": followups_left,
-            "conversation_id": new_conversation_id,
-            # The recorded ask_questions row id for this turn — what the
-            # feedback controls rate. None when the turn wasn't recorded
-            # (token-only or break-glass access with no users row); the UI
-            # shows no feedback controls then.
-            "turn_id": turn_id,
-            "usage": usage_line,
-        }
+        except _AskUnknownConversationError:
+            raise HTTPException(status_code=404, detail="unknown conversation")
+        except _AskForbiddenConversationError:
+            raise HTTPException(status_code=403, detail="not your conversation")
     finally:
         lib.close()
 
@@ -31211,6 +31034,16 @@ _mcp_toolbox.register_toolbox_tools(_mcp, _lib)
 from webapp import mcp_library as _mcp_library  # noqa: E402
 
 _mcp_library.register_library_tools(_mcp, _lib, OPML_PATH)
+
+# MCP Phase 5: FP&A Buddy & Matchmaker proxy tools (ask_fpa_buddy,
+# ask_matchmaker) — any valid token, any role (require_caller, same as
+# Phase 3's tools), calling the same in-process orchestration POST /ask and
+# the two .../find/chat routes now call themselves. See
+# webapp/mcp_qa.py's module docstring for the full auth-model reasoning and
+# why these can't be simple HTTP self-calls.
+from webapp import mcp_qa as _mcp_qa  # noqa: E402
+
+_mcp_qa.register_qa_tools(_mcp, _lib, OPML_PATH)
 
 _mcp_asgi_app = _mcp.streamable_http_app()
 

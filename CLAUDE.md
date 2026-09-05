@@ -5389,6 +5389,41 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   the disclosed, uncapped query-embedding cost on a non-empty
   `search_library` call) and `tests/test_mcp_library.py` for the
   auth-model regression coverage.
+- **MCP server, Phase 5 (2026-09) — FP&A Buddy & Matchmaker proxy tools
+  (`ask_fpa_buddy`, `ask_matchmaker(kind, ...)`), a new `webapp/mcp_qa.py`.**
+  Neither `/ask` nor the two matchmaker routes' identity resolution
+  (`_require_member`/`_current_user_id`) understands an MCP bearer token —
+  an HTTP self-call would run as an unmetered, unaudited `user_id=None` —
+  so these two tools call `answer_question()`/`linklib.matchmaker`'s
+  `_answer()` **in-process**, passing the MCP-resolved `user_id` explicitly.
+  Doing that required extracting the cap-check/history-rebuild/recording
+  orchestration that used to live inline in the three HTTP routes into two
+  new shared modules, `webapp/ask_orchestrator.py::run_ask` and
+  `webapp/matchmaker_orchestrator.py::run_matchmaker` — `POST /ask` and both
+  `.../find/chat` routes now call these themselves too, held to the same
+  behavior-identical discipline as the radical-transparency gate-extraction
+  PR: `tests/test_ask_conversations.py`/`tests/test_ask_feedback.py`/
+  `tests/test_software_matchmaker.py`/`tests/test_communities_matchmaker.py`
+  all pass **unmodified** against the refactored routes. A capped turn
+  returns the orchestrators' `{"capped": true, ...}` dict as a normal
+  (non-error) MCP result, matching `/ask`'s own HTTP-200-on-capped design.
+  **Auth is a third tier** — `require_caller` (Phase 3's "any valid, active
+  token, no role restriction"), not `require_admin` — since `/ask` itself
+  only requires any signed-in member, and gating these tools to admin-only
+  would preempt a possible future non-admin MCP tier. **One tool for both
+  matchmaker kinds** (`kind: "tools"|"communities"`), not two, since
+  `linklib.matchmaker._answer()` is already one shared function
+  differentiated by an internal kind string. **A real, disclosed
+  conversation-continuity asymmetry**: `ask_fpa_buddy` is keyed purely on
+  `user_id` (seamless across web/MCP for the same user); `ask_matchmaker`
+  additionally requires a session match, so an MCP caller gets a synthesized
+  stable per-user session key (`f"mcp:user:{user_id}"`) — a conversation
+  started via MCP resumes via MCP, but not from a web session, same
+  pre-existing limitation the web's own cross-browser case already has. See
+  ARCHITECTURE.md's "MCP server — FP&A Buddy & Matchmaker proxy tools
+  (Phase 5)" section for the full write-up and `tests/test_mcp_qa.py` for
+  cap/history/audit-trail coverage plus the unchanged-HTTP-route regression
+  proof.
 - **Compare Redesign, Phase 1 (2026-09) — both Compare pages rebuilt on a
   new `linklib/compare.py` serializer; the shared contract Compare Phase 2
   (AI summary generation) and MCP Phase 3 (compare tools) will also build
