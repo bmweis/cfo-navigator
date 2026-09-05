@@ -129,7 +129,12 @@ CREATE TABLE IF NOT EXISTS users (
     name          TEXT NOT NULL DEFAULT '',
     email         TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL DEFAULT '',
-    last_login_at TEXT NOT NULL DEFAULT ''
+    last_login_at TEXT NOT NULL DEFAULT '',
+    -- Set whenever the current password was chosen by someone other than the
+    -- account holder (account creation, an admin reset) — cleared the moment
+    -- the holder sets their own password. Drives a dismissible nudge banner
+    -- only, never a login block. See the migration list's own comment.
+    password_change_recommended INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS contacts (
@@ -2291,6 +2296,21 @@ class Library:
             # admin form's own warning copy — doesn't strand the mirror or
             # require re-matching by URL.
             "ALTER TABLE original_content ADD COLUMN mirrored_article_id INTEGER",
+            # Encourage-password-change (2026-09) — set whenever an account's
+            # password was chosen by someone other than the account holder
+            # (admin-created, or admin-reset), cleared the moment the holder
+            # sets their own new password (self-service /reset-password, or
+            # the in-session /change-password form) — see create_user's
+            # password_change_recommended default, set_user_password's
+            # sibling set_password_change_recommended, and
+            # webapp.app._password_change_nudge_html. A dismissible nudge
+            # only (Brian's explicit call) — never blocks any route. SQL
+            # default 0 so an existing row on first deploy of this column
+            # doesn't suddenly nag; the "new/reset account defaults to 1"
+            # behavior lives at the Python call sites that actually create
+            # or reset a password, same "SQL default is the floor" split
+            # tools.needs_review's own migration comment already documents.
+            "ALTER TABLE users ADD COLUMN password_change_recommended INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4049,15 +4069,25 @@ class Library:
     # -- users / accounts ------------------------------------------------------
 
     def create_user(self, username: str, password: str, role: str = "user",
-                    name: str = "", email: str = "") -> int:
-        """Create an account. Raises sqlite3.IntegrityError if the username exists."""
+                    name: str = "", email: str = "",
+                    password_change_recommended: bool = True) -> int:
+        """Create an account. Raises sqlite3.IntegrityError if the username exists.
+
+        password_change_recommended defaults True — every account created here
+        was given a password by an admin, not chosen by the account holder, so
+        it starts flagged for the dismissible change-password nudge (see the
+        password_change_recommended migration comment). Pass False only for a
+        caller that's genuinely not in that shape (none exist today; kept as a
+        real parameter rather than hardcoded so a future self-registration
+        flow, if one is ever built, isn't forced to flag itself)."""
         from .passwords import hash_password
         username = (username or "").strip().lower()
         role = role if role in ("user", "admin") else "user"
         cur = self.conn.execute(
-            "INSERT INTO users (username, password_hash, role, active, name, email, created_at) "
-            "VALUES (?,?,?,1,?,?,?)",
-            (username, hash_password(password), role, name.strip(), email.strip(), _now()),
+            "INSERT INTO users (username, password_hash, role, active, name, email, created_at, "
+            "password_change_recommended) VALUES (?,?,?,1,?,?,?,?)",
+            (username, hash_password(password), role, name.strip(), email.strip(), _now(),
+             int(password_change_recommended)),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -4079,7 +4109,7 @@ class Library:
     def list_users(self) -> list[dict]:
         rows = self.conn.execute(
             "SELECT id, username, role, active, name, email, created_at, last_login_at, "
-            "ask_cap_usd, matchmaker_cap_usd "
+            "ask_cap_usd, matchmaker_cap_usd, password_change_recommended "
             "FROM users ORDER BY role DESC, username"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -4087,8 +4117,16 @@ class Library:
     def get_user(self, username: str) -> Optional[dict]:
         row = self.conn.execute(
             "SELECT id, username, role, active, name, email, created_at, last_login_at, "
-            "ask_cap_usd, matchmaker_cap_usd "
+            "ask_cap_usd, matchmaker_cap_usd, password_change_recommended "
             "FROM users WHERE username=?", ((username or "").strip().lower(),)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_id(self, user_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT id, username, role, active, name, email, created_at, last_login_at, "
+            "ask_cap_usd, matchmaker_cap_usd, password_change_recommended "
+            "FROM users WHERE id=?", (user_id,)
         ).fetchone()
         return dict(row) if row else None
 
@@ -4198,6 +4236,22 @@ class Library:
         from .passwords import hash_password
         self.conn.execute("UPDATE users SET password_hash=? WHERE id=?",
                           (hash_password(password), user_id))
+        self.conn.commit()
+
+    def set_password_change_recommended(self, user_id: int, recommended: bool) -> None:
+        """Set or clear the dismissible change-password nudge flag.
+
+        Deliberately separate from set_user_password rather than folded into
+        it — the two call sites that change a password want opposite
+        outcomes: an admin resetting someone else's password (/admin/users)
+        sets this True (they didn't choose it), while the account holder
+        setting their own new password (self-service /reset-password, or
+        /change-password) clears it. Folding this into set_user_password
+        would force one of those two call sites to immediately undo it."""
+        self.conn.execute(
+            "UPDATE users SET password_change_recommended=? WHERE id=?",
+            (int(recommended), user_id),
+        )
         self.conn.commit()
 
     def update_user(self, user_id: int, username: str | None = None,
