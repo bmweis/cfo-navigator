@@ -8936,7 +8936,11 @@ def _community_geo_line(c: dict) -> str:
 # cpe_eligible is a single Details-card line, not a section — see
 # _community_details_card. Notable members / Public criticism don't name-match
 # either of Brian's four groups perfectly; placed here as the closest
-# semantic fit (social proof / trade-off caveat).
+# semantic fit (social proof / trade-off caveat). Stage focus/Jobs program/
+# Individual or team (Surface Hidden Community Profile Fields, 2026-09) were
+# the last three Quick-facts fields with no public home at all — see
+# linklib/compare.py's own comment on COMMUNITY_PROFILE_GROUPS for the
+# placement reasoning.
 _COMMUNITY_PROFILE_GROUPS = compare.COMMUNITY_PROFILE_GROUPS
 
 
@@ -9821,10 +9825,21 @@ def tools_community_profile(request: Request, slug: str):
     featured_sticker = _sticker("Featured", rotate=8, top="-14px", right="-16px", size=14) if community.get("featured") else ""
     screenshot_block = _screenshot_card_html(community, featured_sticker)
 
-    top_band = f"""<div class="tp-band">
-  <div>{hero_text}</div>
-  <div>{screenshot_block}</div>
-</div>"""
+    # "Too much spacing between the action row and the Bottom line box"
+    # (2026-09 follow-up to the Surface Hidden Community Profile Fields
+    # build) — root cause was this page's own pre-Sidebar-Consolidation
+    # layout: hero_text and screenshot_block used to sit side by side in
+    # their own two-column `.tp-band` (top_band), so the Bottom line
+    # callout below it couldn't start until that whole grid ROW finished —
+    # gated behind the screenshot column's height, not the (much shorter)
+    # hero column's. Software's own Sidebar Consolidation pass (see that
+    # CLAUDE.md bullet) already solved this exact problem by making the
+    # hero full-width above the band and moving its screenshot into the
+    # sidebar column instead. Mirrored here: hero_text now renders directly
+    # (no band, no screenshot alongside it), and screenshot_block opens the
+    # sidebar column below, alongside Details/Categories/Similar
+    # communities — same reference-sidebar pattern this page already used
+    # for those three, just extended to the screenshot too.
 
     # "Description coming soon." / "...Add one from the edit page." joins
     # the cross-entity approved empty-state string family (empty-state
@@ -10015,7 +10030,7 @@ def tools_community_profile(request: Request, slug: str):
             f'disclosed and never affect ranking or inclusion.</span></div>'
         )
 
-    lower_band = f"""<div class="tp-band">
+    content_band = f"""<div class="tp-band">
   <div class="tp-col-stack">
     {verdict_block}
     {profile_citations_block}
@@ -10023,6 +10038,7 @@ def tools_community_profile(request: Request, slug: str):
     {profile_cards}
   </div>
   <div class="tp-col-stack">
+    {screenshot_block}
     {details_card}
     {categories_card}
     {similar_communities_block}
@@ -10037,10 +10053,12 @@ def tools_community_profile(request: Request, slug: str):
     # review_status_html is now computed above, before hero_text, and
     # spliced into the hero right after the name/subhead (item 4, 2026-08
     # placement follow-up) — see that comment for the full reasoning.
+    # hero_text renders full-width here, not inside content_band — see the
+    # spacing-fix comment above screenshot_block's assignment.
 
     main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
-{top_band}
-{lower_band}
+{hero_text}
+{content_band}
 {footnote_block}
 {footer_links}"""
 
@@ -10050,6 +10068,7 @@ def tools_community_profile(request: Request, slug: str):
 <style>
 .tp-band{{display:grid;grid-template-columns:2fr 1fr;gap:22px;align-items:start;margin-top:22px;}}
 .tp-band>div{{min-width:0;}}
+.tp-band:first-of-type{{margin-top:20px;}}
 @media(max-width:800px){{.tp-band{{grid-template-columns:1fr;}}}}
 .tp-col-stack{{display:flex;flex-direction:column;gap:22px;}}
 .tp-header-row{{display:flex;align-items:flex-start;gap:14px;margin-bottom:8px;}}
@@ -14886,9 +14905,9 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 {_short_field('meeting_format', 'Programming', 'In-person / virtual / hybrid')}
 {_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
 {_short_field('seniority_band', 'Who it targets', 'Who it targets by seniority')}
-{_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus. Placeholder, not yet researched or weighted.')}
-{_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any. Placeholder, not yet researched or weighted.')}
-{_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both. Placeholder, not yet researched or weighted.')}
+{_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus.')}
+{_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any.')}
+{_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both.')}
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">

@@ -47,17 +47,36 @@ EXCERPT_LINE_CLAMP = 4
 # Compare's old flat list was "Phase 8.5's job to rebuild" against exactly
 # this grouping — this is that phase. webapp/app.py imports this name
 # instead of keeping a second copy.
+#
+# Surface Hidden Community Profile Fields (2026-09) added Stage focus,
+# Jobs program, and Individual or team — three admin-collected Quick-facts
+# fields (`stage_focus`/`jobs_program`/`team_or_individual`) that had never
+# rendered anywhere public. Step 0 investigation found real, substantive
+# content already stored for 36 of 40 communities (not the placeholder
+# text the edit-page's own `placeholder=` attribute might suggest), so this
+# is mostly "surface content that already exists," not "build empty-state
+# scaffolding for an unpopulated field" — though the standard applies
+# either way. Placed by semantic fit, not to balance group sizes: Stage
+# focus is a company-stage targeting fact, a natural peer of the existing
+# seniority-band ("Who it targets") entry; Jobs program is a member
+# benefit, same category as Resources included; Individual or team is a
+# membership-structure/purchasing fact, closer to Business model's "how
+# this sustains itself" than to who it's personally for. No new gating —
+# `_narrative_field`/`gates.field_state` handle these exactly like every
+# other entry here, off the same whole-profile `needs_review` flag.
 COMMUNITY_PROFILE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Who it's for", [
         ("Ideal member", "ideal_member"),
         ("Who should skip it", "anti_fit"),
         ("Who it targets", "seniority_band"),
+        ("Stage focus", "stage_focus"),
     ]),
     ("What you get", [
         ("Value proposition", "value_prop"),
         ("Primary purpose", "primary_purpose"),
         ("Resources included", "resources_included"),
         ("Notable members", "notable_members"),
+        ("Jobs program", "jobs_program"),
     ]),
     ("How it works", [
         ("Format, in practice", "format_reality"),
@@ -69,6 +88,7 @@ COMMUNITY_PROFILE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("Sponsor relationship", "sponsor_relationship_note"),
         ("Business model", "business_model"),
         ("Public criticism", "public_criticism"),
+        ("Individual or team", "team_or_individual"),
     ]),
 ]
 

@@ -5730,6 +5730,73 @@ never reads as something to tap.
   covered by `webapp.checks.script_syntax_problems()` — same standing
   caveat as the Reader's own inline script).
 
+- **Surface Hidden Community Profile Fields (2026-09) — Stage focus, Jobs
+  program, and Individual or team join `linklib.compare.
+  COMMUNITY_PROFILE_GROUPS`; a real hero/screenshot spacing bug fixed in
+  the same PR.** Step 0 investigation found these three admin-editable
+  Quick-facts fields (`stage_focus`/`jobs_program`/`team_or_individual`)
+  had never rendered on the Community profile page or Compare — the last
+  three Quick-facts fields with no public home, per `webapp/app.py`'s own
+  comment above `_COMMUNITY_PROFILE_GROUPS` (every sibling field already
+  had one: a Details-card row, folded into another field as texture, or a
+  `COMMUNITY_PROFILE_GROUPS` entry). **A live query against production
+  (this session had `/mcp` admin-tool access) found real, substantive
+  content already stored for 36 of 40 communities** — not the near-empty
+  state the edit-page's own `placeholder=` attribute text ("Placeholder,
+  not yet researched or weighted," removed in this PR since it's
+  misleading once the field renders publicly) might have suggested. So
+  this shipped mostly as "surface content that already exists," not "build
+  empty-state scaffolding for an unpopulated field," though the three-state
+  standard (verified/pending/empty) still holds for the 4 communities with
+  a real gap in one of the three. Placed by semantic fit, not to balance
+  group sizes: **Stage focus** joins "Who it's for" (a company-stage
+  targeting fact, a natural peer of the existing seniority-band "Who it
+  targets" entry); **Jobs program** joins "What you get" (a member benefit,
+  same category as Resources included); **Individual or team** joins "Cost
+  & structure" (a membership-structure/purchasing fact, closer to Business
+  model's "how this sustains itself" than to who it's personally for). No
+  new gating logic — `_narrative_field`/`gates.field_state` handle all
+  three exactly like every other group field, off the same whole-profile
+  `needs_review` flag `build_communities_compare` already reads once per
+  community.
+
+  **Same PR fixed a real spacing bug this build surfaced** (flagged mid-turn:
+  "too much spacing between the visit, compare, edit buttons and the
+  bottom line box... look at a software profile for comparison"): the
+  Community profile page's hero (name/tags/actions) and its screenshot
+  card used to sit side by side in their own two-column `.tp-band`
+  (`top_band`), so the Bottom line callout directly below it couldn't
+  start until that whole grid row finished — gated behind the (usually
+  much taller) screenshot column's height, not the hero column's actual,
+  much shorter, content height. Software's own Tool Profile Layout: Sidebar
+  Consolidation pass (above) had already solved the identical problem for
+  the Software profile page — hero full-width above a single `.tp-band`,
+  screenshot moved into the sidebar column — so this mirrors that exact
+  pattern rather than inventing a new one: `hero_text` now renders
+  full-width (no band, no screenshot beside it), and `screenshot_block`
+  opens the sidebar column of the one remaining band (renamed
+  `content_band`, from `lower_band`), alongside Details/Categories/Similar
+  communities — the same reference-sidebar grouping this page already used
+  for those three, just extended to the screenshot. The CSS gained
+  `.tp-band:first-of-type{margin-top:20px;}`, matching Software's own
+  override, since there's now only one `.tp-band` on the page. On mobile
+  (`<=800px`, unchanged breakpoint), the sidebar now falls after all the
+  main-column narrative content in DOM order rather than right after the
+  hero — the same "main column first, sidebar second" mobile order
+  Software's Sidebar Consolidation pass already established, not a new
+  decision; verified with a real 390×844 Playwright session (no horizontal
+  overflow, narrative-first stacking).
+
+  **Standing rule this PR enforces, worth restating for future field
+  additions**: every admin-editable field must render on at least the
+  profile page (and Compare, where applicable) — no field is ever
+  collected-but-never-shown. See `linklib/compare.py`'s own comment on
+  `COMMUNITY_PROFILE_GROUPS` for the placement reasoning, ARCHITECTURE.md's
+  matching bullet for the full technical write-up, and `tests/
+  test_surface_hidden_community_fields.py` for the regression coverage
+  (group placement, verified/pending/empty on both the profile page and
+  Compare).
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
