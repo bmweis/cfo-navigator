@@ -27170,6 +27170,15 @@ def admin_users(request: Request, msg: str = ""):
         # (override) note is gone, per Brian's ask; the value itself is
         # the only signal now, and typing a new one + Save is the only way
         # to change it) / a Save button, all in one flex row.
+        # 2026-09 cap-consolidation follow-up: the per-field Save button is
+        # gone — both cap inputs now ride along in the shared profile-form
+        # (via `form=`, same trick Name/Email already use) so the row's one
+        # Edit/Save toggle covers them too. A hidden `{field}_original`
+        # sibling records the value shown at render time, so a plain Name/
+        # Email save (which always resubmits the cap inputs' current value
+        # too, since they're part of the same form) can't silently pin a
+        # user's currently-effective default as an explicit override — see
+        # _apply_user_cap_override_from_form.
         return f"""<tr class="admin-table-row" {row_attrs}>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{uid}" class="users-row-cb" onchange="updateBulkButton('users')"></td>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:130px;">
@@ -27206,20 +27215,20 @@ def admin_users(request: Request, msg: str = ""):
             </form>
           </td>
           <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
-            <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+            <div style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
               <span style="color:var(--muted);">${spent:.2f} / $</span>
-              <input type="number" id="ask-input-{uid}" name="cap" step="0.01" min="0" value="{effective_cap:.2f}" readonly
+              <input type="number" id="ask-input-{uid}" form="{profile_form_id}" name="ask_cap" step="0.01" min="0" value="{effective_cap:.2f}" readonly
                 title="This user's current monthly cap" style="{cap_input_style_view}">
-              <button type="submit" id="ask-save-{uid}" class="btn btn-ghost" style="{action_btn_style}" hidden>Save</button>
-            </form>
+              <input type="hidden" name="ask_cap_original" value="{effective_cap:.2f}" form="{profile_form_id}">
+            </div>
           </td>
           <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
-            <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+            <div style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
               <span style="color:var(--muted);">${mm_spent:.2f} / $</span>
-              <input type="number" id="mm-input-{uid}" name="cap" step="0.01" min="0" value="{mm_effective_cap:.2f}" readonly
+              <input type="number" id="mm-input-{uid}" form="{profile_form_id}" name="matchmaker_cap" step="0.01" min="0" value="{mm_effective_cap:.2f}" readonly
                 title="This user's current monthly cap" style="{cap_input_style_view}">
-              <button type="submit" id="mm-save-{uid}" class="btn btn-ghost" style="{action_btn_style}" hidden>Save</button>
-            </form>
+              <input type="hidden" name="matchmaker_cap_original" value="{mm_effective_cap:.2f}" form="{profile_form_id}">
+            </div>
           </td>
           <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
@@ -27380,14 +27389,19 @@ initColPicker('users', {json.dumps([k for k, _ in users_cols])}, {json.dumps(lis
 applySortFilter('users');
 // 2026-09 view/edit-mode follow-up: the row is read-only until this fires.
 // One click reveals every editable control for that row at once (Make
-// admin/member under the Access badge, Disable/Enable under Status, the
-// Password field's input+Reset, and both cap inputs' Save buttons) and
-// turns Name/Email/the cap inputs from plain-looking readonly fields into
-// bordered editable ones. The SAME button becomes "Save" and, on the next
-// click, submits the Name/Email <form> (id="profile-form-{{uid}}") — every
-// other field (Make admin/member, Disable/Enable, password Reset, each
-// cap's own Save) already gets its own visible submit button once
-// revealed, so this only needs to submit Name/Email on the toggle's behalf.
+// admin/member under the Access badge, Disable/Enable under Status, and
+// the Password field's input+Reset) and turns Name/Email/both cap inputs
+// from plain-looking readonly fields into bordered editable ones. The SAME
+// button becomes "Save" and, on the next click, submits the shared
+// <form id="profile-form-{{uid}}"> — which now carries Name, Email, AND
+// both cap values together (2026-09 cap-consolidation follow-up: the two
+// cap fields used to each have their own separate "Set" button/form;
+// they're part of this one form now via the `form=` attribute, same as
+// Name/Email, so one row-level Save covers everything except the two
+// controls that still need a deliberate, separate click — Make admin/
+// member, Disable/Enable, and password Reset all stay their own buttons,
+// since each is a distinct, consequential action rather than a plain field
+// edit).
 //
 // Deliberately NOT done by turning this button into a real type="submit"
 // tied to the form via the `form=` attribute (the first version of this
@@ -27417,10 +27431,6 @@ function toggleUserEdit(uid, btn) {{
   if (pwView) pwView.hidden = true;
   if (pwEdit) pwEdit.hidden = false;
   ['role-form-', 'toggle-form-'].forEach(function(prefix) {{
-    var el = document.getElementById(prefix + uid);
-    if (el) el.hidden = false;
-  }});
-  ['ask-save-', 'mm-save-'].forEach(function(prefix) {{
     var el = document.getElementById(prefix + uid);
     if (el) el.hidden = false;
   }});
@@ -27550,6 +27560,37 @@ async def admin_users_ask_cap_default(request: Request):
     return RedirectResponse(f"/admin/users?msg={quote(f'Default FP&A Buddy cap set to ${cap:.2f}/month.')}", status_code=303)
 
 
+def _apply_user_cap_override_from_form(lib, user_id: int, form, field: str, setter) -> None:
+    """2026-09 cap-consolidation follow-up: the FP&A Buddy/Matchmaker cap
+    inputs now ride along in the row's one shared Save (via the HTML
+    `form=` attribute, same trick Name/Email already used), replacing the
+    two separate per-cap "Set" buttons — but ONLY actually writes an
+    override when the submitted value differs from what the field showed
+    at render time (a hidden `{field}_original` sibling input, also part
+    of the same form). Without that guard, an ordinary Name/Email save
+    would silently resubmit whatever the cap input's CURRENT effective
+    value happens to be (default or override, always populated, never
+    blank) and pin it as an explicit override — quietly converting a user
+    who's following the site default into one with a pinned override just
+    because someone corrected their name. Skipped entirely if the field is
+    absent from the form at all (`None`), so a stray raw POST that only
+    sets name/email/username can never (de)clear a cap either."""
+    raw = form.get(field)
+    if raw is None:
+        return
+    original = (form.get(f"{field}_original") or "").strip()
+    raw = raw.strip()
+    if raw == original:
+        return
+    if not raw:
+        setter(user_id, None)
+        return
+    try:
+        setter(user_id, max(0.0, float(raw)))
+    except ValueError:
+        pass  # not a valid number — leave the cap untouched rather than 500
+
+
 @app.post("/admin/users/{user_id}/edit")
 async def admin_users_edit(request: Request, user_id: int):
     if not _is_authed(request):
@@ -27568,11 +27609,22 @@ async def admin_users_edit(request: Request, user_id: int):
             msg = f'Updated “{username.lower()}”.'
         except _sql.IntegrityError:
             msg = f'Username “{username.lower()}” is already taken.'
+        else:
+            _apply_user_cap_override_from_form(lib, user_id, form, "ask_cap", lib.set_user_ask_cap)
+            _apply_user_cap_override_from_form(lib, user_id, form, "matchmaker_cap", lib.set_user_matchmaker_cap)
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
+# 2026-09 cap-consolidation follow-up: /admin/users itself no longer posts to
+# either of the two routes below — the row's cap inputs now ride along in
+# the shared profile-form Save (see _apply_user_cap_override_from_form
+# above). Left in place rather than deleted: both are still real, directly
+# tested routes (test_admin_users_table.py, test_communities_matchmaker.py
+# post to them directly) offering a narrower single-field API than the
+# consolidated edit route — a deliberate, flagged choice to keep rather
+# than a silent decision either way.
 @app.post("/admin/users/{user_id}/ask-cap")
 async def admin_users_ask_cap(request: Request, user_id: int):
     if not _is_authed(request):

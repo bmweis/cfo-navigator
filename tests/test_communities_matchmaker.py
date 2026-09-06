@@ -228,13 +228,18 @@ def test_chat_logged_in_user_cap_tracked_separately_from_session(env):
 
 
 def test_admin_users_page_shows_matchmaker_cap_controls(env):
+    """2026-09 cap-consolidation follow-up: the per-user Matchmaker cap
+    field no longer has its own <form action="...matchmaker-cap"> — it's
+    part of the shared profile-form now (submitted via the row's one
+    Edit/Save toggle), so the per-user action route is gone from the
+    rendered page; the site-wide default-cap form is untouched."""
     appmod, uid = env
     c = _client(appmod)
     r = c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
     r = c.get("/admin/users")
     assert r.status_code == 200
     assert "Matchmaker" in r.text
-    assert f"/admin/users/{uid}/matchmaker-cap" in r.text
+    assert f'name="matchmaker_cap"' in r.text
     assert "/admin/users/matchmaker-cap-default" in r.text
 
 

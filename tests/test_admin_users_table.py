@@ -198,15 +198,17 @@ def test_manage_panel_is_retired(env):
 
 
 def test_row_posts_to_all_the_same_action_routes_inline(env):
+    """2026-09 cap-consolidation follow-up: the two cap fields no longer
+    have their own <form action="...ask-cap"/"...matchmaker-cap">
+    — they're part of the shared profile-form now (form= attribute), so
+    those two actions are gone from this list; every other action still
+    posts to its own unchanged route."""
     jane_id, bob_id = _seed_users(env)
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
-    # Every action still posts to the same unchanged routes — view/edit-mode
-    # (2026-09) only changed when each control is *visible*, not where it
-    # posts to.
     assert f'action="/admin/users/{jane_id}/edit"' in body
-    assert f'action="/admin/users/{jane_id}/ask-cap"' in body
-    assert f'action="/admin/users/{jane_id}/matchmaker-cap"' in body
+    assert f'action="/admin/users/{jane_id}/ask-cap"' not in body
+    assert f'action="/admin/users/{jane_id}/matchmaker-cap"' not in body
     assert f'action="/admin/users/{jane_id}/password"' in body
     assert f'action="/admin/users/{jane_id}/role"' in body
     assert f'action="/admin/users/{jane_id}/toggle"' in body
@@ -269,6 +271,10 @@ def test_access_level_and_status_badges_carry_their_own_action_form(env):
 
 
 def test_ask_cap_override_still_works(env):
+    """The standalone /ask-cap route is no longer reachable from the UI
+    (2026-09 cap-consolidation follow-up — see the new tests below for the
+    consolidated path) but it's still a real, directly-tested route,
+    deliberately left in place rather than deleted."""
     jane_id, _ = _seed_users(env)
     admin = _admin_client(env)
     admin.post(f"/admin/users/{jane_id}/ask-cap", data={"cap": "12.50"})
@@ -284,12 +290,108 @@ def test_ask_cap_override_still_works(env):
 
 
 def test_matchmaker_cap_override_still_works(env):
+    """Same standalone-route note as test_ask_cap_override_still_works
+    above — /matchmaker-cap is unreachable from the UI now but still a
+    real, directly-tested route."""
     jane_id, _ = _seed_users(env)
     admin = _admin_client(env)
     admin.post(f"/admin/users/{jane_id}/matchmaker-cap", data={"cap": "3.00"})
     lib = env._lib()
     try:
         assert lib.get_user("jane")["matchmaker_cap_usd"] == 3.0
+    finally:
+        lib.close()
+
+
+# ---------------------------------------------------------------------------
+# 2a. Cap-consolidation follow-up (2026-09) — the per-field "Set" button is
+#     gone; both cap inputs ride along in the shared profile-form (via
+#     `form=`, same trick Name/Email already use), so the row's one Save
+#     covers name/email/both caps together. A hidden `{field}_original`
+#     sibling guards against an ordinary Name/Email save silently pinning
+#     a user's currently-effective (default) cap as an explicit override —
+#     see _apply_user_cap_override_from_form in webapp/app.py.
+# ---------------------------------------------------------------------------
+
+def test_cap_save_buttons_are_gone(env):
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert f'id="ask-save-{jane_id}"' not in body
+    assert f'id="mm-save-{jane_id}"' not in body
+    ask_input_tag = re.search(rf'<input[^>]*id="ask-input-{jane_id}"[^>]*>', body).group(0)
+    mm_input_tag = re.search(rf'<input[^>]*id="mm-input-{jane_id}"[^>]*>', body).group(0)
+    profile_form_id = f"profile-form-{jane_id}"
+    assert f'form="{profile_form_id}"' in ask_input_tag
+    assert f'form="{profile_form_id}"' in mm_input_tag
+    assert f'name="ask_cap"' in ask_input_tag
+    assert f'name="matchmaker_cap"' in mm_input_tag
+
+
+def test_cap_inputs_carry_a_hidden_original_value_in_the_same_form(env):
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    profile_form_id = f"profile-form-{jane_id}"
+    assert re.search(
+        rf'<input type="hidden" name="ask_cap_original" value="5\.00" form="{profile_form_id}">', body)
+    assert re.search(
+        rf'<input type="hidden" name="matchmaker_cap_original" value="2\.00" form="{profile_form_id}">', body)
+
+
+def test_saving_the_row_with_a_changed_cap_applies_the_override(env):
+    """Editing the cap input and clicking the row's one Save (the same
+    /edit route Name/Email already use) sets a real override — no separate
+    Set button needed."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    admin.post(f"/admin/users/{jane_id}/edit", data={
+        "username": "jane", "name": "Jane Doe", "email": "jane@example.com",
+        "ask_cap": "12.50", "ask_cap_original": "5.00",
+        "matchmaker_cap": "3.00", "matchmaker_cap_original": "2.00",
+    })
+    lib = env._lib()
+    try:
+        u = lib.get_user("jane")
+        assert u["ask_cap_usd"] == 12.5
+        assert u["matchmaker_cap_usd"] == 3.0
+    finally:
+        lib.close()
+
+
+def test_saving_the_row_with_an_unchanged_cap_does_not_create_an_override(env):
+    """The real bug this guard prevents: a plain Name/Email save always
+    resubmits the cap inputs' current (default) value too, since they're
+    part of the same form — that must NOT silently convert "follows the
+    site default" into a pinned override."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    admin.post(f"/admin/users/{jane_id}/edit", data={
+        "username": "jane", "name": "Jane Updated", "email": "jane@example.com",
+        "ask_cap": "5.00", "ask_cap_original": "5.00",
+        "matchmaker_cap": "2.00", "matchmaker_cap_original": "2.00",
+    })
+    lib = env._lib()
+    try:
+        u = lib.get_user("jane")
+        assert u["name"] == "Jane Updated"
+        assert u["ask_cap_usd"] is None
+        assert u["matchmaker_cap_usd"] is None
+    finally:
+        lib.close()
+
+
+def test_clearing_the_cap_input_clears_an_existing_override(env):
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    admin.post(f"/admin/users/{jane_id}/ask-cap", data={"cap": "12.50"})
+    admin.post(f"/admin/users/{jane_id}/edit", data={
+        "username": "jane", "name": "", "email": "",
+        "ask_cap": "", "ask_cap_original": "12.50",
+    })
+    lib = env._lib()
+    try:
+        assert lib.get_user("jane")["ask_cap_usd"] is None
     finally:
         lib.close()
 
@@ -336,18 +438,17 @@ def test_hidden_attribute_override_present(env):
 
 
 def test_editable_controls_hidden_by_default(env):
-    """Every control that should only appear in edit mode starts with the
-    `hidden` attribute: the cap Save buttons, and the password edit form
-    (input+Reset) — the role/toggle forms are covered by
-    test_access_level_and_status_badges_carry_their_own_action_form."""
+    """The password edit form (input+Reset) starts with the `hidden`
+    attribute, only revealed once Edit is clicked — the role/toggle forms
+    are covered by test_access_level_and_status_badges_carry_their_own_
+    action_form; the cap fields have no Save button to hide any more
+    (2026-09 cap-consolidation follow-up — they're readonly inputs, not a
+    hidden button, see test_cap_save_buttons_are_gone and
+    test_cap_fields_show_current_effective_value_readonly_by_default)."""
     jane_id, _ = _seed_users(env)
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
-    ask_save_tag = re.search(rf'<button[^>]*id="ask-save-{jane_id}"[^>]*>', body).group(0)
-    mm_save_tag = re.search(rf'<button[^>]*id="mm-save-{jane_id}"[^>]*>', body).group(0)
     pw_edit_tag = re.search(rf'<form id="pw-edit-{jane_id}"[^>]*>', body).group(0)
-    assert "hidden" in ask_save_tag
-    assert "hidden" in mm_save_tag
     assert "hidden" in pw_edit_tag
 
 

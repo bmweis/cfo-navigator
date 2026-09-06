@@ -1019,6 +1019,56 @@ reported by Brian — a direct instance of CLAUDE.md's standing rule that an
 interactive change must be verified against what the browser actually
 receives, never just a rendered-HTML string.
 
+**Cap-consolidation follow-up (2026-09), same page — the two per-cap "Set"
+buttons are gone; both cap fields now ride along in the row's one shared
+Save.** Brian's ask after seeing the view/edit-mode redesign live: connect
+the FP&A Buddy/Matchmaker cap inputs to the row-level Save button instead of
+each having its own. Mechanically straightforward — both cap `<input>`s
+already had `id`s; they gained `form="profile-form-{uid}"` (the same
+`form=` attribute trick Name/Email already used to ride in a `<form>` that
+isn't their DOM parent) and were renamed from a shared `name="cap"` (fine
+when each lived in its own standalone form) to distinct `name="ask_cap"`/
+`name="matchmaker_cap"`, since both now submit through the identical form.
+Their wrapping `<form method="post" action=".../ask-cap">`/`.../matchmaker-
+cap">` elements and the two hidden `ask-save-{uid}`/`mm-save-{uid}` buttons
+are gone outright — replaced by a plain `<div>` for the flex layout.
+
+**The real design problem this raised, not just a markup move**: the cap
+input always displays the CURRENT effective value (default or override,
+never blank — the `(default)`/`(override)` note text was already dropped in
+the view/edit-mode redesign above), so once it's part of the same form as
+Name/Email, an ordinary "fix this user's name" save would resubmit that
+value on every save, not just an intentional cap change. Naively writing
+whatever's submitted would silently convert every "follows the site
+default" user into "pinned override at today's default" the first time
+anyone touched their row for an unrelated reason — a real, easy-to-miss
+regression, not a hypothetical. Fixed with a hidden `{field}_original`
+sibling input (`ask_cap_original`/`matchmaker_cap_original`, also
+`form=`-attached to the same shared form) that records the value the field
+showed at render time; a new shared `_apply_user_cap_override_from_form`
+helper in `webapp/app.py` only calls `Library.set_user_ask_cap`/
+`set_user_matchmaker_cap` when the submitted value actually differs from
+that original — an untouched cap field is a no-op regardless of what it
+displays, exactly matching the pre-consolidation "only Set actually
+changes it" behavior. A field cleared to blank still clears an existing
+override (`setter(user_id, None)`), same as the standalone routes always
+did. Verified live (Playwright + a direct DB read, not just an HTTP
+status): editing jane's FP&A Buddy cap and clicking the row's Save applied
+the new override; editing bob's Name (leaving both cap fields at their
+unedited default value) left both of his caps `NULL` — the guard held.
+
+**The two standalone routes, `POST /admin/users/{id}/ask-cap`/
+`.../matchmaker-cap`, are deliberately NOT deleted** — a flagged choice,
+not a silent one. Nothing in the `/admin/users` UI posts to them any more,
+but they're still real, independently exercised routes
+(`tests/test_admin_users_table.py`'s own `test_ask_cap_override_still_works`/
+`test_matchmaker_cap_override_still_works`, and
+`tests/test_communities_matchmaker.py`) offering a narrower single-field
+API than the consolidated `/edit` route now provides. Removing them was
+judged separate, larger scope than what was asked — kept as a documented,
+still-functional (if UI-orphaned) mechanism rather than silently deciding
+either way.
+
 **Duplicate-URL blocking on save (both tables, create and edit).**
 `linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
 `_find_community_by_normalized_url` lookup on `Library` guard `add_tool`,
