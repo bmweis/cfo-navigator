@@ -100,16 +100,33 @@ def test_open_task_counts_empty_by_default(lib):
 
 def test_open_task_counts_reflects_pending_tool(lib):
     from webapp import tasks
-    # add_tool() defaults needs_review=1 for a brand-new tool (see its own
-    # docstring), so an unapproved tool is counted twice here: once by
-    # count_pending_tools() (awaiting approval) and once by
-    # count_tools_needing_attention() (needs_review=1) — the Software card's
-    # badge combines both, mirroring Communities' own card's shape (pending +
-    # a needing-review signal), per webapp.tasks' own comment.
+    # add_tool() defaults needs_review=1 for EVERY brand-new tool (see its
+    # own docstring) and approve_tool() never touches needs_review — so an
+    # unapproved tool always satisfies both "pending approval" and "needs
+    # review" at once. Before the dedup fix, the badge summed two separate
+    # counts and double-counted this every time; now it's a single deduped
+    # count and this tool counts once.
     lib.add_tool("A", "desc", "https://a.example", [], approved=0)
     counts = tasks.open_task_counts(lib)
-    assert counts["/admin/tools/software"] == 2
+    assert counts["/admin/tools/software"] == 1
     assert tasks.has_open_tasks(lib) is True
+
+
+def test_open_task_counts_does_not_double_count_pending_and_needing_review_tool(lib):
+    """Direct regression test for the double-count bug: a single tool that
+    is BOTH pending approval AND needs-review (the guaranteed-overlap case
+    every brand-new tool hits) must count once in the Software badge, not
+    twice — and a second, distinct pending tool must still add a second
+    count on top of it."""
+    from webapp import tasks
+    lib.add_tool("A", "desc", "https://a.example", [], approved=0)  # pending + needs_review=1
+    lib.add_tool("B", "desc", "https://b.example", [], approved=1, needs_review=0)
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/tools/software"] == 1  # not 2
+
+    lib.add_tool("C", "desc", "https://c.example", [], approved=0)  # a second, distinct overlap case
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/tools/software"] == 2  # not 4
 
 
 def test_open_task_counts_dedupes_per_field_verification_flags(lib):
@@ -140,11 +157,41 @@ def test_open_task_counts_dedupes_per_field_verification_flags(lib):
 
 def test_open_task_counts_reflects_pending_community(lib):
     from webapp import tasks
+    # Unlike tools, a freshly submitted community has NO community_profiles
+    # row at all (that table's needs_review flag doesn't exist until a
+    # profile is actually drafted) — so this pending community is NOT also
+    # needs-review, and the count here (1) isn't proof of dedup on its own;
+    # see test_open_task_counts_does_not_double_count_pending_and_needing_
+    # review_community below for the real overlap case.
     lib.add_community(name="A", url="https://a.example", demographic="CFOs",
                        cost_band="Free", categories=[], approved=0)
     counts = tasks.open_task_counts(lib)
     assert counts["/admin/tools/communities"] == 1
     assert tasks.has_open_tasks(lib) is True
+
+
+def test_open_task_counts_does_not_double_count_pending_and_needing_review_community(lib):
+    """Communities' overlap isn't automatic the way tools' is (see
+    Library.count_communities_needing_attention()'s own docstring) — it
+    requires an admin to draft/save a profile for a still-pending
+    community, reachable only by direct URL — but nothing in the code
+    prevents it, so it must still dedupe correctly when it happens."""
+    from webapp import tasks
+    community_id = lib.add_community(name="A", url="https://a.example", demographic="CFOs",
+                                      cost_band="Free", categories=[], approved=0)
+    lib.upsert_community_profile(community_id, ideal_member="CFOs at Series B+", needs_review=1)
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/tools/communities"] == 1  # not 2
+
+    lib.add_community(name="B", url="https://b.example", demographic="CFOs",
+                       cost_band="Free", categories=[], approved=1)  # a distinct approved-but-unrelated row
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/tools/communities"] == 1  # unaffected — B has no profile, not needs-review
+
+    lib.add_community(name="C", url="https://c.example", demographic="CFOs",
+                       cost_band="Free", categories=[], approved=0)  # a second, distinct pending community
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/tools/communities"] == 2  # not 3
 
 
 def test_open_task_counts_reflects_new_contact(lib):
@@ -550,4 +597,4 @@ def test_nested_group_badge_shows_through_collapsed_parent(admin_client):
 
     m = re.search(r'<span class="task-badge">(\d+)</span>', toolbox_summary)
     assert m is not None
-    assert int(m.group(1)) >= 2  # the pending tool, counted twice (see above)
+    assert int(m.group(1)) >= 1  # the pending tool (deduped to 1, see the badge-dedup tests)

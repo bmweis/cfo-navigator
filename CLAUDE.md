@@ -6021,6 +6021,66 @@ never reads as something to tap.
   `test_open_task_counts_dedupes_per_field_verification_flags` for the
   regression coverage, including the multi-field-on-one-tool dedup case.
 
+- **Badge dedup safety, Software + Communities (2026-09) — both badges were
+  a sum of two separate counts, and a single row satisfying both conditions
+  at once got counted twice; both now read one dedup-safe count apiece
+  instead.** For Software this was a real, live bug, not a hypothetical:
+  `add_tool()` defaults `needs_review=1` for every brand-new tool regardless
+  of caller (admin add-form, public `/tools/submit`, seed scripts — none
+  passes 0), and `approve_tool()` only ever flips `approved`, never touches
+  `needs_review` or the three per-field flags — so every tool sitting in the
+  approval queue already also had `needs_review=1`, and the old `count_
+  pending_tools() + count_tools_needing_attention()` sum double-counted it
+  every time. `count_tools_needing_attention()` now also ORs in
+  `approved=0` alongside its existing conditions (still one query over the
+  `tools` table, one row per tool, no `DISTINCT` needed), and is the SOLE
+  count behind the Software badge — `count_pending_tools()` is no longer
+  summed alongside it (the method itself is untouched, just has no current
+  caller). For Communities the overlap is possible but not automatic: the
+  `needs_review` flag lives on `community_profiles`, a separate table with
+  no row at all until a profile is actually drafted, and the public
+  submission route (`add_community()` alone, no profile generation) never
+  creates one — but `GET`/`POST /admin/tools/communities/{id}/profile`
+  never checks the community's `approved` status either, so an admin
+  drafting/saving a profile for a still-pending submission (reachable only
+  by direct URL — no link from the Pending submissions table) would land in
+  exactly this state. New `Library.count_communities_needing_attention()`
+  (a `LEFT JOIN` against `community_profiles`, since most communities —
+  pending ones especially — have no profile row and an `INNER JOIN` would
+  silently drop them; `COUNT(DISTINCT c.id)` is defensive rather than
+  strictly required, since `community_profiles.community_id` is a 1:1
+  primary key with no fan-out risk) replaces the old `count_pending_
+  communities() + count_communities_needing_review()` sum the same way.
+  **No shared helper between the two** — investigated and deliberately
+  passed on: tools' fix is a single-table OR, Communities' needs a join
+  across two tables with different row-existence semantics, and a generic
+  "table + condition list" abstraction can't express that difference
+  cleanly without becoming its own small query builder for a two-call
+  audience. Both entities' individual count methods
+  (`count_pending_tools()`, `count_tools_needing_review()`, `count_pending_
+  communities()`, `count_communities_needing_review()`) are all untouched
+  and keep their own other callers — only the two badges' wiring in
+  `webapp.tasks.open_task_counts()` changed, from a sum to a single call
+  apiece. See `tests/test_task_badges.py`'s
+  `test_open_task_counts_does_not_double_count_pending_and_needing_review_tool`/
+  `..._community` for the direct regression coverage.
+
+- **Admin grid reorder (2026-09) — Thought leadership and CFO Toolbox moved
+  from the top of the right column to the left column, below Inbox; Brand,
+  voice, and content and System shifted up to fill the vacated top-right
+  slot.** Display-order only, confirmed before building: the two-column
+  split (`admin_page()`'s `_LEFT_GROUPS` set, iterated in `_ADMIN_GROUPS`'
+  own declared order) was already a simple set-membership check per group
+  name, not a hardcoded per-column layout — extending `_LEFT_GROUPS` from
+  `{"Inbox"}` to `{"Inbox", "Thought leadership", "CFO Toolbox"}` was the
+  entire fix, since `_ADMIN_GROUPS`' own iteration order already places
+  those three (then Brand/voice/content, then System) in exactly the
+  desired top-to-bottom sequence within each column. The mobile single-
+  column stack (both columns concatenate below the `1024px` breakpoint)
+  needed no separate change either, for the same reason. See `tests/
+  test_admin_nav_phase6.py`'s `test_admin_grid_reorder_renders_in_the_new_
+  order` for the regression coverage.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 

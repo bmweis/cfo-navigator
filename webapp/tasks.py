@@ -68,26 +68,25 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/library/queue": lib.queue_count(status="pending"),
         "/admin/library/review-removals": lib.flagged_count(),
         "/admin/contacts": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
-        # 2026-09: the Software card used to badge only count_pending_tools()
-        # (unapproved submissions), unlike Communities' card, which already
-        # combines pending approval with a needing-review signal
-        # (count_communities_needing_review()) — a real asymmetry, not a
-        # deliberate one. First fixed by mirroring Communities exactly
-        # (pending + count_tools_needing_review(), summed), per an explicit
-        # instruction to leave the three per-field *_needs_verification
-        # flags (Description/Agent taxonomy/Competitive differentiation) out
-        # of that PR — they had their own follow-on scope, not that one.
-        # That follow-on has since landed: count_tools_needing_review() is
-        # replaced here with count_tools_needing_attention(), which combines
-        # BOTH the whole-record needs_review signal and any of the three
-        # per-field flags into one deduped, per-tool count — see that
-        # method's own docstring for why a plain sum of the two would
-        # double-count nearly every affected tool (the field flags aren't
-        # independent of needs_review; a fresh draft that sets one also
-        # auto-sets the other in the same write).
-        "/admin/tools/software": lib.count_pending_tools() + lib.count_tools_needing_attention(),
+        # 2026-09: both Software's and Communities' badges used to be a SUM
+        # of two separate counts (pending-approval + needing-review) —
+        # Software's own history is a longer chain of fixes (see git
+        # history / CLAUDE.md), Communities' was the original shape. Both
+        # summed patterns share the same real flaw: if a single row can
+        # satisfy both conditions at once, it gets counted twice, inflating
+        # the badge past what's actually pending. Confirmed for tools this
+        # isn't hypothetical — see count_tools_needing_attention()'s own
+        # docstring for why EVERY unapproved tool already also has
+        # needs_review=1 by construction, making the old sum a real, live
+        # double-count today, not a latent risk. Communities' overlap is
+        # possible but not automatic (see count_communities_needing_
+        # attention()'s docstring) — fixed the same way regardless, since
+        # the sum pattern doesn't protect against it either way. Both
+        # badges now read a single dedup-safe count apiece, replacing the
+        # sum entirely rather than summing alongside it.
+        "/admin/tools/software": lib.count_tools_needing_attention(),
         "/admin/tools/software/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
-        "/admin/tools/communities": lib.count_pending_communities() + lib.count_communities_needing_review(),
+        "/admin/tools/communities": lib.count_communities_needing_attention(),
         "/admin/community-gaps": lib.community_gap_counts()["unreviewed"],
         "/admin/checks": _failing_checks_count(),
         "/admin/users": lib.count_pending_password_resets(),
