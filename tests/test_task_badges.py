@@ -4,6 +4,7 @@ admin href.
 """
 import os
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -99,10 +100,33 @@ def test_open_task_counts_empty_by_default(lib):
 
 def test_open_task_counts_reflects_pending_tool(lib):
     from webapp import tasks
+    # add_tool() defaults needs_review=1 for a brand-new tool (see its own
+    # docstring), so an unapproved tool is counted twice here: once by
+    # count_pending_tools() (awaiting approval) and once by
+    # count_tools_needing_review() (needs_review=1) — the Software card's
+    # badge combines both, mirroring Communities' own card exactly (pending +
+    # needing-review), per webapp.tasks' own comment.
     lib.add_tool("A", "desc", "https://a.example", [], approved=0)
     counts = tasks.open_task_counts(lib)
-    assert counts["/admin/tools/software"] == 1
+    assert counts["/admin/tools/software"] == 2
     assert tasks.has_open_tasks(lib) is True
+
+
+def test_open_task_counts_ignores_per_field_verification_flags(lib):
+    """The three per-field *_needs_verification flags (Description/Agent
+    taxonomy/Competitive differentiation) are deliberately NOT folded into
+    the Software card's badge in this PR — they have their own follow-on
+    scope defined separately. A tool with a pending field flag but no
+    whole-record needs_review, and not awaiting approval, should NOT show up
+    in the Software card's count."""
+    from webapp import tasks
+    tool_id = lib.add_tool("A", "desc", "https://a.example", [], approved=1, needs_review=0)
+    counts = tasks.open_task_counts(lib)
+    assert "/admin/tools/software" not in counts
+    lib.set_tool_agent_taxonomy_draft(tool_id, "note", needs_verification=1)
+    lib.mark_tool_reviewed(tool_id)  # clears needs_review, leaves the field flag set
+    counts = tasks.open_task_counts(lib)
+    assert "/admin/tools/software" not in counts
 
 
 def test_open_task_counts_reflects_pending_community(lib):
@@ -260,7 +284,12 @@ def test_tool_leads_badge_clears_after_viewing(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
-    tool_id = lib.add_tool("A", "desc", "https://a.example", [], approved=1)
+    # needs_review=0 (a brand-new tool otherwise defaults to 1, per add_tool's
+    # own docstring) so the only open task in play here is the lead itself —
+    # otherwise a lingering count_tools_needing_review()>0 would keep the
+    # global nav dot lit after the lead-specific dot clears below, unrelated
+    # to what this test is actually about.
+    tool_id = lib.add_tool("A", "desc", "https://a.example", [], approved=1, needs_review=0)
     lib.save_tool_lead(tool_id, "A", "Jane", "jane@x.com", "Acme", "50-200")
     lib.close()
 
@@ -279,7 +308,11 @@ def test_pending_tool_badge_only_clears_on_approval_not_view(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
-    lib.add_tool("A", "desc", "https://a.example", [], approved=0)
+    # needs_review=0 to isolate this test to the approval-queue count alone —
+    # a brand-new tool otherwise defaults to needs_review=1, which would add
+    # its own contribution via count_tools_needing_review() (see the
+    # dedicated tests for that above) and muddy this test's "1".
+    lib.add_tool("A", "desc", "https://a.example", [], approved=0, needs_review=0)
     lib.close()
 
     r1 = client.get("/admin")
@@ -378,13 +411,40 @@ def test_reject_community_deletes_pending_submission(admin_client):
         lib.close()
 
 
-# --- badge-visibility fix: a nonzero badge auto-expands its group ----------
-# (2026-08 — LiveFlow/Liveflow and a Runway name-duplicate pair sat correctly
-# detected and correctly badge-counted, but nobody noticed because the
-# Software sub-group carrying that badge was collapsed by default, two
-# disclosure levels deep. See CLAUDE.md.)
+def _group_label_index(text: str, label: str) -> int:
+    """Locate a group's own heading `>{label}<` inside its `_disclosure_group`
+    summary span, not some other coincidental occurrence of the same text
+    elsewhere on the page. Needed specifically for "CFO Toolbox": the public
+    nav bar's own `<a href="/tools">CFO Toolbox</a>` link renders *before*
+    the admin groups in document order and also matches a bare `>CFO
+    Toolbox<` substring search, so a naive `text.index(label)` finds the nav
+    link, not the group heading — `rfind("<details", ...)` from there then
+    walks back into an unrelated `<details>` (or, worse, the literal text
+    "<details" inside a CSS comment in the page's <style> block), producing
+    a false-passing assertion rather than a real one. Searching only after
+    `<h1>Admin</h1>` (the admin body's own start, always after the nav in
+    document order) sidesteps this for every group label, not just this
+    one."""
+    body_start = text.index("<h1>Admin</h1>")
+    return text.index(label, body_start)
 
-def test_group_with_nonzero_badge_starts_expanded(admin_client):
+
+# --- default-collapsed admin menus, badge stays visible collapsed ----------
+# (2026-09 — reverses the 2026-08 "a nonzero badge auto-expands its group"
+# fix below, per Brian's explicit call: badges ARE the review-inbox signal,
+# and auto-expanding on top of that duplicated it as an intrusive default
+# rather than adding a genuinely different safeguard. The 2026-08 fix's own
+# root cause — LiveFlow/Liveflow and a Runway name-duplicate pair sat
+# correctly detected and correctly badge-counted, but nobody noticed because
+# the Software sub-group carrying that badge was collapsed, two disclosure
+# levels deep, with only a small number on its summary row to hint at it —
+# is still guarded against here, just by a different mechanism: the group's
+# own badge only ever hides once its <details> is OPENED
+# (`.admin-group[open] .group-badge{display:none;}`), so a collapsed-by-
+# default group with something pending still shows its badge number,
+# unhidden, right on the summary row. See CLAUDE.md.)
+
+def test_all_groups_start_collapsed_even_with_a_nonzero_badge(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
@@ -393,21 +453,92 @@ def test_group_with_nonzero_badge_starts_expanded(admin_client):
     lib.close()
 
     r = client.get("/admin")
-    # The Software sub-group's own <details> tag must carry `open` now that
-    # it has a real pending name-duplicate to show, not just a badge number.
-    idx = r.text.index(">Software<")
-    details_start = r.text.rfind("<details", 0, idx)
-    tag_end = r.text.index(">", details_start)
-    assert " open" in r.text[details_start:tag_end]
+    # Every top-level group's <details>, and the nested Software sub-group's
+    # own <details>, must render collapsed on load — including Inbox (always
+    # open pre-2026-09) and Software (carrying a real pending name-duplicate
+    # badge here, which used to force it open too).
+    for label in (">Inbox<", ">CFO Toolbox<", ">Software<"):
+        idx = _group_label_index(r.text, label)
+        details_start = r.text.rfind("<details", 0, idx)
+        tag_end = r.text.index(">", details_start)
+        assert " open" not in r.text[details_start:tag_end], label
 
 
-def test_group_with_zero_badge_stays_collapsed(admin_client):
-    """Unchanged control case — a group with nothing pending still starts
-    collapsed, same as before this fix (only Inbox was ever open by
-    default)."""
+def test_group_with_zero_badge_also_stays_collapsed(admin_client):
+    """Control case — a group with nothing pending starts collapsed too,
+    same as always."""
     client, appmod, db = admin_client
     r = client.get("/admin")
-    idx = r.text.index(">Software<")
+    idx = _group_label_index(r.text, ">Software<")
     details_start = r.text.rfind("<details", 0, idx)
     tag_end = r.text.index(">", details_start)
     assert " open" not in r.text[details_start:tag_end]
+
+
+def test_group_badge_still_visible_while_collapsed(admin_client):
+    """The real regression guard replacing the old auto-expand fix: a
+    collapsed group carrying a real pending item still shows its badge
+    number on the summary row (`.group-badge` only hides once the group is
+    OPENED — see the CSS rule `.admin-group[open] .group-badge{display:
+    none;}` — so collapsed-by-default never hides a pending badge)."""
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.add_tool("LiveFlow", "desc", "https://liveflow.example", ["ERP"], approved=1)
+    lib.add_tool("Liveflow", "desc", "https://liveflow2.example", ["Financial Reporting"], approved=1)
+    lib.close()
+
+    r = client.get("/admin")
+    idx = _group_label_index(r.text, ">Software<")
+    details_start = r.text.rfind("<details", 0, idx)
+    details_end = r.text.index("</details>", idx)
+    # The Software sub-group's own badge markup must appear before its body
+    # content starts, i.e. inside the (collapsed) summary row.
+    summary_end = r.text.index("</summary>", details_start)
+    assert "task-badge" in r.text[details_start:summary_end]
+    assert details_end > summary_end
+
+
+def test_nested_group_badge_shows_through_collapsed_parent(admin_client):
+    """The exact condition the incident comment describes, re-verified now
+    that EVERY group (not just non-badged ones) defaults to collapsed: a
+    real pending item inside Software (nested two levels deep — CFO Toolbox
+    -> Software -> the tool itself) must still be visible from the admin
+    hub's top level without expanding anything, since a native <details>
+    hides its entire body — including a nested <details> and that nested
+    group's OWN badge span — the moment its parent is collapsed.
+
+    The mechanism that satisfies this isn't Software's own badge "showing
+    through" — it structurally can't, since it lives inside CFO Toolbox's
+    collapsed body. It's that CFO Toolbox's own group-level badge already
+    aggregates every href nested inside it (see `toolbox_hrefs` in
+    admin_page(), which folds in `software_hrefs`), so CFO Toolbox's own
+    <summary> — which stays visible regardless of its own open/closed state
+    — already reflects Software's pending count without needing Software's
+    <details> to be open at all."""
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.add_tool("A", "desc", "https://a.example", [], approved=0)
+    lib.close()
+
+    r = client.get("/admin")
+
+    # Both CFO Toolbox's and Software's own <details> render collapsed.
+    for label in (">CFO Toolbox<", ">Software<"):
+        idx = _group_label_index(r.text, label)
+        details_start = r.text.rfind("<details", 0, idx)
+        tag_end = r.text.index(">", details_start)
+        assert " open" not in r.text[details_start:tag_end], label
+
+    # CFO Toolbox's own summary row (visible without expanding anything)
+    # already carries a nonzero badge reflecting Software's pending tool.
+    idx = _group_label_index(r.text, ">CFO Toolbox<")
+    details_start = r.text.rfind("<details", 0, idx)
+    summary_end = r.text.index("</summary>", details_start)
+    toolbox_summary = r.text[details_start:summary_end]
+    assert "task-badge" in toolbox_summary
+
+    m = re.search(r'<span class="task-badge">(\d+)</span>', toolbox_summary)
+    assert m is not None
+    assert int(m.group(1)) >= 2  # the pending tool, counted twice (see above)
