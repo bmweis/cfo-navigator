@@ -5999,6 +5999,28 @@ never reads as something to tap.
   nested case specifically; the mirrored count and its deliberate exclusion
   of the per-field flags).
 
+- **Admin menu badge coverage, follow-up (2026-09) — the per-field
+  `*_needs_verification` flags this PR left out are folded in after all,
+  superseding that deliberate exclusion.** The earlier bullet's `count_
+  tools_needing_attention()` — combining the whole-record `needs_review`
+  signal with any of the three per-field flags into one deduped, per-tool
+  count — was built once, then reverted in favor of the plain `count_
+  pending_tools() + count_tools_needing_review()` sum described above, per
+  an explicit instruction at the time to defer the field flags to their own
+  follow-on scope. That follow-on scope is this PR: `count_tools_needing_
+  attention()` is resurrected verbatim (the original query needed no
+  changes — a `SELECT COUNT(*) FROM tools WHERE ...` over one row per tool
+  is already a per-tool dedup, no `DISTINCT` needed) and wired into
+  `webapp.tasks.open_task_counts()` in place of `count_tools_needing_
+  review()`. `count_tools_needing_review()` itself is untouched and keeps
+  its own other callers (the admin list's "Needs review" filter count, the
+  review-status pill's "(n/3)" breakdown) — only the Software card's badge
+  wiring changed. FP&A Buddy feedback (`ask_feedback`) is the one signal
+  still deliberately left out of the badge system — still no reviewed-state
+  column on that table at all. See `tests/test_task_badges.py`'s
+  `test_open_task_counts_dedupes_per_field_verification_flags` for the
+  regression coverage, including the multi-field-on-one-tool dedup case.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 

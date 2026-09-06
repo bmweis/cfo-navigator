@@ -103,30 +103,39 @@ def test_open_task_counts_reflects_pending_tool(lib):
     # add_tool() defaults needs_review=1 for a brand-new tool (see its own
     # docstring), so an unapproved tool is counted twice here: once by
     # count_pending_tools() (awaiting approval) and once by
-    # count_tools_needing_review() (needs_review=1) — the Software card's
-    # badge combines both, mirroring Communities' own card exactly (pending +
-    # needing-review), per webapp.tasks' own comment.
+    # count_tools_needing_attention() (needs_review=1) — the Software card's
+    # badge combines both, mirroring Communities' own card's shape (pending +
+    # a needing-review signal), per webapp.tasks' own comment.
     lib.add_tool("A", "desc", "https://a.example", [], approved=0)
     counts = tasks.open_task_counts(lib)
     assert counts["/admin/tools/software"] == 2
     assert tasks.has_open_tasks(lib) is True
 
 
-def test_open_task_counts_ignores_per_field_verification_flags(lib):
+def test_open_task_counts_dedupes_per_field_verification_flags(lib):
     """The three per-field *_needs_verification flags (Description/Agent
-    taxonomy/Competitive differentiation) are deliberately NOT folded into
-    the Software card's badge in this PR — they have their own follow-on
-    scope defined separately. A tool with a pending field flag but no
-    whole-record needs_review, and not awaiting approval, should NOT show up
-    in the Software card's count."""
+    taxonomy/Competitive differentiation) ARE folded into the Software
+    card's badge, via count_tools_needing_attention() — but deduped per
+    tool, not summed per field: a tool with 2 or 3 pending fields still
+    counts once. Also covers the edge case that method's docstring names:
+    a field flag pending with no whole-record needs_review (and not
+    awaiting approval) still shows up."""
     from webapp import tasks
     tool_id = lib.add_tool("A", "desc", "https://a.example", [], approved=1, needs_review=0)
     counts = tasks.open_task_counts(lib)
     assert "/admin/tools/software" not in counts
+
     lib.set_tool_agent_taxonomy_draft(tool_id, "note", needs_verification=1)
     lib.mark_tool_reviewed(tool_id)  # clears needs_review, leaves the field flag set
     counts = tasks.open_task_counts(lib)
-    assert "/admin/tools/software" not in counts
+    assert counts["/admin/tools/software"] == 1
+
+    # A second pending field on the SAME tool must not push the count to 2.
+    lib.update_tool(tool_id, "A", "new desc", "https://a.example", [],
+                     summary="new summary", description_needs_verification=1)
+    lib.mark_tool_reviewed(tool_id)  # needs_review only, field flags untouched
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/tools/software"] == 1
 
 
 def test_open_task_counts_reflects_pending_community(lib):
@@ -286,7 +295,7 @@ def test_tool_leads_badge_clears_after_viewing(admin_client):
     lib = Library(db)
     # needs_review=0 (a brand-new tool otherwise defaults to 1, per add_tool's
     # own docstring) so the only open task in play here is the lead itself —
-    # otherwise a lingering count_tools_needing_review()>0 would keep the
+    # otherwise a lingering count_tools_needing_attention()>0 would keep the
     # global nav dot lit after the lead-specific dot clears below, unrelated
     # to what this test is actually about.
     tool_id = lib.add_tool("A", "desc", "https://a.example", [], approved=1, needs_review=0)
@@ -310,7 +319,7 @@ def test_pending_tool_badge_only_clears_on_approval_not_view(admin_client):
     lib = Library(db)
     # needs_review=0 to isolate this test to the approval-queue count alone —
     # a brand-new tool otherwise defaults to needs_review=1, which would add
-    # its own contribution via count_tools_needing_review() (see the
+    # its own contribution via count_tools_needing_attention() (see the
     # dedicated tests for that above) and muddy this test's "1".
     lib.add_tool("A", "desc", "https://a.example", [], approved=0, needs_review=0)
     lib.close()

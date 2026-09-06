@@ -5326,6 +5326,55 @@ class Library:
             "SELECT COUNT(*) FROM tools WHERE needs_review=1"
         ).fetchone()[0]
 
+    def count_tools_needing_attention(self) -> int:
+        """Distinct-tool count for the admin badge (2026-09) — combines the
+        whole-record `needs_review` signal with any of the three per-field
+        `*_needs_verification` flags (Description/Agent taxonomy/Competitive
+        differentiation) into ONE deduped number, not two counts summed.
+
+        This was built once, deliberately reverted in favor of a plain
+        `count_pending_tools() + count_tools_needing_review()` sum (mirroring
+        Communities' own two-independent-dimensions shape) per an earlier,
+        explicit instruction to defer the per-field flags to their own
+        follow-on scope — then resurrected here per a later, superseding
+        instruction asking for exactly this combined, deduped count. Kept
+        verbatim from the original build; nothing about the query itself
+        needed to change.
+
+        Why a plain sum of `count_tools_needing_review()` and a separate
+        per-field count would be wrong: tools' three per-field flags aren't
+        independent of `needs_review` the way Communities' two dimensions
+        are — a fresh Generate/Refresh draft that lands any one of them on 1
+        also force-sets `needs_review` to 1 in the same write (see the
+        "Tools whole-record profile signoff" migration note), so for the
+        overwhelming majority of affected tools, `needs_review=1` and "some
+        field flag is set" are the SAME event, not two separate ones.
+        Summing them would double-count nearly every one, inflating the
+        badge exactly the way the per-field dedup requirement itself exists
+        to prevent (see CLAUDE.md's "one tool with 3 pending fields counts
+        once, not three" guidance) — just at the whole-record/per-field
+        boundary instead of across fields.
+
+        The one real edge case where the two signals diverge: `mark_tool_
+        reviewed()` clears `needs_review` alone and never touches the three
+        field flags, so a tool can have `needs_review=0` with a field flag
+        still genuinely pending (its own per-field "Mark verified" never
+        clicked). A single OR'd query over the `tools` table — one row per
+        tool, so `COUNT(*)` here is already a per-tool count with no
+        separate DISTINCT needed — catches that case too: a strict superset
+        of both `count_tools_needing_review()` and a per-field-only dedup
+        count, with no double-counting between them. `count_tools_needing_
+        review()` itself is untouched and keeps its own other callers (the
+        admin list's "Needs review" filter count, the review-status pill's
+        "(n/3)" breakdown)."""
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM tools
+               WHERE needs_review=1
+                  OR description_needs_verification=1
+                  OR agent_taxonomy_needs_verification=1
+                  OR competitive_differentiation_needs_verification=1"""
+        ).fetchone()[0]
+
     def update_tool_screenshot(self, tool_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
         """Legacy narrow update, kept for pre-Phase-E callers/tests only —
         DO NOT call this from the admin edit-form submit path. Writes
