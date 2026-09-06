@@ -5209,6 +5209,65 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   manual per-item "Refresh" button in the reader toolbar — re-fetches on
   click only (no automatic staleness detection), non-destructive on failure.
   See ARCHITECTURE.md's matching section and `tests/test_read_later_caching.py`.
+- **Reader expand-mode icon + typography polish (2026-09).** Two small bugs on
+  the Instapaper-style expand toggle (`#rr-reader-expand`), found via live-site
+  screenshots, no schema/route change. (1) **Icon geometry**: `RR_ICON_EXPAND`/
+  `RR_ICON_COLLAPSE` originally sat on Feather's stock NE/SW diagonal (arrows
+  toward the top-right/bottom-left corners) — mirrored horizontally onto the
+  NW/SE diagonal instead (top-left/bottom-right), per Brian's direct
+  confirmation, keeping each icon's own outward (collapsed state)/inward
+  (focus-mode state) direction unchanged — only the axis rotated. First pass at
+  this bug swapped which icon renders in which STATE instead of touching the
+  geometry; reverted once Brian clarified the direction/state mapping was
+  already correct and only the diagonal axis was wrong — worth remembering
+  that "icon points the wrong way" bug reports can mean either axis or
+  direction, and they're not interchangeable fixes.
+  (2) **Typography — the merged Feed/Archive/Read Later reader (`/read`) now
+  follows ordinary sitewide typography: Outfit heading, DM Sans body. Settled
+  after two rounds of correction, both flagged explicitly rather than
+  silently, same precedent as the homepage "🚧 building" sticker mix-up
+  elsewhere in this doc.** `.rr-reader-title` was hardcoded to `'Source Serif
+  4',Georgia,serif` with no letter-spacing — a leftover never updated to
+  Outfit when the standalone `/read/{article_id}` reader's own `.reader-meta
+  h1` (already Outfit) and this merged reader's heading treatments diverged —
+  fixed to `var(--font-head)` + `-.02em` tracking, matching BRAND.md's "Page
+  title (H1)" row, and unchanged across both rounds below. `.rr-reader-
+  body-text` went through two states before landing: **round 1** left it on
+  Source Serif 4, reasoning that BRAND.md §3 explicitly sanctioned serif for
+  exactly this surface ("No serif anywhere except the reader" / "Reader body |
+  Source Serif 4") — live-site-correct at the time (BRAND.md really did say
+  that), but wrong on what the page should look like: Brian confirmed on
+  seeing the "after" screenshot that the body should match the title, not stay
+  serif. **Round 2** moved it to `var(--font-head)` (Outfit) alongside the
+  title, on Brian's stated reasoning that the site's own published
+  thought-leadership content proves Outfit is the standard for body text —
+  checked directly against a real Original Content article's `.oc-body p`
+  (the same template Growth Engine Ratio/Sail Don't Row/NetSuite MCP render
+  through, confirmed via `getComputedStyle` and a live screenshot) and found
+  that claim didn't hold: body copy there is DM Sans, Outfit reserved for the
+  `<h1>`. Flagged before shipping a sitewide implication rather than
+  assuming the precedent was accurate; Brian's call once shown the
+  discrepancy was to revert the reader body to `var(--font-body)` (DM Sans)
+  to match the rest of the site, rather than either keep it on Outfit as a
+  one-off exception or change body copy to Outfit sitewide (the third option
+  offered, which would have been a much larger change touching `--font-body`
+  or every body-copy call site). **Net result: the merged reader is no longer
+  a documented typography exception at all** — Outfit heading + DM Sans body
+  is just the site's ordinary pairing, applied here like everywhere else.
+  Source Serif 4 survives ONLY on the standalone `/read/{article_id}`
+  single-article view (a separate, older template, `_READER_CSS`/
+  `.reader-body`, untouched by any of this), which is genuinely a narrower
+  scope than "the reader" as BRAND.md used to describe it — **BRAND.md §3 was
+  updated in the same PR** to match this final state. The now-unused `<link>`
+  that loaded Source Serif 4 specifically for the merged reader page was also
+  removed (nothing on that page references the font any more; both Outfit and
+  DM Sans are already loaded sitewide via `_page()`'s own font link). If a
+  future report says "the reader's font doesn't match the site," check which
+  of the two reader templates it's actually about, and verify any claimed
+  precedent (a specific page's actual computed style) before generalizing it
+  into a brand-standards change — BRAND.md was stale at round 1 of this fix,
+  and an unverified precedent claim was wrong at round 2, so neither "the doc
+  says so" nor "our other content proves it" was reliable on its own here.
 - **MCP server, Phase 1 (2026-09) — a read-only remote MCP server at `/mcp`,
   mounted in-process (same app, same deploy, no second service), with its
   own user-bound token auth and three admin-gated schema-introspection
