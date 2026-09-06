@@ -270,39 +270,6 @@ def test_access_level_and_status_badges_carry_their_own_action_form(env):
     assert "hidden" in toggle_form_tag
 
 
-def test_ask_cap_override_still_works(env):
-    """The standalone /ask-cap route is no longer reachable from the UI
-    (2026-09 cap-consolidation follow-up — see the new tests below for the
-    consolidated path) but it's still a real, directly-tested route,
-    deliberately left in place rather than deleted."""
-    jane_id, _ = _seed_users(env)
-    admin = _admin_client(env)
-    admin.post(f"/admin/users/{jane_id}/ask-cap", data={"cap": "12.50"})
-    lib = env._lib()
-    try:
-        assert lib.get_user("jane")["ask_cap_usd"] == 12.5
-    finally:
-        lib.close()
-    body = admin.get("/admin/users").text
-    # View/edit-mode redesign (2026-09): no more (default)/(override) note —
-    # the cap <input> just always holds the current effective value.
-    assert 'value="12.50"' in body
-
-
-def test_matchmaker_cap_override_still_works(env):
-    """Same standalone-route note as test_ask_cap_override_still_works
-    above — /matchmaker-cap is unreachable from the UI now but still a
-    real, directly-tested route."""
-    jane_id, _ = _seed_users(env)
-    admin = _admin_client(env)
-    admin.post(f"/admin/users/{jane_id}/matchmaker-cap", data={"cap": "3.00"})
-    lib = env._lib()
-    try:
-        assert lib.get_user("jane")["matchmaker_cap_usd"] == 3.0
-    finally:
-        lib.close()
-
-
 # ---------------------------------------------------------------------------
 # 2a. Cap-consolidation follow-up (2026-09) — the per-field "Set" button is
 #     gone; both cap inputs ride along in the shared profile-form (via
@@ -357,6 +324,9 @@ def test_saving_the_row_with_a_changed_cap_applies_the_override(env):
         assert u["matchmaker_cap_usd"] == 3.0
     finally:
         lib.close()
+    body = admin.get("/admin/users").text
+    assert 'value="12.50"' in body
+    assert 'value="3.00"' in body
 
 
 def test_saving_the_row_with_an_unchanged_cap_does_not_create_an_override(env):
@@ -382,9 +352,21 @@ def test_saving_the_row_with_an_unchanged_cap_does_not_create_an_override(env):
 
 
 def test_clearing_the_cap_input_clears_an_existing_override(env):
+    """Sets up the existing override via the same consolidated /edit route
+    (2026-09: the standalone /ask-cap route is gone entirely, not just
+    unreachable from the UI), then clears it the same way — blank input,
+    an `_original` that reflects what was actually showing."""
     jane_id, _ = _seed_users(env)
     admin = _admin_client(env)
-    admin.post(f"/admin/users/{jane_id}/ask-cap", data={"cap": "12.50"})
+    admin.post(f"/admin/users/{jane_id}/edit", data={
+        "username": "jane", "name": "", "email": "",
+        "ask_cap": "12.50", "ask_cap_original": "5.00",
+    })
+    lib = env._lib()
+    try:
+        assert lib.get_user("jane")["ask_cap_usd"] == 12.5
+    finally:
+        lib.close()
     admin.post(f"/admin/users/{jane_id}/edit", data={
         "username": "jane", "name": "", "email": "",
         "ask_cap": "", "ask_cap_original": "12.50",

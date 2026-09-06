@@ -27650,37 +27650,6 @@ async def admin_users_edit(request: Request, user_id: int):
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
-# 2026-09 cap-consolidation follow-up: /admin/users itself no longer posts to
-# either of the two routes below — the row's cap inputs now ride along in
-# the shared profile-form Save (see _apply_user_cap_override_from_form
-# above). Left in place rather than deleted: both are still real, directly
-# tested routes (test_admin_users_table.py, test_communities_matchmaker.py
-# post to them directly) offering a narrower single-field API than the
-# consolidated edit route — a deliberate, flagged choice to keep rather
-# than a silent decision either way.
-@app.post("/admin/users/{user_id}/ask-cap")
-async def admin_users_ask_cap(request: Request, user_id: int):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    form = await request.form()
-    raw = (form.get("cap") or "").strip()
-    lib = _lib()
-    try:
-        if raw:
-            try:
-                cap = max(0.0, float(raw))
-            except ValueError:
-                return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
-            lib.set_user_ask_cap(user_id, cap)
-            msg = f'FP&A Buddy cap override set to ${cap:.2f}/month.'
-        else:
-            lib.set_user_ask_cap(user_id, None)
-            msg = 'FP&A Buddy cap override cleared—this user now follows the site default.'
-    finally:
-        lib.close()
-    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
-
-
 @app.post("/admin/users/matchmaker-cap-default")
 async def admin_users_matchmaker_cap_default(request: Request):
     if not _is_authed(request):
@@ -27696,29 +27665,6 @@ async def admin_users_matchmaker_cap_default(request: Request):
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(f'Default Matchmaker cap set to ${cap:.2f}/month.')}", status_code=303)
-
-
-@app.post("/admin/users/{user_id}/matchmaker-cap")
-async def admin_users_matchmaker_cap(request: Request, user_id: int):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    form = await request.form()
-    raw = (form.get("cap") or "").strip()
-    lib = _lib()
-    try:
-        if raw:
-            try:
-                cap = max(0.0, float(raw))
-            except ValueError:
-                return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
-            lib.set_user_matchmaker_cap(user_id, cap)
-            msg = f'Matchmaker cap override set to ${cap:.2f}/month.'
-        else:
-            lib.set_user_matchmaker_cap(user_id, None)
-            msg = 'Matchmaker cap override cleared—this user now follows the site default.'
-    finally:
-        lib.close()
-    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
 def _is_last_active_admin(users: list[dict], user_id: int) -> bool:

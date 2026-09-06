@@ -1057,17 +1057,27 @@ status): editing jane's FP&A Buddy cap and clicking the row's Save applied
 the new override; editing bob's Name (leaving both cap fields at their
 unedited default value) left both of his caps `NULL` — the guard held.
 
-**The two standalone routes, `POST /admin/users/{id}/ask-cap`/
-`.../matchmaker-cap`, are deliberately NOT deleted** — a flagged choice,
-not a silent one. Nothing in the `/admin/users` UI posts to them any more,
-but they're still real, independently exercised routes
-(`tests/test_admin_users_table.py`'s own `test_ask_cap_override_still_works`/
-`test_matchmaker_cap_override_still_works`, and
-`tests/test_communities_matchmaker.py`) offering a narrower single-field
-API than the consolidated `/edit` route now provides. Removing them was
-judged separate, larger scope than what was asked — kept as a documented,
-still-functional (if UI-orphaned) mechanism rather than silently deciding
-either way.
+**Follow-up: the two standalone routes, `POST /admin/users/{id}/ask-cap`/
+`.../matchmaker-cap`, are now deleted outright.** Kept, initially, as a
+flagged (not silent) choice — nothing in the UI posted to them any more,
+but they were still real, independently tested routes offering a narrower
+single-field API than the consolidated `/edit` route. Brian confirmed
+they should go: per-user cap customization is unchanged (still editable
+per-row inputs), it just saves through the one consolidated Edit/Save
+action now instead of a separate Set button per field — no loss of
+control, no remaining reason for the narrower routes to exist. Removed
+both route handlers (`admin_users_ask_cap`/`admin_users_matchmaker_cap`)
+and their direct tests
+(`test_ask_cap_override_still_works`/`test_matchmaker_cap_override_still_works`
+in `tests/test_admin_users_table.py`); the two tests that used them only
+to seed state (`test_clearing_the_cap_input_clears_an_existing_override`,
+and `tests/test_communities_matchmaker.py`'s own matchmaker-cap tests)
+were rewired onto the consolidated `/edit` route instead, and
+`test_saving_the_row_with_a_changed_cap_applies_the_override` picked up
+the rendered-value assertion the removed test used to carry, so no
+coverage was lost in the removal. `POST /admin/users/{ask,matchmaker}-cap-
+default` (the two site-wide default-cap forms — a completely separate
+mechanism, keyed by no user id) are untouched.
 
 **Duplicate-URL blocking on save (both tables, create and edit).**
 `linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
