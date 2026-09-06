@@ -1,4 +1,4 @@
-"""Admin Users page: table redesign + MCP user setup docs.
+"""Admin Users page: table redesign, direct-edit rows, and MCP user setup docs.
 
 /admin/users moves from a one-card-per-user layout to the same standard
 admin-table convention already used by /admin/tools/software and
@@ -7,18 +7,36 @@ sort/filter, a "Delete selected" bulk action) — see CLAUDE.md's admin-table
 note. This is a layout change, not a feature change: every existing
 per-user action (profile edit, Ask/Matchmaker cap override, password reset,
 role toggle, active toggle, single-row delete, the pending-password-reset
-notice) has to keep working identically, reachable now via a per-row
-"Manage" button instead of a card's own header button. The one deliberately
-new mechanism is bulk delete (approved scope: "Delete selected" only, no
-bulk "Edit selected" — role/active toggles carry a last-active-admin guard
-that's inherently per-row, and a bulk version of it risks a silent
-partial-failure mode, per Brian's own call).
+notice) has to keep working identically.
 
-Also new: a collapsible "How to set up a new MCP user" disclosure block
-(reusing the exact <details>/<summary> markup already established on
+Direct-edit follow-up: the separate "Manage {user}" click-through panel is
+retired entirely. Full name/Email are inline fields saved directly in the
+row (one shared form, since posting only one of the two would blank the
+other — admin_users_edit writes whatever it's handed); FP&A Buddy/Matchmaker
+caps get an inline input + Set button each; password reset is an inline
+field + button in the Actions column; Username stays read-only (it's the
+login identifier); Access level/Status render as their own badge columns,
+with the actual mutating actions (Make admin/member, Disable/Enable,
+password reset, Delete) bundled into the Actions column instead of living
+beside each badge. "Add a member" also moves to the top of the page, beside
+the two dollar-cap default forms (2/3 + 1/3 width). The one deliberately new
+mechanism (unchanged by the direct-edit follow-up) is bulk delete (approved
+scope: "Delete selected" only, no bulk "Edit selected" — role/active toggles
+carry a last-active-admin guard that's inherently per-row, and a bulk version
+of it risks a silent partial-failure mode, per Brian's own call).
+
+Mobile-tidiness follow-up: FP&A Buddy cap and Matchmaker cap merged into one
+"Usage limits" column/mobile-card section — matching how Software/
+Communities' own mobile cards group related info under a single label
+(e.g. Review status: one label, a badge and its action button together)
+rather than a full separate section per field.
+
+Also: a collapsible "How to set up a new MCP user" disclosure block (reusing
+the exact <details>/<summary> markup already established on
 /admin/tools/communities), documenting the full account-creation ->
 cap-raise -> `scripts/mint_api_token.py` -> connector-setup flow.
 """
+import json
 import os
 import pathlib
 import re
@@ -108,8 +126,43 @@ def test_column_picker_lists_optional_columns(env):
     _seed_users(env)
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
-    for col in ("users:realname", "users:email", "users:last_login", "users:ask", "users:matchmaker"):
+    for col in ("users:realname", "users:email", "users:password", "users:last_login",
+                "users:access_level", "users:status", "users:ask", "users:matchmaker"):
         assert f'data-col="{col}"' in body
+
+
+def test_optional_columns_default_visible(env):
+    """The 'expand the table' ask reads as show-by-default, not hidden
+    behind the picker — every optional column starts checked."""
+    _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    for col in ("realname", "email", "password", "last_login", "access_level", "status", "ask", "matchmaker"):
+        assert f'id="colpick-users-{col}" checked' in body
+
+
+def test_initcolpicker_call_passes_the_real_default_visible_list(env):
+    """Real bug, caught by a live mobile screenshot check, not by the
+    server-rendered-checkbox test above: initColPicker()'s own fallback (used
+    whenever nothing's saved in localStorage yet — i.e. every first visit)
+    unconditionally overwrote every checkbox AND every column's actual
+    display to the single shared ADMIN_DEFAULT_VISIBLE_COLS ('review_status')
+    regardless of what the server rendered as checked — Users has no
+    'review_status' column, so every optional column silently rendered
+    hidden on load despite this page's own checkboxes showing checked. Fixed
+    by passing this page's real default-visible list as initColPicker's new
+    third argument; this test pins the actual JS call, not just the
+    server-rendered (and, pre-fix, misleading) checkbox markup."""
+    _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    m = re.search(r"initColPicker\('users',\s*(\[.*?\]),\s*(\[.*?\])\);", body)
+    assert m, "initColPicker('users', ...) call not found with a third argument"
+    cols = json.loads(m.group(1))
+    default_visible = json.loads(m.group(2))
+    for col in ("realname", "email", "password", "last_login", "access_level", "status", "ask", "matchmaker"):
+        assert col in cols
+        assert col in default_visible
 
 
 def test_rows_carry_username_role_and_status(env):
@@ -132,45 +185,292 @@ def test_empty_state_when_no_users(env):
 # 2. Per-user actions still work identically post-redesign.
 # ---------------------------------------------------------------------------
 
-def test_manage_button_and_panel_present_per_row(env):
+def test_manage_panel_is_retired(env):
+    """The separate "Manage {user}" click-through panel is gone — every
+    field it used to hold is edited directly in the row now."""
+    _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert "toggleManage(" not in body
+    assert 'id="manage-' not in body
+    assert "Manage jane" not in body
+    assert 'class="user-manage-panel"' not in body
+
+
+def test_row_posts_to_all_the_same_action_routes_inline(env):
+    """2026-09 cap-consolidation follow-up: the two cap fields no longer
+    have their own <form action="...ask-cap"/"...matchmaker-cap">
+    — they're part of the shared profile-form now (form= attribute), so
+    those two actions are gone from this list; every other action still
+    posts to its own unchanged route."""
     jane_id, bob_id = _seed_users(env)
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
-    assert f"toggleManage({jane_id})" in body
-    assert f'id="manage-{jane_id}"' in body
-    assert "Manage jane" in body
-    # The panel still posts to the same routes as before the redesign.
     assert f'action="/admin/users/{jane_id}/edit"' in body
-    assert f'action="/admin/users/{jane_id}/ask-cap"' in body
-    assert f'action="/admin/users/{jane_id}/matchmaker-cap"' in body
+    assert f'action="/admin/users/{jane_id}/ask-cap"' not in body
+    assert f'action="/admin/users/{jane_id}/matchmaker-cap"' not in body
     assert f'action="/admin/users/{jane_id}/password"' in body
     assert f'action="/admin/users/{jane_id}/role"' in body
     assert f'action="/admin/users/{jane_id}/toggle"' in body
     assert f'action="/admin/users/{jane_id}/delete"' in body
 
 
-def test_ask_cap_override_still_works(env):
+def test_username_is_read_only_no_input(env):
+    """Decision: username stays display-only — an accidental inline edit
+    of the login identifier is a bigger footgun than the convenience is
+    worth. Full name/Email get real <input>s; username does not."""
     jane_id, _ = _seed_users(env)
     admin = _admin_client(env)
-    admin.post(f"/admin/users/{jane_id}/ask-cap", data={"cap": "12.50"})
+    body = admin.get("/admin/users").text
+    # A hidden username field still rides along with the Full name/Email
+    # save (the edit route requires it) — but no *editable* username input.
+    assert 'type="text" name="username"' not in body
+    assert 'type="hidden" name="username" value="jane">' in body
+    assert '<span class="user-name">jane</span>' in body
+
+
+def test_full_name_and_email_share_one_form_via_form_attribute(env):
+    """Full name and Email post together in one request (a shared <form>,
+    referenced from the Full name cell's <input> via the HTML `form=`
+    attribute) — admin_users_edit writes whatever name/email it's given, so
+    two independent per-field forms would silently blank whichever field
+    wasn't included in a given save."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    form_id = f"profile-form-{jane_id}"
+    assert f'<form id="{form_id}"' in body
+    assert f'form="{form_id}" name="name"' in body
+    assert f'<input type="hidden" name="username" value="jane">' in body
+
+
+def test_access_level_and_status_badges_carry_their_own_action_form(env):
+    """View/edit-mode redesign (2026-09), a real reversal of the original
+    judgment call: Make admin/member and Disable/Enable used to live only in
+    the Actions column, separate from the Access/Status badges. Brian asked
+    for them moved directly under their own badge instead — they're hidden
+    (revealed only once "Edit" is clicked) but structurally part of the
+    SAME <td> as the badge now, not the Actions cell."""
+    jane_id, bob_id = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert 'data-col="users:access_level"' in body
+    assert 'data-col="users:status"' in body
+    # jane (role=user) gets a "Make admin" action; bob (role=admin) doesn't.
+    assert body.count(">Make admin<") == 1
+    # Both seeded accounts start active, so both rows offer "Disable".
+    assert body.count(">Disable<") == 2
+    # The role/toggle forms are hidden by default (view mode) — id-scoped
+    # per user, per-field, and both start with the `hidden` attribute.
+    assert f'id="role-form-{jane_id}"' in body
+    assert f'id="toggle-form-{jane_id}"' in body
+    role_form_tag = re.search(rf'<form id="role-form-{jane_id}"[^>]*>', body).group(0)
+    toggle_form_tag = re.search(rf'<form id="toggle-form-{jane_id}"[^>]*>', body).group(0)
+    assert "hidden" in role_form_tag
+    assert "hidden" in toggle_form_tag
+
+
+# ---------------------------------------------------------------------------
+# 2a. Cap-consolidation follow-up (2026-09) — the per-field "Set" button is
+#     gone; both cap inputs ride along in the shared profile-form (via
+#     `form=`, same trick Name/Email already use), so the row's one Save
+#     covers name/email/both caps together. A hidden `{field}_original`
+#     sibling guards against an ordinary Name/Email save silently pinning
+#     a user's currently-effective (default) cap as an explicit override —
+#     see _apply_user_cap_override_from_form in webapp/app.py.
+# ---------------------------------------------------------------------------
+
+def test_cap_save_buttons_are_gone(env):
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert f'id="ask-save-{jane_id}"' not in body
+    assert f'id="mm-save-{jane_id}"' not in body
+    ask_input_tag = re.search(rf'<input[^>]*id="ask-input-{jane_id}"[^>]*>', body).group(0)
+    mm_input_tag = re.search(rf'<input[^>]*id="mm-input-{jane_id}"[^>]*>', body).group(0)
+    profile_form_id = f"profile-form-{jane_id}"
+    assert f'form="{profile_form_id}"' in ask_input_tag
+    assert f'form="{profile_form_id}"' in mm_input_tag
+    assert f'name="ask_cap"' in ask_input_tag
+    assert f'name="matchmaker_cap"' in mm_input_tag
+
+
+def test_cap_inputs_carry_a_hidden_original_value_in_the_same_form(env):
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    profile_form_id = f"profile-form-{jane_id}"
+    assert re.search(
+        rf'<input type="hidden" name="ask_cap_original" value="5\.00" form="{profile_form_id}">', body)
+    assert re.search(
+        rf'<input type="hidden" name="matchmaker_cap_original" value="2\.00" form="{profile_form_id}">', body)
+
+
+def test_saving_the_row_with_a_changed_cap_applies_the_override(env):
+    """Editing the cap input and clicking the row's one Save (the same
+    /edit route Name/Email already use) sets a real override — no separate
+    Set button needed."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    admin.post(f"/admin/users/{jane_id}/edit", data={
+        "username": "jane", "name": "Jane Doe", "email": "jane@example.com",
+        "ask_cap": "12.50", "ask_cap_original": "5.00",
+        "matchmaker_cap": "3.00", "matchmaker_cap_original": "2.00",
+    })
+    lib = env._lib()
+    try:
+        u = lib.get_user("jane")
+        assert u["ask_cap_usd"] == 12.5
+        assert u["matchmaker_cap_usd"] == 3.0
+    finally:
+        lib.close()
+    body = admin.get("/admin/users").text
+    assert 'value="12.50"' in body
+    assert 'value="3.00"' in body
+
+
+def test_saving_the_row_with_an_unchanged_cap_does_not_create_an_override(env):
+    """The real bug this guard prevents: a plain Name/Email save always
+    resubmits the cap inputs' current (default) value too, since they're
+    part of the same form — that must NOT silently convert "follows the
+    site default" into a pinned override."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    admin.post(f"/admin/users/{jane_id}/edit", data={
+        "username": "jane", "name": "Jane Updated", "email": "jane@example.com",
+        "ask_cap": "5.00", "ask_cap_original": "5.00",
+        "matchmaker_cap": "2.00", "matchmaker_cap_original": "2.00",
+    })
+    lib = env._lib()
+    try:
+        u = lib.get_user("jane")
+        assert u["name"] == "Jane Updated"
+        assert u["ask_cap_usd"] is None
+        assert u["matchmaker_cap_usd"] is None
+    finally:
+        lib.close()
+
+
+def test_clearing_the_cap_input_clears_an_existing_override(env):
+    """Sets up the existing override via the same consolidated /edit route
+    (2026-09: the standalone /ask-cap route is gone entirely, not just
+    unreachable from the UI), then clears it the same way — blank input,
+    an `_original` that reflects what was actually showing."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    admin.post(f"/admin/users/{jane_id}/edit", data={
+        "username": "jane", "name": "", "email": "",
+        "ask_cap": "12.50", "ask_cap_original": "5.00",
+    })
     lib = env._lib()
     try:
         assert lib.get_user("jane")["ask_cap_usd"] == 12.5
     finally:
         lib.close()
-    body = admin.get("/admin/users").text
-    assert "$12.50" in body and "override" in body
-
-
-def test_matchmaker_cap_override_still_works(env):
-    jane_id, _ = _seed_users(env)
-    admin = _admin_client(env)
-    admin.post(f"/admin/users/{jane_id}/matchmaker-cap", data={"cap": "3.00"})
+    admin.post(f"/admin/users/{jane_id}/edit", data={
+        "username": "jane", "name": "", "email": "",
+        "ask_cap": "", "ask_cap_original": "12.50",
+    })
     lib = env._lib()
     try:
-        assert lib.get_user("jane")["matchmaker_cap_usd"] == 3.0
+        assert lib.get_user("jane")["ask_cap_usd"] is None
     finally:
         lib.close()
+
+
+# ---------------------------------------------------------------------------
+# 2b. View/edit-mode redesign (2026-09) — the row is read-only by default;
+#     one "Edit" button per row (Actions column) reveals every editable
+#     control at once and becomes "Save"; a second click submits Name/Email.
+#     A real bug was caught live here, not just by these assertions: the
+#     first version turned the button into a real type="submit" tied to the
+#     form via the `form=` attribute, which made Chromium submit the form on
+#     the SAME click that was only supposed to reveal the fields — the page
+#     navigated away before anything was ever shown. Fixed by never mutating
+#     the button's type; the second click calls form.requestSubmit()
+#     explicitly instead. See toggleUserEdit() in the page's own <script>.
+# ---------------------------------------------------------------------------
+
+def test_edit_button_renders_as_type_button_not_submit(env):
+    """Guards against reintroducing the type-mutation footgun: the button
+    must render (and stay, in markup) as type="button" — submission is
+    handled entirely by JS calling form.requestSubmit(), never by the
+    browser's native submit-button activation behavior."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert f'type="button" id="edit-btn-{jane_id}"' in body
+    assert f'onclick="toggleUserEdit({jane_id}, this)"' in body
+    assert f'type="submit" id="edit-btn-{jane_id}"' not in body
+
+
+def test_hidden_attribute_override_present(env):
+    """Real bug, caught live by screenshotting the page BEFORE ever clicking
+    Edit: the sitewide `.btn{{display:inline-block}}` rule is an
+    author-origin style, which always beats the browser's own
+    `[hidden]{{display:none}}` UA-stylesheet rule regardless of selector
+    specificity — so every hidden .btn (the cap Save buttons, at minimum)
+    rendered visible from first load, before Edit was ever clicked. This
+    pins the fix: an explicit `[hidden]{{display:none!important;}}` rule
+    that restores the attribute's actual default."""
+    _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert "[hidden]" in body and "display:none!important" in body
+
+
+def test_editable_controls_hidden_by_default(env):
+    """The password edit form (input+Reset) starts with the `hidden`
+    attribute, only revealed once Edit is clicked — the role/toggle forms
+    are covered by test_access_level_and_status_badges_carry_their_own_
+    action_form; the cap fields have no Save button to hide any more
+    (2026-09 cap-consolidation follow-up — they're readonly inputs, not a
+    hidden button, see test_cap_save_buttons_are_gone and
+    test_cap_fields_show_current_effective_value_readonly_by_default)."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    pw_edit_tag = re.search(rf'<form id="pw-edit-{jane_id}"[^>]*>', body).group(0)
+    assert "hidden" in pw_edit_tag
+
+
+def test_password_is_its_own_field_not_folded_into_actions(env):
+    """Password moves to its own column/field (was tucked into Actions
+    before) — view mode shows a plain bullet placeholder, no real value
+    (there's nothing to show — passwords are hashed); edit mode reveals the
+    same input+Reset button this always had, just relocated."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert 'data-col="users:password"' in body
+    assert f'id="pw-view-{jane_id}"' in body
+    assert f'action="/admin/users/{jane_id}/password"' in body
+
+
+def test_cap_fields_show_current_effective_value_readonly_by_default(env):
+    """No more (default)/(override) note text — the cap <input> just always
+    holds the current effective value (default, absent an override) and is
+    readonly until Edit is clicked."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    ask_input_tag = re.search(rf'<input[^>]*id="ask-input-{jane_id}"[^>]*>', body).group(0)
+    assert 'value="5.00"' in ask_input_tag  # the site default, no override set
+    assert "readonly" in ask_input_tag
+    assert "(default)" not in body
+    assert "(override)" not in body
+
+
+def test_name_and_email_inputs_readonly_by_default(env):
+    """Name/Email join the same view/edit-mode pattern as everything else —
+    readonly (view-mode "plain text" look) until Edit reveals them."""
+    jane_id, _ = _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    name_tag = re.search(rf'<input[^>]*id="name-input-{jane_id}"[^>]*>', body).group(0)
+    email_tag = re.search(rf'<input[^>]*id="email-input-{jane_id}"[^>]*>', body).group(0)
+    assert "readonly" in name_tag
+    assert "readonly" in email_tag
 
 
 def test_active_toggle_still_works(env):

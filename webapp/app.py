@@ -10880,17 +10880,30 @@ _ADMIN_BULK_EDIT_JS = """
 // count. See CLAUDE.md's admin-list column-defaults follow-up for the
 // full write-up (table-width investigation after PR 465).
 var ADMIN_DEFAULT_VISIBLE_COLS = ['review_status'];
-function initColPicker(tableKey, cols) {
+function initColPicker(tableKey, cols, defaultVisible) {
+  // defaultVisible (optional, 2026-09 Users-table fix): a per-table override
+  // of the fallback used when nothing's saved in localStorage yet. Before
+  // this parameter existed, EVERY table's fallback was the single shared
+  // ADMIN_DEFAULT_VISIBLE_COLS ('review_status') regardless of what
+  // _admin_column_picker_html's own `default_visible` pre-checked
+  // server-side — a real bug this fixes, not just a naming mismatch: this
+  // function's own `cb.checked = visible` line (below) OVERWRITES the
+  // server-rendered checkbox state to match `active` on every load, so a
+  // table with no `review_status` column (Users) silently ended up with
+  // every optional column hidden on first visit, contradicting its own
+  // rendered "checked" checkboxes. Software/Communities omit this argument
+  // and keep their exact original behavior (the global default, unchanged).
+  var fallback = defaultVisible || ADMIN_DEFAULT_VISIBLE_COLS;
   var stored = localStorage.getItem('cfo_admin_cols_' + tableKey);
   var active;
   if (stored) {
-    try { active = JSON.parse(stored); } catch (e) { active = ADMIN_DEFAULT_VISIBLE_COLS.slice(); }
+    try { active = JSON.parse(stored); } catch (e) { active = fallback.slice(); }
   } else {
     // No saved view yet — the minimal default (Name/Actions are always
     // shown, no data-col; only Review status joins them here) rather than
     // every column, so an admin list with a lot of optional metadata
     // (Communities) doesn't overflow its container by default.
-    active = ADMIN_DEFAULT_VISIBLE_COLS.slice();
+    active = fallback.slice();
   }
   cols.forEach(function(col) {
     var visible = active.indexOf(col) !== -1;
@@ -27085,8 +27098,40 @@ def admin_users(request: Request, msg: str = ""):
     # admin-table-convention note. Username/Actions have no data-col, so
     # they're always visible; everything else is picker-gated, same as the
     # other two tables.
-    users_cols = [("realname", "Name"), ("email", "Email"), ("last_login", "Last login"),
+    # 2026-09 table-redesign follow-up: Access level/Status join the optional
+    # columns (their own badge columns, per Brian's decision — display only,
+    # scannable at a glance; the actual change still goes through an
+    # explicit action button, bundled into the Actions column below rather
+    # than living beside the badge — see the PR description for why).
+    # default_visible now covers every optional column (the "expand the
+    # table" ask reads as show-by-default, not hidden-behind-a-picker), but
+    # the picker/toggle mechanism itself is unchanged from the other two
+    # admin tables.
+    # 2026-09 mobile-tidiness follow-up (superseded below): FP&A Buddy cap
+    # and Matchmaker cap were briefly merged into one "Usage limits" section,
+    # matching Software/Communities' own mobile cards (related info under
+    # ONE section label, e.g. Review status). Brian liked the mobile result
+    # but flagged the merged desktop column as crowded and asked for each
+    # cap to go back to being its own field — see the follow-up note right
+    # above _user_row's ask-cap/matchmaker-cap cells for how that's resolved
+    # (one compact single-line field each, identical at both breakpoints,
+    # rather than a device-specific merge).
+    #
+    # "Access level" shortened to "Access" here too (not just the mobile
+    # data-label from the earlier round) so the column-picker label and the
+    # <th> text both say the same short thing at every width.
+    # 2026-09 view/edit-mode follow-up: the row is read-only by default now
+    # (badges, plain values) — a single per-row "Edit" button (in Actions,
+    # becomes "Save" once clicked) reveals every editable control at once:
+    # Name/Email inputs, Make admin/member (now directly under the Access
+    # badge instead of in Actions), Disable/Enable (directly under Status),
+    # the Password field's input+Reset, and both cap inputs' Save buttons.
+    # Password is a real field/column of its own now (was folded into
+    # Actions before). See _user_row for the actual reveal mechanics.
+    users_cols = [("realname", "Name"), ("email", "Email"), ("password", "Password"),
+                  ("last_login", "Last login"), ("access_level", "Access"), ("status", "Status"),
                   ("ask", "FP&A Buddy cap"), ("matchmaker", "Matchmaker cap")]
+    users_default_visible = tuple(k for k, _ in users_cols)
     users_sort_fields = [("name", "Username"), ("last_login", "Last login"), ("created", "Created")]
     users_scalar_filters = [
         {"key": "role", "label": "Role", "options": ["Admin", "Member"]},
@@ -27105,14 +27150,16 @@ def admin_users(request: Request, msg: str = ""):
         last_raw = u["last_login_at"] or ""
         last_display = _esc(last_raw[:10]) or "—"
         created_raw = (u["created_at"] or "")[:10]
+        # 2026-09: no more (default)/(override) note — per Brian's ask, the
+        # cap field just shows the current effective value (whichever it
+        # is) and lets you overwrite it directly; cap_override itself is
+        # only needed to compute that effective value now.
         cap_override = u.get("ask_cap_usd")
         effective_cap = cap_override if cap_override is not None else default_cap
         spent = ask_spend.get(uid, 0.0)
-        cap_note = "override" if cap_override is not None else "default"
         mm_cap_override = u.get("matchmaker_cap_usd")
         mm_effective_cap = mm_cap_override if mm_cap_override is not None else default_mm_cap
         mm_spent = mm_spend.get(uid, 0.0)
-        mm_cap_note = "override" if mm_cap_override is not None else "default"
         resets = resets_by_user.get(uid)
         reset_notice = ""
         if resets:
@@ -27134,91 +27181,111 @@ def admin_users(request: Request, msg: str = ""):
             "created": created_raw,
             "search": f"{u['username']} {u.get('name') or ''} {u.get('email') or ''}",
         })
+        # 2026-09 direct-edit redesign: the separate "Manage" click-through
+        # panel is retired — Full name/Email are inline fields, saved via
+        # one shared <form> (id below) that both cells' inputs reference by
+        # the HTML `form=` attribute, so a Save posts both fields together
+        # in one request. That matters here specifically: admin_users_edit
+        # writes whatever `name`/`email` it's given, so posting only one of
+        # the two would blank the other — two independent per-field forms
+        # would silently clobber whichever field wasn't included.
+        profile_form_id = f"profile-form-{uid}"
+        name_val = _esc(u.get("name") or "")
+        email_val = _esc(u.get("email") or "")
+        # 2026-09 view/edit-mode follow-up: every field below now has a
+        # "view" look (transparent border/background — reads as plain text,
+        # even though it's still a real, readonly <input>) that JS
+        # (toggleUserEdit, in this page's own <script>) swaps to a
+        # bordered "edit" look — border-color/background only, same
+        # padding, so nothing reflows when edit mode opens. This one style
+        # string covers Name/Email; the cap inputs get their own narrower
+        # version below.
+        field_style_view = ("padding:6px 8px;border:1px solid transparent;border-radius:6px;font:inherit;"
+                             "font-size:12.5px;background:transparent;width:100%;color:var(--ink);")
+        cap_input_style_view = ("padding:5px 7px;border:1px solid transparent;border-radius:6px;font:inherit;"
+                                 "font-size:12.5px;background:transparent;width:72px;color:var(--ink);")
+        action_btn_style = "font-size:12px;padding:5px 10px;white-space:nowrap;"
+        # 2026-09 follow-up to the Usage-limits merge: split back into two
+        # separate fields (FP&A Buddy cap / Matchmaker cap), each its own
+        # column again, per Brian's ask — the merged column read clean on
+        # mobile but crowded on desktop. Each field is now ONE line at
+        # both breakpoints: spend / an editable cap input (pre-filled with
+        # the CURRENT effective value, never blank — the (default)/
+        # (override) note is gone, per Brian's ask; the value itself is
+        # the only signal now, and typing a new one + Save is the only way
+        # to change it) / a Save button, all in one flex row.
+        # 2026-09 cap-consolidation follow-up: the per-field Save button is
+        # gone — both cap inputs now ride along in the shared profile-form
+        # (via `form=`, same trick Name/Email already use) so the row's one
+        # Edit/Save toggle covers them too. A hidden `{field}_original`
+        # sibling records the value shown at render time, so a plain Name/
+        # Email save (which always resubmits the cap inputs' current value
+        # too, since they're part of the same form) can't silently pin a
+        # user's currently-effective default as an explicit override — see
+        # _apply_user_cap_override_from_form.
         return f"""<tr class="admin-table-row" {row_attrs}>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{uid}" class="users-row-cb" onchange="updateBulkButton('users')"></td>
-          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">
-            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-              <span class="user-name">{_esc(u["username"])}</span>{role_badge}{status_badge}
-            </div>
+          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:130px;">
+            <span class="user-name">{_esc(u["username"])}</span>
             {reset_notice}
           </td>
-          <td data-col="users:realname" data-label="Name" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(u.get('name') or '—')}</td>
-          <td data-col="users:email" data-label="Email" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(u.get('email') or '—')}</td>
+          <td data-col="users:realname" data-label="Name" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:130px;">
+            <input type="text" id="name-input-{uid}" form="{profile_form_id}" name="name" value="{name_val}" maxlength="120" placeholder="—" title="display name" readonly style="{field_style_view}">
+          </td>
+          <td data-col="users:email" data-label="Email" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:190px;">
+            <form id="{profile_form_id}" method="post" action="/admin/users/{uid}/edit" style="margin:0;">
+              <input type="hidden" name="username" value="{_esc(u['username'])}">
+              <input type="email" id="email-input-{uid}" name="email" value="{email_val}" maxlength="200" placeholder="—" title="email" readonly style="{field_style_view}">
+            </form>
+          </td>
+          <td data-col="users:password" data-label="Password" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
+            <span id="pw-view-{uid}" style="color:var(--muted);letter-spacing:2px;">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
+            <form id="pw-edit-{uid}" method="post" action="/admin/users/{uid}/password" style="display:flex;gap:5px;align-items:center;" hidden>
+              <input type="password" name="password" placeholder="new password" minlength="8" title="Reset this account's password—8+ characters" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:12.5px;background:var(--bg);width:120px;">
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Reset</button>
+            </form>
+          </td>
           <td data-col="users:last_login" data-label="Last login" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);white-space:nowrap;">{last_display}</td>
+          <td data-col="users:access_level" data-label="Access" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            {role_badge}
+            <form id="role-form-{uid}" method="post" action="/admin/users/{uid}/role" style="margin-top:6px;" hidden>
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Make member" if u["role"]=="admin" else "Make admin"}</button>
+            </form>
+          </td>
+          <td data-col="users:status" data-label="Status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            {status_badge}
+            <form id="toggle-form-{uid}" method="post" action="/admin/users/{uid}/toggle" style="margin-top:6px;" hidden>
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Disable" if active else "Enable"}</button>
+            </form>
+          </td>
           <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
-            <div style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</div>
-            <div style="color:var(--muted);">{cap_note}</div>
+            <div style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+              <span style="color:var(--muted);">${spent:.2f} / $</span>
+              <input type="number" id="ask-input-{uid}" form="{profile_form_id}" name="ask_cap" step="0.01" min="0" value="{effective_cap:.2f}" readonly
+                title="This user's current monthly cap" style="{cap_input_style_view}">
+              <input type="hidden" name="ask_cap_original" value="{effective_cap:.2f}" form="{profile_form_id}">
+            </div>
           </td>
           <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
-            <div style="font-weight:600;color:var(--ink);">${mm_spent:.2f} / ${mm_effective_cap:.2f}</div>
-            <div style="color:var(--muted);">{mm_cap_note}</div>
+            <div style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+              <span style="color:var(--muted);">${mm_spent:.2f} / $</span>
+              <input type="number" id="mm-input-{uid}" form="{profile_form_id}" name="matchmaker_cap" step="0.01" min="0" value="{mm_effective_cap:.2f}" readonly
+                title="This user's current monthly cap" style="{cap_input_style_view}">
+              <input type="hidden" name="matchmaker_cap_original" value="{mm_effective_cap:.2f}" form="{profile_form_id}">
+            </div>
           </td>
-          <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <button type="button" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="toggleManage({uid})">Manage</button>
+          <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <button type="button" id="edit-btn-{uid}" class="btn btn-ghost" style="{action_btn_style}" onclick="toggleUserEdit({uid}, this)">Edit</button>
+              <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');">
+                <button type="submit" class="btn btn-ghost" style="{action_btn_style}color:#b91c1c;border-color:#fca5a5;">Delete</button>
+              </form>
+            </div>
           </td>
         </tr>"""
 
-    def _manage_panel(u: dict) -> str:
-        uid = u["id"]
-        active = u["active"]
-        cap_override = u.get("ask_cap_usd")
-        mm_cap_override = u.get("matchmaker_cap_usd")
-        return f"""<div class="user-manage-panel" id="manage-{uid}" style="display:none;">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
-    <h3 style="margin:0;font-size:14px;font-family:var(--font-head);color:var(--ink);">Manage {_esc(u['username'])}</h3>
-    <button type="button" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;" onclick="toggleManage({uid})">Close</button>
-  </div>
-  <div class="user-manage-row">
-    <label>Profile</label>
-    <form method="post" action="/admin/users/{uid}/edit" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-      <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" placeholder="username" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:120px;">
-      <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:130px;">
-      <input name="email" type="email" value="{_esc(u["email"] or "")}" maxlength="200" placeholder="email" title="email" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:170px;">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Save</button>
-    </form>
-  </div>
-  <div class="user-manage-row">
-    <label>FP&amp;A Buddy cap</label>
-    <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:6px;align-items:center;">
-      <span style="font-size:13px;color:var(--muted);">$</span>
-      <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
-        placeholder="${default_cap:.2f}" title="Monthly cap override—blank inherits the site default"
-        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-      <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
-    </form>
-  </div>
-  <div class="user-manage-row">
-    <label>Matchmaker cap</label>
-    <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:6px;align-items:center;">
-      <span style="font-size:13px;color:var(--muted);">$</span>
-      <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
-        placeholder="${default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default"
-        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-      <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
-    </form>
-  </div>
-  <div class="user-manage-row">
-    <label>Reset password</label>
-    <form method="post" action="/admin/users/{uid}/password" style="display:flex;gap:6px;align-items:center;">
-      <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:150px;">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Reset</button>
-    </form>
-  </div>
-  <div class="user-manage-row">
-    <label>Account</label>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
-      <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Disable" if active else "Enable"}</button></form>
-      <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
-    </div>
-  </div>
-</div>"""
-
     rows_html = "".join(_user_row(u) for u in users) or (
         f'<tr><td colspan="{total_cols}" style="padding:20px;color:var(--muted);">No accounts yet. Create one below.</td></tr>')
-    manage_panels_html = "".join(_manage_panel(u) for u in users)
 
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
@@ -27234,22 +27301,50 @@ def admin_users(request: Request, msg: str = ""):
   </div>
 </details>
 
-<form method="post" action="/admin/users/ask-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-  <span style="font-size:13px;color:var(--muted);">FP&amp;A Buddy default monthly cap, per user:</span>
-  <span style="font-size:13px;">$</span>
-  <input type="number" name="cap" step="0.01" min="0" value="{default_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
-  <span style="font-size:12px;color:var(--muted);">Per-user overrides below take priority over this.</span>
-</form>
-<form method="post" action="/admin/users/matchmaker-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-  <span style="font-size:13px;color:var(--muted);">Matchmaker default monthly cap, per user (tracks separately from FP&amp;A Buddy&mdash;see CLAUDE.md):</span>
-  <span style="font-size:13px;">$</span>
-  <input type="number" name="cap" step="0.01" min="0" value="{default_mm_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
-  <span style="font-size:12px;color:var(--muted);">Anonymous visitors (no login) are capped the same way, keyed by session cookie instead of a user row.</span>
-</form>
+<div class="users-top-grid" style="display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:start;margin-bottom:24px;">
+  <div>
+    <h2 style="font-size:16px;margin:0 0 12px;">Add a member</h2>
+    <form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
+        <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;white-space:nowrap;">Temp password *</label>
+        <input name="password" type="text" required minlength="8" placeholder="at least 8 characters" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Name</label>
+        <input name="name" maxlength="120" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Email</label>
+        <input name="email" type="email" maxlength="200" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Role</label>
+        <select name="role" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+          <option value="user">Member (user)</option>
+          <option value="admin">Admin</option>
+        </select></div>
+      <div style="display:flex;align-items:flex-end;"><button type="submit" class="btn" style="font-size:14px;padding:9px 22px;">Create account</button></div>
+    </form>
+  </div>
+  <div style="display:grid;gap:14px;">
+    <form method="post" action="/admin/users/ask-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:8px;">
+      <span style="font-size:13px;color:var(--muted);">FP&amp;A Buddy default monthly cap, per user</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:13px;">$</span>
+        <input type="number" name="cap" step="0.01" min="0" value="{default_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
+      </div>
+      <span style="font-size:12px;color:var(--muted);">Per-user overrides below take priority over this.</span>
+    </form>
+    <form method="post" action="/admin/users/matchmaker-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:8px;">
+      <span style="font-size:13px;color:var(--muted);">Matchmaker default monthly cap, per user (tracks separately from FP&amp;A Buddy&mdash;see CLAUDE.md)</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:13px;">$</span>
+        <input type="number" name="cap" step="0.01" min="0" value="{default_mm_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
+      </div>
+      <span style="font-size:12px;color:var(--muted);">Anonymous visitors (no login) are capped the same way, keyed by session cookie instead of a user row.</span>
+    </form>
+  </div>
+</div>
 
-{_admin_column_picker_html("users", users_cols, default_visible=("last_login",))}
+<h2 style="font-size:18px;margin:0 0 12px;">Members</h2>
+{_admin_column_picker_html("users", users_cols, default_visible=users_default_visible)}
 {_admin_sort_filter_toolbar_html("users", users_sort_fields, users_scalar_filters, search_placeholder="Search by username, name, or email…")}
 <div style="margin:0 0 16px;display:flex;gap:10px;flex-wrap:wrap;">
   <button type="button" id="users-bulk-delete-btn" class="btn btn-ghost" disabled
@@ -27272,7 +27367,10 @@ def admin_users(request: Request, msg: str = ""):
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Username</th>
   <th data-col="users:realname" style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
   <th data-col="users:email" style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
+  <th data-col="users:password" style="padding:10px 12px;text-align:left;font-size:13px;">Password</th>
   <th data-col="users:last_login" style="padding:10px 12px;text-align:left;font-size:13px;">Last login</th>
+  <th data-col="users:access_level" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
+  <th data-col="users:status" style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
   <th data-col="users:ask" style="padding:10px 12px;text-align:left;font-size:13px;">FP&amp;A Buddy cap</th>
   <th data-col="users:matchmaker" style="padding:10px 12px;text-align:left;font-size:13px;">Matchmaker cap</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
@@ -27280,41 +27378,50 @@ def admin_users(request: Request, msg: str = ""):
 <tbody id="users-approved-tbody">{rows_html}</tbody>
 </table>
 </div>
-
-<div id="users-manage-panels" style="margin-top:16px;display:grid;gap:10px;">{manage_panels_html}</div>
-
-<h2 style="font-size:18px;margin-top:32px;">Add a member</h2>
-<form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
-    <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Temporary password *</label>
-    <input name="password" type="text" required minlength="8" placeholder="at least 8 characters" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Name</label>
-    <input name="name" maxlength="120" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Email</label>
-    <input name="email" type="email" maxlength="200" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Role</label>
-    <select name="role" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-      <option value="user">Member (user)</option>
-      <option value="admin">Admin</option>
-    </select></div>
-  <div style="display:flex;align-items:flex-end;"><button type="submit" class="btn" style="font-size:14px;padding:9px 22px;">Create account</button></div>
-</form>
 </div>
 
 <style>
+/* 2026-09 view/edit-mode follow-up: the sitewide .btn rule sets
+   display:inline-block unconditionally — an author-origin style, which
+   always beats the browser's own [hidden]{{display:none}} UA-stylesheet
+   rule regardless of selector specificity, since origin outranks
+   specificity in the cascade. Without this, every hidden .btn (the cap
+   Save buttons) rendered visible from the very first page load, before
+   Edit was ever clicked — caught live, not assumed, by screenshotting the
+   page before clicking Edit and seeing them already showing. This one
+   rule restores the attribute's actual browser default wherever it's used
+   on this page. */
+[hidden]{{display:none!important;}}
 .user-name{{font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);}}
 .user-badge{{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;}}
-.user-manage-panel{{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:10px;}}
-.user-manage-row{{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:center;}}
-.user-manage-row label{{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}}
-@media (max-width:600px){{.user-manage-row{{grid-template-columns:1fr;}}}}
+@media(max-width:900px){{.users-top-grid{{grid-template-columns:1fr!important;}}}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
   .admin-table-responsive, .admin-table-responsive tbody,
-  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;}}
-  .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
-  .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
+  .admin-table-responsive td{{display:block;width:100%;}}
+  /* Last login / Access level / Status form a compact 3-column mini-table
+     right under the username (Brian's explicit ask, matching how a real
+     table lines values up across rows) — the <tr> itself becomes a grid so
+     those three specific cells can share one row instead of each stacking
+     as its own full-width block. Every OTHER cell keeps stacking full-width
+     via grid-column:1/-1 (a spanning item forces a fresh row, so the trio
+     — the only non-spanning items, consecutive in the DOM — auto-place
+     into one 3-column row of their own). `order` moves that row to sit
+     right after Username without touching DOM order (so desktop's column
+     order, sort/filter, and the column picker are all unaffected — this is
+     a pure visual reorder, scoped to this one breakpoint). */
+  .admin-table-responsive tr{{display:grid;grid-template-columns:repeat(3,1fr);
+    column-gap:10px;width:100%;border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-cell{{grid-column:1/-1;border-bottom:none!important;padding:6px 12px!important;}}
+  .admin-table-cell[data-col="users:realname"],
+  .admin-table-cell[data-col="users:email"],
+  .admin-table-cell[data-col="users:password"]{{order:3;}}
+  .admin-table-cell[data-col="users:last_login"],
+  .admin-table-cell[data-col="users:access_level"],
+  .admin-table-cell[data-col="users:status"]{{grid-column:span 1;order:2;}}
+  .admin-table-cell[data-col="users:ask"],
+  .admin-table-cell[data-col="users:matchmaker"]{{order:4;}}
+  .admin-table-cell[data-label="Actions"]{{order:5;}}
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
@@ -27322,14 +27429,56 @@ def admin_users(request: Request, msg: str = ""):
 </style>
 
 <script>
-initColPicker('users', {json.dumps([k for k, _ in users_cols])});
+initColPicker('users', {json.dumps([k for k, _ in users_cols])}, {json.dumps(list(users_default_visible))});
 applySortFilter('users');
-function toggleManage(uid) {{
-  var panel = document.getElementById('manage-' + uid);
-  if (!panel) return;
-  var opening = panel.style.display === 'none';
-  panel.style.display = opening ? 'block' : 'none';
-  if (opening) panel.scrollIntoView({{behavior: 'smooth', block: 'nearest'}});
+// 2026-09 view/edit-mode follow-up: the row is read-only until this fires.
+// One click reveals every editable control for that row at once (Make
+// admin/member under the Access badge, Disable/Enable under Status, and
+// the Password field's input+Reset) and turns Name/Email/both cap inputs
+// from plain-looking readonly fields into bordered editable ones. The SAME
+// button becomes "Save" and, on the next click, submits the shared
+// <form id="profile-form-{{uid}}"> — which now carries Name, Email, AND
+// both cap values together (2026-09 cap-consolidation follow-up: the two
+// cap fields used to each have their own separate "Set" button/form;
+// they're part of this one form now via the `form=` attribute, same as
+// Name/Email, so one row-level Save covers everything except the two
+// controls that still need a deliberate, separate click — Make admin/
+// member, Disable/Enable, and password Reset all stay their own buttons,
+// since each is a distinct, consequential action rather than a plain field
+// edit).
+//
+// Deliberately NOT done by turning this button into a real type="submit"
+// tied to the form via the `form=` attribute (the first version of this
+// did exactly that): mutating a button's type to "submit" while still
+// inside ITS OWN click handler makes the browser process the *current*
+// click as a submit too, the instant the handler returns — confirmed live
+// with a real Playwright click (not just reasoning about it): the page
+// navigated away on the very first "Edit" click, before anything was ever
+// revealed. Calling form.requestSubmit() explicitly, only on the second
+// click, avoids that footgun entirely — the button's type never changes.
+function toggleUserEdit(uid, btn) {{
+  var editing = btn.textContent === 'Save';
+  if (editing) {{
+    var form = document.getElementById('profile-form-' + uid);
+    if (form.requestSubmit) form.requestSubmit(); else form.submit();
+    return;
+  }}
+  ['name', 'email', 'ask', 'mm'].forEach(function(key) {{
+    var el = document.getElementById(key + '-input-' + uid);
+    if (!el) return;
+    el.readOnly = false;
+    el.style.borderColor = 'var(--line)';
+    el.style.background = 'var(--bg)';
+  }});
+  var pwView = document.getElementById('pw-view-' + uid);
+  var pwEdit = document.getElementById('pw-edit-' + uid);
+  if (pwView) pwView.hidden = true;
+  if (pwEdit) pwEdit.hidden = false;
+  ['role-form-', 'toggle-form-'].forEach(function(prefix) {{
+    var el = document.getElementById(prefix + uid);
+    if (el) el.hidden = false;
+  }});
+  btn.textContent = 'Save';
 }}
 async function openUsersDeleteSelectedPanel() {{
   var ids = Array.prototype.map.call(document.querySelectorAll('.users-row-cb:checked'), function(cb) {{ return parseInt(cb.value, 10); }});
@@ -27455,6 +27604,37 @@ async def admin_users_ask_cap_default(request: Request):
     return RedirectResponse(f"/admin/users?msg={quote(f'Default FP&A Buddy cap set to ${cap:.2f}/month.')}", status_code=303)
 
 
+def _apply_user_cap_override_from_form(lib, user_id: int, form, field: str, setter) -> None:
+    """2026-09 cap-consolidation follow-up: the FP&A Buddy/Matchmaker cap
+    inputs now ride along in the row's one shared Save (via the HTML
+    `form=` attribute, same trick Name/Email already used), replacing the
+    two separate per-cap "Set" buttons — but ONLY actually writes an
+    override when the submitted value differs from what the field showed
+    at render time (a hidden `{field}_original` sibling input, also part
+    of the same form). Without that guard, an ordinary Name/Email save
+    would silently resubmit whatever the cap input's CURRENT effective
+    value happens to be (default or override, always populated, never
+    blank) and pin it as an explicit override — quietly converting a user
+    who's following the site default into one with a pinned override just
+    because someone corrected their name. Skipped entirely if the field is
+    absent from the form at all (`None`), so a stray raw POST that only
+    sets name/email/username can never (de)clear a cap either."""
+    raw = form.get(field)
+    if raw is None:
+        return
+    original = (form.get(f"{field}_original") or "").strip()
+    raw = raw.strip()
+    if raw == original:
+        return
+    if not raw:
+        setter(user_id, None)
+        return
+    try:
+        setter(user_id, max(0.0, float(raw)))
+    except ValueError:
+        pass  # not a valid number — leave the cap untouched rather than 500
+
+
 @app.post("/admin/users/{user_id}/edit")
 async def admin_users_edit(request: Request, user_id: int):
     if not _is_authed(request):
@@ -27473,29 +27653,9 @@ async def admin_users_edit(request: Request, user_id: int):
             msg = f'Updated “{username.lower()}”.'
         except _sql.IntegrityError:
             msg = f'Username “{username.lower()}” is already taken.'
-    finally:
-        lib.close()
-    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
-
-
-@app.post("/admin/users/{user_id}/ask-cap")
-async def admin_users_ask_cap(request: Request, user_id: int):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    form = await request.form()
-    raw = (form.get("cap") or "").strip()
-    lib = _lib()
-    try:
-        if raw:
-            try:
-                cap = max(0.0, float(raw))
-            except ValueError:
-                return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
-            lib.set_user_ask_cap(user_id, cap)
-            msg = f'FP&A Buddy cap override set to ${cap:.2f}/month.'
         else:
-            lib.set_user_ask_cap(user_id, None)
-            msg = 'FP&A Buddy cap override cleared—this user now follows the site default.'
+            _apply_user_cap_override_from_form(lib, user_id, form, "ask_cap", lib.set_user_ask_cap)
+            _apply_user_cap_override_from_form(lib, user_id, form, "matchmaker_cap", lib.set_user_matchmaker_cap)
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
@@ -27516,29 +27676,6 @@ async def admin_users_matchmaker_cap_default(request: Request):
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(f'Default Matchmaker cap set to ${cap:.2f}/month.')}", status_code=303)
-
-
-@app.post("/admin/users/{user_id}/matchmaker-cap")
-async def admin_users_matchmaker_cap(request: Request, user_id: int):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    form = await request.form()
-    raw = (form.get("cap") or "").strip()
-    lib = _lib()
-    try:
-        if raw:
-            try:
-                cap = max(0.0, float(raw))
-            except ValueError:
-                return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
-            lib.set_user_matchmaker_cap(user_id, cap)
-            msg = f'Matchmaker cap override set to ${cap:.2f}/month.'
-        else:
-            lib.set_user_matchmaker_cap(user_id, None)
-            msg = 'Matchmaker cap override cleared—this user now follows the site default.'
-    finally:
-        lib.close()
-    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
 def _is_last_active_admin(users: list[dict], user_id: int) -> bool:

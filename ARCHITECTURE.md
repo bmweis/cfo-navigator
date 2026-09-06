@@ -803,18 +803,18 @@ are identical either way — only the affordance differs.
 machinery, with two deliberate divergences from the bulk-delete shape above.**
 `/admin/users` moved off a one-card-per-user layout onto the identical
 `_admin_column_picker_html`/`_admin_sort_filter_toolbar_html`/
-`_admin_row_data_attrs` stack (column picker: Name/Email/Last login/FP&A
-Buddy cap/Matchmaker cap, all optional, Username/Actions always visible;
-sort/filter: Username/Last login/Created plus Role/Status scalar filters and
-a username/name/email search box) — reusing the shared, table-agnostic pieces
-of `_ADMIN_BULK_EDIT_JS` (`updateBulkButton`, `selectAllRows`, the
-column-picker and sort/filter functions) exactly as Software/Communities do.
-Two things are NOT shared with the bulk-delete mechanism documented just
-above, both because they don't fit rather than by oversight: (1) **no
-"Edit selected"** — Software/Communities' bulk-edit assumes one shared
-categorical field to set across every selected row; Users has no such field
-that's safe to bulk-set, since the role/active toggles both carry the
-last-active-admin lockout guard (`_is_last_active_admin`), which is
+`_admin_row_data_attrs` stack (column picker: Name/Email/Last login/Access
+level/Status/FP&A Buddy cap/Matchmaker cap, all optional, Username/Actions
+always visible; sort/filter: Username/Last login/Created plus Role/Status
+scalar filters and a username/name/email search box) — reusing the shared,
+table-agnostic pieces of `_ADMIN_BULK_EDIT_JS` (`updateBulkButton`,
+`selectAllRows`, the column-picker and sort/filter functions) exactly as
+Software/Communities do. Two things are NOT shared with the bulk-delete
+mechanism documented just above, both because they don't fit rather than by
+oversight: (1) **no "Edit selected"** — Software/Communities' bulk-edit
+assumes one shared categorical field to set across every selected row; Users
+has no such field that's safe to bulk-set, since the role/active toggles both
+carry the last-active-admin lockout guard (`_is_last_active_admin`), which is
 inherently a per-row question, not a batch one. (2) **the delete-confirm JS
 is bespoke, not the shared `openDeleteSelectedPanel`/
 `renderDeleteSelectedPanel`/`submitBulkDelete` trio** — those hardcode the
@@ -833,16 +833,251 @@ reported back as explicitly *blocked* (with the rest of the selection still
 deletable) — never silently dropped, never silently allowed — and the commit
 route re-derives the guard fresh via `Library.list_users()` on every
 iteration rather than trusting the preview's snapshot, since deleting one
-selected admin can change whether the next one is the last one. **Manage
-panels (the per-user profile/cap/password/role/delete forms, unchanged from
-the old card layout) render grouped in one block below the table, not nested
-as a second `<tr>` per row** — `applySortFilter()`'s `tbody.appendChild()`
-re-sort (see "Sort + filter" above) only touches `tr[data-name]` rows, so a
-sibling detail row with no `data-name` of its own would either get left
-behind at its old position on a re-sort or need real changes to that shared
-mechanism to stay paired with its owner row; clicking "Manage" calls
-`scrollIntoView()` on the matching panel so the panel-below-the-table layout
-costs the admin no context.
+selected admin can change whether the next one is the last one.
+
+**Direct-edit follow-up (2026-09) — the separate "Manage {user}" click-through
+panel is retired; every per-user field the panel used to hold is now edited
+directly in its own row/column, and "Add a member" moves to the top of the
+page beside the two dollar-cap default forms.** Three things worth recording
+about how the row itself is built, since none of them were needed by the old
+card-per-user layout: (1) **Full name and Email share one `<form>`, not two.**
+`admin_users_edit` writes whatever `name`/`email` values it's handed, so a
+per-field form that only posts one of the two would blank the other out on
+save. The `<form id="profile-form-{id}">` lives in the Email `<td>` (with a
+hidden `username` input, since the route still requires it, and the Save
+button); the Full name `<td>`'s `<input>` is outside that `<form>` element in
+the DOM but carries a matching `form="profile-form-{id}"` attribute — a
+standard HTML association, not a DOM-nesting trick — so one Save click submits
+both fields together regardless of which column the button visually sits in.
+(2) **Access level and Status are pure badge columns; every actual change —
+password reset, Make admin/member, Disable/Enable, Delete — lives in the
+Actions column instead**, a deliberate choice (flagged in the PR rather than
+assumed) over pairing each badge with its own action button inline: it keeps
+the two badge columns purely scannable and keeps every mutating control in
+one place, matching the literal column/notes split in the build brief. (3)
+**Username stays read-only** (display only, no input) — it is the login
+identifier, and an accidental inline edit is a bigger footgun than the
+convenience is worth; changing it would require deliberately opting into the
+Full name/Email pattern, which this PR does not do. The FP&A Buddy/Matchmaker
+cap columns keep their existing spend/cap display, now paired with their own
+inline cap-override input + "Set" button directly in the same cell (unchanged
+routes, `POST /admin/users/{id}/ask-cap`/`/matchmaker-cap`) instead of behind
+Manage. **Layout**: "Add a member" (2/3 width) and the two cap-default forms,
+stacked in a 1/3-width column, now render side by side above the table in a
+`grid-template-columns:2fr 1fr` container that collapses to one column under
+900px — replacing the old top-to-bottom order (cap defaults → table →
+Add-a-member at the very bottom).
+
+**Mobile-polish follow-up (2026-09), from a live-screenshot review against
+Software/Communities' own mobile cards.** Three fixes, all verified with real
+Playwright screenshots at 390×844 and 1280px, not just reasoned about: (1)
+**`initColPicker()` had a real, pre-existing bug this page's own default
+depended on** — its no-saved-view fallback was hardcoded to the single shared
+`ADMIN_DEFAULT_VISIBLE_COLS = ['review_status']` for every admin table
+(Software/Communities/Users), and its own `cb.checked = visible` line
+overwrites the server-rendered checkbox state to match that fallback on every
+load. Users has no `review_status` column, so every optional column
+silently rendered hidden on first visit despite the page's own checkboxes
+showing checked. Fixed with a new optional third argument,
+`initColPicker(tableKey, cols, defaultVisible)` — Software/Communities omit
+it and keep their exact original behavior; Users passes its own real
+default-visible list. (2) **"Add a member"'s Username/Temp password inputs
+now align** — "Temporary password" (which wrapped to two lines in its narrow
+mobile column, pushing its input down out of alignment with Username's)
+shortened to "Temp password" with `white-space:nowrap`. (3) **Make
+member/admin, Disable/Enable, and Delete sit on one row on mobile** via a new
+`.users-action-btns` class — equal-width flex, smaller font/padding, scoped
+to the *existing* 700px breakpoint only (a first pass applied this globally
+and broke the desktop Actions column — buttons overlapping/clipped — caught
+by a desktop screenshot before shipping; desktop keeps its original natural
+wrapping layout, unaffected).
+
+**Usage limits: merged, then split back into two one-line fields (2026-09,
+same follow-up) — a real reversal, flagged rather than silently overwritten.**
+First pass: live screenshots of `/admin/tools/software` and
+`/admin/tools/communities`' own mobile cards (the explicit reference point)
+showed related info grouping under ONE section label (e.g. "Review status":
+one label, a badge and its action button together), so FP&A Buddy cap and
+Matchmaker cap were merged into one `users:usage` column/mobile-card section,
+"Usage limits" — each cap a two-line sub-item, separated by a dashed divider.
+Brian liked the mobile result but flagged the merged column as crowded on
+desktop and asked for each cap to be its own field again, with every field on
+one line. **Resolved by going back to two separate columns
+(`("ask", "FP&A Buddy cap")`/`("matchmaker", "Matchmaker cap")` in
+`users_cols`, matching every other admin table's "each column is a field"
+convention) but redesigning each cap's cell to be genuinely ONE line at both
+breakpoints** — `$0.00 / $` + an editable cap `<input>` (now the only place
+the cap number renders — no separate bold-formatted duplicate) + a "Set"
+button + a muted `(default)`/`(override)` note, all in one `flex-wrap:nowrap`
+row, instead of a label line followed by a separate form line. The row is
+allowed to render wider than the viewport on desktop, same as it already can
+(the table's own `overflow-x:auto` wrapper, unchanged, handles it) — verified
+live that the *page* never overflows even when the *table* does. `total_cols`
+is still derived from `len(users_cols)`, so it updated automatically back to
+9. Cap-override `<input>` values are now formatted to two decimals
+(`f"{cap_override:.2f}"`, e.g. "12.50") for display consistency, widened to
+72px so that doesn't clip. The two underlying routes (`POST
+/admin/users/{id}/ask-cap`/`/matchmaker-cap`) were never touched by either
+pass — this whole arc is display-layer only.
+
+**"Access level" shortened to "Access" everywhere, not just mobile (2026-09,
+same round).** The mobile-only round above shortened just the `data-label`
+attribute (only ever read by the mobile CSS) so "ACCESS LEVEL" would stop
+wrapping to two lines in the narrow mobile grid. Brian asked for the same
+short label at both breakpoints, for consistency — `users_cols`' own label
+and the desktop `<th>` text both now say "Access" too (the column-picker
+checkbox and the table header), so there's one canonical label instead of a
+mobile-only abbreviation living beside a longer desktop one.
+
+**Mobile mini-table for Last login/Access level/Status (2026-09), same
+follow-up — Brian's explicit ask: put these three "inline next to the name,
+aligned vertically with one another, almost like a 3x2 table."** Each of the
+three was its own full-width stacked block on mobile; now the `<tr>` itself
+becomes a CSS grid (`grid-template-columns:repeat(3,1fr)`, scoped to the
+existing 700px breakpoint) so they can share one row. Every OTHER cell in the
+row (checkbox, username, name, email, usage limits, actions) gets
+`grid-column:1/-1` — a spanning item always starts a fresh grid row, so the
+three non-spanning cells (last_login/access_level/status), being consecutive
+in the DOM and immediately preceded by a spanning cell, auto-place into one
+row of their own with no markup restructuring needed. Each column still
+carries its own `[data-label]::before` caption above its own value (Last
+login/Access/Status), which is what gives the visual "2-row" read Brian
+asked for — a label row and a value row — without a second, separate label
+mechanism. `order` (also mobile-only) moves that row to sit directly under
+the username, ahead of Name/Email/Usage limits/Actions, **without touching
+DOM order** — desktop's column order, sort/filter, and the column picker are
+completely unaffected, confirmed by a desktop screenshot showing the
+original table layout unchanged. One label was shortened for this: "Access
+level" → "Access" (the `data-label` attribute only — the desktop `<th>` text
+stays "Access level"), since "ACCESS LEVEL" wrapped to two lines in a
+1/3-width mobile column and threw its badge out of vertical alignment with
+Last login's and Status's — exactly the kind of misalignment Brian was
+asking to fix, caught by measuring bounding boxes across the three cells
+before shipping, not just eyeballing a screenshot.
+
+**View/edit-mode redesign (2026-09), same page — the row is read-only by
+default; one "Edit" button per row reveals every editable control at once and
+becomes "Save"; Password becomes its own field/column.** A further reversal of
+the direct-edit design two rounds above: that design put Access/Status'
+mutating actions (Make admin/member, Disable/Enable) in the Actions column,
+separate from their badges, and showed every cap/name/email field as an
+always-editable input. Brian's ask moved five things at once — Make
+admin/member now renders directly under the Access badge (same `<td>`, not
+Actions), Disable/Enable directly under the Status badge, Password gets its
+own column (a view-mode bullet placeholder + a hidden input+Reset form,
+previously nowhere on the page as its own field), the cap `<input>`s drop
+their `(default)`/`(override)` note text entirely (the field just always
+holds the current effective value, editable in place), and every field
+(Name/Email/both caps, plus the two badge action forms and the password form)
+starts `readonly`/`hidden` until a single per-row "Edit" button — the only
+button left in Actions, immediately followed by Delete — reveals all of them
+and turns itself into "Save". A second click on "Save" submits the Name/Email
+`<form>` (`id="profile-form-{id}"`) specifically — every other revealed
+control already carries its own visible submit button (Make admin/member,
+Disable/Enable, password Reset, each cap's own Save), so the row-level
+Edit/Save toggle only needs to submit Name/Email on its own behalf. Implemented
+as `toggleUserEdit(uid, btn)` in the page's own `<script>`, checking
+`btn.textContent === 'Save'` rather than tracking a separate boolean, since the
+button's own visible label already is that state.
+
+**Two real, non-obvious browser bugs were caught here live (Playwright,
+before/after `getComputedStyle`), not by these rows' own passing test
+assertions** — both are exactly the kind of thing a rendered-HTML string check
+can't catch, per CLAUDE.md's own testing-standard note above:
+1. **Mutating a button's `type` to `"submit"` (with a `form=` attribute)
+   synchronously inside its OWN click handler submits the SAME click, not the
+   next one.** The first version of `toggleUserEdit` set `btn.type =
+   'submit'`/`btn.setAttribute('form', ...)` when entering edit mode, meaning
+   to make the *next* click submit. Chromium evaluates a button's activation
+   behavior using its state *after* the synchronous handler returns, so the
+   very first "Edit" click silently navigated the page away — nothing was ever
+   revealed. Fixed by never mutating the button's `type`; it stays
+   `type="button"` permanently, and the second click calls
+   `document.getElementById('profile-form-'+uid).requestSubmit()` explicitly.
+   A regression test (`test_edit_button_renders_as_type_button_not_submit`)
+   pins the rendered markup so this can't silently regress.
+2. **The sitewide `.btn{display:inline-block}` rule defeated the `hidden`
+   attribute on every button carrying that class — an author-origin-vs.-
+   user-agent-origin cascade fact, not a specificity fact.** After fixing (1),
+   a screenshot taken *before ever clicking Edit* still showed the cap Save
+   buttons and the password Reset field visible. The browser's own
+   `[hidden]{display:none}` rule is UA-stylesheet-origin; author-origin rules
+   always win regardless of selector specificity, so `.btn`'s unconditional
+   `display:inline-block` silently overrode `hidden` on every `.btn`-classed
+   element (and the password edit form's own inline
+   `style="display:flex"` did the same thing to itself, since an inline style
+   also beats a non-`!important` stylesheet rule). Fixed with one page-scoped
+   rule, `[hidden]{display:none!important;}` — `!important` is both necessary
+   and sufficient to beat both offending declarations. Verified live via
+   `getComputedStyle` before/after on an unedited row (all five gated elements
+   read `display:'none'`) and an edited row (all five flip to `block`/`flex`).
+   A regression test (`test_hidden_attribute_override_present`) pins the CSS
+   rule's presence.
+
+Both bugs were caught by this session's own live verification pass, not
+reported by Brian — a direct instance of CLAUDE.md's standing rule that an
+interactive change must be verified against what the browser actually
+receives, never just a rendered-HTML string.
+
+**Cap-consolidation follow-up (2026-09), same page — the two per-cap "Set"
+buttons are gone; both cap fields now ride along in the row's one shared
+Save.** Brian's ask after seeing the view/edit-mode redesign live: connect
+the FP&A Buddy/Matchmaker cap inputs to the row-level Save button instead of
+each having its own. Mechanically straightforward — both cap `<input>`s
+already had `id`s; they gained `form="profile-form-{uid}"` (the same
+`form=` attribute trick Name/Email already used to ride in a `<form>` that
+isn't their DOM parent) and were renamed from a shared `name="cap"` (fine
+when each lived in its own standalone form) to distinct `name="ask_cap"`/
+`name="matchmaker_cap"`, since both now submit through the identical form.
+Their wrapping `<form method="post" action=".../ask-cap">`/`.../matchmaker-
+cap">` elements and the two hidden `ask-save-{uid}`/`mm-save-{uid}` buttons
+are gone outright — replaced by a plain `<div>` for the flex layout.
+
+**The real design problem this raised, not just a markup move**: the cap
+input always displays the CURRENT effective value (default or override,
+never blank — the `(default)`/`(override)` note text was already dropped in
+the view/edit-mode redesign above), so once it's part of the same form as
+Name/Email, an ordinary "fix this user's name" save would resubmit that
+value on every save, not just an intentional cap change. Naively writing
+whatever's submitted would silently convert every "follows the site
+default" user into "pinned override at today's default" the first time
+anyone touched their row for an unrelated reason — a real, easy-to-miss
+regression, not a hypothetical. Fixed with a hidden `{field}_original`
+sibling input (`ask_cap_original`/`matchmaker_cap_original`, also
+`form=`-attached to the same shared form) that records the value the field
+showed at render time; a new shared `_apply_user_cap_override_from_form`
+helper in `webapp/app.py` only calls `Library.set_user_ask_cap`/
+`set_user_matchmaker_cap` when the submitted value actually differs from
+that original — an untouched cap field is a no-op regardless of what it
+displays, exactly matching the pre-consolidation "only Set actually
+changes it" behavior. A field cleared to blank still clears an existing
+override (`setter(user_id, None)`), same as the standalone routes always
+did. Verified live (Playwright + a direct DB read, not just an HTTP
+status): editing jane's FP&A Buddy cap and clicking the row's Save applied
+the new override; editing bob's Name (leaving both cap fields at their
+unedited default value) left both of his caps `NULL` — the guard held.
+
+**Follow-up: the two standalone routes, `POST /admin/users/{id}/ask-cap`/
+`.../matchmaker-cap`, are now deleted outright.** Kept, initially, as a
+flagged (not silent) choice — nothing in the UI posted to them any more,
+but they were still real, independently tested routes offering a narrower
+single-field API than the consolidated `/edit` route. Brian confirmed
+they should go: per-user cap customization is unchanged (still editable
+per-row inputs), it just saves through the one consolidated Edit/Save
+action now instead of a separate Set button per field — no loss of
+control, no remaining reason for the narrower routes to exist. Removed
+both route handlers (`admin_users_ask_cap`/`admin_users_matchmaker_cap`)
+and their direct tests
+(`test_ask_cap_override_still_works`/`test_matchmaker_cap_override_still_works`
+in `tests/test_admin_users_table.py`); the two tests that used them only
+to seed state (`test_clearing_the_cap_input_clears_an_existing_override`,
+and `tests/test_communities_matchmaker.py`'s own matchmaker-cap tests)
+were rewired onto the consolidated `/edit` route instead, and
+`test_saving_the_row_with_a_changed_cap_applies_the_override` picked up
+the rendered-value assertion the removed test used to carry, so no
+coverage was lost in the removal. `POST /admin/users/{ask,matchmaker}-cap-
+default` (the two site-wide default-cap forms — a completely separate
+mechanism, keyed by no user id) are untouched.
 
 **Duplicate-URL blocking on save (both tables, create and edit).**
 `linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
