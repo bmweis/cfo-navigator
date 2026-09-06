@@ -5933,6 +5933,68 @@ never reads as something to tap.
   (group placement, verified/pending/empty on both the profile page and
   Compare).
 
+- **Admin menu default-state + badge coverage (2026-09) — every admin-hub group
+  now defaults to collapsed on load, reversing the 2026-08 "Inbox always open,
+  any group with a nonzero badge also starts open" fix; plus a real Software
+  badge undercount closed.** Brian's report ("Inbox, Toolbox, Software render
+  expanded on load") traced to `admin_page()`'s `_group_html()`, which forced
+  `open=True` for `gname=="Inbox"` or any group whose aggregate badge was
+  nonzero — not a leftover/debug artifact, a deliberate, documented fix for a
+  real incident (a pending LiveFlow/Liveflow name-duplicate pair and a Runway
+  pair went unnoticed inside a collapsed, two-levels-deep Software sub-group,
+  even though detection and badge counting were both correct — see the
+  git-blame'd 2026-08 comment this reverts). Investigated and flagged to
+  Brian before touching it, since honoring the literal ask would revert that
+  incident fix; his explicit call reverses it anyway — **badges are the
+  review-inbox signal, and auto-expanding on top of that duplicated the same
+  information as an intrusive default rather than a genuinely different
+  safeguard.** The incident's own root cause is still guarded against by a
+  different, pre-existing mechanism that didn't need to change: a group's
+  badge only ever hides once its `<details>` is OPENED
+  (`.admin-group[open] .group-badge{display:none;}`), so a collapsed-by-
+  default group with something pending still shows its badge number, unhidden,
+  right on the summary row — the exact spot the incident says to look. Single
+  centralized fix (`_group_html`'s own `open=` parameter, now always `False`),
+  not three per-section patches, since Inbox/Toolbox/Software all render
+  through the same function. **Separately, a real, concrete badge gap**: the
+  Software admin card counted only `count_pending_tools()` (the approval
+  queue), while Communities' equivalent card already combined
+  `count_pending_communities() + count_communities_needing_review()` — an
+  asymmetry, not a deliberate scope choice; `count_tools_needing_review()`
+  (the tools-side mirror of that same method, built for the "Tools
+  whole-record profile signoff" feature) already existed and simply was
+  never wired into `webapp.tasks.open_task_counts()`. Fixed with a new
+  `Library.count_tools_needing_attention()` rather than a second additive
+  term — **a deliberate deviation from the literal "sum two counts, same
+  shape as Communities" instruction, flagged here rather than silently
+  applied**: unlike Communities' two genuinely independent dimensions
+  (approval vs. review), a fresh Generate/Refresh draft that lands any one of
+  tools' three per-field `*_needs_verification` flags (Description/Agent
+  taxonomy/Competitive differentiation) also force-sets the whole-record
+  `needs_review` in the same write (the documented auto-link), so for the
+  overwhelming majority of affected tools `count_tools_needing_review()` and
+  "some field flag is set" are the same event — summing them would
+  double-count nearly every one, inflating the badge exactly the way the
+  per-field dedup requirement (`COUNT(DISTINCT tool_id)`, one tool with 3
+  pending fields counts once) exists to prevent, just at the whole-record/
+  per-field boundary instead of across fields. `count_tools_needing_attention()`
+  is one `OR`'d, `COUNT(*)`-over-tools query (`needs_review=1 OR
+  description_needs_verification=1 OR agent_taxonomy_needs_verification=1 OR
+  competitive_differentiation_needs_verification=1`) — a strict superset of
+  both signals, catching the one real edge case where they diverge too:
+  `mark_tool_reviewed()` clears `needs_review` alone and never touches the
+  three field flags, so a tool can read `needs_review=0` with a field flag
+  still genuinely pending (its own per-field "Mark verified" never clicked).
+  `count_tools_needing_review()` itself is untouched — it keeps its own
+  callers (the admin list's "Needs review" filter count, the review-status
+  pill's "(n/3)" breakdown). FP&A Buddy feedback (`ask_feedback`) stays
+  deliberately out of the badge system — still no reviewed-state column on
+  that table at all, re-confirmed during this same investigation.
+  See `tests/test_task_badges.py` for the regression coverage (every
+  top-level and nested group collapsed on load even with a real pending
+  badge; the badge itself still visible in that collapsed state; the new
+  deduped count's own edge case).
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 

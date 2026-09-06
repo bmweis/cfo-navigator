@@ -23364,21 +23364,30 @@ def admin_page(request: Request):
         )
         flat_hrefs = badge_hrefs if badge_hrefs is not None else [item[0] for item in items if not isinstance(item, str)]
         group_badge_html = _group_badge(task_counts, flat_hrefs)
-        # Inbox starts expanded, same as always. Any other group/sub-group
-        # carrying a nonzero badge also starts expanded — a real, unresolved
-        # item (e.g. a name-duplicate pair) sitting inside a collapsed
-        # sub-group, with only a small aggregate number on a parent group's
-        # summary to hint at it, is exactly how LiveFlow/Liveflow and the
-        # Runway pair went unnoticed even though detection and badge counting
-        # were both correct the whole time — see CLAUDE.md. A nonzero badge
-        # is a call to action, not just a count to glance at.
+        # Every group/sub-group defaults to COLLAPSED on load, Inbox
+        # included — reversed 2026-09 from an earlier "Inbox always open,
+        # any group with a nonzero badge also starts open" rule (flagging
+        # the reversal explicitly rather than silently, per CLAUDE.md's own
+        # standing practice for this). That earlier rule was itself a
+        # deliberate fix for a real incident: a pending name-duplicate pair
+        # went unnoticed inside a collapsed sub-group, with nothing but a
+        # small aggregate number on the parent's summary to hint at it —
+        # see CLAUDE.md's LiveFlow/Runway note. Reversing it does NOT bring
+        # that failure mode back: `.admin-group[open] .group-badge{display:
+        # none;}` only ever hides a group's badge once it's opened, so a
+        # collapsed-by-default group with a real pending item still shows
+        # its badge number on the summary row, unhidden, exactly where the
+        # incident's own root cause (a badge sitting collapsed) says to
+        # look. Brian's explicit call: badges are the review-inbox signal;
+        # auto-expanding on top of that duplicated the same information as
+        # an intrusive default rather than a genuinely different safeguard.
         return _disclosure_group(
             gname,
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
             f'<div style="display:grid;gap:14px;">{cards}</div>',
             count_label=f'{len(items)} {"tool" if len(items) == 1 else "tools"}',
             badge_html=group_badge_html,
-            open=(gname == "Inbox" or bool(group_badge_html)),
+            open=False,
             nested=nested,
         )
 
