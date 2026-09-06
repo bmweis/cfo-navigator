@@ -70,18 +70,20 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/contacts": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
         # 2026-09: the Software card used to badge only count_pending_tools()
         # (unapproved submissions), unlike Communities' card, which already
-        # combined pending approval with a needing-review signal
+        # combines pending approval with a needing-review signal
         # (count_communities_needing_review()) — a real asymmetry, not a
         # deliberate one; count_tools_needing_review() (the tools-side
         # mirror of that same method) already existed and simply wasn't
-        # wired in here. Fixed, and folded together with the three per-field
-        # *_needs_verification flags (Description/Agent taxonomy/Competitive
-        # differentiation — tools' asymmetric per-field verification model,
-        # vs. Communities' one whole-profile flag) into one deduped,
-        # distinct-tool count rather than three more additive terms — see
-        # Library.count_tools_needing_attention()'s own docstring for why a
-        # plain sum would double-count nearly every affected tool.
-        "/admin/tools/software": lib.count_pending_tools() + lib.count_tools_needing_attention(),
+        # wired in here. Fixed by mirroring Communities exactly: pending +
+        # needing-review, summed. The three per-field *_needs_verification
+        # flags (Description/Agent taxonomy/Competitive differentiation)
+        # are deliberately NOT folded in here — they have their own defined
+        # follow-on scope (a separate PR), not this one, per Brian's
+        # explicit call. (An earlier draft of this fix combined them into
+        # one deduped count on the reasoning that they're rarely independent
+        # of needs_review — see git history if that reasoning is useful when
+        # that follow-on scope is picked up.)
+        "/admin/tools/software": lib.count_pending_tools() + lib.count_tools_needing_review(),
         "/admin/tools/software/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
         "/admin/tools/communities": lib.count_pending_communities() + lib.count_communities_needing_review(),
         "/admin/community-gaps": lib.community_gap_counts()["unreviewed"],
@@ -91,12 +93,10 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         # Phase 1c badge scope-down: only these three of the un-badged queues
         # Phase 0 inventoried got wired in — each already has a cheap count
         # (an indexed COUNT, or a documented "fine to run live" full scan;
-        # see that PR's CLAUDE.md note). ask-feedback is deliberately still
-        # left out — no reviewed-state column exists on ask_feedback at all
-        # (re-confirmed 2026-09, see the reviewed-on-view investigation) —
-        # logged for a future flow-harmonization decision instead. The tools
-        # *_needs_verification flags are no longer in that deferred bucket:
-        # they're wired above, folded into the Software card's own count.
+        # see that PR's CLAUDE.md note). ask-feedback and the three tools
+        # *_needs_verification flags are still deliberately left out (each
+        # has its own follow-on scope defined separately — not this PR) —
+        # logged for a future flow-harmonization decision instead.
         "/admin/tools/software/feature-review-queue": lib.count_feature_review_queue(status="pending"),
         "/admin/library/backfill-content": lib.count_needs_content_check() + lib.count_articles_needing_manual_review(),
         "/admin/tools/software/name-duplicates": len(lib.find_tool_name_duplicate_candidates()),

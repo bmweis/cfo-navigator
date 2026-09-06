@@ -5326,47 +5326,6 @@ class Library:
             "SELECT COUNT(*) FROM tools WHERE needs_review=1"
         ).fetchone()[0]
 
-    def count_tools_needing_attention(self) -> int:
-        """Distinct-tool count for the admin badge (2026-09) — deliberately
-        NOT `count_tools_needing_review()` (whole-record `needs_review`)
-        summed with a separate per-field count, even though the Software
-        admin card wiring was asked for in exactly that additive shape (the
-        same shape Communities' badge already uses: pending + needing-review,
-        two genuinely independent dimensions summed).
-
-        Tools' three per-field `*_needs_verification` flags aren't
-        independent of `needs_review` the way Communities' two dimensions
-        are: a fresh Generate/Refresh draft that lands any one of them on 1
-        also force-sets `needs_review` to 1 in the same write (see the
-        "Tools whole-record profile signoff" migration note) — so for the
-        overwhelming majority of affected tools, `needs_review=1` and "some
-        field flag is set" are the SAME event, not two separate ones.
-        Summing `count_tools_needing_review()` with a distinct per-field
-        count would double-count nearly every one of them, inflating the
-        badge exactly the way the per-field dedup requirement itself exists
-        to prevent (see CLAUDE.md's "one tool with 3 pending fields counts
-        once, not three" guidance) — just at the whole-record/per-field
-        boundary instead of across fields.
-
-        The one real edge case where the two signals diverge: `mark_tool_
-        reviewed()` clears `needs_review` alone and never touches the three
-        field flags, so a tool can have `needs_review=0` with a field flag
-        still genuinely pending (its own "Mark verified" was never clicked).
-        A single OR'd, DISTINCT-tool count catches that case too, so this
-        method is a strict superset of both `count_tools_needing_review()`
-        and a per-field-only dedup count, with no double-counting between
-        them — one honest "does this tool need my attention" number per
-        tool. `count_tools_needing_review()` itself is untouched and keeps
-        its own callers (the admin list's own "Needs review" filter count,
-        the review-status pill's (n/3) breakdown)."""
-        return self.conn.execute(
-            """SELECT COUNT(*) FROM tools
-               WHERE needs_review=1
-                  OR description_needs_verification=1
-                  OR agent_taxonomy_needs_verification=1
-                  OR competitive_differentiation_needs_verification=1"""
-        ).fetchone()[0]
-
     def update_tool_screenshot(self, tool_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
         """Legacy narrow update, kept for pre-Phase-E callers/tests only —
         DO NOT call this from the admin edit-form submit path. Writes
