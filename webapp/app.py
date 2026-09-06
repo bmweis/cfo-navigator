@@ -19167,11 +19167,31 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
 .rr-reader-body{max-width:min(92%,880px);margin:0 auto;padding:44px 32px 100px;}
 .rr-reader-category{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
   color:var(--seafoam-deep);margin-bottom:12px;}
-.rr-reader-title{font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:30px;line-height:1.18;
-  color:var(--ink);margin-bottom:16px;}
+/* Title uses Outfit, matching BRAND.md's "Page title (H1)" row (30px/600/
+   -0.02em) and the standalone /read/{id} reader's own .reader-meta h1 —
+   this used to fall through to 'Source Serif 4',Georgia,serif with no
+   letter-spacing, a leftover that never got updated when the two readers'
+   heading treatments were established. */
+.rr-reader-title{font-family:var(--font-head);font-weight:600;font-size:30px;line-height:1.18;
+  letter-spacing:-.02em;color:var(--ink);margin-bottom:16px;}
 .rr-reader-byline{font-size:13px;color:var(--muted);padding-bottom:22px;border-bottom:1px solid var(--line);
   margin-bottom:26px;font-family:var(--font-body);}
-.rr-reader-body-text{font-family:'Source Serif 4',Georgia,serif;font-size:var(--rr-fs,17px);line-height:1.75;color:var(--ink-soft);}
+/* Body font, corrected 2026-09, twice: this rendered in 'Source Serif 4'
+   first — a BRAND.md-documented exception at the time ("Reader body |
+   Source Serif 4") — confirmed wrong by direct live-site review. A first
+   fix moved it to var(--font-head) (Outfit) alongside the title; checked
+   against the site's actual published long-form content (an Original
+   Content article's .oc-body p, the same template NetSuite MCP/Growth
+   Engine Ratio/Sail Don't Row render through) and found that body copy is
+   DM Sans there, Outfit only for the H1 — so Outfit-for-body would have
+   made this reader the one place on the whole site with body copy in a
+   headings font, not a return to an existing pattern. Settled on
+   var(--font-body) (DM Sans) instead — this now matches ordinary sitewide
+   typography exactly (Outfit heading, DM Sans body), no reader-specific
+   exception left to document at all. The standalone /read/{id}
+   single-article view (a different template, _READER_CSS/.reader-body) is
+   NOT touched here — still Source Serif 4, out of scope for this fix. */
+.rr-reader-body-text{font-family:var(--font-body);font-size:var(--rr-fs,17px);line-height:1.75;color:var(--ink-soft);}
 .rr-reader-body-text p{margin-bottom:1.3em;}
 .rr-reader-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;
   color:var(--muted);font-size:14px;padding:40px;text-align:center;}
@@ -19487,7 +19507,11 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
 
     body = (
         _READER_SHELL_CSS
-        + '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
+        # No dedicated Source Serif 4 <link> here any more (2026-09) — this
+        # merged reader's title/body moved to Outfit/DM Sans respectively
+        # (ordinary sitewide typography), both already loaded via _page()'s
+        # own font <link>; nothing on this page references the serif any
+        # more, so importing it would just be a wasted request.
         + tag_vocab_html
         + f"""<div class="rr-shell">
   {rail_html}
@@ -19556,8 +19580,17 @@ var rrFsSizes = [17, 15, 20];
 // point is it behaves identically whether the open article came from Feed
 // or Archive.
 var rrFocusMode = false;
-var RR_ICON_EXPAND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
-var RR_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+// RR_ICON_EXPAND's arrows point OUTWARD, toward the top-left/bottom-right
+// (NW/SE) corners; RR_ICON_COLLAPSE's point INWARD, tails anchored at the
+// same two corners. (Fixed 2026-09: these originally sat on the NE/SW
+// diagonal — Feather's stock "maximize-2"/"minimize-2" — which pointed the
+// wrong way live; mirrored horizontally onto NW/SE per direct confirmation,
+// keeping each icon's outward/inward direction otherwise unchanged.)
+// RR_ICON_EXPAND shows by default (not yet in focus mode) — clicking it
+// expands; RR_ICON_COLLAPSE shows once in focus mode — clicking it restores
+// the rail/list. See rrRenderArticle/rrSetFocusMode below for that mapping.
+var RR_ICON_EXPAND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 3 3 3 3 9"></polyline><polyline points="15 21 21 21 21 15"></polyline><line x1="3" y1="3" x2="10" y2="10"></line><line x1="21" y1="21" x2="14" y2="14"></line></svg>';
+var RR_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 14 14 14 14 20"></polyline><polyline points="4 10 10 10 10 4"></polyline><line x1="10" y1="10" x2="3" y2="3"></line><line x1="21" y1="21" x2="14" y2="14"></line></svg>';
 var RR_ICON_SEARCH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>';
 // Tag glyph for the reader toolbar — the collapsed state of the inline tag
 // editor, matching Instapaper's own toolbar tag affordance.
@@ -30339,8 +30372,8 @@ def admin_brand(request: Request):
         '<p style="margin:0;color:var(--ink-soft);">The quick brown fox jumps over the lazy dog. Body copy is DM Sans at 16px / 1.65—warm, readable, and quiet enough to disappear behind the content. Eyebrows and labels use the same family, uppercase, with wide tracking.</p>'
         '<div style="height:18px;"></div>'
         '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4—long-form reading only (/read)</div>'
-        '<p style="margin:0;font-family:\'Source Serif 4\',Georgia,serif;font-size:18px;line-height:1.75;color:var(--ink);">Revenue recognized today is the result of investments made over the past several quarters, not just last quarter. Features ship before they\'re sold; pipeline built in Q1 converts in Q3. The serif appears nowhere else in the system.</p>'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4—standalone single-article reader only (/read/{article_id})</div>'
+        '<p style="margin:0;font-family:\'Source Serif 4\',Georgia,serif;font-size:18px;line-height:1.75;color:var(--ink);">Revenue recognized today is the result of investments made over the past several quarters, not just last quarter. Features ship before they\'re sold; pipeline built in Q1 converts in Q3. The serif appears nowhere else in the system—not even the merged Feed/Archive/Read Later reader at /read, which uses ordinary sitewide typography (Outfit heading, DM Sans body) like everywhere else (2026-09).</p>'
         '</div>'
     )
 
@@ -30391,7 +30424,7 @@ def admin_brand(request: Request):
         '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart—keep it that way.</li>'
         '<li><strong>Coral is display-only.</strong> It\'s too light for body text (2.8:1); use coral-deep, or navy-on-coral-wash, when text is involved.</li>'
         '<li><strong>Buttons are navy or ghost</strong>—never a seafoam or coral fill.</li>'
-        '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings, DM Sans for everything, Source Serif 4 for reading only, Caveat for stickers only.</li>'
+        '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings, DM Sans for body copy and everything else (including the merged Feed/Archive/Read Later reader, both title and body), Source Serif 4 for the standalone single-article reader only, Caveat for stickers only.</li>'
         '</ul>'
     )
 
