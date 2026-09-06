@@ -18769,11 +18769,19 @@ def api_read_article(request: Request, id: int = 0, url: str = ""):
 
 
 _READER_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap');
+/* 2026-09: Source Serif 4 removed sitewide, this page's last holdout —
+   Brian's standing rule is Outfit or DM Sans only, ever, for content/
+   reading typography (Caveat/Permanent Marker's decorative sticker/wordmark
+   use is a separate, out-of-scope layer). Body now DM Sans, matching the
+   merged Feed/Archive/Read Later reader's own settled typography (see
+   CLAUDE.md's "Reader expand-mode icon + typography polish" bullet for the
+   full back-and-forth that landed on DM Sans there first). .reader-meta h1
+   already used Outfit — unchanged. */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap');
 :root{--ink:#1a1a1a;--muted:#6F6A60;--line:#E4E0D6;--bg:#F5F4EF;--surface:#FFFFFF;--accent:#002975;
   --seafoam-deep:#1F7A66;--coral:#E8704F;--coral-wash:#FBEAE3;}
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--ink);font:18px/1.75 'Source Serif 4',Georgia,serif;}
+body{background:var(--bg);color:var(--ink);font:16px/1.65 'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;}
 a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
 a:hover{opacity:.8;}
 
@@ -19189,8 +19197,11 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
    var(--font-body) (DM Sans) instead — this now matches ordinary sitewide
    typography exactly (Outfit heading, DM Sans body), no reader-specific
    exception left to document at all. The standalone /read/{id}
-   single-article view (a different template, _READER_CSS/.reader-body) is
-   NOT touched here — still Source Serif 4, out of scope for this fix. */
+   single-article view (a different template, _READER_CSS/.reader-body) was
+   a separate, deliberately out-of-scope holdout for this fix — it moved to
+   DM Sans too in a follow-up pass once Brian confirmed the standing rule is
+   Outfit/DM Sans only, ever, for content typography (never a third font,
+   Caveat/Permanent Marker's decorative sticker/wordmark use aside). */
 .rr-reader-body-text{font-family:var(--font-body);font-size:var(--rr-fs,17px);line-height:1.75;color:var(--ink-soft);}
 .rr-reader-body-text p{margin-bottom:1.3em;}
 .rr-reader-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;
@@ -30316,10 +30327,11 @@ def admin_brand(request: Request):
         '<div style="height:18px;"></div>'
         '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">DM Sans—body &amp; UI</div>'
         '<p style="margin:0;color:var(--ink-soft);">The quick brown fox jumps over the lazy dog. Body copy is DM Sans at 16px / 1.65—warm, readable, and quiet enough to disappear behind the content. Eyebrows and labels use the same family, uppercase, with wide tracking.</p>'
-        '<div style="height:18px;"></div>'
-        '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4—standalone single-article reader only (/read/{article_id})</div>'
-        '<p style="margin:0;font-family:\'Source Serif 4\',Georgia,serif;font-size:18px;line-height:1.75;color:var(--ink);">Revenue recognized today is the result of investments made over the past several quarters, not just last quarter. Features ship before they\'re sold; pipeline built in Q1 converts in Q3. The serif appears nowhere else in the system—not even the merged Feed/Archive/Read Later reader at /read, which uses ordinary sitewide typography (Outfit heading, DM Sans body) like everywhere else (2026-09).</p>'
+        # No third "Source Serif 4" specimen any more (2026-09) — that font
+        # is gone sitewide, its last holdout (the standalone /read/{id}
+        # reader) moved to DM Sans in the same pass. Only Outfit/DM Sans
+        # (plus Caveat/Permanent Marker, shown separately below as
+        # decorative-only) render anywhere on the site now.
         '</div>'
     )
 
@@ -30370,7 +30382,7 @@ def admin_brand(request: Request):
         '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart—keep it that way.</li>'
         '<li><strong>Coral is display-only.</strong> It\'s too light for body text (2.8:1); use coral-deep, or navy-on-coral-wash, when text is involved.</li>'
         '<li><strong>Buttons are navy or ghost</strong>—never a seafoam or coral fill.</li>'
-        '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings, DM Sans for body copy and everything else (including the merged Feed/Archive/Read Later reader, both title and body), Source Serif 4 for the standalone single-article reader only, Caveat for stickers only.</li>'
+        '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings, DM Sans for body copy and everything else—no other content/reading fonts anywhere on the site, the standalone single-article reader included—Caveat for stickers only.</li>'
         '</ul>'
     )
 

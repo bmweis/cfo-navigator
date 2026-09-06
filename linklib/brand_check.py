@@ -181,7 +181,11 @@ BANNED_COLORS = {
 # only, the sitewide "CFO Navigator"/logo wordmark only, never headings or body
 # copy. This check can't enforce those placement rules mechanically; it only
 # confirms neither font itself is an off-brand-font regression.
-ALLOWED_FONTS = {"Outfit", "DM Sans", "Source Serif 4", "Segoe UI", "Caveat", "Permanent Marker"}
+# "Source Serif 4" was retired sitewide (2026-09, standing rule from Brian:
+# only Outfit or DM Sans for content/reading typography, ever) — removed
+# from this allowlist deliberately, not left in for a font nothing renders
+# in any more, so a future reintroduction gets caught as a regression.
+ALLOWED_FONTS = {"Outfit", "DM Sans", "Segoe UI", "Caveat", "Permanent Marker"}
 # Off-brand fonts that must never be referenced.
 BANNED_FONTS = {
     "Inter", "Lora", "Arial", "Helvetica", "Times New Roman",
