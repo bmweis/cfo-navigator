@@ -23432,12 +23432,15 @@ def admin_page(request: Request):
         _SOFTWARE_TOOLS, badge_hrefs=software_hrefs, nested=True,
     )
 
-    # Two columns on wide viewports: left carries the group Brian triages
-    # most often (Inbox); right carries the three public-nav-mirroring
-    # groups (Thought Leadership, CFO Toolbox, Brand/voice/content) plus the
+    # Two columns on wide viewports: left carries Inbox plus Thought
+    # leadership and CFO Toolbox (2026-09 reorder — these two used to sit at
+    # the top of the right column; Brand/voice/content and System shifted up
+    # to fill that slot); right now carries just Brand/voice/content and the
     # System catch-all. Below the breakpoint both stacks concatenate into a
-    # single-column order — unchanged from before this split.
-    _LEFT_GROUPS = {"Inbox"}
+    # single-column order — unchanged from before this split, and still
+    # correct after the reorder since _ADMIN_GROUPS' own iteration order
+    # already puts these five in the desired top-to-bottom sequence.
+    _LEFT_GROUPS = {"Inbox", "Thought leadership", "CFO Toolbox"}
     left_html = ""
     right_html = ""
     for gname, gdesc, items in _ADMIN_GROUPS:

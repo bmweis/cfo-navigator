@@ -109,3 +109,31 @@ def test_all_four_moved_routes_still_resolve_at_the_same_urls(env):
                  "/admin/ask-feedback", "/admin/game-settings"):
         resp = c.get(path)
         assert resp.status_code == 200, path
+
+
+# --- 2026-09 grid reorder: Thought leadership + CFO Toolbox move to the
+# left column, below Inbox; Brand/voice/content + System shift up to fill
+# the vacated top-right slot. Display order only — no route/content change,
+# confirmed above the section already covers that for the four moved pages
+# and is untouched by this reorder. ---------------------------------------
+
+def _group_heading_index(body: str, name: str) -> int:
+    """Locate a top-level admin group's own heading span — not any other
+    coincidental occurrence of the same text (e.g. CFO Toolbox also appears
+    in the public nav bar, rendered earlier in the page than the admin
+    groups themselves)."""
+    marker = f'font-weight:600;">{name}</span>'
+    idx = body.index(marker, body.index("<h1>Admin</h1>"))
+    return idx
+
+
+def test_admin_grid_reorder_renders_in_the_new_order(env):
+    c = _admin_client(env)
+    body = c.get("/admin").text
+    order = ["Inbox", "Thought leadership", "CFO Toolbox",
+             "Brand, voice, and content", "System"]
+    indexes = [_group_heading_index(body, name) for name in order]
+    assert indexes == sorted(indexes), (
+        "expected admin groups to render in order "
+        f"{order}, got index positions {indexes}"
+    )

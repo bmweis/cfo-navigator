@@ -5327,49 +5327,45 @@ class Library:
         ).fetchone()[0]
 
     def count_tools_needing_attention(self) -> int:
-        """Distinct-tool count for the admin badge (2026-09) — combines the
-        whole-record `needs_review` signal with any of the three per-field
-        `*_needs_verification` flags (Description/Agent taxonomy/Competitive
-        differentiation) into ONE deduped number, not two counts summed.
+        """Distinct-tool count for the admin badge (2026-09) — the single
+        dedup-safe number behind the Software card's badge, combining
+        EVERY condition that used to be summed as separate counts:
+        pending approval (`approved=0`), whole-record `needs_review`, and
+        any of the three per-field `*_needs_verification` flags
+        (Description/Agent taxonomy/Competitive differentiation).
 
-        This was built once, deliberately reverted in favor of a plain
-        `count_pending_tools() + count_tools_needing_review()` sum (mirroring
-        Communities' own two-independent-dimensions shape) per an earlier,
-        explicit instruction to defer the per-field flags to their own
-        follow-on scope — then resurrected here per a later, superseding
-        instruction asking for exactly this combined, deduped count. Kept
-        verbatim from the original build; nothing about the query itself
-        needed to change.
+        This was built once (needs_review + the three field flags only,
+        no approval condition), deliberately reverted in favor of a plain
+        `count_pending_tools() + count_tools_needing_review()` sum per an
+        earlier instruction to defer the field flags, then resurrected
+        with the field flags folded back in (still no approval condition —
+        that sum was `count_pending_tools() + count_tools_needing_
+        attention()`, approval kept as a separate additive term). This
+        revision folds `approved=0` in too, replacing that sum with a
+        single query, because the sum was a REAL, LIVE double-count, not
+        a latent one: `add_tool()` defaults `needs_review=1` for every
+        brand-new tool regardless of caller (admin add-form, public
+        `/tools/submit`, seed scripts — see that method's own docstring),
+        and `approve_tool()` only ever flips `approved`, never touches
+        `needs_review` or the three field flags — so EVERY tool sitting in
+        the approval queue today already also has `needs_review=1`, and
+        was being counted twice by `count_pending_tools() + count_tools_
+        needing_attention()`. Confirmed by direct code read of `add_tool`/
+        `approve_tool`, not assumed.
 
-        Why a plain sum of `count_tools_needing_review()` and a separate
-        per-field count would be wrong: tools' three per-field flags aren't
-        independent of `needs_review` the way Communities' two dimensions
-        are — a fresh Generate/Refresh draft that lands any one of them on 1
-        also force-sets `needs_review` to 1 in the same write (see the
-        "Tools whole-record profile signoff" migration note), so for the
-        overwhelming majority of affected tools, `needs_review=1` and "some
-        field flag is set" are the SAME event, not two separate ones.
-        Summing them would double-count nearly every one, inflating the
-        badge exactly the way the per-field dedup requirement itself exists
-        to prevent (see CLAUDE.md's "one tool with 3 pending fields counts
-        once, not three" guidance) — just at the whole-record/per-field
-        boundary instead of across fields.
-
-        The one real edge case where the two signals diverge: `mark_tool_
-        reviewed()` clears `needs_review` alone and never touches the three
-        field flags, so a tool can have `needs_review=0` with a field flag
-        still genuinely pending (its own per-field "Mark verified" never
-        clicked). A single OR'd query over the `tools` table — one row per
-        tool, so `COUNT(*)` here is already a per-tool count with no
-        separate DISTINCT needed — catches that case too: a strict superset
-        of both `count_tools_needing_review()` and a per-field-only dedup
-        count, with no double-counting between them. `count_tools_needing_
-        review()` itself is untouched and keeps its own other callers (the
-        admin list's "Needs review" filter count, the review-status pill's
-        "(n/3)" breakdown)."""
+        Every condition here is a column on the same `tools` row (no join
+        across a separate table), so `COUNT(*)` is already a per-tool
+        count — no `DISTINCT` needed. `count_pending_tools()` and
+        `count_tools_needing_review()` are both untouched and keep their
+        own other callers (the admin list's "Needs review" filter count,
+        the review-status pill's "(n/3)" breakdown, the pending-submissions
+        table) — only the Software card's badge wiring in `webapp.tasks.
+        open_task_counts()` reads this method now, as the sole count for
+        that badge (no longer summed with anything else)."""
         return self.conn.execute(
             """SELECT COUNT(*) FROM tools
-               WHERE needs_review=1
+               WHERE approved=0
+                  OR needs_review=1
                   OR description_needs_verification=1
                   OR agent_taxonomy_needs_verification=1
                   OR competitive_differentiation_needs_verification=1"""
@@ -6898,6 +6894,61 @@ class Library:
     def count_communities_needing_review(self) -> int:
         return self.conn.execute(
             "SELECT COUNT(*) FROM community_profiles WHERE needs_review=1"
+        ).fetchone()[0]
+
+    def count_communities_needing_attention(self) -> int:
+        """Distinct-community count for the admin badge (2026-09) — the
+        dedup-safe replacement for `count_pending_communities() +
+        count_communities_needing_review()` summed as two counts.
+
+        Unlike tools (see `count_tools_needing_attention()`'s docstring,
+        where pending-approval and needs-review overlap on EVERY unapproved
+        tool by construction), overlap here is possible but not automatic:
+        `add_community()` has no `needs_review` concept at all — that flag
+        lives on `community_profiles`, a separate table with no row at all
+        until a profile is actually drafted (`community_profiles.
+        community_id` is its own primary key, one row per community, only
+        ever created by a profile save). The public submission route
+        (`/tools/communities/submit`) calls `add_community()` alone, with
+        no profile generation — so a freshly submitted pending community
+        has no `community_profiles` row and can't be needs-review=1 yet.
+        `approve_community()` only ever flips `approved`, same as tools'
+        `approve_tool()`.
+
+        The overlap CAN still happen, though, and nothing in the code
+        prevents it: `GET/POST /admin/tools/communities/{id}/profile` (the
+        profile-edit page and its save route) never checks the community's
+        `approved` status — confirmed by direct code read, not assumed —
+        so an admin drafting/saving a profile for a still-pending
+        submission (reachable by direct URL; there's no link to it from
+        the Pending submissions table's own row, which offers only
+        Approve/Reject) would leave that community `approved=0` with a
+        `community_profiles` row at `needs_review=1`, exactly the
+        double-count the sum pattern doesn't protect against. Whether any
+        currently-pending community is actually in that state is a live-
+        data question this session can't check (no production DB access) —
+        so this is reported as a real possibility, not a confirmed live
+        bug the way tools' case is.
+
+        A `LEFT JOIN` (not an `INNER JOIN`) is required here, unlike
+        tools' single-table query: most communities — pending ones
+        especially — have no `community_profiles` row at all, and an
+        INNER JOIN would silently drop every one of them from the count.
+        `community_profiles.community_id` is a 1:1 primary key (no fan-out
+        possible), so `COUNT(DISTINCT c.id)` is defensive/explicit rather
+        than strictly required — but kept for the same reason
+        `count_tools_needing_attention()`'s query comment calls out its
+        own dedup mechanism explicitly. `count_pending_communities()` and
+        `count_communities_needing_review()` are both untouched and keep
+        their own other callers (the admin list's "needing review" filter,
+        the review-status pill's "(n/12)" breakdown) — only the
+        Communities card's badge wiring in `webapp.tasks.open_task_counts()`
+        reads this method now, as the sole count for that badge."""
+        return self.conn.execute(
+            """SELECT COUNT(DISTINCT c.id) FROM communities c
+               LEFT JOIN community_profiles p ON p.community_id = c.id
+               WHERE c.approved=0
+                  OR p.needs_review=1"""
         ).fetchone()[0]
 
     def community_profile_needs_review_ids(self) -> set[int]:
