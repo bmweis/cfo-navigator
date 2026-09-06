@@ -26781,21 +26781,30 @@ _FEEDBACK_RATINGS = {
 
 
 @app.get("/admin/ask-feedback", response_class=HTMLResponse)
-def admin_ask_feedback(request: Request, rating: str = ""):
+def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     """Triage view for member feedback on FP&A Buddy answers: every rating,
     newest first, with the full context needed to judge a flagged answer —
     the question, the answer, and the sources it actually cited (persisted
     per turn in ask_questions.citations_json). Capture + triage only: nothing
-    here feeds back into prompts or retrieval automatically."""
+    here feeds back into prompts or retrieval automatically.
+
+    Reviewed state (2026-09, Phase 3) is a manual per-row "Mark reviewed"
+    toggle, matching /admin/community-gaps' own reviewed column/toggle/
+    filter shape exactly — not auto-clear-on-view. See toggle_ask_feedback_
+    reviewed's docstring for why."""
     if not _is_authed(request):
         return _login_redirect(request)
     if rating not in Library.ASK_FEEDBACK_RATINGS:
         rating = ""
+    if reviewed not in ("", "yes", "no"):
+        reviewed = ""
     lib = _lib()
     try:
-        rows = lib.list_ask_feedback(rating=rating or None, limit=200)
+        reviewed_filter = None if reviewed == "" else (reviewed == "yes")
+        rows = lib.list_ask_feedback(rating=rating or None, reviewed=reviewed_filter, limit=200)
         month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
         month_counts = lib.ask_feedback_counts(since=month_start)
+        unreviewed_count = lib.count_unreviewed_ask_feedback()
     finally:
         lib.close()
 
@@ -26804,6 +26813,16 @@ def admin_ask_feedback(request: Request, rating: str = ""):
 
     def _card(r: dict) -> str:
         label, fg, bg = _FEEDBACK_RATINGS.get(r["rating"], (r["rating"], "var(--ink)", "var(--surface-2)"))
+        is_reviewed = bool(r.get("reviewed"))
+        # Same pill styling as /admin/community-gaps' own Reviewed/New badge
+        # (Phase 0 confirmed that's bespoke markup, not a shared component —
+        # reused verbatim here rather than factored out, since it's two call
+        # sites, not a growing pattern).
+        reviewed_badge = (
+            '<span style="font-size:12px;font-weight:700;color:var(--seafoam-deep);background:var(--seafoam-wash);border-radius:999px;padding:3px 12px;white-space:nowrap;">Reviewed</span>'
+            if is_reviewed else
+            '<span style="font-size:12px;font-weight:700;color:var(--alert);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">New</span>'
+        )
         comment = ""
         if r.get("comment"):
             comment = (f'<div style="margin:8px 0 0;padding:8px 12px;background:var(--coral-wash);'
@@ -26820,11 +26839,16 @@ def admin_ask_feedback(request: Request, rating: str = ""):
         model = (r.get("model") or "").replace("claude-", "")
         report_link = (f'/admin/ask-report?user={quote(r["rater_username"])}'
                        if r.get("rater_username") else "/admin/ask-report")
+        back_qs = f"?reviewed={reviewed}" if reviewed else ""
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
     <span style="font-size:12px;font-weight:700;color:{fg};background:{bg};border-radius:999px;padding:3px 12px;white-space:nowrap;">{label}</span>
+    {reviewed_badge}
     <span style="font-size:12.5px;color:var(--muted);">{_esc(_rater(r))} &middot; {_esc((r["created_at"] or "")[:10])}{' &middot; edited' if r.get("updated_at") else ''}</span>
     <a href="{report_link}" style="margin-left:auto;font-size:12px;color:var(--accent);white-space:nowrap;">View in ask report &rarr;</a>
+    <form method="post" action="/admin/ask-feedback/{r['id']}/toggle-reviewed{back_qs}" style="margin:0;">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">{"Mark unreviewed" if is_reviewed else "Mark reviewed"}</button>
+    </form>
   </div>
   {comment}
   <div style="font-weight:600;color:var(--navy);font-size:14.5px;margin-top:10px;">{_esc(r.get("question") or "")}</div>
@@ -26839,17 +26863,29 @@ def admin_ask_feedback(request: Request, rating: str = ""):
     cards = "".join(_card(r) for r in rows) or \
         '<div style="padding:24px;text-align:center;color:var(--muted);border:1px solid var(--line);border-radius:12px;background:var(--surface);">No feedback yet.</div>'
 
+    # Unreviewed is deliberately all-time, not month-scoped — same choice
+    # /admin/community-gaps makes for its own Unreviewed stat tile (Total
+    # submissions/This calendar month are the two that scope; Unreviewed
+    # answers a different question, "how much is left to triage," which
+    # isn't naturally a monthly figure).
     stat_cards = "".join(
         f"""<div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
     <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{month_counts.get(key, 0):,}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">{label} this month</div>
   </div>"""
         for key, (label, _, _) in _FEEDBACK_RATINGS.items()
-    )
+    ) + f"""<div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{unreviewed_count:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Unreviewed</div>
+  </div>"""
 
     filter_options = "".join(
         f'<option value="{key}"{" selected" if rating == key else ""}>{label}</option>'
         for key, (label, _, _) in _FEEDBACK_RATINGS.items()
+    )
+    reviewed_filter_options = "".join(
+        f'<option value="{key}"{" selected" if reviewed == key else ""}>{label}</option>'
+        for key, label in [("no", "Unreviewed"), ("yes", "Reviewed")]
     )
 
     body = f"""<div class="page page-admin">
@@ -26857,7 +26893,7 @@ def admin_ask_feedback(request: Request, rating: str = ""):
 <h1>FP&amp;A Buddy feedback</h1>
 <p style="color:var(--muted);margin:-6px 0 20px;">How members rated the answers&mdash;flagged answers stay inspectable with the sources they actually cited. Capture and triage only; nothing here changes prompts or retrieval.</p>
 
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px;margin-bottom:20px;">
   {stat_cards}
 </div>
 
@@ -26867,12 +26903,30 @@ def admin_ask_feedback(request: Request, rating: str = ""):
     <option value="">All ratings</option>
     {filter_options}
   </select>
+  <label style="font-size:13px;color:var(--muted);">Reviewed:</label>
+  <select name="reviewed" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
+    <option value="">All</option>
+    {reviewed_filter_options}
+  </select>
 </form>
 
 {cards}
-<p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 200{' matching' if rating else ''} ratings.</p>
+<p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 200{' matching' if (rating or reviewed) else ''} ratings.</p>
 </div>"""
     return HTMLResponse(_page("FP&A Buddy feedback—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/ask-feedback/{feedback_id}/toggle-reviewed")
+def admin_ask_feedback_toggle(request: Request, feedback_id: int, reviewed: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.toggle_ask_feedback_reviewed(feedback_id)
+    finally:
+        lib.close()
+    qs = f"?reviewed={reviewed}" if reviewed else ""
+    return RedirectResponse(f"/admin/ask-feedback{qs}", status_code=303)
 
 
 @app.get("/admin/community-gaps", response_class=HTMLResponse)

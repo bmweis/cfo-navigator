@@ -1392,6 +1392,12 @@ CREATE TABLE IF NOT EXISTS feeds (
 _POST_MIGRATION_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_reset_requests(token_hash)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_read_later_user_url ON read_later(user_id, url)",
+    # ask_feedback.reviewed is migration-added (see the ALTER TABLE above),
+    # not present in the original CREATE TABLE, so — same reasoning as
+    # read_later's own index above — it has to live here, not inline in the
+    # schema string, or a fresh-DB boot would try to index a column that
+    # doesn't exist yet on that first pass.
+    "CREATE INDEX IF NOT EXISTS idx_ask_feedback_reviewed ON ask_feedback(reviewed)",
 ]
 
 
@@ -2311,6 +2317,17 @@ class Library:
             # or reset a password, same "SQL default is the floor" split
             # tools.needs_review's own migration comment already documents.
             "ALTER TABLE users ADD COLUMN password_change_recommended INTEGER NOT NULL DEFAULT 0",
+            # FP&A Buddy feedback triage (2026-09) — a manual "mark
+            # reviewed" toggle for ask_feedback, matching Community gaps'
+            # own `community_gap_submissions.reviewed` column name/type/
+            # default exactly (Phase 0 investigation confirmed that's a
+            # plain boolean, not a timestamp, so this mirrors it rather than
+            # inventing a viewed_at convention). Deliberately NOT auto-clear-
+            # on-view, for the same reason Community gaps isn't: merely
+            # opening the admin list shouldn't silently dismiss every row on
+            # it. See toggle_ask_feedback_reviewed/count_unreviewed_ask_
+            # feedback and the admin_ask_feedback route.
+            "ALTER TABLE ask_feedback ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -7911,14 +7928,22 @@ class Library:
         ).fetchone()
         return row[0] if row else cur.lastrowid
 
-    def list_ask_feedback(self, rating: str | None = None, limit: int = 200) -> list[dict]:
+    def list_ask_feedback(self, rating: str | None = None, reviewed: bool | None = None,
+                          limit: int = 200) -> list[dict]:
         """Feedback rows newest first, joined with the rated turn (question,
         answer, model, cost, citations snapshot) and the rater's identity —
-        everything the admin triage view shows. Pass `rating` to filter."""
-        where, params = "", []
+        everything the admin triage view shows. Pass `rating` and/or
+        `reviewed` to filter (combined with AND when both are given — same
+        convention as list_community_gap_submissions' own `reviewed`
+        param)."""
+        clauses, params = [], []
         if rating:
-            where = "WHERE f.rating=?"
+            clauses.append("f.rating=?")
             params.append(rating)
+        if reviewed is not None:
+            clauses.append("f.reviewed=?")
+            params.append(1 if reviewed else 0)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.conn.execute(
             f"""SELECT f.*, u.username AS rater_username, u.name AS rater_name,
                        aq.question, aq.answer, aq.model, aq.effort, aq.cost_usd,
@@ -7932,6 +7957,29 @@ class Library:
             params + [limit],
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def toggle_ask_feedback_reviewed(self, feedback_id: int) -> None:
+        """Manual "mark reviewed"/"mark unreviewed" toggle — mirrors
+        toggle_community_gap_reviewed exactly (same flip-in-place shape),
+        per the explicit decision to give ask_feedback the same manual
+        pattern Community gaps already has, not an auto-clear-on-view one."""
+        self.conn.execute(
+            "UPDATE ask_feedback SET reviewed = 1 - reviewed WHERE id=?",
+            (feedback_id,),
+        )
+        self.conn.commit()
+
+    def count_unreviewed_ask_feedback(self, since: str = "") -> int:
+        """Badge count for the FP&A Buddy feedback card — same shape as
+        community_gap_counts()'s own `unreviewed` bucket."""
+        where, params = "", []
+        if since:
+            where = "WHERE created_at >= ?"
+            params = [since]
+        unreviewed_where = f"{where} AND reviewed=0" if where else "WHERE reviewed=0"
+        return self.conn.execute(
+            f"SELECT COUNT(*) FROM ask_feedback {unreviewed_where}", params
+        ).fetchone()[0]
 
     def ask_feedback_counts(self, since: str = "") -> dict[str, int]:
         """Per-rating counts (every rating key present, 0 when none), optionally
