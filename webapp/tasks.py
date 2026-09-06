@@ -91,15 +91,15 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/checks": _failing_checks_count(),
         "/admin/users": lib.count_pending_password_resets(),
         "/admin/email-failures": lib.count_pending_email_failures(),
-        # Phase 1c badge scope-down: only these three of the un-badged queues
-        # Phase 0 inventoried got wired in — each already has a cheap count
-        # (an indexed COUNT, or a documented "fine to run live" full scan;
-        # see that PR's CLAUDE.md note). ask-feedback is deliberately still
-        # left out — no reviewed-state column exists on ask_feedback at all
-        # — logged for a future flow-harmonization decision instead. The
-        # tools *_needs_verification flags are no longer in that deferred
-        # bucket: they're wired above, folded into the Software card's own
-        # count.
+        # 2026-09 (Phase 3): ask-feedback is no longer deferred — it has the
+        # same manual "mark reviewed" toggle Community gaps already uses
+        # (ask_feedback.reviewed, same column name/type/default), not an
+        # auto-clear-on-view mechanism (investigated and explicitly
+        # rejected for Community gaps first, then matched here rather than
+        # diverging). Every other un-badged queue Phase 0 inventoried is
+        # still deliberately left out — logged for a future flow-
+        # harmonization decision instead.
+        "/admin/ask-feedback": lib.count_unreviewed_ask_feedback(),
         "/admin/tools/software/feature-review-queue": lib.count_feature_review_queue(status="pending"),
         "/admin/library/backfill-content": lib.count_needs_content_check() + lib.count_articles_needing_manual_review(),
         "/admin/tools/software/name-duplicates": len(lib.find_tool_name_duplicate_candidates()),

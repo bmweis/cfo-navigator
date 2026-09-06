@@ -6081,6 +6081,49 @@ never reads as something to tap.
   test_admin_nav_phase6.py`'s `test_admin_grid_reorder_renders_in_the_new_
   order` for the regression coverage.
 
+- **FP&A Buddy feedback: reviewed toggle (2026-09, Phase 3) — `ask_feedback`
+  gets the same manual "Mark reviewed" pattern Community gaps already has,
+  closing the last deferred badge gap from the earlier admin-badge-coverage
+  round.** Investigated first, per the standing gate: `community_gap_
+  submissions.reviewed` is a plain `INTEGER NOT NULL DEFAULT 0` boolean
+  (not a timestamp), flipped by a bespoke per-row toggle button/route
+  (`toggle_community_gap_reviewed`, `POST /admin/community-gaps/{id}/
+  toggle-reviewed`) — not a reusable macro/component, just markup local to
+  that one page's `_card()` closure, confirmed by reading it rather than
+  assumed. `community_gap_counts()["unreviewed"]` and the toggle read/write
+  the exact same column, so the stat tile and the row action can never
+  drift out of sync. `ask_feedback` was list-only (no detail view) with no
+  reviewed concept of any kind — `ask_feedback_counts()` only ever grouped
+  by `rating`. Built by mirroring Community gaps exactly, not inventing a
+  parallel shape: a migration-added `ask_feedback.reviewed` column (same
+  name/type/default — the schema comment explicitly says why this isn't a
+  `viewed_at` timestamp instead), `toggle_ask_feedback_reviewed()` (same
+  flip-in-place `UPDATE ... SET reviewed = 1 - reviewed`),
+  `count_unreviewed_ask_feedback()` (same shape as `community_gap_counts()`'s
+  own `unreviewed` bucket), and `list_ask_feedback()` gained an optional
+  `reviewed` filter alongside its existing `rating` one (combined with AND,
+  same convention `list_community_gap_submissions()` already uses). The
+  toggle component itself is copy-pasted markup, not factored into a shared
+  helper — Phase 0 found it was bespoke to begin with, and two call sites
+  isn't a pattern worth abstracting yet; the "Reviewed"/"New" pill styling
+  is reused verbatim (same hex-free `--seafoam-wash`/`--alert` tokens) so
+  the two pages read as visually consistent regardless. `/admin/ask-feedback`
+  gained a second filter select (Reviewed: All/Unreviewed/Reviewed,
+  combinable with the existing rating filter in one GET form) and a 4th
+  stat tile ("Unreviewed", deliberately all-time not month-scoped — same
+  choice Community gaps' own Unreviewed tile makes, since "how much is left
+  to triage" isn't naturally a monthly figure); the stat-card grid switched
+  from a hardcoded `repeat(3,1fr)` to `repeat(auto-fit,minmax(130px,1fr))`
+  per the standing CSS-Grid-blowout lesson (Phase P) rather than hand-fixing
+  the column count. `webapp.tasks.open_task_counts()` wires in
+  `count_unreviewed_ask_feedback()` for `/admin/ask-feedback` — no longer in
+  the deferred bucket; the comment there was updated to say so. `ask_feedback_
+  counts()` itself is untouched and keeps its own caller (the 3 per-rating
+  "this month" stat tiles). See `tests/test_ask_feedback.py`'s new Phase-3
+  section for the full regression coverage (toggle flip, filter, badge
+  wiring, the route's admin-only gate, and the rendered page carrying the
+  new badge/button/stat-tile markup).
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
