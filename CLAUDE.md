@@ -6124,6 +6124,33 @@ never reads as something to tap.
   wiring, the route's admin-only gate, and the rendered page carrying the
   new badge/button/stat-tile markup).
 
+- **Admin "Completeness" filter (2026-09) — one more scalar filter on both
+  `/admin/tools/software` and `/admin/tools/communities`, for finding
+  profiles missing content or a screenshot ahead of a manual review pass.
+  Consume-only against `linklib/gates.py`: no new gating concept, no
+  `gates.py` changes — it reuses the exact same field set and the same
+  strip-then-check emptiness test `gates.field_state` already applies (per
+  `linklib/compare.py`'s field list, the authoritative one, not a guess at
+  an old memory of it): tools' Description/Agent taxonomy/Bottom line
+  (`competitive_differentiation`)/Competitors; Communities' `verdict_summary`
+  plus the 17 `COMMUNITY_PROFILE_GROUPS` fields/Similar communities. Plus a
+  direct, non-gate `screenshot_url` presence check on both — deliberately
+  **not** `app_screenshot_url` too, since the app/product screenshot is a
+  genuinely optional curated extra most records never get (CFO Toolbox
+  Phase E), so flagging its absence would make the filter useless.
+  Renders as a single "Missing"/"Complete" dropdown (`_tool_completeness`/
+  `_community_completeness` in `webapp/app.py`), the same `scalar_filters`
+  convention every other AND-matched admin-table filter (Cost band, Access,
+  ...) already uses — a precomputed `data-completeness` attribute per row,
+  read by the existing shared `_ADMIN_SORT_FILTER_JS`, no new JS. Two new
+  bulk-query `Library` methods avoid an N+1 per row, same precedent as
+  `community_profile_quality_flags()`: `tool_competitor_counts()`/
+  `community_competitor_counts()` (one grouped `COUNT(*)` over the join
+  table) and `community_profile_has_empty_narrative_field()` (one bulk
+  `SELECT` over `community_profiles`, mirroring `community_profile_quality_
+  flags()`'s own shape) — a community with no `community_profiles` row at
+  all is treated as incomplete too, since it has none of the tracked
+  fields. See `tests/test_admin_completeness_filter.py`.
 - **Sonnet 5 pricing correction (2026-09, issue #98) — the numeric rate row was
   already correct; only a stale comment claiming it would expire was fixed.**
   `linklib/pricing.py`'s `MODEL_PRICING["claude-sonnet-5"]` row (keyed off the

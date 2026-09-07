@@ -11412,6 +11412,60 @@ def _admin_row_data_attrs(fields: dict[str, str]) -> str:
     return " ".join(f'data-{k}="{_esc(v.lower())}"' for k, v in fields.items())
 
 
+# Admin completeness filter (2026-09) — "Missing something" scalar filter on
+# both /admin/tools/software and /admin/tools/communities, reusing
+# linklib.gates' EMPTY state purely as a signal (via the same
+# strip-then-check emptiness test gates.field_state already applies —
+# CLAUDE.md's "consume only, no new gating concept" scope for this feature)
+# plus a direct check of the homepage screenshot column. Deliberately checks
+# only screenshot_url, never app_screenshot_url — the app/product screenshot
+# is a genuinely optional curated extra most records never get (see
+# CLAUDE.md's CFO Toolbox Phase E note), so flagging its absence would make
+# the filter useless. Deliberately checks only tools.summary/description
+# (whichever the profile page actually renders — the exact same fallback
+# linklib.compare._narrative_field already uses for this field, kept in sync
+# rather than re-derived), never both independently.
+_COMPLETENESS_MISSING = "missing"
+_COMPLETENESS_COMPLETE = "complete"
+
+
+def _tool_completeness(t: dict, n_competitors: int) -> str:
+    """One tool's completeness signal for the admin list filter — "missing"
+    if Description, Agent taxonomy, Bottom line, the homepage screenshot, or
+    at least one curated Competitor is absent; "complete" otherwise. Mirrors
+    exactly the field set linklib.compare.build_software_compare tracks for
+    this entity type (Description/Agent taxonomy/Bottom line/Competitors) —
+    see that module's own field list, not re-derived here."""
+    if not (t.get("summary") or t.get("description") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not (t.get("agent_taxonomy_note") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not (t.get("competitive_differentiation") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not (t.get("screenshot_url") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not n_competitors:
+        return _COMPLETENESS_MISSING
+    return _COMPLETENESS_COMPLETE
+
+
+def _community_completeness(c: dict, has_empty_narrative_field: bool, n_similar: int) -> str:
+    """One community's completeness signal — mirrors
+    linklib.compare.build_communities_compare's field set (the
+    COMMUNITY_PROFILE_GROUPS fields + Bottom line, via
+    Library.community_profile_has_empty_narrative_field; a community with no
+    community_profiles row at all is treated the same as one with an empty
+    field, since it has none of the tracked fields), plus the homepage
+    screenshot and at least one curated Similar community."""
+    if has_empty_narrative_field:
+        return _COMPLETENESS_MISSING
+    if not (c.get("screenshot_url") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not n_similar:
+        return _COMPLETENESS_MISSING
+    return _COMPLETENESS_COMPLETE
+
+
 def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str, str]],
                                      scalar_filters: list[dict], category_options: list[dict] | None = None,
                                      category_style: str = "dropdown", search_placeholder: str | None = None) -> str:
@@ -11513,6 +11567,7 @@ def admin_software(request: Request, filter: str = ""):
         tool_categories = lib.list_tool_categories()
         n_name_dupes = len(lib.find_tool_name_duplicate_candidates())
         n_needs_review = lib.count_tools_needing_review()
+        competitor_counts = lib.tool_competitor_counts()
     finally:
         lib.close()
     # "Needs review" filter (2026-08 amendment) — mirrors admin_communities'
@@ -11578,6 +11633,7 @@ def admin_software(request: Request, filter: str = ""):
             # orders "10" after "9" instead of before it.
             "intros": f"{n_leads:04d}",
             "search": f"{t['name']} {t['url']}",
+            "completeness": _tool_completeness(t, competitor_counts.get(t["id"], 0)),
         })
         # data-label on each <td> feeds the stacked-card layout at the
         # .admin-table-responsive breakpoint (see its CSS)—unused above that
@@ -11637,6 +11693,14 @@ def admin_software(request: Request, filter: str = ""):
     # entirely (see the Cost band/Access/etc. pattern on the Communities
     # table above, which likewise never lists its own Featured checkbox).
     software_sort_fields = [("name", "Name"), ("url", "URL"), ("summary", "Short description"), ("intros", "Intros")]
+    # Completeness filter (2026-09) — one more scalar (AND-matched) filter,
+    # same convention as Communities' Cost band/Access/etc. below. "Missing"
+    # means at least one of Description/Agent taxonomy/Bottom line/homepage
+    # screenshot/Competitors is empty — see _tool_completeness.
+    software_scalar_filters = [
+        {"key": "completeness", "label": "Completeness",
+         "options": ["Missing", "Complete"]},
+    ]
 
     # "Needs review" count/show-all links (2026-08 amendment) — same
     # review_filter_link/clear_filter_link pattern as admin_communities.
@@ -11683,7 +11747,7 @@ def admin_software(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software{' needing review' if filter == 'needs_review' else ''}</h2>
 {_admin_column_picker_html("software", software_cols)}
-{_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories,
+{_admin_sort_filter_toolbar_html("software", software_sort_fields, software_scalar_filters, category_options=tool_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
 <div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
@@ -15138,6 +15202,8 @@ def admin_communities(request: Request, filter: str = ""):
         needs_review_ids = lib.community_profile_needs_review_ids()
         quality_flags = lib.community_profile_quality_flags()
         community_categories = lib.list_community_categories()
+        has_empty_field = lib.community_profile_has_empty_narrative_field()
+        similar_counts = lib.community_competitor_counts()
     finally:
         lib.close()
 
@@ -15203,6 +15269,8 @@ def admin_communities(request: Request, filter: str = ""):
             "sponsorship_type": c["sponsorship_type"] or "", "format": c["format"] or "",
             "reach": c["reach"] or "", "categories": "|".join(c["categories"]),
             "search": f"{c['name']} {c['url']}",
+            "completeness": _community_completeness(
+                c, has_empty_field.get(c["id"], True), similar_counts.get(c["id"], 0)),
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
   <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
@@ -15274,6 +15342,8 @@ def admin_communities(request: Request, filter: str = ""):
         {"key": "sponsorship_type", "label": "Sponsorship type", "options": _COMMUNITY_SPONSORSHIP_TYPES},
         {"key": "format", "label": "Format", "options": _COMMUNITY_FORMAT},
         {"key": "reach", "label": "Reach", "options": _COMMUNITY_REACH},
+        # Completeness filter (2026-09) — see _community_completeness.
+        {"key": "completeness", "label": "Completeness", "options": ["Missing", "Complete"]},
     ]
 
     n_needs_review = len(needs_review_ids)
