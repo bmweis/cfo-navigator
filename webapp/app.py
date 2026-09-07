@@ -6424,13 +6424,14 @@ def privacy_page(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Library submissions — a public "suggest a piece" form. Submissions land
-# UN-ENRICHED in the Archive Queue (no server-side fetch, no Claude call), so a
-# public endpoint can't be used to run up cost or fetch arbitrary URLs. Brian
-# reviews them in /admin/library/queue; enrichment happens only on approval.
+# Library submissions — a member-gated (any signed-in account) "suggest a
+# piece" form. Submissions land UN-ENRICHED in the Archive Queue (no
+# server-side fetch, no Claude call), so it can't be used to run up cost or
+# fetch arbitrary URLs even from a low-friction account. Brian reviews them
+# in /admin/library/queue; enrichment happens only on approval.
 #
-# Public for now; the handler is self-contained, so gating it behind the future
-# paid login is a one-line auth check.
+# Reachable only by direct URL until the FP&A Buddy suggest-content link
+# (webapp/app.py's srcListHtml()) started pointing here.
 # ---------------------------------------------------------------------------
 
 @app.get("/library/submit", response_class=HTMLResponse)
@@ -20688,10 +20689,16 @@ function srcListHtml(d) {{
     var ownTag = c.own_content ? ' <span class="ask-src-own">(own writing)</span>' : '';
     return '<li>' + (icons[c.type] || '') + ' <a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">[' + c.n + '] ' + escapeHtml(c.title) + '</a>' + ownTag + '</li>';
   }});
-  if (!items.length) return '';
-  var caption = cites.some(function(c) {{ return c.type === 'web' && c.provider === 'exa'; }})
+  // Suggest-content nudge: always rendered, even with zero citations — that's
+  // the case where Buddy came up empty-handed, exactly the moment worth
+  // pointing someone at /library/submit. Reuses the existing muted
+  // .ask-src-caption treatment rather than a new component.
+  var suggestLine = '<div class="ask-src-caption">Know a source that should be here? '
+    + '<a href="/library/submit">Suggest it for the archive &rarr;</a></div>';
+  if (!items.length) return suggestLine;
+  var exaCaption = cites.some(function(c) {{ return c.type === 'web' && c.provider === 'exa'; }})
     ? '<div class="ask-src-caption">Web search powered by Exa</div>' : '';
-  return '<ul class="ask-src-list">' + items.join('') + '</ul>' + caption;
+  return '<ul class="ask-src-list">' + items.join('') + '</ul>' + exaCaption + suggestLine;
 }}
 // Per-answer feedback: one tap records; tapping another option changes the
 // rating (the server upserts one row per turn per user). A negative rating
