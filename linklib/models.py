@@ -1,15 +1,26 @@
-"""Model registry for the picker UIs — one place to add a model.
+"""Model registry for the picker UIs — one place to add a model, for the
+pickers that actually read this registry.
 
-Every model picker (Q&A, LinkedIn posts, re-enrich, backfill) renders from this
-registry, so a new Claude model becomes selectable everywhere by editing one row
-here instead of four scattered lists.
+**Corrected (issue #98 Piece 1, 2026-09) — this registry does NOT drive
+every model picker in the app.** It feeds exactly three admin surfaces:
+/admin/system/model (the live enrichment-model setting), the re-enrich
+picker, and the backfill picker. It does NOT feed FP&A Buddy — Buddy's
+Quick/Standard/Deep tiers map to hardcoded model ids in
+`linklib.agent.EFFORT_SETTINGS`, a separate dict this registry has no
+connection to; adding a model here does not make it selectable (or even
+reachable) by a Buddy question. "LinkedIn posts" no longer exists as a
+capability at all — that generator (`linklib/social.py`, `scripts/post.py`)
+was removed outright in #95 — so this docstring's old "Q&A, LinkedIn posts,
+re-enrich, backfill" claim was stale on two of its four counts. See
+CLAUDE.md's "Adding a new Claude model — every touchpoint" section for the
+full, current list of every place a new model id needs adding.
 
 `models_for` optionally consults the live Anthropic Models API (`models.list()`):
 
 * models the API reports as **retired** drop off the pickers on their own, and
 * for the chat pickers, models Anthropic ships that are **newer** than anything in
   the registry are surfaced automatically (labelled from the API) — so "pull any
-  new model" holds without a code change.
+  new model" holds without a code change **for the three surfaces above**.
 
 The enrichment pickers stay curated (no auto-surfacing): a re-enrich runs over the
 whole archive, so we don't want to point a 1,500-article pass at an unexpectedly
@@ -23,6 +34,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from datetime import datetime, timezone
 
 # Single source of truth, ordered fast -> best. `short` is for compact pickers
 # (Q&A, posts, backfill); `enrich` is the longer framing for the re-enrich page.
@@ -114,3 +126,36 @@ def models_for(*, blurb: str = "short", allow_new: bool = False) -> list[dict]:
     view = [{"id": m["id"], "label": m["label"], "blurb": m.get(blurb) or m["short"]}
             for m in _REGISTRY]
     return _merge(view, _live_models(), allow_new)
+
+
+# How often Brian should manually re-check Anthropic's actual current model
+# lineup against this registry AND against linklib.agent.EFFORT_SETTINGS'
+# hardcoded tier models — there's no "list every model Anthropic currently
+# ships" API to reconcile against automatically (`models.list()` only
+# returns what's already deployed/visible to this account, which is a
+# consequence of adding a model, not a way to discover one that hasn't been
+# added yet), so this is a second dated-reminder threshold for a human
+# attestation, same shape as linklib.pricing.PRICING_REVIEW_STALE_DAYS but
+# a separate, parallel reminder — not a replacement for it. Set tighter
+# than pricing's 90 days (issue #98 Piece 2, confirmed with Brian): new
+# models ship roughly every 30-60 days, meaningfully more often than an
+# existing model's price changes.
+MODELS_REVIEW_STALE_DAYS = 30
+
+
+def models_review_is_stale(last_reviewed_iso: str, *, now: datetime | None = None) -> bool:
+    """True when `last_reviewed_iso` (a stored settings value, empty string
+    if never recorded) is older than MODELS_REVIEW_STALE_DAYS — or missing
+    entirely, the same "go check it" signal as genuinely stale. Mirrors
+    linklib.pricing.pricing_review_is_stale exactly (same logic, separate
+    function/setting so the two reminders can go stale independently)."""
+    if not last_reviewed_iso:
+        return True
+    try:
+        then = datetime.fromisoformat(last_reviewed_iso)
+    except ValueError:
+        return True
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (now - then).days >= MODELS_REVIEW_STALE_DAYS

@@ -20,6 +20,17 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 
+def _pricing_section(html: str) -> str:
+    """/admin/checks now renders a second, sibling reminder banner below
+    this one (New-model awareness, issue #98 Piece 2 follow-up) that
+    deliberately mirrors this banner's own phrasing closely ("never been
+    marked reviewed" appears in both, independently, when marked-reviewed
+    at different times) — so a plain whole-page substring check can false-
+    positive/negative on the OTHER banner's state. Scope every assertion
+    to just the Pricing-freshness section."""
+    return html.split("New-model awareness")[0]
+
+
 @pytest.fixture
 def admin_client(monkeypatch):
     db = tempfile.mktemp(suffix=".db")
@@ -71,10 +82,10 @@ def test_mark_reviewed_clears_the_stale_banner(admin_client):
         lib.close()
     assert stored  # a real ISO timestamp was recorded
 
-    r2 = client.get("/admin/checks")
-    assert "never been marked reviewed" not in r2.text
-    assert "past the 90-day review window" not in r2.text
-    assert "manually verified" in r2.text
+    r2 = _pricing_section(client.get("/admin/checks").text)
+    assert "never been marked reviewed" not in r2
+    assert "past the 90-day review window" not in r2
+    assert "manually verified" in r2
 
 
 def test_banner_goes_stale_again_past_the_threshold(admin_client):
@@ -104,10 +115,10 @@ def test_banner_stays_fresh_within_the_threshold(admin_client):
     finally:
         lib.close()
 
-    r = client.get("/admin/checks")
-    assert "past the 90-day review window" not in r.text
-    assert "never been marked reviewed" not in r.text
-    assert "manually verified" in r.text
+    r = _pricing_section(client.get("/admin/checks").text)
+    assert "past the 90-day review window" not in r
+    assert "never been marked reviewed" not in r
+    assert "manually verified" in r
 
 
 def test_mark_reviewed_requires_auth(monkeypatch):
