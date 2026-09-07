@@ -6171,6 +6171,39 @@ never reads as something to tap.
   codebase starts using a 1-hour cache TTL; nothing does today. New
   `tests/test_pricing.py` pins the confirmed rate values and a hand-checked
   `compute_cost` calculation so a future accidental edit is caught.
+- **Pricing/model freshness check (2026-09, issue #98 follow-up) — two
+  genuinely different pieces, one fully automatable, one that can't be.**
+  **Piece 1, permanent and automated**: `tests/test_pricing.py::
+  test_every_registry_model_has_a_pricing_row` asserts every model id in
+  `linklib/models.py`'s curated `_REGISTRY` has a matching `MODEL_PRICING`
+  row — closes the "new model registered, pricing forgotten" gap for good;
+  no human ever needs to remember to check this again. As of this PR the two
+  already matched exactly (confirmed by the Step 0 investigation), so the
+  test passed immediately — its job is guarding against future drift, not
+  fixing a current gap. **Piece 2, a dated manual reminder, not automation**
+  — there's no pricing API to reconcile `MODEL_PRICING` against the way
+  `linklib.models` reconciles the model registry against the live Models
+  API, so the honest version of "check this periodically" is a human
+  attestation, not a test. Reuses the same reviewed-toggle pattern already
+  established for Community gaps (`toggle_community_gap_reviewed`) and
+  FP&A Buddy feedback (`toggle_ask_feedback_reviewed`) — a plain dated
+  `settings` value (`pricing_last_verified`, via the existing
+  `get_setting`/`set_setting`, no new column) rather than a per-row boolean,
+  since there's no per-row entity here, just one global "last verified"
+  date. `/admin/checks` gained a "Pricing freshness" section below the
+  automated pass/fail list — deliberately its own banner
+  (`_pricing_freshness_banner`), not a row in `checks.run_all()`'s list,
+  since this isn't a pass/fail check in that sense. Amber (never-reviewed,
+  or older than `linklib.pricing.PRICING_REVIEW_STALE_DAYS` = 90, confirmed
+  with Brian) / seafoam (fresh), with a "Mark reviewed" button
+  (`POST /admin/checks/mark-pricing-reviewed`, admin-only) that stamps the
+  current time — no auto-clear-on-view, same as the other two toggles.
+  `linklib.pricing.pricing_review_is_stale()` is the pure, unit-tested
+  staleness check (missing or unparseable value both read as stale, same
+  as "never verified"). See `tests/test_pricing_freshness.py` for the
+  end-to-end coverage (never-reviewed banner, mark-reviewed clearing it,
+  going stale again past 90 days, staying fresh within it, auth on both
+  the page and the action).
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

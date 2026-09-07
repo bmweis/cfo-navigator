@@ -19,6 +19,33 @@ periodically.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
+# How often Brian should manually re-check MODEL_PRICING against Anthropic's
+# (and OpenAI's) published rates — there's no pricing API to reconcile
+# against automatically (unlike linklib.models, which reconciles the model
+# *registry* against the live Models API), so this is a dated-reminder
+# threshold for a human attestation, not something a test can verify on its
+# own. Confirmed with Brian (issue #98 follow-up, 2026-09).
+PRICING_REVIEW_STALE_DAYS = 90
+
+
+def pricing_review_is_stale(last_verified_iso: str, *, now: datetime | None = None) -> bool:
+    """True when `last_verified_iso` (a stored settings value, empty string
+    if never recorded) is older than PRICING_REVIEW_STALE_DAYS — or missing
+    entirely, which is the same "go check it" signal as genuinely stale."""
+    if not last_verified_iso:
+        return True
+    try:
+        then = datetime.fromisoformat(last_verified_iso)
+    except ValueError:
+        return True
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (now - then).days >= PRICING_REVIEW_STALE_DAYS
+
+
 # USD per million tokens. cache_write is the 5-minute-TTL rate (1.25x input);
 # nothing in this codebase sets a 1-hour cache TTL, so the 2x rate isn't
 # modeled. cache_read is ~0.1x input, per Anthropic's published cache

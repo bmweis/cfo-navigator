@@ -23131,12 +23131,60 @@ async def admin_system_model_test_connection(request: Request):
     return JSONResponse(test_model_connection(model))
 
 
+def _pricing_freshness_banner(last_verified: str) -> str:
+    """Issue #98, Piece 2 — a dated manual-attestation reminder, not a
+    pass/fail check: there's no pricing API to reconcile MODEL_PRICING
+    against automatically (see linklib/pricing.py's module docstring), so
+    this is the same reviewed-toggle pattern already used for Community
+    gaps and FP&A Buddy feedback (a plain dated setting, flipped by a
+    "Mark reviewed" button, no auto-clear-on-view) applied to a third
+    thing: has a human actually re-checked Anthropic's published rates
+    recently. Deliberately its own banner, not a row in run_all()'s
+    pass/fail list — this isn't automatable, so it isn't a check in that
+    sense."""
+    from linklib.pricing import PRICING_REVIEW_STALE_DAYS, pricing_review_is_stale
+    stale = pricing_review_is_stale(last_verified)
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+    if stale:
+        bg, border, color = amber_wash, amber_border, amber_text
+        if last_verified:
+            when = _relative_age(last_verified)
+            html = (f'Pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
+                    f'against Anthropic&rsquo;s published rates &mdash; that&rsquo;s past the '
+                    f'{PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
+                    f'<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
+                    f'Anthropic&rsquo;s (and OpenAI&rsquo;s) current published rates, then mark it reviewed.')
+        else:
+            html = ('Pricing has <strong>never been marked reviewed</strong>. Check '
+                    '<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
+                    'Anthropic&rsquo;s (and OpenAI&rsquo;s) current published rates, then mark it reviewed.')
+    else:
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        when = _relative_age(last_verified)
+        html = (f'Pricing was manually verified <strong>{_esc(when) or "recently"}</strong> against '
+                f'Anthropic&rsquo;s published rates.')
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;'
+            f'display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
+            f'<span>{html}</span>'
+            f'<form method="post" action="/admin/checks/mark-pricing-reviewed" style="margin:0;flex-shrink:0;">'
+            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;white-space:nowrap;">Mark reviewed</button>'
+            f'</form></div>')
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     from webapp import checks as _checks
     results = _checks.run_all()
+    lib = _lib()
+    try:
+        pricing_last_verified = lib.get_setting("pricing_last_verified")
+    finally:
+        lib.close()
+    pricing_banner = _pricing_freshness_banner(pricing_last_verified)
 
     live = [r for r in results if r["where"] == "In-app"]
     passing = sum(1 for r in live if r["ok"])
@@ -23182,8 +23230,29 @@ def admin_checks(request: Request):
 {summary}
 {rows}
 <p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
+<h2 style="margin:28px 0 4px;">Pricing freshness</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Not automatable&mdash;there&rsquo;s no pricing API to check <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against, so this is a dated reminder for a human re-check, not a pass/fail test.</p>
+{pricing_banner}
 </div>"""
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/checks/mark-pricing-reviewed")
+def admin_checks_mark_pricing_reviewed(request: Request):
+    """Issue #98, Piece 2 — the manual "Mark reviewed" action: Brian has
+    actually re-checked MODEL_PRICING against Anthropic's (and OpenAI's)
+    current published rates and confirmed/updated it. Same plain
+    set-a-dated-setting shape as every other reviewed-toggle in this
+    codebase, just a timestamp rather than a boolean since there's no
+    per-row entity here to flip — one global "last verified" date."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.set_setting("pricing_last_verified", datetime.now(timezone.utc).isoformat())
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/checks", status_code=303)
 
 
 def _relative_age(iso: str) -> str:

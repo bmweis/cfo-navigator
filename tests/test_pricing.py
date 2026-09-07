@@ -7,7 +7,8 @@ Sonnet 5 to the once-planned $3/$15) would go uncaught.
 """
 from __future__ import annotations
 
-from linklib.pricing import MODEL_PRICING, compute_cost
+from linklib.models import _REGISTRY
+from linklib.pricing import MODEL_PRICING, compute_cost, pricing_review_is_stale
 
 
 def test_sonnet_5_pricing_is_the_confirmed_permanent_rate():
@@ -53,3 +54,33 @@ def test_model_pricing_only_tracks_a_single_cache_write_rate():
     a known, out-of-scope gap by issue #98's investigation, not a bug."""
     for rates in MODEL_PRICING.values():
         assert set(rates.keys()) == {"input", "output", "cache_write", "cache_read"}
+
+
+def test_every_registry_model_has_a_pricing_row():
+    """issue #98, Piece 1 — every model string in linklib.models's curated
+    registry (the source every picker in the app renders from) must have a
+    matching MODEL_PRICING entry, permanently, not just as of today. Without
+    this, a model added to the registry with pricing forgotten would silently
+    fall back to Sonnet 4.6 rates on every real call — this closes that gap
+    for good, no human needs to remember to check it again.
+
+    (Verified during development that this actually catches the regression it
+    exists to catch: temporarily adding a registry-only id with no
+    MODEL_PRICING row made this fail, as expected — not shipped as a
+    permanent broken-state test, per the task brief.)"""
+    registry_ids = {m["id"] for m in _REGISTRY}
+    missing = registry_ids - set(MODEL_PRICING.keys())
+    assert not missing, f"registered model(s) with no MODEL_PRICING row: {sorted(missing)}"
+
+
+def test_pricing_review_is_stale_thresholds():
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    fresh = (now - timedelta(days=10)).isoformat()
+    stale = (now - timedelta(days=91)).isoformat()
+    boundary = (now - timedelta(days=90)).isoformat()
+    assert pricing_review_is_stale(fresh, now=now) is False
+    assert pricing_review_is_stale(stale, now=now) is True
+    assert pricing_review_is_stale(boundary, now=now) is True
+    assert pricing_review_is_stale("", now=now) is True
+    assert pricing_review_is_stale("not-a-date", now=now) is True
