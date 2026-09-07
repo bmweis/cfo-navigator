@@ -6,12 +6,16 @@ billing figures, not a token-count proxy. This is separate from
 `agent.COST_ESTIMATES`, which is a rough *pre-call* estimate shown in the UI
 before a question is asked (we don't know real usage until the call returns).
 
-Pricing checked 2026-07-02 against Anthropic's published rates. Sonnet 5 is in
-an introductory pricing window through 2026-08-31 ($2/$10 per MTok instead of
-the standard $3/$15) — after that date this file needs a manual edit to the
-Sonnet 5 row. There's no live pricing API to reconcile against (unlike
-`linklib.models`, which reconciles against the live Models API), so a stale
-row here silently under- or over-charges until someone updates it.
+Pricing checked 2026-07-02 against Anthropic's published rates, re-verified
+2026-09-07 (issue #98). Sonnet 5's introductory rate ($2/$10 per MTok,
+instead of the originally-planned standard $3/$15) is now permanent — the
+planned September 1 increase to $3/$15 was cancelled by Anthropic, so no
+further edit is needed here on that account. See
+https://www.anthropic.com/news/claude-sonnet-5 There's no live pricing API to
+reconcile against (unlike `linklib.models`, which reconciles against the live
+Models API), so a stale row here silently under- or over-charges until
+someone updates it — re-verify against Anthropic's published rates
+periodically.
 """
 from __future__ import annotations
 
@@ -24,7 +28,7 @@ from __future__ import annotations
 MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00,  "cache_write": 1.25, "cache_read": 0.10},
     "claude-sonnet-4-6":         {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_read": 0.30},
-    "claude-sonnet-5":           {"input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_read": 0.20},  # intro pricing through 2026-08-31; becomes $3/$15 after
+    "claude-sonnet-5":           {"input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_read": 0.20},  # permanent rate (was introductory; the planned $3/$15 increase was cancelled — see module docstring)
     "claude-opus-4-8":           {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
     "claude-opus-5":             {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
 }
