@@ -5572,6 +5572,26 @@ class Library:
         ).fetchall()
         return [self._tool_to_dict(r) for r in rows]
 
+    def tool_competitor_counts(self) -> dict[int, int]:
+        """{tool_id: curated-competitor count}, for every tool with at
+        least one — used by the admin Software list's completeness filter
+        so it doesn't call list_tool_competitors per row (same bulk-query
+        precedent as community_profile_quality_flags: one grouped query
+        for the whole page, not an N+1 per-row fetch). Counts both sides
+        of the normalized (tool_id, competitor_id) pair against every tool
+        that appears in either column."""
+        out: dict[int, int] = {}
+        rows = self.conn.execute(
+            """SELECT id AS tool_id, COUNT(*) AS n FROM (
+                   SELECT tool_id AS id FROM tool_competitors
+                   UNION ALL
+                   SELECT competitor_id AS id FROM tool_competitors
+               ) GROUP BY id"""
+        ).fetchall()
+        for r in rows:
+            out[r["tool_id"]] = r["n"]
+        return out
+
     def suggest_tool_competitors(self, tool_id: int, limit: int = 8) -> list[dict]:
         """Candidate competitors for the admin edit page's suggestion list,
         ranked by shared-category count (most overlap first, then name).
@@ -6682,6 +6702,23 @@ class Library:
         ).fetchall()
         return [self._community_to_dict(r) for r in rows]
 
+    def community_competitor_counts(self) -> dict[int, int]:
+        """{community_id: curated-similar-community count} — the
+        Communities-side mirror of tool_competitor_counts, same bulk-query
+        reasoning (one grouped query for the admin list's completeness
+        filter, not a per-row list_community_competitors call)."""
+        out: dict[int, int] = {}
+        rows = self.conn.execute(
+            """SELECT id AS community_id, COUNT(*) AS n FROM (
+                   SELECT community_id AS id FROM community_competitors
+                   UNION ALL
+                   SELECT competitor_id AS id FROM community_competitors
+               ) GROUP BY id"""
+        ).fetchall()
+        for r in rows:
+            out[r["community_id"]] = r["n"]
+        return out
+
     def suggest_community_competitors(self, community_id: int, limit: int = 8) -> list[dict]:
         """Candidate similar communities for the admin edit page's suggestion
         list, ranked by shared-category count. Same pure-tag-overlap
@@ -6986,6 +7023,20 @@ class Library:
         "cost_value_verdict", "notable_members", "public_criticism", "verdict_summary",
     )
 
+    # The full set of Community-profile narrative fields the admin
+    # completeness filter (2026-09) checks for emptiness — mirrors
+    # linklib.compare.COMMUNITY_PROFILE_GROUPS' 17 grouped fields plus
+    # Bottom line (verdict_summary), hand-duplicated here rather than
+    # imported, same "keep linklib.db free of a sibling-module dependency"
+    # convention as _COMMUNITY_CONFIDENCE_FIELDS just above.
+    _COMMUNITY_NARRATIVE_FIELDS = (
+        "ideal_member", "anti_fit", "seniority_band", "stage_focus",
+        "value_prop", "primary_purpose", "resources_included", "notable_members", "jobs_program",
+        "format_reality", "engagement_level", "application_friction",
+        "cost_value_verdict", "sponsor_relationship_note", "business_model", "public_criticism",
+        "team_or_individual", "verdict_summary",
+    )
+
     def community_profile_quality_flags(self) -> dict[int, dict]:
         """Item 6 (Aug 2026 UI pass) — read-only surfacing of quality
         signals the admin communities LIST page never showed, even though
@@ -7016,6 +7067,28 @@ class Library:
                 "low_confidence": bool(row["low_confidence"]),
                 "unconfident_count": unconfident,
             }
+        return out
+
+    def community_profile_has_empty_narrative_field(self) -> dict[int, bool]:
+        """{community_id: True} for every community whose community_profiles
+        row has at least one blank field among _COMMUNITY_NARRATIVE_FIELDS
+        (the same field set linklib.compare.COMMUNITY_PROFILE_GROUPS + Bottom
+        line track) — the Communities-side signal behind the admin list's
+        "Missing something" completeness filter (2026-09). One bulk query
+        for the whole page, same reasoning as community_profile_quality_flags
+        just above. A community with NO community_profiles row at all has
+        no entry here — the caller treats "no entry" as incomplete too,
+        since it has none of the tracked fields at all."""
+        cols = ", ".join(self._COMMUNITY_NARRATIVE_FIELDS)
+        rows = self.conn.execute(
+            f"SELECT community_id, {cols} FROM community_profiles"
+        ).fetchall()
+        out: dict[int, bool] = {}
+        for r in rows:
+            row = dict(r)
+            out[row["community_id"]] = any(
+                not (row.get(f) or "").strip() for f in self._COMMUNITY_NARRATIVE_FIELDS
+            )
         return out
 
     # -- community gap submissions (Phase 5: native gap-collection) ---------

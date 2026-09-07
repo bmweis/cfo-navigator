@@ -2899,6 +2899,25 @@ Details worth knowing:
   test_review_state_publish_gates.py`/`tests/test_matchmaker_publish_gate.py`
   (PR A's own end-to-end suite) pass unchanged — the actual proof this
   extraction is behavior-identical, not just internally consistent.
+- **Admin Completeness filter (2026-09) — a `linklib/gates.py` *consumer*,
+  not a change to it.** `/admin/tools/software` and `/admin/tools/communities`
+  gained a "Missing"/"Complete" scalar filter for finding profiles missing
+  content or a screenshot ahead of a manual review pass — the same field
+  set `linklib/compare.py` already tracks for each entity type (Software:
+  Description/Agent taxonomy/Bottom line/Competitors; Communities:
+  Bottom line/`COMMUNITY_PROFILE_GROUPS`/Similar communities), checked for
+  blankness the same way `gates.field_state` does, plus a direct
+  `screenshot_url` presence check outside the gate mechanism entirely (not
+  `app_screenshot_url`, which is optional and mostly unset by design).
+  `webapp/app.py`'s `_tool_completeness`/`_community_completeness` compute
+  one `data-completeness` value per row, read by the existing shared
+  `_ADMIN_SORT_FILTER_JS` — no new JS, no new UI paradigm, just another
+  entry in each table's `scalar_filters` list. Two bulk-query `Library`
+  additions avoid an N+1 per row (`tool_competitor_counts()`/
+  `community_competitor_counts()`, `community_profile_has_empty_narrative_
+  field()`), mirroring `community_profile_quality_flags()`'s existing
+  one-query-for-the-whole-page shape. See `tests/
+  test_admin_completeness_filter.py`.
 - **Compare Redesign Phase 1 (2026-09) — a new `linklib/compare.py`
   serializer replaces both compare matrices' hand-assembled row logic, and
   the pages themselves are rebuilt on it: grouped section headers (fixing
