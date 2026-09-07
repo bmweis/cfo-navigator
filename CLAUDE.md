@@ -6124,6 +6124,27 @@ never reads as something to tap.
   wiring, the route's admin-only gate, and the rendered page carrying the
   new badge/button/stat-tile markup).
 
+- **Sonnet 5 pricing correction (2026-09, issue #98) — the numeric rate row was
+  already correct; only a stale comment claiming it would expire was fixed.**
+  `linklib/pricing.py`'s `MODEL_PRICING["claude-sonnet-5"]` row (keyed off the
+  literal model string `claude-sonnet-5`, the same id `linklib/models.py` and
+  `linklib/agent.py`'s effort-tier map both use) already held the confirmed
+  $2/$10/$2.50(5-min cache write)/$0.20(cache read) per-MTok rates — but its
+  comment and the module docstring both said this was a temporary
+  introductory window ending 2026-08-31, reverting to $3/$15 after. Per
+  Anthropic's own pricing announcement
+  (https://www.anthropic.com/news/claude-sonnet-5), that planned increase was
+  cancelled — the introductory rate is now permanent — so both were corrected
+  to say so rather than continue flagging a future edit that will never be
+  needed. **Separate, smaller finding, not acted on**: `MODEL_PRICING` tracks
+  only one `cache_write` rate per model (the 5-minute-TTL rate) — there's no
+  column for the 1-hour-TTL cache-write rate (Sonnet 5: $4.00/MTok), so a
+  future caller that actually sets a 1-hour cache TTL would silently be
+  charged the 5-minute rate instead. Worth adding if/when something in this
+  codebase starts using a 1-hour cache TTL; nothing does today. New
+  `tests/test_pricing.py` pins the confirmed rate values and a hand-checked
+  `compute_cost` calculation so a future accidental edit is caught.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
