@@ -6548,6 +6548,35 @@ defined — not just the one nearest the typo — which is how one truncated apo
 silently took out search, select-all, and bulk edit/delete together, on two separate
 admin pages, with no exception thrown anywhere a person would see it.
 
+## Hub-nav orphan detector
+
+`/admin`'s hub-nav cards (`_ADMIN_GROUPS`, `_LIBRARY_TOOLS`, `_FPA_BUDDY_TOOLS`,
+`_SOFTWARE_TOOLS` in `webapp/app.py`) are hand-maintained tuples — the same failure
+shape as every other hand-maintained list this project has had to guard against
+mechanically. Found 2026-09: Communities' category CRUD
+(`/admin/tools/communities/categories`) had a real, working route with no hub-nav
+card at all, while its Software parallel (`/admin/tools/software/categories`) did —
+caught by manual sampling during an admin-sprawl review, not by anything mechanical.
+
+`webapp.app.hub_nav_orphans()` closes this the same way `/admin/system/page-index`
+closes the width-tier drift problem: it reuses that same live `app.routes`
+introspection technique (a sibling, not a parallel implementation) to enumerate
+every real `/admin/*` GET/HTML route, flattens the hub-nav tuples into their own
+href set, and diffs the two. Three route classes are excluded before diffing
+because they're never expected to carry their own card — `/admin` itself, any
+route with a path parameter (a per-record detail/edit page reached from its list
+page's rows), and a `.../new` creation-form route whose own parent path is already
+carded (a general, mechanical rule — a future `.../new` route needs no edit here) —
+plus two small, individually-documented exceptions
+(`/admin/overhead-spend/details`, `/admin/tools/software/name-duplicates`) mirroring
+`_PAGE_INDEX_CUSTOM_EXCEPTIONS`'s own precedent. Wired into `webapp.checks.run_all()`
+as "Hub-nav orphans" — a real automated pass/fail entry in `/admin/checks`' existing
+list, not a fourth dated manual-attestation banner (unlike the Pricing/Exa-pricing/
+New-model-awareness reminders above, this is mechanically computable with no
+external source or human judgment call). See `tests/test_hub_nav_orphans.py` for
+the coverage, including a reproduction of the exact 2026-09 gap proving the detector
+actually catches it, not just passes trivially.
+
 ## Running locally
 
 ```bash
