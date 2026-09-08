@@ -6922,12 +6922,16 @@ except the first one:
    `linklib/agent.py`, `linklib/matchmaker.py`, `linklib/suggest.py`,
    `linklib/dedupe.py`, `linklib/queue.py`, `linklib/enrich.py`, and
    `linklib/embeddings.py` each declare their own `os.environ.get("LINKLIB_..._MODEL",
-   "<hardcoded literal>")` default, independently. None of these read the
-   registry either; each is its own literal to update if the *default* itself
-   (not a picker option) should change. `linklib/agent.py`'s `MODEL_ALIASES`
-   (friendly short names like `"opus"`/`"sonnet5"` -> canonical id, used by
-   `scripts/ask.py`'s `--model` flag) is a sixth, smaller list in the same
-   category.
+   "<hardcoded literal>")` default. None of these read the registry, and
+   `queue.py`/`enrich.py`/`embeddings.py` each pick their own deliberately
+   different literal for a deliberately different reason (see the
+   model-config-consolidation bullet below) — each is its own literal to
+   update if that default itself (not a picker option) should change.
+   `linklib/agent.py`'s `MODEL_ALIASES` (friendly short names like
+   `"opus"`/`"sonnet5"` -> canonical id) is a sixth, smaller list in the same
+   category — it's used internally by `agent.py` itself (`REWRITE_MODEL`,
+   `ask()`'s own `model=` resolution), not only by `scripts/ask.py`'s
+   `--model` flag as this doc once assumed; stays in `agent.py`, not moved.
 
 MCP tools (`ask_fpa_buddy`, `ask_matchmaker`) were checked too and don't add a
 seventh touchpoint — neither exposes a model parameter; both proxy straight into
@@ -6964,6 +6968,57 @@ Settings key `models_last_reviewed`; `POST /admin/checks/mark-models-reviewed`
 records it. The banner links out to both Anthropic's live model-overview docs and
 back to this section (so "what do I actually need to touch" doesn't need
 re-deriving each time it goes stale).
+
+**Model-config consolidation (2026-09, follow-up to issue #98's touchpoint
+investigation above) — the "default chat model" literal, deduplicated where it
+was genuinely duplicated; left alone everywhere it wasn't.** Point 5 above
+flagged five separately-hardcoded `"claude-sonnet-4-6"`/`os.environ.get("LINKLIB_CHAT_MODEL",
+...)` fallbacks (`linklib/agent.py`, `linklib/matchmaker.py`, `linklib/suggest.py`,
+`linklib/dedupe.py`, plus `linklib/queue.py`'s differently-valued
+`QUEUE_ENRICH_MODEL`) as drift risk, same shape as the pricing/registry gap
+#506 closed — a real default duplicated in multiple places with nothing
+keeping them in sync. Investigated per-site before touching anything, rather
+than assuming uniformity:
+- **`agent.py`, `matchmaker.py`, `suggest.py` were genuinely identical** — same
+  env var (`LINKLIB_CHAT_MODEL`), same literal, no stated reason to differ.
+  Consolidated into one new `linklib.models.DEFAULT_CHAT_MODEL =
+  "claude-sonnet-4-6"` constant, which all three now pass as the fallback
+  argument to their own unchanged `os.environ.get("LINKLIB_CHAT_MODEL", ...)`
+  call — behavior-identical (confirmed live: with/without `LINKLIB_CHAT_MODEL`
+  set, each module's resolved default is byte-identical before and after).
+- **`dedupe.py` shares the same *ultimate* default but has a real, deliberate
+  extra override layer** (`LINKLIB_DEDUPE_MODEL`, checked before
+  `LINKLIB_CHAT_MODEL`) — not drift, an intentional per-feature knob. Kept
+  exactly as its own two-level `os.environ.get(...)` chain; only its
+  innermost hardcoded literal now points at the shared
+  `DEFAULT_CHAT_MODEL` constant instead of re-typing the string.
+- **`queue.py`'s `QUEUE_ENRICH_MODEL` (`"claude-opus-4-8"`) is untouched, as
+  scoped** — a deliberately different, more capable model for a deliberately
+  different task class (background enrichment depth, same "quality over
+  cost" reasoning as `enrich.py`'s own `DEFAULT_MODEL`), not a copy of the
+  chat default that happened to diverge. Forcing it onto the shared constant
+  would be false consistency, not a fix.
+- **`linklib/agent.py`'s `MODEL_ALIASES` stays in `agent.py`** — the task's
+  original premise (flagged as one of five things to re-verify, not assumed)
+  that it's "used only by a CLI script" turned out to be wrong: it's used
+  internally by `agent.py` itself (`REWRITE_MODEL = MODEL_ALIASES["haiku"]`,
+  and `ask()`'s own `model=` resolution at
+  `MODEL_ALIASES.get(model, model)`) — `scripts/ask.py` never imports it at
+  all, it just passes a raw string through to `agent.ask()`, which resolves
+  the alias internally. Moving a lookup table this tightly coupled to
+  `agent.py`'s own resolution logic would be pure churn with no drift-risk
+  benefit, so it was left in place.
+
+`linklib/models.py` has zero `linklib`-internal imports of its own (a leaf
+module), so importing `DEFAULT_CHAT_MODEL` from it into `agent.py`/
+`matchmaker.py`/`suggest.py`/`dedupe.py` carries no circular-import risk —
+confirmed by actually importing all five touched modules together, not just
+reasoned about. `queue.py` and every other model-default site in point 5
+above (`enrich.py`, `embeddings.py`) are unmodified. This is a
+where-the-default-is-defined refactor only — no change to what model is
+actually used anywhere, no changes to `EFFORT_SETTINGS`/`COST_ESTIMATES`/the
+pricing or registry CI tests (already addressed by the new-model-awareness
+PR above).
 
 ## Billing note
 
