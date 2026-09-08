@@ -21466,6 +21466,7 @@ _SOFTWARE_TOOLS = [
 _TOOLBOX_TOOLS = [
     ("/admin/tools/resources", "Resources", "Add, edit, or remove the sources listed in the Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
+    ("/admin/tools/communities/categories", "Community categories", "Add, rename, or remove the category pills communities are tagged with on /tools/communities—the Communities parallel to Software categories above."),
     ("/admin/game-settings",    "Sail, don't row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
 ]
 
@@ -22586,6 +22587,94 @@ def _page_index_snapshot() -> list[dict]:
         rows.append({"path": route.path, "tier": tier, "flagged": not tier})
     rows.sort(key=lambda r: r["path"])
     return rows
+
+
+# Hub-nav orphan detector — a sibling to the page-index route-walk above,
+# reusing the exact same `app.routes` introspection technique but catching
+# the opposite failure: not "a page with no width tier" but "a real admin
+# route with no hub-nav card anywhere on /admin", reachable only by guessing
+# the URL or clicking some other page's inline link. Found 2026-09, during
+# an admin-sprawl review: Communities' category CRUD
+# (/admin/tools/communities/categories) had no /admin card at all, while its
+# Software parallel (/admin/tools/software/categories) did — caught by
+# manual sampling, not anything mechanical. `_ADMIN_GROUPS`/`_LIBRARY_TOOLS`/
+# `_FPA_BUDDY_TOOLS`/`_SOFTWARE_TOOLS` are hand-maintained tuples, exactly
+# the kind of thing that silently drifts from the real route table — this
+# closes that gap the same way page-index closed the width-tier one.
+#
+# Three classes of real route are legitimately never expected to carry their
+# own hub card, excluded mechanically before diffing rather than hand-listed
+# one at a time:
+#   1. `/admin` itself — the hub page doesn't link to itself.
+#   2. A route with a path parameter (`{id}`/`{slug}` in its path) — a
+#      per-record detail/edit page reached from its own list page's rows,
+#      never a fixed hub-nav destination in its own right.
+#   3. A `.../new` creation-form route whose own parent path (everything
+#      before the trailing `/new`) is ITSELF already a hub-nav href —
+#      reached via an "Add new" button on that already-carded page. A
+#      general rule, not a maintained list: any future `.../new` route
+#      added under an already-carded page is covered automatically, with no
+#      edit needed here.
+# Two further routes are true, individually-justified exceptions — small,
+# named, and documented, the same shape as `_PAGE_INDEX_CUSTOM_EXCEPTIONS`'s
+# own two above:
+#   - `/admin/overhead-spend/details` — a drill-down sub-view of
+#     `/admin/overhead-spend`, itself already carded; reached via a link on
+#     that page, not a fixed nav destination of its own.
+#   - `/admin/tools/software/name-duplicates` — deliberately has no card of
+#     its own (see `_SOFTWARE_TOOLS`'s own comment above): it's an inline
+#     link on Software vendors' own page, and its pending count already
+#     folds into that sub-group's aggregate badge via `badge_hrefs`.
+_HUB_NAV_KNOWN_NON_CARDED = {
+    "/admin/overhead-spend/details",
+    "/admin/tools/software/name-duplicates",
+}
+
+
+def _hub_nav_all_hrefs() -> set[str]:
+    """Every href that actually renders as a real hub-nav card on /admin
+    today — the identical assembly admin_page() performs at render time
+    (_LIBRARY_TOOLS + the Library link card + the Compare-summary-feedback
+    card + _FPA_BUDDY_TOOLS + _SOFTWARE_TOOLS + every _ADMIN_GROUPS item),
+    kept as its own function so admin_page() and this detector can never
+    build two different sets from the same source tuples."""
+    hrefs = {href for href, _, _ in _LIBRARY_TOOLS}
+    hrefs.add("/admin/library")
+    hrefs.add("/admin/compare-summary-feedback")
+    hrefs |= {href for href, _, _ in _FPA_BUDDY_TOOLS if href.startswith("/admin")}
+    hrefs |= {href for href, _, _ in _SOFTWARE_TOOLS}
+    for _gname, _gdesc, items in _ADMIN_GROUPS:
+        hrefs |= {href for href, _, _ in items}
+    return hrefs
+
+
+def hub_nav_orphans() -> list[str]:
+    """Real admin page routes with no corresponding hub-nav card anywhere on
+    /admin — see the block comment above for the full exclusion rules and
+    why each exists. Sorted for a stable, diffable result."""
+    from fastapi.routing import APIRoute
+    carded = _hub_nav_all_hrefs()
+    orphans = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if "GET" not in route.methods:
+            continue
+        path = route.path
+        if not path.startswith("/admin") or path == "/admin":
+            continue
+        if _page_index_response_class_name(route) != "HTMLResponse":
+            continue
+        if "{" in path:
+            continue
+        if path.endswith("/new") and path[: -len("/new")] in carded:
+            continue
+        if path in _HUB_NAV_KNOWN_NON_CARDED:
+            continue
+        if path not in carded:
+            orphans.append(path)
+    orphans.sort()
+    return orphans
 
 
 @app.get("/admin/system/page-index", response_class=HTMLResponse)
