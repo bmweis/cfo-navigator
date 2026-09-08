@@ -76,17 +76,19 @@ def lib(tmp_path):
 def test_medium_recovery_skips_non_blocked_host(lib, monkeypatch):
     called = []
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: called.append(url) or "")
-    assert pl.medium_recovery(lib, _NORMAL_URL, "Some Title") is None
+                        lambda lib_, url: (called.append(url) or "", 0.0))
+    result, cost = pl.medium_recovery(lib, _NORMAL_URL, "Some Title")
+    assert result is None
+    assert cost == 0.0
     assert called == [], "a non-blocked host must never spend an Exa call"
 
 
 def test_medium_recovery_hit_returns_title_content_and_html(lib, monkeypatch):
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: _RECOVERED_TEXT)
+                        lambda lib_, url: (_RECOVERED_TEXT, 0.0))
 
-    result = pl.medium_recovery(lib, _MEDIUM_URL, "")
+    result, _cost = pl.medium_recovery(lib, _MEDIUM_URL, "")
     assert result is not None
     assert result["source"] == "medium-fetch"
     assert result["candidate_url"] == _MEDIUM_URL
@@ -100,10 +102,11 @@ def test_medium_recovery_hit_returns_title_content_and_html(lib, monkeypatch):
 
 def test_medium_recovery_miss_returns_none(lib, monkeypatch):
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
-    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "")
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: ("", 0.0))
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": ("", ""))
-    assert pl.medium_recovery(lib, _MEDIUM_URL, "Some Title") is None
+                        lambda lib_, title, author="": ("", "", 0.0))
+    result, _cost = pl.medium_recovery(lib, _MEDIUM_URL, "Some Title")
+    assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +122,7 @@ def test_ingest_url_recovers_title_and_content_on_blocked_host(lib, monkeypatch)
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: _RECOVERED_TEXT)
+                        lambda lib_, url: (_RECOVERED_TEXT, 0.0))
 
     result = pl.ingest_url(lib, _MEDIUM_URL, do_enrich=False)
     article_id = result["id"]
@@ -145,9 +148,9 @@ def test_ingest_url_falls_back_to_url_title_when_medium_tier_also_misses(lib, mo
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
-    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "")
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: ("", 0.0))
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": ("", ""))
+                        lambda lib_, title, author="": ("", "", 0.0))
 
     result = pl.ingest_url(lib, _MEDIUM_URL, do_enrich=False)
     article_id = result["id"]
@@ -172,7 +175,7 @@ def test_ingest_url_non_blocked_host_never_calls_medium_tier(lib, monkeypatch):
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: called.append(url) or "should never be reached")
+                        lambda lib_, url: (called.append(url) or "should never be reached", 0.0))
 
     result = pl.ingest_url(lib, _NORMAL_URL, do_enrich=False)
     assert called == []
@@ -192,7 +195,7 @@ def test_ingest_url_successful_direct_fetch_never_calls_medium_tier(lib, monkeyp
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: extract_mod._page_data_from_html(good_html))
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: called.append(url) or "should never be reached")
+                        lambda lib_, url: (called.append(url) or "should never be reached", 0.0))
 
     result = pl.ingest_url(lib, _MEDIUM_URL, do_enrich=False)
     assert called == []
@@ -221,7 +224,7 @@ def test_resolve_reader_content_recovers_on_blocked_host(env, monkeypatch):
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: _RECOVERED_TEXT)
+                        lambda lib_, url: (_RECOVERED_TEXT, 0.0))
 
     data = env._resolve_reader_content(url=_MEDIUM_URL)
     assert data is not None
@@ -242,7 +245,7 @@ def test_resolve_reader_content_medium_tier_before_wayback(env, monkeypatch):
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: _RECOVERED_TEXT)
+                        lambda lib_, url: (_RECOVERED_TEXT, 0.0))
 
     wayback_called = []
     monkeypatch.setattr(wayback_module, "find_snapshot",
@@ -262,9 +265,9 @@ def test_resolve_reader_content_falls_through_to_wayback_when_medium_tier_misses
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
-    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "")
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: ("", 0.0))
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": ("", ""))
+                        lambda lib_, title, author="": ("", "", 0.0))
     monkeypatch.setattr(wayback_module, "find_snapshot",
                         lambda url: "https://web.archive.org/web/x")
     snap_html = "<html><body><article><p>Archived reader content.</p></article></body></html>"
@@ -284,7 +287,7 @@ def test_resolve_reader_content_non_blocked_host_unaffected(env, monkeypatch):
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 404"))
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: called.append(url) or "should never be reached")
+                        lambda lib_, url: (called.append(url) or "should never be reached", 0.0))
 
     import linklib.wayback as wayback_module
     monkeypatch.setattr(wayback_module, "find_snapshot", lambda url: None)

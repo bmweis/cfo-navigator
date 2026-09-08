@@ -102,9 +102,10 @@ def trace_article(lib: Library, article_id: int) -> None:
         return
 
     print("    Live re-trace of _try_medium_platform() (read-only, no DB write):")
-    ok, structured, candidate_url, source, note = pl._try_medium_platform(lib, title, author, url)
+    ok, structured, candidate_url, source, note, exa_cost = pl._try_medium_platform(lib, title, author, url)
     print(f"        -> ok={ok}  source={source!r}  candidate_url={candidate_url!r}")
     print(f"        -> note: {note}")
+    print(f"        -> exa_cost_usd: {exa_cost}")
     if ok:
         print(f"        -> structured content length: {len(structured)} chars "
               f"(this run did NOT write it — call backfill_article_content() for that)")

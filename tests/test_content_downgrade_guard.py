@@ -214,10 +214,10 @@ def test_migration_tier_refuses_a_paywalled_candidate(lib, monkeypatch):
     before = lib.get_article(aid)["content_html"]
 
     monkeypatch.setattr("linklib.domain_migration.find_migrated_url",
-                        lambda lib_, dom, title: "https://jeffreycarter.substack.com/p/x")
+                        lambda lib_, dom, title: ("https://jeffreycarter.substack.com/p/x", 0.007))
     monkeypatch.setattr("linklib.extract.fetch_page", lambda *a, **k: _preview_page())
 
-    ok, _structured, _url = pipeline._try_domain_migration(
+    ok, _structured, _url, _cost = pipeline._try_domain_migration(
         lib, "jeffreycarter.substack.com", "Some Title",
         "https://pointsandfigures.com/i")
 

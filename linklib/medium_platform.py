@@ -140,24 +140,32 @@ def is_recognized_blocked_host(url: str) -> bool:
     return is_medium_platform_host(url) or host in _OTHER_BLOCKED_HOSTS
 
 
-def fetch_content_by_url(lib, url: str) -> str:
+def fetch_content_by_url(lib, url: str) -> tuple[str, float]:
     """Direct Exa content fetch for a known, exact URL — Exa's `/contents`
     endpoint, not `/search`. Used when the article's own current URL
     (post manual-URL-correction, see CLAUDE.md's manual-review bullets) is
     already on a recognized blocked host: there's no candidate to
     disambiguate, so no title-match validation is needed the way
-    find_medium_candidate's search results need one. Returns the fetched
-    text, or "" on any miss/failure (no EXA_API_KEY, Exa disabled via the
-    admin toggle, a blank url, a network failure, a non-200/malformed
-    response, or a response with no usable text) — never raises, same
+    find_medium_candidate's search results need one. Returns
+    (text, cost_usd) — the fetched text ("" on any miss/failure), and the
+    real compute_exa_cost() figure for the call (2026-09, Exa cost-tracking
+    foundation). EXA_PRICING only models the "search" endpoint tier
+    (compute_exa_cost's own documented fallback), so a /contents call is
+    billed at those same rates rather than adding a new, unmodeled pricing
+    row for a single caller — see EXA_PRICING's own comment on adding rows
+    only once a caller needs one; this stays a deliberate approximation,
+    not a claim that /contents and /search cost the same in reality.
+    cost_usd is 0.0 whenever Exa was never actually billed (no
+    EXA_API_KEY, Exa disabled via the admin toggle, a blank url, a network
+    failure, or a non-200/malformed response) — never raises, same
     best-effort contract as find_medium_candidate/find_migrated_url. `lib`
     may be None (falls back to "enabled"), matching agent._web_provider's
     own convention."""
     api_key = os.environ.get("EXA_API_KEY")
     if not api_key or not url:
-        return ""
+        return "", 0.0
     if lib is not None and not lib.get_exa_enabled():
-        return ""
+        return "", 0.0
 
     try:
         resp = requests.post(
@@ -169,33 +177,39 @@ def fetch_content_by_url(lib, url: str) -> str:
         resp.raise_for_status()
         data = resp.json()
     except Exception:
-        return ""
+        return "", 0.0
 
-    for r in (data.get("results") or []):
+    from .pricing import compute_exa_cost
+    results = data.get("results") or []
+    cost = compute_exa_cost("contents", num_results=len(results))
+    for r in results:
         if isinstance(r, dict) and (r.get("text") or "").strip():
-            return r.get("text") or ""
-    return ""
+            return r.get("text") or "", cost
+    return "", cost
 
 
-def find_medium_candidate(lib, title: str, author: str = "") -> tuple[str, str]:
+def find_medium_candidate(lib, title: str, author: str = "") -> tuple[str, str, float]:
     """Search Exa (no domain restriction — see module docstring) for the
     article by title (+ author if available), validating candidates in
     order through linklib.domain_migration._titles_match() and returning
     the first that clears the threshold. Returns (candidate_url,
-    candidate_text) — candidate_text is Exa's own returned contents.text
-    for that hit, needed by the caller's same-domain validation path (see
-    linklib.pipeline._try_medium_platform) since re-fetching a Medium-
-    platform candidate would just re-hit the same block. Returns ("", "")
-    on any miss or failure — never raises, same best-effort contract as
-    find_migrated_url. `lib` may be None (falls back to "enabled"),
-    matching agent._web_provider's own convention."""
+    candidate_text, cost_usd) — candidate_text is Exa's own returned
+    contents.text for that hit, needed by the caller's same-domain
+    validation path (see linklib.pipeline._try_medium_platform) since
+    re-fetching a Medium-platform candidate would just re-hit the same
+    block; cost_usd is the real compute_exa_cost() figure for the call
+    (2026-09, Exa cost-tracking foundation), billed on real results
+    delivered same as every other Exa search path in this codebase.
+    Returns ("", "", 0.0) on any miss or failure — never raises, same
+    best-effort contract as find_migrated_url. `lib` may be None (falls
+    back to "enabled"), matching agent._web_provider's own convention."""
     from .domain_migration import _titles_match
 
     api_key = os.environ.get("EXA_API_KEY")
     if not api_key or not title.strip():
-        return "", ""
+        return "", "", 0.0
     if lib is not None and not lib.get_exa_enabled():
-        return "", ""
+        return "", "", 0.0
 
     query = f"{title} {author}".strip() if author else title
     try:
@@ -209,12 +223,15 @@ def find_medium_candidate(lib, title: str, author: str = "") -> tuple[str, str]:
         resp.raise_for_status()
         data = resp.json()
     except Exception:
-        return "", ""
+        return "", "", 0.0
 
-    for r in (data.get("results") or []):
+    from .pricing import compute_exa_cost
+    results = data.get("results") or []
+    cost = compute_exa_cost("search", num_results=len(results))
+    for r in results:
         if not isinstance(r, dict):
             continue
         url = r.get("url") or ""
         if url and _titles_match(title, r.get("title") or ""):
-            return url, (r.get("text") or "")
-    return "", ""
+            return url, (r.get("text") or ""), cost
+    return "", "", cost

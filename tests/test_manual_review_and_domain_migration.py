@@ -269,7 +269,9 @@ def test_titles_match_rejects_unrelated():
 
 def test_find_migrated_url_no_api_key(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
-    assert dm_mod.find_migrated_url(None, "new.example", "Some Title") is None
+    url, cost = dm_mod.find_migrated_url(None, "new.example", "Some Title")
+    assert url is None
+    assert cost == 0.0
 
 
 def test_find_migrated_url_returns_title_matching_hit(monkeypatch):
@@ -286,8 +288,9 @@ def test_find_migrated_url_returns_title_matching_hit(monkeypatch):
             ]}
 
     monkeypatch.setattr(dm_mod.requests, "post", lambda *a, **kw: _Resp())
-    url = dm_mod.find_migrated_url(None, "new.example", "My Great Post")
+    url, cost = dm_mod.find_migrated_url(None, "new.example", "My Great Post")
     assert url == "https://new.example/my-great-post"
+    assert cost >= 0.0
 
 
 def test_find_migrated_url_no_match_returns_none(monkeypatch):
@@ -301,7 +304,8 @@ def test_find_migrated_url_no_match_returns_none(monkeypatch):
             return {"results": [{"title": "Totally Unrelated", "url": "https://new.example/x"}]}
 
     monkeypatch.setattr(dm_mod.requests, "post", lambda *a, **kw: _Resp())
-    assert dm_mod.find_migrated_url(None, "new.example", "My Great Post") is None
+    url, cost = dm_mod.find_migrated_url(None, "new.example", "My Great Post")
+    assert url is None
 
 
 def test_find_migrated_url_network_error_returns_none(monkeypatch):
@@ -311,7 +315,9 @@ def test_find_migrated_url_network_error_returns_none(monkeypatch):
         raise ConnectionError("boom")
 
     monkeypatch.setattr(dm_mod.requests, "post", _raise)
-    assert dm_mod.find_migrated_url(None, "new.example", "My Great Post") is None
+    url, cost = dm_mod.find_migrated_url(None, "new.example", "My Great Post")
+    assert url is None
+    assert cost == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +343,7 @@ def test_backfill_uses_migration_tier_before_wayback_on_match(lib, monkeypatch):
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
 
     monkeypatch.setattr(dm_mod, "find_migrated_url",
-                        lambda lib_, domain, title: "https://jeffreycarter.substack.com/p/some-post")
+                        lambda lib_, domain, title: ("https://jeffreycarter.substack.com/p/some-post", 0.005))
 
     migrated_html = ("<html><body><article>" +
                      "<p>Migrated content, definitely long enough to pass the sanity check.</p>" * 15 +
@@ -376,7 +382,7 @@ def test_backfill_migration_miss_falls_through_to_wayback(lib, monkeypatch):
     article_id = _seed(lib, url="https://avc.com/2020/01/x.html", title="Some AVC Post")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
-    monkeypatch.setattr(dm_mod, "find_migrated_url", lambda lib_, domain, title: None)
+    monkeypatch.setattr(dm_mod, "find_migrated_url", lambda lib_, domain, title: (None, 0.0))
 
     snap_html = ("<html><body><article>" +
                 "<p>Archived snapshot content, long enough to pass sanity check reliably.</p>" * 15 +
@@ -399,7 +405,7 @@ def test_backfill_no_migration_domain_match_skips_tier_entirely(lib, monkeypatch
                         lambda url: PageData(title="", content="", fetch_error="HTTP 500"))
     called = []
     monkeypatch.setattr(dm_mod, "find_migrated_url",
-                        lambda lib_, domain, title: called.append(domain) or None)
+                        lambda lib_, domain, title: (called.append(domain) or None, 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -415,7 +421,7 @@ def test_backfill_migration_domain_but_no_title_skips_tier(lib, monkeypatch):
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     called = []
     monkeypatch.setattr(dm_mod, "find_migrated_url",
-                        lambda lib_, domain, title: called.append(1) or None)
+                        lambda lib_, domain, title: (called.append(1) or None, 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -444,7 +450,7 @@ def test_defunct_service_still_skips_fetch_and_wayback_and_migration(lib, monkey
     monkeypatch.setattr(extract_mod, "fetch_page", lambda url: fetch_called.append(url) or PageData("", ""))
     migration_called = []
     monkeypatch.setattr(dm_mod, "find_migrated_url",
-                        lambda lib_, domain, title: migration_called.append(1) or None)
+                        lambda lib_, domain, title: (migration_called.append(1) or None, 0.0))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False

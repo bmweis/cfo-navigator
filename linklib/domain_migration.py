@@ -64,19 +64,24 @@ def _titles_match(a: str, b: str) -> bool:
     return overlap >= _TITLE_MATCH_THRESHOLD
 
 
-def find_migrated_url(lib, new_domain: str, title: str) -> str | None:
+def find_migrated_url(lib, new_domain: str, title: str) -> tuple[str | None, float]:
     """Search Exa, restricted to `new_domain`, for the given article title.
-    Returns the best title-matching result's URL, or None. Never raises — a
-    missing EXA_API_KEY, Exa disabled via the admin toggle, a blank title, a
-    network failure, or a non-200/malformed response all resolve to None,
-    same best-effort contract as linklib.wayback and
-    linklib.agent.retrieve_exa. `lib` may be None (falls back to "enabled"),
-    matching agent._web_provider's own convention."""
+    Returns (url_or_None, cost_usd) — the best title-matching result's URL
+    (or None on a miss), and the real compute_exa_cost() figure for the
+    call (2026-09, Exa cost-tracking foundation — the same "no estimation"
+    discipline linklib.agent.retrieve_exa already follows: billed on real
+    results delivered, not the number requested). cost_usd is 0.0 whenever
+    Exa was never actually billed — a missing EXA_API_KEY, Exa disabled via
+    the admin toggle, a blank title, a network failure, or a non-200/
+    malformed response — never raises, same best-effort contract as
+    linklib.wayback and linklib.agent.retrieve_exa. `lib` may be None
+    (falls back to "enabled"), matching agent._web_provider's own
+    convention."""
     api_key = os.environ.get("EXA_API_KEY")
     if not api_key or not title.strip() or not new_domain:
-        return None
+        return None, 0.0
     if lib is not None and not lib.get_exa_enabled():
-        return None
+        return None, 0.0
 
     try:
         resp = requests.post(
@@ -88,12 +93,15 @@ def find_migrated_url(lib, new_domain: str, title: str) -> str | None:
         resp.raise_for_status()
         data = resp.json()
     except Exception:
-        return None
+        return None, 0.0
 
-    for r in (data.get("results") or []):
+    from .pricing import compute_exa_cost
+    results = data.get("results") or []
+    cost = compute_exa_cost("search", num_results=len(results))
+    for r in results:
         if not isinstance(r, dict):
             continue
         url = r.get("url") or ""
         if url and _titles_match(title, r.get("title") or ""):
-            return url
-    return None
+            return url, cost
+    return None, cost

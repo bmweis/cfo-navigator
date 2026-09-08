@@ -18741,7 +18741,7 @@ def _resolve_reader_content(id: int = 0, url: str = "", user_id: int | None = No
                 from linklib.pipeline import medium_recovery
                 mp_lib = _lib()
                 try:
-                    recovered = medium_recovery(
+                    recovered, _recovered_exa_cost = medium_recovery(
                         mp_lib, url, cached_title or title, (article or {}).get("author", ""))
                 finally:
                     mp_lib.close()
@@ -22852,11 +22852,22 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
 def admin_exa_settings(request: Request):
     """Exa kill switch (Phase 7): toggle which mechanism handles FP&A Buddy's
     web tier, and an on-demand connection test. Turning Exa off doesn't
-    disable web search — it switches to Claude's native web_search_20250305
-    tool as the fallback (see linklib.agent._web_provider); that unified
-    condition (toggle AND EXA_API_KEY) is why the page also flags a missing
-    key even when the toggle itself is on, so an admin isn't left wondering
-    why Buddy is still using the native tool."""
+    disable Buddy's own web search — it switches to Claude's native
+    web_search_20250305 tool as the fallback (see linklib.agent._web_provider);
+    that unified condition (toggle AND EXA_API_KEY) is why the page also
+    flags a missing key even when the toggle itself is on, so an admin isn't
+    left wondering why Buddy is still using the native tool.
+
+    Corrected 2026-09 (Exa cost-tracking foundation): this same toggle
+    (Library.get_exa_enabled(), checked via `lib is None or lib.get_exa_enabled()`
+    in every one of these) also gates the Reader content backfill's
+    domain-migration tier (linklib/domain_migration.py) and Medium-platform
+    tier (linklib/medium_platform.py) — neither has a fallback the way
+    Buddy's web tier does, so turning Exa off here doesn't switch either
+    backfill tier to something else, it just turns them off, silently
+    (both tiers still fall through to Wayback afterward, same as any other
+    miss). The page previously only ever mentioned Buddy's web tier; the
+    copy below now names all three call sites and says so explicitly."""
     if not _is_authed(request):
         return _login_redirect(request)
 
@@ -22877,7 +22888,13 @@ def admin_exa_settings(request: Request):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Exa web search</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Exa is the preferred mechanism for FP&amp;A Buddy's web tier. Turning it off doesn't disable web search&mdash;it switches to Claude's own web-search tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">This one toggle gates every real Exa call in the app, not just FP&amp;A Buddy's web tier:</p>
+<ul style="color:var(--ink-soft);margin:0 0 20px;font-size:15px;line-height:1.7;padding-left:22px;">
+<li><strong>FP&amp;A Buddy's web tier.</strong> Turning Exa off here doesn't disable web search&mdash;it switches to Claude's own <code>web_search_20250305</code> tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</li>
+<li><strong>Reader content backfill's domain-migration tier</strong> (a URL on a confirmed migrated domain, e.g. avc.com&nbsp;&rarr;&nbsp;avc.xyz).</li>
+<li><strong>Reader content backfill's Medium-platform tier</strong> (medium.com and other recognized Cloudflare-blocked hosts).</li>
+</ul>
+<p style="color:var(--ink-soft);margin:-8px 0 20px;font-size:15px;line-height:1.6;"><strong>Unlike Buddy's web tier, the two backfill tiers have no fallback&mdash;turning Exa off here turns them off too, with no substitute mechanism.</strong> A backfill attempt that would have used either tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried.</p>
 {key_banner}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
