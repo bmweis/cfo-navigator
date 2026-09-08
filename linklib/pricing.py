@@ -100,6 +100,36 @@ def compute_embedding_cost(model: str, input_tokens: int = 0) -> float:
     return input_tokens * rate / 1_000_000
 
 
+# How often Brian should manually re-check EXA_PRICING against Exa's
+# published rates (exa.ai/pricing) — same "no pricing API to reconcile
+# against" situation as PRICING_REVIEW_STALE_DAYS above, so this is a third,
+# separate dated-reminder threshold for a human attestation. 90 days, same
+# window as Claude/OpenAI pricing above (not the 30-day new-model-awareness
+# window in linklib.models) — this checks whether an existing rate is still
+# accurate, not whether something new exists to add, the same category of
+# check as Claude/OpenAI pricing. Confirmed with Brian (issue tracking the
+# Exa pricing freshness banner, 2026-09).
+EXA_PRICING_REVIEW_STALE_DAYS = 90
+
+
+def exa_pricing_review_is_stale(last_verified_iso: str, *, now: datetime | None = None) -> bool:
+    """True when `last_verified_iso` (a stored settings value, empty string
+    if never recorded) is older than EXA_PRICING_REVIEW_STALE_DAYS — or
+    missing entirely, the same "go check it" signal as genuinely stale.
+    Mirrors pricing_review_is_stale exactly (same logic, separate
+    function/setting so the two reminders can go stale independently)."""
+    if not last_verified_iso:
+        return True
+    try:
+        then = datetime.fromisoformat(last_verified_iso)
+    except ValueError:
+        return True
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (now - then).days >= EXA_PRICING_REVIEW_STALE_DAYS
+
+
 # USD per 1,000 requests. Checked 2026-07-26 against Exa's published rates
 # (exa.ai/pricing). `included_results` is how many results the base price
 # covers before `extra_per_1k_result` kicks in per result over that (Exa's

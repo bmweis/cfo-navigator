@@ -6204,6 +6204,28 @@ never reads as something to tap.
   end-to-end coverage (never-reviewed banner, mark-reviewed clearing it,
   going stale again past 90 days, staying fresh within it, auth on both
   the page and the action).
+- **Exa pricing freshness — a third, parallel dated manual reminder,
+  mirroring the Pricing freshness banner above exactly.** `linklib/pricing.py`'s
+  `EXA_PRICING` table (checked 2026-07-26 against Exa's published rates) had
+  no freshness reminder at all, unlike `MODEL_PRICING` and the model
+  registry — found during the AI usage dashboard's Step 0 investigation.
+  Same mechanism, same shape: a dated `settings` value
+  (`exa_pricing_last_verified`), `linklib.pricing.exa_pricing_review_is_stale()`
+  (pure, unit-tested, identical logic to `pricing_review_is_stale`), a
+  third `/admin/checks` banner (`_exa_pricing_freshness_banner`) below the
+  New-model-awareness one, and `POST /admin/checks/mark-exa-pricing-reviewed`
+  — no auto-clear-on-view, admin-only, same amber/seafoam treatment. Same
+  90-day window as Claude/OpenAI pricing (`EXA_PRICING_REVIEW_STALE_DAYS`),
+  not the 30-day new-model-awareness window — this checks whether an
+  existing rate is still accurate, the same category of question as
+  Claude/OpenAI pricing, not "does something new exist to add." Not seeded
+  from the table's own "checked 2026-07-26" comment — starts unreviewed,
+  same as the other two banners never backfilled from their own pre-banner
+  pricing-check comments either. See `tests/test_exa_pricing_freshness.py`
+  for the end-to-end coverage (same shape as `tests/test_pricing_freshness.py`),
+  and note `tests/test_models_freshness.py`'s own `_models_section` helper
+  was widened to bound its split on both sides, since a third section now
+  follows it on the page.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
