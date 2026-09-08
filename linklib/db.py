@@ -609,6 +609,10 @@ CREATE TABLE IF NOT EXISTS ask_questions (
     embed_input_tokens    INTEGER NOT NULL DEFAULT 0,  -- query-time embedding call for hybrid retrieval (#93)
     embed_cost_usd        REAL NOT NULL DEFAULT 0,     -- embed's share, already inside cost_usd (user-cap cost,
                                                         -- unlike embed-on-save which is overhead — see article_embeddings)
+    exa_result_count      INTEGER NOT NULL DEFAULT 0,  -- Exa cost tracking (2026-09): Answer.exa_result_count,
+                                                        -- added via migration below (see that migration's comment)
+    exa_cost_usd          REAL NOT NULL DEFAULT 0,     -- Exa's share, already inside cost_usd — see
+                                                        -- Answer.exa_cost_usd/linklib.agent.retrieve_exa
     hidden_public         INTEGER NOT NULL DEFAULT 0,  -- admin removed from the community view only
     anonymized            INTEGER NOT NULL DEFAULT 0,  -- asker name hidden on the community view only
     citations_json        TEXT NOT NULL DEFAULT '[]',  -- the turn's API-verified cited sources (see record_ask_question)
@@ -850,7 +854,11 @@ CREATE INDEX IF NOT EXISTS idx_job_run_log_job_started ON job_run_log(job_name, 
 -- Library._manual_review_article_ids) — a URL correction via
 -- url_correction_log resets what counts as "since the last correction", so a
 -- corrected article's attempt count starts fresh rather than inheriting a
--- pre-correction failure streak forever.
+-- pre-correction failure streak forever. `exa_cost_usd` (added via migration
+-- below, same as `source` — see that migration's comment) is the real Exa
+-- spend this attempt incurred, from the domain-migration and/or
+-- Medium-platform tiers (linklib/domain_migration.py, linklib/
+-- medium_platform.py) — 0 for an attempt that never reached Exa.
 CREATE TABLE IF NOT EXISTS content_refetch_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     article_id    INTEGER NOT NULL,
@@ -2328,6 +2336,35 @@ class Library:
             # it. See toggle_ask_feedback_reviewed/count_unreviewed_ask_
             # feedback and the admin_ask_feedback route.
             "ALTER TABLE ask_feedback ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0",
+            # Exa cost tracking, pre-dashboard foundation (2026-09) — the
+            # Reader content backfill's domain-migration and Medium-platform
+            # fallback tiers (linklib/domain_migration.py,
+            # linklib/medium_platform.py) call Exa with zero cost tracking
+            # anywhere — unlike FP&A Buddy's retrieve_exa, whose cost lands
+            # on ask_questions.exa_cost_usd. content_refetch_log already
+            # records each backfill attempt's outcome, so this is the
+            # natural home for it rather than a new table: one row per
+            # backfill_article_content() call already exists, this just
+            # adds what that attempt's Exa usage (if any) cost, real or $0.
+            # 0 for every pre-existing row (no Exa spend was ever tracked
+            # for them) and for any attempt that never called Exa at all
+            # (a direct-fetch success, a defunct-service skip, or a
+            # Wayback-only attempt with no migration/Medium tier reached).
+            # See Library.log_content_refetch_attempt's exa_cost_usd param.
+            "ALTER TABLE content_refetch_log ADD COLUMN exa_cost_usd REAL NOT NULL DEFAULT 0",
+            # Exa cost tracking, pre-dashboard foundation (2026-09), part 2:
+            # Answer.exa_cost_usd/exa_result_count (linklib/agent.py) were
+            # always computed on every Buddy turn but never persisted here —
+            # unlike embed_cost_usd/rewrite_cost_usd, which each got their
+            # own column the moment their call became a real per-turn cost.
+            # exa_cost_usd is already folded into cost_usd (same "share,
+            # already inside the total" convention as the other two
+            # breakout columns); this just makes that share visible on its
+            # own, the same gap this whole PR closes for the Reader
+            # backfill's Exa calls too. 0 for every pre-existing row (no
+            # per-turn Exa cost was ever tracked for them).
+            "ALTER TABLE ask_questions ADD COLUMN exa_result_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ask_questions ADD COLUMN exa_cost_usd REAL NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4458,16 +4495,23 @@ class Library:
 
     def log_content_refetch_attempt(self, article_id: int, status: str,
                                      reason: str = "", detail: str = "",
-                                     source: str = "direct") -> int:
+                                     source: str = "direct",
+                                     exa_cost_usd: float = 0.0) -> int:
         """One row per re-fetch attempt — see content_refetch_log's CREATE
         TABLE comment for why every attempt is logged, not just failures.
         `source` ('direct' | 'wayback') distinguishes a Wayback-archived
         success from a normal live-fetch success — see linklib.wayback and
-        linklib.pipeline.backfill_article_content."""
+        linklib.pipeline.backfill_article_content. `exa_cost_usd` (2026-09,
+        Exa cost-tracking foundation) is the real compute_exa_cost() total
+        for every Exa call this attempt made — the domain-migration and/or
+        Medium-platform tiers, whichever actually ran — win or miss; 0.0 for
+        an attempt that never reached Exa at all (a direct-fetch success, a
+        defunct-service skip, or a Wayback-only path with no migration/Medium
+        tier applicable)."""
         cur = self.conn.execute(
-            "INSERT INTO content_refetch_log (article_id, status, reason, detail, source, attempted_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (article_id, status, reason, detail, source, _now()),
+            "INSERT INTO content_refetch_log (article_id, status, reason, detail, source, exa_cost_usd, attempted_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (article_id, status, reason, detail, source, exa_cost_usd, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -7609,17 +7653,21 @@ class Library:
                             rewrite_output_tokens: int = 0,
                             rewrite_cost_usd: float = 0.0,
                             embed_input_tokens: int = 0, embed_cost_usd: float = 0.0,
+                            exa_result_count: int = 0, exa_cost_usd: float = 0.0,
                             citations: Optional[list[dict]] = None) -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
         a conversation and the caller fills it in with str(id) after insert.
         `cost_usd` is the turn TOTAL (answer + any query-rewrite call + any
-        query-time embedding call for hybrid retrieval); the rewrite_* and
-        embed_* args break out each call's share of it. (embed_* here is the
-        user-cap cost of embedding the QUESTION — a different thing from
-        article_embeddings.cost_usd, which is Brian's embed-on-save overhead
-        and never touches this table.)
+        query-time embedding call for hybrid retrieval + any Exa web-search
+        call); the rewrite_*/embed_*/exa_* args break out each call's share
+        of it. (embed_* here is the user-cap cost of embedding the QUESTION —
+        a different thing from article_embeddings.cost_usd, which is Brian's
+        embed-on-save overhead and never touches this table. exa_cost_usd —
+        2026-09, Exa cost-tracking foundation — mirrors Answer.exa_cost_usd/
+        exa_result_count from linklib.agent.retrieve_exa exactly the same
+        way embed_cost_usd already mirrors the embedding call's share.)
         `citations` is the turn's API-verified cited-source list
         ([{n, title, url, type, article_id?}] — article_id only on
         library-type entries), stored as a snapshot: feed and web sources are
@@ -7633,13 +7681,15 @@ class Library:
                 cache_creation_tokens, cache_read_tokens, cost_usd,
                 rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
                 embed_input_tokens, embed_cost_usd,
+                exa_result_count, exa_cost_usd,
                 citations_json, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
              cost_usd, rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
              embed_input_tokens, embed_cost_usd,
+             exa_result_count, exa_cost_usd,
              json.dumps(citations or []), now),
         )
         row_id = cur.lastrowid

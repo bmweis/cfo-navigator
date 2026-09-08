@@ -147,14 +147,21 @@ def run_ask(
             cache_creation_tokens=ans.cache_creation_tokens,
             cache_read_tokens=ans.cache_read_tokens,
             # ans.cost_usd is the turn total (answer + follow-up query
-            # rewrite + query-time embedding for hybrid retrieval), so
-            # the monthly-cap SUM sees all of it.
+            # rewrite + query-time embedding for hybrid retrieval + any Exa
+            # web-search call), so the monthly-cap SUM sees all of it.
             cost_usd=ans.cost_usd,
             rewrite_input_tokens=ans.rewrite_input_tokens,
             rewrite_output_tokens=ans.rewrite_output_tokens,
             rewrite_cost_usd=ans.rewrite_cost_usd,
             embed_input_tokens=ans.embed_input_tokens,
             embed_cost_usd=ans.embed_cost_usd,
+            # Exa cost tracking, pre-dashboard foundation (2026-09):
+            # previously computed on Answer but never passed through here —
+            # ans.exa_cost_usd is already inside ans.cost_usd above, same as
+            # embed_cost_usd/rewrite_cost_usd; this just makes its own share
+            # visible on the row.
+            exa_result_count=ans.exa_result_count,
+            exa_cost_usd=ans.exa_cost_usd,
             # Persisted snapshot of what this answer actually cited, so a
             # later feedback flag stays inspectable with its sources.
             citations=ans.citations,

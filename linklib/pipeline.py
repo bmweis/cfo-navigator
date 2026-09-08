@@ -69,6 +69,7 @@ def ingest_url(
     content = ""
     content_html = ""
     medium_source = ""
+    medium_exa_cost = 0.0
     quality_checked = False
     quality_ok = True
     quality_reason = ""
@@ -92,7 +93,7 @@ def ingest_url(
                 page.raw_html, content, page.blocked)
 
         if not quality_ok:
-            recovered = medium_recovery(lib, url, page_title)
+            recovered, medium_exa_cost = medium_recovery(lib, url, page_title)
             if recovered:
                 page_title = recovered["title"] or page_title
                 content = recovered["content"]
@@ -137,10 +138,12 @@ def ingest_url(
             lib.set_content_check_flag(article_id, not quality_ok, quality_reason)
             if not quality_ok:
                 lib.log_content_refetch_attempt(article_id, "failure",
-                                                reason=quality_reason, source="save")
+                                                reason=quality_reason, source="save",
+                                                exa_cost_usd=medium_exa_cost)
             elif medium_source:
                 lib.log_content_refetch_attempt(article_id, "success",
-                                                source=medium_source, detail=url)
+                                                source=medium_source, detail=url,
+                                                exa_cost_usd=medium_exa_cost)
 
     if do_enrich:
         from . import tagstyle
@@ -350,43 +353,46 @@ def _domain_migration_target(url: str) -> str:
 
 
 def _try_domain_migration(lib: Library, new_domain: str, title: str,
-                           original_url: str) -> tuple[bool, str, str]:
+                           original_url: str) -> tuple[bool, str, str, float]:
     """Attempts the domain-migration tier for one article: find a candidate
     on `new_domain` via Exa (linklib.domain_migration.find_migrated_url),
     then fetch and sanity-check it exactly as a direct fetch or a Wayback
-    snapshot would have to. Returns (ok, structured_html, migrated_url).
-    Never raises — any failure at any stage (no title to search with, no Exa
-    hit, the candidate fails to fetch, fails assess_extraction_quality, or
-    has no extractable structure) resolves to (False, "", ""), same
-    best-effort contract as the Wayback fallback."""
+    snapshot would have to. Returns (ok, structured_html, migrated_url,
+    exa_cost_usd) — exa_cost_usd (2026-09, Exa cost-tracking foundation) is
+    whatever find_migrated_url's own Exa call cost, win or miss (0.0 if it
+    was never reached at all). Never raises — any failure at any stage (no
+    title to search with, no Exa hit, the candidate fails to fetch, fails
+    assess_extraction_quality, or has no extractable structure) resolves to
+    (False, "", "", cost), same best-effort contract as the Wayback
+    fallback."""
     from .extract import fetch_page, extract_reader_html, assess_extraction_quality
     from . import domain_migration
 
     if not title.strip():
-        return False, "", ""
-    candidate_url = domain_migration.find_migrated_url(lib, new_domain, title)
+        return False, "", "", 0.0
+    candidate_url, cost = domain_migration.find_migrated_url(lib, new_domain, title)
     if not candidate_url:
-        return False, "", ""
+        return False, "", "", cost
 
     try:
         page = fetch_page(candidate_url)
     except Exception:
-        return False, "", ""
+        return False, "", "", cost
     if not page.raw_html:
-        return False, "", ""
+        return False, "", "", cost
 
     ok, _reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
     if not ok:
-        return False, "", ""
+        return False, "", "", cost
 
     structured = extract_reader_html(page.raw_html, candidate_url)
     if not structured:
-        return False, "", ""
-    return True, structured, candidate_url
+        return False, "", "", cost
+    return True, structured, candidate_url, cost
 
 
 def _try_medium_platform(lib: Library, title: str, author: str,
-                          original_url: str) -> tuple[bool, str, str, str, str]:
+                          original_url: str) -> tuple[bool, str, str, str, str, float]:
     """Attempts the Medium-platform tier for one article.
 
     Tries, in order:
@@ -426,10 +432,10 @@ def _try_medium_platform(lib: Library, title: str, author: str,
          other source (see extract.py's module comment on that function
          for the "consistent house reading experience" principle).
 
-    Returns (ok, structured_html, candidate_url, source, note) — source is
-    'medium-fetch' for a fetch-by-URL success, 'medium-search' for a
-    search-by-title success (distinguishable in content_refetch_log — see
-    _finish_backfill_after_direct_failure), or '' on failure. `note` is a
+    Returns (ok, structured_html, candidate_url, source, note, exa_cost_usd)
+    — source is 'medium-fetch' for a fetch-by-URL success, 'medium-search'
+    for a search-by-title success (distinguishable in content_refetch_log —
+    see _finish_backfill_after_direct_failure), or '' on failure. `note` is a
     short diagnostic trace of what this call actually attempted and why it
     didn't return a hit — ALWAYS populated, success or failure, so a caller
     (and, via _finish_backfill_after_direct_failure, the eventual
@@ -437,22 +443,25 @@ def _try_medium_platform(lib: Library, title: str, author: str,
     "this tier was never reached" (2026-08 wrap-up sprint follow-up: two
     live production traces came back with a log signature indistinguishable
     from the pre-fetch-by-URL flow, and there was no way to confirm from the
-    log alone whether the new code path had actually executed). Never
-    raises — any failure at any stage resolves to
-    (False, "", "", "", note), same best-effort contract as
-    _try_domain_migration."""
+    log alone whether the new code path had actually executed). exa_cost_usd
+    (2026-09, Exa cost-tracking foundation) is the SUM of both Exa calls this
+    attempt made — fetch-by-URL always runs first and its cost always counts
+    even when it's a miss that falls through; search-by-title's cost is
+    added on top only if that step is actually reached. Never raises — any
+    failure at any stage resolves to (False, "", "", "", note, cost), same
+    best-effort contract as _try_domain_migration."""
     from .extract import (fetch_page, extract_reader_html, assess_extraction_quality,
                            paragraphs_html_from_text, _MIN_CONTENT_WORDS)
     from . import medium_platform
 
-    direct_text = medium_platform.fetch_content_by_url(lib, original_url)
+    direct_text, cost = medium_platform.fetch_content_by_url(lib, original_url)
     if direct_text:
         text = direct_text.strip()
         word_count = len(text.split())
         if word_count >= _MIN_CONTENT_WORDS:
             structured = paragraphs_html_from_text(text)
             if structured:
-                return True, structured, original_url, "medium-fetch", "fetch-by-url: hit"
+                return True, structured, original_url, "medium-fetch", "fetch-by-url: hit", cost
             fetch_note = f"fetch-by-url: got {word_count} words but no extractable structure after chrome-strip"
         else:
             fetch_note = f"fetch-by-url: too-thin ({word_count} words)"
@@ -462,35 +471,36 @@ def _try_medium_platform(lib: Library, title: str, author: str,
         fetch_note = "fetch-by-url: no result from Exa"
 
     if not title.strip():
-        return False, "", "", "", f"{fetch_note}; search-by-title: skipped (no title)"
-    candidate_url, candidate_text = medium_platform.find_medium_candidate(lib, title, author)
+        return False, "", "", "", f"{fetch_note}; search-by-title: skipped (no title)", cost
+    candidate_url, candidate_text, search_cost = medium_platform.find_medium_candidate(lib, title, author)
+    cost += search_cost
     if not candidate_url:
-        return False, "", "", "", f"{fetch_note}; search-by-title: no candidate"
+        return False, "", "", "", f"{fetch_note}; search-by-title: no candidate", cost
 
     if medium_platform.is_recognized_blocked_host(candidate_url):
         text = (candidate_text or "").strip()
         if len(text.split()) < _MIN_CONTENT_WORDS:
-            return False, "", "", "", f"{fetch_note}; search-by-title: candidate too-thin (exa-text, {candidate_url})"
+            return False, "", "", "", f"{fetch_note}; search-by-title: candidate too-thin (exa-text, {candidate_url})", cost
         structured = paragraphs_html_from_text(text)
         if not structured:
-            return False, "", "", "", f"{fetch_note}; search-by-title: candidate had no extractable structure (exa-text, {candidate_url})"
-        return True, structured, candidate_url, "medium-search", f"{fetch_note}; search-by-title: hit (exa-text, {candidate_url})"
+            return False, "", "", "", f"{fetch_note}; search-by-title: candidate had no extractable structure (exa-text, {candidate_url})", cost
+        return True, structured, candidate_url, "medium-search", f"{fetch_note}; search-by-title: hit (exa-text, {candidate_url})", cost
 
     try:
         page = fetch_page(candidate_url)
     except Exception as exc:
-        return False, "", "", "", f"{fetch_note}; search-by-title: candidate fetch raised {type(exc).__name__} ({candidate_url})"
+        return False, "", "", "", f"{fetch_note}; search-by-title: candidate fetch raised {type(exc).__name__} ({candidate_url})", cost
     if not page.raw_html:
-        return False, "", "", "", f"{fetch_note}; search-by-title: candidate fetch returned no content ({candidate_url})"
+        return False, "", "", "", f"{fetch_note}; search-by-title: candidate fetch returned no content ({candidate_url})", cost
 
     ok, reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
     if not ok:
-        return False, "", "", "", f"{fetch_note}; search-by-title: candidate failed quality check ({reason}, {candidate_url})"
+        return False, "", "", "", f"{fetch_note}; search-by-title: candidate failed quality check ({reason}, {candidate_url})", cost
 
     structured = extract_reader_html(page.raw_html, candidate_url)
     if not structured:
-        return False, "", "", "", f"{fetch_note}; search-by-title: candidate had no extractable structure ({candidate_url})"
-    return True, structured, candidate_url, "medium-search", f"{fetch_note}; search-by-title: hit (live-refetch, {candidate_url})"
+        return False, "", "", "", f"{fetch_note}; search-by-title: candidate had no extractable structure ({candidate_url})", cost
+    return True, structured, candidate_url, "medium-search", f"{fetch_note}; search-by-title: hit (live-refetch, {candidate_url})", cost
 
 
 def _first_heading_text(html: str) -> str:
@@ -538,7 +548,7 @@ def _plain_text_from_structured_html(html: str) -> str:
     return "\n\n".join(blocks) if blocks else soup.get_text(" ", strip=True)
 
 
-def medium_recovery(lib: Library, url: str, title: str = "", author: str = "") -> Optional[dict]:
+def medium_recovery(lib: Library, url: str, title: str = "", author: str = "") -> tuple[Optional[dict], float]:
     """Bookmarklet/Reader title-and-content-extraction follow-up (2026-08):
     a direct fetch of a recognized Cloudflare-blocked host (medium.com and
     friends — see linklib.medium_platform.is_recognized_blocked_host) never
@@ -559,10 +569,10 @@ def medium_recovery(lib: Library, url: str, title: str = "", author: str = "") -
     host never spends an Exa call here — a caller doesn't need to
     duplicate that check first.
 
-    Returns None on any miss: host not recognized, no EXA_API_KEY, Exa
-    disabled via the admin toggle, or the tier itself came up empty —
-    never raises, same best-effort contract as _try_medium_platform. On a
-    hit, returns a dict with:
+    Returns (result, exa_cost_usd). result is None on any miss: host not
+    recognized, no EXA_API_KEY, Exa disabled via the admin toggle, or the
+    tier itself came up empty — never raises, same best-effort contract as
+    _try_medium_platform. On a hit, result is a dict with:
       - content_html: the tier's structured Reader HTML
       - content: a plain-text rendering of the same HTML (see
         _plain_text_from_structured_html) — NOT the raw Exa text, so a
@@ -574,20 +584,25 @@ def medium_recovery(lib: Library, url: str, title: str = "", author: str = "") -
       - candidate_url, source: passed through from _try_medium_platform
         ('medium-fetch' | 'medium-search'), for a caller's own
         content_refetch_log row or UI display.
+    exa_cost_usd (2026-09, Exa cost-tracking foundation) is
+    _try_medium_platform's own accumulated cost — real even on a miss
+    (result is None), so a caller that logs to content_refetch_log on
+    either outcome can record what was actually spent trying. 0.0 when the
+    host isn't recognized at all (Exa was never reached).
     """
     from . import medium_platform
     if not medium_platform.is_recognized_blocked_host(url):
-        return None
-    ok, structured, candidate_url, source, _note = _try_medium_platform(lib, title, author, url)
+        return None, 0.0
+    ok, structured, candidate_url, source, _note, cost = _try_medium_platform(lib, title, author, url)
     if not ok:
-        return None
+        return None, cost
     return {
         "content_html": structured,
         "content": _plain_text_from_structured_html(structured),
         "title": _first_heading_text(structured),
         "candidate_url": candidate_url,
         "source": source,
-    }
+    }, cost
 
 
 def _finish_backfill_after_direct_failure(lib: Library, article: dict,
@@ -633,19 +648,28 @@ def _finish_backfill_after_direct_failure(lib: Library, article: dict,
     detail regardless of the Wayback outcome. An article whose host isn't
     recognized by any tier logs identically to before this fix (empty
     trace, no detail change) — this only adds information when a tier
-    genuinely ran."""
+    genuinely ran. exa_cost_usd (2026-09, Exa cost-tracking foundation)
+    accumulates across every tier actually attempted during this one call —
+    a miss's cost isn't lost just because a later tier goes on to succeed
+    (or because everything ultimately falls through to Wayback, which
+    itself has no Exa cost) — and lands on whichever single
+    content_refetch_log row this call ultimately writes, preserving the
+    same one-row-per-call invariant described above."""
     article_id = article["id"]
     url = article["url"]
     tier_notes: list[str] = []
+    tier_exa_cost = 0.0
 
     migration_domain = _domain_migration_target(url)
     if migration_domain:
         title = article.get("title") or ""
-        ok, structured, migrated_url = _try_domain_migration(lib, migration_domain, title, url)
+        ok, structured, migrated_url, cost = _try_domain_migration(lib, migration_domain, title, url)
+        tier_exa_cost += cost
         if ok:
             lib.set_article_content_html(article_id, structured)
             lib.log_content_refetch_attempt(article_id, "success",
-                                            source="migration", detail=migrated_url)
+                                            source="migration", detail=migrated_url,
+                                            exa_cost_usd=tier_exa_cost)
             return True, ""
         tier_notes.append(f"migration({migration_domain}): no usable candidate")
 
@@ -653,16 +677,19 @@ def _finish_backfill_after_direct_failure(lib: Library, article: dict,
     if medium_platform.is_recognized_blocked_host(url):
         title = article.get("title") or ""
         author = article.get("author") or ""
-        ok, structured, candidate_url, source, tier_note = _try_medium_platform(lib, title, author, url)
+        ok, structured, candidate_url, source, tier_note, cost = _try_medium_platform(lib, title, author, url)
+        tier_exa_cost += cost
         if ok:
             lib.set_article_content_html(article_id, structured)
             lib.log_content_refetch_attempt(article_id, "success",
-                                            source=source, detail=candidate_url)
+                                            source=source, detail=candidate_url,
+                                            exa_cost_usd=tier_exa_cost)
             return True, ""
         tier_notes.append(f"medium[{tier_note}]")
 
     tier_trace = "; ".join(tier_notes)
-    return _finish_backfill_via_wayback(lib, article_id, url, direct_reason, direct_detail, tier_trace)
+    return _finish_backfill_via_wayback(lib, article_id, url, direct_reason, direct_detail,
+                                        tier_trace, tier_exa_cost)
 
 
 def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
@@ -758,7 +785,8 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
 
 def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
                                   direct_reason: str, direct_detail: str,
-                                  tier_trace: str = "") -> tuple[bool, str]:
+                                  tier_trace: str = "",
+                                  tier_exa_cost: float = 0.0) -> tuple[bool, str]:
     """Called only once a direct fetch has already failed for
     `direct_reason` — tries a Wayback Machine snapshot as a last resort
     (linklib.wayback), reusing the exact same sanity-check/structured-
@@ -787,6 +815,12 @@ def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
     Empty (the default) when no other tier applies to this URL at all —
     that case's logged detail is byte-for-byte unchanged from before this
     parameter existed.
+
+    `tier_exa_cost` (2026-09, Exa cost-tracking foundation) is whatever the
+    migration/Medium tiers already spent before falling through here — 0.0
+    when neither tier was reached. Carried onto whichever single row this
+    call logs (a Wayback success, or the final failure), regardless of the
+    fact that Wayback itself never spends an Exa call.
     """
     from .extract import extract_reader_html, assess_extraction_quality, _page_data_from_html
     from . import wayback
@@ -802,7 +836,8 @@ def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
                 if structured:
                     lib.set_article_content_html(article_id, structured)
                     lib.log_content_refetch_attempt(article_id, "success",
-                                                    source="wayback", detail=snap_url)
+                                                    source="wayback", detail=snap_url,
+                                                    exa_cost_usd=tier_exa_cost)
                     return True, ""
                 wb_note = "snapshot fetched but had no extractable structure"
             else:
@@ -814,7 +849,8 @@ def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
     if tier_trace:
         combined_detail = f"{combined_detail} [{tier_trace}]"
     lib.log_content_refetch_attempt(article_id, "failure", reason=direct_reason,
-                                    detail=combined_detail, source="direct")
+                                    detail=combined_detail, source="direct",
+                                    exa_cost_usd=tier_exa_cost)
     return False, direct_reason
 
 

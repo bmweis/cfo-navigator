@@ -185,6 +185,51 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   into `ask_questions.cost_usd` the same way the follow-up query-rewrite's cost already
   does (`embed_cost_usd` breaks out its share). A general ledger covering overhead
   spend more broadly (enrichment included) is deferred — see issue #105.
+- **Exa cost tracking, pre-dashboard foundation (2026-09) — closes two real gaps
+  the AI usage/cost dashboard's own Step 0 investigation found: a computed cost
+  that was never persisted, and two Exa call sites with no cost tracking at all.**
+  (1) `Answer.exa_result_count`/`exa_cost_usd` (`linklib.agent.retrieve_exa`) were
+  always computed on every Buddy turn but silently dropped before reaching
+  `ask_questions` — unlike `embed_cost_usd`/`rewrite_cost_usd`, which each already
+  had their own column and were passed through. Two new `ask_questions` columns
+  (`exa_result_count`, `exa_cost_usd`) mirror that exact pattern; `exa_cost_usd`
+  is already folded into `cost_usd` (the turn total the monthly cap sums), same as
+  the other two breakout columns. `webapp.ask_orchestrator.run_ask`'s call to
+  `Library.record_ask_question` now actually passes `ans.exa_result_count`/
+  `ans.exa_cost_usd` through — previously computed and then dropped. (2) The
+  Reader content backfill's fallback tiers (`linklib/domain_migration.py`,
+  `linklib/medium_platform.py`) call Exa's `/search` and `/contents` endpoints
+  with zero cost computation anywhere — not tracked at all, not even in
+  `content_refetch_log`. `find_migrated_url`/`fetch_content_by_url`/
+  `find_medium_candidate` now each return a real `pricing.compute_exa_cost()`
+  figure alongside their existing result (0.0 whenever Exa was never actually
+  billed — missing key, toggle off, blank input, network failure — same
+  best-effort contract every other Exa path in this codebase already follows),
+  billed even on a miss since Exa still charges for a returned-but-unmatched
+  result. A `/contents` call (`fetch_content_by_url`) is billed at `compute_exa_cost`'s
+  existing "search" fallback rates — `EXA_PRICING` only models the `search` tier
+  (see that dict's own comment on adding a row only once a caller needs one); this
+  is a deliberate approximation for now, not a claim the two endpoints cost the
+  same. A new `content_refetch_log.exa_cost_usd` column (added via migration, same
+  `source` precedent) is the durable home — `linklib.pipeline._try_domain_migration`/
+  `_try_medium_platform` both now thread cost through, accumulating it across every
+  Exa call one `backfill_article_content()` attempt actually makes (a tier's miss
+  still spent real money, and that spend lands on whichever single row the attempt
+  ultimately logs — a later tier's success, or the final Wayback/failure row —
+  preserving the existing one-row-per-attempt invariant). `medium_recovery()`
+  (the same tier reused by `pipeline.ingest_url`'s save-time recovery path) returns
+  its own cost the same way, logged onto `ingest_url`'s existing `content_refetch_log`
+  write (`source="save"`); the Reader's live-read recovery path
+  (`webapp._resolve_reader_content`) stays ephemeral/unlogged, unchanged — it never
+  persisted this content at all, cost included. **`/admin/exa-settings`' copy was
+  also corrected** — it used to describe only Buddy's web tier, which left an admin
+  with no way to know that turning Exa off also silently disables both backfill
+  tiers, with no fallback the way Buddy's own web tier has one (Claude's native
+  `web_search_20250305`). The page now names all three call sites and says
+  plainly that the two backfill tiers have no substitute — a miss there just
+  falls through to the pre-existing Wayback fallback, same as any other miss.
+  No changes to `EXA_PRICING` itself and no dashboard UI in this PR — both are
+  scoped separately; see `tests/test_exa_cost_tracking.py` for the coverage.
 - **`preferred_sites.opml` is dual-purpose.** It's both the web-search allowlist and the
   subscription list behind `/read`'s Feed quick view. Use direct RSS/Atom URLs — Feedly
   proxy URLs (`feedly.com/web/...`) are skipped because they require auth. Paywalled
