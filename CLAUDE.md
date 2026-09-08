@@ -6577,6 +6577,63 @@ external source or human judgment call). See `tests/test_hub_nav_orphans.py` for
 the coverage, including a reproduction of the exact 2026-09 gap proving the detector
 actually catches it, not just passes trivially.
 
+## Freshness-Banner & Reviewed-Toggle Consolidation
+
+An admin-sprawl review (2026-09-08) found two duplication patterns on `/admin/checks`
+and nearby admin pages — investigated as one question (are these the same underlying
+mechanism, or two that happen to rhyme?) before building anything. **Answer: two
+genuinely different patterns, each with its own real, byte-for-byte duplication worth
+extracting on its own** — not one shared "toggle core" with banner presentation on
+top. They differ on the two axes that actually drive rendering: cardinality (one
+global value per page vs. one row among many) and reversibility/staleness (a
+time-windowed amber/seafoam banner vs. a plain reviewed-or-not pill with no color
+staleness at all). Forcing them into one component would mean a banner pretending to
+be a row or vice versa — more parameters than duplication saved.
+
+- **`_reviewed_freshness_banner(is_stale, message_html, mark_url)`** — the shared
+  wrapper (colors, layout, the "Mark reviewed" button) `_pricing_freshness_banner`/
+  `_models_freshness_banner`/`_exa_pricing_freshness_banner` now all delegate to. Each
+  of the three stays its own function, since the real staleness predicate (imported
+  from a different module per banner) and the message wording genuinely differ — only
+  the mechanical wrapper was actually duplicated.
+- **`_reviewed_toggle_html(is_reviewed, toggle_url, *, one_way=False, reviewed_at="",
+  form_style="")`** — the shared badge+action pair for community-gaps and ask-feedback
+  (two-way: a boolean that flips back and forth, rendered as a seafoam/alert pill) and,
+  in `one_way=True` mode, compare-summary-feedback (a timestamp set once and never
+  un-set — no pill, since there's nothing to toggle back to; plain muted "Reviewed
+  {date}" text once set). Returns `(badge_html, action_html)` so each caller places the
+  two pieces exactly where its own row layout already puts them.
+- **`backfill-content`'s accept/unaccept pair is deliberately NOT folded in.** It only
+  rhymes at the vocabulary level — underneath it's a `content_refetch_log` status enum
+  (not a reviewed boolean/timestamp), rendered as a row that physically moves between
+  two different table sections with a confirm dialog and a separate Undo action, not an
+  inline pill flip. Forcing it through `_reviewed_toggle_html` would have been the
+  wrong abstraction, so it stays its own thing.
+- **The stale "two call sites, not a growing pattern" comment is corrected** (it was
+  wrong the moment a third caller — compare-summary-feedback — existed, and would have
+  gone stale again the moment a fourth did): the corrected version says "see all
+  callers of `_reviewed_toggle_html`" rather than naming a count, specifically so it
+  can't go stale the same way again.
+- **A real, unrelated correctness bug found during this pass, fixed in the same PR**:
+  `MODEL_PRICING` is Claude-only — OpenAI's embedding rate is tracked separately in
+  `EMBEDDING_PRICING`, which has no freshness-reminder banner of its own — but the
+  pricing-freshness banner's copy, its docstrings, and `PRICING_REVIEW_STALE_DAYS`'s
+  own comment all said "Anthropic's (and OpenAI's) published rates," asserting coverage
+  the table doesn't actually have. Every instance was corrected to name only Anthropic;
+  `test_pricing_banner_no_longer_claims_openai_coverage` pins it.
+- **`/admin/checks`' three near-duplicate "this is a manual, dated reminder, not
+  automatable" paragraphs are tightened to one shared line** (stated once, above all
+  three sections) plus a single one-line question per section naming only what that
+  section actually checks — no more re-explaining the same "not automatable" framing
+  three times with only the subject swapped.
+
+See `tests/test_reviewed_helpers.py` for direct coverage of both shared helpers; every
+pre-existing test for the three banners and the three toggle call sites
+(`tests/test_pricing_freshness.py`, `tests/test_models_freshness.py`,
+`tests/test_exa_pricing_freshness.py`, `tests/test_ask_feedback.py`,
+`tests/test_community_profiles.py`, `tests/test_compare_summary.py`) passes
+unmodified — proof the consolidation is behavior-identical.
+
 ## Running locally
 
 ```bash

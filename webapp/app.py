@@ -9488,6 +9488,49 @@ async def compare_summary_feedback_submit(request: Request):
     return HTMLResponse(_page("Thanks—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
+def _reviewed_toggle_html(is_reviewed: bool, toggle_url: str, *, one_way: bool = False,
+                           reviewed_at: str = "", form_style: str = "") -> tuple[str, str]:
+    """Shared rendering for the "has a human confirmed this row" idiom —
+    a badge (or, in one_way mode, plain text) plus a "Mark reviewed" action.
+    See all callers of _reviewed_toggle_html for the current call sites.
+
+    Two shapes, not one, since the underlying value genuinely differs:
+      - Two-way (default): a boolean that flips back and forth
+        (community-gaps, ask-feedback) — a seafoam/alert pill badge, and a
+        button that always reads "Mark unreviewed"/"Mark reviewed" depending
+        on current state.
+      - one_way=True: a timestamp set once and never un-set
+        (compare-summary-feedback) — no pill (there's nothing to toggle back
+        to, so a badge would overstate the mechanism), just plain muted
+        "Reviewed {date}" text once set, else the same kind of button minus
+        the toggle-back option.
+    `form_style` lets a caller position the action form exactly as its own
+    row layout requires (each of the three current call sites uses a
+    different one) without baking a specific layout choice into the shared
+    helper. Returns (badge_html, action_html) so a caller can place the two
+    pieces independently, exactly where its own row already puts them —
+    badge_html is "" in one_way mode, since that shape has no separate
+    badge at all."""
+    style_attr = f' style="{form_style}"' if form_style else ""
+    if one_way:
+        if is_reviewed:
+            when = f" {_esc(reviewed_at[:10])}" if reviewed_at else ""
+            action_html = f'<span style="color:var(--muted);font-size:12px;">Reviewed{when}</span>'
+        else:
+            action_html = (f'<form method="post" action="{toggle_url}"{style_attr}>'
+                            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;">Mark reviewed</button></form>')
+        return "", action_html
+    badge_html = (
+        '<span style="font-size:12px;font-weight:700;color:var(--seafoam-deep);background:var(--seafoam-wash);border-radius:999px;padding:3px 12px;white-space:nowrap;">Reviewed</span>'
+        if is_reviewed else
+        '<span style="font-size:12px;font-weight:700;color:var(--alert);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">New</span>'
+    )
+    action_html = (f'<form method="post" action="{toggle_url}"{style_attr}>'
+                   f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">'
+                   f'{"Mark unreviewed" if is_reviewed else "Mark reviewed"}</button></form>')
+    return badge_html, action_html
+
+
 @app.get("/admin/compare-summary-feedback", response_class=HTMLResponse)
 def admin_compare_summary_feedback(request: Request):
     if not _is_authed(request):
@@ -9501,10 +9544,9 @@ def admin_compare_summary_feedback(request: Request):
     def _row_html(r: dict) -> str:
         back_href = f"/tools/{'software' if r['entity_type'] == 'tool' else 'communities'}/compare?ids={r['entity_ids']}"
         reviewed = bool(r["reviewed_at"])
-        action = (
-            f'<span style="color:var(--muted);font-size:12px;">Reviewed {_esc(r["reviewed_at"][:10])}</span>' if reviewed else
-            f'<form method="post" action="/admin/compare-summary-feedback/{r["id"]}/mark-reviewed">'
-            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;">Mark reviewed</button></form>'
+        _, action = _reviewed_toggle_html(
+            reviewed, f'/admin/compare-summary-feedback/{r["id"]}/mark-reviewed',
+            one_way=True, reviewed_at=r["reviewed_at"] or "",
         )
         return f"""<tr>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(r['created_at'][:10])}</td>
@@ -23238,6 +23280,29 @@ async def admin_system_model_test_connection(request: Request):
     return JSONResponse(test_model_connection(model))
 
 
+def _reviewed_freshness_banner(is_stale: bool, message_html: str, mark_url: str) -> str:
+    """Shared rendering for a dated, human-attestation "freshness" banner —
+    the mechanical part (colors, layout, the "Mark reviewed" button) that
+    _pricing_freshness_banner/_models_freshness_banner/
+    _exa_pricing_freshness_banner below all share byte-for-byte. Each of
+    those three stays its own function: the actual staleness PREDICATE
+    (imported from a different module per banner — linklib.pricing vs.
+    linklib.models) and the message WORDING genuinely differ per banner
+    (different tables, different docs links, a different review window),
+    so only the wrapper is worth extracting here, not the whole thing into
+    one parameterized mega-function."""
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+    bg, border, color = (amber_wash, amber_border, amber_text) if is_stale else (seafoam_wash, seafoam, "inherit")
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;'
+            f'display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
+            f'<span>{message_html}</span>'
+            f'<form method="post" action="{mark_url}" style="margin:0;flex-shrink:0;">'
+            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;white-space:nowrap;">Mark reviewed</button>'
+            f'</form></div>')
+
+
 def _pricing_freshness_banner(last_verified: str) -> str:
     """Issue #98, Piece 2 — a dated manual-attestation reminder, not a
     pass/fail check: there's no pricing API to reconcile MODEL_PRICING
@@ -23248,63 +23313,56 @@ def _pricing_freshness_banner(last_verified: str) -> str:
     thing: has a human actually re-checked Anthropic's published rates
     recently. Deliberately its own banner, not a row in run_all()'s
     pass/fail list — this isn't automatable, so it isn't a check in that
-    sense."""
+    sense.
+
+    MODEL_PRICING is Claude-only — OpenAI's embedding rate lives in a
+    separate EMBEDDING_PRICING table with no freshness reminder of its own
+    yet, so this banner's copy names only Anthropic, not "Anthropic's (and
+    OpenAI's)" as an earlier draft claimed (corrected 2026-09, admin-sprawl
+    follow-up — that phrasing asserted coverage this banner doesn't
+    actually have)."""
     from linklib.pricing import PRICING_REVIEW_STALE_DAYS, pricing_review_is_stale
     stale = pricing_review_is_stale(last_verified)
-    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
-    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
     if stale:
-        bg, border, color = amber_wash, amber_border, amber_text
         if last_verified:
             when = _relative_age(last_verified)
             html = (f'Pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
                     f'against Anthropic&rsquo;s published rates &mdash; that&rsquo;s past the '
                     f'{PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
                     f'<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
-                    f'Anthropic&rsquo;s (and OpenAI&rsquo;s) current published rates, then mark it reviewed.')
+                    f'Anthropic&rsquo;s current published rates, then mark it reviewed.')
         else:
             html = ('Pricing has <strong>never been marked reviewed</strong>. Check '
                     '<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
-                    'Anthropic&rsquo;s (and OpenAI&rsquo;s) current published rates, then mark it reviewed.')
+                    'Anthropic&rsquo;s current published rates, then mark it reviewed.')
     else:
-        bg, border, color = seafoam_wash, seafoam, "inherit"
         when = _relative_age(last_verified)
         html = (f'Pricing was manually verified <strong>{_esc(when) or "recently"}</strong> against '
                 f'Anthropic&rsquo;s published rates.')
-    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
-            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;'
-            f'display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
-            f'<span>{html}</span>'
-            f'<form method="post" action="/admin/checks/mark-pricing-reviewed" style="margin:0;flex-shrink:0;">'
-            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;white-space:nowrap;">Mark reviewed</button>'
-            f'</form></div>')
+    return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-pricing-reviewed")
 
 
 def _models_freshness_banner(last_reviewed: str) -> str:
     """Issue #98, Piece 2 follow-up — a second, parallel dated
     manual-attestation reminder, sibling to _pricing_freshness_banner
-    above and built to the identical visual/mechanical pattern (same
-    reviewed-toggle shape, same colors, same "Mark reviewed" button — no
-    auto-clear-on-view). Answers a genuinely different question than
-    pricing freshness does: not "has an existing model's price gone
-    stale" but "does Anthropic have current models this app doesn't know
-    about at all." There's no API to check that automatically either —
-    `models.list()` (linklib.models._live_models) only ever returns
-    models already deployed/visible to this account, which is a
-    consequence of a model having been added somewhere already, not a way
-    to discover a brand-new release — so this stays a human attestation,
-    same as pricing, just on its own shorter clock (Anthropic ships new
-    models roughly every 30-60 days, so linklib.models.MODELS_REVIEW_STALE_DAYS
-    is 30, tighter than pricing's 90)."""
+    above (both share _reviewed_freshness_banner's rendering). Answers a
+    genuinely different question than pricing freshness does: not "has an
+    existing model's price gone stale" but "does Anthropic have current
+    models this app doesn't know about at all." There's no API to check
+    that automatically either — `models.list()` (linklib.models._live_models)
+    only ever returns models already deployed/visible to this account,
+    which is a consequence of a model having been added somewhere already,
+    not a way to discover a brand-new release — so this stays a human
+    attestation, same as pricing, just on its own shorter clock (Anthropic
+    ships new models roughly every 30-60 days, so
+    linklib.models.MODELS_REVIEW_STALE_DAYS is 30, tighter than pricing's
+    90)."""
     from linklib.models import MODELS_REVIEW_STALE_DAYS, models_review_is_stale
     stale = models_review_is_stale(last_reviewed)
-    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
-    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
     doc_link = ('<a href="https://github.com/bmweis/cfo-navigator/blob/main/CLAUDE.md'
                 '#adding-a-new-claude-model--every-touchpoint" target="_blank" rel="noopener" '
                 'style="color:inherit;text-decoration:underline;">every touchpoint a new model needs</a>')
     if stale:
-        bg, border, color = amber_wash, amber_border, amber_text
         if last_reviewed:
             when = _relative_age(last_reviewed)
             html = (f'Anthropic&rsquo;s model lineup was last manually checked <strong>{_esc(when) or "a while ago"}</strong> '
@@ -23320,38 +23378,26 @@ def _models_freshness_banner(last_reviewed: str) -> str:
                     f'against <code>linklib/models.py</code>&rsquo;s registry, and see {doc_link} before wiring a model into '
                     f'FP&amp;A Buddy specifically&mdash;then mark it reviewed.')
     else:
-        bg, border, color = seafoam_wash, seafoam, "inherit"
         when = _relative_age(last_reviewed)
         html = (f'Anthropic&rsquo;s model lineup was manually checked <strong>{_esc(when) or "recently"}</strong> '
                 f'against <code>linklib/models.py</code>&rsquo;s registry.')
-    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
-            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;'
-            f'display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
-            f'<span>{html}</span>'
-            f'<form method="post" action="/admin/checks/mark-models-reviewed" style="margin:0;flex-shrink:0;">'
-            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;white-space:nowrap;">Mark reviewed</button>'
-            f'</form></div>')
+    return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-models-reviewed")
 
 
 def _exa_pricing_freshness_banner(last_verified: str) -> str:
     """A third, parallel dated manual-attestation reminder, sibling to
-    _pricing_freshness_banner/_models_freshness_banner above and built to
-    the identical visual/mechanical pattern (same reviewed-toggle shape,
-    same colors, same "Mark reviewed" button — no auto-clear-on-view).
-    Answers the same category of question as Claude/OpenAI pricing
-    freshness (is an existing rate still accurate), just for
-    linklib.pricing.EXA_PRICING instead of MODEL_PRICING/EMBEDDING_PRICING
-    — there's no pricing API to reconcile Exa's rates against
-    automatically either, so this stays a human attestation, same as the
-    other two, on the same 90-day window as Claude/OpenAI pricing (not the
+    _pricing_freshness_banner/_models_freshness_banner above (all three
+    share _reviewed_freshness_banner's rendering). Answers the same
+    category of question as Claude pricing freshness (is an existing rate
+    still accurate), just for linklib.pricing.EXA_PRICING instead of
+    MODEL_PRICING — there's no pricing API to reconcile Exa's rates
+    against automatically either, so this stays a human attestation, same
+    as the other two, on the same 90-day window as Claude pricing (not the
     30-day new-model-awareness window — this isn't "does something new
     exist," it's "is the existing rate still current")."""
     from linklib.pricing import EXA_PRICING_REVIEW_STALE_DAYS, exa_pricing_review_is_stale
     stale = exa_pricing_review_is_stale(last_verified)
-    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
-    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
     if stale:
-        bg, border, color = amber_wash, amber_border, amber_text
         if last_verified:
             when = _relative_age(last_verified)
             html = (f'Exa pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
@@ -23368,17 +23414,10 @@ def _exa_pricing_freshness_banner(last_verified: str) -> str:
                     'style="color:inherit;text-decoration:underline;">Exa&rsquo;s current published rates</a>, '
                     'then mark it reviewed.')
     else:
-        bg, border, color = seafoam_wash, seafoam, "inherit"
         when = _relative_age(last_verified)
         html = (f'Exa pricing was manually verified <strong>{_esc(when) or "recently"}</strong> against '
                 f'Exa&rsquo;s published rates.')
-    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
-            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;'
-            f'display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
-            f'<span>{html}</span>'
-            f'<form method="post" action="/admin/checks/mark-exa-pricing-reviewed" style="margin:0;flex-shrink:0;">'
-            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;white-space:nowrap;">Mark reviewed</button>'
-            f'</form></div>')
+    return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-exa-pricing-reviewed")
 
 
 @app.get("/admin/checks", response_class=HTMLResponse)
@@ -23442,14 +23481,15 @@ def admin_checks(request: Request):
 {summary}
 {rows}
 <p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
+<p style="color:var(--ink-soft);margin:24px 0 -4px;font-size:14px;line-height:1.6;">None of the three sections below can be checked automatically&mdash;there&rsquo;s no pricing or model-catalog API to reconcile these tables against, so each is a dated reminder for a human re-check, not a pass/fail test.</p>
 <h2 id="pricing-freshness" style="margin:28px 0 4px;">Pricing freshness</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Not automatable&mdash;there&rsquo;s no pricing API to check <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against, so this is a dated reminder for a human re-check, not a pass/fail test.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table still accurate against Anthropic&rsquo;s current published rates?</p>
 {pricing_banner}
 <h2 id="new-model-awareness" style="margin:28px 0 4px;">New-model awareness</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Also not automatable, and a different question from pricing freshness above: not whether an existing model&rsquo;s price is current, but whether Anthropic has shipped models this app doesn&rsquo;t know about yet at all&mdash;there&rsquo;s no &ldquo;list every current model&rdquo; API to check against, so this is a second dated reminder for a human re-check.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">A different question from pricing freshness above: has Anthropic shipped a model since the last check that isn&rsquo;t in <code>linklib/models.py</code> yet?</p>
 {models_banner}
 <h2 id="exa-pricing-freshness" style="margin:28px 0 4px;">Exa pricing freshness</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Also not automatable&mdash;there&rsquo;s no pricing API to check <code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table against, so this is a third dated reminder for a human re-check, same category of question as pricing freshness above (is an existing rate still accurate), just for Exa instead of Claude/OpenAI.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table still accurate against Exa&rsquo;s current published rates?</p>
 {exa_pricing_banner}
 </div>"""
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
@@ -23458,8 +23498,9 @@ def admin_checks(request: Request):
 @app.post("/admin/checks/mark-pricing-reviewed")
 def admin_checks_mark_pricing_reviewed(request: Request):
     """Issue #98, Piece 2 — the manual "Mark reviewed" action: Brian has
-    actually re-checked MODEL_PRICING against Anthropic's (and OpenAI's)
-    current published rates and confirmed/updated it. Same plain
+    actually re-checked MODEL_PRICING against Anthropic's current
+    published rates and confirmed/updated it (MODEL_PRICING is Claude-only
+    — see _pricing_freshness_banner's docstring). Same plain
     set-a-dated-setting shape as every other reviewed-toggle in this
     codebase, just a timestamp rather than a boolean since there's no
     per-row entity here to flip — one global "last verified" date."""
@@ -27359,15 +27400,6 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     def _card(r: dict) -> str:
         label, fg, bg = _FEEDBACK_RATINGS.get(r["rating"], (r["rating"], "var(--ink)", "var(--surface-2)"))
         is_reviewed = bool(r.get("reviewed"))
-        # Same pill styling as /admin/community-gaps' own Reviewed/New badge
-        # (Phase 0 confirmed that's bespoke markup, not a shared component —
-        # reused verbatim here rather than factored out, since it's two call
-        # sites, not a growing pattern).
-        reviewed_badge = (
-            '<span style="font-size:12px;font-weight:700;color:var(--seafoam-deep);background:var(--seafoam-wash);border-radius:999px;padding:3px 12px;white-space:nowrap;">Reviewed</span>'
-            if is_reviewed else
-            '<span style="font-size:12px;font-weight:700;color:var(--alert);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">New</span>'
-        )
         comment = ""
         if r.get("comment"):
             comment = (f'<div style="margin:8px 0 0;padding:8px 12px;background:var(--coral-wash);'
@@ -27385,15 +27417,16 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
         report_link = (f'/admin/ask-report?user={quote(r["rater_username"])}'
                        if r.get("rater_username") else "/admin/ask-report")
         back_qs = f"?reviewed={reviewed}" if reviewed else ""
+        reviewed_badge, reviewed_action = _reviewed_toggle_html(
+            is_reviewed, f"/admin/ask-feedback/{r['id']}/toggle-reviewed{back_qs}", form_style="margin:0;",
+        )
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
     <span style="font-size:12px;font-weight:700;color:{fg};background:{bg};border-radius:999px;padding:3px 12px;white-space:nowrap;">{label}</span>
     {reviewed_badge}
     <span style="font-size:12.5px;color:var(--muted);">{_esc(_rater(r))} &middot; {_esc((r["created_at"] or "")[:10])}{' &middot; edited' if r.get("updated_at") else ''}</span>
     <a href="{report_link}" style="margin-left:auto;font-size:12px;color:var(--accent);white-space:nowrap;">View in ask report &rarr;</a>
-    <form method="post" action="/admin/ask-feedback/{r['id']}/toggle-reviewed{back_qs}" style="margin:0;">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">{"Mark unreviewed" if is_reviewed else "Mark reviewed"}</button>
-    </form>
+    {reviewed_action}
   </div>
   {comment}
   <div style="font-weight:600;color:var(--navy);font-size:14.5px;margin-top:10px;">{_esc(r.get("question") or "")}</div>
@@ -27545,11 +27578,6 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
 
     def _card(r: dict) -> str:
         is_reviewed = bool(r["reviewed"])
-        badge = (
-            '<span style="font-size:12px;font-weight:700;color:var(--seafoam-deep);background:var(--seafoam-wash);border-radius:999px;padding:3px 12px;white-space:nowrap;">Reviewed</span>'
-            if is_reviewed else
-            '<span style="font-size:12px;font-weight:700;color:var(--alert);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">New</span>'
-        )
         is_recommender = r.get("submission_type") == "recommender"
         is_correction = r.get("submission_type") == "correction"
         type_badge = (
@@ -27587,13 +27615,14 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
             ]) or no_text_fallback
         )
         back_qs = f"?reviewed={reviewed}" if reviewed else ""
+        badge, action = _reviewed_toggle_html(
+            is_reviewed, f"/admin/community-gaps/{r['id']}/toggle-reviewed{back_qs}", form_style="margin-left:auto;",
+        )
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
     {badge}{type_badge}
     <span style="font-size:12.5px;color:var(--muted);">{_esc((r["created_at"] or "")[:10])}{' &middot; ' + _esc(r["email"]) if r.get("email") else ''}</span>
-    <form method="post" action="/admin/community-gaps/{r['id']}/toggle-reviewed{back_qs}" style="margin-left:auto;">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">{"Mark unreviewed" if is_reviewed else "Mark reviewed"}</button>
-    </form>
+    {action}
   </div>
   {text_blocks}
   <div style="font-size:12px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">{" &middot; ".join(meta_bits)}</div>

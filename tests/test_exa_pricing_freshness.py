@@ -1,15 +1,14 @@
 """The /admin/checks Exa-pricing-freshness reminder — a third, parallel
 dated manual-attestation signal, sibling to test_pricing_freshness.py's
-Claude/OpenAI pricing banner and test_models_freshness.py's new-model
-banner.
+Claude pricing banner and test_models_freshness.py's new-model banner.
 
 There's no pricing API to reconcile linklib/pricing.py's EXA_PRICING table
 against automatically either, so this is a dated manual-attestation signal,
 not a pass/fail check: an `exa_pricing_last_verified` settings value, a
 banner that turns amber once it's stale (or was never recorded), and a
 "Mark reviewed" action that resets it — the same reviewed-toggle pattern
-already used for Community gaps, FP&A Buddy feedback, Claude/OpenAI
-pricing, and new-model awareness.
+already used for Community gaps, FP&A Buddy feedback, Claude pricing, and
+new-model awareness.
 """
 import os
 import pathlib
