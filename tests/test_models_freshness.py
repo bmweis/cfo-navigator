@@ -22,12 +22,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 def _models_section(html: str) -> str:
     """/admin/checks renders this banner below the Pricing-freshness one
-    (issue #98), which deliberately mirrors this banner's own phrasing
-    closely ("never been marked reviewed" appears in both, independently,
-    when marked-reviewed at different times) — so a plain whole-page
-    substring check can false-positive/negative on the OTHER banner's
-    state. Scope every assertion to just the New-model-awareness section."""
-    return html.split("New-model awareness")[1]
+    (issue #98), and an Exa-pricing-freshness one below THIS one, which
+    deliberately mirror this banner's own phrasing closely ("never been
+    marked reviewed" appears in all three, independently, when
+    marked-reviewed at different times) — so a plain whole-page substring
+    check can false-positive/negative on an OTHER banner's state. Scope
+    every assertion to just the New-model-awareness section, bounded on
+    both sides so it doesn't also swallow the Exa section that follows it."""
+    return html.split("New-model awareness")[1].split("Exa pricing freshness")[0]
 
 
 @pytest.fixture

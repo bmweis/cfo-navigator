@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from linklib.agent import EFFORT_SETTINGS
 from linklib.models import _REGISTRY
-from linklib.pricing import MODEL_PRICING, compute_cost, pricing_review_is_stale
+from linklib.pricing import (
+    MODEL_PRICING,
+    compute_cost,
+    exa_pricing_review_is_stale,
+    pricing_review_is_stale,
+)
 
 
 def test_sonnet_5_pricing_is_the_confirmed_permanent_rate():
@@ -121,3 +126,18 @@ def test_pricing_review_is_stale_thresholds():
     assert pricing_review_is_stale(boundary, now=now) is True
     assert pricing_review_is_stale("", now=now) is True
     assert pricing_review_is_stale("not-a-date", now=now) is True
+
+
+def test_exa_pricing_review_is_stale_thresholds():
+    """Same threshold logic as pricing_review_is_stale above, mirrored for
+    EXA_PRICING's own independent 90-day reminder."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    fresh = (now - timedelta(days=10)).isoformat()
+    stale = (now - timedelta(days=91)).isoformat()
+    boundary = (now - timedelta(days=90)).isoformat()
+    assert exa_pricing_review_is_stale(fresh, now=now) is False
+    assert exa_pricing_review_is_stale(stale, now=now) is True
+    assert exa_pricing_review_is_stale(boundary, now=now) is True
+    assert exa_pricing_review_is_stale("", now=now) is True
+    assert exa_pricing_review_is_stale("not-a-date", now=now) is True
