@@ -36,6 +36,23 @@ import threading
 import time
 from datetime import datetime, timezone
 
+# The shared "default chat model" — the interactive/general-purpose Claude
+# default for linklib.agent (ask()'s last-resort fallback, reached only when
+# neither an explicit model override nor the effort tier's own model is set),
+# linklib.matchmaker (the model used for every matchmaker turn), and
+# linklib.suggest (the keep/skip predictor's fallback). linklib.dedupe's own
+# near-duplicate verifier shares this same ultimate default but keeps its own
+# extra `LINKLIB_DEDUPE_MODEL` override layer ahead of it — that two-level
+# fallback chain is deliberate, not drift, so it isn't collapsed into this
+# constant's own env-var resolution.
+#
+# Deliberately NOT used for enrichment: linklib/enrich.py's own DEFAULT_MODEL
+# ("claude-opus-5") and linklib/queue.py's QUEUE_ENRICH_MODEL
+# ("claude-opus-4-8") both intentionally pick a more capable/costlier model
+# for depth, since that output is the resale-safe customer-facing asset — see
+# each module's own docstring. Not unified with this constant on purpose.
+DEFAULT_CHAT_MODEL = "claude-sonnet-4-6"
+
 # Single source of truth, ordered fast -> best. `short` is for compact pickers
 # (Q&A, posts, backfill); `enrich` is the longer framing for the re-enrich page.
 # Add a model by adding a row here.

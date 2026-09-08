@@ -15,6 +15,8 @@ import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
+from .models import DEFAULT_CHAT_MODEL
+
 DEFAULT_THRESHOLD = 0.62      # applies to TITLE similarity (the strictness lever)
 DEFAULT_WINDOW_DAYS = 90
 # Body/summary overlap must be strong to link two items on its own, so generic
@@ -323,7 +325,7 @@ def _rekey_cluster(cluster: list[dict], source: str = "") -> list[dict]:
 
 
 _VERIFY_MODEL = os.environ.get("LINKLIB_DEDUPE_MODEL",
-                               os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6"))
+                               os.environ.get("LINKLIB_CHAT_MODEL", DEFAULT_CHAT_MODEL))
 
 _VERIFY_PROMPT = """A finance leader is de-duplicating a research library. A fast
 text filter flagged the articles below as POSSIBLE near-duplicates, but it only

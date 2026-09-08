@@ -28,9 +28,10 @@ import requests
 
 from .citations import extract_citations, make_document_block
 from .db import Library
+from .models import DEFAULT_CHAT_MODEL
 from .voice_settings import VoicePromptMissing, require_voice_setting
 
-DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
+DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", DEFAULT_CHAT_MODEL)
 
 # Friendly alias → canonical model ID
 MODEL_ALIASES: dict[str, str] = {

@@ -15,8 +15,9 @@ import json
 import os
 
 from .db import Library
+from .models import DEFAULT_CHAT_MODEL
 
-DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
+DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", DEFAULT_CHAT_MODEL)
 
 _PROMPT = """A finance leader curates a research library for finance leaders at
 high-growth tech companies. They keep substantive written articles and skip
