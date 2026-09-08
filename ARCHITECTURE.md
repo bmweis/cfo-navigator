@@ -6861,6 +6861,83 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   (placement, verified/pending/empty on both the profile page and
   Compare).
 
+### AI usage/config dashboard — `/admin/system/ai-usage` (2026-09)
+
+A single new read-only admin page indexing every Claude/Exa/OpenAI surface
+in the app: which model or mechanism powers it, whether it's a live DB
+setting or a code-only default that needs a deploy to change, and a link
+out to wherever it's actually changed. Built on a completed investigation
+(Step 0, reported and approved) plus three merged PRs that closed every gap
+it found — #508 (model-config consolidation), #509 (Exa pricing freshness
+banner), #510 (Exa cost tracking + settings-copy fix) — so this page reads
+already-accurate state, it computes nothing new of its own.
+
+**Explicitly does not absorb any functionality from the three pages it
+links to.** No new editing surface: the enrichment-model dropdown stays on
+`/admin/system/model`, the Exa on/off toggle and its connection test stay
+on `/admin/exa-settings`, and every "Mark reviewed" action for the three
+freshness reminders stays on `/admin/checks`. This page only reads and
+displays.
+
+- **Claude section** — three independent surfaces, confirmed as genuinely
+  independent by direct code trace, not assumed:
+  - **Enrichment** (Description, Agent taxonomy, Bottom line, Community
+    profile fields, article summaries) — `Library.get_enrich_model()`, a
+    live `settings` value, editable at `/admin/system/model` with no
+    redeploy. Defaults to `claude-opus-5`.
+  - **FP&A Buddy** (Quick/Standard/Deep) — `linklib.agent.EFFORT_SETTINGS`,
+    a fully separate hardcoded dict with one model per tier
+    (`claude-haiku-4-5-20251001` / `claude-sonnet-4-6` / `claude-opus-4-8`).
+    Code-only — changing a tier's model needs a deploy. Links to
+    `/tools/fpa-buddy/how-it-works`.
+  - **Matchmaker** (Software & Community chat) — `linklib.matchmaker.
+    DEFAULT_MODEL`, resolved from `os.environ.get("LINKLIB_CHAT_MODEL",
+    DEFAULT_CHAT_MODEL)` (the shared constant #508 introduced in
+    `linklib.models`). Independent of the enrichment setting above and,
+    like Buddy's tiers, code-only.
+- **Exa section** — the four real call sites, confirmed by direct trace
+  before #510 and unchanged since: `linklib.agent.retrieve_exa` (Buddy's
+  web tier, cost persisted in `ask_questions.exa_cost_usd`/
+  `exa_result_count`), `linklib.domain_migration.find_migrated_url` and
+  `linklib.medium_platform.fetch_content_by_url`/`find_medium_candidate`
+  (the Reader content backfill's two fallback tiers, cost persisted in
+  `content_refetch_log.exa_cost_usd`), and `linklib.feature_scan.
+  research_vendor_domain` (the Feature Taxonomy vendor-research script).
+  **The fourth call site is deliberately called out as tracked
+  differently from the other three, per the approved build brief** — its
+  cost is per-run script output only (printed by whichever script invoked
+  it, e.g. `scripts/enrich_agent_taxonomy.py`), not written to any
+  database table, unlike the other three call sites #510 wired into real
+  ledgers. The page states this explicitly next to that row rather than
+  letting the uniform "Exa call site" list imply identical tracking. One
+  shared on/off toggle (`Library.get_exa_enabled()`) gates all four; the
+  page shows its current state and, if it's on but `EXA_API_KEY` is unset,
+  says so — links to `/admin/exa-settings`.
+- **OpenAI section** — footnote-weight, one call site: `text-embedding-3-small`
+  in `linklib/embeddings.py`, cost tracked in two ledgers by payer
+  (`article_embeddings.cost_usd` for Brian's overhead,
+  `ask_questions.embed_cost_usd` for the user-cap cost of embedding the
+  query at ask-time).
+- **Freshness-banner status glance** — a compact strip at the top of the
+  page (2 dots for the Claude section: Pricing, New-model awareness; 1 dot
+  for the Exa section: Exa pricing), each reading the same `settings`
+  value and `*_review_is_stale()` function `/admin/checks` itself uses, and
+  linking to a matching `id` anchor added to that page's own `<h2>`
+  headings (`#pricing-freshness`, `#new-model-awareness`,
+  `#exa-pricing-freshness`). Deliberately not a duplicate of the full
+  banner or its "Mark reviewed" button — that action stays exclusively on
+  `/admin/checks`.
+- **Dollar totals are explicitly out of scope** — the page closes with a
+  link to `/admin/overhead-spend`, never a number of its own. This is a
+  usage/config map, not a spend report.
+
+See `tests/test_ai_usage_dashboard.py` for the regression coverage
+(auth gate, all three Claude surfaces reflecting live values including a
+changed enrichment-model setting, all four Exa call sites with the
+feature-scan one explicitly distinguished, the OpenAI footnote, every
+outbound link, no `<form>` anywhere on the page, and the freshness dots
+tracking a live "Mark reviewed" action taken on `/admin/checks`).
+
 ## 4. Design decisions and their reasons
 
 Short entries: what was decided, and why. Rationale below is taken from code
