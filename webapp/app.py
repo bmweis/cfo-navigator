@@ -23243,6 +23243,54 @@ def _models_freshness_banner(last_reviewed: str) -> str:
             f'</form></div>')
 
 
+def _exa_pricing_freshness_banner(last_verified: str) -> str:
+    """A third, parallel dated manual-attestation reminder, sibling to
+    _pricing_freshness_banner/_models_freshness_banner above and built to
+    the identical visual/mechanical pattern (same reviewed-toggle shape,
+    same colors, same "Mark reviewed" button — no auto-clear-on-view).
+    Answers the same category of question as Claude/OpenAI pricing
+    freshness (is an existing rate still accurate), just for
+    linklib.pricing.EXA_PRICING instead of MODEL_PRICING/EMBEDDING_PRICING
+    — there's no pricing API to reconcile Exa's rates against
+    automatically either, so this stays a human attestation, same as the
+    other two, on the same 90-day window as Claude/OpenAI pricing (not the
+    30-day new-model-awareness window — this isn't "does something new
+    exist," it's "is the existing rate still current")."""
+    from linklib.pricing import EXA_PRICING_REVIEW_STALE_DAYS, exa_pricing_review_is_stale
+    stale = exa_pricing_review_is_stale(last_verified)
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+    if stale:
+        bg, border, color = amber_wash, amber_border, amber_text
+        if last_verified:
+            when = _relative_age(last_verified)
+            html = (f'Exa pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
+                    f'against Exa&rsquo;s published rates &mdash; that&rsquo;s past the '
+                    f'{EXA_PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
+                    f'<code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table against '
+                    f'<a href="https://exa.ai/pricing" target="_blank" rel="noopener" '
+                    f'style="color:inherit;text-decoration:underline;">Exa&rsquo;s current published rates</a>, '
+                    f'then mark it reviewed.')
+        else:
+            html = ('Exa pricing has <strong>never been marked reviewed</strong>. Check '
+                    '<code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table against '
+                    '<a href="https://exa.ai/pricing" target="_blank" rel="noopener" '
+                    'style="color:inherit;text-decoration:underline;">Exa&rsquo;s current published rates</a>, '
+                    'then mark it reviewed.')
+    else:
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        when = _relative_age(last_verified)
+        html = (f'Exa pricing was manually verified <strong>{_esc(when) or "recently"}</strong> against '
+                f'Exa&rsquo;s published rates.')
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;'
+            f'display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
+            f'<span>{html}</span>'
+            f'<form method="post" action="/admin/checks/mark-exa-pricing-reviewed" style="margin:0;flex-shrink:0;">'
+            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;white-space:nowrap;">Mark reviewed</button>'
+            f'</form></div>')
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
@@ -23253,10 +23301,12 @@ def admin_checks(request: Request):
     try:
         pricing_last_verified = lib.get_setting("pricing_last_verified")
         models_last_reviewed = lib.get_setting("models_last_reviewed")
+        exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
     finally:
         lib.close()
     pricing_banner = _pricing_freshness_banner(pricing_last_verified)
     models_banner = _models_freshness_banner(models_last_reviewed)
+    exa_pricing_banner = _exa_pricing_freshness_banner(exa_pricing_last_verified)
 
     live = [r for r in results if r["where"] == "In-app"]
     passing = sum(1 for r in live if r["ok"])
@@ -23308,6 +23358,9 @@ def admin_checks(request: Request):
 <h2 style="margin:28px 0 4px;">New-model awareness</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Also not automatable, and a different question from pricing freshness above: not whether an existing model&rsquo;s price is current, but whether Anthropic has shipped models this app doesn&rsquo;t know about yet at all&mdash;there&rsquo;s no &ldquo;list every current model&rdquo; API to check against, so this is a second dated reminder for a human re-check.</p>
 {models_banner}
+<h2 style="margin:28px 0 4px;">Exa pricing freshness</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Also not automatable&mdash;there&rsquo;s no pricing API to check <code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table against, so this is a third dated reminder for a human re-check, same category of question as pricing freshness above (is an existing rate still accurate), just for Exa instead of Claude/OpenAI.</p>
+{exa_pricing_banner}
 </div>"""
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
 
@@ -23343,6 +23396,23 @@ def admin_checks_mark_models_reviewed(request: Request):
     lib = _lib()
     try:
         lib.set_setting("models_last_reviewed", datetime.now(timezone.utc).isoformat())
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/checks", status_code=303)
+
+
+@app.post("/admin/checks/mark-exa-pricing-reviewed")
+def admin_checks_mark_exa_pricing_reviewed(request: Request):
+    """Sibling to mark-pricing-reviewed/mark-models-reviewed above: Brian
+    has actually re-checked linklib/pricing.py's EXA_PRICING table against
+    Exa's current published rates and confirmed/updated it. Same plain
+    set-a-dated-setting shape, a separate settings key so all three
+    reminders go stale independently."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.set_setting("exa_pricing_last_verified", datetime.now(timezone.utc).isoformat())
     finally:
         lib.close()
     return RedirectResponse("/admin/checks", status_code=303)
