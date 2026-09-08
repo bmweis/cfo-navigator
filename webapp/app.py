@@ -29511,6 +29511,31 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         )
     _backfill_total_lead_sentence = f'<p style="color:var(--muted);margin:0 0 10px;">{_lead_sentence_text}</p>'
 
+    # Structured-count source breakdown — one compact stat line instead of
+    # four near-identical "N came from X — look for 'via X' below" paragraphs
+    # (2026-09 backfill-content copy tightening). The fifth paragraph this
+    # replaced (excluded_count's "permanently excluded... re-run with force
+    # checked to retry anyway") is dropped outright, not folded in here — it
+    # isn't a source breakdown of Structured at all, and it only ever
+    # restated the "Defunct service" tile's own tooltip plus the force
+    # checkbox's own helper text below, with no information of its own.
+    _source_bits = [
+        (wayback_count, "Wayback"),
+        (migration_count, "Migration"),
+        (medium_fetch_count, "Medium fetch"),
+        (medium_search_count, "Medium search"),
+    ]
+    _source_parts = [f'{count:,} via {label}' for count, label in _source_bits if count]
+    if len(_source_parts) > 1:
+        _source_joined = ", ".join(_source_parts[:-1]) + f', and {_source_parts[-1]}'
+    else:
+        _source_joined = _source_parts[0] if _source_parts else ""
+    _source_breakdown_html = (
+        f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 20px;">Of the {done_count:,} structured '
+        f'articles, {_source_joined}&mdash;look for the matching badge in the attempts log below.</p>'
+        if _source_parts else ''
+    )
+
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Reader content backfill</h1>
@@ -29545,11 +29570,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   </div>
 </div>
 
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch. Look for the &ldquo;via Wayback&rdquo; badge in the attempts log below.</p>' if wayback_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{migration_count:,} came from a <strong>known domain migration</strong> (e.g. a blog that relocated to a new host)&mdash;look for &ldquo;via Migration&rdquo; below.</p>' if migration_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_fetch_count:,} came from a <strong>direct Exa fetch</strong> of the article&rsquo;s own URL (medium.com and similar hosts block direct fetches)&mdash;look for &ldquo;via Medium fetch&rdquo; below.</p>' if medium_fetch_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{medium_search_count:,} came from a <strong>Medium-platform search match</strong> once the direct fetch above didn&rsquo;t work out&mdash;look for &ldquo;via Medium search&rdquo; below.</p>' if medium_search_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service, so re-fetching can never succeed. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry anyway.</p>' if excluded_count else ''}
+{_source_breakdown_html}
 
 <div id="poll-container">{status_html}</div>
 {_job_run_banner("content_backfill")}
