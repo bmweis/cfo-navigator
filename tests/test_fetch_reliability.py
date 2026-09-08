@@ -612,15 +612,40 @@ def test_admin_page_shows_wayback_count_note_only_when_nonzero(env):
 
     c = _admin_client(env)
     r = c.get("/admin/library/backfill-content")
-    assert "Wayback Machine" in r.text
-    assert "1 of the structured articles" in r.text or ">1<" in r.text
+    assert "1 via Wayback" in r.text
+    assert "look for the matching badge in the attempts log below" in r.text
 
 
 def test_admin_page_no_wayback_note_when_zero(env):
     c = _admin_client(env)
     r = c.get("/admin/library/backfill-content")
     assert r.status_code == 200
-    assert "of the structured articles above came from a" not in r.text
+    assert "look for the matching badge in the attempts log below" not in r.text
+
+
+def test_admin_page_source_breakdown_joins_multiple_sources(env):
+    """2026-09 backfill-content copy tightening: what used to be four
+    near-identical "N came from X — look for 'via X' below" paragraphs is
+    now one compact, Oxford-comma-joined stat line."""
+    lib = env._lib()
+    wb = _seed(lib, url="https://example.com/wb")
+    lib.log_content_refetch_attempt(wb, "success", source="wayback")
+    mig = _seed(lib, url="https://example.com/mig")
+    lib.log_content_refetch_attempt(mig, "success", source="migration")
+    mf = _seed(lib, url="https://example.com/mf")
+    lib.log_content_refetch_attempt(mf, "success", source="medium-fetch")
+    ms = _seed(lib, url="https://example.com/ms")
+    lib.log_content_refetch_attempt(ms, "success", source="medium-search")
+    lib.close()
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    assert (
+        "1 via Wayback, 1 via Migration, 1 via Medium fetch, and 1 via Medium search"
+        in r.text
+    )
+    assert r.text.count("look for the matching badge in the attempts log below") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -638,14 +663,26 @@ def test_admin_page_shows_defunct_service_pill_and_exclusion_note(env):
     r = c.get("/admin/library/backfill-content")
     assert r.status_code == 200
     assert "Defunct service" in r.text
-    assert "permanently excluded from future runs" in r.text
-    assert "1 article permanently" in r.text or "permanently excluded" in r.text
+    assert "permanently excluded from retry" in r.text
 
 
-def test_admin_page_no_exclusion_note_when_zero(env):
+def test_admin_page_source_breakdown_excludes_excluded_count(env):
+    """2026-09 backfill-content copy tightening: the consolidated source-
+    breakdown line covers only the four Structured-count sources (Wayback/
+    Migration/Medium fetch/Medium search) — the old fifth paragraph about
+    permanently-excluded defunct-service articles was dropped outright as
+    redundant with the Defunct service tile's own tooltip and the force
+    checkbox's own helper text, not folded into this line."""
+    lib = env._lib()
+    a1 = _seed(lib, url="https://example.com/a")
+    lib.log_content_refetch_attempt(a1, "success", source="wayback")
+    defunct_id = _seed(lib, url="http://feedproxy.google.com/~r/z/")
+    lib.log_content_refetch_attempt(defunct_id, "failure", reason="defunct-service")
+    lib.close()
+
     c = _admin_client(env)
     r = c.get("/admin/library/backfill-content")
-    assert r.status_code == 200
+    assert "via Wayback" in r.text
     assert "permanently excluded from future runs" not in r.text
 
 
