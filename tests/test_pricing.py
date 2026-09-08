@@ -7,6 +7,7 @@ Sonnet 5 to the once-planned $3/$15) would go uncaught.
 """
 from __future__ import annotations
 
+from linklib.agent import EFFORT_SETTINGS
 from linklib.models import _REGISTRY
 from linklib.pricing import MODEL_PRICING, compute_cost, pricing_review_is_stale
 
@@ -71,6 +72,42 @@ def test_every_registry_model_has_a_pricing_row():
     registry_ids = {m["id"] for m in _REGISTRY}
     missing = registry_ids - set(MODEL_PRICING.keys())
     assert not missing, f"registered model(s) with no MODEL_PRICING row: {sorted(missing)}"
+
+
+def test_every_effort_tier_model_has_a_pricing_row():
+    """issue #98, Piece 1 follow-up — linklib.models._REGISTRY isn't the
+    only place a model id lives. FP&A Buddy's Quick/Standard/Deep tiers
+    (linklib.agent.EFFORT_SETTINGS) map to their own hardcoded model ids,
+    completely disconnected from the registry the test above covers — the
+    investigation confirmed a model swapped into EFFORT_SETTINGS is not
+    required to appear in the registry at all (e.g. claude-opus-4-8, the
+    'deep' tier's model, isn't a registry entry). Without this, changing
+    which model a tier uses with pricing forgotten would silently record
+    real Ask spend at Sonnet 4.6's rates (compute_cost's fallback) instead
+    of the tier's actual model — a live-cost accuracy bug, not just a
+    cosmetic one, since Ask cost is what per-user dollar caps are built on.
+
+    (Verified this actually catches the regression it exists to catch:
+    temporarily pointing a tier at a model with no MODEL_PRICING row made
+    this fail, as expected.)"""
+    effort_model_ids = {settings["model"] for settings in EFFORT_SETTINGS.values()}
+    missing = effort_model_ids - set(MODEL_PRICING.keys())
+    assert not missing, f"EFFORT_SETTINGS model(s) with no MODEL_PRICING row: {sorted(missing)}"
+
+
+def test_every_effort_tier_model_has_a_cost_estimate_row():
+    """Same gap as above, for linklib.agent.COST_ESTIMATES — the rough
+    pre-call estimate shown on /tools/fpa-buddy before a question is asked.
+    COST_ESTIMATES.get(model, {}).get(tier) degrades silently to None (a
+    blank cost estimate in the UI) rather than raising, so nothing else
+    would ever catch a tier pointed at a model missing from this table."""
+    from linklib.agent import COST_ESTIMATES
+    for tier, settings in EFFORT_SETTINGS.items():
+        model = settings["model"]
+        assert model in COST_ESTIMATES, f"EFFORT_SETTINGS['{tier}'] model {model!r} has no COST_ESTIMATES row"
+        assert tier in COST_ESTIMATES[model], (
+            f"COST_ESTIMATES[{model!r}] has no '{tier}' entry"
+        )
 
 
 def test_pricing_review_is_stale_thresholds():

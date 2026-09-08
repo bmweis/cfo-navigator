@@ -73,3 +73,18 @@ def test_models_for_static_fallback(monkeypatch):
     assert by_id["claude-sonnet-5"] == "Balanced · newest"
     enrich = {m["id"]: m["blurb"] for m in models.models_for(blurb="enrich")}
     assert "stronger summaries" in enrich["claude-sonnet-5"]
+
+
+def test_models_review_is_stale_thresholds():
+    """issue #98, Piece 2 — mirrors linklib.pricing.pricing_review_is_stale's
+    own threshold test, at models.py's tighter 30-day window."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    fresh = (now - timedelta(days=10)).isoformat()
+    stale = (now - timedelta(days=31)).isoformat()
+    boundary = (now - timedelta(days=30)).isoformat()
+    assert models.models_review_is_stale(fresh, now=now) is False
+    assert models.models_review_is_stale(stale, now=now) is True
+    assert models.models_review_is_stale(boundary, now=now) is True
+    assert models.models_review_is_stale("", now=now) is True
+    assert models.models_review_is_stale("not-a-date", now=now) is True

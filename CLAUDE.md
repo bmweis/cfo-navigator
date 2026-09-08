@@ -6872,6 +6872,99 @@ picks something else — quality over cost for this use case, same reasoning
 enrichment model next to its existing AI-cost estimate, since model choice
 directly affects that number.
 
+### Adding a new Claude model — every touchpoint
+
+**Investigated (issue #98, Piece 1, 2026-09) after #506 shipped a CI test guarding
+registry-vs-pricing drift — the question was whether "add a new model" is genuinely
+a one-string change once that test exists. It isn't.** `linklib/models.py`'s own
+docstring used to claim its `_REGISTRY` is what "every model picker (Q&A, LinkedIn
+posts, re-enrich, backfill)" renders from — both false as of this investigation:
+LinkedIn post drafting was removed outright in #95, and Q&A (FP&A Buddy) never reads
+the registry at all. The docstring is corrected; this section is the real list.
+
+There are (at least) five separate places a model id can need adding or updating,
+not connected to each other and not connected to `linklib/models.py`'s registry
+except the first one:
+
+1. **`linklib/models.py`'s `_REGISTRY`** — feeds exactly three admin surfaces:
+   `/admin/system/model` (the live enrichment-model setting), the re-enrich
+   picker, and the backfill picker. Adding a row here is sufficient — and only
+   sufficient — for those three. `models_for(allow_new=True)` also auto-surfaces
+   a genuinely new model on the two chat-oriented pickers without a code change,
+   but the enrichment pickers stay curated on purpose (no auto-surfacing, so a
+   1,500-article re-enrich pass can't land on an unexpectedly pricey model by
+   accident).
+2. **`linklib/agent.py`'s `EFFORT_SETTINGS`** — FP&A Buddy's actual Quick/
+   Standard/Deep -> model mapping, a completely separate hardcoded dict with no
+   link to the registry at all. This is the real "model selector" for Buddy,
+   even though there's no dropdown — Buddy's UI only ever shows the three effort
+   tiers (`linklib.agent.EFFORT_SETTINGS`; see "FP&A Buddy has no visible model
+   picker" above). Putting a model in the registry does **not** make it reachable
+   by a Buddy question; only editing this dict does. Confirmed live: `EFFORT_SETTINGS`'s
+   "deep" tier already runs `claude-opus-4-8`, a model that was never in
+   `_REGISTRY` at all — proof the two have always been independent, not a new gap.
+3. **`linklib/agent.py`'s `COST_ESTIMATES`** — the rough pre-call cost estimate
+   shown on `/tools/fpa-buddy`, keyed by canonical model id then effort tier.
+   `COST_ESTIMATES.get(model, {}).get(tier)` degrades silently to `None` (a blank
+   cost estimate in the UI) for a tier pointed at a model missing here — no error,
+   no crash, just quietly wrong/missing UI.
+4. **`linklib/pricing.py`'s `MODEL_PRICING`** — the real per-call USD cost table
+   real spend is recorded against (drives per-user dollar caps). An unlisted model
+   silently falls back to Sonnet 4.6 rates rather than $0 or an error (see that
+   module's own docstring) — a live-cost-accuracy bug, not cosmetic. #506's CI
+   test (`test_every_registry_model_has_a_pricing_row`) only ever checked this
+   against the *registry*; a follow-up test
+   (`test_every_effort_tier_model_has_a_pricing_row`/
+   `test_every_effort_tier_model_has_a_cost_estimate_row`, `tests/test_pricing.py`)
+   now also checks it against `EFFORT_SETTINGS`, since a tier's model can (and
+   does, per point 2) live outside the registry entirely.
+5. **Assorted standalone `DEFAULT_MODEL`/`QUEUE_ENRICH_MODEL` fallbacks** —
+   `linklib/agent.py`, `linklib/matchmaker.py`, `linklib/suggest.py`,
+   `linklib/dedupe.py`, `linklib/queue.py`, `linklib/enrich.py`, and
+   `linklib/embeddings.py` each declare their own `os.environ.get("LINKLIB_..._MODEL",
+   "<hardcoded literal>")` default, independently. None of these read the
+   registry either; each is its own literal to update if the *default* itself
+   (not a picker option) should change. `linklib/agent.py`'s `MODEL_ALIASES`
+   (friendly short names like `"opus"`/`"sonnet5"` -> canonical id, used by
+   `scripts/ask.py`'s `--model` flag) is a sixth, smaller list in the same
+   category.
+
+MCP tools (`ask_fpa_buddy`, `ask_matchmaker`) were checked too and don't add a
+seventh touchpoint — neither exposes a model parameter; both proxy straight into
+the same `EFFORT_SETTINGS`/matchmaker `DEFAULT_MODEL` machinery in-process (Phase 5),
+so point 2 already covers them.
+
+**Bottom line: not a one-string change.** A new model that should power FP&A Buddy
+needs edits to (at least) `EFFORT_SETTINGS`, `COST_ESTIMATES`, and `MODEL_PRICING` —
+three separate dicts in two files, none of which the registry reconciles for you.
+A new model that should only be selectable for enrichment/re-enrich/backfill needs
+only the registry (plus a `MODEL_PRICING` row, now enforced by CI either way).
+**No further automation was built for this** beyond the CI-test extension above
+(explicitly scoped and approved before building, issue #98 Piece 1) — unifying
+`EFFORT_SETTINGS`/`COST_ESTIMATES` into the registry-reconciliation mechanism
+`models_for` already has would be a real, riskier redesign (Buddy's tiers are
+deliberately curated/manual, the same reasoning the enrichment pickers already use
+for staying non-auto-surfacing) and was left as a possible future decision, not
+something to do silently as part of this reminder.
+
+**New-model-awareness reminder (issue #98, Piece 2)** — same reviewed-toggle
+pattern as the Pricing-freshness reminder directly above (a dated `settings` value,
+a banner on `/admin/checks` separate from the pass/fail list, an admin-only "Mark
+reviewed" action, no auto-clear-on-view), but answering a different question and
+kept as a fully separate, independent reminder: not "has an existing model's price
+gone stale" but "does Anthropic have current models this app doesn't know about at
+all." There's no API for that either (`models.list()`, per `linklib/models.py`'s
+own `_live_models`, only ever returns models already deployed/visible to this
+account — a consequence of a model having been added somewhere already, never a
+way to discover a brand-new release), so this stays a human attestation too.
+`linklib.models.MODELS_REVIEW_STALE_DAYS` = **30 days** (vs. pricing's 90) —
+confirmed with Brian: new models ship roughly every 30-60 days, meaningfully more
+often than an existing model's price changes, so the review window is tighter.
+Settings key `models_last_reviewed`; `POST /admin/checks/mark-models-reviewed`
+records it. The banner links out to both Anthropic's live model-overview docs and
+back to this section (so "what do I actually need to touch" doesn't need
+re-deriving each time it goes stale).
+
 ## Billing note
 
 Three separate billing relationships:

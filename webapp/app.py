@@ -23173,6 +23173,59 @@ def _pricing_freshness_banner(last_verified: str) -> str:
             f'</form></div>')
 
 
+def _models_freshness_banner(last_reviewed: str) -> str:
+    """Issue #98, Piece 2 follow-up — a second, parallel dated
+    manual-attestation reminder, sibling to _pricing_freshness_banner
+    above and built to the identical visual/mechanical pattern (same
+    reviewed-toggle shape, same colors, same "Mark reviewed" button — no
+    auto-clear-on-view). Answers a genuinely different question than
+    pricing freshness does: not "has an existing model's price gone
+    stale" but "does Anthropic have current models this app doesn't know
+    about at all." There's no API to check that automatically either —
+    `models.list()` (linklib.models._live_models) only ever returns
+    models already deployed/visible to this account, which is a
+    consequence of a model having been added somewhere already, not a way
+    to discover a brand-new release — so this stays a human attestation,
+    same as pricing, just on its own shorter clock (Anthropic ships new
+    models roughly every 30-60 days, so linklib.models.MODELS_REVIEW_STALE_DAYS
+    is 30, tighter than pricing's 90)."""
+    from linklib.models import MODELS_REVIEW_STALE_DAYS, models_review_is_stale
+    stale = models_review_is_stale(last_reviewed)
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+    doc_link = ('<a href="https://github.com/bmweis/cfo-navigator/blob/main/CLAUDE.md'
+                '#adding-a-new-claude-model--every-touchpoint" target="_blank" rel="noopener" '
+                'style="color:inherit;text-decoration:underline;">every touchpoint a new model needs</a>')
+    if stale:
+        bg, border, color = amber_wash, amber_border, amber_text
+        if last_reviewed:
+            when = _relative_age(last_reviewed)
+            html = (f'Anthropic&rsquo;s model lineup was last manually checked <strong>{_esc(when) or "a while ago"}</strong> '
+                    f'&mdash; that&rsquo;s past the {MODELS_REVIEW_STALE_DAYS}-day review window. Check '
+                    f'<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
+                    f'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s current model docs</a> '
+                    f'for anything new, add it to <code>linklib/models.py</code>&rsquo;s registry if it belongs in the curated '
+                    f'pickers, and see {doc_link} before wiring a model into FP&amp;A Buddy specifically&mdash;then mark it reviewed.')
+        else:
+            html = (f'Anthropic&rsquo;s model lineup has <strong>never been marked reviewed</strong>. Check '
+                    f'<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
+                    f'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s current model docs</a> '
+                    f'against <code>linklib/models.py</code>&rsquo;s registry, and see {doc_link} before wiring a model into '
+                    f'FP&amp;A Buddy specifically&mdash;then mark it reviewed.')
+    else:
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        when = _relative_age(last_reviewed)
+        html = (f'Anthropic&rsquo;s model lineup was manually checked <strong>{_esc(when) or "recently"}</strong> '
+                f'against <code>linklib/models.py</code>&rsquo;s registry.')
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;'
+            f'display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
+            f'<span>{html}</span>'
+            f'<form method="post" action="/admin/checks/mark-models-reviewed" style="margin:0;flex-shrink:0;">'
+            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;white-space:nowrap;">Mark reviewed</button>'
+            f'</form></div>')
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
@@ -23182,9 +23235,11 @@ def admin_checks(request: Request):
     lib = _lib()
     try:
         pricing_last_verified = lib.get_setting("pricing_last_verified")
+        models_last_reviewed = lib.get_setting("models_last_reviewed")
     finally:
         lib.close()
     pricing_banner = _pricing_freshness_banner(pricing_last_verified)
+    models_banner = _models_freshness_banner(models_last_reviewed)
 
     live = [r for r in results if r["where"] == "In-app"]
     passing = sum(1 for r in live if r["ok"])
@@ -23233,6 +23288,9 @@ def admin_checks(request: Request):
 <h2 style="margin:28px 0 4px;">Pricing freshness</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Not automatable&mdash;there&rsquo;s no pricing API to check <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against, so this is a dated reminder for a human re-check, not a pass/fail test.</p>
 {pricing_banner}
+<h2 style="margin:28px 0 4px;">New-model awareness</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Also not automatable, and a different question from pricing freshness above: not whether an existing model&rsquo;s price is current, but whether Anthropic has shipped models this app doesn&rsquo;t know about yet at all&mdash;there&rsquo;s no &ldquo;list every current model&rdquo; API to check against, so this is a second dated reminder for a human re-check.</p>
+{models_banner}
 </div>"""
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
 
@@ -23250,6 +23308,24 @@ def admin_checks_mark_pricing_reviewed(request: Request):
     lib = _lib()
     try:
         lib.set_setting("pricing_last_verified", datetime.now(timezone.utc).isoformat())
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/checks", status_code=303)
+
+
+@app.post("/admin/checks/mark-models-reviewed")
+def admin_checks_mark_models_reviewed(request: Request):
+    """Issue #98, Piece 2 follow-up — sibling to mark-pricing-reviewed
+    above: Brian has actually checked Anthropic's current model lineup
+    against linklib/models.py's registry (and, where relevant, wired a new
+    model into FP&A Buddy's EFFORT_SETTINGS per CLAUDE.md's touchpoint
+    list) and confirmed/updated it. Same plain set-a-dated-setting shape,
+    a separate settings key so the two reminders go stale independently."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.set_setting("models_last_reviewed", datetime.now(timezone.utc).isoformat())
     finally:
         lib.close()
     return RedirectResponse("/admin/checks", status_code=303)
