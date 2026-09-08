@@ -7087,6 +7087,15 @@ actually used anywhere, no changes to `EFFORT_SETTINGS`/`COST_ESTIMATES`/the
 pricing or registry CI tests (already addressed by the new-model-awareness
 PR above).
 
+**`/admin/system/ai-usage` (2026-09) is a read-only index over everything
+in this section** — which model/mechanism powers each Claude/Exa/OpenAI
+surface, live vs. code-only, and a link to wherever it's actually changed
+(`/admin/system/model`, `/admin/exa-settings`, `/admin/checks`), plus a
+compact status glance on the three freshness reminders above. No dollar
+totals — those stay at `/admin/overhead-spend`, which this page links to.
+See ARCHITECTURE.md's "AI usage/config dashboard" section for the full
+write-up.
+
 ## Billing note
 
 Three separate billing relationships:

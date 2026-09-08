@@ -21525,6 +21525,7 @@ _ADMIN_GROUPS = [
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/system/model",    "AI model",            "Which Claude model powers enrichment&mdash;Description, Agent taxonomy, Competitive differentiation, Community profiles, and article summaries&mdash;switchable live, no redeploy."),
+        ("/admin/system/ai-usage", "AI usage",            "A read-only map of every Claude/Exa/OpenAI surface&mdash;which model or mechanism powers it, whether it's live-editable, and where to change it."),
         ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
@@ -23352,13 +23353,13 @@ def admin_checks(request: Request):
 {summary}
 {rows}
 <p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
-<h2 style="margin:28px 0 4px;">Pricing freshness</h2>
+<h2 id="pricing-freshness" style="margin:28px 0 4px;">Pricing freshness</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Not automatable&mdash;there&rsquo;s no pricing API to check <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against, so this is a dated reminder for a human re-check, not a pass/fail test.</p>
 {pricing_banner}
-<h2 style="margin:28px 0 4px;">New-model awareness</h2>
+<h2 id="new-model-awareness" style="margin:28px 0 4px;">New-model awareness</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Also not automatable, and a different question from pricing freshness above: not whether an existing model&rsquo;s price is current, but whether Anthropic has shipped models this app doesn&rsquo;t know about yet at all&mdash;there&rsquo;s no &ldquo;list every current model&rdquo; API to check against, so this is a second dated reminder for a human re-check.</p>
 {models_banner}
-<h2 style="margin:28px 0 4px;">Exa pricing freshness</h2>
+<h2 id="exa-pricing-freshness" style="margin:28px 0 4px;">Exa pricing freshness</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Also not automatable&mdash;there&rsquo;s no pricing API to check <code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table against, so this is a third dated reminder for a human re-check, same category of question as pricing freshness above (is an existing rate still accurate), just for Exa instead of Claude/OpenAI.</p>
 {exa_pricing_banner}
 </div>"""
@@ -23442,6 +23443,152 @@ def _relative_age(iso: str) -> str:
     if secs < 86400:
         return f"{int(secs // 3600)}h ago"
     return f"{int(secs // 86400)}d ago"
+
+
+def _ai_usage_freshness_dot(label: str, last_value: str, stale: bool, anchor: str) -> str:
+    """A compact read-only status line for one of the three /admin/checks
+    freshness reminders (Pricing, New-model awareness, Exa pricing) —
+    AI usage/config dashboard, Step 0 decision 2. Deliberately NOT the full
+    banner (no "Mark reviewed" button, no long explanatory copy) — this
+    page only ever reads the three settings values and reuses each
+    module's own *_review_is_stale() to color a dot; the actual review
+    action lives exclusively on /admin/checks, which this links to via the
+    anchor ids added alongside the three h2 headings there."""
+    color = ("#CA8A04" if stale else "var(--seafoam-deep)")
+    when = _relative_age(last_value)
+    if not last_value:
+        detail = "never reviewed"
+    elif stale:
+        detail = f"reviewed {when or 'a while ago'} — stale"
+    else:
+        detail = f"reviewed {when or 'recently'}"
+    return (f'<a href="/admin/checks#{anchor}" style="display:flex;align-items:center;gap:8px;'
+            f'text-decoration:none;color:inherit;font-size:13px;padding:6px 0;">'
+            f'<span style="width:9px;height:9px;border-radius:50%;background:{color};flex-shrink:0;"></span>'
+            f'<span style="color:var(--ink-soft);">{_esc(label)}: {_esc(detail)}</span>'
+            f'<span style="color:var(--muted);">&rarr;</span></a>')
+
+
+@app.get("/admin/system/ai-usage", response_class=HTMLResponse)
+def admin_system_ai_usage(request: Request):
+    """AI usage/config dashboard — a read-only index of which Claude/Exa/
+    OpenAI surface uses which model or mechanism, whether each is live-
+    editable or needs a deploy, and a link to wherever it's actually
+    changed. Built on a completed investigation (Step 0, reported and
+    approved) plus PRs 508, 509, and 510, which closed every gap that
+    investigation found — this page is a map over already-accurate data,
+    not a new source of truth. No editing here: every "change something"
+    affordance is a link out to /admin/system/model, /admin/exa-settings,
+    or /admin/checks. Dollar totals live at /admin/overhead-spend, linked
+    at the bottom — this page is usage/config only, never spend."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    from linklib.models import DEFAULT_CHAT_MODEL, models_review_is_stale
+    from linklib.agent import EFFORT_SETTINGS
+    from linklib.pricing import pricing_review_is_stale, exa_pricing_review_is_stale
+
+    lib = _lib()
+    try:
+        enrich_model = lib.get_enrich_model()
+        exa_enabled = lib.get_exa_enabled()
+        pricing_last_verified = lib.get_setting("pricing_last_verified")
+        models_last_reviewed = lib.get_setting("models_last_reviewed")
+        exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
+    finally:
+        lib.close()
+    has_exa_key = bool(os.environ.get("EXA_API_KEY"))
+
+    def _card(title: str, rows: str, extra: str = "") -> str:
+        return (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+                f'padding:18px 20px;margin-bottom:14px;">'
+                f'<div style="font:600 12px var(--font-body);letter-spacing:.06em;text-transform:uppercase;'
+                f'color:var(--muted);margin-bottom:10px;">{_esc(title)}</div>{rows}{extra}</div>')
+
+    def _row(label: str, value: str, note: str = "") -> str:
+        note_html = f'<div style="font-size:12.5px;color:var(--muted);margin-top:2px;">{note}</div>' if note else ""
+        return (f'<div style="padding:8px 0;border-top:1px solid var(--line);">'
+                f'<div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
+                f'<span style="font-size:13.5px;color:var(--ink-soft);">{label}</span>'
+                f'<span style="font-size:13.5px;font-weight:600;color:var(--navy);text-align:right;">{value}</span>'
+                f'</div>{note_html}</div>')
+
+    live_badge = '<span style="color:var(--seafoam-deep);font-weight:600;">Live&mdash;no redeploy</span>'
+    code_badge = '<span style="color:#92400e;font-weight:600;">Code-only&mdash;needs a deploy</span>'
+
+    # --- Claude ---------------------------------------------------------
+    claude_rows = (
+        _row("Enrichment", f'{_esc(_enrich_model_label(enrich_model))} <span style="font-size:12px;">({_esc(enrich_model)})</span>',
+             f'Description, Agent taxonomy, Bottom line, Community profile fields, article summaries. {live_badge} &mdash; '
+             f'<a href="/admin/system/model" style="color:var(--accent);">/admin/system/model &rarr;</a>')
+        + _row("FP&amp;A Buddy",
+               " / ".join(_esc(_enrich_model_label(t["model"])) for t in
+                          [EFFORT_SETTINGS["quick"], EFFORT_SETTINGS["standard"], EFFORT_SETTINGS["deep"]]),
+               f'Quick / Standard / Deep, one model per tier ({_esc(EFFORT_SETTINGS["quick"]["model"])} / '
+               f'{_esc(EFFORT_SETTINGS["standard"]["model"])} / {_esc(EFFORT_SETTINGS["deep"]["model"])}). '
+               f'{code_badge} &mdash; hardcoded in <code>linklib.agent.EFFORT_SETTINGS</code>, no admin picker. '
+               f'<a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works &rarr;</a>')
+        + _row("Matchmaker", _esc(_enrich_model_label(DEFAULT_CHAT_MODEL)),
+               f'Software &amp; Community matchmaker chat, one shared default. {code_badge} &mdash; '
+               f'<code>linklib.matchmaker.DEFAULT_MODEL</code>, resolved from <code>LINKLIB_CHAT_MODEL</code> / '
+               f'<code>linklib.models.DEFAULT_CHAT_MODEL</code>, independent of the enrichment setting above.')
+    )
+    claude_freshness = (
+        _ai_usage_freshness_dot("Pricing", pricing_last_verified,
+                                 pricing_review_is_stale(pricing_last_verified), "pricing-freshness")
+        + _ai_usage_freshness_dot("New-model awareness", models_last_reviewed,
+                                   models_review_is_stale(models_last_reviewed), "new-model-awareness")
+    )
+
+    # --- Exa --------------------------------------------------------------
+    exa_toggle_html = (
+        f'<div style="padding:10px 0;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-soft);">'
+        f'Toggle: <strong style="color:var(--navy);">{"On" if exa_enabled else "Off"}</strong>'
+        f'{" &mdash; but EXA_API_KEY is unset, so every call site below is on its fallback regardless" if not has_exa_key and exa_enabled else ""}'
+        f' &mdash; <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings &rarr;</a></div>'
+    )
+    exa_rows = (
+        _row("FP&amp;A Buddy web tier", "Tracked in <code>ask_questions</code>",
+             "Has a fallback&mdash;Claude's native web_search_20250305 tool, same trusted-sites allowlist either way.")
+        + _row("Reader backfill: domain migration", "Tracked in <code>content_refetch_log</code>",
+               "No fallback (other than the existing Wayback tier)&mdash;a real hit is simply not tried when Exa is off.")
+        + _row("Reader backfill: Medium-platform", "Tracked in <code>content_refetch_log</code>",
+               "No fallback (other than the existing Wayback tier)&mdash;same as domain migration above.")
+        + _row("Feature Taxonomy vendor research", "Per-run script output only",
+               "<strong>Not a persistent ledger like the three above</strong>&mdash;<code>linklib.feature_scan."
+               "research_vendor_domain</code> computes and prints its own cost for that one script run "
+               "(<code>scripts/enrich_agent_taxonomy.py</code> / feature-drafting tools); nothing writes it to a "
+               "database table, so it doesn't show up in any of the ledgers the other three call sites use.")
+        + exa_toggle_html
+    )
+    exa_freshness = _ai_usage_freshness_dot("Exa pricing", exa_pricing_last_verified,
+                                             exa_pricing_review_is_stale(exa_pricing_last_verified),
+                                             "exa-pricing-freshness")
+
+    # --- OpenAI (footnote) ------------------------------------------------
+    openai_rows = _row("Embeddings", "text-embedding-3-small",
+                        "Embed-on-save, <code>embed_backfill</code>, and the vector half of hybrid Library retrieval. "
+                        "Cost tracked in two ledgers by payer: <code>article_embeddings.cost_usd</code> (Brian's overhead) "
+                        "and <code>ask_questions.embed_cost_usd</code> (user-cap cost, the query embedding at ask-time).")
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>AI usage</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">Which model or mechanism powers each Claude/Exa/OpenAI surface in the app, and whether it's a live setting or a code default. Read-only&mdash;every change happens on the page it links to, not here. For dollar totals, see <a href="/admin/overhead-spend" style="color:var(--accent);">Overhead spend &rarr;</a>.</p>
+<div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:0 0 22px;">
+{claude_freshness}{exa_freshness}
+</div>
+
+<h2 style="margin:0 0 4px;">Claude</h2>
+{_card("Models by surface", claude_rows)}
+
+<h2 style="margin:24px 0 4px;">Exa</h2>
+{_card("Call sites", exa_rows)}
+
+<h2 style="margin:24px 0 4px;">OpenAI</h2>
+{_card("Embeddings", openai_rows)}
+</div>"""
+    return HTMLResponse(_page("AI usage—Admin", "Admin", body, authed=True))
 
 
 def _job_run_banner(job_name: str) -> str:
