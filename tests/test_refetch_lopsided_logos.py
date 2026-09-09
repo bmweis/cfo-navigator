@@ -4,6 +4,12 @@ excludes manual overrides, excludes the Cube/Kintsugi defensive skip list)
 against a temp DB + hand-built sample PNGs, and the preview/apply flow
 end-to-end with fetch_logo_asset/download_asset monkeypatched — never a
 real network call, never real quota spend.
+
+Source switched from Brandfetch to Logo.dev in 2026-09 (see
+linklib/logodev.py and scripts/backfill_logos.py's own history note) —
+fetch_logo_asset now returns image bytes directly (not a src_url) and
+download_asset takes (image_bytes, dest_path), no session argument, since
+Logo.dev's one HTTP call already carries the image content.
 """
 import os
 import pathlib
@@ -109,7 +115,7 @@ def test_candidates_scans_communities_too(tmp_path):
 
 # --- preview mode: zero API calls ------------------------------------------
 
-def test_preview_mode_makes_zero_brandfetch_calls(tmp_path, monkeypatch, capsys):
+def test_preview_mode_makes_zero_logodev_calls(tmp_path, monkeypatch, capsys):
     lib, db_path, add = _setup(tmp_path)
     add("WideCo", "wideco.com", 400, 40)
     lib.close()
@@ -142,12 +148,12 @@ def test_apply_mode_requires_api_key(tmp_path, monkeypatch, capsys):
     lib, db_path, add = _setup(tmp_path)
     add("WideCo", "wideco.com", 400, 40)
     lib.close()
-    monkeypatch.delenv("BRANDFETCH_API_KEY", raising=False)
+    monkeypatch.delenv("LOGODEV_API_KEY", raising=False)
     monkeypatch.setattr(sys, "argv", ["refetch_lopsided_logos.py", "--db", db_path, "--apply"])
     rc = script.main()
     err = capsys.readouterr().err
     assert rc == 1
-    assert "BRANDFETCH_API_KEY" in err
+    assert "LOGODEV_API_KEY" in err
 
 
 def test_apply_mode_switches_to_square_asset_and_writes(tmp_path, monkeypatch, capsys):
@@ -156,14 +162,14 @@ def test_apply_mode_switches_to_square_asset_and_writes(tmp_path, monkeypatch, c
     lib.close()
 
     def fake_fetch(domain, api_key, session=None):
-        return ("https://cdn.example/icon.png", "png", "icon"), None
+        return (b"\x89PNGfake", "png", "icon"), None
 
-    def fake_download(src_url, dest_path, session=None):
+    def fake_download(image_bytes, dest_path):
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         with open(dest_path, "wb") as f:
             f.write(_make_png(80, 80))
 
-    monkeypatch.setenv("BRANDFETCH_API_KEY", "fake-key")
+    monkeypatch.setenv("LOGODEV_API_KEY", "fake-key")
     monkeypatch.setattr(script, "fetch_logo_asset", fake_fetch)
     monkeypatch.setattr(script, "download_asset", fake_download)
     monkeypatch.setattr(sys, "argv", ["refetch_lopsided_logos.py", "--db", db_path, "--apply"])
@@ -180,23 +186,23 @@ def test_apply_mode_switches_to_square_asset_and_writes(tmp_path, monkeypatch, c
 
 
 def test_apply_mode_leaves_wordmark_only_result_unchanged(tmp_path, monkeypatch, capsys):
-    """When Brandfetch still has no icon/symbol asset for a brand, the
-    script must NOT overwrite the existing (still-wordmark) file, and must
-    report it as a residual manual-override case."""
+    """When Logo.dev still returns nothing but a wordmark asset for a
+    brand, the script must NOT overwrite the existing (still-wordmark)
+    file, and must report it as a residual manual-override case."""
     lib, db_path, add = _setup(tmp_path)
     tid = add("OnlyWordmarkCo", "onlywordmark.com", 400, 40)
     original_row = lib.get_tool(tid)
     lib.close()
 
     def fake_fetch(domain, api_key, session=None):
-        return ("https://cdn.example/logo.svg", "svg", "logo"), None  # still a wordmark
+        return (b"<svg/>", "svg", "logo"), None  # still a wordmark
 
     download_calls = []
 
-    def fake_download(src_url, dest_path, session=None):
+    def fake_download(image_bytes, dest_path):
         download_calls.append(dest_path)
 
-    monkeypatch.setenv("BRANDFETCH_API_KEY", "fake-key")
+    monkeypatch.setenv("LOGODEV_API_KEY", "fake-key")
     monkeypatch.setattr(script, "fetch_logo_asset", fake_fetch)
     monkeypatch.setattr(script, "download_asset", fake_download)
     monkeypatch.setattr(sys, "argv", ["refetch_lopsided_logos.py", "--db", db_path, "--apply"])
@@ -224,9 +230,9 @@ def test_apply_mode_stops_on_quota(tmp_path, monkeypatch, capsys):
 
     def fake_fetch(domain, api_key, session=None):
         calls.append(domain)
-        return None, "QUOTA: 429 rate-limited/quota-exceeded — stopping the run, not just this record"
+        return None, "QUOTA: 429 rate-limited — stopping the run, not just this record"
 
-    monkeypatch.setenv("BRANDFETCH_API_KEY", "fake-key")
+    monkeypatch.setenv("LOGODEV_API_KEY", "fake-key")
     monkeypatch.setattr(script, "fetch_logo_asset", fake_fetch)
     monkeypatch.setattr(sys, "argv", ["refetch_lopsided_logos.py", "--db", db_path, "--apply"])
     rc = script.main()
@@ -244,14 +250,14 @@ def test_apply_mode_never_writes_over_manual_override(tmp_path, monkeypatch, cap
     original_row = lib.get_tool(tid)
 
     def fake_fetch(domain, api_key, session=None):
-        return ("https://cdn.example/icon.png", "png", "icon"), None
+        return (b"\x89PNGfake", "png", "icon"), None
 
-    def fake_download(src_url, dest_path, session=None):
+    def fake_download(image_bytes, dest_path):
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         with open(dest_path, "wb") as f:
             f.write(_make_png(80, 80))
 
-    monkeypatch.setenv("BRANDFETCH_API_KEY", "fake-key")
+    monkeypatch.setenv("LOGODEV_API_KEY", "fake-key")
     monkeypatch.setattr(script, "fetch_logo_asset", fake_fetch)
     monkeypatch.setattr(script, "download_asset", fake_download)
 
