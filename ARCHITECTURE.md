@@ -5779,15 +5779,38 @@ the full non-destructive-retirement note). `Library.list_flagged`/
 this feature, confirmed by the same grep to have no other caller — are
 deleted outright.
 
-**No dedicated test file existed for this feature** — its coverage was
-scattered across `tests/test_admin_library_layout.py` (a quadrant-contents
-assertion), `tests/test_task_badges.py` (`flagged_count()` shape),
-`tests/test_reenrich.py` (a full scope-flag-and-keep round trip), and two
-mocked-JSON-payload fixtures (`tests/test_tag_style.py`,
-`tests/test_enrichment_cost_accounting.py`) that included now-unused
-`in_scope`/`scope_reason` keys — each updated or removed in place rather
-than skipped, per the standing "delete removed tests, don't skip them"
-rule.
+**A dedicated test file DID exist and was missed by the original grep** —
+`tests/test_scope_rules.py`, asserting the prompt's permanent audience-only
+exclusion language directly against `enrich._PROMPT`. The original grep
+searched for `review-removals|list_flagged|flagged_count|keep_article` and
+separately `in_scope|scope_reason|skipped_scope`, and somehow this file's
+own match didn't surface in the captured results — it only turned up as a
+real failure in the full local test-suite run, `test_prompt_is_audience_only`
+asserting `"career in venture capital" in enrich._PROMPT.lower()`, which the
+retirement makes false. Rewritten in full: it now asserts the audience-scope
+judgment is gone from the prompt entirely (`"career in venture capital"`,
+`"in_scope"`, and `"scope_reason"` all absent), that `Enrichment`'s
+dataclass fields no longer include `in_scope`/`scope_reason`, and that the
+already-retired cleanup-mode mechanism (unrelated, checked separately) stays
+gone. `ENRICH_RULES_VERSION` was bumped from `"v4"` to `"v5"` alongside this
+— the prompt's own comment says "BUMP THIS whenever `_PROMPT` changes," and
+the prompt genuinely changed (two of its four JSON keys, and their entire
+governing rule, removed) — with `test_rules_version` updated to match.
+
+Beyond that dedicated file, coverage was also scattered across
+`tests/test_admin_library_layout.py` (a quadrant-contents assertion, updated
+for the "Existing archive management" quadrant's tool count),
+`tests/test_feed_cookie_flag.py` (a separate quadrant-tool-count assertion
+that also needed updating — `lib-q-existing` dropped from 4 to 3 tools),
+`tests/test_task_badges.py` (`flagged_count()` shape — the removed test
+replaced with a narrower one pinning only `queue_count()`, the badge concept
+that's still real), `tests/test_reenrich.py` (a full scope-flag-and-keep
+round trip, replaced with a test asserting `in_scope` lands at its frozen
+default of `1` regardless of content), and two mocked-JSON-payload fixtures
+(`tests/test_tag_style.py`, `tests/test_enrichment_cost_accounting.py`) that
+included now-unused `in_scope`/`scope_reason` keys — each updated or removed
+in place rather than skipped, per the standing "delete removed tests, don't
+skip them" rule.
 
 ### Admin URL convention, Phase 1b PR 1 (2026-08)
 
