@@ -18,9 +18,10 @@ from dataclasses import dataclass
 from .db import Library
 from .enrich import NEEDS_VERIFICATION
 from .gates import MATCHMAKER_COMMUNITY_NOTE, MATCHMAKER_DISCLAIMER, MATCHMAKER_FIELD_SUFFIX
+from .models import DEFAULT_CHAT_MODEL
 from .voice_settings import VoicePromptMissing, require_voice_setting
 
-DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
+DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", DEFAULT_CHAT_MODEL)
 MAX_TOKENS = 900
 
 # Conversation cost guard — a matching conversation is naturally more

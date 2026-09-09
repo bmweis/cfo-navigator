@@ -6,8 +6,12 @@ gone with unchanged behavior at its 3 former call sites.
 The row-existence-vs.-cell-content split (item #10) is exercised here
 through both matrices side by side, on the same shaped fixture data, to
 show the two entity types share one code path (`gates.any_populated` for
-row existence, `_compare_cell_html`/`gates.state_for`/`gates.badge_text`
-for cell content) rather than two independently-behaving implementations.
+row existence, `gates.state_for`/`gates.badge_text` for cell content) —
+Compare Redesign Phase 1 (2026-09) moved the actual field-selection/state
+logic into `linklib/compare.py`'s serializer, rendered via
+`_cmp_section_cell_html` in webapp/app.py (the retired `_compare_cell_html`
+this docstring used to name), but the underlying gates.py contract these
+tests exercise is unchanged.
 """
 import os
 import pathlib

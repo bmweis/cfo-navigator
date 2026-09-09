@@ -77,6 +77,12 @@ def brand_docs_problems() -> list[str]:
     return []
 
 
+# --- hub-nav orphans (every real /admin route has a hub card) ---------------
+def hub_nav_orphan_problems() -> list[str]:
+    from webapp import app
+    return app.hub_nav_orphans()
+
+
 # --- shared <script> blocks parse as valid JS --------------------------------
 # 2026-08 lesson: a fix once validated raw source text via regex and reported
 # success, but every _JS constant below is a plain (non-f-string) Python
@@ -195,6 +201,12 @@ def run_all() -> list[dict]:
         "name": "BRAND.md §7 in sync", "where": "Live + CI", "ok": not bd,
         "what": "BRAND.md's token table is generated from the live :root block, not hand-copied.",
         "detail": "; ".join(bd) if bd else "BRAND.md matches the live CSS. (test_brand_docs_sync)"})
+
+    hn = hub_nav_orphan_problems()
+    results.append({
+        "name": "Hub-nav orphans", "where": "Live + CI", "ok": not hn,
+        "what": "Every real /admin route has a corresponding hub-nav card—nothing reachable only by guessing the URL.",
+        "detail": "; ".join(hn) if hn else "Every admin route has a hub-nav card. (test_hub_nav_orphans)"})
 
     pf = _pyflakes_problems()
     if pf is None:

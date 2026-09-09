@@ -129,7 +129,12 @@ CREATE TABLE IF NOT EXISTS users (
     name          TEXT NOT NULL DEFAULT '',
     email         TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL DEFAULT '',
-    last_login_at TEXT NOT NULL DEFAULT ''
+    last_login_at TEXT NOT NULL DEFAULT '',
+    -- Set whenever the current password was chosen by someone other than the
+    -- account holder (account creation, an admin reset) — cleared the moment
+    -- the holder sets their own password. Drives a dismissible nudge banner
+    -- only, never a login block. See the migration list's own comment.
+    password_change_recommended INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS contacts (
@@ -253,7 +258,7 @@ CREATE TABLE IF NOT EXISTS thought_leadership (
 -- feed) with sort_key only as a tiebreak — see Library.list_original_content.
 -- _TL_FEATURED_CARDS itself stays in the repo, unimported, as a rollback
 -- reference (same precedent as webapp/thought_leadership_data.py) — see
--- scripts/migrate_original_content.py for the one-time migration that seeds
+-- scripts/archive/migrate_original_content.py for the one-time migration that seeds
 -- this table from it, and CLAUDE.md's Original Content Phase 1 entry.
 CREATE TABLE IF NOT EXISTS original_content (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -604,6 +609,10 @@ CREATE TABLE IF NOT EXISTS ask_questions (
     embed_input_tokens    INTEGER NOT NULL DEFAULT 0,  -- query-time embedding call for hybrid retrieval (#93)
     embed_cost_usd        REAL NOT NULL DEFAULT 0,     -- embed's share, already inside cost_usd (user-cap cost,
                                                         -- unlike embed-on-save which is overhead — see article_embeddings)
+    exa_result_count      INTEGER NOT NULL DEFAULT 0,  -- Exa cost tracking (2026-09): Answer.exa_result_count,
+                                                        -- added via migration below (see that migration's comment)
+    exa_cost_usd          REAL NOT NULL DEFAULT 0,     -- Exa's share, already inside cost_usd — see
+                                                        -- Answer.exa_cost_usd/linklib.agent.retrieve_exa
     hidden_public         INTEGER NOT NULL DEFAULT 0,  -- admin removed from the community view only
     anonymized            INTEGER NOT NULL DEFAULT 0,  -- asker name hidden on the community view only
     citations_json        TEXT NOT NULL DEFAULT '[]',  -- the turn's API-verified cited sources (see record_ask_question)
@@ -845,7 +854,11 @@ CREATE INDEX IF NOT EXISTS idx_job_run_log_job_started ON job_run_log(job_name, 
 -- Library._manual_review_article_ids) — a URL correction via
 -- url_correction_log resets what counts as "since the last correction", so a
 -- corrected article's attempt count starts fresh rather than inheriting a
--- pre-correction failure streak forever.
+-- pre-correction failure streak forever. `exa_cost_usd` (added via migration
+-- below, same as `source` — see that migration's comment) is the real Exa
+-- spend this attempt incurred, from the domain-migration and/or
+-- Medium-platform tiers (linklib/domain_migration.py, linklib/
+-- medium_platform.py) — 0 for an attempt that never reached Exa.
 CREATE TABLE IF NOT EXISTS content_refetch_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     article_id    INTEGER NOT NULL,
@@ -924,6 +937,51 @@ CREATE TABLE IF NOT EXISTS enrichment_cost (
     created_at    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_enrichment_cost_article ON enrichment_cost(article_id);
+
+-- Compare Redesign Phase 2 — the AI overlap/contrast summary shown above the
+-- Software/Communities Compare tables. Cached permanently (no TTL), keyed by
+-- the exact set of compared entities plus a content hash of what actually
+-- went into the prompt (see Library.compare_summary_content_hash) — an edit
+-- to any compared entity's underlying fields changes the hash and naturally
+-- misses the cache on the next view, with no separate invalidation mechanism
+-- needed. `has_unverified` is deliberately NOT stored here: it's derived live
+-- from the CURRENT entities' gate state at render time (see
+-- webapp.app._cmp_summary_block_html), decoupled from the content-hash key,
+-- so a verify-only action (no text edit — the hash is unchanged) doesn't
+-- force a wasteful regen but the footnote's unverified-content disclosure
+-- still reflects today's real review state, not the state at generation time.
+CREATE TABLE IF NOT EXISTS compare_summary_cache (
+    entity_type   TEXT NOT NULL,             -- 'tool' | 'community'
+    entity_ids    TEXT NOT NULL,             -- sorted, comma-joined entity ids, e.g. "12,47"
+    content_hash  TEXT NOT NULL,             -- sha256 of the concatenated prompt input text
+    summary       TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    input_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd      REAL NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (entity_type, entity_ids, content_hash)
+);
+
+-- Manual, free-text feedback on one cached compare summary — "what was
+-- flagged, on which comparison, optional free text" per the Phase 2 spec.
+-- No automated action on a submission; Brian reviews the list by hand at
+-- /admin/compare-summary-feedback and marks each one reviewed once handled.
+-- `summary_text` snapshots the flagged summary verbatim so the review list
+-- still shows exactly what was flagged even if that cache row is later
+-- regenerated (a content edit changes the hash, which would otherwise orphan
+-- the feedback row's own context).
+CREATE TABLE IF NOT EXISTS compare_summary_feedback (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type   TEXT NOT NULL DEFAULT '',
+    entity_ids    TEXT NOT NULL DEFAULT '',
+    content_hash  TEXT NOT NULL DEFAULT '',
+    summary_text  TEXT NOT NULL DEFAULT '',
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT '',
+    reviewed_at   TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_compare_summary_feedback_reviewed ON compare_summary_feedback(reviewed_at);
 
 -- Manual vendor-spend ledger for /admin/overhead-spend "Vendor totals" —
 -- one row per real charge (Railway, Cloudflare, Google Workspace, domain
@@ -1342,6 +1400,12 @@ CREATE TABLE IF NOT EXISTS feeds (
 _POST_MIGRATION_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_reset_requests(token_hash)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_read_later_user_url ON read_later(user_id, url)",
+    # ask_feedback.reviewed is migration-added (see the ALTER TABLE above),
+    # not present in the original CREATE TABLE, so — same reasoning as
+    # read_later's own index above — it has to live here, not inline in the
+    # schema string, or a fresh-DB boot would try to index a column that
+    # doesn't exist yet on that first pass.
+    "CREATE INDEX IF NOT EXISTS idx_ask_feedback_reviewed ON ask_feedback(reviewed)",
 ]
 
 
@@ -2228,6 +2292,79 @@ class Library:
             # draft): tools already have the three per-field gates doing
             # that job.
             "ALTER TABLE tools ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0",
+            # FP&A Buddy published-content ingestion (2026-09) — provenance
+            # flag, not a ranking signal (see linklib/agent.py's
+            # _build_source_documents/_rrf_merge — nothing in retrieval reads
+            # this column; it's read only post-retrieval, for citation
+            # labeling). Set unconditionally on the 3 original_content
+            # mirror rows by sync_original_content_article(), and set (never
+            # cleared) by pipeline.ingest_url() whenever a saved URL matches
+            # a thought_leadership.url — see
+            # linklib/original_content_sync.py and Library.
+            # is_thought_leadership_url/set_article_own_content.
+            "ALTER TABLE articles ADD COLUMN is_own_content INTEGER NOT NULL DEFAULT 0",
+            # The mirrored articles.id for this original_content row, or NULL
+            # before the first sync. Tracked explicitly (rather than
+            # re-deriving it via a URL lookup on every sync) so a later slug
+            # rename — which legitimately changes the canonical URL, see the
+            # admin form's own warning copy — doesn't strand the mirror or
+            # require re-matching by URL.
+            "ALTER TABLE original_content ADD COLUMN mirrored_article_id INTEGER",
+            # Encourage-password-change (2026-09) — set whenever an account's
+            # password was chosen by someone other than the account holder
+            # (admin-created, or admin-reset), cleared the moment the holder
+            # sets their own new password (self-service /reset-password, or
+            # the in-session /change-password form) — see create_user's
+            # password_change_recommended default, set_user_password's
+            # sibling set_password_change_recommended, and
+            # webapp.app._password_change_nudge_html. A dismissible nudge
+            # only (Brian's explicit call) — never blocks any route. SQL
+            # default 0 so an existing row on first deploy of this column
+            # doesn't suddenly nag; the "new/reset account defaults to 1"
+            # behavior lives at the Python call sites that actually create
+            # or reset a password, same "SQL default is the floor" split
+            # tools.needs_review's own migration comment already documents.
+            "ALTER TABLE users ADD COLUMN password_change_recommended INTEGER NOT NULL DEFAULT 0",
+            # FP&A Buddy feedback triage (2026-09) — a manual "mark
+            # reviewed" toggle for ask_feedback, matching Community gaps'
+            # own `community_gap_submissions.reviewed` column name/type/
+            # default exactly (Phase 0 investigation confirmed that's a
+            # plain boolean, not a timestamp, so this mirrors it rather than
+            # inventing a viewed_at convention). Deliberately NOT auto-clear-
+            # on-view, for the same reason Community gaps isn't: merely
+            # opening the admin list shouldn't silently dismiss every row on
+            # it. See toggle_ask_feedback_reviewed/count_unreviewed_ask_
+            # feedback and the admin_ask_feedback route.
+            "ALTER TABLE ask_feedback ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0",
+            # Exa cost tracking, pre-dashboard foundation (2026-09) — the
+            # Reader content backfill's domain-migration and Medium-platform
+            # fallback tiers (linklib/domain_migration.py,
+            # linklib/medium_platform.py) call Exa with zero cost tracking
+            # anywhere — unlike FP&A Buddy's retrieve_exa, whose cost lands
+            # on ask_questions.exa_cost_usd. content_refetch_log already
+            # records each backfill attempt's outcome, so this is the
+            # natural home for it rather than a new table: one row per
+            # backfill_article_content() call already exists, this just
+            # adds what that attempt's Exa usage (if any) cost, real or $0.
+            # 0 for every pre-existing row (no Exa spend was ever tracked
+            # for them) and for any attempt that never called Exa at all
+            # (a direct-fetch success, a defunct-service skip, or a
+            # Wayback-only attempt with no migration/Medium tier reached).
+            # See Library.log_content_refetch_attempt's exa_cost_usd param.
+            "ALTER TABLE content_refetch_log ADD COLUMN exa_cost_usd REAL NOT NULL DEFAULT 0",
+            # Exa cost tracking, pre-dashboard foundation (2026-09), part 2:
+            # Answer.exa_cost_usd/exa_result_count (linklib/agent.py) were
+            # always computed on every Buddy turn but never persisted here —
+            # unlike embed_cost_usd/rewrite_cost_usd, which each got their
+            # own column the moment their call became a real per-turn cost.
+            # exa_cost_usd is already folded into cost_usd (same "share,
+            # already inside the total" convention as the other two
+            # breakout columns); this just makes that share visible on its
+            # own, the same gap this whole PR closes for the Reader
+            # backfill's Exa calls too. 0 for every pre-existing row (no
+            # per-turn Exa cost was ever tracked for them).
+            "ALTER TABLE ask_questions ADD COLUMN exa_result_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ask_questions ADD COLUMN exa_cost_usd REAL NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -2971,6 +3108,111 @@ class Library:
             f"SELECT COALESCE(SUM(cost_usd),0) FROM enrichment_cost {clause}", params
         ).fetchone()
         return float(row[0])
+
+    # -- Compare Redesign Phase 2 — AI comparison summary: cache, daily cap,
+    # and manual feedback triage. See compare_summary_cache's schema comment
+    # for the cache-key/invalidation design. --
+
+    _DEFAULT_COMPARE_SUMMARY_CAP_USD = 2.00  # small, shared daily budget —
+    # this is one cached artifact per unique entity-set, not a per-visitor
+    # cost like Ask/matchmaker, so it doesn't need their larger per-user caps.
+
+    @staticmethod
+    def compare_summary_content_hash(text: str) -> str:
+        """sha256 of the exact text handed to the generator — the cache
+        key's content component. A pure function (no DB access) so the
+        caller can compute it before deciding whether a lookup is even
+        needed."""
+        import hashlib
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def get_compare_summary(self, entity_type: str, entity_ids: str, content_hash: str) -> Optional[dict]:
+        row = self.conn.execute(
+            """SELECT * FROM compare_summary_cache
+               WHERE entity_type=? AND entity_ids=? AND content_hash=?""",
+            (entity_type, entity_ids, content_hash),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_compare_summary(self, entity_type: str, entity_ids: str, content_hash: str,
+                             summary: str, model: str, input_tokens: int = 0,
+                             output_tokens: int = 0, cost_usd: float = 0.0) -> None:
+        """Upsert one cached summary. `summary` is run through the same
+        mechanical voice backstop (linklib.voice_mechanics) every other
+        prose-capable Library write applies before persisting — a freshly
+        generated summary is exactly the kind of AI-drafted text that
+        backstop exists for."""
+        from .voice_mechanics import normalize_voice_mechanics
+        self.conn.execute(
+            """INSERT INTO compare_summary_cache
+               (entity_type, entity_ids, content_hash, summary, model,
+                input_tokens, output_tokens, cost_usd, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(entity_type, entity_ids, content_hash) DO UPDATE SET
+                 summary=excluded.summary, model=excluded.model,
+                 input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
+                 cost_usd=excluded.cost_usd, created_at=excluded.created_at""",
+            (entity_type, entity_ids, content_hash, normalize_voice_mechanics(summary), model,
+             input_tokens, output_tokens, cost_usd, _now()),
+        )
+        self.conn.commit()
+
+    def get_default_compare_summary_cap(self) -> float:
+        raw = self.get_setting("compare_summary_default_cap_usd")
+        try:
+            return float(raw) if raw else self._DEFAULT_COMPARE_SUMMARY_CAP_USD
+        except ValueError:
+            return self._DEFAULT_COMPARE_SUMMARY_CAP_USD
+
+    def set_default_compare_summary_cap(self, cap_usd: float) -> None:
+        self.set_setting("compare_summary_default_cap_usd", str(cap_usd))
+
+    def compare_summary_cost_today(self) -> float:
+        """Total compare-summary generation spend so far today (UTC calendar
+        day) — a shared, global figure, not per-user, since this is one
+        cached resource everyone reads. Mirrors matchmaker_cost_this_month's
+        shape at a daily grain instead of monthly."""
+        day_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) FROM compare_summary_cache WHERE created_at >= ?",
+            (day_start,),
+        ).fetchone()
+        return float(row[0])
+
+    def add_compare_summary_feedback(self, entity_type: str, entity_ids: str, content_hash: str,
+                                      summary_text: str, note: str = "") -> int:
+        cur = self.conn.execute(
+            """INSERT INTO compare_summary_feedback
+               (entity_type, entity_ids, content_hash, summary_text, note, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (entity_type, entity_ids, content_hash, summary_text, note.strip(), _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_compare_summary_feedback(self, include_reviewed: bool = True) -> list[dict]:
+        where = "" if include_reviewed else "WHERE reviewed_at=''"
+        rows = self.conn.execute(
+            f"SELECT * FROM compare_summary_feedback {where} ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_compare_summary_feedback(self, reviewed: Optional[bool] = None) -> int:
+        if reviewed is None:
+            clause, params = "", ()
+        elif reviewed:
+            clause, params = "WHERE reviewed_at!=''", ()
+        else:
+            clause, params = "WHERE reviewed_at=''", ()
+        return self.conn.execute(
+            f"SELECT COUNT(*) FROM compare_summary_feedback {clause}", params
+        ).fetchone()[0]
+
+    def mark_compare_summary_feedback_reviewed(self, feedback_id: int) -> None:
+        self.conn.execute(
+            "UPDATE compare_summary_feedback SET reviewed_at=? WHERE id=?", (_now(), feedback_id)
+        )
+        self.conn.commit()
 
     def overhead_cost_breakdown(self) -> list[dict]:
         """One row per internal cost-attribution source (embeddings,
@@ -3728,6 +3970,43 @@ class Library:
             "SELECT COUNT(*) FROM articles WHERE needs_content_check=1"
         ).fetchone()[0]
 
+    def set_article_own_content(self, article_id: int, is_own: bool = True) -> None:
+        """Mark (or, in principle, unmark) an article as Brian's own published
+        writing — a provenance flag only, read solely by
+        linklib.agent._build_source_documents/citations.extract_citations for
+        citation labeling and never by retrieve()/_rrf_merge (no ranking
+        effect — see the articles.is_own_content migration comment).
+
+        Every real caller only ever sets True: sync_original_content_article
+        (the 3 mirrored original_content rows, unconditionally, by
+        construction) and pipeline.ingest_url (a future bookmarklet save
+        whose URL matches a thought_leadership.url — see
+        is_thought_leadership_url). Like needs_content_check's own clearing
+        rule, this is a durable fact once learned; nothing clears it
+        automatically."""
+        self.conn.execute(
+            "UPDATE articles SET is_own_content=? WHERE id=?",
+            (int(bool(is_own)), article_id),
+        )
+        self.conn.commit()
+
+    def is_thought_leadership_url(self, url: str) -> bool:
+        """True when `url` (after the same normalize_url() canonicalization
+        upsert() applies) matches a thought_leadership.url — the generic
+        provenance-setting logic pipeline.ingest_url() uses to flag a future
+        bookmarklet save of one of the externally-hosted pieces. A plain
+        Python scan over thought_leadership (a few dozen rows) rather than a
+        SQL comparison, since URLs need normalize_url() applied to both sides
+        before comparing and thought_leadership.url is stored verbatim
+        (whatever was typed into the admin form)."""
+        target = normalize_url(url)
+        if not target:
+            return False
+        rows = self.conn.execute(
+            "SELECT url FROM thought_leadership WHERE url != ''"
+        ).fetchall()
+        return any(normalize_url(r["url"]) == target for r in rows)
+
     def recent_articles_by_source(self, source: str, limit: int = 20) -> list[dict]:
         """Most-recently-saved articles from one source — the 'what I keep' examples
         for predicting which queued candidates the curator would approve."""
@@ -3844,15 +4123,25 @@ class Library:
     # -- users / accounts ------------------------------------------------------
 
     def create_user(self, username: str, password: str, role: str = "user",
-                    name: str = "", email: str = "") -> int:
-        """Create an account. Raises sqlite3.IntegrityError if the username exists."""
+                    name: str = "", email: str = "",
+                    password_change_recommended: bool = True) -> int:
+        """Create an account. Raises sqlite3.IntegrityError if the username exists.
+
+        password_change_recommended defaults True — every account created here
+        was given a password by an admin, not chosen by the account holder, so
+        it starts flagged for the dismissible change-password nudge (see the
+        password_change_recommended migration comment). Pass False only for a
+        caller that's genuinely not in that shape (none exist today; kept as a
+        real parameter rather than hardcoded so a future self-registration
+        flow, if one is ever built, isn't forced to flag itself)."""
         from .passwords import hash_password
         username = (username or "").strip().lower()
         role = role if role in ("user", "admin") else "user"
         cur = self.conn.execute(
-            "INSERT INTO users (username, password_hash, role, active, name, email, created_at) "
-            "VALUES (?,?,?,1,?,?,?)",
-            (username, hash_password(password), role, name.strip(), email.strip(), _now()),
+            "INSERT INTO users (username, password_hash, role, active, name, email, created_at, "
+            "password_change_recommended) VALUES (?,?,?,1,?,?,?,?)",
+            (username, hash_password(password), role, name.strip(), email.strip(), _now(),
+             int(password_change_recommended)),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -3874,7 +4163,7 @@ class Library:
     def list_users(self) -> list[dict]:
         rows = self.conn.execute(
             "SELECT id, username, role, active, name, email, created_at, last_login_at, "
-            "ask_cap_usd, matchmaker_cap_usd "
+            "ask_cap_usd, matchmaker_cap_usd, password_change_recommended "
             "FROM users ORDER BY role DESC, username"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -3882,8 +4171,16 @@ class Library:
     def get_user(self, username: str) -> Optional[dict]:
         row = self.conn.execute(
             "SELECT id, username, role, active, name, email, created_at, last_login_at, "
-            "ask_cap_usd, matchmaker_cap_usd "
+            "ask_cap_usd, matchmaker_cap_usd, password_change_recommended "
             "FROM users WHERE username=?", ((username or "").strip().lower(),)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_id(self, user_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT id, username, role, active, name, email, created_at, last_login_at, "
+            "ask_cap_usd, matchmaker_cap_usd, password_change_recommended "
+            "FROM users WHERE id=?", (user_id,)
         ).fetchone()
         return dict(row) if row else None
 
@@ -3993,6 +4290,22 @@ class Library:
         from .passwords import hash_password
         self.conn.execute("UPDATE users SET password_hash=? WHERE id=?",
                           (hash_password(password), user_id))
+        self.conn.commit()
+
+    def set_password_change_recommended(self, user_id: int, recommended: bool) -> None:
+        """Set or clear the dismissible change-password nudge flag.
+
+        Deliberately separate from set_user_password rather than folded into
+        it — the two call sites that change a password want opposite
+        outcomes: an admin resetting someone else's password (/admin/users)
+        sets this True (they didn't choose it), while the account holder
+        setting their own new password (self-service /reset-password, or
+        /change-password) clears it. Folding this into set_user_password
+        would force one of those two call sites to immediately undo it."""
+        self.conn.execute(
+            "UPDATE users SET password_change_recommended=? WHERE id=?",
+            (int(recommended), user_id),
+        )
         self.conn.commit()
 
     def update_user(self, user_id: int, username: str | None = None,
@@ -4182,16 +4495,23 @@ class Library:
 
     def log_content_refetch_attempt(self, article_id: int, status: str,
                                      reason: str = "", detail: str = "",
-                                     source: str = "direct") -> int:
+                                     source: str = "direct",
+                                     exa_cost_usd: float = 0.0) -> int:
         """One row per re-fetch attempt — see content_refetch_log's CREATE
         TABLE comment for why every attempt is logged, not just failures.
         `source` ('direct' | 'wayback') distinguishes a Wayback-archived
         success from a normal live-fetch success — see linklib.wayback and
-        linklib.pipeline.backfill_article_content."""
+        linklib.pipeline.backfill_article_content. `exa_cost_usd` (2026-09,
+        Exa cost-tracking foundation) is the real compute_exa_cost() total
+        for every Exa call this attempt made — the domain-migration and/or
+        Medium-platform tiers, whichever actually ran — win or miss; 0.0 for
+        an attempt that never reached Exa at all (a direct-fetch success, a
+        defunct-service skip, or a Wayback-only path with no migration/Medium
+        tier applicable)."""
         cur = self.conn.execute(
-            "INSERT INTO content_refetch_log (article_id, status, reason, detail, source, attempted_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (article_id, status, reason, detail, source, _now()),
+            "INSERT INTO content_refetch_log (article_id, status, reason, detail, source, exa_cost_usd, attempted_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (article_id, status, reason, detail, source, exa_cost_usd, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -5067,6 +5387,51 @@ class Library:
             "SELECT COUNT(*) FROM tools WHERE needs_review=1"
         ).fetchone()[0]
 
+    def count_tools_needing_attention(self) -> int:
+        """Distinct-tool count for the admin badge (2026-09) — the single
+        dedup-safe number behind the Software card's badge, combining
+        EVERY condition that used to be summed as separate counts:
+        pending approval (`approved=0`), whole-record `needs_review`, and
+        any of the three per-field `*_needs_verification` flags
+        (Description/Agent taxonomy/Competitive differentiation).
+
+        This was built once (needs_review + the three field flags only,
+        no approval condition), deliberately reverted in favor of a plain
+        `count_pending_tools() + count_tools_needing_review()` sum per an
+        earlier instruction to defer the field flags, then resurrected
+        with the field flags folded back in (still no approval condition —
+        that sum was `count_pending_tools() + count_tools_needing_
+        attention()`, approval kept as a separate additive term). This
+        revision folds `approved=0` in too, replacing that sum with a
+        single query, because the sum was a REAL, LIVE double-count, not
+        a latent one: `add_tool()` defaults `needs_review=1` for every
+        brand-new tool regardless of caller (admin add-form, public
+        `/tools/submit`, seed scripts — see that method's own docstring),
+        and `approve_tool()` only ever flips `approved`, never touches
+        `needs_review` or the three field flags — so EVERY tool sitting in
+        the approval queue today already also has `needs_review=1`, and
+        was being counted twice by `count_pending_tools() + count_tools_
+        needing_attention()`. Confirmed by direct code read of `add_tool`/
+        `approve_tool`, not assumed.
+
+        Every condition here is a column on the same `tools` row (no join
+        across a separate table), so `COUNT(*)` is already a per-tool
+        count — no `DISTINCT` needed. `count_pending_tools()` and
+        `count_tools_needing_review()` are both untouched and keep their
+        own other callers (the admin list's "Needs review" filter count,
+        the review-status pill's "(n/3)" breakdown, the pending-submissions
+        table) — only the Software card's badge wiring in `webapp.tasks.
+        open_task_counts()` reads this method now, as the sole count for
+        that badge (no longer summed with anything else)."""
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM tools
+               WHERE approved=0
+                  OR needs_review=1
+                  OR description_needs_verification=1
+                  OR agent_taxonomy_needs_verification=1
+                  OR competitive_differentiation_needs_verification=1"""
+        ).fetchone()[0]
+
     def update_tool_screenshot(self, tool_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
         """Legacy narrow update, kept for pre-Phase-E callers/tests only —
         DO NOT call this from the admin edit-form submit path. Writes
@@ -5250,6 +5615,26 @@ class Library:
             (tool_id, tool_id),
         ).fetchall()
         return [self._tool_to_dict(r) for r in rows]
+
+    def tool_competitor_counts(self) -> dict[int, int]:
+        """{tool_id: curated-competitor count}, for every tool with at
+        least one — used by the admin Software list's completeness filter
+        so it doesn't call list_tool_competitors per row (same bulk-query
+        precedent as community_profile_quality_flags: one grouped query
+        for the whole page, not an N+1 per-row fetch). Counts both sides
+        of the normalized (tool_id, competitor_id) pair against every tool
+        that appears in either column."""
+        out: dict[int, int] = {}
+        rows = self.conn.execute(
+            """SELECT id AS tool_id, COUNT(*) AS n FROM (
+                   SELECT tool_id AS id FROM tool_competitors
+                   UNION ALL
+                   SELECT competitor_id AS id FROM tool_competitors
+               ) GROUP BY id"""
+        ).fetchall()
+        for r in rows:
+            out[r["tool_id"]] = r["n"]
+        return out
 
     def suggest_tool_competitors(self, tool_id: int, limit: int = 8) -> list[dict]:
         """Candidate competitors for the admin edit page's suggestion list,
@@ -6003,6 +6388,51 @@ class Library:
         self.conn.execute("DELETE FROM original_content WHERE id = ?", (item_id,))
         self.conn.commit()
 
+    def set_original_content_mirrored_article_id(self, item_id: int, article_id: int | None) -> None:
+        """Narrow single-column setter tracking which articles.id (if any)
+        currently mirrors this piece — see linklib/original_content_sync.py.
+        Deliberately not folded into add/update_original_content's own
+        signature: those two are driven by the admin form, which knows
+        nothing about the mirrored article's id."""
+        self.conn.execute(
+            "UPDATE original_content SET mirrored_article_id=? WHERE id=?",
+            (article_id, item_id),
+        )
+        self.conn.commit()
+
+    def insert_mirrored_article(self, url: str, title: str, content: str) -> int:
+        """Create the articles row backing a mirrored original_content piece.
+        Deliberately NOT Library.upsert() — upsert's merge-into-existing-row
+        path keeps whatever the existing row already has (existing["content"]
+        or art.content), which is correct for an external re-fetch but wrong
+        here: a brand-new mirror has nothing to merge with, so a plain INSERT
+        is simplest and clearest about that. is_own_content is set separately
+        by the caller (set_article_own_content), same as every other flag on
+        a freshly-inserted article."""
+        url = normalize_url(url)
+        now = _now()
+        cur = self.conn.execute(
+            "INSERT INTO articles (url, title, content, saved_at, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (url, title, content, now, now, now),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_mirrored_article(self, article_id: int, title: str, url: str, content: str) -> None:
+        """Overwrite (never merge) an existing mirrored article's title/url/
+        content — the re-sync-on-edit path. Deliberately NOT
+        Library.upsert()/update_content(): upsert()'s merge keeps existing
+        non-empty content, and update_content() only ever touches `content`.
+        A re-sync must always win, the same way an admin's own edit to a
+        draft always should — the mirrored row is a reflection of body_md,
+        not independently-editable content of its own."""
+        self.conn.execute(
+            "UPDATE articles SET title=?, url=?, content=?, updated_at=? WHERE id=?",
+            (title, normalize_url(url), content, _now(), article_id),
+        )
+        self.conn.commit()
+
     # -- communities (the /tools/communities directory) ---------------------
     # Mirrors the tools/tool_categories shape above: categories_json holds the
     # many-to-many relationship inline (no join table), community_categories
@@ -6316,6 +6746,23 @@ class Library:
         ).fetchall()
         return [self._community_to_dict(r) for r in rows]
 
+    def community_competitor_counts(self) -> dict[int, int]:
+        """{community_id: curated-similar-community count} — the
+        Communities-side mirror of tool_competitor_counts, same bulk-query
+        reasoning (one grouped query for the admin list's completeness
+        filter, not a per-row list_community_competitors call)."""
+        out: dict[int, int] = {}
+        rows = self.conn.execute(
+            """SELECT id AS community_id, COUNT(*) AS n FROM (
+                   SELECT community_id AS id FROM community_competitors
+                   UNION ALL
+                   SELECT competitor_id AS id FROM community_competitors
+               ) GROUP BY id"""
+        ).fetchall()
+        for r in rows:
+            out[r["community_id"]] = r["n"]
+        return out
+
     def suggest_community_competitors(self, community_id: int, limit: int = 8) -> list[dict]:
         """Candidate similar communities for the admin edit page's suggestion
         list, ranked by shared-category count. Same pure-tag-overlap
@@ -6547,6 +6994,61 @@ class Library:
             "SELECT COUNT(*) FROM community_profiles WHERE needs_review=1"
         ).fetchone()[0]
 
+    def count_communities_needing_attention(self) -> int:
+        """Distinct-community count for the admin badge (2026-09) — the
+        dedup-safe replacement for `count_pending_communities() +
+        count_communities_needing_review()` summed as two counts.
+
+        Unlike tools (see `count_tools_needing_attention()`'s docstring,
+        where pending-approval and needs-review overlap on EVERY unapproved
+        tool by construction), overlap here is possible but not automatic:
+        `add_community()` has no `needs_review` concept at all — that flag
+        lives on `community_profiles`, a separate table with no row at all
+        until a profile is actually drafted (`community_profiles.
+        community_id` is its own primary key, one row per community, only
+        ever created by a profile save). The public submission route
+        (`/tools/communities/submit`) calls `add_community()` alone, with
+        no profile generation — so a freshly submitted pending community
+        has no `community_profiles` row and can't be needs-review=1 yet.
+        `approve_community()` only ever flips `approved`, same as tools'
+        `approve_tool()`.
+
+        The overlap CAN still happen, though, and nothing in the code
+        prevents it: `GET/POST /admin/tools/communities/{id}/profile` (the
+        profile-edit page and its save route) never checks the community's
+        `approved` status — confirmed by direct code read, not assumed —
+        so an admin drafting/saving a profile for a still-pending
+        submission (reachable by direct URL; there's no link to it from
+        the Pending submissions table's own row, which offers only
+        Approve/Reject) would leave that community `approved=0` with a
+        `community_profiles` row at `needs_review=1`, exactly the
+        double-count the sum pattern doesn't protect against. Whether any
+        currently-pending community is actually in that state is a live-
+        data question this session can't check (no production DB access) —
+        so this is reported as a real possibility, not a confirmed live
+        bug the way tools' case is.
+
+        A `LEFT JOIN` (not an `INNER JOIN`) is required here, unlike
+        tools' single-table query: most communities — pending ones
+        especially — have no `community_profiles` row at all, and an
+        INNER JOIN would silently drop every one of them from the count.
+        `community_profiles.community_id` is a 1:1 primary key (no fan-out
+        possible), so `COUNT(DISTINCT c.id)` is defensive/explicit rather
+        than strictly required — but kept for the same reason
+        `count_tools_needing_attention()`'s query comment calls out its
+        own dedup mechanism explicitly. `count_pending_communities()` and
+        `count_communities_needing_review()` are both untouched and keep
+        their own other callers (the admin list's "needing review" filter,
+        the review-status pill's "(n/12)" breakdown) — only the
+        Communities card's badge wiring in `webapp.tasks.open_task_counts()`
+        reads this method now, as the sole count for that badge."""
+        return self.conn.execute(
+            """SELECT COUNT(DISTINCT c.id) FROM communities c
+               LEFT JOIN community_profiles p ON p.community_id = c.id
+               WHERE c.approved=0
+                  OR p.needs_review=1"""
+        ).fetchone()[0]
+
     def community_profile_needs_review_ids(self) -> set[int]:
         """Which community_ids currently have needs_review=1 — used by the
         admin communities list to badge/filter rows without joining the full
@@ -6563,6 +7065,20 @@ class Library:
         "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
         "engagement_level", "sponsor_relationship_note", "application_friction",
         "cost_value_verdict", "notable_members", "public_criticism", "verdict_summary",
+    )
+
+    # The full set of Community-profile narrative fields the admin
+    # completeness filter (2026-09) checks for emptiness — mirrors
+    # linklib.compare.COMMUNITY_PROFILE_GROUPS' 17 grouped fields plus
+    # Bottom line (verdict_summary), hand-duplicated here rather than
+    # imported, same "keep linklib.db free of a sibling-module dependency"
+    # convention as _COMMUNITY_CONFIDENCE_FIELDS just above.
+    _COMMUNITY_NARRATIVE_FIELDS = (
+        "ideal_member", "anti_fit", "seniority_band", "stage_focus",
+        "value_prop", "primary_purpose", "resources_included", "notable_members", "jobs_program",
+        "format_reality", "engagement_level", "application_friction",
+        "cost_value_verdict", "sponsor_relationship_note", "business_model", "public_criticism",
+        "team_or_individual", "verdict_summary",
     )
 
     def community_profile_quality_flags(self) -> dict[int, dict]:
@@ -6595,6 +7111,28 @@ class Library:
                 "low_confidence": bool(row["low_confidence"]),
                 "unconfident_count": unconfident,
             }
+        return out
+
+    def community_profile_has_empty_narrative_field(self) -> dict[int, bool]:
+        """{community_id: True} for every community whose community_profiles
+        row has at least one blank field among _COMMUNITY_NARRATIVE_FIELDS
+        (the same field set linklib.compare.COMMUNITY_PROFILE_GROUPS + Bottom
+        line track) — the Communities-side signal behind the admin list's
+        "Missing something" completeness filter (2026-09). One bulk query
+        for the whole page, same reasoning as community_profile_quality_flags
+        just above. A community with NO community_profiles row at all has
+        no entry here — the caller treats "no entry" as incomplete too,
+        since it has none of the tracked fields at all."""
+        cols = ", ".join(self._COMMUNITY_NARRATIVE_FIELDS)
+        rows = self.conn.execute(
+            f"SELECT community_id, {cols} FROM community_profiles"
+        ).fetchall()
+        out: dict[int, bool] = {}
+        for r in rows:
+            row = dict(r)
+            out[row["community_id"]] = any(
+                not (row.get(f) or "").strip() for f in self._COMMUNITY_NARRATIVE_FIELDS
+            )
         return out
 
     # -- community gap submissions (Phase 5: native gap-collection) ---------
@@ -7115,17 +7653,21 @@ class Library:
                             rewrite_output_tokens: int = 0,
                             rewrite_cost_usd: float = 0.0,
                             embed_input_tokens: int = 0, embed_cost_usd: float = 0.0,
+                            exa_result_count: int = 0, exa_cost_usd: float = 0.0,
                             citations: Optional[list[dict]] = None) -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
         a conversation and the caller fills it in with str(id) after insert.
         `cost_usd` is the turn TOTAL (answer + any query-rewrite call + any
-        query-time embedding call for hybrid retrieval); the rewrite_* and
-        embed_* args break out each call's share of it. (embed_* here is the
-        user-cap cost of embedding the QUESTION — a different thing from
-        article_embeddings.cost_usd, which is Brian's embed-on-save overhead
-        and never touches this table.)
+        query-time embedding call for hybrid retrieval + any Exa web-search
+        call); the rewrite_*/embed_*/exa_* args break out each call's share
+        of it. (embed_* here is the user-cap cost of embedding the QUESTION —
+        a different thing from article_embeddings.cost_usd, which is Brian's
+        embed-on-save overhead and never touches this table. exa_cost_usd —
+        2026-09, Exa cost-tracking foundation — mirrors Answer.exa_cost_usd/
+        exa_result_count from linklib.agent.retrieve_exa exactly the same
+        way embed_cost_usd already mirrors the embedding call's share.)
         `citations` is the turn's API-verified cited-source list
         ([{n, title, url, type, article_id?}] — article_id only on
         library-type entries), stored as a snapshot: feed and web sources are
@@ -7139,13 +7681,15 @@ class Library:
                 cache_creation_tokens, cache_read_tokens, cost_usd,
                 rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
                 embed_input_tokens, embed_cost_usd,
+                exa_result_count, exa_cost_usd,
                 citations_json, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
              cost_usd, rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
              embed_input_tokens, embed_cost_usd,
+             exa_result_count, exa_cost_usd,
              json.dumps(citations or []), now),
         )
         row_id = cur.lastrowid
@@ -7507,14 +8051,22 @@ class Library:
         ).fetchone()
         return row[0] if row else cur.lastrowid
 
-    def list_ask_feedback(self, rating: str | None = None, limit: int = 200) -> list[dict]:
+    def list_ask_feedback(self, rating: str | None = None, reviewed: bool | None = None,
+                          limit: int = 200) -> list[dict]:
         """Feedback rows newest first, joined with the rated turn (question,
         answer, model, cost, citations snapshot) and the rater's identity —
-        everything the admin triage view shows. Pass `rating` to filter."""
-        where, params = "", []
+        everything the admin triage view shows. Pass `rating` and/or
+        `reviewed` to filter (combined with AND when both are given — same
+        convention as list_community_gap_submissions' own `reviewed`
+        param)."""
+        clauses, params = [], []
         if rating:
-            where = "WHERE f.rating=?"
+            clauses.append("f.rating=?")
             params.append(rating)
+        if reviewed is not None:
+            clauses.append("f.reviewed=?")
+            params.append(1 if reviewed else 0)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.conn.execute(
             f"""SELECT f.*, u.username AS rater_username, u.name AS rater_name,
                        aq.question, aq.answer, aq.model, aq.effort, aq.cost_usd,
@@ -7528,6 +8080,29 @@ class Library:
             params + [limit],
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def toggle_ask_feedback_reviewed(self, feedback_id: int) -> None:
+        """Manual "mark reviewed"/"mark unreviewed" toggle — mirrors
+        toggle_community_gap_reviewed exactly (same flip-in-place shape),
+        per the explicit decision to give ask_feedback the same manual
+        pattern Community gaps already has, not an auto-clear-on-view one."""
+        self.conn.execute(
+            "UPDATE ask_feedback SET reviewed = 1 - reviewed WHERE id=?",
+            (feedback_id,),
+        )
+        self.conn.commit()
+
+    def count_unreviewed_ask_feedback(self, since: str = "") -> int:
+        """Badge count for the FP&A Buddy feedback card — same shape as
+        community_gap_counts()'s own `unreviewed` bucket."""
+        where, params = "", []
+        if since:
+            where = "WHERE created_at >= ?"
+            params = [since]
+        unreviewed_where = f"{where} AND reviewed=0" if where else "WHERE reviewed=0"
+        return self.conn.execute(
+            f"SELECT COUNT(*) FROM ask_feedback {unreviewed_where}", params
+        ).fetchone()[0]
 
     def ask_feedback_counts(self, since: str = "") -> dict[str, int]:
         """Per-rating counts (every rating key present, 0 when none), optionally

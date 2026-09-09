@@ -250,6 +250,124 @@ def test_admin_feedback_view_renders_and_filters(env):
     assert "What is CAC payback?" in matching
 
 
+# ---------------------------------------------------------------------------
+# Reviewed toggle (Phase 3) — same manual pattern as /admin/community-gaps,
+# not auto-clear-on-view. See Library.toggle_ask_feedback_reviewed's docstring.
+# ---------------------------------------------------------------------------
+
+def test_new_feedback_row_starts_unreviewed(lib):
+    qid = lib.record_ask_question(1, "q", "a", "m", "standard", True, False, True)
+    lib.record_ask_feedback(qid, 1, "helpful")
+    rows = _feedback_rows(lib)
+    assert rows[0]["reviewed"] == 0
+
+
+def test_toggle_ask_feedback_reviewed_flips_in_place(lib):
+    qid = lib.record_ask_question(1, "q", "a", "m", "standard", True, False, True)
+    fid = lib.record_ask_feedback(qid, 1, "helpful")
+    lib.toggle_ask_feedback_reviewed(fid)
+    assert _feedback_rows(lib)[0]["reviewed"] == 1
+    lib.toggle_ask_feedback_reviewed(fid)
+    assert _feedback_rows(lib)[0]["reviewed"] == 0
+
+
+def test_count_unreviewed_ask_feedback(lib):
+    q1 = lib.record_ask_question(1, "q1", "a", "m", "standard", True, False, True)
+    q2 = lib.record_ask_question(1, "q2", "a", "m", "standard", True, False, True)
+    f1 = lib.record_ask_feedback(q1, 1, "helpful")
+    lib.record_ask_feedback(q2, 1, "inaccurate")
+    assert lib.count_unreviewed_ask_feedback() == 2
+    lib.toggle_ask_feedback_reviewed(f1)
+    assert lib.count_unreviewed_ask_feedback() == 1
+
+
+def test_list_ask_feedback_reviewed_filter(lib):
+    q1 = lib.record_ask_question(1, "q1", "a", "m", "standard", True, False, True)
+    q2 = lib.record_ask_question(1, "q2", "a", "m", "standard", True, False, True)
+    f1 = lib.record_ask_feedback(q1, 1, "helpful")
+    lib.record_ask_feedback(q2, 1, "inaccurate")
+    lib.toggle_ask_feedback_reviewed(f1)
+    assert len(lib.list_ask_feedback(reviewed=True)) == 1
+    assert len(lib.list_ask_feedback(reviewed=False)) == 1
+    assert len(lib.list_ask_feedback()) == 2
+
+
+def test_open_task_counts_reflects_unreviewed_ask_feedback(lib):
+    from webapp import tasks
+    qid = lib.record_ask_question(1, "q", "a", "m", "standard", True, False, True)
+    fid = lib.record_ask_feedback(qid, 1, "helpful")
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/ask-feedback"] == 1
+    lib.toggle_ask_feedback_reviewed(fid)
+    counts = tasks.open_task_counts(lib)
+    assert "/admin/ask-feedback" not in counts
+
+
+def test_admin_feedback_view_renders_reviewed_toggle(env):
+    appmod, turn_id, _, _ = env
+    member = _login(appmod, "member1", "supersecret")
+    member.post("/ask/feedback", json={"question_id": turn_id, "rating": "inaccurate",
+                                       "comment": "numbers looked stale"})
+    admin = _login(appmod, "admin", "adminpass")
+    html = admin.get("/admin/ask-feedback").text
+    assert "Mark reviewed" in html
+    assert ">New<" in html   # unreviewed badge
+    assert "Unreviewed" in html   # stat tile label
+
+
+def test_admin_feedback_toggle_route_flips_and_redirects(env):
+    appmod, turn_id, _, _ = env
+    member = _login(appmod, "member1", "supersecret")
+    member.post("/ask/feedback", json={"question_id": turn_id, "rating": "helpful"})
+    admin = _login(appmod, "admin", "adminpass")
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    try:
+        feedback_id = lib.conn.execute("SELECT id FROM ask_feedback").fetchone()["id"]
+    finally:
+        lib.close()
+
+    r = admin.post(f"/admin/ask-feedback/{feedback_id}/toggle-reviewed", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/ask-feedback"
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    try:
+        assert lib.conn.execute("SELECT reviewed FROM ask_feedback WHERE id=?",
+                                 (feedback_id,)).fetchone()["reviewed"] == 1
+    finally:
+        lib.close()
+
+    html = admin.get("/admin/ask-feedback").text
+    assert "Mark unreviewed" in html
+    assert ">Reviewed<" in html
+
+    # A non-admin can't flip it either.
+    non_admin_resp = _client(appmod).post(
+        f"/admin/ask-feedback/{feedback_id}/toggle-reviewed", follow_redirects=False)
+    assert non_admin_resp.status_code == 303
+    assert non_admin_resp.headers["location"] != "/admin/ask-feedback"
+
+
+def test_admin_feedback_view_reviewed_filter(env):
+    appmod, turn_id, _, _ = env
+    member = _login(appmod, "member1", "supersecret")
+    member.post("/ask/feedback", json={"question_id": turn_id, "rating": "helpful"})
+    admin = _login(appmod, "admin", "adminpass")
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    try:
+        feedback_id = lib.conn.execute("SELECT id FROM ask_feedback").fetchone()["id"]
+        lib.toggle_ask_feedback_reviewed(feedback_id)
+    finally:
+        lib.close()
+
+    unreviewed_view = admin.get("/admin/ask-feedback?reviewed=no").text
+    assert "What is CAC payback?" not in unreviewed_view
+    reviewed_view = admin.get("/admin/ask-feedback?reviewed=yes").text
+    assert "What is CAC payback?" in reviewed_view
+
+
 def test_ask_response_includes_turn_id(env):
     """POST /ask returns the recorded row id as turn_id — what the feedback
     controls rate. No ANTHROPIC_API_KEY in tests, so the fallback answer path

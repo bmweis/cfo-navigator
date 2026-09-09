@@ -25,7 +25,7 @@ is a visual-parity fix, not new content.
 Deliberately a manual, run-by-hand script — NOT wired into an automatic boot
 hook, same standing rule as every other production DATA write in this repo.
 Safe by default (preview only, no writes) — same --apply convention as
-scripts/migrate_original_content.py.
+scripts/archive/migrate_original_content.py.
 
 Idempotent: guarded by checking whether the row's body_md already matches
 what this script would set — a second run reports "already applied" and

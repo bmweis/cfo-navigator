@@ -95,12 +95,12 @@ def test_is_medium_platform_host_empty_url():
 
 def test_find_medium_candidate_no_api_key(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
-    assert mp_mod.find_medium_candidate(None, "Some Title") == ("", "")
+    assert mp_mod.find_medium_candidate(None, "Some Title") == ("", "", 0.0)
 
 
 def test_find_medium_candidate_no_title(monkeypatch):
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
-    assert mp_mod.find_medium_candidate(None, "") == ("", "")
+    assert mp_mod.find_medium_candidate(None, "") == ("", "", 0.0)
 
 
 def test_find_medium_candidate_returns_title_matching_hit(monkeypatch):
@@ -117,7 +117,7 @@ def test_find_medium_candidate_returns_title_matching_hit(monkeypatch):
             ]}
 
     monkeypatch.setattr(mp_mod.requests, "post", lambda *a, **kw: _Resp())
-    url, text = mp_mod.find_medium_candidate(None, "My Great Post")
+    url, text, cost = mp_mod.find_medium_candidate(None, "My Great Post")
     assert url == "https://techcrunch.com/my-great-post"
     assert text == "real body text"
 
@@ -133,7 +133,8 @@ def test_find_medium_candidate_no_match_returns_empty(monkeypatch):
             return {"results": [{"title": "Totally Unrelated", "url": "https://example.com/x", "text": ""}]}
 
     monkeypatch.setattr(mp_mod.requests, "post", lambda *a, **kw: _Resp())
-    assert mp_mod.find_medium_candidate(None, "My Great Post") == ("", "")
+    url, text, cost = mp_mod.find_medium_candidate(None, "My Great Post")
+    assert (url, text) == ("", "")
 
 
 def test_find_medium_candidate_network_error_returns_empty(monkeypatch):
@@ -143,7 +144,7 @@ def test_find_medium_candidate_network_error_returns_empty(monkeypatch):
         raise ConnectionError("boom")
 
     monkeypatch.setattr(mp_mod.requests, "post", _raise)
-    assert mp_mod.find_medium_candidate(None, "My Great Post") == ("", "")
+    assert mp_mod.find_medium_candidate(None, "My Great Post") == ("", "", 0.0)
 
 
 def test_find_medium_candidate_no_domain_restriction_in_request(monkeypatch):
@@ -273,7 +274,7 @@ def test_backfill_uses_medium_tier_before_wayback_on_other_host_match(lib, monke
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": ("https://techcrunch.com/some-post", ""))
+                        lambda lib_, title, author="": ("https://techcrunch.com/some-post", "", 0.0))
 
     candidate_html = ("<html><body><article>" +
                       "<p>Candidate content, definitely long enough to pass the sanity check.</p>" * 15 +
@@ -320,7 +321,7 @@ def test_backfill_medium_tier_same_domain_carve_out_uses_exa_text(lib, monkeypat
                 "Real opening paragraph with plenty of words to clear the minimum "
                 "content threshold comfortably. " * 10)
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": ("https://medium.com/@other/some-post-xyz789", exa_text))
+                        lambda lib_, title, author="": ("https://medium.com/@other/some-post-xyz789", exa_text, 0.0))
 
     fetch_calls = []
     real_fetch_page = extract_mod.fetch_page
@@ -355,7 +356,7 @@ def test_backfill_medium_tier_same_domain_carve_out_too_thin_falls_through(lib, 
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": ("https://medium.com/@other/thin-post-2", "Too short."))
+                        lambda lib_, title, author="": ("https://medium.com/@other/thin-post-2", "Too short.", 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -372,7 +373,7 @@ def test_backfill_medium_tier_miss_falls_through_to_wayback(lib, monkeypatch):
     article_id = _seed(lib, url="https://medium.com/@vc/no-match-post", title="No Match Post")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
-    monkeypatch.setattr(mp_mod, "find_medium_candidate", lambda lib_, title, author="": ("", ""))
+    monkeypatch.setattr(mp_mod, "find_medium_candidate", lambda lib_, title, author="": ("", "", 0.0))
 
     snap_html = ("<html><body><article>" +
                 "<p>Archived snapshot content, long enough to pass sanity check reliably.</p>" * 15 +
@@ -395,7 +396,7 @@ def test_backfill_non_medium_host_skips_tier_entirely(lib, monkeypatch):
                         lambda url: PageData(title="", content="", fetch_error="HTTP 500"))
     called = []
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": called.append(1) or ("", ""))
+                        lambda lib_, title, author="": (called.append(1) or "", "", 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -421,8 +422,8 @@ def test_wayback_fallthrough_detail_traces_medium_tier_miss(lib, monkeypatch):
     article_id = _seed(lib, url="https://medium.com/@vc/no-match-post", title="No Match Post")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
-    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "")
-    monkeypatch.setattr(mp_mod, "find_medium_candidate", lambda lib_, title, author="": ("", ""))
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: ("", 0.0))
+    monkeypatch.setattr(mp_mod, "find_medium_candidate", lambda lib_, title, author="": ("", "", 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -460,8 +461,8 @@ def test_wayback_fallthrough_detail_traces_fetch_by_url_too_thin(lib, monkeypatc
     article_id = _seed(lib, url="https://medium.com/@vc/thin-fetch-post", title="Thin Fetch Post")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
-    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "Too short to count.")
-    monkeypatch.setattr(mp_mod, "find_medium_candidate", lambda lib_, title, author="": ("", ""))
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: ("Too short to count.", 0.0))
+    monkeypatch.setattr(mp_mod, "find_medium_candidate", lambda lib_, title, author="": ("", "", 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -477,7 +478,7 @@ def test_wayback_fallthrough_detail_traces_migration_tier_miss(lib, monkeypatch)
     article_id = _seed(lib, url="https://pointsandfigures.com/x/", title="A Post")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
-    monkeypatch.setattr(dm_mod, "find_migrated_url", lambda lib_, domain, title: None)
+    monkeypatch.setattr(dm_mod, "find_migrated_url", lambda lib_, domain, title: (None, 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -490,8 +491,8 @@ def test_wayback_fallthrough_detail_traces_migration_tier_miss(lib, monkeypatch)
 def test_try_medium_platform_returns_five_tuple_with_note_on_success(lib, monkeypatch):
     """The note is always populated, even on a hit — not just on failure."""
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: "Real opening paragraph with plenty of words. " * 15)
-    ok, structured, candidate_url, source, note = pl._try_medium_platform(
+                        lambda lib_, url: ("Real opening paragraph with plenty of words. " * 15, 0.0))
+    ok, structured, candidate_url, source, note, cost = pl._try_medium_platform(
         lib, "Some Title", "", "https://medium.com/@a/one")
     assert ok is True
     assert source == "medium-fetch"
@@ -506,7 +507,7 @@ def test_backfill_medium_host_no_title_skips_tier(lib, monkeypatch):
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     called = []
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": called.append(1) or ("", ""))
+                        lambda lib_, title, author="": (called.append(1) or "", "", 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -523,10 +524,10 @@ def test_migration_tier_tried_before_medium_tier_when_both_could_apply(lib, monk
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     monkeypatch.setattr(dm_mod, "find_migrated_url",
-                        lambda lib_, domain, title: "https://jeffreycarter.substack.com/p/x")
+                        lambda lib_, domain, title: ("https://jeffreycarter.substack.com/p/x", 0.0))
     medium_called = []
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": medium_called.append(1) or ("", ""))
+                        lambda lib_, title, author="": (medium_called.append(1) or "", "", 0.0))
 
     migrated_html = ("<html><body><article>" +
                      "<p>Migrated content, definitely long enough to pass the sanity check.</p>" * 15 +
@@ -558,12 +559,12 @@ def test_is_recognized_blocked_host_covers_medium_and_other_hosts():
 
 def test_fetch_content_by_url_no_api_key(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
-    assert mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post") == ""
+    assert mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post") == ("", 0.0)
 
 
 def test_fetch_content_by_url_no_url(monkeypatch):
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
-    assert mp_mod.fetch_content_by_url(None, "") == ""
+    assert mp_mod.fetch_content_by_url(None, "") == ("", 0.0)
 
 
 def test_fetch_content_by_url_returns_text_and_hits_contents_endpoint(monkeypatch):
@@ -583,7 +584,7 @@ def test_fetch_content_by_url_returns_text_and_hits_contents_endpoint(monkeypatc
         return _Resp()
 
     monkeypatch.setattr(mp_mod.requests, "post", _post)
-    text = mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post")
+    text, cost = mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post")
     assert text == "Real article text."
     assert captured["url"] == mp_mod._EXA_CONTENTS_URL
     assert captured["json"]["urls"] == ["https://medium.com/@a/post"]
@@ -600,7 +601,8 @@ def test_fetch_content_by_url_no_text_returns_empty(monkeypatch):
             return {"results": [{"url": "https://medium.com/@a/post", "text": ""}]}
 
     monkeypatch.setattr(mp_mod.requests, "post", lambda *a, **kw: _Resp())
-    assert mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post") == ""
+    text, cost = mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post")
+    assert text == ""
 
 
 def test_fetch_content_by_url_network_error_returns_empty(monkeypatch):
@@ -610,7 +612,7 @@ def test_fetch_content_by_url_network_error_returns_empty(monkeypatch):
         raise ConnectionError("boom")
 
     monkeypatch.setattr(mp_mod.requests, "post", _raise)
-    assert mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post") == ""
+    assert mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post") == ("", 0.0)
 
 
 def test_backfill_fetch_by_url_success_skips_search_and_wayback(lib, monkeypatch):
@@ -624,11 +626,11 @@ def test_backfill_fetch_by_url_success_skips_search_and_wayback(lib, monkeypatch
 
     fetch_text = ("Real opening paragraph with plenty of words to clear the minimum "
                   "content threshold comfortably. " * 10)
-    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: fetch_text)
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: (fetch_text, 0.0))
 
     search_called = []
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": search_called.append(1) or ("", ""))
+                        lambda lib_, title, author="": (search_called.append(1) or "", "", 0.0))
     wayback_called = []
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose",
                         lambda url: wayback_called.append(url) or (None, "unreached"))
@@ -655,9 +657,9 @@ def test_backfill_fetch_by_url_thin_result_falls_through_to_search(lib, monkeypa
     article_id = _seed(lib, url="https://medium.com/@vc/some-post", title="Some Post")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
-    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "Too short.")
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: ("Too short.", 0.0))
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": ("https://techcrunch.com/some-post", ""))
+                        lambda lib_, title, author="": ("https://techcrunch.com/some-post", "", 0.0))
 
     candidate_html = ("<html><body><article>" +
                       "<p>Candidate content, definitely long enough to pass the sanity check.</p>" * 15 +
@@ -685,9 +687,9 @@ def test_backfill_fetch_by_url_miss_falls_through_to_search(lib, monkeypatch):
     article_id = _seed(lib, url="https://medium.com/@vc/some-post", title="Some Post")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
-    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "")
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: ("", 0.0))
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": ("https://medium.com/@other/some-post-xyz", ""))
+                        lambda lib_, title, author="": ("https://medium.com/@other/some-post-xyz", "", 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -706,11 +708,11 @@ def test_backfill_fetch_by_url_tried_even_with_no_title(lib, monkeypatch):
 
     def _fetch_by_url(lib_, url):
         fetch_calls.append(url)
-        return fetch_text
+        return fetch_text, 0.0
     monkeypatch.setattr(mp_mod, "fetch_content_by_url", _fetch_by_url)
     search_called = []
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": search_called.append(1) or ("", ""))
+                        lambda lib_, title, author="": (search_called.append(1) or "", "", 0.0))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is True
@@ -727,7 +729,7 @@ def test_backfill_non_medium_host_skips_fetch_by_url_too(lib, monkeypatch):
                         lambda url: PageData(title="", content="", fetch_error="HTTP 500"))
     fetch_called = []
     monkeypatch.setattr(mp_mod, "fetch_content_by_url",
-                        lambda lib_, url: fetch_called.append(1) or "")
+                        lambda lib_, url: (fetch_called.append(1) or "", 0.0))
     monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
@@ -743,7 +745,7 @@ def test_backfill_shockwave_host_uses_fetch_by_url_tier(lib, monkeypatch):
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
     fetch_text = "Real opening paragraph with plenty of words to clear the floor. " * 10
-    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: fetch_text)
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: (fetch_text, 0.0))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is True
@@ -794,7 +796,7 @@ def test_defunct_service_still_skips_medium_tier(lib, monkeypatch):
     monkeypatch.setattr(extract_mod, "fetch_page", lambda url: fetch_called.append(url) or PageData("", ""))
     medium_called = []
     monkeypatch.setattr(mp_mod, "find_medium_candidate",
-                        lambda lib_, title, author="": medium_called.append(1) or ("", ""))
+                        lambda lib_, title, author="": (medium_called.append(1) or "", "", 0.0))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False

@@ -30,6 +30,8 @@ Private routes (require login cookie; API routes also accept a token):
     POST /save                 Capture a link into the Archive (token auth — used by bookmarklet)
     POST /save-later           Capture a link into Read Later (token auth — used by its own bookmarklet)
     POST /read-later/refresh   Re-fetch and replace a Read Later item's cached content (session auth)
+    GET  /change-password / POST /change-password  Set a new password while signed in
+                                       (member-gated, session auth only — no token fallback)
     GET  /api/search           JSON search API
     GET  /bookmarklet          One-click Archive saver script
     GET  /read-later-bookmarklet  One-click Read Later saver script
@@ -61,7 +63,7 @@ import markdown as _markdown
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-from linklib import gates
+from linklib import compare, gates
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS
@@ -71,7 +73,19 @@ from linklib.purge_csv import parse_purge_confirmations_csv, MAX_PURGE_PER_RUN
 from linklib.library_delete_csv import parse_library_delete_csv, MAX_DELETE_PER_RUN
 from linklib.extract import _MIN_CONTENT_WORDS
 from linklib.pipeline import ingest_url
+from linklib.original_content_sync import sync_original_content_article
 from linklib import backup
+from webapp.markdown_render import render_narrative_markdown
+from webapp.ask_orchestrator import (
+    ForbiddenConversationError as _AskForbiddenConversationError,
+    UnknownConversationError as _AskUnknownConversationError,
+    run_ask,
+)
+from webapp.matchmaker_orchestrator import (
+    ForbiddenConversationError as _MatchmakerForbiddenConversationError,
+    UnknownConversationError as _MatchmakerUnknownConversationError,
+    run_matchmaker,
+)
 # webapp/thought_leadership_data.py is no longer imported here — the four
 # /thought-leadership columns now read from the thought_leadership DB table
 # (Phase 1, see CLAUDE.md). The module itself stays in the repo, unused, as
@@ -1060,6 +1074,35 @@ def _low_confidence_indicator_html(low_confidence: object) -> str:
             f'Source page fetch: {value}</p>')
 
 
+# Real Markdown/List Rendering for Narrative Fields (2026-09) — shared CSS
+# for `render_narrative_markdown()`'s output (webapp/markdown_render.py):
+# real <p>/<ul>/<ol>/<li> tags where the field previously rendered as one
+# white-space:pre-wrap <p>. `.tp-card p{margin:0;...}` (defined immediately
+# above each of the two places this is spliced in) already gives every <p>
+# tag inside a .tp-card its correct font-size/color/line-height via a plain
+# descendant selector — that part needs no change. What's missing without
+# this block is spacing BETWEEN consecutive rendered elements (margin:0
+# would otherwise run every paragraph/list straight into the next with no
+# gap) and basic list-marker layout, so this only adds bottom-margin (zeroed
+# on each block's own last child, so the block's outer spacing — set by
+# whatever wraps .narrative-md, e.g. the Bottom Line callout's own
+# margin-bottom — isn't doubled) and list padding/marker spacing. Colors and
+# font sizing are deliberately NOT set here — each call site still wraps its
+# rendered HTML in a div carrying the same inline style properties as the
+# single <p> it replaces (e.g. the Bottom Line callout's navy/16px/1.5), and
+# those inherit down through the real, inherited CSS properties
+# (color/font-size/line-height/overflow-wrap/word-break) to every child
+# <p>/<li> untouched.
+_NARRATIVE_MD_CSS = (
+    '.narrative-md p{margin:0 0 12px;}'
+    '.narrative-md p:last-child{margin-bottom:0;}'
+    '.narrative-md ul,.narrative-md ol{margin:0 0 12px;padding-left:22px;}'
+    '.narrative-md ul:last-child,.narrative-md ol:last-child{margin-bottom:0;}'
+    '.narrative-md li{margin-bottom:5px;}'
+    '.narrative-md li:last-child{margin-bottom:0;}'
+)
+
+
 def _citations_list_html(citations: list, cap: int | None = None, empty_note: str = "") -> str:
     """Render a field's API-verified citation list (Citations-API grounding
     fix, Phase 1b — see linklib.citations, linklib.enrich.
@@ -1594,6 +1637,32 @@ def _group_badge(task_counts: dict[str, int], hrefs) -> str:
     return _task_badge_dot() if dot_pending else ""
 
 
+def _password_change_nudge_html(lib: Library, request: Request) -> str:
+    """Dismissible reminder banner for a signed-in member whose current
+    password was chosen by someone other than them (a brand-new account, or
+    an admin reset) — see users.password_change_recommended's migration
+    comment. Wired into the two pages a login redirect actually lands on
+    (homepage() for role="user", admin_page() for role="admin") rather than
+    threaded through _page()'s ~250 call sites — the smallest surface that
+    still shows it on the very next page after login. A deliberate nudge
+    only, never a block, per Brian's explicit call: dismissal is client-only
+    (localStorage, keyed per user id so one shared browser's dismiss can't
+    hide it for a different account signed in later) — same convention as
+    the Compare page's swipe-hint (_CMP_SWIPE_HINT_JS)."""
+    claims = _current_claims(request)
+    if not claims or not claims.get("username"):
+        return ""
+    user = lib.get_user(claims["username"])
+    if not user or not user.get("password_change_recommended"):
+        return ""
+    key = f"pw_nudge_dismissed_{user['id']}"
+    return f"""<div id="pw-nudge-banner" style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:12px 18px;margin:0 0 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+<span style="font-size:14px;color:var(--ink-soft);">Your password was set for you&mdash;worth changing it to one only you know. <a href="/change-password" style="font-weight:600;color:var(--navy);">Change it now &rarr;</a></span>
+<button type="button" onclick="try{{localStorage.setItem('{key}','1');}}catch(e){{}}var b=document.getElementById('pw-nudge-banner');if(b)b.style.display='none';" style="background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:4px 8px;">Dismiss</button>
+</div>
+<script>(function(){{try{{if(localStorage.getItem('{key}')){{var b=document.getElementById('pw-nudge-banner');if(b)b.style.display='none';}}}}catch(e){{}}}})();</script>"""
+
+
 def _has_open_admin_tasks() -> bool:
     from webapp import tasks as _tasks
     lib = _lib()
@@ -1758,31 +1827,386 @@ def _review_state_badge(unverified: bool, authed: bool, cls: str = "tp-verify") 
     return f' <span class="{cls}">{text}</span>'
 
 
-def _compare_cell_html(text: str | None, unverified: bool, authed: bool,
-                        empty_label: str = "Not yet available.",
-                        cls: str = "cc-verify", pre_wrap: bool = False) -> str:
-    """Shared `<td>` renderer for every per-field review-gated Compare
-    matrix column, on both Software (`_agent_cell`/`_desc_cell`/
-    `_diff_cell`) and Communities (`_profile_cell`). Radical-transparency
-    review standard: content always renders for both viewers now — a
-    pending review no longer collapses into the same empty-looking cell as
-    an entity with no content at all (see linklib.gates' module docstring).
-
-    `pre_wrap` covers the one real markup difference between the two
-    matrices' cells: Communities' profile fields can carry embedded
-    newlines (drafted narrative text), Software's compare fields don't —
-    kept as a caller-chosen flag rather than two near-duplicate functions.
-    Callers that need to check the OTHER, unrelated `_NEEDS_VERIFICATION`
-    data-completeness sentinel (Communities' `.comm-verify`) do that
-    themselves before ever calling this — this function only ever handles
-    the review-state gate."""
-    text = (text or "").strip()
-    if not text:
-        return f'<td class="cc-cell cc-empty">{_esc(empty_label)}</td>'
-    badge = _review_state_badge(unverified, authed, cls)
+def _cmp_populated_field_html(f: "compare.CompareField", authed: bool) -> str:
+    """One populated `CompareField`'s inner markup — clamped pre-wrap text
+    (Compare Redesign Phase 1: `.cmp-clamp` applies a CSS
+    `-webkit-line-clamp` matching `compare.EXCERPT_LINE_CLAMP`, so a long
+    draft scans as an excerpt instead of a full essay; the full text is
+    still in the DOM, just visually clamped, so copy/paste and
+    accessibility both see the whole field), the same review-state badge
+    every profile page uses, and — the fix for Compare's dead citation
+    markers — the same `_citations_list_html` "Sources" chip list a
+    profile page renders right alongside the field, fed by the exact
+    `entity_citations` rows the caller already fetched. Caller guarantees
+    `f.state != GateState.EMPTY`."""
+    badge = _review_state_badge(f.state == gates.GateState.PENDING, authed, "cc-verify")
     badge_html = f'<div style="margin-top:4px;">{badge.strip()}</div>' if badge else ""
-    style_attr = ' style="white-space:pre-wrap;"' if pre_wrap else ""
-    return f'<td class="cc-cell"{style_attr}>{_esc(text)}{badge_html}</td>'
+    citations_html = _citations_list_html(f.citations, cap=5) if f.citations else ""
+    return (f'<div class="cmp-clamp"><div class="cmp-clamp-inner">{_esc(f.text)}</div></div>'
+            f'{badge_html}{citations_html}')
+
+
+def _cmp_empty_html(empty_copy_key: str, authed: bool) -> str:
+    """One empty section/field's placeholder — reuses `gates.
+    COMPARE_EMPTY_LABELS`, the shorter, no-admin-suffix family gates.py
+    already defines specifically for compare-matrix cells (a compare cell
+    never carries a "go fill this in" prompt — that only ever appears on
+    the field's own profile/edit page). `authed` is accepted for a
+    consistent call signature with `_cmp_populated_field_html` even though
+    this family doesn't vary by viewer."""
+    del authed
+    return f'<span class="cc-empty">{_esc(gates.COMPARE_EMPTY_LABELS.get(empty_copy_key, "Not yet available."))}</span>'
+
+
+def _cmp_section_cell_html(section: "compare.CompareSection", authed: bool, empty_copy_key: str) -> str:
+    """One `<td>`'s inner markup for one `CompareSection` — a single field
+    (every tool section; Communities' Bottom line) renders directly; a
+    themed group of several sub-fields (Communities' 4 profile groups)
+    mirrors the profile page's own two-tier empty handling exactly: the
+    WHOLE group empty -> one group-level placeholder (the profile page's
+    "This section hasn't been researched yet."); some fields populated,
+    some not -> each populated field renders normally and each empty one
+    gets the profile page's Tier-2 "No details available." inline, with no
+    admin suffix (a single missing fact inside an otherwise-populated card
+    doesn't warrant a "go fill this in" prompt)."""
+    fields = section.fields
+    if len(fields) == 1:
+        f = fields[0]
+        if f.state == gates.GateState.EMPTY:
+            return _cmp_empty_html(empty_copy_key, authed)
+        return _cmp_populated_field_html(f, authed)
+    if all(f.state == gates.GateState.EMPTY for f in fields):
+        return _cmp_empty_html(empty_copy_key, authed)
+    parts = []
+    for f in fields:
+        body = ('<div class="cmp-tier2">No details available.</div>'
+                if f.state == gates.GateState.EMPTY else _cmp_populated_field_html(f, authed))
+        parts.append(f'<div class="cmp-subfield"><div class="cmp-subfield-label">{_esc(f.label)}</div>{body}</div>')
+    return "".join(parts)
+
+
+def _cmp_section_band_row_html(title: str, n_entities: int) -> str:
+    """One full-width `.cc-section` band row (Key facts / Description /
+    AI / Agent involvement / Bottom line / Competitors / Similar
+    communities / a Community profile group). Mobile follow-up: the title
+    is wrapped in a `.cmp-sticky-label` inner span, not just given to the
+    plain `<td>` — this table has no separate per-row label COLUMN the way
+    the pre-redesign flat-row table did (that text now lives entirely in
+    this band, which spans every column via `colspan`), so on a narrow
+    viewport a plain band scrolls its own title out of view exactly like
+    every other cell the moment the visitor swipes right to see a second
+    entity — the real shape of the "you lose the label while comparing"
+    bug, traced by comparing a real before/after-scroll screenshot rather
+    than assumed from the ticket's own description of a literal label
+    column (this layout doesn't have one; the band *is* the label here).
+    The inner span sticks to the scroll container's left edge instead, so
+    "Description"/"AI / Agent involvement"/etc. stays on screen the whole
+    time a visitor is swiping between entities."""
+    return (f'<tr><td class="cc-cell cc-section" colspan="{n_entities + 1}">'
+            f'<span class="cmp-sticky-label">{_esc(title)}</span></td></tr>')
+
+
+def _cmp_chip_list_html(chips: "compare.CompareChipList", authed: bool) -> str:
+    if not chips.items:
+        return _cmp_empty_html(chips.empty_copy_key, authed)
+    return '<div class="cmp-chip-row">' + "".join(
+        f'<a href="{_esc(i.url)}" class="cmp-chip" target="_blank" rel="noopener">{_esc(i.name)}</a>'
+        for i in chips.items
+    ) + '</div>'
+
+
+def _cmp_tag_chips_html(entity: "compare.CompareEntity", diff: "compare.CompareTagDiff") -> str:
+    """Shared-vs-unique category tag chips (shared tags across every
+    compared entity get a solid seafoam fill, an entity's own unique tags
+    get a seafoam outline, so overlap and contrast are visible at a glance
+    without reading every pill) — Compare Redesign Phase 1 follow-up: moved
+    out of the Key facts band into the header row, directly under each
+    entity's name, since a category tag is an identity fact about the
+    entity, not a "key fact" row alongside Region/Access/Cost. Returns ""
+    when the entity has no tags at all, so a caller can skip the wrapping
+    markup entirely rather than rendering an empty row."""
+    shared_set = set(diff.shared)
+    tag_chips = "".join(f'<span class="cmp-tag cmp-tag-shared">{_esc(t)}</span>'
+                         for t in entity.tags if t in shared_set)
+    tag_chips += "".join(f'<span class="cmp-tag cmp-tag-unique">{_esc(t)}</span>'
+                          for t in diff.unique.get(entity.id, []))
+    return f'<div class="cmp-tag-row">{tag_chips}</div>' if tag_chips else ""
+
+
+def _cmp_key_facts_cell_html(entity: "compare.CompareEntity") -> str:
+    """The Key facts band's one `<td>` per entity — Communities' small
+    Region/Access/Sponsor/Cost/Founded facts, bundled into ONE row instead
+    of five separate ones so Key facts reads as a compact summary band, not
+    another wall of lonely rows. Tags moved out of this band (Compare
+    Redesign Phase 1 follow-up, see `_cmp_tag_chips_html`) — Software has
+    no other key facts, so its Key facts band is retired outright (see
+    `tools_software_compare`); Communities keeps this one, tag-free."""
+    parts = []
+    for kf in entity.key_facts:
+        if kf.needs_verification:
+            parts.append(f'<div class="cmp-fact"><span class="cmp-fact-label">{_esc(kf.label)}</span> '
+                          f'<span class="comm-verify">Needs verification</span></div>')
+        else:
+            parts.append(f'<div class="cmp-fact"><span class="cmp-fact-label">{_esc(kf.label)}</span> '
+                          f'<span class="cmp-fact-value">{_esc(kf.value)}</span></div>')
+    return "".join(parts) if parts else '<span class="cc-empty">Not yet available.</span>'
+
+
+# ---------------------------------------------------------------------------
+# Compare Redesign Phase 2 — the AI overlap/contrast summary block rendered
+# above both Compare tables. Purely additive: reads the same `entities`
+# list `tools_software_compare`/`tools_communities_compare` already build
+# from `linklib.compare`, and inserts one new block above the existing
+# `<table>` — no existing cell-rendering function here is touched.
+# ---------------------------------------------------------------------------
+
+# Approved verbatim (Brian, no further sign-off needed): the exact string is
+# "AI-generated summary, not human-verified. Includes catalog content still
+# under review. Flag an issue" (unverified-content variant) / "AI-generated
+# summary, not human-verified. Flag an issue" (verified variant). Split into
+# a prefix constant + a hardcoded "Flag an issue" link label so the link
+# only ever wraps that exact trailing phrase, never re-typed or duplicated.
+_CMP_SUMMARY_FOOTNOTE_PREFIX = "AI-generated summary, not human-verified. Includes catalog content still under review. "
+_CMP_SUMMARY_FOOTNOTE_PREFIX_VERIFIED = "AI-generated summary, not human-verified. "
+_CMP_SUMMARY_CAP_HIT_NOTE = "Comparison summary temporarily unavailable—daily budget reached. Check back tomorrow."
+
+
+def _cmp_entities_for_summary(entities: list["compare.CompareEntity"]) -> list[dict]:
+    """Convert `CompareEntity` objects into the plain-dict shape
+    `linklib.enrich.generate_compare_summary` expects — that module can't
+    import `linklib.compare` directly (compare.py already imports enrich.py
+    for NEEDS_VERIFICATION, so the reverse import would be circular).
+    Skips EMPTY fields (nothing to summarize); a PENDING field is included
+    with its unverified flag set so the model can hedge on it."""
+    out = []
+    for e in entities:
+        sections = []
+        for section in e.sections:
+            for f in section.fields:
+                if f.state == gates.GateState.EMPTY:
+                    continue
+                sections.append((f.label, f.text, f.state == gates.GateState.PENDING))
+        out.append({"name": e.name, "tags": e.tags, "sections": sections})
+    return out
+
+
+def _cmp_summary_content_text(entities_data: list[dict]) -> str:
+    """The exact text the cache's content hash is computed over — every
+    field's label + text (never the unverified flag, on purpose: per
+    Brian's approval, has_unverified is decoupled from the content-hash key
+    so a verify-only action, no text edit, doesn't force a wasteful regen).
+    Tags are included since they're part of what the model actually reads."""
+    parts = []
+    for e in entities_data:
+        parts.append(e.get("name", ""))
+        parts.append(",".join(e.get("tags") or []))
+        for label, text, _unverified in e.get("sections", []):
+            parts.append(f"{label}:{text}")
+    return "\n".join(parts)
+
+
+def _cmp_summary_block_html(request: Request, entities: list["compare.CompareEntity"], entity_type: str) -> str:
+    """Look up (or generate) the cached overlap/contrast summary for this
+    exact set of entities, and render the block — or "" if there's nothing
+    to show (cap hit renders a labeled note instead of "", every other
+    unavailability reason renders "" silently, since only the cap-hit case
+    has approved copy for a visible message). Never raises: any failure
+    here must not take down the whole Compare page (requirement 3 — "never
+    fail the page; the summary is additive")."""
+    entity_ids = ",".join(str(e.id) for e in sorted(entities, key=lambda e: e.id))
+    entities_data = _cmp_entities_for_summary(entities)
+    content_hash = Library.compare_summary_content_hash(_cmp_summary_content_text(entities_data))
+
+    # has_unverified is computed live from the CURRENT entities' gate state,
+    # deliberately decoupled from the cache key/content hash (per Brian's
+    # approval) — a verify-only action changes no field text, so it can't
+    # miss the cache, but the footnote still has to reflect today's real
+    # review state, not whatever it was at generation time.
+    has_unverified = any(unverified for e in entities_data for _l, _t, unverified in e["sections"])
+
+    lib = _lib()
+    try:
+        cached = lib.get_compare_summary(entity_type, entity_ids, content_hash)
+        if cached is None:
+            cap = lib.get_default_compare_summary_cap()
+            spent = lib.compare_summary_cost_today()
+            if spent >= cap:
+                return (
+                    '<div class="cmp-summary cmp-summary-capped">'
+                    f'<p style="margin:0;">{_esc(_CMP_SUMMARY_CAP_HIT_NOTE)}</p></div>'
+                )
+            model = lib.get_enrich_model()
+            from linklib.voice_settings import VoicePromptMissing, require_voice_setting
+            try:
+                voice_core = require_voice_setting(lib, "voice_core")
+            except VoicePromptMissing:
+                return ""
+            from linklib.enrich import generate_compare_summary
+            draft = generate_compare_summary(entity_type, entities_data, model=model, voice_core=voice_core)
+            if draft is None:
+                return ""
+            lib.set_compare_summary(entity_type, entity_ids, content_hash, draft.summary, draft.model,
+                                     draft.input_tokens, draft.output_tokens, draft.cost_usd)
+            lib.record_enrichment_cost(None, draft.model, draft.input_tokens, draft.output_tokens, draft.cost_usd)
+            summary_text = draft.summary
+        else:
+            summary_text = cached["summary"]
+    except Exception:
+        return ""
+    finally:
+        lib.close()
+
+    if not summary_text.strip():
+        return ""
+
+    footnote_prefix = _CMP_SUMMARY_FOOTNOTE_PREFIX if has_unverified else _CMP_SUMMARY_FOOTNOTE_PREFIX_VERIFIED
+    feedback_href = f"/compare-summary/feedback?type={entity_type}&ids={_esc(entity_ids)}&hash={content_hash}"
+    return f"""<div class="cmp-summary">
+<p class="cmp-summary-text">{_esc(summary_text)}</p>
+<p class="cmp-summary-footnote">{_esc(footnote_prefix)}<a href="{feedback_href}">Flag an issue</a></p>
+</div>"""
+
+
+# Shared CSS for both Compare matrices (Compare Redesign Phase 1) — the
+# grouped-section layout, narrative-excerpt clamp, citation chips, and
+# shared/unique tag treatment are visually identical on Software and
+# Communities, so this is one constant both routes' <style> blocks include
+# rather than two copies that could drift.
+_CMP_SHARED_CSS = f"""
+.cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
+.cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
+  color:var(--ink-soft);line-height:1.55;min-width:220px;}}
+.cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  min-width:140px;white-space:nowrap;background:var(--bg);}}
+.cc-empty{{color:var(--muted);font-style:italic;}}
+.cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);
+  background:var(--seafoam);padding:8px 16px;}}
+/* Brand-consistency pass (2026-08): was #92400e/#fef3c7 (off-palette amber)
+   — recolored to --coral-wash bg + --navy text (navy, not coral-deep,
+   because BRAND.md's own mechanical CI check bans coral/coral-deep text
+   under 18px — same sanctioned coral-wash+navy callout pairing), the same
+   small per-field "unverified" badge language used everywhere this concept
+   renders (.tp-verify, .tool-desc-verify), deliberately distinct in
+   size/shape from the larger pill-shaped whole-record _review_status_pill_html
+   so the two read as different signal types even though they now share one
+   color rule. */
+.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
+  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;
+  border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
+thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
+.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
+.comm-name:hover{{color:var(--accent);}}
+.tool-star{{font-size:14px;color:#b8860b;}}
+/* Narrative-excerpt clamp (Compare Redesign Phase 1) — ~{compare.EXCERPT_LINE_CLAMP} lines via
+   -webkit-line-clamp, approved over a fixed character count so it adapts
+   to each table's real column width. white-space:pre-wrap on the inner div
+   (not the clamped outer box, which needs display:-webkit-box) is the fix
+   for the flattened-markdown bug: a "- " bulleted line now keeps its own
+   line instead of running together with the next one — the same treatment
+   profile pages already give this text, not a new markdown renderer (a
+   real markdown-to-HTML pass for these fields is scoped as its own
+   follow-up PR, deliberately not built here). */
+.cmp-clamp{{display:-webkit-box;-webkit-line-clamp:{compare.EXCERPT_LINE_CLAMP};-webkit-box-orient:vertical;overflow:hidden;}}
+.cmp-clamp-inner{{white-space:pre-wrap;}}
+.cmp-subfield{{margin-bottom:14px;}}
+.cmp-subfield:last-child{{margin-bottom:0;}}
+.cmp-subfield-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;}}
+.cmp-tier2{{color:var(--muted);font-style:italic;font-size:13px;}}
+.cmp-chip-row{{display:flex;flex-wrap:wrap;gap:6px;}}
+.cmp-chip{{font-size:13px;font-weight:600;color:var(--navy);background:var(--seafoam-wash);border-radius:999px;
+  padding:4px 12px;text-decoration:none;}}
+.cmp-chip:hover{{background:var(--seafoam);}}
+/* .cmp-tag-row now renders only in the header cell, directly under each
+   entity's name (Compare Redesign Phase 1 follow-up — tags moved out of
+   the Key facts band, since a category tag is an identity fact about the
+   entity, not a "key fact" alongside Region/Access/Cost). */
+.cmp-tag-row{{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 0;}}
+.cmp-tag{{font-size:11.5px;font-weight:600;border-radius:999px;padding:3px 10px;white-space:nowrap;}}
+/* Shared-vs-unique tag treatment (Compare Redesign Phase 1, approved in
+   Step 0): solid seafoam fill for a tag every compared entity shares,
+   outline-only for a tag only this entity has — a glance at fill vs.
+   outline shows overlap and contrast without reading every pill. */
+.cmp-tag-shared{{background:var(--seafoam);color:var(--navy);}}
+.cmp-tag-unique{{background:transparent;color:var(--seafoam-deep);border:1px solid var(--seafoam-mid);}}
+.cmp-fact{{font-size:13px;color:var(--ink-soft);margin-bottom:4px;}}
+.cmp-fact-label{{font-weight:600;color:var(--muted);}}
+.cmp-full-link{{display:block;margin-top:4px;font-size:12.5px;font-weight:600;color:var(--navy);text-decoration:none;}}
+.cmp-full-link:hover{{text-decoration:underline;}}
+/* Mobile follow-up: sticky section labels + swipe hint. This table has no
+   separate per-row label COLUMN the way a flat label/value table would —
+   every row's "label" is a full-width .cc-section band (colspan across
+   every column), not a narrow leftmost cell, so a first pass that made
+   .cc-label sticky pinned nothing (those cells are blank; the real text
+   lives in the band). Confirmed live, before/after a real horizontal
+   scroll: a plain band's title scrolled out of view exactly like every
+   other cell the moment a visitor swiped right, which is the actual
+   "you lose the label while comparing" bug. Fixed by sticking the band's
+   own TEXT (.cmp-sticky-label, an inline-block span nested inside the
+   wide .cc-section cell) to the scroll container's left edge below 700px
+   (the same breakpoint the admin tables' own responsive treatment uses)
+   — "Description"/"AI / Agent involvement"/etc. now stays on screen for
+   the whole swipe, not just for the initial, unscrolled view. */
+@media (max-width:700px){{
+  .cmp-sticky-label{{position:sticky;left:16px;display:inline-block;}}
+}}
+/* Swipe hint (Compare Redesign Phase 1 follow-up) — a passive, non-link
+   affordance shown once (until the visitor's first horizontal scroll of
+   the table, tracked in localStorage — see _CMP_SWIPE_HINT_JS), mobile
+   only. Deliberately NOT styled like this page's own "Full profile →"
+   link (navy, bold, bare arrow) — a two-directional icon plus muted,
+   non-bold text reads as "FYI," never as something to tap. */
+.cmp-swipe-hint{{display:none;align-items:center;gap:6px;color:var(--muted);font-size:12.5px;margin:0 0 8px;}}
+.cmp-swipe-hint svg{{flex-shrink:0;}}
+@media (max-width:700px){{
+  .cmp-swipe-hint{{display:flex;}}
+}}
+/* AI comparison summary (Compare Redesign Phase 2) — a light seafoam card
+   above the table, same register as this page's own intro paragraph, not a
+   loud callout: this is a heads-up, not the page's main content. */
+.cmp-summary{{background:var(--seafoam-wash);border:1px solid var(--seafoam-mid);border-radius:12px;
+  padding:16px 20px;margin:0 0 20px;}}
+.cmp-summary-text{{margin:0 0 8px;font-size:14.5px;line-height:1.6;color:var(--ink);}}
+.cmp-summary-footnote{{margin:0;font-size:12px;color:var(--muted);}}
+.cmp-summary-footnote a{{color:var(--muted);text-decoration:underline;}}
+.cmp-summary-capped{{background:var(--bg);border:1px dashed var(--line);}}
+.cmp-summary-capped p{{color:var(--muted);font-size:13px;font-style:italic;}}
+"""
+
+# Swipe hint markup + dismiss logic, shared by both Compare pages (Compare
+# Redesign Phase 1 follow-up). The icon is a plain two-headed horizontal
+# arrow (Lucide's "move-horizontal" shape), drawn in the same flat,
+# two-tone line-icon style as every other icon in this file (viewBox 0 0
+# 24 24, stroke-width 2, round caps/joins) — chosen specifically because
+# it reads as "this scrolls both ways," not as a directional "go here"
+# link arrow.
+_CMP_SWIPE_HINT_HTML = (
+    '<div class="cmp-swipe-hint" id="cmp-swipe-hint">'
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round"><polyline points="18 8 22 12 18 16"/>'
+    '<polyline points="6 8 2 12 6 16"/><line x1="2" y1="12" x2="22" y2="12"/></svg>'
+    '<span>Swipe to compare</span></div>'
+)
+
+_CMP_SWIPE_HINT_JS = """
+(function(){
+  var hint = document.getElementById('cmp-swipe-hint');
+  var wrap = document.getElementById('cmp-scroll-wrap');
+  if (!hint || !wrap) return;
+  var KEY = 'cmp_swipe_hint_seen';
+  try {
+    if (localStorage.getItem(KEY)) { hint.style.display = 'none'; return; }
+  } catch (e) {}
+  var dismissed = false;
+  function dismiss(){
+    if (dismissed) return;
+    dismissed = true;
+    hint.style.display = 'none';
+    try { localStorage.setItem(KEY, '1'); } catch (e) {}
+  }
+  wrap.addEventListener('scroll', dismiss, {passive: true});
+})();
+"""
 
 
 # CFO Toolbox logo rendering (Phase F) — turns a tools.logo_path/
@@ -1822,12 +2246,21 @@ def _screenshot_slot_caption(url: str, captured_at: str, label: str) -> str:
     there's no more "(no product screenshot available yet)" hedge — that
     sentence was anticipating this exact feature and reads as obsolete once
     an app screenshot is a real, separate thing rather than a hoped-for
-    override."""
+    override.
+
+    Edit-page-fixes item 3: a URL present with no captured_at is not "not
+    yet captured" — it's the deliberate, normal result of a hand-pasted
+    screenshot URL (Library.update_tool_screenshot_url explicitly clears
+    captured_at on a manual paste, since a hand-pasted URL has no capture
+    date). The old wording implied the slot was still empty even while a
+    real image rendered right above it. Now says exactly what the edit
+    page's own (already-correct) caption for this same state says, so both
+    surfaces describe it identically."""
     if not (url or "").strip():
         return ""
     if (captured_at or "").strip():
         return f"{label} screenshot, captured {captured_at[:10]}"
-    return f"{label} screenshot (not yet captured)"
+    return f"{label} screenshot, manually set—no capture date"
 
 
 def _screenshot_card_html(entity: dict, featured_sticker: str = "") -> str:
@@ -1944,7 +2377,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     _gen_host_id = f"gen-host-app-screenshot-{idsfx}"
 
     in_form_html = f"""  <div id="{_gen_host_id}">
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Product</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">App screenshot</label>
     <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">No single reliable URL for "the app"—a login/demo/product-tour page you have public access to. This is inherently manual/curated, not something to fill in for every record.</p>
     <input name="app_screenshot_source_url"{_form_attr} type="text" maxlength="500" value="{_esc(source_url)}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
@@ -2901,6 +3334,10 @@ async def reset_password_submit(request: Request):
         if len(password) < 8:
             return RedirectResponse(f"/reset-password?token={quote(token)}&error=1", status_code=303)
         lib.set_user_password(req["user_id"], password)
+        # The account holder just chose their own password — clear the
+        # nudge (mirrors admin_users_password setting it True for the
+        # opposite case: an admin choosing it for them).
+        lib.set_password_change_recommended(req["user_id"], False)
         lib.resolve_password_resets_for_user(req["user_id"])
     finally:
         lib.close()
@@ -2949,6 +3386,69 @@ def logout():
     resp = RedirectResponse("/", status_code=303)
     resp.delete_cookie(COOKIE_NAME, path="/")
     return resp
+
+
+# ---------------------------------------------------------------------------
+# In-session "change my password" — session-cookie-only (no token fallback,
+# same tier as /api/read-article and /read-later/refresh), distinct from the
+# token-based self-service /forgot-password -> /reset-password email flow.
+# Reached from the dismissible password-change-recommended nudge banner
+# (_password_change_nudge_html), but also directly reachable by any signed-in
+# member any time — not gated on the nudge flag being set.
+# ---------------------------------------------------------------------------
+
+@app.get("/change-password", response_class=HTMLResponse)
+def change_password_page(request: Request, error: str = ""):
+    if not _is_member(request):
+        return _login_redirect(request)
+    if request.query_params.get("done") == "1":
+        body = """<div class="page page-form">
+<h1>Password updated</h1>
+<p style="color:var(--muted);margin:4px 0 20px;">Your password has been changed.</p>
+<p><a href="/" style="font-size:14px;">&larr; Back to the site</a></p>
+</div>"""
+        return HTMLResponse(_page("Password updated—Brian Weisberg", "", body, authed=_is_authed(request)))
+    err = ""
+    if error == "current":
+        err = '<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That current password isn&rsquo;t right—try again.</p>'
+    elif error == "short":
+        err = '<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">New password must be at least 8 characters.</p>'
+    body = f"""<div class="page page-form">
+<h1>Change your password</h1>
+<p style="color:var(--muted);margin:4px 0 28px;">Enter your current password and choose a new one.</p>
+{err}
+<form method="post" action="/change-password" style="display:grid;gap:16px;">
+  <input name="current_password" type="password" required autocomplete="current-password" placeholder="Current password"
+         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <input name="new_password" type="password" required minlength="8" autocomplete="new-password" placeholder="New password"
+         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <button type="submit" class="btn">Update password</button>
+</form>
+</div>"""
+    return HTMLResponse(_page("Change password—Brian Weisberg", "", body, authed=_is_authed(request)))
+
+
+@app.post("/change-password")
+async def change_password_submit(request: Request):
+    if not _is_member(request):
+        return _login_redirect(request)
+    claims = _current_claims(request)
+    username = (claims or {}).get("username") or ""
+    form = await request.form()
+    current_password = form.get("current_password") or ""
+    new_password = form.get("new_password") or ""
+    lib = _lib()
+    try:
+        user = lib.authenticate(username, current_password) if username else None
+        if not user:
+            return RedirectResponse("/change-password?error=current", status_code=303)
+        if len(new_password) < 8:
+            return RedirectResponse("/change-password?error=short", status_code=303)
+        lib.set_user_password(user["id"], new_password)
+        lib.set_password_change_recommended(user["id"], False)
+    finally:
+        lib.close()
+    return RedirectResponse("/change-password?done=1", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -3066,6 +3566,7 @@ def homepage(request: Request):
         # logic works, not a bug to guard against.
         tl_reps = [lib.get_thought_leadership_representative(t) for t, _label in _TL_TYPES]
         original_content_home = lib.list_original_content_for_home()
+        password_nudge_html = _password_change_nudge_html(lib, request)
     finally:
         lib.close()
 
@@ -3098,6 +3599,7 @@ def homepage(request: Request):
       </a>""" if is_admin else "")
 
     body = f"""<div class="page page-full">
+{password_nudge_html}
 <style>
 {_TL_SHARED_CSS}
 /* Mobile (default): plain stacked flow, DOM order = hero -> photo card ->
@@ -5923,13 +6425,14 @@ def privacy_page(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Library submissions — a public "suggest a piece" form. Submissions land
-# UN-ENRICHED in the Archive Queue (no server-side fetch, no Claude call), so a
-# public endpoint can't be used to run up cost or fetch arbitrary URLs. Brian
-# reviews them in /admin/library/queue; enrichment happens only on approval.
+# Library submissions — a member-gated (any signed-in account) "suggest a
+# piece" form. Submissions land UN-ENRICHED in the Archive Queue (no
+# server-side fetch, no Claude call), so it can't be used to run up cost or
+# fetch arbitrary URLs even from a low-friction account. Brian reviews them
+# in /admin/library/queue; enrichment happens only on approval.
 #
-# Public for now; the handler is self-contained, so gating it behind the future
-# paid login is a one-line auth check.
+# Reachable only by direct URL until the FP&A Buddy suggest-content link
+# (webapp/app.py's srcListHtml()) started pointing here.
 # ---------------------------------------------------------------------------
 
 @app.get("/library/submit", response_class=HTMLResponse)
@@ -6837,6 +7340,17 @@ def tools_software_compare(request: Request, ids: str = ""):
             t = lib.get_tool(tid)
             if t and t.get("approved"):
                 tools.append(t)
+        # Citations and competitors, fetched once per tool up front — the
+        # serializer (linklib.compare) is pure data, it never touches the DB
+        # itself. Only description/agent_taxonomy have a real Citations-API
+        # grounding mechanism (competitive_differentiation doesn't, per
+        # CLAUDE.md), so those are the only two field names fetched.
+        citations = {}
+        competitors = {}
+        for t in tools:
+            citations[(t["id"], "description")] = lib.get_entity_citations("tool", t["id"], "description")
+            citations[(t["id"], "agent_taxonomy")] = lib.get_entity_citations("tool", t["id"], "agent_taxonomy")
+            competitors[t["id"]] = lib.list_tool_competitors(t["id"])
     finally:
         lib.close()
 
@@ -6852,152 +7366,91 @@ to compare them side by side. Check the box on any card, then use the compare ba
 </div>"""
         return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
-    def _cell(text: str, empty_label: str = "Not yet available.") -> str:
-        text = (text or "").strip()
-        if not text:
-            return f'<td class="cc-cell cc-empty">{_esc(empty_label)}</td>'
-        return f'<td class="cc-cell">{_esc(text)}</td>'
+    _compare_authed = _is_authed(request)
+    entities, tag_diff = compare.build_software_compare(tools, citations, competitors)
 
+    # Tags render directly under each entity's name now (Compare Redesign
+    # Phase 1 follow-up) — a category tag is an identity fact, not a "key
+    # fact" row alongside Region/Access/Cost the way Communities has. Once
+    # tags move out, Software has nothing left for a Key facts band at
+    # all, so that whole section is retired below (Communities keeps its
+    # own, tag-free — see tools_communities_compare).
     header_cells = "".join(
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
-    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if t.get('promoted') else ''}
-    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if t.get('advisor') else ''}
+    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if e.promoted else ''}
+    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if e.advisor else ''}
   </div>
-  <a href="/tools/software/{_esc(t['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(t['name'])}</a>
+  <a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(e.name)}</a>
+  {_cmp_tag_chips_html(e, tag_diff)}
 </th>'''
-        for t in tools
+        for e in entities
     )
 
-    def _row(label: str, values: list[str], empty_label: str = "Not yet available.") -> str:
-        if not gates.any_populated(values):
-            return ""
-        return (f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>'
-                + "".join(_cell(v, empty_label) for v in values) + "</tr>")
-
-    tags_row = _row("Tags", [", ".join(t.get("categories") or []) for t in tools])
-
-    # AI/agent involvement gets its own section, same visual weight as
-    # Features, rather than sitting alongside Description/How this differs
-    # as just another text field — this is a comparison dimension buyers
-    # increasingly ask about first, not an afterthought. An empty value is
-    # "not documented yet," never treated as "this vendor has no agent
-    # capability" — the same sparse-data honesty rule as Features' "Not
-    # tracked yet."
-    _compare_authed = _is_authed(request)
-
-    def _agent_cell(t: dict) -> str:
-        return _compare_cell_html(
-            t.get("agent_taxonomy_note"),
-            bool(t.get("agent_taxonomy_needs_verification")),
-            _compare_authed,
-            gates.COMPARE_EMPTY_LABELS["tool_agent_taxonomy"],
+    # Grouped sections (Compare Redesign Phase 1 — fixes the orphaned-header
+    # bug: every section now gets the same .cc-section teal band, not just
+    # AI / Agent involvement). Every entity's `sections` list is built by
+    # build_software_compare in the same fixed order (Description, AI /
+    # Agent involvement, Bottom line), so zipping by index is safe.
+    _section_empty_keys = ["tool_description", "tool_agent_taxonomy", "tool_differentiation"]
+    section_rows = []
+    for idx, section_title in enumerate(s.title for s in entities[0].sections):
+        empty_key = _section_empty_keys[idx]
+        cells = "".join(
+            f'<td class="cc-cell">{_cmp_section_cell_html(e.sections[idx], _compare_authed, empty_key)}</td>'
+            for e in entities
+        )
+        section_rows.append(
+            _cmp_section_band_row_html(section_title, len(entities))
+            + f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
         )
 
-    agent_row = ""
-    if gates.any_populated([t.get("agent_taxonomy_note") for t in tools]):
-        agent_row = (f'<tr><td class="cc-cell cc-label">{_esc("How agents are involved")}</td>'
-                     + "".join(_agent_cell(t) for t in tools) + "</tr>")
-    agent_section = ""
-    if agent_row:
-        agent_section = f"""<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>
-{agent_row}"""
-    else:
-        _agent_empty_label = gates.COMPARE_EMPTY_LABELS["tool_agent_taxonomy"]
-        agent_section = (
-            f'<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>'
-            f'<tr><td class="cc-cell cc-label"></td>'
-            + "".join(f'<td class="cc-cell cc-empty">{_esc(_agent_empty_label)}</td>' for _ in tools) + "</tr>"
+    competitors_row = (
+        _cmp_section_band_row_html("Competitors", len(entities))
+        + '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(
+            f'<td class="cc-cell">{_cmp_chip_list_html(e.chip_lists[0], _compare_authed)}</td>'
+            for e in entities
         )
+        + "</tr>"
+    )
 
-    def _desc_cell(t: dict) -> str:
-        return _compare_cell_html(
-            t.get("summary") or t.get("description"),
-            bool(t.get("description_needs_verification")),
-            _compare_authed,
-            gates.COMPARE_EMPTY_LABELS["tool_description"],
+    full_profile_row = (
+        '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(
+            f'<td class="cc-cell"><a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" '
+            f'class="cmp-full-link">Full profile &rarr;</a></td>'
+            for e in entities
         )
-
-    description_row = ""
-    if gates.any_populated([t.get("summary") or t.get("description") for t in tools]):
-        description_row = (f'<tr><td class="cc-cell cc-label">{_esc("Description")}</td>'
-                            + "".join(_desc_cell(t) for t in tools) + "</tr>")
-
-    def _diff_cell(t: dict) -> str:
-        # Competitive differentiation ("How this differs") previously used
-        # the generic _row/_cell helpers below with no review-gate logic at
-        # all — the one field that rendered an unverified draft identically
-        # to a verified one, to every viewer, with no badge for anyone. Now
-        # brought in line with Agent taxonomy/Description above via the
-        # same shared _compare_cell_html.
-        return _compare_cell_html(
-            t.get("competitive_differentiation"),
-            bool(t.get("competitive_differentiation_needs_verification")),
-            _compare_authed,
-            gates.COMPARE_EMPTY_LABELS["tool_differentiation"],
-        )
-
-    differentiation_row = ""
-    if gates.any_populated([t.get("competitive_differentiation") for t in tools]):
-        differentiation_row = (f'<tr><td class="cc-cell cc-label">{_esc("How this differs")}</td>'
-                                + "".join(_diff_cell(t) for t in tools) + "</tr>")
-
-    other_rows = description_row + differentiation_row
-
-    # Legacy tool_features-driven Features comparison row was removed here
-    # (Feature Taxonomy Phase 1b PR 2 legacy retirement) rather than migrated
-    # to the governed tool_feature_links model — a governed-model Compare
-    # view is deliberately later/out-of-scope work (docs/BUILD_PLAN.md Phase
-    # 8), not something this retirement PR builds. The public profile page's
-    # "Key features" card (_software_key_features_card) is the only public
-    # rendering surface for tool_feature_links today.
+        + "</tr>"
+    )
 
     body = f"""<div class="page page-grid">
 {back_link}
 <h1 style="margin:0;">Compare software</h1>
-<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Side by side, the same fields you'd see on each
-tool's own profile page, including how (and whether) AI agents are actually involved—not just a tagline, since
-that's increasingly a deciding factor. Rows still marked
-<span class="cc-verify">unverified</span> came from an LLM first pass and haven't been confirmed yet.</p>
+<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">A quick read on overlap and contrast across
+{len(entities)} tools&mdash;not the full profile. Click a name, or "Full profile," to read the whole thing.
+Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
+confirmed yet.</p>
 
-<div style="overflow-x:auto;">
+{_cmp_summary_block_html(request, entities, "tool")}
+{_CMP_SWIPE_HINT_HTML}
+<div style="overflow-x:auto;" id="cmp-scroll-wrap">
 <table class="cc-table">
 <thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
 <tbody>
-{tags_row}
-{agent_section}
-{other_rows}
+{"".join(section_rows)}
+{competitors_row}
+{full_profile_row}
 </tbody>
 </table>
 </div>
 </div>
 
 <style>
-.cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
-.cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
-  color:var(--ink-soft);line-height:1.55;min-width:200px;}}
-.cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  min-width:140px;white-space:nowrap;background:var(--bg);}}
-.cc-empty{{color:var(--muted);font-style:italic;}}
-.cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);
-  background:var(--seafoam);padding:8px 16px;}}
-/* Brand-consistency pass (2026-08): was #92400e/#fef3c7 (off-palette amber)
-   — recolored to --coral-wash bg + --navy text (navy, not coral-deep,
-   because BRAND.md's own mechanical CI check bans coral/coral-deep text
-   under 18px — same sanctioned coral-wash+navy callout pairing), the same
-   small per-field
-   "unverified" badge language used everywhere this concept renders
-   (.tp-verify, .tool-desc-verify, the Communities compare page's own
-   .cc-verify below), deliberately distinct in size/shape from the larger
-   pill-shaped whole-record _review_status_pill_html so the two read as
-   different signal types even though they now share one color rule. */
-.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
-  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
-thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
-.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
-.comm-name:hover{{color:var(--accent);}}
-.tool-star{{font-size:14px;color:#b8860b;}}
-</style>"""
+{_CMP_SHARED_CSS}
+</style>
+<script>{_CMP_SWIPE_HINT_JS}</script>"""
     return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
@@ -7017,7 +7470,8 @@ def tools_software_find(request: Request):
 <p style="margin:0 0 12px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
 <h1 style="margin-bottom:6px;">Software matchmaker</h1>
-<p style="color:var(--muted);margin:0 0 24px;">Tell us what you're trying to solve and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+<p style="color:var(--muted);margin:0 0 8px;">Tell us what you're trying to solve and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+<p style="color:var(--muted);font-size:12.5px;margin:0 0 24px;">Conversations here don&rsquo;t carry over to Claude or MCP (and vice versa); each one starts fresh.</p>
 
 <div id="mm-thread"></div>
 
@@ -7194,7 +7648,6 @@ document.addEventListener('keydown', function(e) {
 
 @app.post("/tools/software/find/chat")
 async def tools_software_find_chat(request: Request):
-    from linklib.matchmaker import answer_software_question, MAX_FOLLOWUPS
     payload = await request.json()
     question = (payload.get("question") or "").strip()
     if not question:
@@ -7205,64 +7658,18 @@ async def tools_software_find_chat(request: Request):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
-
-        history: list[dict] = []
-        prior_questions = 0
-        if conversation_id:
-            turns = lib.list_matchmaker_conversation_turns(conversation_id)
-            if not turns:
-                raise HTTPException(status_code=404, detail="unknown conversation")
-            if turns[0]["session_id"] != session_id or turns[0]["user_id"] != user_id:
-                raise HTTPException(status_code=403, detail="not your conversation")
-            prior_questions = len(turns)
-            if prior_questions >= 1 + MAX_FOLLOWUPS:
-                body = {"capped": True,
-                        "answer": "We've reached the limit for this conversation. "
-                                  "Start a new question to keep going."}
-                resp = JSONResponse(body)
-                _set_visitor_cookie(request, resp, session_id)
-                return resp
-            for t in turns:
-                history.append({"role": "user", "content": t["question"]})
-                history.append({"role": "assistant", "content": t["answer"]})
-
-        # Same shared budget as the Communities matchmaker — kind='software'
-        # rows sum into the same per-user/per-session cap (matchmaker_cost_
-        # this_month[_session] doesn't filter by kind), a deliberate design
-        # choice (see matchmaker_questions in ARCHITECTURE.md) rather than a
-        # separate budget per matchmaker.
-        if user_id is not None:
-            cap = lib.get_effective_matchmaker_cap(user_id)
-            spent = lib.matchmaker_cost_this_month(user_id)
-        else:
-            cap = lib.get_default_matchmaker_cap()
-            spent = lib.matchmaker_cost_this_month_session(session_id)
-        if spent >= cap:
-            body = {"capped": True,
-                    "answer": (f"We've used ${spent:.2f} of this month's ${cap:.2f} matchmaker "
-                               "budget. It resets at the start of next month—in the meantime, "
-                               "browse the full directory at /tools/software.")}
-            resp = JSONResponse(body)
-            _set_visitor_cookie(request, resp, session_id)
-            return resp
-
-        ans = answer_software_question(lib, question, history=history)
-
-        row_id = lib.record_matchmaker_question(
-            session_id, "software", question, ans.text, ans.model,
-            user_id=user_id, conversation_id=conversation_id, turn_index=prior_questions,
-            input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
-            cache_creation_tokens=ans.cache_creation_tokens, cache_read_tokens=ans.cache_read_tokens,
-            cost_usd=ans.cost_usd,
-        )
-        new_conversation_id = conversation_id or str(row_id)
-        followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
-
-        body = {
-            "answer": ans.text,
-            "conversation_id": new_conversation_id,
-            "followups_left": followups_left,
-        }
+        # Orchestration (cap check, conversation-history rebuild, the
+        # answer_software_question() call, and matchmaker_questions
+        # recording — including the shared software+communities budget) is
+        # shared with the ask_matchmaker MCP tool — see
+        # webapp/matchmaker_orchestrator.py.
+        try:
+            body = run_matchmaker(lib, "software", user_id, session_id, question,
+                                   conversation_id=conversation_id)
+        except _MatchmakerUnknownConversationError:
+            raise HTTPException(status_code=404, detail="unknown conversation")
+        except _MatchmakerForbiddenConversationError:
+            raise HTTPException(status_code=403, detail="not your conversation")
         resp = JSONResponse(body)
         _set_visitor_cookie(request, resp, session_id)
         return resp
@@ -7308,15 +7715,16 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # Community Profile cards further down), which shows muted text to
     # everyone instead of hiding.
     # Competitors: a Logo/Name table rather than the old chip row (Phase F).
-    # It used to sit right below Bottom Line, both being "how does this
-    # stack up" content — Bottom Line itself moved up into the hero band
-    # (item 5, Aug 2026 UI pass), so Competitors is now the first thing in
-    # lower_band_left, ahead of sitting at the bottom of the right column.
-    # Competitors are always
-    # full `tools` rows (list_tool_competitors joins tool_competitors back to
-    # tools), never free text, so each row is a real profile link with its
-    # own logo_path — the same _logo_box fallback as F2/F3 covers a
-    # competitor that hasn't been through the Brandfetch backfill yet.
+    # Sidebar Consolidation pass (2026-09): Competitors moved into the
+    # sidebar (last of screenshot -> Key features -> Competitors) rather
+    # than sitting in the main narrative column below Bottom Line/
+    # Description/Agent taxonomy — it's typically a short reference list,
+    # not part of the tool's own story, so it belongs with the other
+    # scannable-reference cards. Competitors are always full `tools` rows
+    # (list_tool_competitors joins tool_competitors back to tools), never
+    # free text, so each row is a real profile link with its own
+    # logo_path — the same _logo_box fallback as F2/F3 covers a competitor
+    # that hasn't been through the Brandfetch backfill yet.
     competitors_block = ""
     if competitors:
         comp_rows = "".join(
@@ -7345,26 +7753,30 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # badge for either viewer. Now brought in line with Description/Agent
     # taxonomy below: content always renders, with a trailing review-state
     # badge.
-    # Spacing fix (item 4, empty-state visual QA pass): the seafoam callout
-    # had margin-bottom but no margin-top, so the category chips row right
-    # above it (tp-hero-cats, margin-top only) left it sitting flush against
-    # the chips with no breathing room above — equal 22px on both sides now,
-    # matching its own margin-bottom, in both the populated and empty
-    # states.
+    # Spacing (item 4, empty-state visual QA pass; revisited in the Sidebar
+    # Consolidation pass, 2026-09): the seafoam callout used to sit inline in
+    # the hero, between the category chips and the action row, where its own
+    # margin-top/margin-bottom:22px gave it equal breathing room on both
+    # sides. It now opens the main column's tp-col-stack instead (Sidebar
+    # Consolidation — see the tp-band comment below), whose own `gap:22px`
+    # already spaces every stacked card evenly; a self-margin on top of that
+    # gap would double the space above/below this one card versus its
+    # neighbors. So no margin here — the stack's gap alone produces the same
+    # equal spacing, just via the shared mechanism every other card in the
+    # column uses too.
     _diff_unverified = bool(tool.get("competitive_differentiation_needs_verification"))
     differentiation_block = ""
     if (tool.get("competitive_differentiation") or "").strip():
         _diff_badge = _review_state_badge(_diff_unverified, authed, "tp-verify")
         differentiation_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
-  border-radius:0 0 10px 10px;padding:18px 22px;margin-top:22px;margin-bottom:22px;">
+  border-radius:0 0 10px 10px;padding:18px 22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_diff_badge}</div>
-  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(tool['competitive_differentiation'])}</p>
+  <div class="narrative-md" style="color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{render_narrative_markdown(tool['competitive_differentiation'])}</div>
 </div>"""
     else:
         _diff_copy = gates.EMPTY_COPY["tool_differentiation"]
-        _diff_empty_html = _empty_state_card("Bottom line", _empty_state_text(
+        differentiation_block = _empty_state_card("Bottom line", _empty_state_text(
             _diff_copy.visitor_text, _diff_copy.admin_suffix, authed))
-        differentiation_block = f'<div style="margin-top:22px;margin-bottom:22px;">{_diff_empty_html}</div>'
 
     # Radical-transparency review standard (supersedes the old Abacum-
     # fabrication-finding publish gate): `agent_taxonomy_needs_verification`
@@ -7395,7 +7807,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
         _at_badge = _review_state_badge(_at_unverified, authed, "tp-verify")
         agent_taxonomy_block = f"""<div class="tp-card">
   <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy{_at_badge}</h2>
-  <p style="margin:0;white-space:pre-wrap;">{_esc(tool['agent_taxonomy_note'])}</p>
+  <div class="narrative-md">{render_narrative_markdown(tool['agent_taxonomy_note'])}</div>
   {_at_citations_html}
 </div>"""
     else:
@@ -7417,12 +7829,18 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # redundant sub-heading repeating what the tool already is.
     features_card = _software_key_features_card(feature_links)
 
-    # Category tags (Phase F4): moved from their own right-column card down
-    # next to the Visit/Compare/Edit button group instead — the card by
-    # itself was one of the two things (along with the missing logo) leaving
-    # the hero band visibly sparser than the screenshot card beside it. Chips
-    # render right after tp-hero-actions in source order, so the same
-    # placement holds on mobile once the two-column grid collapses to one.
+    # Category tags: Phase F4 moved these from their own right-column card
+    # to sit next to the Visit/Compare/Edit button group; the Sidebar
+    # Consolidation pass (2026-09) moved them again, this time to sit
+    # directly under the tool name/above the subhead — mirroring where
+    # Compare already places entity tags (`_cmp_tag_chips_html`, right under
+    # the linked name) — since a category is an identity fact about the
+    # tool, not something that belongs down by the action buttons. Compare's
+    # tags distinguish shared-vs-unique across compared entities
+    # (`.cmp-tag-shared`/`.cmp-tag-unique`); a solo profile page has no such
+    # comparison to draw, so this keeps the existing solid-seafoam
+    # `.tp-cat-pill` treatment rather than adopting Compare's outline
+    # variant, which has no meaning here.
     cats = tool.get("categories") or []
     cats_html = ("".join(f'<span class="tp-cat-pill">{_esc(c)}</span>' for c in cats)
                  if cats else "")
@@ -7587,11 +8005,15 @@ function submitIntroForm() {{
     # also visible on the profile VIEW page itself, not just the edit page
     # and the admin list. Admin-only, same _is_authed gating as every other
     # admin-facing element on this page (the meta line, the Edit button).
-    # Placement (2026-08 follow-up, per Brian's review of the first draft):
-    # moved from the bottom of the page (after all card content) to the
-    # hero, above the category pills — computed here, before hero_text is
-    # built, so it can be spliced in above tp-hero-cats rather than buried
-    # under everything else.
+    # Placement (2026-08 follow-up, per Brian's review of the first draft;
+    # revisited by the Sidebar Consolidation pass, 2026-09): moved from the
+    # bottom of the page to the hero — computed here, before hero_text is
+    # built, so it can be spliced in right after the header row (name/tags/
+    # subhead) and before the action row, rather than buried under
+    # everything else. Category tags moved out of this same hero flow in
+    # the Sidebar Consolidation pass (now directly under the name instead —
+    # see the cats_html/hero_text comments below), so this no longer sits
+    # "above tp-hero-cats" the way it once did.
     review_status_html = ""
     if authed:
         _needs_review = bool(tool.get("needs_review"))
@@ -7611,32 +8033,37 @@ function submitIntroForm() {{
     # monogram fallback as the directory cards and Competitors table when
     # logo_path is still empty.
     tool_logo_url = _tool_logo_url(tool)
-    # Item 5 (Aug 2026 UI pass): Bottom Line moved up into the hero, right
-    # after the category pills and before the action row — was previously
-    # the first thing in lower_band_left, which meant crossing into a
-    # separate .tp-band (its own margin-top:22px) after the pills' own
-    # margin-top:14px, reading as an oddly large gap for two adjacent
-    # "about this tool" facts. Category pills moved up alongside it (were
-    # previously the last thing in hero_text, after the action row) so the
-    # two stay adjacent with only their own small margins between them,
-    # rather than splitting Bottom Line from its nearest context by the
-    # width of the whole Visit/Compare/Edit row.
+    # Sidebar Consolidation pass (2026-09) — full rework of the hero/band
+    # structure, replacing the Aug 2026 UI pass's arrangement (Bottom Line +
+    # category pills in the hero, Competitors paired with Key features in a
+    # two-column band below). Two problems drove it, both from Brian's live
+    # review of the production Abacum page: (1) Competitors (typically a
+    # short list) was paired with Key features (typically long) in a
+    # two-column row, leaving visible whitespace under the shorter column
+    # and stranding Description as a disconnected full-width block below
+    # both; (2) the category tag sat alone between the admin review pills
+    # and the Bottom line callout, orphaned with no clear grouping.
+    #
+    # Fix: match the Community profile page's already-proven sidebar
+    # pattern (narrative content in a wide main column, reference/lookup
+    # content in a narrower sidebar) instead of inventing a new one. Category
+    # tags move to sit directly under the name, above the subhead — mirroring
+    # where Compare places entity tags (see the cats_html comment above).
+    # The hero itself is now full-width, holding only identity (name, tags,
+    # subhead) and actions (review status, Visit/Warm intro/Compare/Edit) —
+    # screenshot no longer sits beside it (that was the *hero*/hero pairing;
+    # it now opens the sidebar instead, alongside Key features and
+    # Competitors, per Brian's approved Step 0 proposal).
     hero_text = f"""<div class="tp-header-row">
   {_logo_box(tool['name'], tool_logo_url, 56, radius=12)}
   <div>
     <h1 class="tp-h1">{_esc(tool['name'])}{advisor_mark_html}</h1>
+    {f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}
     {f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
   </div>
 </div>
 {review_status_html}
-{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}
-{differentiation_block}
 <div class="tp-hero-actions">{action_row}</div>"""
-
-    top_band = f"""<div class="tp-band">
-  <div>{hero_text}</div>
-  <div>{screenshot_block}</div>
-</div>"""
 
     # white-space:pre-wrap (voice enforcement + structure pass, 2026-08) — see
     # the identical comment on agent_taxonomy_block above; same reasoning
@@ -7646,7 +8073,7 @@ function submitIntroForm() {{
         _desc_badge = _review_state_badge(_desc_unverified, authed, "tp-verify")
         description_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Description{_desc_badge}</h2>
-  <p style="margin:0;white-space:pre-wrap;">{_esc(tool['description'])}</p>
+  <div class="narrative-md">{render_narrative_markdown(tool['description'])}</div>
   {_citations_list_html(description_citations, cap=5)}
 </div>"""
     else:
@@ -7658,43 +8085,39 @@ function submitIntroForm() {{
         description_card = _empty_state_card("Description", _empty_state_text(
             _desc_copy.visitor_text, _desc_copy.admin_suffix, authed))
 
-    # Competitors sits right under Bottom Line now (Phase F6), not at the
-    # bottom of the right column — both are "how does this stack up" content,
-    # so grouping them reads as one thought instead of two.
-    #
-    # F5 follow-up: Categories and Competitors used to be what filled this
-    # right column; now that both moved (F4 to the hero, F6 up next to
-    # Bottom Line), Features is the column's only remaining occupant — and
-    # for a public visitor on a tool with no features yet, that's nothing at
-    # all, which is a wasted-whitespace regression, not a fix. Collapse to a
-    # single full-width column whenever the right side would otherwise be
-    # empty, rather than leaving a dead 1fr gap beside a full left column.
-    # Bottom Line (differentiation_block) moved into hero_text above (item 5,
-    # Aug 2026 UI pass) — no longer the first thing here.
-    lower_band_left = f"""{competitors_block}
+    # Main column (narrative, continuous flow) vs. sidebar (reference/lookup
+    # content) — the same "reference sidebar" pattern the Community profile
+    # page already established (Details/Categories/Similar communities
+    # beside its own narrative column). Bottom line -> Description -> Agent
+    # taxonomy read as one continuous story about the tool; screenshot ->
+    # Key features -> Competitors are each independently-scannable reference
+    # material, not something a reader works through top to bottom. The
+    # screenshot card always renders something (a "No screenshot yet" frame
+    # when none is captured — see _screenshot_card_html), so unlike the old
+    # lower_band this sidebar is never empty and needs no single-column
+    # collapse branch.
+    main_col = f"""{differentiation_block}
 {description_card}
 {agent_taxonomy_block}"""
-    if features_card.strip():
-        lower_band = f"""<div class="tp-band">
+    sidebar_col = f"""{screenshot_block}
+{features_card}
+{competitors_block}"""
+    main_band = f"""<div class="tp-band">
   <div class="tp-col-stack">
-    {lower_band_left}
+    {main_col}
   </div>
   <div class="tp-col-stack">
-    {features_card}
+    {sidebar_col}
   </div>
 </div>"""
-    else:
-        lower_band = f"""<div class="tp-col-stack" style="margin-top:22px;">
-    {lower_band_left}
-  </div>"""
 
     # review_status_html is now computed above, before hero_text, and
-    # spliced into the hero above the category pills (item 4, 2026-08
+    # spliced into the hero right after the header row (item 4, 2026-08
     # placement follow-up) — see that comment for the full reasoning.
 
     main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
-{top_band}
-{lower_band}
+{hero_text}
+{main_band}
 {f'<p style="font-size:13px;color:var(--muted);margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}
 {footnote_block}"""
 
@@ -7722,7 +8145,12 @@ function submitIntroForm() {{
 .tp-fn-mark{{font-size:18px;color:var(--navy-light);font-weight:600;margin-left:3px;transform:translateY(2px);line-height:1;}}
 .tp-subhead{{font-size:17px;color:var(--ink-soft);margin:0 0 18px;overflow-wrap:break-word;word-break:break-word;}}
 .tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
-.tp-hero-cats{{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}}
+/* Sidebar Consolidation pass (2026-09): tags moved from mid-hero (below the
+   action row) to directly under the name — this rule's margin shrank to
+   match (was margin-top:14px, spacing it away from the action row above
+   it; now it sits between .tp-h1's own 8px margin-bottom and .tp-subhead
+   right below, so a small margin-bottom is what's needed instead). */
+.tp-hero-cats{{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px;}}
 .tp-cat-pill{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
 .tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
@@ -7734,6 +8162,7 @@ function submitIntroForm() {{
 .tp-card-h small{{display:block;font-family:var(--font-body);font-weight:500;font-size:12px;color:var(--muted);
   text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}}
 .tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;overflow-wrap:break-word;word-break:break-word;}}
+{_NARRATIVE_MD_CSS}
 .tp-shot-card{{padding:12px;text-align:center;position:relative;overflow:visible;}}
 .tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
   aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
@@ -8581,46 +9010,24 @@ renderCommunities(ALL_COMMUNITIES);
 def _community_geo_line(c: dict) -> str:
     """Python mirror of the /tools/communities card's commGeoLine JS helper,
     for server-rendering the same geography summary on the profile page.
-    An unresearched reach must return the verification flag rather than
-    falling through to the "no local_markets" branch below, which would
-    otherwise render a guessed "National · online" as if it were confirmed."""
-    if c.get("reach") == _NEEDS_VERIFICATION:
-        return "Needs verification"
-    local_markets = (c.get("local_markets") or "").strip()
-    reach = c.get("reach") or "National"
-    if reach == "Regional":
-        return local_markets if local_markets else "Regional"
-    if not local_markets:
-        return "Global" if reach == "Global" else "National · online"
-    return f"{reach} · {local_markets}"
+    Compare Redesign Phase 1 moved the actual logic to
+    `linklib.compare.community_geo_line` (a pure function over a community
+    dict, no reason for it to be webapp-private) so the profile page and
+    Compare's Key facts band can never drift apart — this stays as a thin
+    re-export for the one pre-existing call site below, translating the
+    shared module's raw `NEEDS_VERIFICATION` sentinel back into this
+    function's own pre-existing "Needs verification" return value."""
+    line = compare.community_geo_line(c)
+    return "Needs verification" if line == _NEEDS_VERIFICATION else line
 
 
-# The deep profile fields, in the order the public page presents them —
-# verdict up top as the scannable takeaway, then fit, then the practical
-# details. (label, key, is_multiline) — founded_year is handled separately
-# since it's numeric, not a text block.
-_COMMUNITY_PROFILE_PUBLIC_FIELDS = [
-    ("Ideal member", "ideal_member"),
-    ("Who should skip it", "anti_fit"),
-    ("Value proposition", "value_prop"),
-    ("Format, in practice", "format_reality"),
-    ("Engagement level", "engagement_level"),
-    ("Cost vs. value", "cost_value_verdict"),
-    ("Application friction", "application_friction"),
-    ("Sponsor relationship", "sponsor_relationship_note"),
-    ("Business model", "business_model"),
-    ("Notable members", "notable_members"),
-    ("Public criticism", "public_criticism"),
-]
-
-
-# Themed grouping for the redesigned Communities profile page (Phase 3b) —
-# _COMMUNITY_PROFILE_PUBLIC_FIELDS above stays untouched and is still used
-# by the old /tools/communities/compare page (a flat label/value table,
-# Phase 8.5's job to rebuild, not this phase's). Fourteen flat sections read
-# as a wall of text regardless of how many cards they're split across, so
-# this groups them by theme instead — four cards, each with real breathing
-# room, mirroring the Software profile page's one-concept-per-card pattern.
+# Themed grouping for the Community profile page (Phase 3b) and Compare
+# (Compare Redesign Phase 1 — the old flat _COMMUNITY_PROFILE_PUBLIC_FIELDS
+# list this constant's own comment used to call out as "Phase 8.5's job to
+# rebuild" is gone; Compare now groups by this same theme, not a flat list).
+# Moved to linklib/compare.py (COMMUNITY_PROFILE_GROUPS) so the profile page
+# and Compare share one definition instead of two that could drift — this
+# name stays as a local alias for the one pre-existing call site below.
 # event_style has no row of its own — merged into "Format, in practice"
 # text at render time, since it's texture on that fact, not a new one.
 # platform_type/meeting_format fold into the Details card's Format row
@@ -8628,31 +9035,12 @@ _COMMUNITY_PROFILE_PUBLIC_FIELDS = [
 # cpe_eligible is a single Details-card line, not a section — see
 # _community_details_card. Notable members / Public criticism don't name-match
 # either of Brian's four groups perfectly; placed here as the closest
-# semantic fit (social proof / trade-off caveat).
-_COMMUNITY_PROFILE_GROUPS = [
-    ("Who it's for", [
-        ("Ideal member", "ideal_member"),
-        ("Who should skip it", "anti_fit"),
-        ("Who it targets", "seniority_band"),
-    ]),
-    ("What you get", [
-        ("Value proposition", "value_prop"),
-        ("Primary purpose", "primary_purpose"),
-        ("Resources included", "resources_included"),
-        ("Notable members", "notable_members"),
-    ]),
-    ("How it works", [
-        ("Format, in practice", "format_reality"),
-        ("Engagement level", "engagement_level"),
-        ("Application friction", "application_friction"),
-    ]),
-    ("Cost & structure", [
-        ("Cost vs. value", "cost_value_verdict"),
-        ("Sponsor relationship", "sponsor_relationship_note"),
-        ("Business model", "business_model"),
-        ("Public criticism", "public_criticism"),
-    ]),
-]
+# semantic fit (social proof / trade-off caveat). Stage focus/Jobs program/
+# Individual or team (Surface Hidden Community Profile Fields, 2026-09) were
+# the last three Quick-facts fields with no public home at all — see
+# linklib/compare.py's own comment on COMMUNITY_PROFILE_GROUPS for the
+# placement reasoning.
+_COMMUNITY_PROFILE_GROUPS = compare.COMMUNITY_PROFILE_GROUPS
 
 
 # Native gap-collection form (Phase 5): replaces the old /community
@@ -8924,19 +9312,15 @@ def tools_communities_compare(request: Request, ids: str = ""):
             if c and c.get("approved"):
                 communities.append(c)
         profiles = {c["id"]: (lib.get_community_profile(c["id"]) or {}) for c in communities}
+        # Communities' Citations-API grounding fix is ONE shared citation
+        # set for the whole 23-field draft (field_name="community_profile"),
+        # not one per field — same as the profile page's single Sources
+        # list. Similar communities is the profile page's own curated
+        # cross-link list, reused verbatim.
+        citations = {c["id"]: lib.get_entity_citations("community", c["id"], "community_profile") for c in communities}
+        similar = {c["id"]: lib.list_community_competitors(c["id"]) for c in communities}
     finally:
         lib.close()
-
-    # Radical-transparency review standard (same whole-profile flag as
-    # /tools/communities/{slug}, applied the same way): `needs_review=1`
-    # used to hide that community's ENTIRE profile draft from a public
-    # visitor here — display_profiles swapped to {} for them. It now always
-    # shows every field to every viewer; `_profile_unverified_ids` still
-    # tracks which communities carry an unreviewed profile so `_profile_cell`
-    # below can badge them ("under review" for a visitor, "unverified,
-    # visible to visitors" for an admin) instead of hiding anything.
-    _profile_unverified_ids = {cid for cid, p in profiles.items() if p.get("needs_review")}
-    display_profiles = profiles
 
     back_link = '<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>'
 
@@ -8950,127 +9334,264 @@ to compare them side by side. Check the box on any card, then use the compare ba
 </div>"""
         return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
-    def _cell(text: str) -> str:
-        text = (text or "").strip()
-        if not text:
-            return '<td class="cc-cell cc-empty">Not yet available.</td>'
-        if text == _NEEDS_VERIFICATION:
-            return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
-        return f'<td class="cc-cell">{_esc(text)}</td>'
+    entities, tag_diff = compare.build_communities_compare(communities, profiles, citations, similar)
 
-    def _cost_badge(c: dict) -> str:
-        if c["cost_band"] == _NEEDS_VERIFICATION:
-            return '<span class="comm-verify" style="display:inline-block;margin-top:6px;">Needs verification</span>'
-        return f'<span class="comm-cost" style="display:inline-block;margin-top:6px;">{_esc(c["cost_band"])}</span>'
-
+    # Tags render directly under each entity's name now (Compare Redesign
+    # Phase 1 follow-up), same as Software — see _cmp_tag_chips_html.
+    # Communities' Key facts band stays, holding only Region/Access/
+    # Sponsor/Cost/Founded, unaffected by the tag move.
     header_cells = "".join(
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
-    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if c.get('featured') else ''}
-    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if c.get('advisor') else ''}
+    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if e.promoted else ''}
+    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if e.advisor else ''}
   </div>
-  <a href="/tools/communities/{_esc(c['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(c['name'])}</a>
-  {_cost_badge(c)}
+  <a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(e.name)}</a>
+  {_cmp_tag_chips_html(e, tag_diff)}
 </th>'''
-        for c in communities
+        for e in entities
     )
 
-    def _row(label: str, values: list[str]) -> str:
-        if not gates.any_populated(values):
-            return ""
-        return f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>' + "".join(_cell(v) for v in values) + "</tr>"
-
-    directory_rows = (
-        _row("Region", [_community_geo_line(c) for c in communities])
-        + _row("Access", [c.get("access", "") for c in communities])
-        + _row("Sponsor", [
-            (c["sponsorship_type"] + (f" ({c['sponsor_name']})" if c.get("sponsor_name") else ""))
-            if c.get("sponsorship_type") else ""
-            for c in communities
-        ])
-        + _row("Cost detail", [c.get("cost_note", "") for c in communities])
+    key_facts_row = (
+        _cmp_section_band_row_html("Key facts", len(entities))
+        + '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(f'<td class="cc-cell">{_cmp_key_facts_cell_html(e)}</td>' for e in entities)
+        + "</tr>"
     )
 
-    def _profile_cell(text: str, unverified: bool) -> str:
-        text = (text or "").strip()
-        if text == _NEEDS_VERIFICATION:
-            return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
-        # .cc-verify (radical-transparency review badge) is a DIFFERENT
-        # concept from .comm-verify (the data-completeness flag above) —
-        # these were incorrectly sharing one style once, see the .cc-verify
-        # definition's own comment for the split; kept apart here too. The
-        # sentinel check above has to run first, before _compare_cell_html
-        # ever sees the text — that's a different gate entirely, not part
-        # of the review-state module.
-        return _compare_cell_html(
-            text, unverified, authed,
-            gates.COMPARE_EMPTY_LABELS["community_profile_field"],
-            pre_wrap=True,
-        )
-
-    def _profile_row(label: str, values: list) -> str:
-        if not gates.any_populated(values):
-            return ""
+    # Grouped sections (Compare Redesign Phase 1 — collapses the old flat
+    # 11-field list into the same 4 themed cards the profile page already
+    # groups by, per Step 0's approved plan, instead of 11 ungrouped rows).
+    # Bottom line (verdict_summary) first, then the 4 COMMUNITY_PROFILE_GROUPS
+    # themes — build_communities_compare builds this same fixed order for
+    # every entity, so zipping by index is safe.
+    _section_empty_keys = ["community_bottom_line"] + ["community_profile_group"] * len(compare.COMMUNITY_PROFILE_GROUPS)
+    section_rows = []
+    for idx, section_title in enumerate(s.title for s in entities[0].sections):
+        empty_key = _section_empty_keys[idx]
         cells = "".join(
-            _profile_cell(v, c["id"] in _profile_unverified_ids)
-            for v, c in zip(values, communities)
+            f'<td class="cc-cell">{_cmp_section_cell_html(e.sections[idx], authed, empty_key)}</td>'
+            for e in entities
         )
-        return f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>{cells}</tr>'
+        section_rows.append(
+            _cmp_section_band_row_html(section_title, len(entities))
+            + f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
+        )
 
-    profile_rows = "".join(
-        _profile_row(label, [display_profiles.get(c["id"], {}).get(key, "") for c in communities])
-        for label, key in _COMMUNITY_PROFILE_PUBLIC_FIELDS
+    similar_row = (
+        _cmp_section_band_row_html("Similar communities", len(entities))
+        + '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(
+            f'<td class="cc-cell">{_cmp_chip_list_html(e.chip_lists[0], authed)}</td>'
+            for e in entities
+        )
+        + "</tr>"
     )
-    founded_row = _profile_row("Founded", [
-        str(display_profiles.get(c["id"], {}).get("founded_year") or "") for c in communities
-    ])
+
+    full_profile_row = (
+        '<tr><td class="cc-cell cc-label"></td>'
+        + "".join(
+            f'<td class="cc-cell"><a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" '
+            f'class="cmp-full-link">Full profile &rarr;</a></td>'
+            for e in entities
+        )
+        + "</tr>"
+    )
 
     body = f"""<div class="page page-grid">
 {back_link}
 <h1 style="margin:0;">Compare communities</h1>
-<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Side by side, the same fields you'd see on each
-community's own profile page.</p>
+<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">A quick read on overlap and contrast across
+{len(entities)} communities&mdash;not the full profile. Click a name, or "Full profile," to read the whole thing.
+Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
+confirmed yet.</p>
 
-<div style="overflow-x:auto;">
+{_cmp_summary_block_html(request, entities, "community")}
+{_CMP_SWIPE_HINT_HTML}
+<div style="overflow-x:auto;" id="cmp-scroll-wrap">
 <table class="cc-table">
 <thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
 <tbody>
-{directory_rows}
-{profile_rows}
-{founded_row}
+{key_facts_row}
+{"".join(section_rows)}
+{similar_row}
+{full_profile_row}
 </tbody>
 </table>
 </div>
 </div>
 
 <style>
-.cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
-.cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
-  color:var(--ink-soft);line-height:1.55;min-width:200px;}}
-.cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  min-width:140px;white-space:nowrap;background:var(--bg);}}
-.cc-empty{{color:var(--muted);font-style:italic;}}
-thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
-.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
-.comm-name:hover{{color:var(--navy);}}
+{_CMP_SHARED_CSS}
 .comm-star{{font-size:14px;color:#b8860b;}}
-.comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
-.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
-/* Brand-consistency pass (2026-08) — .comm-verify (above) is a DIFFERENT
-   concept from "unverified—hidden from visitors": it's the dashed/muted
-   "field was never auto-fill-researched" flag (_verify_html's
-   _NEEDS_VERIFICATION sentinel), which stays visible (not gated) and
-   deliberately quiet since it's a data-completeness note, not a
-   publish-gate warning — left untouched. _profile_cell below was
-   incorrectly reusing this same class for the OTHER, publish-gated
-   concept too (a real pre-existing bug: two different meanings sharing
-   one style). Split: this new .cc-verify is the small coral-wash/navy
-   badge every other "unverified—hidden from visitors" surface
-   uses (.tp-verify, the Software compare page's own .cc-verify, etc.). */
-.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
-  background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
-</style>"""
+</style>
+<script>{_CMP_SWIPE_HINT_JS}</script>"""
     return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+# Compare Redesign Phase 2 — the AI comparison summary's feedback mechanism.
+# Public, no token/login required, same trust level as /contact (there's
+# nothing to abuse beyond spam — a stored free-text note reviewed by hand,
+# not an action that costs money or changes anything on submit).
+@app.get("/compare-summary/feedback", response_class=HTMLResponse)
+def compare_summary_feedback_form(request: Request, type: str = "", ids: str = "", hash: str = ""):
+    if type not in ("tool", "community") or not ids or not hash:
+        raise HTTPException(status_code=400, detail="Missing or invalid comparison reference.")
+    lib = _lib()
+    try:
+        cached = lib.get_compare_summary(type, ids, hash)
+    finally:
+        lib.close()
+    if not cached:
+        raise HTTPException(status_code=404, detail="That comparison summary is no longer available.")
+    back_href = f"/tools/{'software' if type == 'tool' else 'communities'}/compare?ids={ids}"
+    body = f"""<div class="page page-form">
+<p style="margin:0 0 4px;"><a href="{_esc(back_href)}" style="font-size:13px;color:var(--muted);">&larr; Back to comparison</a></p>
+<h1>Flag an issue</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">This is the AI-generated summary you're flagging:</p>
+<blockquote style="border-left:3px solid var(--seafoam-mid);margin:0 0 20px;padding:4px 0 4px 16px;
+  color:var(--ink-soft);font-style:italic;">{_esc(cached['summary'])}</blockquote>
+<form method="post" action="/compare-summary/feedback">
+<input type="hidden" name="type" value="{_esc(type)}">
+<input type="hidden" name="ids" value="{_esc(ids)}">
+<input type="hidden" name="hash" value="{_esc(hash)}">
+<label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">What's wrong with this summary? <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+<textarea name="note" rows="4" style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;
+  font:inherit;font-size:14px;background:var(--bg);resize:vertical;margin-bottom:16px;"></textarea>
+<button type="submit" class="btn">Submit feedback</button>
+</form>
+</div>"""
+    return HTMLResponse(_page("Flag an issue—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.post("/compare-summary/feedback")
+async def compare_summary_feedback_submit(request: Request):
+    form = await request.form()
+    entity_type = (form.get("type") or "").strip()
+    entity_ids = (form.get("ids") or "").strip()
+    content_hash = (form.get("hash") or "").strip()
+    note = (form.get("note") or "").strip()
+    if entity_type not in ("tool", "community") or not entity_ids or not content_hash:
+        raise HTTPException(status_code=400, detail="Missing or invalid comparison reference.")
+    lib = _lib()
+    try:
+        cached = lib.get_compare_summary(entity_type, entity_ids, content_hash)
+        summary_text = cached["summary"] if cached else ""
+        lib.add_compare_summary_feedback(entity_type, entity_ids, content_hash, summary_text, note)
+    finally:
+        lib.close()
+    back_href = f"/tools/{'software' if entity_type == 'tool' else 'communities'}/compare?ids={entity_ids}"
+    body = f"""<div class="page page-form">
+<h1>Thanks—flagged for review.</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">I'll take a look.</p>
+<a href="{_esc(back_href)}" class="btn btn-ghost">Back to comparison</a>
+</div>"""
+    return HTMLResponse(_page("Thanks—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+def _reviewed_toggle_html(is_reviewed: bool, toggle_url: str, *, one_way: bool = False,
+                           reviewed_at: str = "", form_style: str = "") -> tuple[str, str]:
+    """Shared rendering for the "has a human confirmed this row" idiom —
+    a badge (or, in one_way mode, plain text) plus a "Mark reviewed" action.
+    See all callers of _reviewed_toggle_html for the current call sites.
+
+    Two shapes, not one, since the underlying value genuinely differs:
+      - Two-way (default): a boolean that flips back and forth
+        (community-gaps, ask-feedback) — a seafoam/alert pill badge, and a
+        button that always reads "Mark unreviewed"/"Mark reviewed" depending
+        on current state.
+      - one_way=True: a timestamp set once and never un-set
+        (compare-summary-feedback) — no pill (there's nothing to toggle back
+        to, so a badge would overstate the mechanism), just plain muted
+        "Reviewed {date}" text once set, else the same kind of button minus
+        the toggle-back option.
+    `form_style` lets a caller position the action form exactly as its own
+    row layout requires (each of the three current call sites uses a
+    different one) without baking a specific layout choice into the shared
+    helper. Returns (badge_html, action_html) so a caller can place the two
+    pieces independently, exactly where its own row already puts them —
+    badge_html is "" in one_way mode, since that shape has no separate
+    badge at all."""
+    style_attr = f' style="{form_style}"' if form_style else ""
+    if one_way:
+        if is_reviewed:
+            when = f" {_esc(reviewed_at[:10])}" if reviewed_at else ""
+            action_html = f'<span style="color:var(--muted);font-size:12px;">Reviewed{when}</span>'
+        else:
+            action_html = (f'<form method="post" action="{toggle_url}"{style_attr}>'
+                            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;">Mark reviewed</button></form>')
+        return "", action_html
+    badge_html = (
+        '<span style="font-size:12px;font-weight:700;color:var(--seafoam-deep);background:var(--seafoam-wash);border-radius:999px;padding:3px 12px;white-space:nowrap;">Reviewed</span>'
+        if is_reviewed else
+        '<span style="font-size:12px;font-weight:700;color:var(--alert);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">New</span>'
+    )
+    action_html = (f'<form method="post" action="{toggle_url}"{style_attr}>'
+                   f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">'
+                   f'{"Mark unreviewed" if is_reviewed else "Mark reviewed"}</button></form>')
+    return badge_html, action_html
+
+
+@app.get("/admin/compare-summary-feedback", response_class=HTMLResponse)
+def admin_compare_summary_feedback(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        rows = lib.list_compare_summary_feedback(include_reviewed=True)
+    finally:
+        lib.close()
+
+    def _row_html(r: dict) -> str:
+        back_href = f"/tools/{'software' if r['entity_type'] == 'tool' else 'communities'}/compare?ids={r['entity_ids']}"
+        reviewed = bool(r["reviewed_at"])
+        _, action = _reviewed_toggle_html(
+            reviewed, f'/admin/compare-summary-feedback/{r["id"]}/mark-reviewed',
+            one_way=True, reviewed_at=r["reviewed_at"] or "",
+        )
+        return f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(r['created_at'][:10])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            <a href="{_esc(back_href)}" target="_blank" rel="noopener">{_esc(r['entity_type'])} &middot; {_esc(r['entity_ids'])}</a>
+          </td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-style:italic;color:var(--ink-soft);">{_esc(r['summary_text'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:pre-wrap;">{_esc(r['note']) or '<span style="color:var(--muted);">&mdash;</span>'}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{action}</td>
+        </tr>"""
+
+    rows_html = "".join(_row_html(r) for r in rows) or (
+        '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No feedback submitted yet.</td></tr>'
+    )
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Compare summary feedback</h1>
+<p style="color:var(--muted);margin:8px 0 20px;">Flags on the AI-generated Compare-page overlap/contrast summary. No automated action&mdash;review each and mark it reviewed once handled.</p>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Comparison</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Summary flagged</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Note</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
+</tr></thead>
+<tbody>{rows_html}</tbody>
+</table>
+</div>
+</div>"""
+    return HTMLResponse(_page("Compare summary feedback—Admin", "", body, role=_role(request)))
+
+
+@app.post("/admin/compare-summary-feedback/{feedback_id}/mark-reviewed")
+def admin_compare_summary_feedback_mark_reviewed(request: Request, feedback_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.mark_compare_summary_feedback_reviewed(feedback_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/compare-summary-feedback", status_code=303)
 
 
 # Chat Matchmaker (linklib/matchmaker.py): replaces the old 4-question quiz at
@@ -9089,7 +9610,8 @@ def tools_communities_find(request: Request):
 <p style="margin:0 0 12px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
 <h1 style="margin-bottom:6px;">Community matchmaker</h1>
-<p style="color:var(--muted);margin:0 0 24px;">Tell us what you're looking for and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+<p style="color:var(--muted);margin:0 0 8px;">Tell us what you're looking for and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+<p style="color:var(--muted);font-size:12.5px;margin:0 0 24px;">Conversations here don&rsquo;t carry over to Claude or MCP (and vice versa); each one starts fresh.</p>
 
 <div id="mm-thread"></div>
 
@@ -9266,7 +9788,6 @@ document.addEventListener('keydown', function(e) {
 
 @app.post("/tools/communities/find/chat")
 async def tools_communities_find_chat(request: Request):
-    from linklib.matchmaker import answer_communities_question, MAX_FOLLOWUPS
     payload = await request.json()
     question = (payload.get("question") or "").strip()
     if not question:
@@ -9277,69 +9798,22 @@ async def tools_communities_find_chat(request: Request):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
-
-        # Follow-up turn: rebuild history from the conversation's recorded
-        # rows, same server-side-source-of-truth pattern as POST /ask.
-        # Ownership requires BOTH the session cookie and (when set) the
-        # logged-in user_id to match — the cookie is the primary key since
-        # this page needs no login, but a signed-in conversation additionally
-        # can't be picked up by a different signed-in user sharing a device.
-        history: list[dict] = []
-        prior_questions = 0
-        if conversation_id:
-            turns = lib.list_matchmaker_conversation_turns(conversation_id)
-            if not turns:
-                raise HTTPException(status_code=404, detail="unknown conversation")
-            if turns[0]["session_id"] != session_id or turns[0]["user_id"] != user_id:
-                raise HTTPException(status_code=403, detail="not your conversation")
-            prior_questions = len(turns)
-            if prior_questions >= 1 + MAX_FOLLOWUPS:
-                body = {"capped": True,
-                        "answer": "We've reached the limit for this conversation. "
-                                  "Start a new question to keep going."}
-                resp = JSONResponse(body)
-                _set_visitor_cookie(request, resp, session_id)
-                return resp
-            for t in turns:
-                history.append({"role": "user", "content": t["question"]})
-                history.append({"role": "assistant", "content": t["answer"]})
-
-        # Dollar-based rate limit, mirroring POST /ask — but this page needs
-        # no login, so the common case has no user_id to key off of. Anonymous
-        # spend is tracked (and capped) by the cfo_visitor session cookie
-        # instead; a signed-in visitor still gets their own per-user cap.
-        if user_id is not None:
-            cap = lib.get_effective_matchmaker_cap(user_id)
-            spent = lib.matchmaker_cost_this_month(user_id)
-        else:
-            cap = lib.get_default_matchmaker_cap()
-            spent = lib.matchmaker_cost_this_month_session(session_id)
-        if spent >= cap:
-            body = {"capped": True,
-                    "answer": (f"We've used ${spent:.2f} of this month's ${cap:.2f} matchmaker "
-                               "budget. It resets at the start of next month—in the meantime, "
-                               "browse the full directory at /tools/communities.")}
-            resp = JSONResponse(body)
-            _set_visitor_cookie(request, resp, session_id)
-            return resp
-
-        ans = answer_communities_question(lib, question, history=history)
-
-        row_id = lib.record_matchmaker_question(
-            session_id, "community", question, ans.text, ans.model,
-            user_id=user_id, conversation_id=conversation_id, turn_index=prior_questions,
-            input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
-            cache_creation_tokens=ans.cache_creation_tokens, cache_read_tokens=ans.cache_read_tokens,
-            cost_usd=ans.cost_usd,
-        )
-        new_conversation_id = conversation_id or str(row_id)
-        followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
-
-        body = {
-            "answer": ans.text,
-            "conversation_id": new_conversation_id,
-            "followups_left": followups_left,
-        }
+        # Orchestration (cap check, conversation-history rebuild, the
+        # answer_communities_question() call, and matchmaker_questions
+        # recording — including the shared software+communities budget) is
+        # shared with the ask_matchmaker MCP tool — see
+        # webapp/matchmaker_orchestrator.py. Ownership requires BOTH the
+        # session cookie and (when set) the logged-in user_id to match — the
+        # cookie is the primary key since this page needs no login, but a
+        # signed-in conversation additionally can't be picked up by a
+        # different signed-in user sharing a device.
+        try:
+            body = run_matchmaker(lib, "community", user_id, session_id, question,
+                                   conversation_id=conversation_id)
+        except _MatchmakerUnknownConversationError:
+            raise HTTPException(status_code=404, detail="unknown conversation")
+        except _MatchmakerForbiddenConversationError:
+            raise HTTPException(status_code=403, detail="not your conversation")
         resp = JSONResponse(body)
         _set_visitor_cookie(request, resp, session_id)
         return resp
@@ -9492,10 +9966,21 @@ def tools_community_profile(request: Request, slug: str):
     featured_sticker = _sticker("Featured", rotate=8, top="-14px", right="-16px", size=14) if community.get("featured") else ""
     screenshot_block = _screenshot_card_html(community, featured_sticker)
 
-    top_band = f"""<div class="tp-band">
-  <div>{hero_text}</div>
-  <div>{screenshot_block}</div>
-</div>"""
+    # "Too much spacing between the action row and the Bottom line box"
+    # (2026-09 follow-up to the Surface Hidden Community Profile Fields
+    # build) — root cause was this page's own pre-Sidebar-Consolidation
+    # layout: hero_text and screenshot_block used to sit side by side in
+    # their own two-column `.tp-band` (top_band), so the Bottom line
+    # callout below it couldn't start until that whole grid ROW finished —
+    # gated behind the screenshot column's height, not the (much shorter)
+    # hero column's. Software's own Sidebar Consolidation pass (see that
+    # CLAUDE.md bullet) already solved this exact problem by making the
+    # hero full-width above the band and moving its screenshot into the
+    # sidebar column instead. Mirrored here: hero_text now renders directly
+    # (no band, no screenshot alongside it), and screenshot_block opens the
+    # sidebar column below, alongside Details/Categories/Similar
+    # communities — same reference-sidebar pattern this page already used
+    # for those three, just extended to the screenshot too.
 
     # "Description coming soon." / "...Add one from the edit page." joins
     # the cross-entity approved empty-state string family (empty-state
@@ -9544,7 +10029,7 @@ def tools_community_profile(request: Request, slug: str):
         verdict_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line{_profile_badge}</div>
-  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;">{_esc(_display_profile['verdict_summary'])}</p>
+  <div class="narrative-md" style="color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{render_narrative_markdown(_display_profile['verdict_summary'])}</div>
 </div>"""
     else:
         _comm_bl_copy = gates.EMPTY_COPY["community_bottom_line"]
@@ -9569,7 +10054,7 @@ def tools_community_profile(request: Request, slug: str):
         sections = "".join(
             f"""<div style="margin-bottom:16px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
-  <p style="margin:0;white-space:pre-wrap;">{_esc(_display_profile[key])}</p>
+  <div class="narrative-md">{render_narrative_markdown(_display_profile[key])}</div>
 </div>"""
             for label, key in fields
             if (_display_profile.get(key) or "").strip()
@@ -9686,7 +10171,7 @@ def tools_community_profile(request: Request, slug: str):
             f'disclosed and never affect ranking or inclusion.</span></div>'
         )
 
-    lower_band = f"""<div class="tp-band">
+    content_band = f"""<div class="tp-band">
   <div class="tp-col-stack">
     {verdict_block}
     {profile_citations_block}
@@ -9694,6 +10179,7 @@ def tools_community_profile(request: Request, slug: str):
     {profile_cards}
   </div>
   <div class="tp-col-stack">
+    {screenshot_block}
     {details_card}
     {categories_card}
     {similar_communities_block}
@@ -9708,10 +10194,12 @@ def tools_community_profile(request: Request, slug: str):
     # review_status_html is now computed above, before hero_text, and
     # spliced into the hero right after the name/subhead (item 4, 2026-08
     # placement follow-up) — see that comment for the full reasoning.
+    # hero_text renders full-width here, not inside content_band — see the
+    # spacing-fix comment above screenshot_block's assignment.
 
     main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
-{top_band}
-{lower_band}
+{hero_text}
+{content_band}
 {footnote_block}
 {footer_links}"""
 
@@ -9721,6 +10209,7 @@ def tools_community_profile(request: Request, slug: str):
 <style>
 .tp-band{{display:grid;grid-template-columns:2fr 1fr;gap:22px;align-items:start;margin-top:22px;}}
 .tp-band>div{{min-width:0;}}
+.tp-band:first-of-type{{margin-top:20px;}}
 @media(max-width:800px){{.tp-band{{grid-template-columns:1fr;}}}}
 .tp-col-stack{{display:flex;flex-direction:column;gap:22px;}}
 .tp-header-row{{display:flex;align-items:flex-start;gap:14px;margin-bottom:8px;}}
@@ -9737,6 +10226,7 @@ def tools_community_profile(request: Request, slug: str):
 .tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
 .tp-card-h{{font-family:var(--font-head);font-weight:600;font-size:18px;color:var(--ink);margin:0 0 14px;letter-spacing:-0.01em;}}
 .tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;overflow-wrap:break-word;word-break:break-word;}}
+{_NARRATIVE_MD_CSS}
 .tp-shot-card{{padding:12px;text-align:center;position:relative;overflow:visible;}}
 .tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
   aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
@@ -10434,17 +10924,30 @@ _ADMIN_BULK_EDIT_JS = """
 // count. See CLAUDE.md's admin-list column-defaults follow-up for the
 // full write-up (table-width investigation after PR 465).
 var ADMIN_DEFAULT_VISIBLE_COLS = ['review_status'];
-function initColPicker(tableKey, cols) {
+function initColPicker(tableKey, cols, defaultVisible) {
+  // defaultVisible (optional, 2026-09 Users-table fix): a per-table override
+  // of the fallback used when nothing's saved in localStorage yet. Before
+  // this parameter existed, EVERY table's fallback was the single shared
+  // ADMIN_DEFAULT_VISIBLE_COLS ('review_status') regardless of what
+  // _admin_column_picker_html's own `default_visible` pre-checked
+  // server-side — a real bug this fixes, not just a naming mismatch: this
+  // function's own `cb.checked = visible` line (below) OVERWRITES the
+  // server-rendered checkbox state to match `active` on every load, so a
+  // table with no `review_status` column (Users) silently ended up with
+  // every optional column hidden on first visit, contradicting its own
+  // rendered "checked" checkboxes. Software/Communities omit this argument
+  // and keep their exact original behavior (the global default, unchanged).
+  var fallback = defaultVisible || ADMIN_DEFAULT_VISIBLE_COLS;
   var stored = localStorage.getItem('cfo_admin_cols_' + tableKey);
   var active;
   if (stored) {
-    try { active = JSON.parse(stored); } catch (e) { active = ADMIN_DEFAULT_VISIBLE_COLS.slice(); }
+    try { active = JSON.parse(stored); } catch (e) { active = fallback.slice(); }
   } else {
     // No saved view yet — the minimal default (Name/Actions are always
     // shown, no data-col; only Review status joins them here) rather than
     // every column, so an admin list with a lot of optional metadata
     // (Communities) doesn't overflow its container by default.
-    active = ADMIN_DEFAULT_VISIBLE_COLS.slice();
+    active = fallback.slice();
   }
   cols.forEach(function(col) {
     var visible = active.indexOf(col) !== -1;
@@ -10952,6 +11455,60 @@ def _admin_row_data_attrs(fields: dict[str, str]) -> str:
     return " ".join(f'data-{k}="{_esc(v.lower())}"' for k, v in fields.items())
 
 
+# Admin completeness filter (2026-09) — "Missing something" scalar filter on
+# both /admin/tools/software and /admin/tools/communities, reusing
+# linklib.gates' EMPTY state purely as a signal (via the same
+# strip-then-check emptiness test gates.field_state already applies —
+# CLAUDE.md's "consume only, no new gating concept" scope for this feature)
+# plus a direct check of the homepage screenshot column. Deliberately checks
+# only screenshot_url, never app_screenshot_url — the app/product screenshot
+# is a genuinely optional curated extra most records never get (see
+# CLAUDE.md's CFO Toolbox Phase E note), so flagging its absence would make
+# the filter useless. Deliberately checks only tools.summary/description
+# (whichever the profile page actually renders — the exact same fallback
+# linklib.compare._narrative_field already uses for this field, kept in sync
+# rather than re-derived), never both independently.
+_COMPLETENESS_MISSING = "missing"
+_COMPLETENESS_COMPLETE = "complete"
+
+
+def _tool_completeness(t: dict, n_competitors: int) -> str:
+    """One tool's completeness signal for the admin list filter — "missing"
+    if Description, Agent taxonomy, Bottom line, the homepage screenshot, or
+    at least one curated Competitor is absent; "complete" otherwise. Mirrors
+    exactly the field set linklib.compare.build_software_compare tracks for
+    this entity type (Description/Agent taxonomy/Bottom line/Competitors) —
+    see that module's own field list, not re-derived here."""
+    if not (t.get("summary") or t.get("description") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not (t.get("agent_taxonomy_note") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not (t.get("competitive_differentiation") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not (t.get("screenshot_url") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not n_competitors:
+        return _COMPLETENESS_MISSING
+    return _COMPLETENESS_COMPLETE
+
+
+def _community_completeness(c: dict, has_empty_narrative_field: bool, n_similar: int) -> str:
+    """One community's completeness signal — mirrors
+    linklib.compare.build_communities_compare's field set (the
+    COMMUNITY_PROFILE_GROUPS fields + Bottom line, via
+    Library.community_profile_has_empty_narrative_field; a community with no
+    community_profiles row at all is treated the same as one with an empty
+    field, since it has none of the tracked fields), plus the homepage
+    screenshot and at least one curated Similar community."""
+    if has_empty_narrative_field:
+        return _COMPLETENESS_MISSING
+    if not (c.get("screenshot_url") or "").strip():
+        return _COMPLETENESS_MISSING
+    if not n_similar:
+        return _COMPLETENESS_MISSING
+    return _COMPLETENESS_COMPLETE
+
+
 def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str, str]],
                                      scalar_filters: list[dict], category_options: list[dict] | None = None,
                                      category_style: str = "dropdown", search_placeholder: str | None = None) -> str:
@@ -11053,6 +11610,7 @@ def admin_software(request: Request, filter: str = ""):
         tool_categories = lib.list_tool_categories()
         n_name_dupes = len(lib.find_tool_name_duplicate_candidates())
         n_needs_review = lib.count_tools_needing_review()
+        competitor_counts = lib.tool_competitor_counts()
     finally:
         lib.close()
     # "Needs review" filter (2026-08 amendment) — mirrors admin_communities'
@@ -11118,13 +11676,14 @@ def admin_software(request: Request, filter: str = ""):
             # orders "10" after "9" instead of before it.
             "intros": f"{n_leads:04d}",
             "search": f"{t['name']} {t['url']}",
+            "completeness": _tool_completeness(t, competitor_counts.get(t["id"], 0)),
         })
         # data-label on each <td> feeds the stacked-card layout at the
         # .admin-table-responsive breakpoint (see its CSS)—unused above that
         # breakpoint, where the table renders normally.
         return f"""<tr class="admin-table-row" {row_attrs}>
-          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
-          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;max-width:200px;">
+          <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
+          <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:220px;">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
               <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}
             </div>
@@ -11133,10 +11692,10 @@ def admin_software(request: Request, filter: str = ""):
           <td data-col="software:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td data-col="software:intros" data-label="Intros" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
           <td data-col="software:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div class="admin-review-status-group" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
+            <div class="admin-review-status-group" style="display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px;">{review_pill}{mark_reviewed}</div>
           </td>
           <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
+            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:6px;">
               <a href="/tools/software/{t['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">View profile</a>
               <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">Edit</a>
               <form method="post" action="/admin/tools/software/{t['id']}/delete" style="margin:0;"
@@ -11177,6 +11736,14 @@ def admin_software(request: Request, filter: str = ""):
     # entirely (see the Cost band/Access/etc. pattern on the Communities
     # table above, which likewise never lists its own Featured checkbox).
     software_sort_fields = [("name", "Name"), ("url", "URL"), ("summary", "Short description"), ("intros", "Intros")]
+    # Completeness filter (2026-09) — one more scalar (AND-matched) filter,
+    # same convention as Communities' Cost band/Access/etc. below. "Missing"
+    # means at least one of Description/Agent taxonomy/Bottom line/homepage
+    # screenshot/Competitors is empty — see _tool_completeness.
+    software_scalar_filters = [
+        {"key": "completeness", "label": "Completeness",
+         "options": ["Missing", "Complete"]},
+    ]
 
     # "Needs review" count/show-all links (2026-08 amendment) — same
     # review_filter_link/clear_filter_link pattern as admin_communities.
@@ -11223,15 +11790,15 @@ def admin_software(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software{' needing review' if filter == 'needs_review' else ''}</h2>
 {_admin_column_picker_html("software", software_cols)}
-{_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories,
+{_admin_sort_filter_toolbar_html("software", software_sort_fields, software_scalar_filters, category_options=tool_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
-<div style="overflow-x:auto;">
+<div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
 <form id="software-approved-form">
-<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
+  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:220px;">Name</th>
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
@@ -11312,19 +11879,20 @@ applySortFilter('software');
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
-  /* Inverted from desktop on purpose (2026-08 follow-up, Brian's explicit
-     ask): desktop deliberately breaks Delete onto its own row below View/
-     Edit (a 2-column grid, matching the Review status pill/Mark reviewed
-     button's own always-stacked "break"); mobile does the opposite — all
-     three actions fit comfortably in one row at full card width, and
-     Review status's pill+button go row instead of column, since a mobile
-     card's own full width has plenty of room neither narrow desktop table
-     cell has. */
-  /* Row/column COUNT still flips (2 cols desktop, 3 cols mobile) — only
-     the WIDTH-stretching part is gone now, replaced by the unconditional
-     fixed-width rule above that already applies at every breakpoint. */
-  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
-  .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
+  /* View profile / Edit / Delete now stay on one row at every breakpoint
+     (2026-09 polish-bundle follow-up, reversing the 2026-08 "Delete breaks
+     onto its own row on desktop" decision above — Brian's explicit ask:
+     the earlier 2-column desktop grid was intentional at the time, but
+     reads as a wrapping bug now that three fixed-100px-wide buttons
+     comfortably fit one row at normal admin-table widths). The base
+     .admin-table-actions-grid rule (inline style on the div itself) is
+     already repeat(3,auto) with the same fixed-width buttons, so mobile
+     needs no override at all any more — one grid shape at every viewport.
+     The Review status pill/"Mark reviewed" button pair got the identical
+     treatment in the same follow-up — row+wrap is now the base style
+     (inline, on .admin-review-status-group itself), not just a
+     mobile-only override, so this media query has nothing left to add
+     for it either. */
 }}
 /* "+ Add software"/"+ Add community" (2026-08 follow-up, Brian's explicit
    ask — two rounds). First round put the button beside the h1 and
@@ -11344,6 +11912,26 @@ applySortFilter('software');
    real font just leaves a little extra padding inside the same
    200px floor; a wider one simply grows past it instead of wrapping. */
 .admin-header-add-btn{{min-width:200px;text-align:center;white-space:nowrap;}}
+/* Sticky first two columns + horizontal scroll (2026-09 polish-bundle,
+   item 1 follow-up — Brian's explicit ask, same day: the Software table
+   doesn't currently overflow at ordinary widths the way Communities' did
+   (fewer optional columns), but it should have the identical scroll
+   affordance available so a future column, a long category list, or a
+   narrower viewport doesn't silently clip Edit/Delete the same way.
+   Copy of the exact mechanism built for /admin/tools/communities (see
+   that page's own comment for the full write-up, including the real
+   `overflow:hidden`-on-<table> sticky-positioning gotcha this already
+   works around, and why neither table carries a swipe-hint affordance)
+   — same class names, same #cmp-scroll-wrap id, so both admin tables
+   behave identically rather than drifting into two near-duplicate
+   implementations. */
+.admin-sticky-col{{position:sticky;background:#fff;z-index:2;}}
+thead .admin-sticky-col{{background:var(--accent-light);z-index:3;}}
+.admin-sticky-col-1{{left:0;width:40px;}}
+.admin-sticky-col-2{{left:40px;box-shadow:2px 0 4px -2px rgba(0,0,0,.15);}}
+@media(max-width:700px){{
+  .admin-sticky-col{{position:static;box-shadow:none;width:auto;}}
+}}
 </style>
 </div>"""
     return HTMLResponse(_page("Software vendors—CFO Toolbox Admin", "", body, authed=True))
@@ -12820,7 +13408,7 @@ def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: s
 # webapp/thought_leadership_data.py). The `original_content` DB table is what
 # both pages actually render from now (via _oc_featured_cards_html); this
 # tuple's own shape (href, tag, tag_color, title, desc, cta) is still what
-# scripts/migrate_original_content.py reads to seed that table, and _tl_fcard/
+# scripts/archive/migrate_original_content.py reads to seed that table, and _tl_fcard/
 # _tl_featured_cards_html/_TL_SHARED_CSS below are still live, reused by the
 # DB-backed renderer — only the content source changed, not the markup.
 #
@@ -12865,7 +13453,7 @@ def _tl_featured_cards_html(cards) -> str:
 # Original Content (Phase 1) — _TL_FEATURED_CARDS above is no longer the live
 # source for the flagship row; it stays in the repo, unimported, purely as a
 # rollback reference (same precedent as webapp/thought_leadership_data.py).
-# scripts/migrate_original_content.py is the one-time migration that seeded
+# scripts/archive/migrate_original_content.py is the one-time migration that seeded
 # the `original_content` table from it. tag_color was never promoted to a
 # stored column (see that table's schema comment in linklib/db.py) — cycled
 # instead from the same 3 established colors by card position, so the three
@@ -13991,11 +14579,15 @@ async def admin_original_content_new_submit(request: Request):
         if slug_error:
             return _reject(slug_error)
 
-        lib.add_original_content(
+        new_id = lib.add_original_content(
             v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
             v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
             v["display_order"],
         )
+        # Mirror into articles for FP&A Buddy retrieval — synchronous, at the
+        # mutation point, same convention as write_opml() on feed mutation.
+        # See linklib/original_content_sync.py.
+        sync_original_content_article(lib, new_id)
     finally:
         lib.close()
     return RedirectResponse("/admin/original-content", status_code=303)
@@ -14068,6 +14660,9 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
             v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
             v["display_order"] or 0,
         )
+        # Re-sync the mirrored articles row — overwrites in place (never
+        # merges), so an edit always wins. See linklib/original_content_sync.py.
+        sync_original_content_article(lib, item_id)
     finally:
         lib.close()
     return RedirectResponse("/admin/original-content", status_code=303)
@@ -14079,6 +14674,12 @@ def admin_original_content_delete(request: Request, item_id: int):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
     try:
+        # Cascade the mirrored articles row too — orphaning it would violate
+        # CLAUDE.md's "No dead data" standard (a mirror with no
+        # original_content row behind it, silently stale forever).
+        it = lib.get_original_content(item_id)
+        if it and it.get("mirrored_article_id"):
+            lib.delete_article(it["mirrored_article_id"])
         lib.delete_original_content(item_id)
     finally:
         lib.close()
@@ -14498,7 +15099,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
   <div id="gen-host-community-profile" style="display:grid;gap:20px;">
 {_section_header("Who it's for")}
 {_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True, confidence_key='ideal_member')}
-{_field('anti_fit', 'Anti-fit', 'Who should probably skip it', confidence_key='anti_fit')}
+{_field('anti_fit', 'Who should skip it', 'Who should probably skip it', confidence_key='anti_fit')}
 {_field('value_prop', 'Value proposition', 'The primary thing members get out of it', confidence_key='value_prop')}
 {_section_header('The member experience')}
 {_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual', confidence_key='format_reality')}
@@ -14507,24 +15108,24 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 {_section_header('Business & sponsorship')}
 {_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.", confidence_key='business_model')}
 {_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.", confidence_key='sponsor_relationship_note')}
-{_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
+{_field('cost_value_verdict', 'Cost vs. value', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
 {_section_header('Reputation & verdict')}
 {_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.', confidence_key='notable_members')}
 {_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.', confidence_key='public_criticism')}
-{_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
+{_field('verdict_summary', 'Bottom line', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
 {_section_header('Quick facts')}
 {_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc.—or "No".', rows=2)}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-{_num_field('founded_year', 'Founded year', 1800, 2100)}
+{_num_field('founded_year', 'Founded', 1800, 2100)}
 {_short_field('primary_purpose', 'Primary purpose', 'e.g. networking, learning, both')}
-{_short_field('cpe_eligible', 'CPE', 'Yes / No / Unclear, with any qualifier')}
+{_short_field('cpe_eligible', 'CPE eligible', 'Yes / No / Unclear, with any qualifier')}
 {_short_field('platform_type', 'Platform', 'Slack, proprietary app, in-person only, …')}
 {_short_field('meeting_format', 'Programming', 'In-person / virtual / hybrid')}
 {_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
-{_short_field('seniority_band', 'Level', 'Who it targets by seniority')}
-{_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus. Placeholder, not yet researched or weighted.')}
-{_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any. Placeholder, not yet researched or weighted.')}
-{_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both. Placeholder, not yet researched or weighted.')}
+{_short_field('seniority_band', 'Who it targets', 'Who it targets by seniority')}
+{_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus.')}
+{_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any.')}
+{_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both.')}
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
@@ -14644,6 +15245,8 @@ def admin_communities(request: Request, filter: str = ""):
         needs_review_ids = lib.community_profile_needs_review_ids()
         quality_flags = lib.community_profile_quality_flags()
         community_categories = lib.list_community_categories()
+        has_empty_field = lib.community_profile_has_empty_narrative_field()
+        similar_counts = lib.community_competitor_counts()
     finally:
         lib.close()
 
@@ -14709,15 +15312,17 @@ def admin_communities(request: Request, filter: str = ""):
             "sponsorship_type": c["sponsorship_type"] or "", "format": c["format"] or "",
             "reach": c["reach"] or "", "categories": "|".join(c["categories"]),
             "search": f"{c['name']} {c['url']}",
+            "completeness": _community_completeness(
+                c, has_empty_field.get(c["id"], True), similar_counts.get(c["id"], 0)),
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
-  <td class="admin-table-cell" style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
-  <td class="admin-table-cell" style="padding:10px 12px;font-weight:600;min-width:250px;">
+  <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
+  <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;font-weight:600;min-width:280px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
       <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{low_conf_badge}
     </div>
   </td>
-  <td data-col="communities:notes" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:150px;">{_esc(c['notes'] or '—')}</td>
+  <td data-col="communities:notes" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:320px;">{_esc(c['notes'] or '—')}</td>
   <td data-col="communities:cost_band" data-label="Cost band" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td data-col="communities:access" data-label="Access" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
   <td data-col="communities:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
@@ -14725,10 +15330,10 @@ def admin_communities(request: Request, filter: str = ""):
   <td data-col="communities:format" data-label="Format" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
   <td data-col="communities:reach" data-label="Reach" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
   <td data-col="communities:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;">
-    <div class="admin-review-status-group" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">{review_pill}{mark_reviewed}</div>
+    <div class="admin-review-status-group" style="display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px;">{review_pill}{mark_reviewed}</div>
   </td>
   <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;min-width:210px;">
-    <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);justify-content:start;gap:6px;">
+    <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:6px;">
       <a href="/tools/communities/{c['slug']}" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">View profile</a>
       <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 8px;font-size:12px;text-align:center;white-space:nowrap;">Edit</a>
       <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
@@ -14780,6 +15385,8 @@ def admin_communities(request: Request, filter: str = ""):
         {"key": "sponsorship_type", "label": "Sponsorship type", "options": _COMMUNITY_SPONSORSHIP_TYPES},
         {"key": "format", "label": "Format", "options": _COMMUNITY_FORMAT},
         {"key": "reach", "label": "Reach", "options": _COMMUNITY_REACH},
+        # Completeness filter (2026-09) — see _community_completeness.
+        {"key": "completeness", "label": "Completeness", "options": ["Missing", "Complete"]},
     ]
 
     n_needs_review = len(needs_review_ids)
@@ -14834,13 +15441,13 @@ def admin_communities(request: Request, filter: str = ""):
 {_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
-<div style="overflow-x:auto;">
+<div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
 <form id="communities-approved-form">
-<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:250px;">Name</th>
-  <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;min-width:150px;">Short description</th>
+  <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
+  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:280px;">Name</th>
+  <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;min-width:320px;">Short description</th>
   <th data-col="communities:cost_band" style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th data-col="communities:access" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th data-col="communities:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
@@ -14920,19 +15527,20 @@ applySortFilter('communities');
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
-  /* Inverted from desktop on purpose (2026-08 follow-up, Brian's explicit
-     ask): desktop deliberately breaks Delete onto its own row below View/
-     Edit (a 2-column grid, matching the Review status pill/Mark reviewed
-     button's own always-stacked "break"); mobile does the opposite — all
-     three actions fit comfortably in one row at full card width, and
-     Review status's pill+button go row instead of column, since a mobile
-     card's own full width has plenty of room neither narrow desktop table
-     cell has. */
-  /* Row/column COUNT still flips (2 cols desktop, 3 cols mobile) — only
-     the WIDTH-stretching part is gone now, replaced by the unconditional
-     fixed-width rule above that already applies at every breakpoint. */
-  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:repeat(3,1fr)!important;justify-content:normal!important;}}
-  .admin-review-status-group{{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;}}
+  /* View profile / Edit / Delete now stay on one row at every breakpoint
+     (2026-09 polish-bundle follow-up, reversing the 2026-08 "Delete breaks
+     onto its own row on desktop" decision above — Brian's explicit ask:
+     the earlier 2-column desktop grid was intentional at the time, but
+     reads as a wrapping bug now that three fixed-100px-wide buttons
+     comfortably fit one row at normal admin-table widths). The base
+     .admin-table-actions-grid rule (inline style on the div itself) is
+     already repeat(3,auto) with the same fixed-width buttons, so mobile
+     needs no override at all any more — one grid shape at every viewport.
+     The Review status pill/"Mark reviewed" button pair got the identical
+     treatment in the same follow-up — row+wrap is now the base style
+     (inline, on .admin-review-status-group itself), not just a
+     mobile-only override, so this media query has nothing left to add
+     for it either. */
 }}
 /* "+ Add software"/"+ Add community" (2026-08 follow-up, Brian's explicit
    ask — two rounds). First round put the button beside the h1 and
@@ -14952,6 +15560,54 @@ applySortFilter('communities');
    real font just leaves a little extra padding inside the same
    200px floor; a wider one simply grows past it instead of wrapping. */
 .admin-header-add-btn{{min-width:200px;text-align:center;white-space:nowrap;}}
+/* Sticky first two columns + horizontal scroll (2026-09 polish-bundle,
+   item 2, later extended to the Software table too on Brian's follow-up
+   ask — see admin_software's own copy of this comment) — the Approved
+   communities table has too many optional columns to fit at once
+   (Categories/Sponsorship type/Format/Reach in particular run wide), and
+   the table was already wrapped in overflow-x:auto with no visible cue
+   that Edit/Delete were being clipped off the right edge. Brian's own
+   preference: keep every column, widen Name/Short description now that
+   side-scrolling is available, and reuse the Compare page's
+   sticky-first-column + horizontal-scroll pattern rather than trimming
+   the default column set. This table's shape differs from Compare's own
+   (a conventional header row + per-column cells, not Compare's full-width
+   .cc-section band rows), so the sticky target here is the first two
+   actual columns — the row checkbox and Name — not a per-row label span;
+   .cmp-sticky-label doesn't apply. The checkbox column gets an explicit
+   40px width (global box-sizing:border-box makes that deterministic
+   given its own 10px/12px padding) so the Name column's left offset is
+   fixed and predictable rather than depending on the checkbox's natural
+   width. id="cmp-scroll-wrap" is reused verbatim from the Compare page's
+   own scroll-container id, but NOT its swipe-hint affordance — Compare's
+   table stays a real table and scrolls at every width, so "Swipe to
+   compare" is always accurate there; this table instead falls back to
+   admin-table-responsive's stacked-card layout below 700px (no
+   horizontal scroll at all once that happens), so a swipe hint tied to
+   the same breakpoint would show the wrong affordance for the exact
+   width range it targets — dropped rather than shown incorrectly, after
+   catching this live in a real mobile-viewport screenshot.
+   Real gotcha found live, not assumed: the table itself used to carry
+   its own background/border/border-radius/overflow:hidden (for the
+   rounded-card look) — but `overflow:hidden` on the <table> registers
+   IT as a scroll container too, so a sticky <td> inside it sticks
+   relative to the (non-scrolling) table box instead of #cmp-scroll-wrap,
+   and silently stops tracking the wrap's real horizontal scroll —
+   confirmed with a live scrollLeft test (position:sticky computed
+   correctly, but the element's bounding rect still moved off-screen).
+   Fixed by moving background/border/border-radius onto #cmp-scroll-wrap
+   itself (overflow-x:auto;overflow-y:hidden — y stays hidden rather
+   than auto since the table's never taller than its wrap) so the actual
+   scroll container is also the only overflow-clipping ancestor in the
+   sticky element's path; the plain <table> underneath now carries no
+   background/border/overflow of its own. */
+.admin-sticky-col{{position:sticky;background:#fff;z-index:2;}}
+thead .admin-sticky-col{{background:var(--accent-light);z-index:3;}}
+.admin-sticky-col-1{{left:0;width:40px;}}
+.admin-sticky-col-2{{left:40px;box-shadow:2px 0 4px -2px rgba(0,0,0,.15);}}
+@media(max-width:700px){{
+  .admin-sticky-col{{position:static;box-shadow:none;width:auto;}}
+}}
 </style>
 </div>"""
     return HTMLResponse(_page("Communities—CFO Toolbox Admin", "", body, authed=True))
@@ -15433,7 +16089,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # right, deliberately with NO "Warm Intro"-style heading or any new
     # content in that column. Kept the "Community Details" heading rather than
     # renaming to "Company Details": a community isn't a company, same
-    # reasoning that kept "Similar communities" instead of "Core competition"
+    # reasoning that kept "Similar communities" instead of "Competitors"
     # below. The structured Reach/Cost/Sponsorship/Access/Format/Notes block
     # — the closest thing
     # Communities have to Software's "Business summary" — gets its own
@@ -15441,9 +16097,12 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # it is prose Brian writes; it's the factual/categorical fields a listing
     # needs. "Similar communities" (curated Community-to-Community links,
     # structurally identical to Software's Competitors block) is intentionally
-    # NOT relabeled "Core competition"—that Software rename tracks a display
-    # label change on the Software profile page ("Competitors" -> "Core
-    # competition"); the Community profile page has always said "Similar
+    # NOT relabeled "Competitors"—Phase P had briefly renamed the Software
+    # edit page's own subheading to "Core competition" (leaving the public
+    # profile page's own "Competitors" heading untouched the whole time), but
+    # the 2026-09 label-alignment sweep reverted that edit-page subheading
+    # back to "Competitors" to match the public label it was always meant to
+    # mirror. The Community profile page has always said "Similar
     # communities" instead, on the reasoning that communities don't compete
     # for a buyer's dollar the way software tools do, so there's no matching
     # display-label rename to mirror here. The 23-field Community profile
@@ -16672,7 +17331,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         _governed_features_html = f"""<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);" open>
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Feature taxonomy</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Key features</h2>
     </span>
     <span class="disclosure-caret">&#9654;</span>
   </summary>
@@ -16798,6 +17457,23 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     _taxonomy_confidence_html = (_confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
         + _low_confidence_indicator_html(tool.get("agent_taxonomy_low_confidence")))
 
+    # Edit-page-fixes item 1: a hand-authored HTML `maxlength` blocks any
+    # NEW keystroke once the field's current value is already at or past the
+    # cap — it doesn't clear or trim existing content, so a cursor still
+    # blinks on click but nothing typed lands. `summary`'s 400-char cap was
+    # added after the column already existed; the one-time migration that
+    # introduced the column (see linklib/db.py's summary-backfill comment)
+    # copied the full, uncapped `description` into any empty `summary`, and
+    # neither add_tool nor update_tool enforce a length limit server-side —
+    # so a tool whose summary was never redrafted since can still carry a
+    # legacy value well over 400 chars, permanently locking out typing in
+    # the browser. Only render the attribute when the stored value already
+    # fits inside it; once an admin saves a compliant value, the guardrail
+    # reapplies on the next page load.
+    _summary_maxlength_attr = (
+        ' maxlength="400"' if len(tool.get("summary") or "") <= 400 else ""
+    )
+
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
         _cap_note = (f"Captured {tool['screenshot_captured_at'][:10]}" if tool.get("screenshot_captured_at")
@@ -16918,7 +17594,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       <div id="gen-host-tool-business-summary" style="display:grid;gap:20px;">
         <div>
           <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
-          <textarea id="tool-summary" name="summary" required maxlength="400" rows="4"
+          <textarea id="tool-summary" name="summary" required{_summary_maxlength_attr} rows="4"
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
           <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—shares its verification status, not tracked separately.</p>
@@ -16974,8 +17650,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Competition</h2>
 
   <div id="gen-host-tool-competitors" style="margin-bottom:28px;">
-    <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Core competition</div>
-    <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Closest competitors" on {_esc(tool['name'])}'s profile page. Curating from either tool's edit page links both directions.</p>
+    <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Competitors</div>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Competitors" on {_esc(tool['name'])}'s profile page. Curating from either tool's edit page links both directions.</p>
 
     {_competitors_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No competitors curated yet.</p>'}
 
@@ -16994,7 +17670,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
   <div id="gen-host-tool-differentiation">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Competitive differentiation{_differentiation_verify_badge}</label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Bottom line{_differentiation_verify_badge}</label>
       <span>
         <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err', 'gen-host-tool-differentiation')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>
@@ -18108,7 +18784,7 @@ def _resolve_reader_content(id: int = 0, url: str = "", user_id: int | None = No
                 from linklib.pipeline import medium_recovery
                 mp_lib = _lib()
                 try:
-                    recovered = medium_recovery(
+                    recovered, _recovered_exa_cost = medium_recovery(
                         mp_lib, url, cached_title or title, (article or {}).get("author", ""))
                 finally:
                     mp_lib.close()
@@ -18207,11 +18883,19 @@ def api_read_article(request: Request, id: int = 0, url: str = ""):
 
 
 _READER_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap');
+/* 2026-09: Source Serif 4 removed sitewide, this page's last holdout —
+   Brian's standing rule is Outfit or DM Sans only, ever, for content/
+   reading typography (Caveat/Permanent Marker's decorative sticker/wordmark
+   use is a separate, out-of-scope layer). Body now DM Sans, matching the
+   merged Feed/Archive/Read Later reader's own settled typography (see
+   CLAUDE.md's "Reader expand-mode icon + typography polish" bullet for the
+   full back-and-forth that landed on DM Sans there first). .reader-meta h1
+   already used Outfit — unchanged. */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap');
 :root{--ink:#1a1a1a;--muted:#6F6A60;--line:#E4E0D6;--bg:#F5F4EF;--surface:#FFFFFF;--accent:#002975;
   --seafoam-deep:#1F7A66;--coral:#E8704F;--coral-wash:#FBEAE3;}
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--ink);font:18px/1.75 'Source Serif 4',Georgia,serif;}
+body{background:var(--bg);color:var(--ink);font:16px/1.65 'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;}
 a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
 a:hover{opacity:.8;}
 
@@ -18605,11 +19289,34 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
 .rr-reader-body{max-width:min(92%,880px);margin:0 auto;padding:44px 32px 100px;}
 .rr-reader-category{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
   color:var(--seafoam-deep);margin-bottom:12px;}
-.rr-reader-title{font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:30px;line-height:1.18;
-  color:var(--ink);margin-bottom:16px;}
+/* Title uses Outfit, matching BRAND.md's "Page title (H1)" row (30px/600/
+   -0.02em) and the standalone /read/{id} reader's own .reader-meta h1 —
+   this used to fall through to 'Source Serif 4',Georgia,serif with no
+   letter-spacing, a leftover that never got updated when the two readers'
+   heading treatments were established. */
+.rr-reader-title{font-family:var(--font-head);font-weight:600;font-size:30px;line-height:1.18;
+  letter-spacing:-.02em;color:var(--ink);margin-bottom:16px;}
 .rr-reader-byline{font-size:13px;color:var(--muted);padding-bottom:22px;border-bottom:1px solid var(--line);
   margin-bottom:26px;font-family:var(--font-body);}
-.rr-reader-body-text{font-family:'Source Serif 4',Georgia,serif;font-size:var(--rr-fs,17px);line-height:1.75;color:var(--ink-soft);}
+/* Body font, corrected 2026-09, twice: this rendered in 'Source Serif 4'
+   first — a BRAND.md-documented exception at the time ("Reader body |
+   Source Serif 4") — confirmed wrong by direct live-site review. A first
+   fix moved it to var(--font-head) (Outfit) alongside the title; checked
+   against the site's actual published long-form content (an Original
+   Content article's .oc-body p, the same template NetSuite MCP/Growth
+   Engine Ratio/Sail Don't Row render through) and found that body copy is
+   DM Sans there, Outfit only for the H1 — so Outfit-for-body would have
+   made this reader the one place on the whole site with body copy in a
+   headings font, not a return to an existing pattern. Settled on
+   var(--font-body) (DM Sans) instead — this now matches ordinary sitewide
+   typography exactly (Outfit heading, DM Sans body), no reader-specific
+   exception left to document at all. The standalone /read/{id}
+   single-article view (a different template, _READER_CSS/.reader-body) was
+   a separate, deliberately out-of-scope holdout for this fix — it moved to
+   DM Sans too in a follow-up pass once Brian confirmed the standing rule is
+   Outfit/DM Sans only, ever, for content typography (never a third font,
+   Caveat/Permanent Marker's decorative sticker/wordmark use aside). */
+.rr-reader-body-text{font-family:var(--font-body);font-size:var(--rr-fs,17px);line-height:1.75;color:var(--ink-soft);}
 .rr-reader-body-text p{margin-bottom:1.3em;}
 .rr-reader-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;
   color:var(--muted);font-size:14px;padding:40px;text-align:center;}
@@ -18925,7 +19632,11 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
 
     body = (
         _READER_SHELL_CSS
-        + '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
+        # No dedicated Source Serif 4 <link> here any more (2026-09) — this
+        # merged reader's title/body moved to Outfit/DM Sans respectively
+        # (ordinary sitewide typography), both already loaded via _page()'s
+        # own font <link>; nothing on this page references the serif any
+        # more, so importing it would just be a wasted request.
         + tag_vocab_html
         + f"""<div class="rr-shell">
   {rail_html}
@@ -18994,8 +19705,17 @@ var rrFsSizes = [17, 15, 20];
 // point is it behaves identically whether the open article came from Feed
 // or Archive.
 var rrFocusMode = false;
-var RR_ICON_EXPAND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
-var RR_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+// RR_ICON_EXPAND's arrows point OUTWARD, toward the top-left/bottom-right
+// (NW/SE) corners; RR_ICON_COLLAPSE's point INWARD, tails anchored at the
+// same two corners. (Fixed 2026-09: these originally sat on the NE/SW
+// diagonal — Feather's stock "maximize-2"/"minimize-2" — which pointed the
+// wrong way live; mirrored horizontally onto NW/SE per direct confirmation,
+// keeping each icon's outward/inward direction otherwise unchanged.)
+// RR_ICON_EXPAND shows by default (not yet in focus mode) — clicking it
+// expands; RR_ICON_COLLAPSE shows once in focus mode — clicking it restores
+// the rail/list. See rrRenderArticle/rrSetFocusMode below for that mapping.
+var RR_ICON_EXPAND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 3 3 3 3 9"></polyline><polyline points="15 21 21 21 21 15"></polyline><line x1="3" y1="3" x2="10" y2="10"></line><line x1="21" y1="21" x2="14" y2="14"></line></svg>';
+var RR_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 14 14 14 14 20"></polyline><polyline points="4 10 10 10 10 4"></polyline><line x1="10" y1="10" x2="3" y2="3"></line><line x1="21" y1="21" x2="14" y2="14"></line></svg>';
 var RR_ICON_SEARCH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>';
 // Tag glyph for the reader toolbar — the collapsed state of the inline tag
 // editor, matching Instapaper's own toolbar tag affordance.
@@ -19627,7 +20347,13 @@ def health():
 
 @app.get("/api/search")
 def api_search(request: Request, q: str = "", limit: int = 50, token: str | None = None):
-    _require_member(request, token)
+    # Admin-only, matching /read's real access tier (Library content includes
+    # articles behind Brian's own paid subscriptions — see _is_authed's
+    # docstring). Previously _require_member (any signed-in user), a
+    # likely-unintentional survivor of the Phase 1 restructure that moved
+    # the Reader itself to admin-only without revisiting this API route —
+    # see ARCHITECTURE.md's MCP-server Phase 4 note (now corrected to match).
+    _require_api(request, token)
     lib = _lib()
     try:
         return {"query": q, "results": lib.search(q, limit=limit)}
@@ -19802,6 +20528,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
 <p style="color:var(--muted);margin:0 0 12px;">A digital library of finance content I curate by hand, kept structured and current by a content pipeline built on Claude, Exa, and the Internet Archive. Skip the digging, get your answer.</p>
 <p class="ask-teaser">Curious how this works? <a href="#fpa-features">Scroll down</a> or <a href="/tools/fpa-buddy/how-it-works">read the full breakdown &rarr;</a></p>
+<p style="color:var(--muted);font-size:12.5px;margin:-4px 0 12px;">Conversations continue seamlessly whether you ask here on the site or via Claude/MCP.</p>
 
 <div class="ask-example">
   <div class="ask-example-label">Illustrative example&mdash;not a captured real answer</div>
@@ -19924,6 +20651,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-src-list li{{font-size:12px;}}
 .ask-src-list a, .ask-src-list span.ask-src-static{{display:inline-flex;align-items:center;gap:5px;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
 .ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}
+.ask-src-own{{margin-left:4px;font-size:11px;color:var(--muted);font-weight:500;}}
 .ask-src-caption{{margin:6px 0 0;font-size:11px;color:var(--muted);}}
 
 .ask-loading{{display:flex;align-items:center;gap:10px;padding:2px 0;}}
@@ -20061,16 +20789,29 @@ function mdToHtml(raw) {{
 // web_search_20250305 fallback also produces type "web" citations when Exa
 // is toggled off or EXA_API_KEY is missing, and those get no caption at all
 // (a normal citation, just no "Powered by Exa" line).
+// Published-content ingestion (2026-09): a citation carrying own_content
+// (Brian's own mirrored/matched writing — see
+// linklib.original_content_sync) gets a small "(own writing)" label — a
+// citation-list label only, never an inline prose mention (flagged as a
+// real voice-integrity risk during design and deliberately left out; see
+// CLAUDE.md's Published-Content Ingestion entry).
 function srcListHtml(d) {{
   var icons = {{library: '&#128218;', feed: '&#128240;', web: '&#127760;'}};
   var cites = d.citations || [];
   var items = cites.map(function(c) {{
-    return '<li>' + (icons[c.type] || '') + ' <a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">[' + c.n + '] ' + escapeHtml(c.title) + '</a></li>';
+    var ownTag = c.own_content ? ' <span class="ask-src-own">(own writing)</span>' : '';
+    return '<li>' + (icons[c.type] || '') + ' <a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">[' + c.n + '] ' + escapeHtml(c.title) + '</a>' + ownTag + '</li>';
   }});
-  if (!items.length) return '';
-  var caption = cites.some(function(c) {{ return c.type === 'web' && c.provider === 'exa'; }})
+  // Suggest-content nudge: always rendered, even with zero citations — that's
+  // the case where Buddy came up empty-handed, exactly the moment worth
+  // pointing someone at /library/submit. Reuses the existing muted
+  // .ask-src-caption treatment rather than a new component.
+  var suggestLine = '<div class="ask-src-caption">Know a source that should be here? '
+    + '<a href="/library/submit">Suggest it for the archive &rarr;</a></div>';
+  if (!items.length) return suggestLine;
+  var exaCaption = cites.some(function(c) {{ return c.type === 'web' && c.provider === 'exa'; }})
     ? '<div class="ask-src-caption">Web search powered by Exa</div>' : '';
-  return '<ul class="ask-src-list">' + items.join('') + '</ul>' + caption;
+  return '<ul class="ask-src-list">' + items.join('') + '</ul>' + exaCaption + suggestLine;
 }}
 // Per-answer feedback: one tap records; tapping another option changes the
 // rating (the server upserts one row per turn per user). A negative rating
@@ -20305,7 +21046,6 @@ loadRecent();
 @app.post("/ask")
 async def ask(request: Request):
     _require_member(request)
-    from linklib.agent import answer_question, MAX_FOLLOWUPS
     payload = await request.json()
     question = (payload.get("question") or "").strip()
     if not question:
@@ -20330,117 +21070,26 @@ async def ask(request: Request):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
-
-        # Follow-up turn: rebuild history from the conversation's recorded
-        # rows (the server-side source of truth). Ownership mirrors the
-        # feedback endpoint — 404 for a conversation that doesn't exist, 403
-        # for someone else's. Token-only / break-glass access (user_id None)
-        # never has recorded turns, so it can't continue any conversation —
-        # each of its questions is one-shot.
-        history: list[dict] = []
-        prior_questions = 0
-        if conversation_id:
-            turns = lib.list_conversation_turns(conversation_id)
-            if not turns:
-                raise HTTPException(status_code=404, detail="unknown conversation")
-            if user_id is None or turns[0]["user_id"] != user_id:
-                raise HTTPException(status_code=403, detail="not your conversation")
-            # The follow-up cap counts recorded rows, never client-supplied
-            # turns (invisible cost guard) — a capped conversation never
-            # reaches the API.
-            prior_questions = len(turns)
-            if prior_questions >= 1 + MAX_FOLLOWUPS:
-                return {
-                    "capped": True,
-                    "answer": "We've reached the limit for this conversation. "
-                              "Start a new question to keep going.",
-                    "sources": [], "feed_sources": [], "web_sources": [],
-                }
-            for t in turns:
-                history.append({"role": "user", "content": t["question"]})
-                history.append({"role": "assistant", "content": t["answer"]})
-
-        # Dollar-based rate limit — real spend this calendar month vs. the
-        # user's effective cap (per-user override, else the global default).
-        # Skipped for token-only access and the break-glass admin login with
-        # no matching `users` row (no user_id to attribute cost to), matching
-        # today's unrestricted behavior for those cases.
-        if user_id is not None:
-            cap = lib.get_effective_ask_cap(user_id)
-            spent = lib.ask_cost_this_month(user_id)
-            if spent >= cap:
-                return {
-                    "capped": True,
-                    "answer": (f"You've used ${spent:.2f} of your ${cap:.2f} FP&A Buddy budget "
-                               "for this month. It resets at the start of next month."),
-                    "sources": [], "feed_sources": [], "web_sources": [],
-                }
-
-        ans = answer_question(
-            lib, question,
-            model=model,
-            effort=effort,
-            use_library=use_library,
-            use_feed=use_feed,
-            use_web=use_web,
-            opml_path=OPML_PATH if (use_feed or use_web) else None,
-            history=history,
-        )
-
-        # None for token-only / break-glass access: nothing was recorded, so
-        # there is no conversation to continue (the guards above already
-        # reject any conversation_id those callers send).
-        new_conversation_id = None
-        usage_line = None
-        turn_id = None
-        if user_id is not None:
-            row_id = lib.record_ask_question(
-                # ans.model is the resolved canonical model actually used —
-                # not the raw request field, which can be an alias or blank
-                # (the /archive quick-ask widget never sends one).
-                user_id, question, ans.text, ans.model, effort,
-                use_library, use_feed, use_web,
-                conversation_id=conversation_id, turn_index=prior_questions,
-                input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
-                cache_creation_tokens=ans.cache_creation_tokens,
-                cache_read_tokens=ans.cache_read_tokens,
-                # ans.cost_usd is the turn total (answer + follow-up query
-                # rewrite + query-time embedding for hybrid retrieval), so
-                # the monthly-cap SUM sees all of it.
-                cost_usd=ans.cost_usd,
-                rewrite_input_tokens=ans.rewrite_input_tokens,
-                rewrite_output_tokens=ans.rewrite_output_tokens,
-                rewrite_cost_usd=ans.rewrite_cost_usd,
-                embed_input_tokens=ans.embed_input_tokens,
-                embed_cost_usd=ans.embed_cost_usd,
-                # Persisted snapshot of what this answer actually cited, so a
-                # later feedback flag stays inspectable with its sources.
-                citations=ans.citations,
+        # Orchestration (cap check, conversation-history rebuild, the
+        # answer_question() call, and ask_questions recording) is shared
+        # with the ask_fpa_buddy MCP tool — see webapp/ask_orchestrator.py.
+        # Ownership mirrors the feedback endpoint — 404 for a conversation
+        # that doesn't exist, 403 for someone else's.
+        try:
+            return run_ask(
+                lib, user_id, question,
+                model=model,
+                effort=effort,
+                use_library=use_library,
+                use_feed=use_feed,
+                use_web=use_web,
+                conversation_id=conversation_id,
+                opml_path=OPML_PATH,
             )
-            new_conversation_id = conversation_id or str(row_id)
-            turn_id = row_id
-            cap = lib.get_effective_ask_cap(user_id)
-            spent = lib.ask_cost_this_month(user_id)
-            usage_line = {"spent": round(spent, 2), "cap": round(cap, 2)}
-
-        followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
-        return {
-            "answer": ans.text,
-            # API-verified citations only — what the answer's [n] markers map
-            # to. The full retrieved lists below stay for compatibility.
-            "citations": ans.citations,
-            "sources":      [{"title": s["title"], "url": s["url"]} for s in ans.sources],
-            "feed_sources": [{"title": s["title"], "url": s["url"]} for s in ans.feed_sources],
-            "web_sources":  [{"title": s["title"], "url": s["url"]} for s in ans.web_sources],
-            "followups_left": followups_left,
-            "conversation_id": new_conversation_id,
-            # The recorded ask_questions row id for this turn — what the
-            # feedback controls rate. None when the turn wasn't recorded
-            # (token-only or break-glass access with no users row); the UI
-            # shows no feedback controls then.
-            "turn_id": turn_id,
-            "usage": usage_line,
-        }
+        except _AskUnknownConversationError:
+            raise HTTPException(status_code=404, detail="unknown conversation")
+        except _AskForbiddenConversationError:
+            raise HTTPException(status_code=403, detail="not your conversation")
     finally:
         lib.close()
 
@@ -20860,6 +21509,7 @@ _SOFTWARE_TOOLS = [
 _TOOLBOX_TOOLS = [
     ("/admin/tools/resources", "Resources", "Add, edit, or remove the sources listed in the Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
+    ("/admin/tools/communities/categories", "Community categories", "Add, rename, or remove the category pills communities are tagged with on /tools/communities—the Communities parallel to Software categories above."),
     ("/admin/game-settings",    "Sail, don't row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
 ]
 
@@ -20919,6 +21569,7 @@ _ADMIN_GROUPS = [
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/system/model",    "AI model",            "Which Claude model powers enrichment&mdash;Description, Agent taxonomy, Competitive differentiation, Community profiles, and article summaries&mdash;switchable live, no redeploy."),
+        ("/admin/system/ai-usage", "AI usage",            "A read-only map of every Claude/Exa/OpenAI surface&mdash;which model or mechanism powers it, whether it's live-editable, and where to change it."),
         ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
@@ -21775,6 +22426,10 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 #     communities-find quiz via a `kind` column) — splitting any of them
 #     into either Toolbox bucket would be arbitrary, so they sit in Site
 #     utilities & system alongside the other audit/log tables instead.
+#   - compare_summary_cache/compare_summary_feedback (Compare Redesign
+#     Phase 2) are the same shared-across-both-entity-types shape as
+#     entity_citations/matchmaker_questions above (entity_type='tool'|
+#     'community'), so they sit here for the identical reason.
 _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Users & auth", ["users", "password_reset_requests", "read_later", "api_tokens"]),
     ("Toolbox — Software", ["tools", "tool_categories", "tool_leads", "tool_audit_log",
@@ -21793,7 +22448,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
-                                  "narrative_review_log", "entity_citations", "matchmaker_questions"]),
+                                  "narrative_review_log", "entity_citations", "matchmaker_questions",
+                                  "compare_summary_cache", "compare_summary_feedback"]),
 ]
 
 
@@ -21974,6 +22630,94 @@ def _page_index_snapshot() -> list[dict]:
         rows.append({"path": route.path, "tier": tier, "flagged": not tier})
     rows.sort(key=lambda r: r["path"])
     return rows
+
+
+# Hub-nav orphan detector — a sibling to the page-index route-walk above,
+# reusing the exact same `app.routes` introspection technique but catching
+# the opposite failure: not "a page with no width tier" but "a real admin
+# route with no hub-nav card anywhere on /admin", reachable only by guessing
+# the URL or clicking some other page's inline link. Found 2026-09, during
+# an admin-sprawl review: Communities' category CRUD
+# (/admin/tools/communities/categories) had no /admin card at all, while its
+# Software parallel (/admin/tools/software/categories) did — caught by
+# manual sampling, not anything mechanical. `_ADMIN_GROUPS`/`_LIBRARY_TOOLS`/
+# `_FPA_BUDDY_TOOLS`/`_SOFTWARE_TOOLS` are hand-maintained tuples, exactly
+# the kind of thing that silently drifts from the real route table — this
+# closes that gap the same way page-index closed the width-tier one.
+#
+# Three classes of real route are legitimately never expected to carry their
+# own hub card, excluded mechanically before diffing rather than hand-listed
+# one at a time:
+#   1. `/admin` itself — the hub page doesn't link to itself.
+#   2. A route with a path parameter (`{id}`/`{slug}` in its path) — a
+#      per-record detail/edit page reached from its own list page's rows,
+#      never a fixed hub-nav destination in its own right.
+#   3. A `.../new` creation-form route whose own parent path (everything
+#      before the trailing `/new`) is ITSELF already a hub-nav href —
+#      reached via an "Add new" button on that already-carded page. A
+#      general rule, not a maintained list: any future `.../new` route
+#      added under an already-carded page is covered automatically, with no
+#      edit needed here.
+# Two further routes are true, individually-justified exceptions — small,
+# named, and documented, the same shape as `_PAGE_INDEX_CUSTOM_EXCEPTIONS`'s
+# own two above:
+#   - `/admin/overhead-spend/details` — a drill-down sub-view of
+#     `/admin/overhead-spend`, itself already carded; reached via a link on
+#     that page, not a fixed nav destination of its own.
+#   - `/admin/tools/software/name-duplicates` — deliberately has no card of
+#     its own (see `_SOFTWARE_TOOLS`'s own comment above): it's an inline
+#     link on Software vendors' own page, and its pending count already
+#     folds into that sub-group's aggregate badge via `badge_hrefs`.
+_HUB_NAV_KNOWN_NON_CARDED = {
+    "/admin/overhead-spend/details",
+    "/admin/tools/software/name-duplicates",
+}
+
+
+def _hub_nav_all_hrefs() -> set[str]:
+    """Every href that actually renders as a real hub-nav card on /admin
+    today — the identical assembly admin_page() performs at render time
+    (_LIBRARY_TOOLS + the Library link card + the Compare-summary-feedback
+    card + _FPA_BUDDY_TOOLS + _SOFTWARE_TOOLS + every _ADMIN_GROUPS item),
+    kept as its own function so admin_page() and this detector can never
+    build two different sets from the same source tuples."""
+    hrefs = {href for href, _, _ in _LIBRARY_TOOLS}
+    hrefs.add("/admin/library")
+    hrefs.add("/admin/compare-summary-feedback")
+    hrefs |= {href for href, _, _ in _FPA_BUDDY_TOOLS if href.startswith("/admin")}
+    hrefs |= {href for href, _, _ in _SOFTWARE_TOOLS}
+    for _gname, _gdesc, items in _ADMIN_GROUPS:
+        hrefs |= {href for href, _, _ in items}
+    return hrefs
+
+
+def hub_nav_orphans() -> list[str]:
+    """Real admin page routes with no corresponding hub-nav card anywhere on
+    /admin — see the block comment above for the full exclusion rules and
+    why each exists. Sorted for a stable, diffable result."""
+    from fastapi.routing import APIRoute
+    carded = _hub_nav_all_hrefs()
+    orphans = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if "GET" not in route.methods:
+            continue
+        path = route.path
+        if not path.startswith("/admin") or path == "/admin":
+            continue
+        if _page_index_response_class_name(route) != "HTMLResponse":
+            continue
+        if "{" in path:
+            continue
+        if path.endswith("/new") and path[: -len("/new")] in carded:
+            continue
+        if path in _HUB_NAV_KNOWN_NON_CARDED:
+            continue
+        if path not in carded:
+            orphans.append(path)
+    orphans.sort()
+    return orphans
 
 
 @app.get("/admin/system/page-index", response_class=HTMLResponse)
@@ -22241,11 +22985,22 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
 def admin_exa_settings(request: Request):
     """Exa kill switch (Phase 7): toggle which mechanism handles FP&A Buddy's
     web tier, and an on-demand connection test. Turning Exa off doesn't
-    disable web search — it switches to Claude's native web_search_20250305
-    tool as the fallback (see linklib.agent._web_provider); that unified
-    condition (toggle AND EXA_API_KEY) is why the page also flags a missing
-    key even when the toggle itself is on, so an admin isn't left wondering
-    why Buddy is still using the native tool."""
+    disable Buddy's own web search — it switches to Claude's native
+    web_search_20250305 tool as the fallback (see linklib.agent._web_provider);
+    that unified condition (toggle AND EXA_API_KEY) is why the page also
+    flags a missing key even when the toggle itself is on, so an admin isn't
+    left wondering why Buddy is still using the native tool.
+
+    Corrected 2026-09 (Exa cost-tracking foundation): this same toggle
+    (Library.get_exa_enabled(), checked via `lib is None or lib.get_exa_enabled()`
+    in every one of these) also gates the Reader content backfill's
+    domain-migration tier (linklib/domain_migration.py) and Medium-platform
+    tier (linklib/medium_platform.py) — neither has a fallback the way
+    Buddy's web tier does, so turning Exa off here doesn't switch either
+    backfill tier to something else, it just turns them off, silently
+    (both tiers still fall through to Wayback afterward, same as any other
+    miss). The page previously only ever mentioned Buddy's web tier; the
+    copy below now names all three call sites and says so explicitly."""
     if not _is_authed(request):
         return _login_redirect(request)
 
@@ -22266,7 +23021,13 @@ def admin_exa_settings(request: Request):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Exa web search</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Exa is the preferred mechanism for FP&amp;A Buddy's web tier. Turning it off doesn't disable web search&mdash;it switches to Claude's own web-search tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">This one toggle gates every real Exa call in the app, not just FP&amp;A Buddy's web tier:</p>
+<ul style="color:var(--ink-soft);margin:0 0 20px;font-size:15px;line-height:1.7;padding-left:22px;">
+<li><strong>FP&amp;A Buddy's web tier.</strong> Turning Exa off here doesn't disable web search&mdash;it switches to Claude's own <code>web_search_20250305</code> tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</li>
+<li><strong>Reader content backfill's domain-migration tier</strong> (a URL on a confirmed migrated domain, e.g. avc.com&nbsp;&rarr;&nbsp;avc.xyz).</li>
+<li><strong>Reader content backfill's Medium-platform tier</strong> (medium.com and other recognized Cloudflare-blocked hosts).</li>
+</ul>
+<p style="color:var(--ink-soft);margin:-8px 0 20px;font-size:15px;line-height:1.6;"><strong>Unlike Buddy's web tier, the two backfill tiers have no fallback&mdash;turning Exa off here turns them off too, with no substitute mechanism.</strong> A backfill attempt that would have used either tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried.</p>
 {key_banner}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
@@ -22520,12 +23281,162 @@ async def admin_system_model_test_connection(request: Request):
     return JSONResponse(test_model_connection(model))
 
 
+def _reviewed_freshness_banner(is_stale: bool, message_html: str, mark_url: str) -> str:
+    """Shared rendering for a dated, human-attestation "freshness" banner —
+    the mechanical part (colors, layout, the "Mark reviewed" button) that
+    _pricing_freshness_banner/_models_freshness_banner/
+    _exa_pricing_freshness_banner below all share byte-for-byte. Each of
+    those three stays its own function: the actual staleness PREDICATE
+    (imported from a different module per banner — linklib.pricing vs.
+    linklib.models) and the message WORDING genuinely differ per banner
+    (different tables, different docs links, a different review window),
+    so only the wrapper is worth extracting here, not the whole thing into
+    one parameterized mega-function."""
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+    bg, border, color = (amber_wash, amber_border, amber_text) if is_stale else (seafoam_wash, seafoam, "inherit")
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;'
+            f'display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
+            f'<span>{message_html}</span>'
+            f'<form method="post" action="{mark_url}" style="margin:0;flex-shrink:0;">'
+            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;white-space:nowrap;">Mark reviewed</button>'
+            f'</form></div>')
+
+
+def _pricing_freshness_banner(last_verified: str) -> str:
+    """Issue #98, Piece 2 — a dated manual-attestation reminder, not a
+    pass/fail check: there's no pricing API to reconcile MODEL_PRICING
+    against automatically (see linklib/pricing.py's module docstring), so
+    this is the same reviewed-toggle pattern already used for Community
+    gaps and FP&A Buddy feedback (a plain dated setting, flipped by a
+    "Mark reviewed" button, no auto-clear-on-view) applied to a third
+    thing: has a human actually re-checked Anthropic's published rates
+    recently. Deliberately its own banner, not a row in run_all()'s
+    pass/fail list — this isn't automatable, so it isn't a check in that
+    sense.
+
+    MODEL_PRICING is Claude-only — OpenAI's embedding rate lives in a
+    separate EMBEDDING_PRICING table with no freshness reminder of its own
+    yet, so this banner's copy names only Anthropic, not "Anthropic's (and
+    OpenAI's)" as an earlier draft claimed (corrected 2026-09, admin-sprawl
+    follow-up — that phrasing asserted coverage this banner doesn't
+    actually have)."""
+    from linklib.pricing import PRICING_REVIEW_STALE_DAYS, pricing_review_is_stale
+    stale = pricing_review_is_stale(last_verified)
+    if stale:
+        if last_verified:
+            when = _relative_age(last_verified)
+            html = (f'Pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
+                    f'against Anthropic&rsquo;s published rates &mdash; that&rsquo;s past the '
+                    f'{PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
+                    f'<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
+                    f'Anthropic&rsquo;s current published rates, then mark it reviewed.')
+        else:
+            html = ('Pricing has <strong>never been marked reviewed</strong>. Check '
+                    '<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
+                    'Anthropic&rsquo;s current published rates, then mark it reviewed.')
+    else:
+        when = _relative_age(last_verified)
+        html = (f'Pricing was manually verified <strong>{_esc(when) or "recently"}</strong> against '
+                f'Anthropic&rsquo;s published rates.')
+    return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-pricing-reviewed")
+
+
+def _models_freshness_banner(last_reviewed: str) -> str:
+    """Issue #98, Piece 2 follow-up — a second, parallel dated
+    manual-attestation reminder, sibling to _pricing_freshness_banner
+    above (both share _reviewed_freshness_banner's rendering). Answers a
+    genuinely different question than pricing freshness does: not "has an
+    existing model's price gone stale" but "does Anthropic have current
+    models this app doesn't know about at all." There's no API to check
+    that automatically either — `models.list()` (linklib.models._live_models)
+    only ever returns models already deployed/visible to this account,
+    which is a consequence of a model having been added somewhere already,
+    not a way to discover a brand-new release — so this stays a human
+    attestation, same as pricing, just on its own shorter clock (Anthropic
+    ships new models roughly every 30-60 days, so
+    linklib.models.MODELS_REVIEW_STALE_DAYS is 30, tighter than pricing's
+    90)."""
+    from linklib.models import MODELS_REVIEW_STALE_DAYS, models_review_is_stale
+    stale = models_review_is_stale(last_reviewed)
+    doc_link = ('<a href="https://github.com/bmweis/cfo-navigator/blob/main/CLAUDE.md'
+                '#adding-a-new-claude-model--every-touchpoint" target="_blank" rel="noopener" '
+                'style="color:inherit;text-decoration:underline;">every touchpoint a new model needs</a>')
+    if stale:
+        if last_reviewed:
+            when = _relative_age(last_reviewed)
+            html = (f'Anthropic&rsquo;s model lineup was last manually checked <strong>{_esc(when) or "a while ago"}</strong> '
+                    f'&mdash; that&rsquo;s past the {MODELS_REVIEW_STALE_DAYS}-day review window. Check '
+                    f'<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
+                    f'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s current model docs</a> '
+                    f'for anything new, add it to <code>linklib/models.py</code>&rsquo;s registry if it belongs in the curated '
+                    f'pickers, and see {doc_link} before wiring a model into FP&amp;A Buddy specifically&mdash;then mark it reviewed.')
+        else:
+            html = (f'Anthropic&rsquo;s model lineup has <strong>never been marked reviewed</strong>. Check '
+                    f'<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
+                    f'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s current model docs</a> '
+                    f'against <code>linklib/models.py</code>&rsquo;s registry, and see {doc_link} before wiring a model into '
+                    f'FP&amp;A Buddy specifically&mdash;then mark it reviewed.')
+    else:
+        when = _relative_age(last_reviewed)
+        html = (f'Anthropic&rsquo;s model lineup was manually checked <strong>{_esc(when) or "recently"}</strong> '
+                f'against <code>linklib/models.py</code>&rsquo;s registry.')
+    return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-models-reviewed")
+
+
+def _exa_pricing_freshness_banner(last_verified: str) -> str:
+    """A third, parallel dated manual-attestation reminder, sibling to
+    _pricing_freshness_banner/_models_freshness_banner above (all three
+    share _reviewed_freshness_banner's rendering). Answers the same
+    category of question as Claude pricing freshness (is an existing rate
+    still accurate), just for linklib.pricing.EXA_PRICING instead of
+    MODEL_PRICING — there's no pricing API to reconcile Exa's rates
+    against automatically either, so this stays a human attestation, same
+    as the other two, on the same 90-day window as Claude pricing (not the
+    30-day new-model-awareness window — this isn't "does something new
+    exist," it's "is the existing rate still current")."""
+    from linklib.pricing import EXA_PRICING_REVIEW_STALE_DAYS, exa_pricing_review_is_stale
+    stale = exa_pricing_review_is_stale(last_verified)
+    if stale:
+        if last_verified:
+            when = _relative_age(last_verified)
+            html = (f'Exa pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
+                    f'against Exa&rsquo;s published rates &mdash; that&rsquo;s past the '
+                    f'{EXA_PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
+                    f'<code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table against '
+                    f'<a href="https://exa.ai/pricing" target="_blank" rel="noopener" '
+                    f'style="color:inherit;text-decoration:underline;">Exa&rsquo;s current published rates</a>, '
+                    f'then mark it reviewed.')
+        else:
+            html = ('Exa pricing has <strong>never been marked reviewed</strong>. Check '
+                    '<code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table against '
+                    '<a href="https://exa.ai/pricing" target="_blank" rel="noopener" '
+                    'style="color:inherit;text-decoration:underline;">Exa&rsquo;s current published rates</a>, '
+                    'then mark it reviewed.')
+    else:
+        when = _relative_age(last_verified)
+        html = (f'Exa pricing was manually verified <strong>{_esc(when) or "recently"}</strong> against '
+                f'Exa&rsquo;s published rates.')
+    return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-exa-pricing-reviewed")
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     from webapp import checks as _checks
     results = _checks.run_all()
+    lib = _lib()
+    try:
+        pricing_last_verified = lib.get_setting("pricing_last_verified")
+        models_last_reviewed = lib.get_setting("models_last_reviewed")
+        exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
+    finally:
+        lib.close()
+    pricing_banner = _pricing_freshness_banner(pricing_last_verified)
+    models_banner = _models_freshness_banner(models_last_reviewed)
+    exa_pricing_banner = _exa_pricing_freshness_banner(exa_pricing_last_verified)
 
     live = [r for r in results if r["where"] == "In-app"]
     passing = sum(1 for r in live if r["ok"])
@@ -22571,8 +23482,72 @@ def admin_checks(request: Request):
 {summary}
 {rows}
 <p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
+<p style="color:var(--ink-soft);margin:24px 0 -4px;font-size:14px;line-height:1.6;">None of the three sections below can be checked automatically&mdash;there&rsquo;s no pricing or model-catalog API to reconcile these tables against, so each is a dated reminder for a human re-check, not a pass/fail test.</p>
+<h2 id="pricing-freshness" style="margin:28px 0 4px;">Pricing freshness</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table still accurate against Anthropic&rsquo;s current published rates?</p>
+{pricing_banner}
+<h2 id="new-model-awareness" style="margin:28px 0 4px;">New-model awareness</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">A different question from pricing freshness above: has Anthropic shipped a model since the last check that isn&rsquo;t in <code>linklib/models.py</code> yet?</p>
+{models_banner}
+<h2 id="exa-pricing-freshness" style="margin:28px 0 4px;">Exa pricing freshness</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table still accurate against Exa&rsquo;s current published rates?</p>
+{exa_pricing_banner}
 </div>"""
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/checks/mark-pricing-reviewed")
+def admin_checks_mark_pricing_reviewed(request: Request):
+    """Issue #98, Piece 2 — the manual "Mark reviewed" action: Brian has
+    actually re-checked MODEL_PRICING against Anthropic's current
+    published rates and confirmed/updated it (MODEL_PRICING is Claude-only
+    — see _pricing_freshness_banner's docstring). Same plain
+    set-a-dated-setting shape as every other reviewed-toggle in this
+    codebase, just a timestamp rather than a boolean since there's no
+    per-row entity here to flip — one global "last verified" date."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.set_setting("pricing_last_verified", datetime.now(timezone.utc).isoformat())
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/checks", status_code=303)
+
+
+@app.post("/admin/checks/mark-models-reviewed")
+def admin_checks_mark_models_reviewed(request: Request):
+    """Issue #98, Piece 2 follow-up — sibling to mark-pricing-reviewed
+    above: Brian has actually checked Anthropic's current model lineup
+    against linklib/models.py's registry (and, where relevant, wired a new
+    model into FP&A Buddy's EFFORT_SETTINGS per CLAUDE.md's touchpoint
+    list) and confirmed/updated it. Same plain set-a-dated-setting shape,
+    a separate settings key so the two reminders go stale independently."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.set_setting("models_last_reviewed", datetime.now(timezone.utc).isoformat())
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/checks", status_code=303)
+
+
+@app.post("/admin/checks/mark-exa-pricing-reviewed")
+def admin_checks_mark_exa_pricing_reviewed(request: Request):
+    """Sibling to mark-pricing-reviewed/mark-models-reviewed above: Brian
+    has actually re-checked linklib/pricing.py's EXA_PRICING table against
+    Exa's current published rates and confirmed/updated it. Same plain
+    set-a-dated-setting shape, a separate settings key so all three
+    reminders go stale independently."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.set_setting("exa_pricing_last_verified", datetime.now(timezone.utc).isoformat())
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/checks", status_code=303)
 
 
 def _relative_age(iso: str) -> str:
@@ -22599,6 +23574,152 @@ def _relative_age(iso: str) -> str:
     if secs < 86400:
         return f"{int(secs // 3600)}h ago"
     return f"{int(secs // 86400)}d ago"
+
+
+def _ai_usage_freshness_dot(label: str, last_value: str, stale: bool, anchor: str) -> str:
+    """A compact read-only status line for one of the three /admin/checks
+    freshness reminders (Pricing, New-model awareness, Exa pricing) —
+    AI usage/config dashboard, Step 0 decision 2. Deliberately NOT the full
+    banner (no "Mark reviewed" button, no long explanatory copy) — this
+    page only ever reads the three settings values and reuses each
+    module's own *_review_is_stale() to color a dot; the actual review
+    action lives exclusively on /admin/checks, which this links to via the
+    anchor ids added alongside the three h2 headings there."""
+    color = ("#CA8A04" if stale else "var(--seafoam-deep)")
+    when = _relative_age(last_value)
+    if not last_value:
+        detail = "never reviewed"
+    elif stale:
+        detail = f"reviewed {when or 'a while ago'} — stale"
+    else:
+        detail = f"reviewed {when or 'recently'}"
+    return (f'<a href="/admin/checks#{anchor}" style="display:flex;align-items:center;gap:8px;'
+            f'text-decoration:none;color:inherit;font-size:13px;padding:6px 0;">'
+            f'<span style="width:9px;height:9px;border-radius:50%;background:{color};flex-shrink:0;"></span>'
+            f'<span style="color:var(--ink-soft);">{_esc(label)}: {_esc(detail)}</span>'
+            f'<span style="color:var(--muted);">&rarr;</span></a>')
+
+
+@app.get("/admin/system/ai-usage", response_class=HTMLResponse)
+def admin_system_ai_usage(request: Request):
+    """AI usage/config dashboard — a read-only index of which Claude/Exa/
+    OpenAI surface uses which model or mechanism, whether each is live-
+    editable or needs a deploy, and a link to wherever it's actually
+    changed. Built on a completed investigation (Step 0, reported and
+    approved) plus PRs 508, 509, and 510, which closed every gap that
+    investigation found — this page is a map over already-accurate data,
+    not a new source of truth. No editing here: every "change something"
+    affordance is a link out to /admin/system/model, /admin/exa-settings,
+    or /admin/checks. Dollar totals live at /admin/overhead-spend, linked
+    at the bottom — this page is usage/config only, never spend."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    from linklib.models import DEFAULT_CHAT_MODEL, models_review_is_stale
+    from linklib.agent import EFFORT_SETTINGS
+    from linklib.pricing import pricing_review_is_stale, exa_pricing_review_is_stale
+
+    lib = _lib()
+    try:
+        enrich_model = lib.get_enrich_model()
+        exa_enabled = lib.get_exa_enabled()
+        pricing_last_verified = lib.get_setting("pricing_last_verified")
+        models_last_reviewed = lib.get_setting("models_last_reviewed")
+        exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
+    finally:
+        lib.close()
+    has_exa_key = bool(os.environ.get("EXA_API_KEY"))
+
+    def _card(title: str, rows: str, extra: str = "") -> str:
+        return (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+                f'padding:18px 20px;margin-bottom:14px;">'
+                f'<div style="font:600 12px var(--font-body);letter-spacing:.06em;text-transform:uppercase;'
+                f'color:var(--muted);margin-bottom:10px;">{_esc(title)}</div>{rows}{extra}</div>')
+
+    def _row(label: str, value: str, note: str = "") -> str:
+        note_html = f'<div style="font-size:12.5px;color:var(--muted);margin-top:2px;">{note}</div>' if note else ""
+        return (f'<div style="padding:8px 0;border-top:1px solid var(--line);">'
+                f'<div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
+                f'<span style="font-size:13.5px;color:var(--ink-soft);">{label}</span>'
+                f'<span style="font-size:13.5px;font-weight:600;color:var(--navy);text-align:right;">{value}</span>'
+                f'</div>{note_html}</div>')
+
+    live_badge = '<span style="color:var(--seafoam-deep);font-weight:600;">Live&mdash;no redeploy</span>'
+    code_badge = '<span style="color:#92400e;font-weight:600;">Code-only&mdash;needs a deploy</span>'
+
+    # --- Claude ---------------------------------------------------------
+    claude_rows = (
+        _row("Enrichment", f'{_esc(_enrich_model_label(enrich_model))} <span style="font-size:12px;">({_esc(enrich_model)})</span>',
+             f'Description, Agent taxonomy, Bottom line, Community profile fields, article summaries. {live_badge} &mdash; '
+             f'<a href="/admin/system/model" style="color:var(--accent);">/admin/system/model &rarr;</a>')
+        + _row("FP&amp;A Buddy",
+               " / ".join(_esc(_enrich_model_label(t["model"])) for t in
+                          [EFFORT_SETTINGS["quick"], EFFORT_SETTINGS["standard"], EFFORT_SETTINGS["deep"]]),
+               f'Quick / Standard / Deep, one model per tier ({_esc(EFFORT_SETTINGS["quick"]["model"])} / '
+               f'{_esc(EFFORT_SETTINGS["standard"]["model"])} / {_esc(EFFORT_SETTINGS["deep"]["model"])}). '
+               f'{code_badge} &mdash; hardcoded in <code>linklib.agent.EFFORT_SETTINGS</code>, no admin picker. '
+               f'<a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works &rarr;</a>')
+        + _row("Matchmaker", _esc(_enrich_model_label(DEFAULT_CHAT_MODEL)),
+               f'Software &amp; Community matchmaker chat, one shared default. {code_badge} &mdash; '
+               f'<code>linklib.matchmaker.DEFAULT_MODEL</code>, resolved from <code>LINKLIB_CHAT_MODEL</code> / '
+               f'<code>linklib.models.DEFAULT_CHAT_MODEL</code>, independent of the enrichment setting above.')
+    )
+    claude_freshness = (
+        _ai_usage_freshness_dot("Pricing", pricing_last_verified,
+                                 pricing_review_is_stale(pricing_last_verified), "pricing-freshness")
+        + _ai_usage_freshness_dot("New-model awareness", models_last_reviewed,
+                                   models_review_is_stale(models_last_reviewed), "new-model-awareness")
+    )
+
+    # --- Exa --------------------------------------------------------------
+    exa_toggle_html = (
+        f'<div style="padding:10px 0;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-soft);">'
+        f'Toggle: <strong style="color:var(--navy);">{"On" if exa_enabled else "Off"}</strong>'
+        f'{" &mdash; but EXA_API_KEY is unset, so every call site below is on its fallback regardless" if not has_exa_key and exa_enabled else ""}'
+        f' &mdash; <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings &rarr;</a></div>'
+    )
+    exa_rows = (
+        _row("FP&amp;A Buddy web tier", "Tracked in <code>ask_questions</code>",
+             "Has a fallback&mdash;Claude's native web_search_20250305 tool, same trusted-sites allowlist either way.")
+        + _row("Reader backfill: domain migration", "Tracked in <code>content_refetch_log</code>",
+               "No fallback (other than the existing Wayback tier)&mdash;a real hit is simply not tried when Exa is off.")
+        + _row("Reader backfill: Medium-platform", "Tracked in <code>content_refetch_log</code>",
+               "No fallback (other than the existing Wayback tier)&mdash;same as domain migration above.")
+        + _row("Feature Taxonomy vendor research", "Per-run script output only",
+               "<strong>Not a persistent ledger like the three above</strong>&mdash;<code>linklib.feature_scan."
+               "research_vendor_domain</code> computes and prints its own cost for that one script run "
+               "(<code>scripts/enrich_agent_taxonomy.py</code> / feature-drafting tools); nothing writes it to a "
+               "database table, so it doesn't show up in any of the ledgers the other three call sites use.")
+        + exa_toggle_html
+    )
+    exa_freshness = _ai_usage_freshness_dot("Exa pricing", exa_pricing_last_verified,
+                                             exa_pricing_review_is_stale(exa_pricing_last_verified),
+                                             "exa-pricing-freshness")
+
+    # --- OpenAI (footnote) ------------------------------------------------
+    openai_rows = _row("Embeddings", "text-embedding-3-small",
+                        "Embed-on-save, <code>embed_backfill</code>, and the vector half of hybrid Library retrieval. "
+                        "Cost tracked in two ledgers by payer: <code>article_embeddings.cost_usd</code> (Brian's overhead) "
+                        "and <code>ask_questions.embed_cost_usd</code> (user-cap cost, the query embedding at ask-time).")
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>AI usage</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">Which model or mechanism powers each Claude/Exa/OpenAI surface in the app, and whether it's a live setting or a code default. Read-only&mdash;every change happens on the page it links to, not here. For dollar totals, see <a href="/admin/overhead-spend" style="color:var(--accent);">Overhead spend &rarr;</a>.</p>
+<div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:0 0 22px;">
+{claude_freshness}{exa_freshness}
+</div>
+
+<h2 style="margin:0 0 4px;">Claude</h2>
+{_card("Models by surface", claude_rows)}
+
+<h2 style="margin:24px 0 4px;">Exa</h2>
+{_card("Call sites", exa_rows)}
+
+<h2 style="margin:24px 0 4px;">OpenAI</h2>
+{_card("Embeddings", openai_rows)}
+</div>"""
+    return HTMLResponse(_page("AI usage—Admin", "Admin", body, authed=True))
 
 
 def _job_run_banner(job_name: str) -> str:
@@ -22791,6 +23912,7 @@ def admin_page(request: Request):
     lib = _lib()
     try:
         task_counts = _tasks.open_task_counts(lib)
+        password_nudge_html = _password_change_nudge_html(lib, request)
     finally:
         lib.close()
 
@@ -22829,21 +23951,30 @@ def admin_page(request: Request):
         )
         flat_hrefs = badge_hrefs if badge_hrefs is not None else [item[0] for item in items if not isinstance(item, str)]
         group_badge_html = _group_badge(task_counts, flat_hrefs)
-        # Inbox starts expanded, same as always. Any other group/sub-group
-        # carrying a nonzero badge also starts expanded — a real, unresolved
-        # item (e.g. a name-duplicate pair) sitting inside a collapsed
-        # sub-group, with only a small aggregate number on a parent group's
-        # summary to hint at it, is exactly how LiveFlow/Liveflow and the
-        # Runway pair went unnoticed even though detection and badge counting
-        # were both correct the whole time — see CLAUDE.md. A nonzero badge
-        # is a call to action, not just a count to glance at.
+        # Every group/sub-group defaults to COLLAPSED on load, Inbox
+        # included — reversed 2026-09 from an earlier "Inbox always open,
+        # any group with a nonzero badge also starts open" rule (flagging
+        # the reversal explicitly rather than silently, per CLAUDE.md's own
+        # standing practice for this). That earlier rule was itself a
+        # deliberate fix for a real incident: a pending name-duplicate pair
+        # went unnoticed inside a collapsed sub-group, with nothing but a
+        # small aggregate number on the parent's summary to hint at it —
+        # see CLAUDE.md's LiveFlow/Runway note. Reversing it does NOT bring
+        # that failure mode back: `.admin-group[open] .group-badge{display:
+        # none;}` only ever hides a group's badge once it's opened, so a
+        # collapsed-by-default group with a real pending item still shows
+        # its badge number on the summary row, unhidden, exactly where the
+        # incident's own root cause (a badge sitting collapsed) says to
+        # look. Brian's explicit call: badges are the review-inbox signal;
+        # auto-expanding on top of that duplicated the same information as
+        # an intrusive default rather than a genuinely different safeguard.
         return _disclosure_group(
             gname,
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
             f'<div style="display:grid;gap:14px;">{cards}</div>',
             count_label=f'{len(items)} {"tool" if len(items) == 1 else "tools"}',
             badge_html=group_badge_html,
-            open=(gname == "Inbox" or bool(group_badge_html)),
+            open=False,
             nested=nested,
         )
 
@@ -22856,6 +23987,15 @@ def admin_page(request: Request):
     library_link_card = _card("/admin/library", "Library",
                               f"Build, curate, enrich, and back up your archive&mdash;{len(_LIBRARY_TOOLS)} tools.",
                               _group_badge(task_counts, library_hrefs))
+
+    # Compare Redesign Phase 2 — spans both Software and Communities Compare
+    # pages, so it's a direct CFO Toolbox card rather than nested under
+    # either sub-group, same placement precedent as Library above.
+    compare_summary_feedback_card = _card(
+        "/admin/compare-summary-feedback", "Compare summary feedback",
+        "Reader-flagged issues with the AI-generated Compare-page overlap/contrast summary.",
+        _badge_for_href("/admin/compare-summary-feedback", task_counts.get("/admin/compare-summary-feedback", 0)),
+    )
 
     # FP&A Buddy moves from its own standalone top-level group into a nested
     # sub-group inside CFO Toolbox — the same group, same 4 items, same
@@ -22879,18 +24019,24 @@ def admin_page(request: Request):
         _SOFTWARE_TOOLS, badge_hrefs=software_hrefs, nested=True,
     )
 
-    # Two columns on wide viewports: left carries the group Brian triages
-    # most often (Inbox); right carries the three public-nav-mirroring
-    # groups (Thought Leadership, CFO Toolbox, Brand/voice/content) plus the
+    # Two columns on wide viewports: left carries Inbox plus Thought
+    # leadership and CFO Toolbox (2026-09 reorder — these two used to sit at
+    # the top of the right column; Brand/voice/content and System shifted up
+    # to fill that slot); right now carries just Brand/voice/content and the
     # System catch-all. Below the breakpoint both stacks concatenate into a
-    # single-column order — unchanged from before this split.
-    _LEFT_GROUPS = {"Inbox"}
+    # single-column order — unchanged from before this split, and still
+    # correct after the reorder since _ADMIN_GROUPS' own iteration order
+    # already puts these five in the desired top-to-bottom sequence.
+    _LEFT_GROUPS = {"Inbox", "Thought leadership", "CFO Toolbox"}
     left_html = ""
     right_html = ""
     for gname, gdesc, items in _ADMIN_GROUPS:
         if gname == "CFO Toolbox":
-            toolbox_hrefs = [href for href, _, _ in items] + software_hrefs + fpa_hrefs + library_hrefs
-            html = _group_html(gname, gdesc, [software_subgroup_html] + list(items) + [fpa_subgroup_html, library_link_card],
+            toolbox_hrefs = ([href for href, _, _ in items] + software_hrefs + fpa_hrefs + library_hrefs
+                              + ["/admin/compare-summary-feedback"])
+            html = _group_html(gname, gdesc,
+                               [software_subgroup_html] + list(items)
+                               + [fpa_subgroup_html, library_link_card, compare_summary_feedback_card],
                                badge_hrefs=toolbox_hrefs)
         else:
             html = _group_html(gname, gdesc, items)
@@ -22900,6 +24046,7 @@ def admin_page(request: Request):
             right_html += html
 
     body = f"""<div class="page page-admin">
+{password_nudge_html}
 <style>
 .admin-group summary:hover{{background:var(--surface);}}
 .admin-group[open] .group-badge{{display:none;}}
@@ -25304,11 +26451,17 @@ def _render_cited_answer(answer: str, citations_json: str,
                                f'archive #{int(c["article_id"])}</span>')
             except (TypeError, ValueError):
                 archive_ref = ""
+        # Published-content ingestion (2026-09): same citation-list-only
+        # label as the client-side srcListHtml renderer — see that
+        # function's own comment for why this never became an inline
+        # prose mention.
+        own_tag = (' <span style="color:var(--muted);font-size:11px;">(own writing)</span>'
+                   if c.get("own_content") else "")
         items.append(
             f'<li>{_ASK_SOURCE_ICONS.get(c.get("type"), "")} '
             f'<a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener">'
             f'[{_esc(c.get("n") if c.get("n") is not None else "")}] '
-            f'{_esc(c.get("title") or c.get("url") or "")}</a>{archive_ref}</li>'
+            f'{_esc(c.get("title") or c.get("url") or "")}</a>{archive_ref}{own_tag}</li>'
         )
     sources_html = ('<ul style="margin:8px 0 0;padding-left:18px;list-style:none;font-size:13px;'
                     f'display:flex;flex-direction:column;gap:4px;">{"".join(items)}</ul>')
@@ -26215,21 +27368,30 @@ _FEEDBACK_RATINGS = {
 
 
 @app.get("/admin/ask-feedback", response_class=HTMLResponse)
-def admin_ask_feedback(request: Request, rating: str = ""):
+def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     """Triage view for member feedback on FP&A Buddy answers: every rating,
     newest first, with the full context needed to judge a flagged answer —
     the question, the answer, and the sources it actually cited (persisted
     per turn in ask_questions.citations_json). Capture + triage only: nothing
-    here feeds back into prompts or retrieval automatically."""
+    here feeds back into prompts or retrieval automatically.
+
+    Reviewed state (2026-09, Phase 3) is a manual per-row "Mark reviewed"
+    toggle, matching /admin/community-gaps' own reviewed column/toggle/
+    filter shape exactly — not auto-clear-on-view. See toggle_ask_feedback_
+    reviewed's docstring for why."""
     if not _is_authed(request):
         return _login_redirect(request)
     if rating not in Library.ASK_FEEDBACK_RATINGS:
         rating = ""
+    if reviewed not in ("", "yes", "no"):
+        reviewed = ""
     lib = _lib()
     try:
-        rows = lib.list_ask_feedback(rating=rating or None, limit=200)
+        reviewed_filter = None if reviewed == "" else (reviewed == "yes")
+        rows = lib.list_ask_feedback(rating=rating or None, reviewed=reviewed_filter, limit=200)
         month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
         month_counts = lib.ask_feedback_counts(since=month_start)
+        unreviewed_count = lib.count_unreviewed_ask_feedback()
     finally:
         lib.close()
 
@@ -26238,6 +27400,7 @@ def admin_ask_feedback(request: Request, rating: str = ""):
 
     def _card(r: dict) -> str:
         label, fg, bg = _FEEDBACK_RATINGS.get(r["rating"], (r["rating"], "var(--ink)", "var(--surface-2)"))
+        is_reviewed = bool(r.get("reviewed"))
         comment = ""
         if r.get("comment"):
             comment = (f'<div style="margin:8px 0 0;padding:8px 12px;background:var(--coral-wash);'
@@ -26254,11 +27417,17 @@ def admin_ask_feedback(request: Request, rating: str = ""):
         model = (r.get("model") or "").replace("claude-", "")
         report_link = (f'/admin/ask-report?user={quote(r["rater_username"])}'
                        if r.get("rater_username") else "/admin/ask-report")
+        back_qs = f"?reviewed={reviewed}" if reviewed else ""
+        reviewed_badge, reviewed_action = _reviewed_toggle_html(
+            is_reviewed, f"/admin/ask-feedback/{r['id']}/toggle-reviewed{back_qs}", form_style="margin:0;",
+        )
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
     <span style="font-size:12px;font-weight:700;color:{fg};background:{bg};border-radius:999px;padding:3px 12px;white-space:nowrap;">{label}</span>
+    {reviewed_badge}
     <span style="font-size:12.5px;color:var(--muted);">{_esc(_rater(r))} &middot; {_esc((r["created_at"] or "")[:10])}{' &middot; edited' if r.get("updated_at") else ''}</span>
     <a href="{report_link}" style="margin-left:auto;font-size:12px;color:var(--accent);white-space:nowrap;">View in ask report &rarr;</a>
+    {reviewed_action}
   </div>
   {comment}
   <div style="font-weight:600;color:var(--navy);font-size:14.5px;margin-top:10px;">{_esc(r.get("question") or "")}</div>
@@ -26273,17 +27442,29 @@ def admin_ask_feedback(request: Request, rating: str = ""):
     cards = "".join(_card(r) for r in rows) or \
         '<div style="padding:24px;text-align:center;color:var(--muted);border:1px solid var(--line);border-radius:12px;background:var(--surface);">No feedback yet.</div>'
 
+    # Unreviewed is deliberately all-time, not month-scoped — same choice
+    # /admin/community-gaps makes for its own Unreviewed stat tile (Total
+    # submissions/This calendar month are the two that scope; Unreviewed
+    # answers a different question, "how much is left to triage," which
+    # isn't naturally a monthly figure).
     stat_cards = "".join(
         f"""<div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
     <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{month_counts.get(key, 0):,}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">{label} this month</div>
   </div>"""
         for key, (label, _, _) in _FEEDBACK_RATINGS.items()
-    )
+    ) + f"""<div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{unreviewed_count:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Unreviewed</div>
+  </div>"""
 
     filter_options = "".join(
         f'<option value="{key}"{" selected" if rating == key else ""}>{label}</option>'
         for key, (label, _, _) in _FEEDBACK_RATINGS.items()
+    )
+    reviewed_filter_options = "".join(
+        f'<option value="{key}"{" selected" if reviewed == key else ""}>{label}</option>'
+        for key, label in [("no", "Unreviewed"), ("yes", "Reviewed")]
     )
 
     body = f"""<div class="page page-admin">
@@ -26291,7 +27472,7 @@ def admin_ask_feedback(request: Request, rating: str = ""):
 <h1>FP&amp;A Buddy feedback</h1>
 <p style="color:var(--muted);margin:-6px 0 20px;">How members rated the answers&mdash;flagged answers stay inspectable with the sources they actually cited. Capture and triage only; nothing here changes prompts or retrieval.</p>
 
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px;margin-bottom:20px;">
   {stat_cards}
 </div>
 
@@ -26301,12 +27482,30 @@ def admin_ask_feedback(request: Request, rating: str = ""):
     <option value="">All ratings</option>
     {filter_options}
   </select>
+  <label style="font-size:13px;color:var(--muted);">Reviewed:</label>
+  <select name="reviewed" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
+    <option value="">All</option>
+    {reviewed_filter_options}
+  </select>
 </form>
 
 {cards}
-<p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 200{' matching' if rating else ''} ratings.</p>
+<p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 200{' matching' if (rating or reviewed) else ''} ratings.</p>
 </div>"""
     return HTMLResponse(_page("FP&A Buddy feedback—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/ask-feedback/{feedback_id}/toggle-reviewed")
+def admin_ask_feedback_toggle(request: Request, feedback_id: int, reviewed: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.toggle_ask_feedback_reviewed(feedback_id)
+    finally:
+        lib.close()
+    qs = f"?reviewed={reviewed}" if reviewed else ""
+    return RedirectResponse(f"/admin/ask-feedback{qs}", status_code=303)
 
 
 @app.get("/admin/community-gaps", response_class=HTMLResponse)
@@ -26380,11 +27579,6 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
 
     def _card(r: dict) -> str:
         is_reviewed = bool(r["reviewed"])
-        badge = (
-            '<span style="font-size:12px;font-weight:700;color:var(--seafoam-deep);background:var(--seafoam-wash);border-radius:999px;padding:3px 12px;white-space:nowrap;">Reviewed</span>'
-            if is_reviewed else
-            '<span style="font-size:12px;font-weight:700;color:var(--alert);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">New</span>'
-        )
         is_recommender = r.get("submission_type") == "recommender"
         is_correction = r.get("submission_type") == "correction"
         type_badge = (
@@ -26422,13 +27616,14 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
             ]) or no_text_fallback
         )
         back_qs = f"?reviewed={reviewed}" if reviewed else ""
+        badge, action = _reviewed_toggle_html(
+            is_reviewed, f"/admin/community-gaps/{r['id']}/toggle-reviewed{back_qs}", form_style="margin-left:auto;",
+        )
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
     {badge}{type_badge}
     <span style="font-size:12.5px;color:var(--muted);">{_esc((r["created_at"] or "")[:10])}{' &middot; ' + _esc(r["email"]) if r.get("email") else ''}</span>
-    <form method="post" action="/admin/community-gaps/{r['id']}/toggle-reviewed{back_qs}" style="margin-left:auto;">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">{"Mark unreviewed" if is_reviewed else "Mark reviewed"}</button>
-    </form>
+    {action}
   </div>
   {text_blocks}
   <div style="font-size:12px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">{" &middot; ".join(meta_bits)}</div>
@@ -26490,6 +27685,32 @@ def admin_community_gap_toggle(request: Request, submission_id: int, reviewed: s
     return RedirectResponse(f"/admin/community-gaps{qs}", status_code=303)
 
 
+# Reference content for the "How to set up a new MCP user" disclosure block
+# on /admin/users. Static — documents the manual, cross-surface flow (this
+# page, then a railway ssh script, then the user's own Claude app) rather
+# than an editable setting, same "plain HTML, not DB-backed" reasoning as
+# _COMMUNITIES_REFERENCE_HTML above. Per CLAUDE.md's Documentation rule,
+# any PR that changes this flow (the mint_api_token.py invocation, the
+# connector URL/header shape, or the default-cap copy) must update this
+# block in the same PR.
+_MCP_USER_SETUP_HTML = """
+<ol style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.85;display:grid;gap:12px;">
+<li><strong>Create the account.</strong> Use &ldquo;Add a member&rdquo; below &mdash; pick a role and an active status.
+They can log in immediately with the temporary password you set. If you gave them an email, a welcome email with
+that password goes out automatically; otherwise, share it with them directly.</li>
+<li><strong>Raise their Ask/Matchmaker cap, if needed.</strong> There&rsquo;s no &ldquo;unlimited&rdquo; option
+&mdash; set a high dollar number instead of the default.</li>
+<li><strong>Mint their personal MCP token.</strong> <code>railway ssh</code>, then:<br>
+<code style="display:block;margin:6px 0;padding:8px 10px;background:var(--surface);border:1px solid var(--line);border-radius:6px;font-size:12.5px;overflow-x:auto;">python -m scripts.mint_api_token --db /data/library.db --username &lt;username&gt; --label &lt;label&gt;</code>
+The plaintext token is shown once &mdash; copy it to a password manager immediately. It can&rsquo;t be recovered
+later, only reissued.</li>
+<li><strong>They add the connector in their own Claude app:</strong> URL <code>https://mcp.bmweis.com/mcp</code>,
+header <code>authorization</code>, value <code>Bearer &lt;token&gt;</code> (the word &ldquo;Bearer&rdquo;, a space,
+the token &mdash; no other format), marked Required.</li>
+</ol>
+"""
+
+
 @app.get("/admin/users", response_class=HTMLResponse)
 def admin_users(request: Request, msg: str = ""):
     if not _is_authed(request):
@@ -26512,167 +27733,454 @@ def admin_users(request: Request, msg: str = ""):
     banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
               f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
 
-    def _card(u: dict) -> str:
+    # Same standard admin-table convention as /admin/tools/software and
+    # /admin/tools/communities (checkbox select, column picker, client-side
+    # sort/filter, a "Delete selected" bulk action) — see CLAUDE.md's
+    # admin-table-convention note. Username/Actions have no data-col, so
+    # they're always visible; everything else is picker-gated, same as the
+    # other two tables.
+    # 2026-09 table-redesign follow-up: Access level/Status join the optional
+    # columns (their own badge columns, per Brian's decision — display only,
+    # scannable at a glance; the actual change still goes through an
+    # explicit action button, bundled into the Actions column below rather
+    # than living beside the badge — see the PR description for why).
+    # default_visible now covers every optional column (the "expand the
+    # table" ask reads as show-by-default, not hidden-behind-a-picker), but
+    # the picker/toggle mechanism itself is unchanged from the other two
+    # admin tables.
+    # 2026-09 mobile-tidiness follow-up (superseded below): FP&A Buddy cap
+    # and Matchmaker cap were briefly merged into one "Usage limits" section,
+    # matching Software/Communities' own mobile cards (related info under
+    # ONE section label, e.g. Review status). Brian liked the mobile result
+    # but flagged the merged desktop column as crowded and asked for each
+    # cap to go back to being its own field — see the follow-up note right
+    # above _user_row's ask-cap/matchmaker-cap cells for how that's resolved
+    # (one compact single-line field each, identical at both breakpoints,
+    # rather than a device-specific merge).
+    #
+    # "Access level" shortened to "Access" here too (not just the mobile
+    # data-label from the earlier round) so the column-picker label and the
+    # <th> text both say the same short thing at every width.
+    # 2026-09 view/edit-mode follow-up: the row is read-only by default now
+    # (badges, plain values) — a single per-row "Edit" button (in Actions,
+    # becomes "Save" once clicked) reveals every editable control at once:
+    # Name/Email inputs, Make admin/member (now directly under the Access
+    # badge instead of in Actions), Disable/Enable (directly under Status),
+    # the Password field's input+Reset, and both cap inputs' Save buttons.
+    # Password is a real field/column of its own now (was folded into
+    # Actions before). See _user_row for the actual reveal mechanics.
+    users_cols = [("realname", "Name"), ("email", "Email"), ("password", "Password"),
+                  ("last_login", "Last login"), ("access_level", "Access"), ("status", "Status"),
+                  ("ask", "FP&A Buddy cap"), ("matchmaker", "Matchmaker cap")]
+    users_default_visible = tuple(k for k, _ in users_cols)
+    users_sort_fields = [("name", "Username"), ("last_login", "Last login"), ("created", "Created")]
+    users_scalar_filters = [
+        {"key": "role", "label": "Role", "options": ["Admin", "Member"]},
+        {"key": "status", "label": "Status", "options": ["Active", "Disabled"]},
+    ]
+    total_cols = 2 + len(users_cols) + 1  # checkbox + username + optional cols + actions
+
+    def _user_row(u: dict) -> str:
         uid = u["id"]
         active = u["active"]
-        status = ('<span class="user-badge" style="background:#d1fae5;color:#065f46;">active</span>' if active
-                  else '<span class="user-badge" style="background:#fee2e2;color:#b91c1c;">disabled</span>')
+        status_badge = ('<span class="user-badge" style="background:#d1fae5;color:#065f46;">active</span>' if active
+                         else '<span class="user-badge" style="background:#fee2e2;color:#b91c1c;">disabled</span>')
         role_badge = (f'<span class="user-badge" style="'
                       f'{"background:var(--coral-wash);color:var(--coral-deep);" if u["role"]=="admin" else "background:var(--seafoam-wash);color:var(--seafoam-deep);"}'
                       f'">{_esc(u["role"])}</span>')
-        last = _esc((u["last_login_at"] or "")[:10]) or "—"
+        last_raw = u["last_login_at"] or ""
+        last_display = _esc(last_raw[:10]) or "—"
+        created_raw = (u["created_at"] or "")[:10]
+        # 2026-09: no more (default)/(override) note — per Brian's ask, the
+        # cap field just shows the current effective value (whichever it
+        # is) and lets you overwrite it directly; cap_override itself is
+        # only needed to compute that effective value now.
         cap_override = u.get("ask_cap_usd")
         effective_cap = cap_override if cap_override is not None else default_cap
         spent = ask_spend.get(uid, 0.0)
-        cap_note = "override" if cap_override is not None else "default"
         mm_cap_override = u.get("matchmaker_cap_usd")
         mm_effective_cap = mm_cap_override if mm_cap_override is not None else default_mm_cap
         mm_spent = mm_spend.get(uid, 0.0)
-        meta_bits = [b for b in (_esc(u["name"] or ""), _esc(u["email"] or "")) if b]
-        meta_bits.append(f"Last in {last}")
-        meta_line = " &middot; ".join(meta_bits)
         resets = resets_by_user.get(uid)
         reset_notice = ""
         if resets:
             when = _esc(resets[0]["created_at"][:10])
             reset_notice = (
-                f'<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:9px;'
-                f'padding:8px 12px;margin:8px 0 0;display:flex;align-items:center;justify-content:space-between;'
-                f'gap:10px;font-size:13px;color:var(--navy);">'
-                f'<span>Requested a password reset&mdash;{when}</span>'
+                f'<div style="margin-top:4px;display:flex;align-items:center;gap:8px;font-size:11.5px;'
+                f'color:var(--navy);flex-wrap:wrap;">'
+                f'<span>&#9888; Requested a password reset&mdash;{when}</span>'
                 f'<form method="post" action="/admin/users/{uid}/password-reset/dismiss" style="margin:0;">'
-                f'<button type="submit" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;'
-                f'color:var(--coral-deep);border-color:var(--coral);">Dismiss</button></form></div>'
+                f'<button type="submit" style="font-size:11px;padding:1px 8px;border:1px solid var(--line);'
+                f'border-radius:5px;background:transparent;color:var(--navy);cursor:pointer;">Dismiss</button>'
+                f'</form></div>'
             )
-        return f"""<div class="user-card" data-user-id="{uid}">
-  <div class="user-card-head">
-    <div style="min-width:0;">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span class="user-name">{_esc(u["username"])}</span>{role_badge}{status}
-      </div>
-      <div class="user-meta">{meta_line}</div>
-      {reset_notice}
-    </div>
-    <div style="display:flex;align-items:center;gap:14px;flex-shrink:0;">
-      <div style="text-align:right;font-size:12px;color:var(--muted);">
-        <div style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</div>
-        <div>Ask &middot; {cap_note}</div>
-        <div style="font-weight:600;color:var(--ink);margin-top:4px;">${mm_spent:.2f} / ${mm_effective_cap:.2f}</div>
-        <div>Matchmaker &middot; {"override" if mm_cap_override is not None else "default"}</div>
-      </div>
-      <button type="button" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;" onclick="toggleManage({uid})">Manage</button>
-    </div>
-  </div>
-  <div class="user-manage" id="manage-{uid}" style="display:none;">
-    <div class="user-manage-row">
-      <label>Profile</label>
-      <form method="post" action="/admin/users/{uid}/edit" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" placeholder="username" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:120px;">
-        <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:130px;">
-        <input name="email" type="email" value="{_esc(u["email"] or "")}" maxlength="200" placeholder="email" title="email" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:170px;">
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Save</button>
-      </form>
-    </div>
-    <div class="user-manage-row">
-      <label>FP&amp;A Buddy cap</label>
-      <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:6px;align-items:center;">
-        <span style="font-size:13px;color:var(--muted);">$</span>
-        <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
-          placeholder="${default_cap:.2f}" title="Monthly cap override—blank inherits the site default"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-        <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
-      </form>
-    </div>
-    <div class="user-manage-row">
-      <label>Matchmaker cap</label>
-      <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:6px;align-items:center;">
-        <span style="font-size:13px;color:var(--muted);">$</span>
-        <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
-          placeholder="${default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-        <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
-      </form>
-    </div>
-    <div class="user-manage-row">
-      <label>Reset password</label>
-      <form method="post" action="/admin/users/{uid}/password" style="display:flex;gap:6px;align-items:center;">
-        <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:150px;">
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Reset</button>
-      </form>
-    </div>
-    <div class="user-manage-row">
-      <label>Account</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
-        <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Disable" if active else "Enable"}</button></form>
-        <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
-      </div>
-    </div>
-  </div>
-</div>"""
+        row_attrs = _admin_row_data_attrs({
+            "name": u["username"],
+            "role": "admin" if u["role"] == "admin" else "member",
+            "status": "active" if active else "disabled",
+            "last_login": last_raw[:10],
+            "created": created_raw,
+            "search": f"{u['username']} {u.get('name') or ''} {u.get('email') or ''}",
+        })
+        # 2026-09 direct-edit redesign: the separate "Manage" click-through
+        # panel is retired — Full name/Email are inline fields, saved via
+        # one shared <form> (id below) that both cells' inputs reference by
+        # the HTML `form=` attribute, so a Save posts both fields together
+        # in one request. That matters here specifically: admin_users_edit
+        # writes whatever `name`/`email` it's given, so posting only one of
+        # the two would blank the other — two independent per-field forms
+        # would silently clobber whichever field wasn't included.
+        profile_form_id = f"profile-form-{uid}"
+        name_val = _esc(u.get("name") or "")
+        email_val = _esc(u.get("email") or "")
+        # 2026-09 view/edit-mode follow-up: every field below now has a
+        # "view" look (transparent border/background — reads as plain text,
+        # even though it's still a real, readonly <input>) that JS
+        # (toggleUserEdit, in this page's own <script>) swaps to a
+        # bordered "edit" look — border-color/background only, same
+        # padding, so nothing reflows when edit mode opens. This one style
+        # string covers Name/Email; the cap inputs get their own narrower
+        # version below.
+        field_style_view = ("padding:6px 8px;border:1px solid transparent;border-radius:6px;font:inherit;"
+                             "font-size:12.5px;background:transparent;width:100%;color:var(--ink);")
+        cap_input_style_view = ("padding:5px 7px;border:1px solid transparent;border-radius:6px;font:inherit;"
+                                 "font-size:12.5px;background:transparent;width:72px;color:var(--ink);")
+        action_btn_style = "font-size:12px;padding:5px 10px;white-space:nowrap;"
+        # 2026-09 follow-up to the Usage-limits merge: split back into two
+        # separate fields (FP&A Buddy cap / Matchmaker cap), each its own
+        # column again, per Brian's ask — the merged column read clean on
+        # mobile but crowded on desktop. Each field is now ONE line at
+        # both breakpoints: spend / an editable cap input (pre-filled with
+        # the CURRENT effective value, never blank — the (default)/
+        # (override) note is gone, per Brian's ask; the value itself is
+        # the only signal now, and typing a new one + Save is the only way
+        # to change it) / a Save button, all in one flex row.
+        # 2026-09 cap-consolidation follow-up: the per-field Save button is
+        # gone — both cap inputs now ride along in the shared profile-form
+        # (via `form=`, same trick Name/Email already use) so the row's one
+        # Edit/Save toggle covers them too. A hidden `{field}_original`
+        # sibling records the value shown at render time, so a plain Name/
+        # Email save (which always resubmits the cap inputs' current value
+        # too, since they're part of the same form) can't silently pin a
+        # user's currently-effective default as an explicit override — see
+        # _apply_user_cap_override_from_form.
+        return f"""<tr class="admin-table-row" {row_attrs}>
+          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{uid}" class="users-row-cb" onchange="updateBulkButton('users')"></td>
+          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:130px;">
+            <span class="user-name">{_esc(u["username"])}</span>
+            {reset_notice}
+          </td>
+          <td data-col="users:realname" data-label="Name" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:130px;">
+            <input type="text" id="name-input-{uid}" form="{profile_form_id}" name="name" value="{name_val}" maxlength="120" placeholder="—" title="display name" readonly style="{field_style_view}">
+          </td>
+          <td data-col="users:email" data-label="Email" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:190px;">
+            <form id="{profile_form_id}" method="post" action="/admin/users/{uid}/edit" style="margin:0;">
+              <input type="hidden" name="username" value="{_esc(u['username'])}">
+              <input type="email" id="email-input-{uid}" name="email" value="{email_val}" maxlength="200" placeholder="—" title="email" readonly style="{field_style_view}">
+            </form>
+          </td>
+          <td data-col="users:password" data-label="Password" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
+            <span id="pw-view-{uid}" style="color:var(--muted);letter-spacing:2px;">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
+            <form id="pw-edit-{uid}" method="post" action="/admin/users/{uid}/password" style="display:flex;gap:5px;align-items:center;" hidden>
+              <input type="password" name="password" placeholder="new password" minlength="8" title="Reset this account's password—8+ characters" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:12.5px;background:var(--bg);width:120px;">
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">Reset</button>
+            </form>
+          </td>
+          <td data-col="users:last_login" data-label="Last login" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);white-space:nowrap;">{last_display}</td>
+          <td data-col="users:access_level" data-label="Access" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            {role_badge}
+            <form id="role-form-{uid}" method="post" action="/admin/users/{uid}/role" style="margin-top:6px;" hidden>
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Make member" if u["role"]=="admin" else "Make admin"}</button>
+            </form>
+          </td>
+          <td data-col="users:status" data-label="Status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            {status_badge}
+            <form id="toggle-form-{uid}" method="post" action="/admin/users/{uid}/toggle" style="margin-top:6px;" hidden>
+              <button type="submit" class="btn btn-ghost" style="{action_btn_style}">{"Disable" if active else "Enable"}</button>
+            </form>
+          </td>
+          <td data-col="users:ask" data-label="FP&amp;A Buddy cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
+            <div style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+              <span style="color:var(--muted);">${spent:.2f} / $</span>
+              <input type="number" id="ask-input-{uid}" form="{profile_form_id}" name="ask_cap" step="0.01" min="0" value="{effective_cap:.2f}" readonly
+                title="This user's current monthly cap" style="{cap_input_style_view}">
+              <input type="hidden" name="ask_cap_original" value="{effective_cap:.2f}" form="{profile_form_id}">
+            </div>
+          </td>
+          <td data-col="users:matchmaker" data-label="Matchmaker cap" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;">
+            <div style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+              <span style="color:var(--muted);">${mm_spent:.2f} / $</span>
+              <input type="number" id="mm-input-{uid}" form="{profile_form_id}" name="matchmaker_cap" step="0.01" min="0" value="{mm_effective_cap:.2f}" readonly
+                title="This user's current monthly cap" style="{cap_input_style_view}">
+              <input type="hidden" name="matchmaker_cap_original" value="{mm_effective_cap:.2f}" form="{profile_form_id}">
+            </div>
+          </td>
+          <td class="admin-table-cell" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);min-width:150px;">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <button type="button" id="edit-btn-{uid}" class="btn btn-ghost" style="{action_btn_style}" onclick="toggleUserEdit({uid}, this)">Edit</button>
+              <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');">
+                <button type="submit" class="btn btn-ghost" style="{action_btn_style}color:#b91c1c;border-color:#fca5a5;">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>"""
 
-    cards = "".join(_card(u) for u in users) or (
-        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
-        'padding:32px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</div>')
+    rows_html = "".join(_user_row(u) for u in users) or (
+        f'<tr><td colspan="{total_cols}" style="padding:20px;color:var(--muted);">No accounts yet. Create one below.</td></tr>')
 
-    body = f"""<div class="page page-admin">
+    body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
+<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Users</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Member accounts for the gated sections. You create accounts here (no public sign-up yet). You always keep admin access via the host password, so you can&rsquo;t lock yourself out.</p>
 {banner}
-<form method="post" action="/admin/users/ask-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-  <span style="font-size:13px;color:var(--muted);">FP&amp;A Buddy default monthly cap, per user:</span>
-  <span style="font-size:13px;">$</span>
-  <input type="number" name="cap" step="0.01" min="0" value="{default_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
-  <span style="font-size:12px;color:var(--muted);">Per-user overrides below take priority over this.</span>
-</form>
-<form method="post" action="/admin/users/matchmaker-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-  <span style="font-size:13px;color:var(--muted);">Matchmaker default monthly cap, per user (tracks separately from FP&amp;A Buddy&mdash;see CLAUDE.md):</span>
-  <span style="font-size:13px;">$</span>
-  <input type="number" name="cap" step="0.01" min="0" value="{default_mm_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
-  <span style="font-size:12px;color:var(--muted);">Anonymous visitors (no login) are capped the same way, keyed by session cookie instead of a user row.</span>
-</form>
-<div style="display:grid;gap:10px;margin-bottom:26px;">{cards}</div>
 
-<h2 style="font-size:18px;">Add a member</h2>
-<form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
-    <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Temporary password *</label>
-    <input name="password" type="text" required minlength="8" placeholder="at least 8 characters" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Name</label>
-    <input name="name" maxlength="120" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Email</label>
-    <input name="email" type="email" maxlength="200" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
-  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Role</label>
-    <select name="role" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-      <option value="user">Member (user)</option>
-      <option value="admin">Admin</option>
-    </select></div>
-  <div style="display:flex;align-items:flex-end;"><button type="submit" class="btn" style="font-size:14px;padding:9px 22px;">Create account</button></div>
-</form>
+<details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
+  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>How to set up a new MCP user</summary>
+  <div style="margin-top:16px;">
+    {_MCP_USER_SETUP_HTML}
+  </div>
+</details>
+
+<div class="users-top-grid" style="display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:start;margin-bottom:24px;">
+  <div>
+    <h2 style="font-size:16px;margin:0 0 12px;">Add a member</h2>
+    <form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
+        <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;white-space:nowrap;">Temp password *</label>
+        <input name="password" type="text" required minlength="8" placeholder="at least 8 characters" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Name</label>
+        <input name="name" maxlength="120" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Email</label>
+        <input name="email" type="email" maxlength="200" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+      <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Role</label>
+        <select name="role" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+          <option value="user">Member (user)</option>
+          <option value="admin">Admin</option>
+        </select></div>
+      <div style="display:flex;align-items:flex-end;"><button type="submit" class="btn" style="font-size:14px;padding:9px 22px;">Create account</button></div>
+    </form>
+  </div>
+  <div style="display:grid;gap:14px;">
+    <form method="post" action="/admin/users/ask-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:8px;">
+      <span style="font-size:13px;color:var(--muted);">FP&amp;A Buddy default monthly cap, per user</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:13px;">$</span>
+        <input type="number" name="cap" step="0.01" min="0" value="{default_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
+      </div>
+      <span style="font-size:12px;color:var(--muted);">Per-user overrides below take priority over this.</span>
+    </form>
+    <form method="post" action="/admin/users/matchmaker-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:8px;">
+      <span style="font-size:13px;color:var(--muted);">Matchmaker default monthly cap, per user (tracks separately from FP&amp;A Buddy&mdash;see CLAUDE.md)</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:13px;">$</span>
+        <input type="number" name="cap" step="0.01" min="0" value="{default_mm_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
+      </div>
+      <span style="font-size:12px;color:var(--muted);">Anonymous visitors (no login) are capped the same way, keyed by session cookie instead of a user row.</span>
+    </form>
+  </div>
+</div>
+
+<h2 style="font-size:18px;margin:0 0 12px;">Members</h2>
+{_admin_column_picker_html("users", users_cols, default_visible=users_default_visible)}
+{_admin_sort_filter_toolbar_html("users", users_sort_fields, users_scalar_filters, search_placeholder="Search by username, name, or email…")}
+<div style="margin:0 0 16px;display:flex;gap:10px;flex-wrap:wrap;">
+  <button type="button" id="users-bulk-delete-btn" class="btn btn-ghost" disabled
+    style="font-size:13px;padding:6px 16px;color:#b91c1c;border-color:#fca5a5;" onclick="openUsersDeleteSelectedPanel()">Delete selected (0)</button>
+</div>
+<div id="users-delete-panel" style="display:none;border:1px solid #fca5a5;border-radius:12px;padding:16px 18px;margin:0 0 20px;background:var(--surface);max-width:520px;">
+  <div id="users-delete-body"></div>
+  <div style="margin-top:14px;">
+    <button type="button" id="users-delete-confirm-btn" class="btn" disabled
+      style="font-size:13px;padding:6px 16px;background:#b91c1c;border-color:#b91c1c;">Delete</button>
+    <button type="button" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;margin-left:6px;"
+      onclick="closeUsersDeleteSelectedPanel()">Cancel</button>
+  </div>
+</div>
+
+<div style="overflow-x:auto;">
+<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('users',this.checked)"></th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Username</th>
+  <th data-col="users:realname" style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th data-col="users:email" style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
+  <th data-col="users:password" style="padding:10px 12px;text-align:left;font-size:13px;">Password</th>
+  <th data-col="users:last_login" style="padding:10px 12px;text-align:left;font-size:13px;">Last login</th>
+  <th data-col="users:access_level" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
+  <th data-col="users:status" style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
+  <th data-col="users:ask" style="padding:10px 12px;text-align:left;font-size:13px;">FP&amp;A Buddy cap</th>
+  <th data-col="users:matchmaker" style="padding:10px 12px;text-align:left;font-size:13px;">Matchmaker cap</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody id="users-approved-tbody">{rows_html}</tbody>
+</table>
+</div>
 </div>
 
 <style>
-.user-card{{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}}
-.user-card-head{{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}}
+/* 2026-09 view/edit-mode follow-up: the sitewide .btn rule sets
+   display:inline-block unconditionally — an author-origin style, which
+   always beats the browser's own [hidden]{{display:none}} UA-stylesheet
+   rule regardless of selector specificity, since origin outranks
+   specificity in the cascade. Without this, every hidden .btn (the cap
+   Save buttons) rendered visible from the very first page load, before
+   Edit was ever clicked — caught live, not assumed, by screenshotting the
+   page before clicking Edit and seeing them already showing. This one
+   rule restores the attribute's actual browser default wherever it's used
+   on this page. */
+[hidden]{{display:none!important;}}
 .user-name{{font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);}}
 .user-badge{{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;}}
-.user-meta{{font-size:12px;color:var(--muted);margin-top:3px;}}
-.user-manage{{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:grid;gap:10px;}}
-.user-manage-row{{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:center;}}
-.user-manage-row label{{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}}
-@media (max-width:600px){{.user-manage-row{{grid-template-columns:1fr;}}}}
+@media(max-width:900px){{.users-top-grid{{grid-template-columns:1fr!important;}}}}
+@media(max-width:700px){{
+  .admin-table-responsive thead{{display:none;}}
+  .admin-table-responsive, .admin-table-responsive tbody,
+  .admin-table-responsive td{{display:block;width:100%;}}
+  /* Last login / Access level / Status form a compact 3-column mini-table
+     right under the username (Brian's explicit ask, matching how a real
+     table lines values up across rows) — the <tr> itself becomes a grid so
+     those three specific cells can share one row instead of each stacking
+     as its own full-width block. Every OTHER cell keeps stacking full-width
+     via grid-column:1/-1 (a spanning item forces a fresh row, so the trio
+     — the only non-spanning items, consecutive in the DOM — auto-place
+     into one 3-column row of their own). `order` moves that row to sit
+     right after Username without touching DOM order (so desktop's column
+     order, sort/filter, and the column picker are all unaffected — this is
+     a pure visual reorder, scoped to this one breakpoint). */
+  .admin-table-responsive tr{{display:grid;grid-template-columns:repeat(3,1fr);
+    column-gap:10px;width:100%;border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-cell{{grid-column:1/-1;border-bottom:none!important;padding:6px 12px!important;}}
+  .admin-table-cell[data-col="users:realname"],
+  .admin-table-cell[data-col="users:email"],
+  .admin-table-cell[data-col="users:password"]{{order:3;}}
+  .admin-table-cell[data-col="users:last_login"],
+  .admin-table-cell[data-col="users:access_level"],
+  .admin-table-cell[data-col="users:status"]{{grid-column:span 1;order:2;}}
+  .admin-table-cell[data-col="users:ask"],
+  .admin-table-cell[data-col="users:matchmaker"]{{order:4;}}
+  .admin-table-cell[data-label="Actions"]{{order:5;}}
+  .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
+    font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin-bottom:3px;}}
+}}
 </style>
 
 <script>
-function toggleManage(uid) {{
-  var panel = document.getElementById('manage-' + uid);
-  if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+initColPicker('users', {json.dumps([k for k, _ in users_cols])}, {json.dumps(list(users_default_visible))});
+applySortFilter('users');
+// 2026-09 view/edit-mode follow-up: the row is read-only until this fires.
+// One click reveals every editable control for that row at once (Make
+// admin/member under the Access badge, Disable/Enable under Status, and
+// the Password field's input+Reset) and turns Name/Email/both cap inputs
+// from plain-looking readonly fields into bordered editable ones. The SAME
+// button becomes "Save" and, on the next click, submits the shared
+// <form id="profile-form-{{uid}}"> — which now carries Name, Email, AND
+// both cap values together (2026-09 cap-consolidation follow-up: the two
+// cap fields used to each have their own separate "Set" button/form;
+// they're part of this one form now via the `form=` attribute, same as
+// Name/Email, so one row-level Save covers everything except the two
+// controls that still need a deliberate, separate click — Make admin/
+// member, Disable/Enable, and password Reset all stay their own buttons,
+// since each is a distinct, consequential action rather than a plain field
+// edit).
+//
+// Deliberately NOT done by turning this button into a real type="submit"
+// tied to the form via the `form=` attribute (the first version of this
+// did exactly that): mutating a button's type to "submit" while still
+// inside ITS OWN click handler makes the browser process the *current*
+// click as a submit too, the instant the handler returns — confirmed live
+// with a real Playwright click (not just reasoning about it): the page
+// navigated away on the very first "Edit" click, before anything was ever
+// revealed. Calling form.requestSubmit() explicitly, only on the second
+// click, avoids that footgun entirely — the button's type never changes.
+function toggleUserEdit(uid, btn) {{
+  var editing = btn.textContent === 'Save';
+  if (editing) {{
+    var form = document.getElementById('profile-form-' + uid);
+    if (form.requestSubmit) form.requestSubmit(); else form.submit();
+    return;
+  }}
+  ['name', 'email', 'ask', 'mm'].forEach(function(key) {{
+    var el = document.getElementById(key + '-input-' + uid);
+    if (!el) return;
+    el.readOnly = false;
+    el.style.borderColor = 'var(--line)';
+    el.style.background = 'var(--bg)';
+  }});
+  var pwView = document.getElementById('pw-view-' + uid);
+  var pwEdit = document.getElementById('pw-edit-' + uid);
+  if (pwView) pwView.hidden = true;
+  if (pwEdit) pwEdit.hidden = false;
+  ['role-form-', 'toggle-form-'].forEach(function(prefix) {{
+    var el = document.getElementById(prefix + uid);
+    if (el) el.hidden = false;
+  }});
+  btn.textContent = 'Save';
+}}
+async function openUsersDeleteSelectedPanel() {{
+  var ids = Array.prototype.map.call(document.querySelectorAll('.users-row-cb:checked'), function(cb) {{ return parseInt(cb.value, 10); }});
+  if (!ids.length) return;
+  document.getElementById('users-delete-panel').style.display = 'block';
+  var body = document.getElementById('users-delete-body');
+  body.innerHTML = '<p style="font-size:13px;color:var(--muted);">Checking admin-account safeguards…</p>';
+  var confirmBtn = document.getElementById('users-delete-confirm-btn');
+  confirmBtn.style.display = '';
+  confirmBtn.disabled = true; confirmBtn.textContent = 'Delete';
+  try {{
+    var r = await fetch('/admin/users/bulk-delete-check', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ids: ids}})
+    }});
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error();
+    renderUsersDeleteSelectedPanel(d);
+  }} catch (e) {{
+    body.innerHTML = '<p style="font-size:13px;color:#b91c1c;">Couldn\\'t load delete preview—try again.</p>';
+  }}
+}}
+function renderUsersDeleteSelectedPanel(d) {{
+  var esc = function(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
+  var body = document.getElementById('users-delete-body');
+  var blockedHtml = '';
+  if (d.blocked && d.blocked.length) {{
+    var items = d.blocked.map(function(b) {{ return '<li><strong>' + esc(b.username) + '</strong>&mdash;' + esc(b.reason) + '</li>'; }}).join('');
+    blockedHtml = '<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13px;">' +
+      '<strong>Not deleting these&mdash;it would leave no admin account:</strong>' +
+      '<ul style="margin:6px 0 0;padding-left:18px;">' + items + '</ul></div>';
+  }}
+  var confirmBtn = document.getElementById('users-delete-confirm-btn');
+  if (!d.users.length) {{
+    body.innerHTML = '<p style="font-size:14px;margin:0 0 8px;">Nothing left to delete.</p>' + blockedHtml;
+    confirmBtn.style.display = 'none';
+    return;
+  }}
+  var names = d.users.map(function(u) {{ return '<li>' + esc(u.username) + '</li>'; }}).join('');
+  body.innerHTML = '<p style="font-size:14px;margin:0 0 8px;">Delete these ' + d.users.length + ' account' + (d.users.length === 1 ? '' : 's') + '?</p>' +
+    '<ul style="margin:0 0 8px;padding-left:18px;font-size:14px;">' + names + '</ul>' + blockedHtml;
+  confirmBtn.style.display = '';
+  confirmBtn.disabled = false; confirmBtn.textContent = 'Delete ' + d.users.length + ' account' + (d.users.length === 1 ? '' : 's');
+  confirmBtn.onclick = function() {{ submitUsersBulkDelete(d.users.map(function(u) {{ return u.id; }})); }};
+}}
+async function submitUsersBulkDelete(ids) {{
+  var btn = document.getElementById('users-delete-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {{
+    var r = await fetch('/admin/users/bulk-delete', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ids: ids}})
+    }});
+    if (!r.ok) throw new Error();
+    window.location.reload();
+  }} catch (e) {{
+    btn.disabled = false; btn.textContent = 'Delete failed—try again';
+  }}
+}}
+function closeUsersDeleteSelectedPanel() {{
+  document.getElementById('users-delete-panel').style.display = 'none';
 }}
 </script>"""
     return HTMLResponse(_page("Users—Admin", "Admin", body, authed=True))
@@ -26737,6 +28245,37 @@ async def admin_users_ask_cap_default(request: Request):
     return RedirectResponse(f"/admin/users?msg={quote(f'Default FP&A Buddy cap set to ${cap:.2f}/month.')}", status_code=303)
 
 
+def _apply_user_cap_override_from_form(lib, user_id: int, form, field: str, setter) -> None:
+    """2026-09 cap-consolidation follow-up: the FP&A Buddy/Matchmaker cap
+    inputs now ride along in the row's one shared Save (via the HTML
+    `form=` attribute, same trick Name/Email already used), replacing the
+    two separate per-cap "Set" buttons — but ONLY actually writes an
+    override when the submitted value differs from what the field showed
+    at render time (a hidden `{field}_original` sibling input, also part
+    of the same form). Without that guard, an ordinary Name/Email save
+    would silently resubmit whatever the cap input's CURRENT effective
+    value happens to be (default or override, always populated, never
+    blank) and pin it as an explicit override — quietly converting a user
+    who's following the site default into one with a pinned override just
+    because someone corrected their name. Skipped entirely if the field is
+    absent from the form at all (`None`), so a stray raw POST that only
+    sets name/email/username can never (de)clear a cap either."""
+    raw = form.get(field)
+    if raw is None:
+        return
+    original = (form.get(f"{field}_original") or "").strip()
+    raw = raw.strip()
+    if raw == original:
+        return
+    if not raw:
+        setter(user_id, None)
+        return
+    try:
+        setter(user_id, max(0.0, float(raw)))
+    except ValueError:
+        pass  # not a valid number — leave the cap untouched rather than 500
+
+
 @app.post("/admin/users/{user_id}/edit")
 async def admin_users_edit(request: Request, user_id: int):
     if not _is_authed(request):
@@ -26755,29 +28294,9 @@ async def admin_users_edit(request: Request, user_id: int):
             msg = f'Updated “{username.lower()}”.'
         except _sql.IntegrityError:
             msg = f'Username “{username.lower()}” is already taken.'
-    finally:
-        lib.close()
-    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
-
-
-@app.post("/admin/users/{user_id}/ask-cap")
-async def admin_users_ask_cap(request: Request, user_id: int):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    form = await request.form()
-    raw = (form.get("cap") or "").strip()
-    lib = _lib()
-    try:
-        if raw:
-            try:
-                cap = max(0.0, float(raw))
-            except ValueError:
-                return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
-            lib.set_user_ask_cap(user_id, cap)
-            msg = f'FP&A Buddy cap override set to ${cap:.2f}/month.'
         else:
-            lib.set_user_ask_cap(user_id, None)
-            msg = 'FP&A Buddy cap override cleared—this user now follows the site default.'
+            _apply_user_cap_override_from_form(lib, user_id, form, "ask_cap", lib.set_user_ask_cap)
+            _apply_user_cap_override_from_form(lib, user_id, form, "matchmaker_cap", lib.set_user_matchmaker_cap)
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
@@ -26798,29 +28317,6 @@ async def admin_users_matchmaker_cap_default(request: Request):
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(f'Default Matchmaker cap set to ${cap:.2f}/month.')}", status_code=303)
-
-
-@app.post("/admin/users/{user_id}/matchmaker-cap")
-async def admin_users_matchmaker_cap(request: Request, user_id: int):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    form = await request.form()
-    raw = (form.get("cap") or "").strip()
-    lib = _lib()
-    try:
-        if raw:
-            try:
-                cap = max(0.0, float(raw))
-            except ValueError:
-                return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
-            lib.set_user_matchmaker_cap(user_id, cap)
-            msg = f'Matchmaker cap override set to ${cap:.2f}/month.'
-        else:
-            lib.set_user_matchmaker_cap(user_id, None)
-            msg = 'Matchmaker cap override cleared—this user now follows the site default.'
-    finally:
-        lib.close()
-    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
 def _is_last_active_admin(users: list[dict], user_id: int) -> bool:
@@ -26876,10 +28372,33 @@ async def admin_users_password(request: Request, user_id: int):
     password = form.get("password") or ""
     msg = "Password too short (8+ characters)." if len(password) < 8 else "Password reset."
     if len(password) >= 8:
+        from linklib.email_utils import send_admin_password_reset_email
         lib = _lib()
         try:
             lib.set_user_password(user_id, password)
+            # An admin chose this password, not the account holder — flag it
+            # for the dismissible change-password nudge, same as a brand-new
+            # account (see users.password_change_recommended's migration
+            # comment). Self-service resets (reset_password_submit) and the
+            # in-session /change-password form both clear this instead, since
+            # there the holder chose their own password.
+            lib.set_password_change_recommended(user_id, True)
             lib.resolve_password_resets_for_user(user_id)
+            user = lib.get_user_by_id(user_id)
+            if user and user.get("email"):
+                login_url = f"{PUBLIC_BASE.rstrip('/')}/login"
+                sent = _send_email_safely(
+                    lib, "admin_password_reset", send_admin_password_reset_email,
+                    user["email"], username=user["username"], temp_password=password,
+                    login_url=login_url, name=user.get("name") or "",
+                    subject_template=lib.get_setting("admin_password_reset_subject_template") or None,
+                    body_template=lib.get_setting("admin_password_reset_body_template") or None,
+                    signoff=lib.get_setting("admin_password_reset_signoff") or None,
+                )
+                msg += (f" Emailed {user['email']}." if sent
+                        else f" Couldn't email {user['email']}—share the new password directly.")
+            elif user:
+                msg += " No email on file—share the new password with them directly."
         finally:
             lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
@@ -26912,6 +28431,87 @@ def admin_users_delete(request: Request, user_id: int):
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/users/bulk-delete-check")
+async def admin_users_bulk_delete_check(request: Request):
+    """Preview for the Users bulk-delete confirm step. Generalizes the
+    single-row Delete button's _is_last_active_admin guard to a batch:
+    rather than silently dropping or silently allowing a selection that
+    would zero out active admins, every selected active-admin row that
+    would do that is reported back as explicitly blocked, with the rest of
+    the selection still deletable — no silent partial failure, per
+    CLAUDE.md's standing "never silently fail" principle."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    try:
+        user_ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    selected = set(user_ids)
+    lib = _lib()
+    try:
+        all_users = lib.list_users()
+        by_id = {u["id"]: u for u in all_users}
+        other_active_admins = [u for u in all_users
+                                if u["role"] == "admin" and u["active"] and u["id"] not in selected]
+        blocked_ids: set[int] = set()
+        if not other_active_admins:
+            # Deleting every selected id would leave nobody — block every
+            # selected active admin (not just one) so the preview names
+            # all of them, not an arbitrary single row.
+            blocked_ids = {u["id"] for u in all_users
+                           if u["id"] in selected and u["role"] == "admin" and u["active"]}
+        users_out, blocked_out = [], []
+        for uid in user_ids:
+            u = by_id.get(uid)
+            if not u:
+                continue
+            if uid in blocked_ids:
+                blocked_out.append({"id": uid, "username": u["username"],
+                                     "reason": "would leave no active admin account"})
+            else:
+                users_out.append({"id": uid, "username": u["username"]})
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "users": users_out, "blocked": blocked_out})
+
+
+@app.post("/admin/users/bulk-delete")
+async def admin_users_bulk_delete(request: Request):
+    """Same delete path as the single-row Delete button (delete_user, gated
+    by _is_last_active_admin), just looped over the selection made in
+    /admin/users. Re-checks the guard fresh on every iteration rather than
+    trusting the bulk-delete-check preview's snapshot — deleting one
+    selected admin can change whether the next one is the last active
+    admin, so the guard has to be re-evaluated against live state as the
+    batch proceeds, not decided once up front."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    lib = _lib()
+    try:
+        deleted = 0
+        for raw_id in ids:
+            try:
+                user_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            users = lib.list_users()
+            if _is_last_active_admin(users, user_id):
+                continue
+            lib.delete_user(user_id)
+            deleted += 1
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "deleted": deleted})
 
 
 @app.post("/admin/library/queue/add")
@@ -27609,9 +29209,22 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     job_total = job.get("total", 0)
     job_ok = job.get("ok", 0)
     job_failed = job.get("failed", 0)
-    job_error = job.get("error", "")
-    job_stopped = job.get("stopped", False)
 
+    # status_html only ever renders the LIVE in-progress view now (2026-09
+    # polish-bundle, item 3). It used to also render terminal "Error"/
+    # "Stopped"/"Done—X succeeded, Y failed out of Z processed" banners once
+    # the job finished — but _job_run_banner("content_backfill") below,
+    # reading the durable job_run_log row, already renders an equivalent
+    # (and durable-across-redeploys) message for every one of those same
+    # three outcomes: "Last run: succeeded/stopped/failed, N ago—<summary>",
+    # where <summary> is the identical "X succeeded, Y failed" text
+    # finish_job_run() was given (see backfill_content_job's own
+    # lib.finish_job_run(...) calls). The two banners stacked, saying the
+    # same thing twice, every time this page was viewed right after a run.
+    # The live poller (see the <script> below) already reloads the page on
+    # completion rather than rendering its own "Done" text client-side, so
+    # dropping the terminal branches here doesn't leave the polling JS out
+    # of sync — the reload picks up _job_run_banner's version.
     status_html = ""
     if running:
         prog_pct = round(job_done / job_total * 100) if job_total else 0
@@ -27626,12 +29239,6 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button>
   </form>
 </div>"""
-    elif job_error:
-        status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: {_esc(job_error)}</div>'
-    elif job_stopped:
-        status_html = f'<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#92400e;">Stopped after {job_done} / {job_total} &mdash; {job_ok} succeeded, {job_failed} failed. Already-succeeded articles are skipped on the next run, so it&rsquo;s safe to press Start again.</div>'
-    elif job_done and not running:
-        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done&mdash;{job_ok} succeeded, {job_failed} failed out of {job_done} processed.</div>'
 
     def _failure_pill(reason, count):
         labels = {"paywall": "Paywall", "bot-challenge": "Bot challenge",
@@ -27746,9 +29353,14 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     wb429_total = wb429_job.get("total", 0)
     wb429_ok = wb429_job.get("ok", 0)
     wb429_failed = wb429_job.get("failed", 0)
-    wb429_error = wb429_job.get("error", "")
-    wb429_stopped = wb429_job.get("stopped", False)
 
+    # Same consolidation as content_backfill's own status_html above
+    # (2026-09 polish-bundle, item 3) — only the LIVE in-progress view
+    # renders here; _job_run_banner("wayback_429_retry") below already
+    # covers the terminal Error/Stopped/Done outcomes durably, with the
+    # identical "X succeeded, Y failed" summary text finish_job_run() was
+    # given, so a second near-identical banner right above it was pure
+    # duplication.
     wb429_status_html = ""
     if wb429_running:
         wb429_pct = round(wb429_done / wb429_total * 100) if wb429_total else 0
@@ -27763,12 +29375,6 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button>
   </form>
 </div>"""
-    elif wb429_error:
-        wb429_status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#b91c1c;">Error: {_esc(wb429_error)}</div>'
-    elif wb429_stopped:
-        wb429_status_html = f'<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#92400e;">Stopped after {wb429_done} / {wb429_total} &mdash; {wb429_ok} succeeded, {wb429_failed} failed. Safe to press Start again&mdash;an article that already recovered won&rsquo;t be re-attempted.</div>'
-    elif wb429_done and not wb429_running:
-        wb429_status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#065f46;">Done&mdash;{wb429_ok} succeeded, {wb429_failed} failed out of {wb429_done} processed.</div>'
 
     wb429_disable = ('disabled style="opacity:.5;cursor:not-allowed;"'
                       if wb429_running or wayback_429_count == 0 else "")
@@ -28024,6 +29630,31 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         )
     _backfill_total_lead_sentence = f'<p style="color:var(--muted);margin:0 0 10px;">{_lead_sentence_text}</p>'
 
+    # Structured-count source breakdown — one compact stat line instead of
+    # four near-identical "N came from X — look for 'via X' below" paragraphs
+    # (2026-09 backfill-content copy tightening). The fifth paragraph this
+    # replaced (excluded_count's "permanently excluded... re-run with force
+    # checked to retry anyway") is dropped outright, not folded in here — it
+    # isn't a source breakdown of Structured at all, and it only ever
+    # restated the "Defunct service" tile's own tooltip plus the force
+    # checkbox's own helper text below, with no information of its own.
+    _source_bits = [
+        (wayback_count, "Wayback"),
+        (migration_count, "Migration"),
+        (medium_fetch_count, "Medium fetch"),
+        (medium_search_count, "Medium search"),
+    ]
+    _source_parts = [f'{count:,} via {label}' for count, label in _source_bits if count]
+    if len(_source_parts) > 1:
+        _source_joined = ", ".join(_source_parts[:-1]) + f', and {_source_parts[-1]}'
+    else:
+        _source_joined = _source_parts[0] if _source_parts else ""
+    _source_breakdown_html = (
+        f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 20px;">Of the {done_count:,} structured '
+        f'articles, {_source_joined}&mdash;look for the matching badge in the attempts log below.</p>'
+        if _source_parts else ''
+    )
+
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Reader content backfill</h1>
@@ -28058,11 +29689,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   </div>
 </div>
 
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch. Look for the &ldquo;via Wayback&rdquo; badge in the attempts log below.</p>' if wayback_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{migration_count:,} came from a <strong>known domain migration</strong> (e.g. a blog that relocated to a new host)&mdash;look for &ldquo;via Migration&rdquo; below.</p>' if migration_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_fetch_count:,} came from a <strong>direct Exa fetch</strong> of the article&rsquo;s own URL (medium.com and similar hosts block direct fetches)&mdash;look for &ldquo;via Medium fetch&rdquo; below.</p>' if medium_fetch_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{medium_search_count:,} came from a <strong>Medium-platform search match</strong> once the direct fetch above didn&rsquo;t work out&mdash;look for &ldquo;via Medium search&rdquo; below.</p>' if medium_search_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service, so re-fetching can never succeed. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry anyway.</p>' if excluded_count else ''}
+{_source_breakdown_html}
 
 <div id="poll-container">{status_html}</div>
 {_job_run_banner("content_backfill")}
@@ -29362,10 +30989,11 @@ def admin_brand(request: Request):
         '<div style="height:18px;"></div>'
         '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">DM Sans—body &amp; UI</div>'
         '<p style="margin:0;color:var(--ink-soft);">The quick brown fox jumps over the lazy dog. Body copy is DM Sans at 16px / 1.65—warm, readable, and quiet enough to disappear behind the content. Eyebrows and labels use the same family, uppercase, with wide tracking.</p>'
-        '<div style="height:18px;"></div>'
-        '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4—long-form reading only (/read)</div>'
-        '<p style="margin:0;font-family:\'Source Serif 4\',Georgia,serif;font-size:18px;line-height:1.75;color:var(--ink);">Revenue recognized today is the result of investments made over the past several quarters, not just last quarter. Features ship before they\'re sold; pipeline built in Q1 converts in Q3. The serif appears nowhere else in the system.</p>'
+        # No third "Source Serif 4" specimen any more (2026-09) — that font
+        # is gone sitewide, its last holdout (the standalone /read/{id}
+        # reader) moved to DM Sans in the same pass. Only Outfit/DM Sans
+        # (plus Caveat/Permanent Marker, shown separately below as
+        # decorative-only) render anywhere on the site now.
         '</div>'
     )
 
@@ -29416,7 +31044,7 @@ def admin_brand(request: Request):
         '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart—keep it that way.</li>'
         '<li><strong>Coral is display-only.</strong> It\'s too light for body text (2.8:1); use coral-deep, or navy-on-coral-wash, when text is involved.</li>'
         '<li><strong>Buttons are navy or ghost</strong>—never a seafoam or coral fill.</li>'
-        '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings, DM Sans for everything, Source Serif 4 for reading only, Caveat for stickers only.</li>'
+        '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings, DM Sans for body copy and everything else—no other content/reading fonts anywhere on the site, the standalone single-article reader included—Caveat for stickers only.</li>'
         '</ul>'
     )
 
@@ -30018,6 +31646,16 @@ def _email_template_registry() -> list[dict]:
             "subject_default": eu.PASSWORD_RESET_SUBJECT_DEFAULT,
             "body_default": eu.PASSWORD_RESET_BODY_DEFAULT,
             "signoff_default": eu.PASSWORD_RESET_SIGNOFF_DEFAULT,
+        },
+        {
+            "id": "admin-password-reset", "prefix": "admin_password_reset", "title": "Admin password reset email",
+            "recipient": "Existing member",
+            "trigger": "An admin resets their password in /admin/users",
+            "blurb": "Sent to an existing member with their new temporary password when an admin resets it directly (distinct from the self-service “Forgot your password?” link above).",
+            "placeholders": eu.ADMIN_PW_RESET_PLACEHOLDERS,
+            "subject_default": eu.ADMIN_PW_RESET_SUBJECT_DEFAULT,
+            "body_default": eu.ADMIN_PW_RESET_BODY_DEFAULT,
+            "signoff_default": eu.ADMIN_PW_RESET_SIGNOFF_DEFAULT,
         },
         {
             "id": "tool-submission", "prefix": "tool_submission", "title": "Tool submission confirmation",
@@ -30716,6 +32354,38 @@ _mcp = _mcp_server.build_mcp(
     extra_allowed_hosts=_mcp_production_hosts,
     extra_allowed_origins=[f"https://{h}" for h in _mcp_production_hosts],
 )
+
+# MCP Phase 3: six read-only Toolbox/Communities content tools (search_tools,
+# get_tool, search_communities, get_community, compare_tools,
+# compare_communities), registered onto the same FastMCP instance — see
+# webapp/mcp_toolbox.py's module docstring for the auth-model distinction
+# from the three admin-gated introspection tools above (any valid token,
+# any role, may call these six; the caller's role only changes what's
+# visible *within* a result, via linklib.gates — never whether the tool can
+# be called at all).
+from webapp import mcp_toolbox as _mcp_toolbox  # noqa: E402
+
+_mcp_toolbox.register_toolbox_tools(_mcp, _lib)
+
+# MCP Phase 4: Library (Archive) search + Feed browse/search (search_library,
+# get_article, browse_feed, search_feed) — admin-role only, re-verified
+# against /read's own actual enforcement rather than assumed. See
+# webapp/mcp_library.py's module docstring for the full auth-model
+# re-verification and the Track A/B reasoning.
+from webapp import mcp_library as _mcp_library  # noqa: E402
+
+_mcp_library.register_library_tools(_mcp, _lib, OPML_PATH)
+
+# MCP Phase 5: FP&A Buddy & Matchmaker proxy tools (ask_fpa_buddy,
+# ask_matchmaker) — any valid token, any role (require_caller, same as
+# Phase 3's tools), calling the same in-process orchestration POST /ask and
+# the two .../find/chat routes now call themselves. See
+# webapp/mcp_qa.py's module docstring for the full auth-model reasoning and
+# why these can't be simple HTTP self-calls.
+from webapp import mcp_qa as _mcp_qa  # noqa: E402
+
+_mcp_qa.register_qa_tools(_mcp, _lib, OPML_PATH)
+
 _mcp_asgi_app = _mcp.streamable_http_app()
 
 

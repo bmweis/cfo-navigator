@@ -127,6 +127,32 @@ def _require_admin(ctx: Context, lib_factory: Callable[[], Library]) -> dict:
     return caller
 
 
+def require_admin(ctx: Context, lib_factory: Callable[[], Library]) -> dict:
+    """Public entry point for another module's admin-gated tools (MCP Phase
+    4's Library/Feed tools) — a thin, behavior-identical alias for
+    `_require_admin`. The three introspection tools above keep calling
+    `_require_admin` directly (unchanged, per Phase 4's own "don't touch
+    the existing five tools" scope); this just gives a later module the
+    same fail-closed admin check without importing a name that looks
+    module-private."""
+    return _require_admin(ctx, lib_factory)
+
+
+def require_caller(ctx: Context, lib_factory: Callable[[], Library]) -> dict:
+    """Public entry point for MCP Phase 3's Toolbox/Communities content
+    tools (webapp/mcp_toolbox.py) — the same fail-closed caller resolution
+    as `_require_admin`, but WITHOUT the admin-role restriction. Those six
+    tools mirror fully public web pages, so any valid, active token (any
+    role) may call them; the caller's role only changes what content is
+    visible *within* the result (a pending field is labeled for a
+    non-admin caller, badged for an admin caller, via linklib.gates),
+    never whether the tool can be called at all. Kept in this module,
+    rather than duplicated, since it wraps the same `_caller_from_ctx`
+    every admin-gated tool already uses — one fail-closed resolution path
+    for every /mcp tool, admin-gated or not."""
+    return _caller_from_ctx(ctx, lib_factory)
+
+
 def _table_rows(lib: Library) -> list[sqlite3.Row]:
     """Every real table/view in the live schema, straight from sqlite_master
     — the single source of truth this whole module validates tool-supplied

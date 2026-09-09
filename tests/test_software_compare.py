@@ -90,6 +90,17 @@ def test_agent_taxonomy_shows_placeholder_when_empty(env):
 
 
 # -- compare route ------------------------------------------------------------
+#
+# Compare Redesign Phase 1 (2026-09) rebuilt this page on a shared
+# linklib/compare.py serializer, with grouped section headers (fixing the
+# old orphaned-header bug — only "AI / Agent involvement" used to get a
+# .cc-section band), a Key facts band with shared/unique tag chips, working
+# citation chips (reusing entity_citations + _citations_list_html, exactly
+# as the profile page does), and a narrative-excerpt clamp
+# (.cmp-clamp/.cmp-clamp-inner, pre-wrap so a bulleted "- " field keeps its
+# own lines instead of flattening into run-on prose — the objective bug
+# Brian's review flagged). See linklib/compare.py's module docstring and
+# ARCHITECTURE.md's Compare section for the full write-up.
 
 def test_compare_route_not_swallowed_by_slug_route(env):
     """Regression: /tools/software/compare must resolve to the compare view,
@@ -130,8 +141,9 @@ def test_compare_renders_directory_fields_side_by_side(env):
 
 def test_compare_gives_agent_involvement_its_own_section(env):
     """AI/agent involvement is a dedicated section (same visual weight as
-    Features), not just another row lumped in with Description — buyers
-    increasingly ask about this first."""
+    every other section now, not just this one) rather than sitting
+    alongside Description as just another text field — this is a
+    comparison dimension buyers increasingly ask about first."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Concourse", "AI agents for finance.", "https://concourse.co", ["FP&A"], approved=1)
@@ -146,6 +158,217 @@ def test_compare_gives_agent_involvement_its_own_section(env):
     assert "Fully independent agent that runs the whole workflow." in r.text
     assert "Not yet documented." in r.text
     assert "not have" not in r.text.lower() and "no agent" not in r.text.lower()
+
+
+def test_compare_every_section_gets_a_real_header_band(env):
+    """Regression for the orphaned-header bug: previously only "AI / Agent
+    involvement" got a .cc-section teal band; Description/Bottom line/
+    Competitors floated with no visual hierarchy. Now every section shares
+    the identical band treatment. (Key facts is Software's tags-only band
+    from the initial Compare Redesign Phase 1 build — it was retired once
+    tags moved into the header row; see test_compare_no_key_facts_band.)"""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    for title in ("Description", "AI / Agent involvement", "Bottom line", "Competitors"):
+        assert f'cc-section" colspan="3"><span class="cmp-sticky-label">{title}</span></td>' in r.text, title
+
+
+def test_compare_no_key_facts_band(env):
+    """Compare Redesign Phase 1 follow-up: once tags moved into the header
+    row, Software had nothing left for a Key facts band, so it's retired
+    outright — unlike Communities, which keeps its own (Region/Access/
+    Sponsor/Cost), Software's page has no "Key facts" section at all."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert 'cc-section" colspan="3"><span class="cmp-sticky-label">Key facts</span></td>' not in r.text
+
+
+def test_compare_tags_render_under_entity_name_in_header(env):
+    """Tags moved out of Key facts and into the header row, directly under
+    each entity's name — same shared/unique chip treatment, new location."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A", "ERP"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    name_idx = r.text.index('>Runway</a>')
+    tag_idx = r.text.index('<span class="cmp-tag cmp-tag-shared">FP&amp;A</span>')
+    # The shared tag chip must appear in the DOM shortly after Runway's own
+    # name link (inside the same header <th>), not down in a separate band.
+    assert name_idx < tag_idx < name_idx + 400
+    assert '<span class="cmp-tag cmp-tag-unique">ERP</span>' in r.text
+
+
+def test_compare_no_tags_no_empty_tag_row(env):
+    """An entity with no tags at all renders no .cmp-tag-row markup —
+    _cmp_tag_chips_html returns "" rather than an empty wrapper div."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", [], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert '<div class="cmp-tag-row">' not in r.text
+
+
+def test_compare_mobile_sticky_section_label_css(env):
+    """Mobile follow-up: the .cc-label column (every row's field name, plus
+    the blank corner cell) gets position:sticky below the 700px breakpoint,
+    so swiping to a second/third entity never loses the row's own label."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "@media (max-width:700px)" in r.text
+    assert ".cmp-sticky-label{position:sticky;left:16px;" in r.text
+    assert '<span class="cmp-sticky-label">Description</span>' in r.text or \
+           '<span class="cmp-sticky-label">Bottom line</span>' in r.text
+
+
+def test_compare_swipe_hint_present_and_not_styled_like_a_link(env):
+    """The swipe hint is a passive affordance, deliberately not styled like
+    this page's own "Full profile →" link (navy, bold) — muted text, a
+    two-directional icon, no href, no cmp-full-link class anywhere near it."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert '<div class="cmp-swipe-hint" id="cmp-swipe-hint">' in r.text
+    assert "Swipe to compare" in r.text
+    assert "<a " not in r.text[r.text.index('id="cmp-swipe-hint"'):r.text.index("Swipe to compare")]
+    assert 'id="cmp-scroll-wrap"' in r.text
+
+
+def test_compare_swipe_hint_dismiss_js_uses_localstorage(env):
+    """The dismiss-on-first-scroll logic follows this codebase's existing
+    plain-localStorage convention (reader-fs, cfo_admin_cols_*, the play
+    high-score keys) — no new persistence mechanism invented."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "cmp_swipe_hint_seen" in r.text
+    assert "localStorage.getItem(KEY)" in r.text
+    assert "localStorage.setItem(KEY, '1')" in r.text
+    assert "addEventListener('scroll'" in r.text
+
+
+def test_compare_differentiation_renamed_to_bottom_line(env):
+    """Renamed from "How this differs" to "Bottom line," matching the exact
+    heading the tool's own profile page uses for this field — both the
+    section header and gates.EMPTY_COPY/COMPARE_EMPTY_LABELS were
+    previously mismatched (row label "How this differs" vs. copy text
+    "Bottom line not yet available.")."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.update_tool_differentiation(a, "Keeps teams in a native workflow.")
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "Bottom line" in r.text
+    assert "How this differs" not in r.text
+    assert "Keeps teams in a native workflow." in r.text
+
+
+def test_compare_narrative_field_gets_clamp_class_and_preserves_line_breaks(env):
+    """The flattened-markdown bug: previously Software's compare cells had
+    no white-space:pre-wrap at all, so a "- " bulleted agent_taxonomy_note
+    ran together into one line. Now every narrative cell wraps its text in
+    .cmp-clamp-inner (white-space:pre-wrap in the page's own <style>), so
+    the newline-separated bullets stay on their own lines."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Concourse", "FP&A", "https://concourse.co", ["FP&A"], approved=1)
+    b = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    bullets = "- Contract Review Agent—extracts key terms.\n- Close Agent—drafts the memo."
+    lib.update_tool_agent_taxonomy(a, bullets)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert '<div class="cmp-clamp-inner">' in r.text
+    assert "- Contract Review Agent—extracts key terms.\n- Close Agent—drafts the memo." in r.text
+    assert "white-space:pre-wrap" in r.text  # .cmp-clamp-inner's own rule, in the page's <style>
+
+
+def test_compare_shows_working_citation_chips(env):
+    """Dead citation markers fix: [1]/[2] used to render as inert escaped
+    text with no Sources list. Compare now fetches entity_citations the
+    same way the profile page does and renders the same _citations_list_html
+    "Sources" chip list right under the field."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.update_tool_agent_taxonomy(a, "Fully independent agent[1].")
+    lib.set_entity_citations("tool", a, "agent_taxonomy",
+                              [{"n": 1, "title": "Runway product page", "url": "https://runway.com/product"}])
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "Fully independent agent[1]." in r.text
+    assert "Sources" in r.text
+    assert 'href="https://runway.com/product"' in r.text
+    assert "Runway product page" in r.text
+
+
+def test_compare_shows_competitors_chip_list(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.add_tool_competitor(a, b)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "Competitors" in r.text
+    assert '<a href="/tools/software/datarails" class="cmp-chip"' in r.text
+
+
+def test_compare_competitors_empty_state_when_none_curated(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "Not yet curated." in r.text
+
+
+def test_compare_full_profile_link_per_entity(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert '<a href="/tools/software/runway" target="_blank" rel="noopener" class="cmp-full-link">Full profile' in r.text
+    assert '<a href="/tools/software/datarails" target="_blank" rel="noopener" class="cmp-full-link">Full profile' in r.text
 
 
 def test_agent_taxonomy_unverified_shown_under_review_on_public_profile(env):

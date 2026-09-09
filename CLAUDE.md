@@ -130,12 +130,106 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   and for anything embed-on-save missed. A content hash on `article_embeddings` detects
   when an article's embeddable text has changed, so re-running the backfill only
   re-embeds what's actually stale.
+- **FP&A Buddy Published-Content Ingestion (2026-09) — Brian's own writing joins
+  retrieval by mirroring `original_content` into `articles`, not a parallel
+  index or a fourth retrieval branch.** Investigated first: neither
+  `original_content` (the 3 native `/thought-leadership` pieces) nor
+  `thought_leadership` (the ~30 rows describing externally-hosted work) was
+  ever in Buddy's Library/Feed/Web retrieval path, and bmweis.com can't be
+  self-fetched (Cloudflare Bot Fight Mode), so a URL-fetch ingestion path
+  can't reach the 3 native pieces at all — `linklib/original_content_sync.py`'s
+  `sync_original_content_article()` mirrors `original_content.body_md`
+  directly into `articles` instead, called synchronously right after each
+  admin save (`POST /admin/original-content/new`/`{id}/edit`), same
+  "regenerate at the mutation point" convention `write_opml()` established.
+  A new `original_content.mirrored_article_id` tracks the mirror; re-syncing
+  on edit is a direct overwrite (`Library.update_mirrored_article`), never
+  `Library.upsert()`'s merge-keeps-existing-content semantics, which are
+  right for an external re-fetch but wrong for a deliberate edit. Clearing
+  `body_md` back to `NULL` (card-metadata-only) deletes the mirror outright
+  rather than orphaning it, and the admin delete route cascades the same
+  way — CLAUDE.md's "No dead data" rule. Indexed text comes from
+  `plain_text_from_body_md()`: the same `python-markdown` render the public
+  page uses, then stripped with BeautifulSoup using a plain `" "` separator
+  — deliberately not the newline-losing-paragraphs bug the Reader's own
+  `get_text(" ", strip=True)` had (that was about *display* text; this is
+  *index* text, where a space separator is actually correct — it keeps an
+  inline run's words together while still preventing adjacent block
+  elements from gluing at a tag boundary). **Provenance, not priority — the
+  rule this feature exists to enforce**: a new `articles.is_own_content`
+  flag is read ONLY by `linklib.agent._build_source_documents`/
+  `linklib.citations.extract_citations`, for citation labeling — nothing in
+  `retrieve()`/`_rrf_merge()`/`Library.search()`/`Library.vector_search()`
+  reads it, so a mirrored article surfaces and ranks purely on merit, same
+  as any other. A cited own-content source gets a small "(own writing)"
+  label in the citation list (both `srcListHtml`'s client-side render and
+  `_render_cited_answer`'s server-side one) — **deliberately not an inline
+  first-person prose mention** ("as I wrote…"): flagged and explicitly
+  rejected as a real voice-integrity risk during design, since first-person
+  narration about Brian's own writing is exactly the kind of thing that
+  could land off-register in front of a real reader; revisit only if the
+  citation label alone proves too quiet. The provenance flag is also set
+  generically for later use: `pipeline.ingest_url()` checks every save's
+  URL against `thought_leadership.url` (`Library.is_thought_leadership_url`,
+  normalized both sides) and flags a match — this is how the ~9
+  externally-hosted, text-fetchable `thought_leadership` pieces will get the
+  same label once Brian bookmarklet-saves them (unchanged save flow — no
+  code path beyond this generic match needs his attention). Set-only, like
+  `needs_content_check` — never cleared once learned. See ARCHITECTURE.md's
+  "Published-content ingestion" write-up (under FP&A Buddy) for the full
+  mechanism and `tests/test_original_content_ingestion.py` for coverage,
+  including the RRF-non-interference regression.
 - **Embedding costs are split by who pays for them.** Embed-on-save/backfill cost is
   Brian's overhead (`article_embeddings.cost_usd`) and never touches a user's Ask
   budget. Embedding the retrieval QUESTION at ask-time is a user-cap cost — it folds
   into `ask_questions.cost_usd` the same way the follow-up query-rewrite's cost already
   does (`embed_cost_usd` breaks out its share). A general ledger covering overhead
   spend more broadly (enrichment included) is deferred — see issue #105.
+- **Exa cost tracking, pre-dashboard foundation (2026-09) — closes two real gaps
+  the AI usage/cost dashboard's own Step 0 investigation found: a computed cost
+  that was never persisted, and two Exa call sites with no cost tracking at all.**
+  (1) `Answer.exa_result_count`/`exa_cost_usd` (`linklib.agent.retrieve_exa`) were
+  always computed on every Buddy turn but silently dropped before reaching
+  `ask_questions` — unlike `embed_cost_usd`/`rewrite_cost_usd`, which each already
+  had their own column and were passed through. Two new `ask_questions` columns
+  (`exa_result_count`, `exa_cost_usd`) mirror that exact pattern; `exa_cost_usd`
+  is already folded into `cost_usd` (the turn total the monthly cap sums), same as
+  the other two breakout columns. `webapp.ask_orchestrator.run_ask`'s call to
+  `Library.record_ask_question` now actually passes `ans.exa_result_count`/
+  `ans.exa_cost_usd` through — previously computed and then dropped. (2) The
+  Reader content backfill's fallback tiers (`linklib/domain_migration.py`,
+  `linklib/medium_platform.py`) call Exa's `/search` and `/contents` endpoints
+  with zero cost computation anywhere — not tracked at all, not even in
+  `content_refetch_log`. `find_migrated_url`/`fetch_content_by_url`/
+  `find_medium_candidate` now each return a real `pricing.compute_exa_cost()`
+  figure alongside their existing result (0.0 whenever Exa was never actually
+  billed — missing key, toggle off, blank input, network failure — same
+  best-effort contract every other Exa path in this codebase already follows),
+  billed even on a miss since Exa still charges for a returned-but-unmatched
+  result. A `/contents` call (`fetch_content_by_url`) is billed at `compute_exa_cost`'s
+  existing "search" fallback rates — `EXA_PRICING` only models the `search` tier
+  (see that dict's own comment on adding a row only once a caller needs one); this
+  is a deliberate approximation for now, not a claim the two endpoints cost the
+  same. A new `content_refetch_log.exa_cost_usd` column (added via migration, same
+  `source` precedent) is the durable home — `linklib.pipeline._try_domain_migration`/
+  `_try_medium_platform` both now thread cost through, accumulating it across every
+  Exa call one `backfill_article_content()` attempt actually makes (a tier's miss
+  still spent real money, and that spend lands on whichever single row the attempt
+  ultimately logs — a later tier's success, or the final Wayback/failure row —
+  preserving the existing one-row-per-attempt invariant). `medium_recovery()`
+  (the same tier reused by `pipeline.ingest_url`'s save-time recovery path) returns
+  its own cost the same way, logged onto `ingest_url`'s existing `content_refetch_log`
+  write (`source="save"`); the Reader's live-read recovery path
+  (`webapp._resolve_reader_content`) stays ephemeral/unlogged, unchanged — it never
+  persisted this content at all, cost included. **`/admin/exa-settings`' copy was
+  also corrected** — it used to describe only Buddy's web tier, which left an admin
+  with no way to know that turning Exa off also silently disables both backfill
+  tiers, with no fallback the way Buddy's own web tier has one (Claude's native
+  `web_search_20250305`). The page now names all three call sites and says
+  plainly that the two backfill tiers have no substitute — a miss there just
+  falls through to the pre-existing Wayback fallback, same as any other miss.
+  No changes to `EXA_PRICING` itself and no dashboard UI in this PR — both are
+  scoped separately; see `tests/test_exa_cost_tracking.py` for the coverage.
 - **`preferred_sites.opml` is dual-purpose.** It's both the web-search allowlist and the
   subscription list behind `/read`'s Feed quick view. Use direct RSS/Atom URLs — Feedly
   proxy URLs (`feedly.com/web/...`) are skipped because they require auth. Paywalled
@@ -3086,6 +3180,18 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     `webapp/thought_leadership_data.py` once nothing archived needs it
     either) actually become dead code safe to delete under this repo's own
     "no dead data"/no-dead-code discipline.
+  - **2026-09 update: confirmed and archived.** Brian confirmed the migration
+    ran in production — `original_content` has been in active use for weeks
+    (ingestion, MCP Phase 4/5, and the Buddy citation work all built on top of
+    it working) — so `scripts/migrate_original_content.py` was `git mv`'d into
+    `scripts/archive/migrate_original_content.py`, matching
+    `migrate_thought_leadership.py`'s own precedent, and
+    `tests/test_migrate_original_content.py`/
+    `tests/test_thought_leadership_homepage_teaser.py`'s imports were updated
+    to the new path. `_TL_FEATURED_CARDS` and `webapp/thought_leadership_data.py`
+    are still live dependencies of the now-archived script and its tests, so
+    neither is dead code yet — the "actually become dead code" condition above
+    is still unmet, just one script closer.
   - **Investigated, not deleted — the 3 Writing-column `thought_leadership`
     rows duplicating the flagship pieces.** This session has no access to
     the live `library.db` (same Railway-volume-only limitation as above),
@@ -5220,6 +5326,89 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   manual per-item "Refresh" button in the reader toolbar — re-fetches on
   click only (no automatic staleness detection), non-destructive on failure.
   See ARCHITECTURE.md's matching section and `tests/test_read_later_caching.py`.
+- **Reader expand-mode icon + typography polish (2026-09).** Two small bugs on
+  the Instapaper-style expand toggle (`#rr-reader-expand`), found via live-site
+  screenshots, no schema/route change. (1) **Icon geometry**: `RR_ICON_EXPAND`/
+  `RR_ICON_COLLAPSE` originally sat on Feather's stock NE/SW diagonal (arrows
+  toward the top-right/bottom-left corners) — mirrored horizontally onto the
+  NW/SE diagonal instead (top-left/bottom-right), per Brian's direct
+  confirmation, keeping each icon's own outward (collapsed state)/inward
+  (focus-mode state) direction unchanged — only the axis rotated. First pass at
+  this bug swapped which icon renders in which STATE instead of touching the
+  geometry; reverted once Brian clarified the direction/state mapping was
+  already correct and only the diagonal axis was wrong — worth remembering
+  that "icon points the wrong way" bug reports can mean either axis or
+  direction, and they're not interchangeable fixes.
+  (2) **Typography — the merged Feed/Archive/Read Later reader (`/read`) now
+  follows ordinary sitewide typography: Outfit heading, DM Sans body. Settled
+  after two rounds of correction, both flagged explicitly rather than
+  silently, same precedent as the homepage "🚧 building" sticker mix-up
+  elsewhere in this doc.** `.rr-reader-title` was hardcoded to `'Source Serif
+  4',Georgia,serif` with no letter-spacing — a leftover never updated to
+  Outfit when the standalone `/read/{article_id}` reader's own `.reader-meta
+  h1` (already Outfit) and this merged reader's heading treatments diverged —
+  fixed to `var(--font-head)` + `-.02em` tracking, matching BRAND.md's "Page
+  title (H1)" row, and unchanged across both rounds below. `.rr-reader-
+  body-text` went through two states before landing: **round 1** left it on
+  Source Serif 4, reasoning that BRAND.md §3 explicitly sanctioned serif for
+  exactly this surface ("No serif anywhere except the reader" / "Reader body |
+  Source Serif 4") — live-site-correct at the time (BRAND.md really did say
+  that), but wrong on what the page should look like: Brian confirmed on
+  seeing the "after" screenshot that the body should match the title, not stay
+  serif. **Round 2** moved it to `var(--font-head)` (Outfit) alongside the
+  title, on Brian's stated reasoning that the site's own published
+  thought-leadership content proves Outfit is the standard for body text —
+  checked directly against a real Original Content article's `.oc-body p`
+  (the same template Growth Engine Ratio/Sail Don't Row/NetSuite MCP render
+  through, confirmed via `getComputedStyle` and a live screenshot) and found
+  that claim didn't hold: body copy there is DM Sans, Outfit reserved for the
+  `<h1>`. Flagged before shipping a sitewide implication rather than
+  assuming the precedent was accurate; Brian's call once shown the
+  discrepancy was to revert the reader body to `var(--font-body)` (DM Sans)
+  to match the rest of the site, rather than either keep it on Outfit as a
+  one-off exception or change body copy to Outfit sitewide (the third option
+  offered, which would have been a much larger change touching `--font-body`
+  or every body-copy call site). **Net result: the merged reader is no longer
+  a documented typography exception at all** — Outfit heading + DM Sans body
+  is just the site's ordinary pairing, applied here like everywhere else.
+  Source Serif 4 survives ONLY on the standalone `/read/{article_id}`
+  single-article view (a separate, older template, `_READER_CSS`/
+  `.reader-body`, untouched by any of this), which is genuinely a narrower
+  scope than "the reader" as BRAND.md used to describe it — **BRAND.md §3 was
+  updated in the same PR** to match this final state. (This holdout didn't
+  last — see the very next bullet, a same-day follow-up that retired it too.) The now-unused `<link>`
+  that loaded Source Serif 4 specifically for the merged reader page was also
+  removed (nothing on that page references the font any more; both Outfit and
+  DM Sans are already loaded sitewide via `_page()`'s own font link). If a
+  future report says "the reader's font doesn't match the site," check which
+  of the two reader templates it's actually about, and verify any claimed
+  precedent (a specific page's actual computed style) before generalizing it
+  into a brand-standards change — BRAND.md was stale at round 1 of this fix,
+  and an unverified precedent claim was wrong at round 2, so neither "the doc
+  says so" nor "our other content proves it" was reliable on its own here.
+- **Source Serif 4 retired sitewide (2026-09 follow-up) — a real, explicit
+  standing rule from Brian, stated directly rather than derived from BRAND.md
+  or precedent: only Outfit or DM Sans, ever, for content/reading typography.
+  No third font, no exceptions.** Prompted by the reader-typography saga
+  immediately above, which left one holdout — the standalone `/read/{id}`
+  single-article view (`_READER_CSS`/`.reader-body`) — still on Source Serif
+  4 after the merged reader settled on DM Sans. Explicitly scoped before
+  building: this rule covers content/reading fonts only, NOT the decorative
+  Caveat (sticker badges)/Permanent Marker (nav+footer wordmark) layer, which
+  Brian confirmed stays untouched — a separate design language, not a content
+  font. Fixed: `_READER_CSS`'s `body{}` rule and its Google Fonts `@import`
+  both moved from Source Serif 4 to DM Sans (`.reader-meta h1` was already
+  Outfit, unchanged); the admin brand-showcase page's third type specimen
+  (which existed solely to show off the serif) removed outright, since no
+  font on the site renders in it any more; and — the part that makes this a
+  real, mechanically-enforced retirement rather than just an unused
+  declaration — `linklib/brand_check.py`'s `ALLOWED_FONTS` allowlist dropped
+  "Source Serif 4" entirely, so `test_brand_standards.py` now fails a future
+  reintroduction the same way it already fails Inter/Lora/Arial/etc., rather
+  than silently permitting it back in. BRAND.md §3 rewritten to describe
+  "two content families" as the standing rule, not three, with the full
+  three-pass history (serif → Outfit → DM Sans, twice, once per reader
+  template) kept as prose for context. No schema/route change.
 - **MCP server, Phase 1 (2026-09) — a read-only remote MCP server at `/mcp`,
   mounted in-process (same app, same deploy, no second service), with its
   own user-bound token auth and three admin-gated schema-introspection
@@ -5299,7 +5488,10 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   directly — flagged to Brian to run and confirm once this deploys, rather
   than silently skipped or claimed done without evidence. Full trace in
   ARCHITECTURE.md's "MCP server, production 421 fix" section and
-  `webapp/mcp_server.py`'s `build_mcp` docstring.
+  `webapp/mcp_server.py`'s `build_mcp` docstring. **2026-09 update: confirmed
+  working in production** — three subsequent MCP phases (3, 4, 5) built and
+  shipped successfully on top of a live `/mcp`, which wouldn't have been
+  possible if this fix hadn't held.
 - **MCP server, connector-vs-curl 401 mismatch (2026-09, resolved) — a
   report, past the 421 fix above: Claude's own connector got 401 from
   `_mcp_auth_gate` on the SAME token a `curl` call got 200 with** (Railway
@@ -5362,6 +5554,795 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   truncation marker — a production sample of 25 `articles` rows had come
   back at 523KB uncapped. See ARCHITECTURE.md's matching section for the
   full write-up.
+- **MCP server, Phase 3 (2026-09) — six read-only Toolbox/Communities
+  content tools (`search_tools`, `get_tool`, `search_communities`,
+  `get_community`, `compare_tools`, `compare_communities`), a new
+  `webapp/mcp_toolbox.py` registered onto the same `/mcp` FastMCP instance
+  the Phase 1 introspection tools live on.** Deliberately **not**
+  admin-only like those three — any valid, active, unrevoked token may
+  call these six (`webapp.mcp_server.require_caller`, same fail-closed
+  resolution minus the role check), mirroring the fully-public web pages
+  they replicate; the caller's role only changes what's visible *within* a
+  result (a pending field's badge text — "under review" vs. "unverified,
+  visible to visitors" — via `linklib.gates`, never whether the tool runs
+  at all). `get_tool`/`get_community` build their own gated dicts over the
+  full profile-page field text; `compare_tools`/`compare_communities` call
+  `linklib.compare.build_software_compare`/`build_communities_compare`
+  completely unmodified (confirmed neither takes a role parameter — badge
+  text is applied afterward, per field) and reject rather than silently
+  truncate a request outside the existing 4-tool/3-community cap. Compare
+  Phase 2's cached AI summary is included cache-hit-only — a free
+  `Library.get_compare_summary` lookup against the same cache key the web
+  route computes; `generate_compare_summary` is never called from here, so
+  an agentic conversation can't spend against the shared daily cost cap.
+  See ARCHITECTURE.md's "MCP server — Toolbox & Communities content tools
+  (Phase 3)" section for the full write-up and `tests/test_mcp_toolbox.py`
+  for the gate-enforcement coverage.
+- **MCP server, Phase 4 (2026-09) — Library (Archive) search
+  (`search_library`, `get_article`) + Feed browse/search (`browse_feed`,
+  `search_feed`), a new `webapp/mcp_library.py`.** Wraps existing logic
+  completely unmodified: `linklib.agent.retrieve()` (hybrid FTS5+vector,
+  RRF-merged) and `Library.get_article`/`get_article_by_url` for Track A;
+  `linklib.feed.get_feed_items()` and `linklib.agent.retrieve_feed()` for
+  Track B. **Re-verified, not inherited, auth model**: `/read`/
+  `/read/{id}`/`/api/read-article` all gate on admin specifically
+  (`_is_authed`), confirming — rather than assuming — the "Library is
+  admin-only" planning note; all four tools require the admin role via a
+  new public `webapp.mcp_server.require_admin`. (`GET /api/search`, an
+  older route wrapping the same `Library.search()`, is member-tier-gated —
+  a likely-unintentional survivor of the Phase 1 restructure, left alone.)
+  Feed has no DB-backed item history (30-min in-memory cache only,
+  confirmed against the real `/read?view=feed` route) — hence two tools,
+  not one: `browse_feed` (chronological, optional category filter) and
+  `search_feed` (keyword-relevance, `retrieve_feed`'s existing
+  overlap-count scoring). `search_library` returns compact hits (an
+  excerpt, `is_own_content` included) with `get_article` as the full-text
+  companion — the published-content ingestion PR's `is_own_content` flag
+  needs no separate "own writing" tool, since it's just an `articles`
+  column. See ARCHITECTURE.md's "MCP server — Library (Archive) search &
+  Feed browse/search (Phase 4)" section for the full write-up (including
+  the disclosed, uncapped query-embedding cost on a non-empty
+  `search_library` call) and `tests/test_mcp_library.py` for the
+  auth-model regression coverage.
+- **MCP server, Phase 5 (2026-09) — FP&A Buddy & Matchmaker proxy tools
+  (`ask_fpa_buddy`, `ask_matchmaker(kind, ...)`), a new `webapp/mcp_qa.py`.**
+  Neither `/ask` nor the two matchmaker routes' identity resolution
+  (`_require_member`/`_current_user_id`) understands an MCP bearer token —
+  an HTTP self-call would run as an unmetered, unaudited `user_id=None` —
+  so these two tools call `answer_question()`/`linklib.matchmaker`'s
+  `_answer()` **in-process**, passing the MCP-resolved `user_id` explicitly.
+  Doing that required extracting the cap-check/history-rebuild/recording
+  orchestration that used to live inline in the three HTTP routes into two
+  new shared modules, `webapp/ask_orchestrator.py::run_ask` and
+  `webapp/matchmaker_orchestrator.py::run_matchmaker` — `POST /ask` and both
+  `.../find/chat` routes now call these themselves too, held to the same
+  behavior-identical discipline as the radical-transparency gate-extraction
+  PR: `tests/test_ask_conversations.py`/`tests/test_ask_feedback.py`/
+  `tests/test_software_matchmaker.py`/`tests/test_communities_matchmaker.py`
+  all pass **unmodified** against the refactored routes. A capped turn
+  returns the orchestrators' `{"capped": true, ...}` dict as a normal
+  (non-error) MCP result, matching `/ask`'s own HTTP-200-on-capped design.
+  **Auth is a third tier** — `require_caller` (Phase 3's "any valid, active
+  token, no role restriction"), not `require_admin` — since `/ask` itself
+  only requires any signed-in member, and gating these tools to admin-only
+  would preempt a possible future non-admin MCP tier. **One tool for both
+  matchmaker kinds** (`kind: "tools"|"communities"`), not two, since
+  `linklib.matchmaker._answer()` is already one shared function
+  differentiated by an internal kind string. **A real, disclosed
+  conversation-continuity asymmetry**: `ask_fpa_buddy` is keyed purely on
+  `user_id` (seamless across web/MCP for the same user); `ask_matchmaker`
+  additionally requires a session match, so an MCP caller gets a synthesized
+  stable per-user session key (`f"mcp:user:{user_id}"`) — a conversation
+  started via MCP resumes via MCP, but not from a web session, same
+  pre-existing limitation the web's own cross-browser case already has. See
+  ARCHITECTURE.md's "MCP server — FP&A Buddy & Matchmaker proxy tools
+  (Phase 5)" section for the full write-up and `tests/test_mcp_qa.py` for
+  cap/history/audit-trail coverage plus the unchanged-HTTP-route regression
+  proof.
+- **Compare Redesign, Phase 1 (2026-09) — both Compare pages rebuilt on a
+  new `linklib/compare.py` serializer; the shared contract Compare Phase 2
+  (AI summary generation) and MCP Phase 3 (compare tools) will also build
+  on, not just this page's own HTML.** Fixed three real bugs Brian's
+  review found: dead `[1]`/`[2]` citation markers (now the same
+  `entity_citations` + `_citations_list_html` "Sources" chip list the
+  profile pages already render — no new mechanism), flattened bulleted
+  text in Software's compare cells (missing `white-space:pre-wrap`,
+  matched to what profile pages already do — a real markdown-to-HTML
+  renderer is deliberately NOT built here, it's scoped as its own
+  immediate follow-up PR since it'd be a site-wide rendering change), and
+  an orphaned section header (every section — Key facts, Description,
+  AI / Agent involvement, Bottom line, Competitors/Similar communities,
+  Communities' 4 themed groups — now shares one `.cc-section` band, not
+  just Agent taxonomy). Added: a Key facts band with shared-vs-unique tag
+  chips (solid seafoam = every compared entity has it, outline = only this
+  one does), and a `-webkit-line-clamp` excerpt (~4 lines, approved over a
+  fixed character count) on the full untruncated text. Communities'
+  Compare collapsed its old flat 11-field list into the same 4 themed
+  groups (`compare.COMMUNITY_PROFILE_GROUPS`) the profile page already
+  uses — that constant, and `community_geo_line()`, moved out of
+  `webapp/app.py` into `linklib/compare.py` so the profile page and
+  Compare can't drift apart. Every section renders for every entity, even
+  fully empty (mirroring the profile pages' "nothing ever disappears"
+  standard), through `linklib/gates.py` exactly as before — this PR
+  extends `gates.COMPARE_EMPTY_LABELS` with four new keys for sections
+  Compare didn't previously render, but never touches the module's actual
+  decision logic. See ARCHITECTURE.md's matching bullet for the full
+  write-up.
+- **Compare Redesign Phase 1, pre-merge follow-up (2026-09) — tags moved
+  out of Key facts into the header row, and a real mobile fix.** Tags
+  (shared-vs-unique chips, same visual treatment) now render directly
+  under each entity's name in the header, not in the Key facts band — a
+  category tag is an identity fact, not a "key fact" alongside
+  Region/Access/Cost. Software's Key facts band had nothing left once tags
+  moved out, so it's retired outright; Communities keeps its own,
+  tag-free. **The mobile fix targeted the wrong element on the first
+  pass, caught only by comparing a real before/after-scroll screenshot**:
+  the original ask was "a sticky label column," but this table has no
+  per-row label COLUMN — every row's field name lives in a full-width
+  `.cc-section` band (the fix for the desktop orphaned-header bug), so
+  making the blank leftmost `.cc-label` cell sticky pinned nothing. Fixed
+  by sticking the band's own title text instead (`.cmp-sticky-label`, an
+  inner `<span>` inside the wide band `<td>`) — see **Mobile
+  swipeable-table pattern** below, the reusable version of this fix. A
+  new swipe-hint affordance (two-headed-arrow icon + muted "Swipe to
+  compare" text, deliberately not styled like this page's own bold navy
+  "Full profile →" link) shows once per visitor, dismissed on first
+  horizontal scroll via a plain `localStorage` flag — this codebase's
+  existing convention for a client-only "seen it once" preference, not a
+  new mechanism. See ARCHITECTURE.md's matching bullet for the full
+  write-up.
+- **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
+  overlap/contrast summary above both Compare tables, cached permanently
+  and capped by a shared daily dollar budget.** Purely additive on top of
+  Phase 1 — no existing cell-rendering function, and no `linklib/compare.py`/
+  `linklib/gates.py` logic, is touched. Generation reuses the exact
+  `CompareEntity`/`CompareField` data the page already built (no
+  re-fetch), is voice-governed via `require_voice_setting` like every
+  other `generate_*` call, and never recommends one entity over another —
+  only describes the shape of a difference. Cached in `compare_summary_cache`,
+  keyed by the compared entity set plus a content hash of what was
+  actually summarized; the footnote's unverified-content disclosure is
+  computed live at render time, decoupled from that cache key, so a
+  verify-only action can't miss the cache but still shows an accurate
+  disclosure. A cap hit renders a labeled note instead of failing the
+  page; every other unavailability reason omits the block silently.
+  Feedback is a public, no-token stored-submission mechanism
+  (`compare_summary_feedback`) reviewed by hand at
+  `/admin/compare-summary-feedback` — no automated action. See
+  ARCHITECTURE.md's matching bullet for the full write-up.
+
+**Mobile swipeable-table pattern** (established by the follow-up above,
+reusable for any future wide table on a narrow viewport): when a table's
+"row label" is a full-width band (`colspan` across every column) rather
+than a narrow first column, `position:sticky` belongs on an inner
+`<span>` wrapping the band's TEXT, not on the band `<td>` itself or on any
+per-row label cell — the `<td>` already spans the whole row and doesn't
+need to move; it's the text inside it that needs to stay in the viewport
+while the row scrolls under it. Pair with a one-time swipe-hint affordance
+(icon + muted text, `localStorage`-dismissed) styled deliberately unlike
+any bare-arrow link convention already on the page, so a passive hint
+never reads as something to tap.
+
+- **Real Markdown/List Rendering for Narrative Fields (2026-09) — the
+  follow-up PR flagged (and deliberately deferred) by Compare Redesign
+  Phase 1's own "flattened markdown" finding above.** `webapp/
+  markdown_render.py`'s `render_narrative_markdown()` is now the single
+  shared mechanism for tool Description/Agent taxonomy/Bottom line and
+  every community profile group field (including the community's own
+  Bottom line) — real `<ul><li>`/`<strong>`/`<p>` in place of the old
+  `_esc(text)` + `white-space:pre-wrap` approximation. It reuses
+  `python-markdown` (already a dependency via `original_content`) but with
+  a genuinely different, more restrictive config than
+  `_render_original_content_markdown`'s: input is HTML-escaped first (these
+  fields are AI-drafted, not Brian-authored-trusted the way
+  `original_content.body_md` is), and the `Markdown` instance has every
+  block/inline processor deregistered except paragraphs, lists, and bold/
+  italic — no headers, blockquotes, links/images, code, or raw HTML, since
+  no generation prompt this serves is ever asked to produce any of those.
+  Lives in `webapp/`, not `linklib/`, on purpose — `linklib/gates.py`'s
+  HTML-free boundary is enforced by import path specifically so nothing
+  HTML-producing is reachable from `linklib` (a future MCP tool safety
+  concern), and this module's whole job is producing HTML.
+  **Compare's own clamped excerpt is deliberately NOT rendered through
+  this** — `-webkit-line-clamp` doesn't reliably clamp block-level children
+  the way it clamps a text run, so `_cmp_populated_field_html` still
+  renders plain `_esc()` text; the real rendered version is one click away
+  via "Full profile →". `linklib/compare.py` and `linklib/gates.py` are
+  both untouched by this PR. See ARCHITECTURE.md's matching bullet for the
+  full write-up and `tests/test_markdown_render.py`/`tests/
+  test_narrative_field_markdown.py` for the coverage.
+
+- **Tool edit page fixes (2026-09) — three independent small bugs, no shared root
+  cause beyond "found in the same live-use session."**
+  1. **Short summary textarea silently rejected typed input** for any tool whose
+     `summary` already exceeded the field's `maxlength="400"` — a real, reproduced
+     bug, not a guess. The one-time migration that introduced the `summary` column
+     (`linklib/db.py`'s `UPDATE tools SET summary=description WHERE summary='' AND
+     description!=''`) copied the full, uncapped `description` into any empty
+     `summary`, with no length limit anywhere server-side; `description` has since
+     grown into 8-12 sentence write-ups, so a tool never redrafted via "Generate
+     summary" since can carry a legacy `summary` well past 400 chars. HTML
+     `maxlength` blocks *appending* once a field's value is already at or over the
+     cap — the cursor still blinks, nothing typed lands, and nothing in the markup
+     said why. Fixed by rendering `maxlength="400"` only when the stored value
+     already fits inside it; an admin can always edit/trim an over-length legacy
+     value, and the guardrail returns once it's saved back under 400.
+  2. **The public profile page's "Bottom line" callout had no edit-page field
+     literally named "Bottom line"** — confirmed a direct 1:1, no-transformation
+     mapping from `tools.competitive_differentiation` (the profile page renders
+     `tool['competitive_differentiation']` verbatim under the header "Bottom
+     line{badge}"). Pure label mismatch: the edit-page field was still labeled
+     "Competitive differentiation." Renamed the edit-page label to "Bottom line" —
+     no schema, route, or display-logic change. First instance of a class of
+     internal/external name mismatch worth watching for elsewhere over time (not
+     swept for here — only this one was in scope).
+  3. **Homepage screenshot caption read "(not yet captured)" over a live image** —
+     the literal string exists in exactly one place in the codebase,
+     `_screenshot_slot_caption()` (`webapp/app.py`), used only by the public
+     Software/Communities **profile** pages' screenshot card — not the actual
+     `/tools/software/{slug}/edit` route, which already had correct wording
+     ("Manually set—no capture date") for this same state. `_screenshot_slot_caption`
+     shows this text whenever a screenshot URL is populated but `screenshot_captured_at`
+     is empty — the deliberate, normal result of a hand-pasted URL
+     (`Library.update_tool_screenshot_url` explicitly clears `captured_at` on a
+     manual paste), not a rare or broken state. So every manually-set screenshot —
+     completely normal — read as "not yet captured" on the profile page, right next
+     to the live image and the "Edit" admin link, which is almost certainly what
+     got called "the edit page" here. Fixed the wording to match the edit page's own
+     phrase exactly, so both surfaces describe the state identically — same class of
+     bug as the `seed_tools.py` description-sync incident (a caption/string not
+     reflecting live state), just one navigation hop from where it was reported.
+- **Tool Profile Layout: Sidebar Consolidation (2026-09) — the Software profile
+  page now uses the same "reference sidebar" pattern the Community profile
+  page already established, replacing the Aug 2026 UI pass's arrangement.**
+  Brian's live review of the production Abacum page found two problems with
+  that arrangement: Competitors (typically a short list) was paired with
+  Key features (typically a long one) in a two-column band, leaving visible
+  whitespace under the shorter column and stranding Description as a
+  disconnected full-width block below both; and the category tag sat alone
+  between the admin review pills and the Bottom line callout, orphaned with
+  no clear grouping. Investigation (Step 0) confirmed the Community profile
+  page already solves this shape — a wide main column carrying continuous
+  narrative content, alongside a narrower sidebar carrying independently-
+  scannable reference/lookup cards (Details, Categories, Similar
+  communities) — so this PR names that the **"reference sidebar"
+  pattern** and brings Software in line with it rather than inventing a
+  second layout. Software's version: **main column** — Bottom line ->
+  Description -> Agent taxonomy, one continuous flow (`main_col` in
+  `tools_software_profile`); **sidebar** — screenshot -> Key features ->
+  Competitors, each independently scannable (`sidebar_col`). The hero
+  (logo/name/tags/subhead/review-status/actions) is now full-width above
+  the two-column band — screenshot no longer sits beside it the way it
+  used to (that was hero-paired-with-screenshot; it now opens the sidebar
+  instead). Category tags moved to sit directly under the tool name, above
+  the subhead — mirroring where Compare already places entity tags
+  (`_cmp_tag_chips_html`, right under the linked name) — since a category
+  is an identity fact about the tool, not action-row furniture. Software
+  has no shared-vs-unique tag distinction the way Compare does (a solo
+  profile page has nothing to compare against), so it keeps the existing
+  solid-seafoam `.tp-cat-pill` treatment rather than adopting Compare's
+  outline variant. The Bottom line callout's spacing rule changed
+  alongside the move: it used to carry its own `margin-top/bottom:22px`
+  (designed for its old spot between the category pills and the action
+  row); now that it's the first card in `main_col`'s `tp-col-stack`, the
+  stack's own `gap:22px` already produces even spacing against its
+  neighbors, so a self-margin there would have double-spaced it — dropped
+  in favor of the shared mechanism every other card in the column uses.
+  Mobile (`@media(max-width:800px)`, `.tp-band` collapses to one column):
+  DOM order is main column first, sidebar second — narrative content
+  before reference content — which was confirmed as the right call in the
+  Step 0 investigation and needed no JS reordering (unlike the homepage's
+  own mobile-only DOM-order fix elsewhere in this doc, which needed one
+  because its grid used explicit `grid-column`/`grid-row` placement;
+  here plain DOM order was already correct). Content, gating, and
+  admin-only elements are unchanged — this is a layout-only PR: no
+  `linklib/gates.py` changes, no schema changes, no changes to Compare
+  pages or the markdown renderer. Verified live at desktop (1400px) and
+  mobile (390px) viewports, logged in and out, on both a fully-populated
+  tool and a sparse/empty one — all four combinations screenshot-checked
+  before merge.
+
+- **Edit-page label alignment (2026-09) — nine internal edit-page labels renamed
+  to match their public/external display labels, from a dedicated label-
+  consistency sweep** (same precedent as "Competitive differentiation" ->
+  "Bottom line" on the tool edit page, earlier in this doc). Label-string-only,
+  no schema/logic/field-name changes: tool edit page's "Core competition" ->
+  "Competitors" (matching the profile page's own `<h2>` — this specifically
+  reverts Phase P's edit-page-only "Competitors" -> "Core competition" rename
+  above, restoring the match to the public label it was originally meant to
+  mirror; the stale help text claiming the profile page shows "Closest
+  competitors" — a rename that never actually happened — was corrected to say
+  "Competitors" too) and "Feature taxonomy" -> "Key features" (matching the
+  profile page's Key features card — label only, the governed-feature-link
+  mechanics underneath are untouched); the app-screenshot-source-URL field's
+  "Product" label -> "App screenshot" (matching the profile page's screenshot
+  card); and, on the Community profile edit page, "Anti-fit" -> "Who should
+  skip it", "Level"/`seniority_band` -> "Who it targets", "Verdict" ->
+  "Bottom line", "Cost vs. value verdict" -> "Cost vs. value", "Founded year"
+  -> "Founded", and "CPE" -> "CPE eligible" — all six matching the exact
+  labels `linklib/compare.py`'s `COMMUNITY_PROFILE_GROUPS`/the public profile
+  page's Details card already use. Three admin-collected-but-never-publicly-
+  rendered community fields found during the same sweep (Stage focus, Jobs
+  program, Individual-or-Team) are a separate, deliberately out-of-scope
+  question (why collect data that's never shown), not a label mismatch —
+  untouched by this PR.
+- **Admin Users page: table redesign + MCP user setup docs (2026-09) — `/admin/users`
+  joins the standard admin-table convention, making it explicitly three-for-three
+  with `/admin/tools/software` and `/admin/tools/communities`.** `/admin/users` was
+  the last major admin list still on a bespoke one-card-per-user layout, with
+  per-user cap editing/role/active/delete tucked behind a card-header "Manage"
+  toggle. Rebuilt on the same shared machinery the other two tables already use —
+  `_admin_column_picker_html`/`_admin_sort_filter_toolbar_html`/
+  `_admin_row_data_attrs`, the `_ADMIN_BULK_EDIT_JS`/`_ADMIN_SORT_FILTER_JS` shared
+  scripts, and the `.admin-table-responsive` mobile-card breakpoint — checkbox
+  select, a column picker (Name/Email/Last login/FP&A Buddy cap/Matchmaker cap,
+  all optional; Username/Actions always visible, same "always-visible name +
+  actions" convention as the other two tables), sortable/filterable columns
+  (Username/Last login/Created; Role/Status scalar filters; a live search box),
+  and a "Delete selected" bulk action. This is a layout change, not a feature
+  change — every existing per-user action (profile edit, Ask/Matchmaker cap
+  override, password reset, role toggle, active toggle, single-row delete, the
+  pending-password-reset notice) works exactly as it did before, just reached via
+  a per-row "Manage" button instead of a card's own header button. Two deliberate
+  departures from the other two tables' exact mechanics, both approved up front:
+  (1) **no bulk "Edit selected"** — Software/Communities' bulk-edit assumes one
+  categorical field to set across every selected row (categories, a checkbox
+  flag); Users has no such field that's safe to bulk-set, since role/active both
+  carry the last-active-admin lockout guard, which is inherently a per-row
+  question, not a batch one — forcing a bulk version risked exactly the kind of
+  silent partial-failure mode this codebase avoids everywhere else (see "No dead
+  data"/the standing "never silently fail" principle above), so it's skipped
+  entirely rather than built unsafely. (2) **the shared `_ADMIN_BULK_EDIT_JS`
+  delete-confirm functions (`openDeleteSelectedPanel`/`renderDeleteSelectedPanel`/
+  `submitBulkDelete`) were NOT reused for the new "Delete selected" action** —
+  they hardcode the `/admin/tools/{tableKey}/...` URL prefix and a
+  Software/Communities-specific response shape (`d.tools`, competitor-reference
+  warnings), neither of which fits Users. Bespoke inline functions
+  (`openUsersDeleteSelectedPanel`/`renderUsersDeleteSelectedPanel`/
+  `submitUsersBulkDelete`, plus a generalized `toggleManage`) live in the route's
+  own `<script>` block instead — deliberately not touching the shared constant
+  Software/Communities still rely on. The generic pieces of that shared script
+  (`updateBulkButton`, `selectAllRows`, the column-picker functions, the sort/
+  filter functions) ARE reused as-is, since they're already table-agnostic
+  (keyed entirely by `tableKey`). New `POST /admin/users/bulk-delete-check`/
+  `/admin/users/bulk-delete` generalize the single-row Delete button's
+  `_is_last_active_admin` guard to a batch: rather than silently dropping or
+  silently allowing a selection that would zero out active admins, the preview
+  reports every such row back as explicitly blocked (with the rest of the
+  selection still deletable), and the commit route re-checks the guard fresh on
+  every iteration against live state rather than trusting the preview's
+  snapshot — deleting one selected admin can change whether the next one is the
+  last active admin. **Manage panels render grouped below the table, not nested
+  as a second `<tr>` under each row** — a deliberate choice to stay clear of the
+  shared sort/filter script's row-reordering: `applySortFilter` physically
+  `appendChild`s `tr[data-name]` rows to re-sort them, and a companion detail row
+  (no `data-name` of its own) would either get silently left behind at its old
+  position or need real changes to the shared, already-relied-upon sort/filter
+  mechanism to keep it paired with its owner row. Clicking "Manage" scrolls the
+  matching panel into view, so the panel-below-the-table layout doesn't cost
+  the admin any context. Also new: a collapsible "How to set up a new MCP user"
+  disclosure block, reusing the exact `<details>`/`<summary>`/`.disclosure-caret`
+  markup `/admin/tools/communities`' own "How this works" block established —
+  a `_MCP_USER_SETUP_HTML` constant (same "static reference content, not
+  DB-backed" precedent as `_COMMUNITIES_REFERENCE_HTML`) walks through creating
+  the account, raising the Ask/Matchmaker cap, minting a personal token via
+  `scripts/mint_api_token.py` over `railway ssh`, and adding the connector in
+  Claude (`https://mcp.bmweis.com/mcp`, header `authorization`, value
+  `Bearer <token>`). Per Step 0's own review, the copy never hardcodes the
+  default cap dollar amounts — both are admin-editable via this same page's
+  "Save default" forms, so a literal `$5`/`$2` in the instructions would drift
+  the moment either default changes; a regression test
+  (`test_mcp_setup_copy_does_not_hardcode_default_cap_amounts`) pins this. No
+  schema changes, no changes to cap logic or default cap amounts, and token
+  minting stays exactly as railway-ssh-only as before — this PR only changes how
+  the page is laid out and adds documentation for a flow that already existed.
+  See ARCHITECTURE.md's "`/admin/users` joins this convention" bullet (under
+  the Software admin column-picker/bulk-edit/bulk-delete section) for the
+  full technical write-up, and `tests/test_admin_users_table.py` for the
+  regression coverage, including the rendered `<script>` block's own
+  `node --check` validation (this page's bulk-delete/manage-toggle script is
+  inline in the route, not a module-level `*_JS` constant, so it isn't
+  covered by `webapp.checks.script_syntax_problems()` — same standing
+  caveat as the Reader's own inline script).
+
+- **Encourage password change (2026-09) — a dismissible nudge, both via email
+  and via a login-flow banner, not a hard block.** Investigated first, per the
+  standing gate: `password_reset_requests` (the "pending password-reset
+  requests" concept) turned out to be an unrelated, already-fully-built
+  self-service mechanism (`/forgot-password` → `/reset-password`, tokenized,
+  emailed) with no connection to account creation or admin-set passwords;
+  outbound email infrastructure (`linklib/email_utils.py`, Gmail REST API,
+  already used for welcome emails and self-service resets) already existed in
+  full, so no new dependency/service decision was needed — confirmed rather
+  than assumed, and reported before any build. Two decisions Brian made
+  explicitly, both flagged rather than picked unilaterally: (1) a **dismissible
+  reminder banner**, never a hard block that would gate every private route
+  behind a forced change — a real, considered trade-off, not the default;
+  (2) the admin's existing "Reset password" action
+  (`POST /admin/users/{id}/password`) gets the same email nudge account
+  creation already sent, closing the loop so "encourage via email" covers
+  both account creation AND an existing account's admin-triggered reset, not
+  just the former. Mechanism: `users.password_change_recommended`
+  (`create_user`'s default = `True`; set back to `True` by an admin reset;
+  cleared only when the account holder sets their own password — self-service
+  `/reset-password`, or the new session-only `GET/POST /change-password` form)
+  drives `_password_change_nudge_html`'s banner, wired into just the two pages
+  a post-login redirect actually lands on (`homepage()`, `admin_page()`) —
+  deliberately not threaded through `_page()`'s ~250 call sites, since a nudge
+  only needs to appear once, on the very next page after login. Dismissal is
+  client-only (`localStorage`, keyed per user id — same convention as the
+  Compare page's swipe-hint), so nothing server-side tracks "seen it." The
+  email itself is a new `send_admin_password_reset_email` (mirrors
+  `send_welcome_email`'s shape: name/username/temp_password/login_url),
+  admin-editable like every other outbound template via
+  `_email_template_registry()`/`/admin/emails`. See ARCHITECTURE.md's "Auth:
+  three tiers, one cookie" section and the `users` schema-table row for the
+  full write-up, and `tests/test_password_change_recommended.py` for the
+  regression coverage (flag defaults/set/clear across all four call sites,
+  the admin-reset email, the in-session change-password form, and the
+  banner's presence/absence including the break-glass admin login, which has
+  no `users` row and so can never carry the flag).
+
+- **Surface Hidden Community Profile Fields (2026-09) — Stage focus, Jobs
+  program, and Individual or team join `linklib.compare.
+  COMMUNITY_PROFILE_GROUPS`; a real hero/screenshot spacing bug fixed in
+  the same PR.** Step 0 investigation found these three admin-editable
+  Quick-facts fields (`stage_focus`/`jobs_program`/`team_or_individual`)
+  had never rendered on the Community profile page or Compare — the last
+  three Quick-facts fields with no public home, per `webapp/app.py`'s own
+  comment above `_COMMUNITY_PROFILE_GROUPS` (every sibling field already
+  had one: a Details-card row, folded into another field as texture, or a
+  `COMMUNITY_PROFILE_GROUPS` entry). **A live query against production
+  (this session had `/mcp` admin-tool access) found real, substantive
+  content already stored for 36 of 40 communities** — not the near-empty
+  state the edit-page's own `placeholder=` attribute text ("Placeholder,
+  not yet researched or weighted," removed in this PR since it's
+  misleading once the field renders publicly) might have suggested. So
+  this shipped mostly as "surface content that already exists," not "build
+  empty-state scaffolding for an unpopulated field," though the three-state
+  standard (verified/pending/empty) still holds for the 4 communities with
+  a real gap in one of the three. Placed by semantic fit, not to balance
+  group sizes: **Stage focus** joins "Who it's for" (a company-stage
+  targeting fact, a natural peer of the existing seniority-band "Who it
+  targets" entry); **Jobs program** joins "What you get" (a member benefit,
+  same category as Resources included); **Individual or team** joins "Cost
+  & structure" (a membership-structure/purchasing fact, closer to Business
+  model's "how this sustains itself" than to who it's personally for). No
+  new gating logic — `_narrative_field`/`gates.field_state` handle all
+  three exactly like every other group field, off the same whole-profile
+  `needs_review` flag `build_communities_compare` already reads once per
+  community.
+
+  **Same PR fixed a real spacing bug this build surfaced** (flagged mid-turn:
+  "too much spacing between the visit, compare, edit buttons and the
+  bottom line box... look at a software profile for comparison"): the
+  Community profile page's hero (name/tags/actions) and its screenshot
+  card used to sit side by side in their own two-column `.tp-band`
+  (`top_band`), so the Bottom line callout directly below it couldn't
+  start until that whole grid row finished — gated behind the (usually
+  much taller) screenshot column's height, not the hero column's actual,
+  much shorter, content height. Software's own Tool Profile Layout: Sidebar
+  Consolidation pass (above) had already solved the identical problem for
+  the Software profile page — hero full-width above a single `.tp-band`,
+  screenshot moved into the sidebar column — so this mirrors that exact
+  pattern rather than inventing a new one: `hero_text` now renders
+  full-width (no band, no screenshot beside it), and `screenshot_block`
+  opens the sidebar column of the one remaining band (renamed
+  `content_band`, from `lower_band`), alongside Details/Categories/Similar
+  communities — the same reference-sidebar grouping this page already used
+  for those three, just extended to the screenshot. The CSS gained
+  `.tp-band:first-of-type{margin-top:20px;}`, matching Software's own
+  override, since there's now only one `.tp-band` on the page. On mobile
+  (`<=800px`, unchanged breakpoint), the sidebar now falls after all the
+  main-column narrative content in DOM order rather than right after the
+  hero — the same "main column first, sidebar second" mobile order
+  Software's Sidebar Consolidation pass already established, not a new
+  decision; verified with a real 390×844 Playwright session (no horizontal
+  overflow, narrative-first stacking).
+
+  **Standing rule this PR enforces, worth restating for future field
+  additions**: every admin-editable field must render on at least the
+  profile page (and Compare, where applicable) — no field is ever
+  collected-but-never-shown. See `linklib/compare.py`'s own comment on
+  `COMMUNITY_PROFILE_GROUPS` for the placement reasoning, ARCHITECTURE.md's
+  matching bullet for the full technical write-up, and `tests/
+  test_surface_hidden_community_fields.py` for the regression coverage
+  (group placement, verified/pending/empty on both the profile page and
+  Compare).
+
+- **Admin menu default-state + badge coverage (2026-09) — every admin-hub group
+  now defaults to collapsed on load, reversing the 2026-08 "Inbox always open,
+  any group with a nonzero badge also starts open" fix; plus a real Software
+  badge undercount closed.** Brian's report ("Inbox, Toolbox, Software render
+  expanded on load") traced to `admin_page()`'s `_group_html()`, which forced
+  `open=True` for `gname=="Inbox"` or any group whose aggregate badge was
+  nonzero — not a leftover/debug artifact, a deliberate, documented fix for a
+  real incident (a pending LiveFlow/Liveflow name-duplicate pair and a Runway
+  pair went unnoticed inside a collapsed, two-levels-deep Software sub-group,
+  even though detection and badge counting were both correct — see the
+  git-blame'd 2026-08 comment this reverts). Investigated and flagged to
+  Brian before touching it, since honoring the literal ask would revert that
+  incident fix; his explicit call — confirmed twice, after a session restart
+  lost the first answer — reverses it anyway: **badges are the review-inbox
+  signal on their own, and auto-expanding on top of that duplicated the same
+  information as an intrusive default rather than a genuinely different
+  safeguard.** The incident's own root cause is still guarded against by a
+  different, pre-existing mechanism that didn't need to change: a group's
+  badge only ever hides once its `<details>` is OPENED
+  (`.admin-group[open] .group-badge{display:none;}`), so a collapsed-by-
+  default group with something pending still shows its badge number, unhidden,
+  right on the summary row — the exact spot the incident says to look. Single
+  centralized fix (`_group_html`'s own `open=` parameter, now always `False`),
+  not three per-section patches, since Inbox/Toolbox/Software all render
+  through the same function. **Re-verified specifically for the nested case**
+  the incident comment describes (Software's badge, two disclosure levels
+  deep inside CFO Toolbox) now that every level defaults collapsed: a native
+  `<details>` hides its ENTIRE body — including a nested `<details>` and that
+  nested group's own badge span — the moment its parent is collapsed, so
+  Software's own badge can't literally "show through" CFO Toolbox once
+  CFO Toolbox itself is closed. What actually satisfies the incident's intent
+  is that CFO Toolbox's own group-level badge already aggregates every href
+  nested inside it (`toolbox_hrefs` in `admin_page()`, which folds in
+  `software_hrefs`), so CFO Toolbox's own `<summary>` — visible regardless of
+  its own open/closed state — already reflects Software's pending count
+  without Software's `<details>` ever needing to be open. **Separately, a
+  real, concrete badge gap**: the Software admin card counted only
+  `count_pending_tools()` (the approval queue), while Communities' equivalent
+  card already combines `count_pending_communities() +
+  count_communities_needing_review()` — an asymmetry, not a deliberate scope
+  choice; `count_tools_needing_review()` (the tools-side mirror of that same
+  method, built for the "Tools whole-record profile signoff" feature) already
+  existed and simply was never wired into `webapp.tasks.open_task_counts()`.
+  Fixed by mirroring Communities exactly — `count_pending_tools() +
+  count_tools_needing_review()`, summed, same as Communities' own two terms.
+  **An earlier draft of this fix instead folded the three per-field
+  `*_needs_verification` flags (Description/Agent taxonomy/Competitive
+  differentiation) into one deduped `count_tools_needing_attention()` query,
+  reasoning that they're rarely independent of `needs_review` (a fresh draft
+  that sets one also auto-sets the whole-record flag in the same write, so
+  summing separately would double-count) — reverted per Brian's explicit
+  call**: those three flags have their own follow-on scope defined
+  separately and are deliberately left out of this PR, not folded in under a
+  different name. `count_tools_needing_review()` keeps its own other callers
+  unaffected (the admin list's "Needs review" filter count, the
+  review-status pill's "(n/3)" breakdown). FP&A Buddy feedback
+  (`ask_feedback`) and the three per-field flags both stay deliberately out
+  of the badge system for now — no reviewed-state column exists on
+  `ask_feedback` at all (re-confirmed during this investigation), and the
+  field flags have their own separately-scoped follow-on.
+  See `tests/test_task_badges.py` for the regression coverage (every
+  top-level and nested group collapsed on load even with a real pending
+  badge; the badge itself still visible in that collapsed state; the nested-
+  nested case specifically; the mirrored count and its deliberate exclusion
+  of the per-field flags).
+
+- **Admin menu badge coverage, follow-up (2026-09) — the per-field
+  `*_needs_verification` flags this PR left out are folded in after all,
+  superseding that deliberate exclusion.** The earlier bullet's `count_
+  tools_needing_attention()` — combining the whole-record `needs_review`
+  signal with any of the three per-field flags into one deduped, per-tool
+  count — was built once, then reverted in favor of the plain `count_
+  pending_tools() + count_tools_needing_review()` sum described above, per
+  an explicit instruction at the time to defer the field flags to their own
+  follow-on scope. That follow-on scope is this PR: `count_tools_needing_
+  attention()` is resurrected verbatim (the original query needed no
+  changes — a `SELECT COUNT(*) FROM tools WHERE ...` over one row per tool
+  is already a per-tool dedup, no `DISTINCT` needed) and wired into
+  `webapp.tasks.open_task_counts()` in place of `count_tools_needing_
+  review()`. `count_tools_needing_review()` itself is untouched and keeps
+  its own other callers (the admin list's "Needs review" filter count, the
+  review-status pill's "(n/3)" breakdown) — only the Software card's badge
+  wiring changed. FP&A Buddy feedback (`ask_feedback`) is the one signal
+  still deliberately left out of the badge system — still no reviewed-state
+  column on that table at all. See `tests/test_task_badges.py`'s
+  `test_open_task_counts_dedupes_per_field_verification_flags` for the
+  regression coverage, including the multi-field-on-one-tool dedup case.
+
+- **Badge dedup safety, Software + Communities (2026-09) — both badges were
+  a sum of two separate counts, and a single row satisfying both conditions
+  at once got counted twice; both now read one dedup-safe count apiece
+  instead.** For Software this was a real, live bug, not a hypothetical:
+  `add_tool()` defaults `needs_review=1` for every brand-new tool regardless
+  of caller (admin add-form, public `/tools/submit`, seed scripts — none
+  passes 0), and `approve_tool()` only ever flips `approved`, never touches
+  `needs_review` or the three per-field flags — so every tool sitting in the
+  approval queue already also had `needs_review=1`, and the old `count_
+  pending_tools() + count_tools_needing_attention()` sum double-counted it
+  every time. `count_tools_needing_attention()` now also ORs in
+  `approved=0` alongside its existing conditions (still one query over the
+  `tools` table, one row per tool, no `DISTINCT` needed), and is the SOLE
+  count behind the Software badge — `count_pending_tools()` is no longer
+  summed alongside it (the method itself is untouched, just has no current
+  caller). For Communities the overlap is possible but not automatic: the
+  `needs_review` flag lives on `community_profiles`, a separate table with
+  no row at all until a profile is actually drafted, and the public
+  submission route (`add_community()` alone, no profile generation) never
+  creates one — but `GET`/`POST /admin/tools/communities/{id}/profile`
+  never checks the community's `approved` status either, so an admin
+  drafting/saving a profile for a still-pending submission (reachable only
+  by direct URL — no link from the Pending submissions table) would land in
+  exactly this state. New `Library.count_communities_needing_attention()`
+  (a `LEFT JOIN` against `community_profiles`, since most communities —
+  pending ones especially — have no profile row and an `INNER JOIN` would
+  silently drop them; `COUNT(DISTINCT c.id)` is defensive rather than
+  strictly required, since `community_profiles.community_id` is a 1:1
+  primary key with no fan-out risk) replaces the old `count_pending_
+  communities() + count_communities_needing_review()` sum the same way.
+  **No shared helper between the two** — investigated and deliberately
+  passed on: tools' fix is a single-table OR, Communities' needs a join
+  across two tables with different row-existence semantics, and a generic
+  "table + condition list" abstraction can't express that difference
+  cleanly without becoming its own small query builder for a two-call
+  audience. Both entities' individual count methods
+  (`count_pending_tools()`, `count_tools_needing_review()`, `count_pending_
+  communities()`, `count_communities_needing_review()`) are all untouched
+  and keep their own other callers — only the two badges' wiring in
+  `webapp.tasks.open_task_counts()` changed, from a sum to a single call
+  apiece. See `tests/test_task_badges.py`'s
+  `test_open_task_counts_does_not_double_count_pending_and_needing_review_tool`/
+  `..._community` for the direct regression coverage.
+
+- **Admin grid reorder (2026-09) — Thought leadership and CFO Toolbox moved
+  from the top of the right column to the left column, below Inbox; Brand,
+  voice, and content and System shifted up to fill the vacated top-right
+  slot.** Display-order only, confirmed before building: the two-column
+  split (`admin_page()`'s `_LEFT_GROUPS` set, iterated in `_ADMIN_GROUPS`'
+  own declared order) was already a simple set-membership check per group
+  name, not a hardcoded per-column layout — extending `_LEFT_GROUPS` from
+  `{"Inbox"}` to `{"Inbox", "Thought leadership", "CFO Toolbox"}` was the
+  entire fix, since `_ADMIN_GROUPS`' own iteration order already places
+  those three (then Brand/voice/content, then System) in exactly the
+  desired top-to-bottom sequence within each column. The mobile single-
+  column stack (both columns concatenate below the `1024px` breakpoint)
+  needed no separate change either, for the same reason. See `tests/
+  test_admin_nav_phase6.py`'s `test_admin_grid_reorder_renders_in_the_new_
+  order` for the regression coverage.
+
+- **FP&A Buddy feedback: reviewed toggle (2026-09, Phase 3) — `ask_feedback`
+  gets the same manual "Mark reviewed" pattern Community gaps already has,
+  closing the last deferred badge gap from the earlier admin-badge-coverage
+  round.** Investigated first, per the standing gate: `community_gap_
+  submissions.reviewed` is a plain `INTEGER NOT NULL DEFAULT 0` boolean
+  (not a timestamp), flipped by a bespoke per-row toggle button/route
+  (`toggle_community_gap_reviewed`, `POST /admin/community-gaps/{id}/
+  toggle-reviewed`) — not a reusable macro/component, just markup local to
+  that one page's `_card()` closure, confirmed by reading it rather than
+  assumed. `community_gap_counts()["unreviewed"]` and the toggle read/write
+  the exact same column, so the stat tile and the row action can never
+  drift out of sync. `ask_feedback` was list-only (no detail view) with no
+  reviewed concept of any kind — `ask_feedback_counts()` only ever grouped
+  by `rating`. Built by mirroring Community gaps exactly, not inventing a
+  parallel shape: a migration-added `ask_feedback.reviewed` column (same
+  name/type/default — the schema comment explicitly says why this isn't a
+  `viewed_at` timestamp instead), `toggle_ask_feedback_reviewed()` (same
+  flip-in-place `UPDATE ... SET reviewed = 1 - reviewed`),
+  `count_unreviewed_ask_feedback()` (same shape as `community_gap_counts()`'s
+  own `unreviewed` bucket), and `list_ask_feedback()` gained an optional
+  `reviewed` filter alongside its existing `rating` one (combined with AND,
+  same convention `list_community_gap_submissions()` already uses). The
+  toggle component itself is copy-pasted markup, not factored into a shared
+  helper — Phase 0 found it was bespoke to begin with, and two call sites
+  isn't a pattern worth abstracting yet; the "Reviewed"/"New" pill styling
+  is reused verbatim (same hex-free `--seafoam-wash`/`--alert` tokens) so
+  the two pages read as visually consistent regardless. `/admin/ask-feedback`
+  gained a second filter select (Reviewed: All/Unreviewed/Reviewed,
+  combinable with the existing rating filter in one GET form) and a 4th
+  stat tile ("Unreviewed", deliberately all-time not month-scoped — same
+  choice Community gaps' own Unreviewed tile makes, since "how much is left
+  to triage" isn't naturally a monthly figure); the stat-card grid switched
+  from a hardcoded `repeat(3,1fr)` to `repeat(auto-fit,minmax(130px,1fr))`
+  per the standing CSS-Grid-blowout lesson (Phase P) rather than hand-fixing
+  the column count. `webapp.tasks.open_task_counts()` wires in
+  `count_unreviewed_ask_feedback()` for `/admin/ask-feedback` — no longer in
+  the deferred bucket; the comment there was updated to say so. `ask_feedback_
+  counts()` itself is untouched and keeps its own caller (the 3 per-rating
+  "this month" stat tiles). See `tests/test_ask_feedback.py`'s new Phase-3
+  section for the full regression coverage (toggle flip, filter, badge
+  wiring, the route's admin-only gate, and the rendered page carrying the
+  new badge/button/stat-tile markup).
+
+- **Admin "Completeness" filter (2026-09) — one more scalar filter on both
+  `/admin/tools/software` and `/admin/tools/communities`, for finding
+  profiles missing content or a screenshot ahead of a manual review pass.
+  Consume-only against `linklib/gates.py`: no new gating concept, no
+  `gates.py` changes — it reuses the exact same field set and the same
+  strip-then-check emptiness test `gates.field_state` already applies (per
+  `linklib/compare.py`'s field list, the authoritative one, not a guess at
+  an old memory of it): tools' Description/Agent taxonomy/Bottom line
+  (`competitive_differentiation`)/Competitors; Communities' `verdict_summary`
+  plus the 17 `COMMUNITY_PROFILE_GROUPS` fields/Similar communities. Plus a
+  direct, non-gate `screenshot_url` presence check on both — deliberately
+  **not** `app_screenshot_url` too, since the app/product screenshot is a
+  genuinely optional curated extra most records never get (CFO Toolbox
+  Phase E), so flagging its absence would make the filter useless.
+  Renders as a single "Missing"/"Complete" dropdown (`_tool_completeness`/
+  `_community_completeness` in `webapp/app.py`), the same `scalar_filters`
+  convention every other AND-matched admin-table filter (Cost band, Access,
+  ...) already uses — a precomputed `data-completeness` attribute per row,
+  read by the existing shared `_ADMIN_SORT_FILTER_JS`, no new JS. Two new
+  bulk-query `Library` methods avoid an N+1 per row, same precedent as
+  `community_profile_quality_flags()`: `tool_competitor_counts()`/
+  `community_competitor_counts()` (one grouped `COUNT(*)` over the join
+  table) and `community_profile_has_empty_narrative_field()` (one bulk
+  `SELECT` over `community_profiles`, mirroring `community_profile_quality_
+  flags()`'s own shape) — a community with no `community_profiles` row at
+  all is treated as incomplete too, since it has none of the tracked
+  fields. See `tests/test_admin_completeness_filter.py`.
+- **Sonnet 5 pricing correction (2026-09, issue #98) — the numeric rate row was
+  already correct; only a stale comment claiming it would expire was fixed.**
+  `linklib/pricing.py`'s `MODEL_PRICING["claude-sonnet-5"]` row (keyed off the
+  literal model string `claude-sonnet-5`, the same id `linklib/models.py` and
+  `linklib/agent.py`'s effort-tier map both use) already held the confirmed
+  $2/$10/$2.50(5-min cache write)/$0.20(cache read) per-MTok rates — but its
+  comment and the module docstring both said this was a temporary
+  introductory window ending 2026-08-31, reverting to $3/$15 after. Per
+  Anthropic's own pricing announcement
+  (https://www.anthropic.com/news/claude-sonnet-5), that planned increase was
+  cancelled — the introductory rate is now permanent — so both were corrected
+  to say so rather than continue flagging a future edit that will never be
+  needed. **Separate, smaller finding, not acted on**: `MODEL_PRICING` tracks
+  only one `cache_write` rate per model (the 5-minute-TTL rate) — there's no
+  column for the 1-hour-TTL cache-write rate (Sonnet 5: $4.00/MTok), so a
+  future caller that actually sets a 1-hour cache TTL would silently be
+  charged the 5-minute rate instead. Worth adding if/when something in this
+  codebase starts using a 1-hour cache TTL; nothing does today. New
+  `tests/test_pricing.py` pins the confirmed rate values and a hand-checked
+  `compute_cost` calculation so a future accidental edit is caught.
+- **Pricing/model freshness check (2026-09, issue #98 follow-up) — two
+  genuinely different pieces, one fully automatable, one that can't be.**
+  **Piece 1, permanent and automated**: `tests/test_pricing.py::
+  test_every_registry_model_has_a_pricing_row` asserts every model id in
+  `linklib/models.py`'s curated `_REGISTRY` has a matching `MODEL_PRICING`
+  row — closes the "new model registered, pricing forgotten" gap for good;
+  no human ever needs to remember to check this again. As of this PR the two
+  already matched exactly (confirmed by the Step 0 investigation), so the
+  test passed immediately — its job is guarding against future drift, not
+  fixing a current gap. **Piece 2, a dated manual reminder, not automation**
+  — there's no pricing API to reconcile `MODEL_PRICING` against the way
+  `linklib.models` reconciles the model registry against the live Models
+  API, so the honest version of "check this periodically" is a human
+  attestation, not a test. Reuses the same reviewed-toggle pattern already
+  established for Community gaps (`toggle_community_gap_reviewed`) and
+  FP&A Buddy feedback (`toggle_ask_feedback_reviewed`) — a plain dated
+  `settings` value (`pricing_last_verified`, via the existing
+  `get_setting`/`set_setting`, no new column) rather than a per-row boolean,
+  since there's no per-row entity here, just one global "last verified"
+  date. `/admin/checks` gained a "Pricing freshness" section below the
+  automated pass/fail list — deliberately its own banner
+  (`_pricing_freshness_banner`), not a row in `checks.run_all()`'s list,
+  since this isn't a pass/fail check in that sense. Amber (never-reviewed,
+  or older than `linklib.pricing.PRICING_REVIEW_STALE_DAYS` = 90, confirmed
+  with Brian) / seafoam (fresh), with a "Mark reviewed" button
+  (`POST /admin/checks/mark-pricing-reviewed`, admin-only) that stamps the
+  current time — no auto-clear-on-view, same as the other two toggles.
+  `linklib.pricing.pricing_review_is_stale()` is the pure, unit-tested
+  staleness check (missing or unparseable value both read as stale, same
+  as "never verified"). See `tests/test_pricing_freshness.py` for the
+  end-to-end coverage (never-reviewed banner, mark-reviewed clearing it,
+  going stale again past 90 days, staying fresh within it, auth on both
+  the page and the action).
+- **Exa pricing freshness — a third, parallel dated manual reminder,
+  mirroring the Pricing freshness banner above exactly.** `linklib/pricing.py`'s
+  `EXA_PRICING` table (checked 2026-07-26 against Exa's published rates) had
+  no freshness reminder at all, unlike `MODEL_PRICING` and the model
+  registry — found during the AI usage dashboard's Step 0 investigation.
+  Same mechanism, same shape: a dated `settings` value
+  (`exa_pricing_last_verified`), `linklib.pricing.exa_pricing_review_is_stale()`
+  (pure, unit-tested, identical logic to `pricing_review_is_stale`), a
+  third `/admin/checks` banner (`_exa_pricing_freshness_banner`) below the
+  New-model-awareness one, and `POST /admin/checks/mark-exa-pricing-reviewed`
+  — no auto-clear-on-view, admin-only, same amber/seafoam treatment. Same
+  90-day window as Claude/OpenAI pricing (`EXA_PRICING_REVIEW_STALE_DAYS`),
+  not the 30-day new-model-awareness window — this checks whether an
+  existing rate is still accurate, the same category of question as
+  Claude/OpenAI pricing, not "does something new exist to add." Not seeded
+  from the table's own "checked 2026-07-26" comment — starts unreviewed,
+  same as the other two banners never backfilled from their own pre-banner
+  pricing-check comments either. See `tests/test_exa_pricing_freshness.py`
+  for the end-to-end coverage (same shape as `tests/test_pricing_freshness.py`),
+  and note `tests/test_models_freshness.py`'s own `_models_section` helper
+  was widened to bound its split on both sides, since a third section now
+  follows it on the page.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -5404,7 +6385,8 @@ tables, no third-party dependency.
     it — it was never part of the `original_content` system, so there's no slug collision to
     guard against).
   - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
-    `/admin/contacts` (member-gated), and
+    `/admin/contacts`, `/change-password` (all member-gated — see the Encourage
+    password change note in Key architecture decisions above), and
     `/read`, `/read/{article_id}` (**admin-only**, Phase 1 access level, merged into
     the single Reader in Phase 5 — see the Library access-level note and the Phase 5
     Reader-merge note in Key architecture decisions above). (The old flat
@@ -5418,19 +6400,35 @@ tables, no third-party dependency.
     now 405s rather than 404s since `POST /ask` still lives there.) The
     `/library` hub route was removed outright in Phase 1 — no redirect.
   - Private API → **401** when unauthenticated, but also accept a valid token (cookie OR
-    `X-Save-Token`): `/ask`, `/post`, `/feed/save`, `/api/search`,
+    `X-Save-Token`): `/ask`, `/post`, `/feed/save`,
     `/library/{article_id}/tags` (the Reader's inline tag editor, Phase 5c —
     the route predates it but had no callers until then). Of these, only
-    `/api/search` also accepts a `?token=` query param as a fallback
+    `/api/search` (see below) also accepts a `?token=` query param as a fallback
     (`token: str | None = None` on the route itself) — the others check
     only the `X-Save-Token` header (2026-09 correction: this line previously
     claimed `?token=` worked for all of them, verified false in code for
     `/ask` specifically during the MCP cleanup/hardening PR's Phase 0).
+  - **`/api/search` is now admin-only (`_require_api`), matching `/read`'s real
+    access tier (2026-09 fix)** — previously gated at member-tier
+    (`_require_member`, any signed-in user), a likely-unintentional survivor
+    of the Phase 1 restructure that moved the Reader itself to admin-only
+    without revisiting this API route (flagged but deliberately left alone by
+    the MCP-server Phase 4 investigation — see ARCHITECTURE.md's matching
+    note, now corrected). A signed-in non-admin member could search/read
+    Library content, including articles behind Brian's own paid subscriptions
+    (OnlyCFO, Mostly Metrics), directly through this route even though `/read`
+    itself already blocked them — closed. Still accepts a valid admin cookie
+    OR the save token (`X-Save-Token` header or `?token=` query param), same
+    as before — only the cookie-tier requirement changed, from any member to
+    admin specifically.
   - **Session-cookie-only** (401 when unauthenticated, no token fallback at all — these are
     reached only from inside the already-authenticated `/read` UI, never cross-origin):
     `/api/read-article` and `/read-later/refresh` (2026-08 follow-up — the per-item Read
     Later "Refresh" action deliberately doesn't accept `X-Save-Token`/`?token=`, unlike
     `/save-later`, since it's a button in the signed-in Reader, not the bookmarklet).
+    `/change-password` (2026-09) is the same tier for the same reason — a self-service
+    password change only ever makes sense from inside an already-authenticated session,
+    never cross-origin, so it never needed a token fallback either.
   - `/save` is **token-only** (`X-Save-Token` header or `?token=`) because the bookmarklet
     calls it cross-origin, where the login cookie can't be sent. It also carries a
     dedicated, `/save`-only CORS middleware (`_save_cors` in `webapp/app.py`, 2026-08
@@ -5621,6 +6619,92 @@ shared `<script>` tag aborts parsing of the *entire* tag, so no function in it g
 defined — not just the one nearest the typo — which is how one truncated apostrophe
 silently took out search, select-all, and bulk edit/delete together, on two separate
 admin pages, with no exception thrown anywhere a person would see it.
+
+## Hub-nav orphan detector
+
+`/admin`'s hub-nav cards (`_ADMIN_GROUPS`, `_LIBRARY_TOOLS`, `_FPA_BUDDY_TOOLS`,
+`_SOFTWARE_TOOLS` in `webapp/app.py`) are hand-maintained tuples — the same failure
+shape as every other hand-maintained list this project has had to guard against
+mechanically. Found 2026-09: Communities' category CRUD
+(`/admin/tools/communities/categories`) had a real, working route with no hub-nav
+card at all, while its Software parallel (`/admin/tools/software/categories`) did —
+caught by manual sampling during an admin-sprawl review, not by anything mechanical.
+
+`webapp.app.hub_nav_orphans()` closes this the same way `/admin/system/page-index`
+closes the width-tier drift problem: it reuses that same live `app.routes`
+introspection technique (a sibling, not a parallel implementation) to enumerate
+every real `/admin/*` GET/HTML route, flattens the hub-nav tuples into their own
+href set, and diffs the two. Three route classes are excluded before diffing
+because they're never expected to carry their own card — `/admin` itself, any
+route with a path parameter (a per-record detail/edit page reached from its list
+page's rows), and a `.../new` creation-form route whose own parent path is already
+carded (a general, mechanical rule — a future `.../new` route needs no edit here) —
+plus two small, individually-documented exceptions
+(`/admin/overhead-spend/details`, `/admin/tools/software/name-duplicates`) mirroring
+`_PAGE_INDEX_CUSTOM_EXCEPTIONS`'s own precedent. Wired into `webapp.checks.run_all()`
+as "Hub-nav orphans" — a real automated pass/fail entry in `/admin/checks`' existing
+list, not a fourth dated manual-attestation banner (unlike the Pricing/Exa-pricing/
+New-model-awareness reminders above, this is mechanically computable with no
+external source or human judgment call). See `tests/test_hub_nav_orphans.py` for
+the coverage, including a reproduction of the exact 2026-09 gap proving the detector
+actually catches it, not just passes trivially.
+
+## Freshness-Banner & Reviewed-Toggle Consolidation
+
+An admin-sprawl review (2026-09-08) found two duplication patterns on `/admin/checks`
+and nearby admin pages — investigated as one question (are these the same underlying
+mechanism, or two that happen to rhyme?) before building anything. **Answer: two
+genuinely different patterns, each with its own real, byte-for-byte duplication worth
+extracting on its own** — not one shared "toggle core" with banner presentation on
+top. They differ on the two axes that actually drive rendering: cardinality (one
+global value per page vs. one row among many) and reversibility/staleness (a
+time-windowed amber/seafoam banner vs. a plain reviewed-or-not pill with no color
+staleness at all). Forcing them into one component would mean a banner pretending to
+be a row or vice versa — more parameters than duplication saved.
+
+- **`_reviewed_freshness_banner(is_stale, message_html, mark_url)`** — the shared
+  wrapper (colors, layout, the "Mark reviewed" button) `_pricing_freshness_banner`/
+  `_models_freshness_banner`/`_exa_pricing_freshness_banner` now all delegate to. Each
+  of the three stays its own function, since the real staleness predicate (imported
+  from a different module per banner) and the message wording genuinely differ — only
+  the mechanical wrapper was actually duplicated.
+- **`_reviewed_toggle_html(is_reviewed, toggle_url, *, one_way=False, reviewed_at="",
+  form_style="")`** — the shared badge+action pair for community-gaps and ask-feedback
+  (two-way: a boolean that flips back and forth, rendered as a seafoam/alert pill) and,
+  in `one_way=True` mode, compare-summary-feedback (a timestamp set once and never
+  un-set — no pill, since there's nothing to toggle back to; plain muted "Reviewed
+  {date}" text once set). Returns `(badge_html, action_html)` so each caller places the
+  two pieces exactly where its own row layout already puts them.
+- **`backfill-content`'s accept/unaccept pair is deliberately NOT folded in.** It only
+  rhymes at the vocabulary level — underneath it's a `content_refetch_log` status enum
+  (not a reviewed boolean/timestamp), rendered as a row that physically moves between
+  two different table sections with a confirm dialog and a separate Undo action, not an
+  inline pill flip. Forcing it through `_reviewed_toggle_html` would have been the
+  wrong abstraction, so it stays its own thing.
+- **The stale "two call sites, not a growing pattern" comment is corrected** (it was
+  wrong the moment a third caller — compare-summary-feedback — existed, and would have
+  gone stale again the moment a fourth did): the corrected version says "see all
+  callers of `_reviewed_toggle_html`" rather than naming a count, specifically so it
+  can't go stale the same way again.
+- **A real, unrelated correctness bug found during this pass, fixed in the same PR**:
+  `MODEL_PRICING` is Claude-only — OpenAI's embedding rate is tracked separately in
+  `EMBEDDING_PRICING`, which has no freshness-reminder banner of its own — but the
+  pricing-freshness banner's copy, its docstrings, and `PRICING_REVIEW_STALE_DAYS`'s
+  own comment all said "Anthropic's (and OpenAI's) published rates," asserting coverage
+  the table doesn't actually have. Every instance was corrected to name only Anthropic;
+  `test_pricing_banner_no_longer_claims_openai_coverage` pins it.
+- **`/admin/checks`' three near-duplicate "this is a manual, dated reminder, not
+  automatable" paragraphs are tightened to one shared line** (stated once, above all
+  three sections) plus a single one-line question per section naming only what that
+  section actually checks — no more re-explaining the same "not automatable" framing
+  three times with only the subject swapped.
+
+See `tests/test_reviewed_helpers.py` for direct coverage of both shared helpers; every
+pre-existing test for the three banners and the three toggle call sites
+(`tests/test_pricing_freshness.py`, `tests/test_models_freshness.py`,
+`tests/test_exa_pricing_freshness.py`, `tests/test_ask_feedback.py`,
+`tests/test_community_profiles.py`, `tests/test_compare_summary.py`) passes
+unmodified — proof the consolidation is behavior-identical.
 
 ## Running locally
 
@@ -6012,6 +7096,163 @@ picks something else — quality over cost for this use case, same reasoning
 `/admin/overhead-spend`'s "Toolbox usage" section now names the active
 enrichment model next to its existing AI-cost estimate, since model choice
 directly affects that number.
+
+### Adding a new Claude model — every touchpoint
+
+**Investigated (issue #98, Piece 1, 2026-09) after #506 shipped a CI test guarding
+registry-vs-pricing drift — the question was whether "add a new model" is genuinely
+a one-string change once that test exists. It isn't.** `linklib/models.py`'s own
+docstring used to claim its `_REGISTRY` is what "every model picker (Q&A, LinkedIn
+posts, re-enrich, backfill)" renders from — both false as of this investigation:
+LinkedIn post drafting was removed outright in #95, and Q&A (FP&A Buddy) never reads
+the registry at all. The docstring is corrected; this section is the real list.
+
+There are (at least) five separate places a model id can need adding or updating,
+not connected to each other and not connected to `linklib/models.py`'s registry
+except the first one:
+
+1. **`linklib/models.py`'s `_REGISTRY`** — feeds exactly three admin surfaces:
+   `/admin/system/model` (the live enrichment-model setting), the re-enrich
+   picker, and the backfill picker. Adding a row here is sufficient — and only
+   sufficient — for those three. `models_for(allow_new=True)` also auto-surfaces
+   a genuinely new model on the two chat-oriented pickers without a code change,
+   but the enrichment pickers stay curated on purpose (no auto-surfacing, so a
+   1,500-article re-enrich pass can't land on an unexpectedly pricey model by
+   accident).
+2. **`linklib/agent.py`'s `EFFORT_SETTINGS`** — FP&A Buddy's actual Quick/
+   Standard/Deep -> model mapping, a completely separate hardcoded dict with no
+   link to the registry at all. This is the real "model selector" for Buddy,
+   even though there's no dropdown — Buddy's UI only ever shows the three effort
+   tiers (`linklib.agent.EFFORT_SETTINGS`; see "FP&A Buddy has no visible model
+   picker" above). Putting a model in the registry does **not** make it reachable
+   by a Buddy question; only editing this dict does. Confirmed live: `EFFORT_SETTINGS`'s
+   "deep" tier already runs `claude-opus-4-8`, a model that was never in
+   `_REGISTRY` at all — proof the two have always been independent, not a new gap.
+3. **`linklib/agent.py`'s `COST_ESTIMATES`** — the rough pre-call cost estimate
+   shown on `/tools/fpa-buddy`, keyed by canonical model id then effort tier.
+   `COST_ESTIMATES.get(model, {}).get(tier)` degrades silently to `None` (a blank
+   cost estimate in the UI) for a tier pointed at a model missing here — no error,
+   no crash, just quietly wrong/missing UI.
+4. **`linklib/pricing.py`'s `MODEL_PRICING`** — the real per-call USD cost table
+   real spend is recorded against (drives per-user dollar caps). An unlisted model
+   silently falls back to Sonnet 4.6 rates rather than $0 or an error (see that
+   module's own docstring) — a live-cost-accuracy bug, not cosmetic. #506's CI
+   test (`test_every_registry_model_has_a_pricing_row`) only ever checked this
+   against the *registry*; a follow-up test
+   (`test_every_effort_tier_model_has_a_pricing_row`/
+   `test_every_effort_tier_model_has_a_cost_estimate_row`, `tests/test_pricing.py`)
+   now also checks it against `EFFORT_SETTINGS`, since a tier's model can (and
+   does, per point 2) live outside the registry entirely.
+5. **Assorted standalone `DEFAULT_MODEL`/`QUEUE_ENRICH_MODEL` fallbacks** —
+   `linklib/agent.py`, `linklib/matchmaker.py`, `linklib/suggest.py`,
+   `linklib/dedupe.py`, `linklib/queue.py`, `linklib/enrich.py`, and
+   `linklib/embeddings.py` each declare their own `os.environ.get("LINKLIB_..._MODEL",
+   "<hardcoded literal>")` default. None of these read the registry, and
+   `queue.py`/`enrich.py`/`embeddings.py` each pick their own deliberately
+   different literal for a deliberately different reason (see the
+   model-config-consolidation bullet below) — each is its own literal to
+   update if that default itself (not a picker option) should change.
+   `linklib/agent.py`'s `MODEL_ALIASES` (friendly short names like
+   `"opus"`/`"sonnet5"` -> canonical id) is a sixth, smaller list in the same
+   category — it's used internally by `agent.py` itself (`REWRITE_MODEL`,
+   `ask()`'s own `model=` resolution), not only by `scripts/ask.py`'s
+   `--model` flag as this doc once assumed; stays in `agent.py`, not moved.
+
+MCP tools (`ask_fpa_buddy`, `ask_matchmaker`) were checked too and don't add a
+seventh touchpoint — neither exposes a model parameter; both proxy straight into
+the same `EFFORT_SETTINGS`/matchmaker `DEFAULT_MODEL` machinery in-process (Phase 5),
+so point 2 already covers them.
+
+**Bottom line: not a one-string change.** A new model that should power FP&A Buddy
+needs edits to (at least) `EFFORT_SETTINGS`, `COST_ESTIMATES`, and `MODEL_PRICING` —
+three separate dicts in two files, none of which the registry reconciles for you.
+A new model that should only be selectable for enrichment/re-enrich/backfill needs
+only the registry (plus a `MODEL_PRICING` row, now enforced by CI either way).
+**No further automation was built for this** beyond the CI-test extension above
+(explicitly scoped and approved before building, issue #98 Piece 1) — unifying
+`EFFORT_SETTINGS`/`COST_ESTIMATES` into the registry-reconciliation mechanism
+`models_for` already has would be a real, riskier redesign (Buddy's tiers are
+deliberately curated/manual, the same reasoning the enrichment pickers already use
+for staying non-auto-surfacing) and was left as a possible future decision, not
+something to do silently as part of this reminder.
+
+**New-model-awareness reminder (issue #98, Piece 2)** — same reviewed-toggle
+pattern as the Pricing-freshness reminder directly above (a dated `settings` value,
+a banner on `/admin/checks` separate from the pass/fail list, an admin-only "Mark
+reviewed" action, no auto-clear-on-view), but answering a different question and
+kept as a fully separate, independent reminder: not "has an existing model's price
+gone stale" but "does Anthropic have current models this app doesn't know about at
+all." There's no API for that either (`models.list()`, per `linklib/models.py`'s
+own `_live_models`, only ever returns models already deployed/visible to this
+account — a consequence of a model having been added somewhere already, never a
+way to discover a brand-new release), so this stays a human attestation too.
+`linklib.models.MODELS_REVIEW_STALE_DAYS` = **30 days** (vs. pricing's 90) —
+confirmed with Brian: new models ship roughly every 30-60 days, meaningfully more
+often than an existing model's price changes, so the review window is tighter.
+Settings key `models_last_reviewed`; `POST /admin/checks/mark-models-reviewed`
+records it. The banner links out to both Anthropic's live model-overview docs and
+back to this section (so "what do I actually need to touch" doesn't need
+re-deriving each time it goes stale).
+
+**Model-config consolidation (2026-09, follow-up to issue #98's touchpoint
+investigation above) — the "default chat model" literal, deduplicated where it
+was genuinely duplicated; left alone everywhere it wasn't.** Point 5 above
+flagged five separately-hardcoded `"claude-sonnet-4-6"`/`os.environ.get("LINKLIB_CHAT_MODEL",
+...)` fallbacks (`linklib/agent.py`, `linklib/matchmaker.py`, `linklib/suggest.py`,
+`linklib/dedupe.py`, plus `linklib/queue.py`'s differently-valued
+`QUEUE_ENRICH_MODEL`) as drift risk, same shape as the pricing/registry gap
+#506 closed — a real default duplicated in multiple places with nothing
+keeping them in sync. Investigated per-site before touching anything, rather
+than assuming uniformity:
+- **`agent.py`, `matchmaker.py`, `suggest.py` were genuinely identical** — same
+  env var (`LINKLIB_CHAT_MODEL`), same literal, no stated reason to differ.
+  Consolidated into one new `linklib.models.DEFAULT_CHAT_MODEL =
+  "claude-sonnet-4-6"` constant, which all three now pass as the fallback
+  argument to their own unchanged `os.environ.get("LINKLIB_CHAT_MODEL", ...)`
+  call — behavior-identical (confirmed live: with/without `LINKLIB_CHAT_MODEL`
+  set, each module's resolved default is byte-identical before and after).
+- **`dedupe.py` shares the same *ultimate* default but has a real, deliberate
+  extra override layer** (`LINKLIB_DEDUPE_MODEL`, checked before
+  `LINKLIB_CHAT_MODEL`) — not drift, an intentional per-feature knob. Kept
+  exactly as its own two-level `os.environ.get(...)` chain; only its
+  innermost hardcoded literal now points at the shared
+  `DEFAULT_CHAT_MODEL` constant instead of re-typing the string.
+- **`queue.py`'s `QUEUE_ENRICH_MODEL` (`"claude-opus-4-8"`) is untouched, as
+  scoped** — a deliberately different, more capable model for a deliberately
+  different task class (background enrichment depth, same "quality over
+  cost" reasoning as `enrich.py`'s own `DEFAULT_MODEL`), not a copy of the
+  chat default that happened to diverge. Forcing it onto the shared constant
+  would be false consistency, not a fix.
+- **`linklib/agent.py`'s `MODEL_ALIASES` stays in `agent.py`** — the task's
+  original premise (flagged as one of five things to re-verify, not assumed)
+  that it's "used only by a CLI script" turned out to be wrong: it's used
+  internally by `agent.py` itself (`REWRITE_MODEL = MODEL_ALIASES["haiku"]`,
+  and `ask()`'s own `model=` resolution at
+  `MODEL_ALIASES.get(model, model)`) — `scripts/ask.py` never imports it at
+  all, it just passes a raw string through to `agent.ask()`, which resolves
+  the alias internally. Moving a lookup table this tightly coupled to
+  `agent.py`'s own resolution logic would be pure churn with no drift-risk
+  benefit, so it was left in place.
+
+`linklib/models.py` has zero `linklib`-internal imports of its own (a leaf
+module), so importing `DEFAULT_CHAT_MODEL` from it into `agent.py`/
+`matchmaker.py`/`suggest.py`/`dedupe.py` carries no circular-import risk —
+confirmed by actually importing all five touched modules together, not just
+reasoned about. `queue.py` and every other model-default site in point 5
+above (`enrich.py`, `embeddings.py`) are unmodified. This is a
+where-the-default-is-defined refactor only — no change to what model is
+actually used anywhere, no changes to `EFFORT_SETTINGS`/`COST_ESTIMATES`/the
+pricing or registry CI tests (already addressed by the new-model-awareness
+PR above).
+
+**`/admin/system/ai-usage` (2026-09) is a read-only index over everything
+in this section** — which model/mechanism powers each Claude/Exa/OpenAI
+surface, live vs. code-only, and a link to wherever it's actually changed
+(`/admin/system/model`, `/admin/exa-settings`, `/admin/checks`), plus a
+compact status glance on the three freshness reminders above. No dollar
+totals — those stay at `/admin/overhead-spend`, which this page links to.
+See ARCHITECTURE.md's "AI usage/config dashboard" section for the full
+write-up.
 
 ## Billing note
 

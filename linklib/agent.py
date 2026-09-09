@@ -28,9 +28,10 @@ import requests
 
 from .citations import extract_citations, make_document_block
 from .db import Library
+from .models import DEFAULT_CHAT_MODEL
 from .voice_settings import VoicePromptMissing, require_voice_setting
 
-DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
+DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", DEFAULT_CHAT_MODEL)
 
 # Friendly alias → canonical model ID
 MODEL_ALIASES: dict[str, str] = {
@@ -300,11 +301,14 @@ class Answer:
     sources: list[dict] = field(default_factory=list)       # saved-library hits
     feed_sources: list[dict] = field(default_factory=list)  # RSS feed hits
     web_sources: list[dict] = field(default_factory=list)   # fresh web results
-    # API-verified citations: [{n, title, url, type, article_id?}] for the
-    # sources the answer ACTUALLY cited (type: library|feed|web; article_id =
-    # articles.id, present on library entries only), numbered to match the
-    # [n] markers injected into `text`. Empty when the model cited nothing or
-    # citation metadata was unusable — never blocks an answer.
+    # API-verified citations: [{n, title, url, type, article_id?, own_content?}]
+    # for the sources the answer ACTUALLY cited (type: library|feed|web;
+    # article_id = articles.id, present on library entries only; own_content
+    # = True when the cited article is one of Brian's own mirrored/matched
+    # pieces — see linklib.original_content_sync, a citation-label-only
+    # flag, never a retrieval-ranking one), numbered to match the [n] markers
+    # injected into `text`. Empty when the model cited nothing or citation
+    # metadata was unusable — never blocks an answer.
     citations: list[dict] = field(default_factory=list)
     # The resolved canonical model ID actually used (after MODEL_ALIASES /
     # DEFAULT_MODEL resolution) — callers that log/record this answer should
@@ -604,9 +608,12 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
     Returns (doc_blocks, sent_docs). doc_blocks are plain-text document blocks
     with citations enabled, in retrieval order — library, then feed, then web
     (Exa) — which keeps numbering deterministic. sent_docs[i] describes
-    doc_blocks[i] as {title, url, type}; a response citation's
-    `document_index` indexes into it, so it must describe what was actually
-    SENT, not everything retrieved.
+    doc_blocks[i] as {title, url, type, article_id?, provider?, own_content?};
+    a response citation's `document_index` indexes into it, so it must
+    describe what was actually SENT, not everything retrieved. own_content
+    (published-content ingestion, 2026-09) is a citation-label-only flag
+    carried through from a library hit's own articles.is_own_content — it
+    never influenced which hits got here in the first place.
 
     The same cost guards as the old flattened prompt apply, and only document
     text counts against them (titles ride in the block's `title` field, like
@@ -620,7 +627,8 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
     used = 0
 
     def _add(title: str, url: str, kind: str, body: str,
-             article_id: int | None = None, provider: str | None = None) -> None:
+             article_id: int | None = None, provider: str | None = None,
+             own_content: bool = False) -> None:
         nonlocal used
         body = (body or "").strip()
         if not body:
@@ -639,6 +647,11 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
             # by Exa" caption can gate on the real mechanism, not just the
             # citation type (both Exa and the native tool are type "web").
             doc["provider"] = provider
+        if own_content:
+            # Published-content ingestion (2026-09): flows straight through
+            # to citations.extract_citations, which copies it onto the final
+            # citation entry — labeling only, see that module's docstring.
+            doc["own_content"] = True
         sent_docs.append(doc)
 
     for h in lib_hits:
@@ -646,7 +659,7 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
             break
         _add(h.get("title", ""), h.get("url", ""), "library",
              _ground_body(h, min(source_chars, global_chars - used)),
-             article_id=h.get("id"))
+             article_id=h.get("id"), own_content=bool(h.get("is_own_content")))
 
     for item in feed_items:
         if used >= global_chars:

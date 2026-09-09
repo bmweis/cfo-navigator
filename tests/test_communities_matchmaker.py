@@ -228,13 +228,18 @@ def test_chat_logged_in_user_cap_tracked_separately_from_session(env):
 
 
 def test_admin_users_page_shows_matchmaker_cap_controls(env):
+    """2026-09 cap-consolidation follow-up: the per-user Matchmaker cap
+    field no longer has its own <form action="...matchmaker-cap"> — it's
+    part of the shared profile-form now (submitted via the row's one
+    Edit/Save toggle), so the per-user action route is gone from the
+    rendered page; the site-wide default-cap form is untouched."""
     appmod, uid = env
     c = _client(appmod)
     r = c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
     r = c.get("/admin/users")
     assert r.status_code == 200
     assert "Matchmaker" in r.text
-    assert f"/admin/users/{uid}/matchmaker-cap" in r.text
+    assert f'name="matchmaker_cap"' in r.text
     assert "/admin/users/matchmaker-cap-default" in r.text
 
 
@@ -252,20 +257,33 @@ def test_admin_matchmaker_cap_default_updates_setting(env):
 
 
 def test_admin_matchmaker_cap_per_user_override_set_and_clear(env):
+    """2026-09 cap-consolidation follow-up: the standalone
+    /admin/users/{id}/matchmaker-cap route is gone entirely (not just
+    UI-unreachable) — per-user cap overrides are set and cleared through
+    the same consolidated /edit route Name/Email/FP&A Buddy cap already
+    use, with a hidden `matchmaker_cap_original` marking what the field
+    showed at render time."""
     appmod, uid = env
     c = _client(appmod)
     c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    lib = Library(os.environ["LINKLIB_DB"])
+    username = lib.get_user_by_id(uid)["username"]
+    default = lib.get_default_matchmaker_cap()
+    lib.close()
 
-    r = c.post(f"/admin/users/{uid}/matchmaker-cap", data={"cap": "1.5"}, follow_redirects=False)
+    r = c.post(f"/admin/users/{uid}/edit", data={
+        "username": username, "matchmaker_cap": "1.5", "matchmaker_cap_original": f"{default:.2f}",
+    }, follow_redirects=False)
     assert r.status_code == 303
     lib = Library(os.environ["LINKLIB_DB"])
     assert lib.get_effective_matchmaker_cap(uid) == 1.5
     lib.close()
 
-    r = c.post(f"/admin/users/{uid}/matchmaker-cap", data={"cap": ""}, follow_redirects=False)
+    r = c.post(f"/admin/users/{uid}/edit", data={
+        "username": username, "matchmaker_cap": "", "matchmaker_cap_original": "1.50",
+    }, follow_redirects=False)
     assert r.status_code == 303
     lib = Library(os.environ["LINKLIB_DB"])
-    default = lib.get_default_matchmaker_cap()
     assert lib.get_effective_matchmaker_cap(uid) == default
     lib.close()
 

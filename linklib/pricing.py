@@ -6,14 +6,50 @@ billing figures, not a token-count proxy. This is separate from
 `agent.COST_ESTIMATES`, which is a rough *pre-call* estimate shown in the UI
 before a question is asked (we don't know real usage until the call returns).
 
-Pricing checked 2026-07-02 against Anthropic's published rates. Sonnet 5 is in
-an introductory pricing window through 2026-08-31 ($2/$10 per MTok instead of
-the standard $3/$15) — after that date this file needs a manual edit to the
-Sonnet 5 row. There's no live pricing API to reconcile against (unlike
-`linklib.models`, which reconciles against the live Models API), so a stale
-row here silently under- or over-charges until someone updates it.
+Pricing checked 2026-07-02 against Anthropic's published rates, re-verified
+2026-09-07 (issue #98). Sonnet 5's introductory rate ($2/$10 per MTok,
+instead of the originally-planned standard $3/$15) is now permanent — the
+planned September 1 increase to $3/$15 was cancelled by Anthropic, so no
+further edit is needed here on that account. See
+https://www.anthropic.com/news/claude-sonnet-5 There's no live pricing API to
+reconcile against (unlike `linklib.models`, which reconciles against the live
+Models API), so a stale row here silently under- or over-charges until
+someone updates it — re-verify against Anthropic's published rates
+periodically.
 """
 from __future__ import annotations
+
+from datetime import datetime, timezone
+
+# How often Brian should manually re-check MODEL_PRICING against Anthropic's
+# published rates — there's no pricing API to reconcile against
+# automatically (unlike linklib.models, which reconciles the model
+# *registry* against the live Models API), so this is a dated-reminder
+# threshold for a human attestation, not something a test can verify on its
+# own. Confirmed with Brian (issue #98 follow-up, 2026-09). MODEL_PRICING is
+# Claude-only — OpenAI's embedding rate is tracked separately, in
+# EMBEDDING_PRICING below, which has no freshness-reminder banner of its
+# own yet (corrected 2026-09, admin-sprawl follow-up: this comment and the
+# /admin/checks banner it backs used to say "(and OpenAI's)," asserting
+# coverage this table doesn't actually have).
+PRICING_REVIEW_STALE_DAYS = 90
+
+
+def pricing_review_is_stale(last_verified_iso: str, *, now: datetime | None = None) -> bool:
+    """True when `last_verified_iso` (a stored settings value, empty string
+    if never recorded) is older than PRICING_REVIEW_STALE_DAYS — or missing
+    entirely, which is the same "go check it" signal as genuinely stale."""
+    if not last_verified_iso:
+        return True
+    try:
+        then = datetime.fromisoformat(last_verified_iso)
+    except ValueError:
+        return True
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (now - then).days >= PRICING_REVIEW_STALE_DAYS
+
 
 # USD per million tokens. cache_write is the 5-minute-TTL rate (1.25x input);
 # nothing in this codebase sets a 1-hour cache TTL, so the 2x rate isn't
@@ -24,7 +60,7 @@ from __future__ import annotations
 MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00,  "cache_write": 1.25, "cache_read": 0.10},
     "claude-sonnet-4-6":         {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_read": 0.30},
-    "claude-sonnet-5":           {"input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_read": 0.20},  # intro pricing through 2026-08-31; becomes $3/$15 after
+    "claude-sonnet-5":           {"input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_read": 0.20},  # permanent rate (was introductory; the planned $3/$15 increase was cancelled — see module docstring)
     "claude-opus-4-8":           {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
     "claude-opus-5":             {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
 }
@@ -67,6 +103,36 @@ def compute_embedding_cost(model: str, input_tokens: int = 0) -> float:
     """
     rate = EMBEDDING_PRICING.get(model, _EMBEDDING_FALLBACK)
     return input_tokens * rate / 1_000_000
+
+
+# How often Brian should manually re-check EXA_PRICING against Exa's
+# published rates (exa.ai/pricing) — same "no pricing API to reconcile
+# against" situation as PRICING_REVIEW_STALE_DAYS above, so this is a third,
+# separate dated-reminder threshold for a human attestation. 90 days, same
+# window as Claude pricing above (not the 30-day new-model-awareness window
+# in linklib.models) — this checks whether an existing rate is still
+# accurate, not whether something new exists to add, the same category of
+# check as Claude pricing. Confirmed with Brian (issue tracking the Exa
+# pricing freshness banner, 2026-09).
+EXA_PRICING_REVIEW_STALE_DAYS = 90
+
+
+def exa_pricing_review_is_stale(last_verified_iso: str, *, now: datetime | None = None) -> bool:
+    """True when `last_verified_iso` (a stored settings value, empty string
+    if never recorded) is older than EXA_PRICING_REVIEW_STALE_DAYS — or
+    missing entirely, the same "go check it" signal as genuinely stale.
+    Mirrors pricing_review_is_stale exactly (same logic, separate
+    function/setting so the two reminders can go stale independently)."""
+    if not last_verified_iso:
+        return True
+    try:
+        then = datetime.fromisoformat(last_verified_iso)
+    except ValueError:
+        return True
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (now - then).days >= EXA_PRICING_REVIEW_STALE_DAYS
 
 
 # USD per 1,000 requests. Checked 2026-07-26 against Exa's published rates

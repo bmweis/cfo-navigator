@@ -44,9 +44,9 @@ def extract_citations(content_blocks, sent_docs: list[dict],
     citations, deduplicated and numbered in first-use order.
 
     `sent_docs[i]` describes the document block sent at `document_index=i`
-    — {title, url, type, article_id?, provider?} — and must describe what
-    was actually SENT to the API, in the same order, so a response
-    citation's `document_index` resolves to the right source.
+    — {title, url, type, article_id?, provider?, own_content?} — and must
+    describe what was actually SENT to the API, in the same order, so a
+    response citation's `document_index` resolves to the right source.
 
     `inject_markers` controls what the returned text looks like:
     - True (agent.py's prose-answer use case): each cited span gets a
@@ -102,6 +102,12 @@ def extract_citations(content_blocks, sent_docs: list[dict],
                         entry["article_id"] = info["article_id"]
                     if info.get("provider") is not None:
                         entry["provider"] = info["provider"]
+                    if info.get("own_content"):
+                        # Published-content ingestion (2026-09): Brian's own
+                        # writing, surfaced on merit like any other source —
+                        # this only labels the citation, never affects
+                        # whether/how highly it was retrieved.
+                        entry["own_content"] = True
                     cited.append(entry)
                 if n not in nums:
                     nums.append(n)

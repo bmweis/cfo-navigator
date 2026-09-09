@@ -103,6 +103,20 @@ Sign in here, then use "Forgot your password?" on that page to set your own pass
 {login_url}"""
 WELCOME_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg"
 
+ADMIN_PW_RESET_PLACEHOLDERS = ["name", "username", "temp_password", "login_url", "to"]
+ADMIN_PW_RESET_SUBJECT_DEFAULT = "Your bmweis.com password was reset"
+ADMIN_PW_RESET_BODY_DEFAULT = """\
+Hi {name},
+
+Your password for bmweis.com was just reset, confirmed for {to}.
+
+Username: {username}
+New temporary password: {temp_password}
+
+Sign in here, then use "Forgot your password?" on that page to set your own password—worth doing soon, since this one was just generated for you:
+{login_url}"""
+ADMIN_PW_RESET_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg"
+
 PASSWORD_RESET_PLACEHOLDERS = ["username", "reset_url", "to"]
 PASSWORD_RESET_SUBJECT_DEFAULT = "Reset your bmweis.com password"
 PASSWORD_RESET_BODY_DEFAULT = """\
@@ -325,6 +339,47 @@ def send_welcome_email(
     subject_template = subject_template or WELCOME_SUBJECT_DEFAULT
     body_template = body_template or WELCOME_BODY_DEFAULT
     signoff = WELCOME_SIGNOFF_DEFAULT if signoff is None else signoff
+
+    placeholders = dict(
+        name=name.strip() or username, username=username,
+        temp_password=temp_password, login_url=login_url, to=to,
+    )
+    msg = _build_templated_message(subject_template, body_template, signoff, placeholders, to=to)
+    _send(msg)
+    return True
+
+
+def send_admin_password_reset_email(
+    to: str,
+    username: str,
+    temp_password: str,
+    login_url: str,
+    name: str = "",
+    subject_template: str | None = None,
+    body_template: str | None = None,
+    signoff: str | None = None,
+) -> bool:
+    """Notify an existing member that an admin just reset their password —
+    the same "here's a temp password, please change it soon" nudge
+    send_welcome_email gives a brand-new account, sent instead when an
+    already-existing account gets a fresh admin-set password
+    (POST /admin/users/{user_id}/password). Returns True if sent, False if
+    Google OAuth is not configured (graceful no-op) — the password change
+    still takes effect either way, so callers should tell the admin plainly
+    when this comes back False (share the new password another way).
+    Raises on API errors.
+
+    subject_template/body_template/signoff default to the ADMIN_PW_RESET_*
+    module constants — pass overrides from /admin/emails to customize copy
+    without a redeploy. Body/subject templates may use any of
+    ADMIN_PW_RESET_PLACEHOLDERS.
+    """
+    if not is_configured():
+        return False
+
+    subject_template = subject_template or ADMIN_PW_RESET_SUBJECT_DEFAULT
+    body_template = body_template or ADMIN_PW_RESET_BODY_DEFAULT
+    signoff = ADMIN_PW_RESET_SIGNOFF_DEFAULT if signoff is None else signoff
 
     placeholders = dict(
         name=name.strip() or username, username=username,

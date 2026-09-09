@@ -132,11 +132,23 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
 # family, distinct from the profile-page placeholders above: no admin
 # suffix, since a compare-matrix cell never carries a "go fill this in"
 # prompt (that only ever appears on the field's own profile/edit page).
+# Compare Redesign Phase 1 (2026-09) added the four new keys below —
+# "community_profile_field" (the old flat-per-field key) is retired, not
+# replaced: Compare now groups Community profile fields into the same 4
+# themed cards the profile page uses (COMMUNITY_PROFILE_GROUPS, see
+# linklib/compare.py), so an empty CELL is either a whole empty GROUP
+# ("community_profile_group", same key EMPTY_COPY already uses for this)
+# or, inside a populated group, the profile page's own Tier-2 "No details
+# available." literal — rendered directly by the HTML layer, not looked up
+# here, since it's a fixed string with no admin-suffix variant at all.
 COMPARE_EMPTY_LABELS: dict[str, str] = {
     "tool_agent_taxonomy": "Not yet documented.",
     "tool_description": "Not yet available.",
     "tool_differentiation": "Not yet available.",
-    "community_profile_field": "Not yet available.",
+    "tool_competitors": "Not yet curated.",
+    "community_bottom_line": "Not yet available.",
+    "community_profile_group": "Not yet documented.",
+    "community_similar_communities": "Not yet curated.",
 }
 
 

@@ -129,17 +129,38 @@ states, soft panels), ~10% — really less — coral (one highlight per screen).
 
 ## 3. Typography
 
-Three content families, one combined Google Fonts import in `<head>`. No serif anywhere
-except the reader. **Caveat** and **Permanent Marker** are accent-only fonts — approved
-dependency exceptions for the graffiti refresh — each restricted to one specific use
-and never used for headings or body copy (that's still Outfit/DM Sans/Source Serif 4,
-unchanged).
+Two content families, one combined Google Fonts import in `<head>`. **Outfit for
+headings, DM Sans for body copy — no other font renders content or reading text
+anywhere on the site, ever** (Brian's explicit standing rule, 2026-09). **Caveat**
+and **Permanent Marker** are accent-only fonts — approved dependency exceptions for
+the graffiti refresh — each restricted to one specific decorative use (sticker
+badges; the sitewide wordmark logo) and never used for headings or body copy; they
+are a separate, narrow exception to "two families," not a third content font.
+
+**2026-09 history — no serif anywhere any more, settled after three passes.** The
+merged Feed/Archive/Read Later reader at `/read` used to render both title and body
+in Source Serif 4 — confirmed wrong on direct live-site review. A first pass moved
+both to Outfit; checked against the site's actual published long-form content (an
+Original Content article's `.oc-body p` — the same template the Growth Engine
+Ratio/Sail Don't Row/NetSuite MCP pieces render through) and found body copy is DM
+Sans there, Outfit reserved for the `<h1>` — so "Outfit for body" would have made
+this reader the one place on the whole site with body copy in a headings font, not
+a return to an existing pattern. Settled on ordinary sitewide typography instead:
+Outfit heading, DM Sans body. That still left one holdout — the standalone
+single-article view at `/read/{article_id}` (a separate, older template,
+`webapp/app.py`'s `_READER_CSS`) — which Brian then confirmed should also drop the
+serif, stating the standing rule directly: only Outfit or DM Sans, ever, for
+content typography. Retired there too in the same pass: body moved to DM Sans
+(matching the sitewide default exactly, 16px/1.65 — this page's own explicit
+`.reader-body` size override is unaffected), the `Source+Serif+4` Google Fonts
+import removed, and `linklib/brand_check.py`'s `ALLOWED_FONTS` allowlist tightened
+to drop it, so a future reintroduction gets caught as a regression rather than
+silently allowed back in.
 
 | Family | Role | Weights |
 |---|---|---|
 | **Outfit** | Headings, display | 600 / 700 |
-| **DM Sans** | Body copy, UI, labels, eyebrows | 400 / 500 / 600 |
-| **Source Serif 4** | Long-form reading (`/read` only) | 400 / 500 / 600 |
+| **DM Sans** | Body copy, UI, labels, eyebrows — every reading surface on the site, reader templates included | 400 / 500 / 600 |
 | **Caveat** | Sticker badges only — never headings or body | 700 |
 | **Permanent Marker** | Sitewide wordmark (nav + footer logo) only — never headings or body | 400 |
 
@@ -156,11 +177,14 @@ unchanged).
 | Eyebrow / kicker | DM Sans | 11.5px uppercase | 600 | .1em |
 | Body | DM Sans | 16px / 1.65 | 400 | — |
 | UI / labels | DM Sans | 13–15px | 500–600 | — |
-| Reader body | Source Serif 4 | 18px / 1.75 | 400 | — |
+| Merged reader title (`/read`) | Outfit | 30px / 1.18 | 600 | -0.02em |
+| Merged reader body (`/read`) | DM Sans | 17px / 1.75 (15–20px cycle) | 400 | — |
+| Standalone reader body (`/read/{article_id}`) | DM Sans | 16px / 1.65 | 400 | — |
 | Reader chrome | DM Sans | 13–14px | 400–500 | — |
 
 **Rules of thumb:** headings are tight (negative tracking) and Outfit; eyebrows are uppercase DM Sans
-with wide tracking and `--muted` or `--navy`; the serif is *exclusively* for reading long articles.
+with wide tracking and `--muted` or `--navy`; every reading surface on the site — both reader
+templates included — is DM Sans body copy, no exceptions.
 
 ### 3.2 Copy casing
 
@@ -307,7 +331,7 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
   (`.tp-verify`/`.cc-verify` CSS classes).
 - **Admin section headings** — an informal sub-heading role used to break up an admin page into
   named sections (e.g. "Pending submissions" / "Approved software" on the Toolbox review pages,
-  "Competition" / "Screenshots" / "Feature taxonomy" on the tool-edit page, dependency-group
+  "Competition" / "Screenshots" / "Key features" on the tool-edit page, dependency-group
   titles on `/admin/open-source`). 16px, 600 weight — smaller and lighter than the base `h2` (21px/600),
   since these mark subsections within a page rather than the page's own top-level sections.
 - **Cards** — white surface, `--line` border, radius 12–16px.
@@ -471,7 +495,7 @@ or a plain break device, even if it originated as a "pull-quote."
 | Let navy + off-white do most of the work | Reach for color to fill space |
 | Use coral once per screen, as a pop | Spread coral across a layout |
 | Keep status colors for status only | Use `--alert` red as a highlight, or coral as a *system* status/error color |
-| Headings in Outfit, reading in Source Serif 4 | Mix the serif into UI, or set body in Outfit |
+| Outfit for headings, DM Sans for body copy — every reading surface, both reader templates included, no exceptions | Introduce a serif or any other third content font, or put body copy in Outfit anywhere |
 | One marker-underline, one or two stickers per page, in a header/hero or card corner | Repeat the graffiti kit decoratively, or put it on admin/data surfaces |
 | Buttons navy or ghost | Make a seafoam or coral button |
 
@@ -573,9 +597,12 @@ Two test suites run on every push/PR via GitHub Actions (`.github/workflows/qa.y
 `test_brand_standards.py` scans the rendered site (`webapp/app.py`, including the inline CSS, SVG
 charts, and JS-built markup) and fails if new content drifts off-brand:
 
-- **Fonts** — only Outfit, DM Sans, Source Serif 4, and system/generic fallbacks may appear. Inter,
-  Lora, Arial, Helvetica, Times, Roboto, etc. are banned (this is the exact class of regression that
-  slipped in before the refresh).
+- **Fonts** — only Outfit and DM Sans for headings/body copy, Caveat (stickers only) and
+  Permanent Marker (wordmark only) as their own narrow decorative exceptions, and
+  system/generic fallbacks may appear. Source Serif 4 was retired sitewide (2026-09) and
+  removed from the allowlist along with it — a reintroduction now fails this check like any
+  other off-brand font. Inter, Lora, Arial, Helvetica, Times, Roboto, etc. are banned (this
+  is the exact class of regression that slipped in before the refresh).
 - **Colors** — every hex in the codebase must be a brand token (parsed from the `:root` above, so the
   palette is its single source of truth) or one of the explicitly-documented auxiliary colors
   (status/feedback, benchmark badges, chart tints, and three deliberate exceptions: destructive-action

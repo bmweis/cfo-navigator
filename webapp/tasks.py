@@ -68,24 +68,42 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/library/queue": lib.queue_count(status="pending"),
         "/admin/library/review-removals": lib.flagged_count(),
         "/admin/contacts": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
-        "/admin/tools/software": lib.count_pending_tools(),
+        # 2026-09: both Software's and Communities' badges used to be a SUM
+        # of two separate counts (pending-approval + needing-review) —
+        # Software's own history is a longer chain of fixes (see git
+        # history / CLAUDE.md), Communities' was the original shape. Both
+        # summed patterns share the same real flaw: if a single row can
+        # satisfy both conditions at once, it gets counted twice, inflating
+        # the badge past what's actually pending. Confirmed for tools this
+        # isn't hypothetical — see count_tools_needing_attention()'s own
+        # docstring for why EVERY unapproved tool already also has
+        # needs_review=1 by construction, making the old sum a real, live
+        # double-count today, not a latent risk. Communities' overlap is
+        # possible but not automatic (see count_communities_needing_
+        # attention()'s docstring) — fixed the same way regardless, since
+        # the sum pattern doesn't protect against it either way. Both
+        # badges now read a single dedup-safe count apiece, replacing the
+        # sum entirely rather than summing alongside it.
+        "/admin/tools/software": lib.count_tools_needing_attention(),
         "/admin/tools/software/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
-        "/admin/tools/communities": lib.count_pending_communities() + lib.count_communities_needing_review(),
+        "/admin/tools/communities": lib.count_communities_needing_attention(),
         "/admin/community-gaps": lib.community_gap_counts()["unreviewed"],
         "/admin/checks": _failing_checks_count(),
         "/admin/users": lib.count_pending_password_resets(),
         "/admin/email-failures": lib.count_pending_email_failures(),
-        # Phase 1c badge scope-down: only these three of the un-badged queues
-        # Phase 0 inventoried got wired in — each already has a cheap count
-        # (an indexed COUNT, or a documented "fine to run live" full scan;
-        # see that PR's CLAUDE.md note). ask-feedback and the three
-        # tools.*_needs_verification flags are deliberately left out: none of
-        # them has a pending/reviewed concept at all yet, so badging them
-        # would be new-feature design work, not badge-wiring — logged for a
-        # future flow-harmonization decision instead.
+        # 2026-09 (Phase 3): ask-feedback is no longer deferred — it has the
+        # same manual "mark reviewed" toggle Community gaps already uses
+        # (ask_feedback.reviewed, same column name/type/default), not an
+        # auto-clear-on-view mechanism (investigated and explicitly
+        # rejected for Community gaps first, then matched here rather than
+        # diverging). Every other un-badged queue Phase 0 inventoried is
+        # still deliberately left out — logged for a future flow-
+        # harmonization decision instead.
+        "/admin/ask-feedback": lib.count_unreviewed_ask_feedback(),
         "/admin/tools/software/feature-review-queue": lib.count_feature_review_queue(status="pending"),
         "/admin/library/backfill-content": lib.count_needs_content_check() + lib.count_articles_needing_manual_review(),
         "/admin/tools/software/name-duplicates": len(lib.find_tool_name_duplicate_candidates()),
+        "/admin/compare-summary-feedback": lib.count_compare_summary_feedback(reviewed=False),
     }
     return {href: n for href, n in counts.items() if n}
 
