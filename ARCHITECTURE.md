@@ -2824,6 +2824,48 @@ Details worth knowing:
   that the renderer was never the bug. See CLAUDE.md's matching bullet for
   the full write-up and `tests/test_brandfetch.py`/
   `tests/test_refetch_lopsided_logos.py` for the regression coverage.
+- **Logo.dev replaces Brandfetch as the active logo source (2026-09).**
+  Brandfetch's Brand API free tier (100 credits, confirmed a one-time
+  non-resetting allotment) is permanently exhausted — not just for the
+  50-tool backlog outstanding at the time, but for every future submission
+  `scripts/backfill_logos.py` would otherwise pick up. Hunter.io and
+  NinjaPear (the two candidate "no signup" free logo APIs) were both
+  investigated and ruled out: each returns exactly one image per domain
+  with no way to request or identify a square asset, the same architectural
+  gap `TYPE_PREFERENCE` (above) exists to work around on the Brandfetch
+  side — switching to either would risk silently reintroducing that same
+  bug from a different vendor. Logo.dev's free image endpoint
+  (`img.logo.dev/:domain`, 500K requests/month, no credit card) is
+  different: it's documented to return the square icon/symbol specifically,
+  confirmed live before the switch was built (Brian's own spot-check on
+  RightRev). New `linklib/logodev.py` is a from-scratch module, not a
+  Brandfetch wrapper — Logo.dev's endpoint IS the icon request, one HTTP
+  call, no JSON response to rank the way `best_logo_asset()` has to for
+  Brandfetch — and `fallback=404` is always forced on every request, since
+  without it a miss returns a 200 with a generated monogram indistinguishable
+  from a real logo. This is a straight swap, not a Brandfetch-then-Logo.dev
+  cascade: Brandfetch's API is guaranteed to fail on every call now, so
+  trying it first would only add a doomed round-trip to every fetch, never
+  a real fallback. `linklib/brandfetch.py` is left completely untouched and
+  unused by default — a dormant reference, not deleted, so restoring
+  Brandfetch (if credits are ever renewed) means swapping the two callers'
+  imports back, not reconstructing anything. Both callers —
+  `scripts/backfill_logos.py`'s batch run and `webapp/app.py`'s
+  `_live_refetch_logo` (the admin "Revert & re-fetch" button) — switched
+  their import from `linklib.brandfetch` to `linklib.logodev`; the only
+  other change at either call site is `download_asset`'s shape, from
+  `(src_url, dest_path, session)` to `(image_bytes, dest_path)`, since
+  Logo.dev's one HTTP call already carries the image bytes home — there's
+  no second request left to make. `DEFAULT_LIMIT` in `backfill_logos.py`
+  moved from 90 (a safety margin under Brandfetch's 100/month cap) to 500,
+  since Logo.dev's free tier has no comparable monthly ceiling to batch
+  around — the whole catalog fits in one run. Attribution: Logo.dev's free
+  tier requires one site-wide credit link for commercial use, confirmed
+  from their own docs to be a single link (a page footer is an explicitly
+  named acceptable placement), not something required near each logo —
+  added once, in `_page()`'s shared footer. See CLAUDE.md's matching bullet
+  for the full write-up and `tests/test_logodev.py`/
+  `tests/test_logo_override.py` for the regression coverage.
 - **Gate-Extraction PR B (2026-09) — the radical-transparency review-state
   decision moves into a new shared module, `linklib/gates.py`, the single
   source of truth for the three-state table PR A ratified. Behavior-
@@ -6553,7 +6595,7 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     basename-only traversal guard as `/static/{filename}`, kept as a
     separate route/directory since these don't ship inside the Docker
     image),
-    `/tools/software/logo/{filename}` (Phase F — serves a Brandfetch-sourced
+    `/tools/software/logo/{filename}` (Phase F — serves a Logo.dev-sourced
     tool logo from `_LOGO_DIR` on the persistent volume, same basename-only
     traversal guard and filename-based URL shape as the screenshot route
     above; `tools.logo_path` stores a path like `logos/tools/abacum.svg`
