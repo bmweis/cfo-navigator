@@ -190,7 +190,11 @@ _STRUCTURE_GUIDANCE = (
 # Version of the enrichment "rules" (the prompt below). Stored alongside each
 # article's enrichment so you can tell which ruleset produced a given summary,
 # and re-run rows enriched under older rules. BUMP THIS whenever _PROMPT changes.
-ENRICH_RULES_VERSION = "v4"
+# v5 (PR 4, "Remove content" retirement, 2026-09): the audience-scope judgment
+# (the in_scope/scope_reason JSON keys and their VC-career-content exclusion
+# rule) was removed from the prompt entirely — see linklib/db.py's
+# articles.in_scope column comment for the full retirement note.
+ENRICH_RULES_VERSION = "v5"
 
 # Floor for every generate_*() call's max_tokens below. Claude's on-by-default
 # adaptive thinking shares the same budget as the response (max_tokens caps

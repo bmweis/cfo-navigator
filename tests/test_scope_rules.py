@@ -1,10 +1,15 @@
-"""The enrichment scope rules — what's excluded from the library.
+"""The enrichment scope rules — retired (PR 4, "Remove content" retirement,
+2026-09).
 
-The permanent rule is audience-only: keep written articles useful to operators
-(finance leaders, founders, execs) and drop content about pursuing a personal
-career in venture capital. The stricter first-time-cleanup exclusions (podcasts,
-slide decks, predictions, fund/LP content) have been retired now that the initial
-cleanup is done — ongoing queue review is the gate from here on.
+Historically this file asserted a permanent audience-only exclusion rule
+(drop content about pursuing a personal career in venture capital) baked
+into the enrichment prompt, on top of an already-retired first-time-cleanup
+toggle. The audience-scope judgment itself is now gone too: enrich() no
+longer asks Claude to judge in/out of scope at all, `articles.in_scope` is
+frozen at 1 for every future article, and `/admin/library/review-removals`
+(the page that showed flagged articles for a human to keep or remove) was
+removed outright — see linklib/db.py's articles.in_scope column comment and
+CLAUDE.md's "'Remove content' retired" bullet for the full write-up.
 """
 import inspect
 import pathlib
@@ -16,14 +21,25 @@ from linklib import enrich
 
 
 def test_rules_version():
-    assert enrich.ENRICH_RULES_VERSION == "v4"
+    assert enrich.ENRICH_RULES_VERSION == "v5"
 
 
-def test_prompt_is_audience_only():
+def test_prompt_has_no_audience_scope_judgment():
     p = enrich._PROMPT.lower()
-    assert "career in venture capital" in p
-    # The retired cleanup exclusions are gone from the prompt entirely.
+    # The retired audience-scope exclusion rule and the even-earlier retired
+    # cleanup exclusions are both gone from the prompt entirely.
+    assert "career in venture capital" not in p
+    assert "in_scope" not in p
+    assert "scope_reason" not in p
     assert "podcast" not in p and "predictions" not in p
+
+
+def test_enrichment_dataclass_has_no_scope_fields():
+    # in_scope/scope_reason were dropped from the Enrichment dataclass
+    # entirely, not just left unpopulated.
+    fields = {f.name for f in enrich.Enrichment.__dataclass_fields__.values()}
+    assert "in_scope" not in fields
+    assert "scope_reason" not in fields
 
 
 def test_cleanup_mechanism_removed():
