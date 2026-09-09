@@ -6957,9 +6957,17 @@ function renderTools(tools) {{
         // Delete button never joined that stretch and rendered visibly
         // shorter than the other two. display:contents drops the form's own
         // box from layout entirely, so Delete becomes a direct flex item too.
-        + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:contents;"'
+        // Path bug fix: this used to omit the "software/" segment
+        // (`/admin/tools/{id}/delete`), which matches no route at all — a
+        // plain 404, not the admin table's own working
+        // `/admin/tools/software/{id}/delete` (see admin_tools_delete).
+        // `redirect_to` is included explicitly, same as that reference form,
+        // even though the route already defaults to "/tools/software" when
+        // it's absent.
+        + '<form method="post" action="/admin/tools/software/' + t.id + '/delete" style="display:contents;"'
         + ' data-toolname="' + esc(t.name) + '"'
         + ' onsubmit="return confirmDelete(this)">'
+        + '<input type="hidden" name="redirect_to" value="/tools/software">'
         + '<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button>'
         + '</form></div>';
       // Inline quick-edit: the four fields called out for fast, no-navigation
