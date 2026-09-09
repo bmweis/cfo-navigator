@@ -1297,6 +1297,55 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   his own explicit call. See ARCHITECTURE.md's matching bullet and
   `tests/test_brandfetch.py`/`tests/test_refetch_lopsided_logos.py` for
   the full write-up and regression coverage.
+- **Logo.dev replaces Brandfetch as the CFO Toolbox logo source (2026-09) —
+  Brandfetch's one-time 100-credit free tier confirmed permanently
+  exhausted (non-resetting, not a monthly cap), affecting not just the
+  50-tool backlog at the time but every future tool/community submission
+  `scripts/backfill_logos.py` would otherwise handle.** Investigated first:
+  Hunter.io and NinjaPear (the two "no signup" free alternatives) were both
+  ruled out — each returns exactly one image per domain with no way to
+  request or identify a square asset, the same architectural gap Brandfetch's
+  own pre-PR-479 default already burned this project once on. Logo.dev's
+  free, uncapped (500K requests/month, no credit card) image endpoint
+  (`img.logo.dev/:domain`) is different: per Logo.dev's own docs, it's
+  explicitly scoped to return "the symbol (also called the icon or mark)"
+  — the square asset, by design — a real spot-check (Brian, RightRev)
+  confirmed this live before the switch was built. **Genuinely a swap, not
+  a cascade**: Brandfetch's Brand API is guaranteed to fail forever, so
+  trying it first and falling through to Logo.dev on every call would just
+  be a doomed HTTP round-trip added to every request, not a real fallback.
+  New `linklib/logodev.py` is a from-scratch module (not a Brandfetch
+  wrapper) — simpler than `linklib/brandfetch.py` by design, since
+  Brandfetch's Brand API returned a JSON document with several logo variants
+  to rank (`best_logo_asset()`'s whole `TYPE_PREFERENCE`/theme/format
+  cascade), while Logo.dev's plain image endpoint already IS the square-icon
+  request — one HTTP call, no ranking logic needed. `fallback=404` is always
+  forced on every request; without it, a domain with no real logo returns a
+  200 with a generated monogram, which would silently write fake placeholder
+  art into the database as if it were a real vendor logo. **`linklib/
+  brandfetch.py` is untouched, byte-for-byte, and unused by default** — kept
+  as a dormant reference, not deleted, per the explicit call that restoring
+  Brandfetch (if credits are ever renewed) should mean swapping an import
+  back, not reconstructing anything. Both existing callers —
+  `scripts/backfill_logos.py`'s batched run and `webapp/app.py`'s
+  `_live_refetch_logo` (the admin "Revert & re-fetch" button) — switched
+  their import from `linklib.brandfetch` to `linklib.logodev`, with no
+  other restructuring beyond `download_asset`'s call shape changing from
+  `(src_url, dest_path, session)` to `(image_bytes, dest_path)`, since
+  Logo.dev's one HTTP call already carries the image bytes — there's no
+  second request left for `download_asset` to make. `DEFAULT_LIMIT` in
+  `backfill_logos.py` moved from 90 (a safety margin under Brandfetch's
+  100/month cap) to 500 (comfortably the whole catalog in one pass, since
+  Logo.dev's free tier has no comparable monthly ceiling to batch around).
+  **Attribution**: Logo.dev's free tier requires a single site-wide credit
+  link for commercial use, not something per-logo — confirmed from their
+  own docs, which explicitly name a page footer as an acceptable placement.
+  Added once, in `_page()`'s shared footer, rather than resolving the
+  genuinely ambiguous "is a personal site with a working directory
+  commercial" question — the link costs nothing either way, so it ships
+  regardless of which answer is technically correct. See ARCHITECTURE.md's
+  matching bullet and `tests/test_logodev.py`/`tests/test_logo_override.py`
+  for the full write-up and regression coverage.
 - **Gate-Extraction PR B (2026-09) — the radical-transparency review-state
   decision (verified / populated-pending-review / empty, PR A above)
   extracted into `linklib/gates.py`, the single source of truth for the
@@ -6502,7 +6551,8 @@ for 8 further weeks, deleting the rest, so the folder doesn't grow without limit
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
 | `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's preferred web retrieval mechanism (`linklib/agent.py`'s `retrieve_exa`). Absent, or the `exa_enabled` setting toggled off at `/admin/exa-settings` → Claude's native `web_search_20250305` tool handles the web tier instead (Phase 7 kill switch); web search itself is never disabled, only which engine runs. No error either way. |
-| `BRANDFETCH_API_KEY` | — | Brandfetch **Brand API** Bearer token, required for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D) and for the admin edit page's "Revert & re-fetch from Brandfetch" live re-fetch action (2026-08 follow-up) — both go through `linklib/brandfetch.py`. Absent → the batch script errors out on `--apply`; the button still reverts a manual override to automatic but reports it couldn't re-fetch live. A different product/credential from `BRANDFETCH_CLIENT_ID` below — do not confuse them. |
+| `LOGODEV_API_KEY` | — | Logo.dev image-endpoint token, required for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D) and for the admin edit page's "Revert & re-fetch from Logo.dev" live re-fetch action (2026-08 follow-up) — both go through `linklib/logodev.py`. The active logo source since 2026-09, replacing Brandfetch (see the Key architecture decisions bullet above). Absent → the batch script errors out on `--apply`; the button still reverts a manual override to automatic but reports it couldn't re-fetch live. |
+| `BRANDFETCH_API_KEY` | — | Brandfetch **Brand API** Bearer token. **Dormant since 2026-09** — Brandfetch's one-time 100-credit free tier is permanently exhausted, so `linklib/brandfetch.py` is no longer called by either the batch script or the admin re-fetch button; kept only so Brandfetch can be restored (swap the import back) if credits are ever renewed. A different product/credential from `BRANDFETCH_CLIENT_ID` below — do not confuse them. |
 | `BRANDFETCH_CLIENT_ID` | — | Public client ID for Brandfetch's free CDN Logo API (`cdn.brandfetch.io`). Kept for reference/potential future browser-embed use, but **not** used by the logo backfill — that product is browser-embed-only and blocks programmatic access (see the Key architecture decisions bullet above). |
 | `LINKLIB_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model for `linklib/embeddings.py` |
 | `LINKLIB_DB` | `library.db` | Path to the SQLite database |

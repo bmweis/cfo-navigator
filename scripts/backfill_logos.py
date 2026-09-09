@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Phase D logo backfill: fetches a company logo for every tool/community
-still missing one, via Brandfetch's **Brand API**
-(`https://api.brandfetch.io/v2/brands/domain/{domain}`, `Authorization:
-Bearer <BRANDFETCH_API_KEY>`) — NOT the free CDN Logo API
-(`cdn.brandfetch.io?c={BRANDFETCH_CLIENT_ID}`) the original Phase D
-investigation assumed. That CDN product is browser-embed-only and
-explicitly disallows programmatic/backend access per Brandfetch's own docs
-and ToS; a follow-up investigation confirmed our dry-run against it (see
-scripts/archive/report_brandfetch_coverage.py) returned a uniform blocked-request
-response for all 216 records, not real "no logo" misses. The Brand API is
-the correct, sanctioned product for this — a real JSON response with logo
-asset URLs, meant for exactly this kind of one-time server-side fetch — but
-its free tier is only 100 requests/month, hence the --limit default below
-and the 3-monthly-batch plan this script is designed around.
+still missing one, via Logo.dev's free image endpoint
+(`https://img.logo.dev/{domain}`, `?token=<LOGODEV_API_KEY>`).
+
+LOGO SOURCE HISTORY (2026-09) — this script originally used Brandfetch's
+Brand API. Brandfetch's free tier was a one-time, non-resetting 100-credit
+allotment, confirmed exhausted for good. Logo.dev replaced it as the
+active source: see `linklib/logodev.py`'s own module docstring for the
+full reasoning, including why this is a straight swap rather than a
+Brandfetch-then-Logo.dev cascade. `linklib/brandfetch.py` is left
+untouched and unused by default, kept as a dormant reference in case
+Brandfetch credits are ever restored — restoring it is a matter of
+switching this script's import back, not reconstructing anything. Logo.dev's
+free tier is 500K requests/month with no credit card required, so the
+old 100/month batching discipline no longer applies here — a full
+catalog run fits comfortably in one pass.
 
 WHERE FILES ARE SAVED — a deliberate deviation from the original build
 instruction. The instruction said `webapp/static/logos/{slug}.{ext}`, but
@@ -45,21 +47,20 @@ processed first, then communities, each in a stable `id` order, matching
 the priority Brian asked for across the 3 planned batches.
 
 Safe by default: with no flags, this ONLY reports which records WOULD be
-processed — no Brand API calls are made (so a preview never spends quota),
-no files are saved, no DB writes happen. Pass --apply to actually fetch,
-download, and write. Per the write-then-read-back standing practice, an
---apply run re-SELECTs every row it touched after the run and asserts
-logo_path took the expected value.
+processed — no Logo.dev calls are made (so a preview never spends
+anything), no files are saved, no DB writes happen. Pass --apply to
+actually fetch, download, and write. Per the write-then-read-back standing
+practice, an --apply run re-SELECTs every row it touched after the run and
+asserts logo_path took the expected value.
 
 Usage:
-    python -m scripts.backfill_logos --db library.db                 # preview (default limit 90)
+    python -m scripts.backfill_logos --db library.db                 # preview (default limit 500)
     python -m scripts.backfill_logos --db library.db --apply          # fetch + save for real
     python -m scripts.backfill_logos --db library.db --limit 50 --apply
     python -m scripts.backfill_logos --db library.db --status         # coverage report only, no fetch
 
-Requires BRANDFETCH_API_KEY in the environment for --apply (not required
-for --status or a preview run). Distinct from BRANDFETCH_CLIENT_ID, which is
-the unrelated CDN-embed credential and is not used here.
+Requires LOGODEV_API_KEY in the environment for --apply (not required for
+--status or a preview run).
 """
 from __future__ import annotations
 
@@ -73,10 +74,11 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from linklib.db import Library, resolve_db_path
-from linklib.brandfetch import extract_domain, fetch_logo_asset, download_asset
+from linklib.logodev import extract_domain, fetch_logo_asset, download_asset
 
-DEFAULT_LIMIT = 90  # safety margin below the hard 100/month free-tier cap
-DEFAULT_DELAY = 0.25  # seconds between Brand API calls — sanctioned use, but no reason to hammer it
+DEFAULT_LIMIT = 500  # comfortably covers the whole catalog in one run — Logo.dev's free
+                      # tier is 500K requests/month, so there's no quota reason to batch
+DEFAULT_DELAY = 0.25  # seconds between Logo.dev calls — polite, not required
 
 # Subdirectory per record type, to avoid a slug collision between a tool and
 # a community silently overwriting each other's logo file (see module docstring).
@@ -99,7 +101,7 @@ def _select_candidates(lib: Library, limit: int) -> list[tuple[str, sqlite3.Row]
     Excludes logo_manual_override=1 rows explicitly (2026-08, manual logo
     override) — Library.set_tool_logo/set_community_logo already refuse to
     write over one regardless, but skipping them here too means this run
-    never spends a Brand API call it can't use anyway."""
+    never spends a Logo.dev call it can't use anyway."""
     tools = lib.conn.execute(
         "SELECT id, name, slug, url FROM tools "
         "WHERE (logo_path='' OR logo_path IS NULL) AND logo_manual_override=0 ORDER BY id"
@@ -147,10 +149,10 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=DEFAULT_LIMIT,
                      help=f"max records to process this run (default {DEFAULT_LIMIT})")
     ap.add_argument("--apply", action="store_true",
-                     help="Actually call the Brand API, download assets, and write to the DB. "
+                     help="Actually call Logo.dev, download assets, and write to the DB. "
                           "Without this flag, only a preview is printed — no API calls, no writes.")
     ap.add_argument("--delay", type=float, default=DEFAULT_DELAY,
-                     help=f"seconds to sleep between Brand API calls (default {DEFAULT_DELAY})")
+                     help=f"seconds to sleep between Logo.dev calls (default {DEFAULT_DELAY})")
     ap.add_argument("--status", action="store_true",
                      help="print logo-coverage counts and exit — no selection, no fetch, no writes")
     args = ap.parse_args()
@@ -174,19 +176,17 @@ def main() -> int:
 
         if not args.apply:
             print(
-                "\nPREVIEW ONLY — no Brand API calls made, no files saved, no DB writes.\n"
+                "\nPREVIEW ONLY — no Logo.dev calls made, no files saved, no DB writes.\n"
                 "This is exactly the record list --apply would process, in the same order.\n"
-                "Whether each one actually resolves a logo can only be known by calling the\n"
-                "Brand API for real, which this preview deliberately skips so a dry run never\n"
-                "spends any of the 100/month free-tier quota. Re-run with --apply to fetch for real."
+                "Whether each one actually resolves a logo can only be known by calling\n"
+                "Logo.dev for real, which this preview deliberately skips. Re-run with\n"
+                "--apply to fetch for real."
             )
             return 0
 
-        api_key = os.environ.get("BRANDFETCH_API_KEY")
+        api_key = os.environ.get("LOGODEV_API_KEY")
         if not api_key:
-            print("\nERROR: BRANDFETCH_API_KEY is not set in the environment "
-                  "(this is the Brand API Bearer token, distinct from BRANDFETCH_CLIENT_ID).",
-                  file=sys.stderr)
+            print("\nERROR: LOGODEV_API_KEY is not set in the environment.", file=sys.stderr)
             return 1
 
         logos_root = _logos_root(args.db)
@@ -216,14 +216,14 @@ def main() -> int:
                 failed.append((kind, name, err))
                 print(f"{prefix} ({domain}): MISS — {err}")
             else:
-                src_url, ext, asset_type = asset
+                image_bytes, ext, asset_type = asset
                 rel_path = f"logos/{_DIR_BY_KIND[kind]}/{slug}.{ext}"
                 dest_path = os.path.join(logos_root, _DIR_BY_KIND[kind], f"{slug}.{ext}")
                 try:
-                    download_asset(src_url, dest_path, session)
-                except requests.RequestException as exc:
-                    failed.append((kind, name, f"asset download failed: {exc}"))
-                    print(f"{prefix} ({domain}): MISS — asset download failed: {exc}")
+                    download_asset(image_bytes, dest_path)
+                except OSError as exc:
+                    failed.append((kind, name, f"asset save failed: {exc}"))
+                    print(f"{prefix} ({domain}): MISS — asset save failed: {exc}")
                 else:
                     # Defense in depth: _select_candidates already excludes
                     # logo_manual_override=1 rows, but set_tool_logo/

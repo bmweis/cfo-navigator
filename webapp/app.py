@@ -114,8 +114,9 @@ _COMMUNITY_SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH
 # needs.
 _APP_SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024  # 8MB — a manually uploaded screenshot, pre-crop, has more headroom than the 3MB avatar cap
 
-# Brandfetch-sourced logos (Phase D backfill, scripts/backfill_logos.py) live
-# under a "logos/" directory next to library.db, split into tools/communities
+# Logo.dev-sourced logos (Phase D backfill, scripts/backfill_logos.py —
+# Brandfetch through 2026-08, Logo.dev from 2026-09, see linklib/logodev.py)
+# live under a "logos/" directory next to library.db, split into tools/communities
 # subdirectories for the same reason as the screenshot dirs above (slugs are
 # separate namespaces per entity type but can collide on the same value —
 # e.g. airbase/datarails/rillet exist in both). tools.logo_path/
@@ -126,16 +127,15 @@ _COMMUNITY_LOGO_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or 
 
 # Manual logo override (2026-08 — see CLAUDE.md's Aleph/Zapier investigation
 # writeup). Files land in the same _LOGO_DIR/_COMMUNITY_LOGO_DIR directories
-# Brandfetch downloads into, named "{slug}-manual.{ext}" so a manual upload
-# never collides with (or gets silently replaced by re-saving over) whatever
-# Brandfetch previously wrote to "{slug}.{ext}" — the two files coexist
-# harmlessly on disk; only tools.logo_path/communities.logo_path decides
-# which one is actually served, via Library.set_tool_logo_manual/
+# the auto-fetch backfill downloads into, named "{slug}-manual.{ext}" so a
+# manual upload never collides with (or gets silently replaced by re-saving
+# over) whatever the backfill previously wrote to "{slug}.{ext}" — the two
+# files coexist harmlessly on disk; only tools.logo_path/communities.logo_path
+# decides which one is actually served, via Library.set_tool_logo_manual/
 # set_community_logo_manual. Restricted to jpeg/png/webp (no SVG) for both
-# the URL-fetch and upload paths, deliberately narrower than Brandfetch's own
-# svg-preferred fetch — an admin-supplied URL/file is user input in a way a
-# vetted third-party API response isn't, and this site doesn't accept raw
-# SVG uploads anywhere else either (see admin_brand_avatar_upload).
+# the URL-fetch and upload paths — an admin-supplied URL/file is user input
+# in a way a vetted third-party API response isn't, and this site doesn't
+# accept raw SVG uploads anywhere else either (see admin_brand_avatar_upload).
 _MANUAL_LOGO_MAX_BYTES = 3 * 1024 * 1024  # 3MB — same cap as the brand avatar upload
 _MANUAL_LOGO_EXT_BY_MIME = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
@@ -1732,7 +1732,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
-  <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a></span>
+  <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a><span>&middot;</span><a href="https://logo.dev">Logos provided by Logo.dev</a></span>
 </footer>
 </body></html>"""
 
@@ -2420,8 +2420,8 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     with a dedicated "Fetch" action, a separate file-upload form (plain
     `<input type=file>` + submit, same shape as /admin/brand/avatar — no
     crop needed here, a logo isn't cropped to a fixed frame), and a "Revert
-    & re-fetch from Brandfetch" action (2026-08 follow-up — see
-    _live_refetch_logo).
+    & re-fetch from Logo.dev" action (2026-08 follow-up, source switched to
+    Logo.dev 2026-09 — see _live_refetch_logo).
 
     Returns (in_form_html, after_form_html), same split as
     _app_screenshot_admin_section: in_form_html is the visible block (label,
@@ -2461,7 +2461,7 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     elif (entity.get("logo_path") or "").strip():
         source_badge = ('<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
                          'color:var(--muted);border:1px solid var(--line);border-radius:5px;'
-                         'padding:2px 7px;margin-left:8px;">Auto-fetched (Brandfetch)</span>')
+                         'padding:2px 7px;margin-left:8px;">Auto-fetched (Logo.dev)</span>')
     else:
         source_badge = ""
 
@@ -2482,10 +2482,10 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
 
     in_form_html = f"""<div id="gen-host-logo-{idsfx}">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Logo{source_badge}</label>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos auto-fetch from Brandfetch via a monthly batch script.
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos auto-fetch from Logo.dev via a monthly batch script.
       A manual override set here always wins, and that batch never touches it. "Revert &amp; re-fetch" clears the override and calls
-      Brandfetch live right now, spending one of the 100 free monthly requests instead of waiting for the batch. If nothing usable
-      turns up, it still reverts to automatic so the batch can retry later.</p>
+      Logo.dev live right now instead of waiting for the batch. If nothing usable turns up, it still reverts to automatic so the
+      batch can retry later.</p>
     {banner_html}
     {stale_banner_html}
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
@@ -2502,7 +2502,7 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
             style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:180px;">
           <button type="submit" form="logo-upload-form-{idsfx}" class="tool-admin-btn">Upload</button>
         </div>
-        <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert &amp; re-fetch from Brandfetch</button>
+        <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert &amp; re-fetch from Logo.dev</button>
       </div>
     </div>
   </div>"""
@@ -2562,53 +2562,53 @@ def _fetch_manual_logo_url(url: str) -> tuple[bytes | None, str | None]:
 
 
 def _live_refetch_logo(lib: "Library", kind: str, entity_id: int, entity: dict) -> tuple[bool, str]:
-    """Powers the "Revert & re-fetch from Brandfetch" action (2026-08
-    follow-up to the manual override feature) — a single, deliberate Brand
-    API call for the one row an admin just flagged, distinct from
-    scripts/backfill_logos.py's own batched, quota-paced monthly run. Both
-    call the exact same linklib.brandfetch functions (including its
-    domain-echo guard), so there is exactly one implementation of "how we
-    talk to Brandfetch" — see that module's docstring.
+    """Powers the "Revert & re-fetch from Logo.dev" action (2026-08
+    follow-up to the manual override feature; source switched from
+    Brandfetch to Logo.dev in 2026-09 — see linklib/logodev.py's own module
+    docstring for why) — a single, deliberate call for the one row an admin
+    just flagged, distinct from scripts/backfill_logos.py's own batched
+    monthly run. Both call the exact same linklib.logodev functions
+    (including fallback=404, always forced), so there is exactly one
+    implementation of "how we talk to Logo.dev."
 
     Callers always call Library.clear_tool_logo_override/
     clear_community_logo_override FIRST, before this — this function never
     touches the override flag itself, only logo_path via a plain
     set_tool_logo/set_community_logo write. On any failure (missing API
-    key, quota, no usable asset, download error) the row is simply left
+    key, rate limit, no usable asset, save error) the row is simply left
     reverted to automatic (already cleared by the caller), so the next
     scripts/backfill_logos.py batch run can still pick it up later — this
     never leaves a row worse off than a plain revert would have.
 
     Returns (ok, message) for the redirect banner."""
-    from linklib import brandfetch
-    api_key = os.environ.get("BRANDFETCH_API_KEY")
+    from linklib import logodev
+    api_key = os.environ.get("LOGODEV_API_KEY")
     if not api_key:
-        return False, ("Reverted to automatic, but BRANDFETCH_API_KEY isn't set on this environment, so no live "
+        return False, ("Reverted to automatic, but LOGODEV_API_KEY isn't set on this environment, so no live "
                         "re-fetch happened. It'll pick up on the next scripts/backfill_logos.py run instead.")
-    domain = brandfetch.extract_domain(entity.get("url") or "")
+    domain = logodev.extract_domain(entity.get("url") or "")
     if not domain:
         return False, "Reverted to automatic, but couldn't parse a domain from this record's URL to re-fetch from."
-    asset, err = brandfetch.fetch_logo_asset(domain, api_key)
+    asset, err = logodev.fetch_logo_asset(domain, api_key)
     if err:
         if err.startswith("QUOTA"):
-            return False, ("Reverted to automatic, but Brandfetch's free-tier quota (100/month) is exhausted right "
-                            "now. It'll pick up on the next scripts/backfill_logos.py run once quota resets.")
-        return False, f"Reverted to automatic, but Brandfetch had nothing usable for {domain}: {err}"
-    src_url, ext, asset_type = asset
+            return False, ("Reverted to automatic, but Logo.dev rate-limited this request just now. It'll pick up "
+                            "on the next scripts/backfill_logos.py run.")
+        return False, f"Reverted to automatic, but Logo.dev had nothing usable for {domain}: {err}"
+    image_bytes, ext, _asset_type = asset
     slug = entity["slug"]
     logo_dir = _LOGO_DIR if kind == "tools" else _COMMUNITY_LOGO_DIR
     dest = os.path.join(logo_dir, f"{slug}.{ext}")
     try:
-        brandfetch.download_asset(src_url, dest)
-    except Exception as exc:
-        return False, f"Reverted to automatic, but found a logo and couldn't download it: {exc}"
+        logodev.download_asset(image_bytes, dest)
+    except OSError as exc:
+        return False, f"Reverted to automatic, but found a logo and couldn't save it: {exc}"
     rel_path = f"logos/{'tools' if kind == 'tools' else 'communities'}/{slug}.{ext}"
     if kind == "tools":
         lib.set_tool_logo(entity_id, rel_path)
     else:
         lib.set_community_logo(entity_id, rel_path)
-    type_note = "" if asset_type in ("icon", "symbol") else " (wordmark-style — no square icon/symbol asset was available)"
-    return True, f"Re-fetched a fresh logo from Brandfetch for {domain}.{type_note}"
+    return True, f"Re-fetched a fresh logo from Logo.dev for {domain}."
 
 
 # Shared client-side crop flow (Phase E) for the "Upload app screenshot"
@@ -7724,7 +7724,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # (list_tool_competitors joins tool_competitors back to tools), never
     # free text, so each row is a real profile link with its own
     # logo_path — the same _logo_box fallback as F2/F3 covers a competitor
-    # that hasn't been through the Brandfetch backfill yet.
+    # that hasn't been through the logo backfill yet.
     competitors_block = ""
     if competitors:
         comp_rows = "".join(
@@ -16468,9 +16468,9 @@ async def admin_communities_logo_upload(request: Request, community_id: int, fil
 
 @app.post("/admin/tools/communities/{community_id}/logo/clear")
 def admin_communities_logo_clear(request: Request, community_id: int):
-    """"Revert & re-fetch from Brandfetch" (2026-08 follow-up — see
+    """"Revert & re-fetch from Logo.dev" (2026-08 follow-up — see
     _live_refetch_logo). Drops the override, blanks logo_path, then makes
-    ONE live Brand API call for this community right now — never leaves it
+    ONE live Logo.dev call for this community right now — never leaves it
     worse off than a plain revert if that call fails for any reason (see
     _live_refetch_logo's own docstring)."""
     if not _is_authed(request):
@@ -18100,12 +18100,12 @@ async def admin_tools_logo_upload(request: Request, tool_id: int, file: UploadFi
 
 @app.post("/admin/tools/software/{tool_id}/logo/clear")
 def admin_tools_logo_clear(request: Request, tool_id: int):
-    """"Revert & re-fetch from Brandfetch" (2026-08 follow-up — see
+    """"Revert & re-fetch from Logo.dev" (2026-08 follow-up — see
     _live_refetch_logo). Drops logo_manual_override, blanks logo_path, then
-    makes ONE live Brand API call for this tool right now — distinct from
-    scripts/backfill_logos.py's own batched, quota-paced monthly run; never
-    leaves the row worse off than a plain revert if that call fails for any
-    reason (missing key, quota, no usable asset — see _live_refetch_logo)."""
+    makes ONE live Logo.dev call for this tool right now — distinct from
+    scripts/backfill_logos.py's own batched monthly run; never leaves the
+    row worse off than a plain revert if that call fails for any reason
+    (missing key, rate limit, no usable asset — see _live_refetch_logo)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
@@ -21789,11 +21789,13 @@ def admin_open_source(request: Request):
 _SCRIPT_REGISTRY = [
     ("backfill_logos.py", "scripts.backfill_logos", "Recurring & actively useful",
      "Fetches a company logo for every Software tool/community still missing one, via "
-     "Brandfetch's Brand API. The free tier is 100 requests/month against a 216-record "
-     "catalog, so runs are deliberately split into ~90-record monthly batches.",
-     "Recurring-manual — roughly monthly, until the catalog's logo coverage is complete.",
-     ["BRANDFETCH_API_KEY (required for --apply; not needed for a preview or --status)"],
-     ["python -m scripts.backfill_logos --db library.db                 # preview (default limit 90)",
+     "Logo.dev's free image endpoint (500K requests/month, no credit card). Replaced "
+     "Brandfetch as the active source in 2026-09 once Brandfetch's one-time 100-credit "
+     "free tier was confirmed permanently exhausted — see linklib/logodev.py.",
+     "Recurring-manual — run whenever new tools/communities need a logo; the whole "
+     "catalog fits in one pass now, no monthly batching required.",
+     ["LOGODEV_API_KEY (required for --apply; not needed for a preview or --status)"],
+     ["python -m scripts.backfill_logos --db library.db                 # preview (default limit 500)",
       "python -m scripts.backfill_logos --db library.db --apply          # fetch + save for real",
       "python -m scripts.backfill_logos --db library.db --status         # coverage report only"]),
     ("audit_tool_logo_dimensions.py", "scripts.audit_tool_logo_dimensions", "Reusable diagnostic",
@@ -32213,7 +32215,7 @@ def tools_communities_screenshot(filename: str):
 
 @app.get("/tools/software/logo/{filename}")
 def tools_software_logo(filename: str):
-    """Serves Brandfetch-sourced tool logos from _LOGO_DIR — same
+    """Serves Logo.dev-sourced tool logos from _LOGO_DIR — same
     basename-only traversal guard and filename-based URL shape as
     tools_software_screenshot above (Phase F), kept as its own directory/
     route pair since these also live on the persistent volume, not inside
