@@ -78,7 +78,6 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
     enriched = False
     enrich_model = ""
     enrich_rules = ""
-    in_scope = True
     page_published = ""
     input_tokens = 0
     output_tokens = 0
@@ -109,7 +108,6 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
             enriched = True
             enrich_model = result.model
             enrich_rules = result.rules_version
-            in_scope = result.in_scope
             input_tokens = result.input_tokens
             output_tokens = result.output_tokens
             cost_usd = result.cost_usd
@@ -126,7 +124,6 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
         suggested_tags=tags, published_at=published_at,
         origin=item.get("origin", "feed"), enriched=enriched,
         enrich_model=enrich_model, enrich_rules=enrich_rules,
-        in_scope=in_scope,
         input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd,
     )
 
@@ -224,7 +221,6 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
                  and it.get("feed_url", "") not in excluded]
 
     added = 0
-    skipped_scope = 0
     from . import tagstyle
     guide = tagstyle.effective_tag_guidance(lib)
 
@@ -237,16 +233,11 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
             lib.record_enrichment_cost(None, cand.get("enrich_model", ""),
                                        input_tokens=in_tok, output_tokens=out_tok,
                                        cost_usd=cost)
-        if not cand.pop("in_scope", True):
-            skipped_scope += 1       # off-audience — don't even propose it
-            progress(i + 1, len(new_items), it.get("title", ""))
-            continue
         if lib.add_to_queue(**cand):
             added += 1
         progress(i + 1, len(new_items), it.get("title", ""))
 
-    return {"scanned": len(items), "new": len(new_items), "added": added,
-            "skipped_scope": skipped_scope}
+    return {"scanned": len(items), "new": len(new_items), "added": added}
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +402,7 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
     for f in feeds:
         site = getattr(f, "html_url", "") or ""
         stat = {"source": f.name, "site": site, "sitemap": None,
-                "candidates": 0, "added": 0, "undated": 0, "skipped_scope": 0,
+                "candidates": 0, "added": 0, "undated": 0,
                 "note": ""}
         if getattr(f, "xml_url", "") in excluded:
             stat["note"] = "skipped — read-only feed (Reader only, not library)"
@@ -460,10 +451,6 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
                     lib.record_enrichment_cost(None, cand.get("enrich_model", ""),
                                                input_tokens=in_tok, output_tokens=out_tok,
                                                cost_usd=cost)
-                if not cand.pop("in_scope", True):
-                    stat["skipped_scope"] += 1   # off-audience — don't propose it
-                    progress(f.name, i + 1, len(candidates))
-                    continue
                 if lib.add_to_queue(**cand):
                     stat["added"] += 1
                     seen.add(normalize_url(e["url"]))

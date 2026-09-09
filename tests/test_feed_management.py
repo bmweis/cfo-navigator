@@ -749,7 +749,7 @@ def test_queue_scan_skips_read_only_feeds_and_keeps_the_rest(seeded, monkeypatch
                                                       summary="", content="", suggested_tags=[],
                                                       published_at=None, origin="feed",
                                                       enriched=False, enrich_model="",
-                                                      enrich_rules="", in_scope=True,
+                                                      enrich_rules="",
                                                       input_tokens=0, output_tokens=0,
                                                       cost_usd=0.0))
     monkeypatch.setattr(seeded, "add_to_queue",
@@ -779,7 +779,7 @@ def test_queue_scan_follows_the_feed_not_the_section_name(seeded, monkeypatch):
                                                       summary="", content="", suggested_tags=[],
                                                       published_at=None, origin="feed",
                                                       enriched=False, enrich_model="",
-                                                      enrich_rules="", in_scope=True,
+                                                      enrich_rules="",
                                                       input_tokens=0, output_tokens=0,
                                                       cost_usd=0.0))
     monkeypatch.setattr(seeded, "add_to_queue",

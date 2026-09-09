@@ -269,7 +269,7 @@ def test_nested_capture_accordions_keep_the_item_level_variant(env):
 def test_each_quadrant_holds_its_specified_tools(env):
     html = _library_html(env)
     bounds = [("lib-q-existing", ["/admin/library/backfill-content", "/admin/library/dedupe",
-                                  "/admin/library/review-removals"]),
+                                  "/admin/library/bulk-delete"]),
               ("lib-q-tags", ["/admin/library/tags", "/admin/library/tag-style",
                               "/admin/library/enrich"]),
               ("lib-q-backup", ["/admin/library/backup", "/admin/library/queue"])]

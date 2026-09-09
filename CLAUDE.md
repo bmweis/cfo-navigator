@@ -6420,6 +6420,45 @@ never reads as something to tap.
   coverage, including a real reproduction of the old broken URL 404ing and a
   full create → delete-via-the-fixed-affordance → confirm-gone cycle.
 
+- **"Remove content" retired (PR 4, 2026-09) — the enricher no longer judges
+  audience fit at all; production had 0 flagged articles at retirement time.**
+  `/admin/library/review-removals` (plus its `/check-link`, `/keep`, `/remove`
+  sub-routes) showed articles the enrichment pipeline flagged as off-audience
+  (`articles.in_scope=0` — podcasts, VC-career content, annual predictions) for
+  a human to keep or remove. It was scaffolding for the initial bulk Feedly
+  import; the archive is now curated one article at a time by hand, so an AI
+  pre-filter has nothing left to do. **Investigated first, per the standing
+  gate**: a full grep of every reader of `articles.in_scope` across `webapp/`,
+  `linklib/`, and `scripts/` confirmed the flag was never read outside this one
+  feature — not by the Reader, `Library.search()`/`vector_search()`,
+  `linklib.agent.retrieve()`/`retrieve_feed()` (FP&A Buddy), or the matchmaker
+  — so it was purely a "flagged for review" bookkeeping fact, never an
+  exclusion filter on normal display/search/retrieval; no "default the filter
+  to include everything" fifth change was needed, since no such filter existed
+  outside the retired feature. `articles.in_scope`/`scope_reason` are **frozen,
+  not dropped** (always `1`/`''` going forward — see the schema comment in
+  `linklib/db.py`), same non-destructive-retirement precedent as
+  `screenshot_is_product`/`field_reviews` elsewhere in this doc.
+  `Library.list_flagged`/`flagged_count`/`keep_article` (the three methods that
+  existed solely for this feature) are deleted outright. `linklib.enrich.enrich()`'s
+  prompt instruction asking Claude to judge audience fit is removed entirely —
+  not just discarded downstream — and the `Enrichment` dataclass's
+  `in_scope`/`scope_reason` fields are dropped with it. **One real side effect
+  this same grep surfaced and this PR also fixes**: `enrich()` is shared by
+  both the post-save enrichment pipeline and `linklib/queue.py`'s pre-queue
+  candidate scoring, which used the identical `result.in_scope` signal to skip
+  an off-audience candidate before it was ever proposed into the Archive Queue
+  (tracked as a `skipped_scope` stat, shown on `/admin/library/queue`'s sweep
+  report as "N skipped as off-audience"). With the prompt gone, that skip could
+  only ever silently no-op — removed outright instead of left as dead code:
+  both `cand.pop("in_scope", ...)` skip blocks, the `skipped_scope` stat, and
+  its admin-page copy are gone. A genuine behavior change beyond the
+  review-removals page itself — a would-be off-audience candidate now reaches
+  the Archive Queue for one-at-a-time human review instead of being filtered
+  before it gets there — consistent with the same hand-curation reasoning the
+  retirement rests on. See ARCHITECTURE.md's "'Remove content' retirement,
+  PR 4 (2026-09)" section for the full write-up.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 

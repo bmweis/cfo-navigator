@@ -21482,7 +21482,6 @@ _LIBRARY_TOOLS = [
     ("/admin/library/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
     ("/admin/library/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
     ("/admin/library/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content—this is the material FP&A Buddy reads from, so depth here pays off there."),
-    ("/admin/library/review-removals", "Remove content",   "Filter for content the enricher flagged as potentially off-target for this archive (e.g. podcasts, annual predictions, fund/LP content) and confirm or keep each one."),
     ("/admin/library/bulk-delete",   "Bulk delete articles", "Permanently remove a specific list of articles you've already decided aren't needed&mdash;paste their URLs into the CSV template, mark <code>confirm_delete</code>, and re-upload. For a known list, not a scan&mdash;different from the &lt;60-word Purge tool under Reader content backfill. A single article can also be removed straight from its Reader toolbar."),
 ]
 
@@ -24294,7 +24293,7 @@ def admin_library(request: Request):
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
-        ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals",
+        ["/admin/library/backfill-content", "/admin/library/dedupe",
          "/admin/library/bulk-delete"],
         "Working with what's already saved.")
 
@@ -25321,20 +25320,17 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
     elif sweep_report:
         sweep_added = sum(r.get("added", 0) for r in sweep_report)
         sweep_cands = sum(r.get("candidates", 0) for r in sweep_report)
-        sweep_scope = sum(r.get("skipped_scope", 0) for r in sweep_report)
-        sweep_status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;{sweep_added} articles queued from {sweep_cands} candidates ({sweep_scope} skipped as off-audience)&mdash;see them in the queue below.</div>'
+        sweep_status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;{sweep_added} articles queued from {sweep_cands} candidates&mdash;see them in the queue below.</div>'
 
     def _sweep_report_row(r):
         added = r.get("added", 0)
         cands = r.get("candidates", 0)
-        scope = r.get("skipped_scope", 0)
         note = r.get("note", "")
         sitemap = r.get("sitemap") or ""
         sm_link = (f'<a href="{_esc(sitemap)}" style="font-size:11px;color:var(--muted);" target="_blank">'
                    f'{_esc(sitemap[:60])}{"…" if len(sitemap) > 60 else ""}</a>'
                    if sitemap else '<span style="font-size:11px;color:var(--muted);">—</span>')
-        extra = f" / {scope} off-audience" if scope else ""
-        status = note if note else f'{added} added / {cands} candidates{extra}'
+        status = note if note else f'{added} added / {cands} candidates'
         status_color = "#b91c1c" if note else ("#16a34a" if added else "#92400e")
         return (f'<tr><td style="padding:8px 12px;font-size:13px;font-weight:500;">{_esc(r.get("source", ""))}</td>'
                 f'<td style="padding:8px 12px;">{sm_link}</td>'
@@ -28564,191 +28560,6 @@ async def admin_queue_dismiss(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Review removals — articles the enricher flagged as off-audience
-# ---------------------------------------------------------------------------
-
-@app.get("/admin/library/review-removals", response_class=HTMLResponse)
-def admin_review_removals(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        flagged = lib.list_flagged()
-    finally:
-        lib.close()
-
-    def _card(a: dict) -> str:
-        aid = a["id"]
-        url = _esc(a["url"])
-        title = _esc(a.get("title") or a["url"])
-        source = _esc(a.get("source") or "")
-        date = _esc((a.get("published_at") or a.get("saved_at") or "")[:10])
-        meta_bits = [b for b in (source, date) if b]
-        meta_line = " &middot; ".join(meta_bits)
-        reason = _esc(a.get("scope_reason") or "flagged off-audience")
-        summary = _esc((a.get("summary") or "")[:300])
-        return f"""<div data-card data-id="{aid}" data-url="{url}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
-    <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
-    <span data-link-status style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap;flex-shrink:0;"></span>
-  </div>
-  <div style="font-size:12px;color:var(--muted);margin:3px 0 6px;">{meta_line}</div>
-  <div style="font-size:12px;color:var(--muted);font-style:italic;margin-bottom:8px;">Flagged: {reason}</div>
-  <p style="font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{summary}</p>
-  <div style="display:flex;gap:9px;">
-    <button class="keep-btn btn btn-ghost" onclick="keepOne(this)" style="font-size:13px;padding:8px 18px;">Keep</button>
-    <button class="btn btn-ghost" onclick="removeOne(this)" style="font-size:13px;padding:8px 18px;color:var(--alert);border-color:var(--alert);">Remove</button>
-  </div>
-</div>"""
-
-    n = len(flagged)
-    if n == 0:
-        cards = ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
-                 'padding:32px;text-align:center;color:var(--muted);">Nothing flagged for removal. '
-                 'After a re-enrichment pass, off-audience articles (e.g. how-to-get-into-VC) show up here.</div>')
-    else:
-        cards = "".join(_card(a) for a in flagged)
-
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
-<h1>Remove content</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as potentially off-target for this archive&mdash;most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so: keep the false positives, remove the rest.</p>
-<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px;">
-  <div><span id="flagged-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{n}</span> <span style="color:var(--muted);">flagged</span></div>
-  <button class="btn btn-ghost" onclick="removeAll()" style="font-size:12px;padding:6px 14px;color:var(--alert);border-color:var(--alert);">Remove all</button>
-</div>
-{cards}
-</div>
-
-<script>
-function cardOf(btn){{ return btn.closest('[data-card]'); }}
-async function postForm(path, data){{
-  try {{
-    const r = await fetch(path, {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:new URLSearchParams(data)}});
-    return r.ok;
-  }} catch(e) {{ return false; }}
-}}
-function dropCard(card){{
-  card.remove();
-  const el = document.getElementById('flagged-count');
-  el.textContent = Math.max(0, parseInt(el.textContent || '0', 10) - 1);
-}}
-async function keepOne(btn){{
-  const card = cardOf(btn);
-  if (await postForm('/admin/library/review-removals/keep', {{id: card.dataset.id}})) dropCard(card);
-}}
-async function removeOne(btn){{
-  const card = cardOf(btn);
-  if (await postForm('/admin/library/review-removals/remove', {{id: card.dataset.id}})) dropCard(card);
-}}
-async function removeAll(){{
-  if (!confirm('Remove all flagged articles? This deletes them from the archive.')) return;
-  const cards = Array.from(document.querySelectorAll('[data-card]'));
-  for (const c of cards) {{ await removeOne(c.querySelector('button:last-child')); }}
-}}
-
-// Dead-link check: fires after render, one small request per card, a few at
-// a time so a big flagged list doesn't open dozens of requests at once.
-async function checkLink(card){{
-  const span = card.querySelector('[data-link-status]');
-  if (!span) return;
-  try {{
-    const r = await fetch('/admin/library/review-removals/check-link?url=' + encodeURIComponent(card.dataset.url));
-    const d = await r.json();
-    if (d.ok) {{
-      span.textContent = '';  // live link — no badge needed
-    }} else {{
-      span.textContent = d.status ? ('dead · ' + d.status) : 'dead';
-      span.style.background = '#fee2e2';
-      span.style.color = '#b91c1c';
-    }}
-  }} catch (e) {{ /* network hiccup on our end — don't flag the article for it */ }}
-}}
-(async function checkAllLinks(){{
-  const cards = Array.from(document.querySelectorAll('[data-card]'));
-  const concurrency = 4;
-  let i = 0;
-  async function worker(){{
-    while (i < cards.length) {{ await checkLink(cards[i++]); }}
-  }}
-  await Promise.all(Array.from({{length: concurrency}}, worker));
-}})();
-</script>"""
-    return HTMLResponse(_page("Remove content—Admin", "Admin", body, authed=True))
-
-
-@app.get("/admin/library/review-removals/check-link")
-def admin_review_check_link(request: Request, url: str):
-    """On-demand dead-link probe for one flagged article, called client-side
-    per card so a slow/dead site never blocks the page itself. Restricted to
-    URLs actually in the flagged set (not an arbitrary open prober) and to
-    http/https, with a short timeout — a slow site should read as "can't
-    tell", not hang the request."""
-    _require_api(request)
-    scheme = urlsplit(url).scheme
-    if scheme not in ("http", "https"):
-        return JSONResponse({"ok": None, "status": None})
-    lib = _lib()
-    try:
-        known = lib.conn.execute(
-            "SELECT 1 FROM articles WHERE url=? AND in_scope=0", (url,)
-        ).fetchone()
-    finally:
-        lib.close()
-    if not known:
-        raise HTTPException(status_code=404, detail="not a flagged article")
-    import requests
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; cfo-navigator-linkcheck/1.0)"}
-    try:
-        r = requests.head(url, headers=headers, timeout=6, allow_redirects=True)
-        if r.status_code >= 400 and r.status_code != 405:
-            return JSONResponse({"ok": False, "status": r.status_code})
-        if r.status_code == 405:  # HEAD not allowed — fall back to a light GET
-            r = requests.get(url, headers=headers, timeout=6, stream=True)
-            r.close()
-            if r.status_code >= 400:
-                return JSONResponse({"ok": False, "status": r.status_code})
-        return JSONResponse({"ok": True, "status": r.status_code})
-    except requests.RequestException:
-        return JSONResponse({"ok": False, "status": None})
-
-
-@app.post("/admin/library/review-removals/keep")
-async def admin_review_keep(request: Request):
-    _require_api(request)
-    form = await request.form()
-    try:
-        article_id = int(form.get("id") or 0)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="bad id")
-    lib = _lib()
-    try:
-        lib.keep_article(article_id)
-        _log_archive_audit(lib, request, "edit", article_id, detail="kept (cleared out-of-scope flag)")
-        return JSONResponse({"ok": True})
-    finally:
-        lib.close()
-
-
-@app.post("/admin/library/review-removals/remove")
-async def admin_review_remove(request: Request, background_tasks: BackgroundTasks):
-    _require_api(request)
-    form = await request.form()
-    try:
-        article_id = int(form.get("id") or 0)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="bad id")
-    lib = _lib()
-    try:
-        lib.delete_article(article_id)
-        _log_archive_audit(lib, request, "delete", article_id, detail="review-removals")
-        background_tasks.add_task(backup.maybe_backup, DB_PATH)
-        return JSONResponse({"ok": True})
-    finally:
-        lib.close()
-
-
-# ---------------------------------------------------------------------------
 # Re-enrich archive — force-refresh Claude summaries + tags server-side
 # ---------------------------------------------------------------------------
 
@@ -28892,8 +28703,7 @@ def admin_enrich(request: Request):
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
   <p style="font-size:13.5px;color:var(--muted);margin:0;line-height:1.6;">
-    <strong>After finishing:</strong> visit <a href="/admin/library/review-removals">Review removals</a> to confirm any articles the enricher flagged as off-audience,
-    and check the enriched summaries in the <a href="/read?view=saved">Reader's Archive view</a>.
+    <strong>After finishing:</strong> check the enriched summaries in the <a href="/read?view=saved">Reader's Archive view</a>.
   </p>
 </div>
 

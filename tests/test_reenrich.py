@@ -96,26 +96,21 @@ def test_queue_provenance_survives_promotion(lib):
     assert art["enrich_rules"] == "v1"
 
 
-def test_scope_flag_recorded_and_reviewable(lib, monkeypatch):
-    """Enrichment that returns in_scope=False flags the row for the removal review."""
+def test_apply_enrichment_leaves_in_scope_at_its_frozen_default(lib, monkeypatch):
+    """The audience-scope judgment is retired (PR 4, "Remove content" —
+    see linklib/db.py's articles.in_scope column comment): enrich() no
+    longer computes in_scope/scope_reason at all, so every article lands
+    with in_scope=1 regardless of content, and no review queue exists to
+    flag anything into."""
     from linklib.enrich import Enrichment
     lib.upsert(Article(url="https://ex.com/vc", title="How to land a job in VC",
                        content="career advice for aspiring investors", enriched=False))
-    lib.upsert(Article(url="https://ex.com/ok", title="SaaS NRR benchmarks",
-                       content="net revenue retention by stage", enriched=False))
 
     def fake(title, text, known_tags=None, model="?", tag_guide=""):
-        off = "vc" in title.lower() and "job" in title.lower()
-        return Enrichment(summary="s", tags=["t"], model=model, rules_version="v2",
-                          in_scope=not off,
-                          scope_reason="how to get a job in VC - off-audience" if off else "keep")
+        return Enrichment(summary="s", tags=["t"], model=model, rules_version="v2")
     monkeypatch.setattr(pipeline.enrich_mod, "enrich", fake)
 
     pipeline.enrich_library(lib, fetch=False, force=True, model="claude-opus-4-8")
-    flagged = lib.list_flagged()
-    assert lib.flagged_count() == 1
-    assert flagged[0]["url"] == "https://ex.com/vc"
-    assert "VC" in flagged[0]["scope_reason"]
-    # keep clears the flag (false-positive path)
-    lib.keep_article(flagged[0]["id"])
-    assert lib.flagged_count() == 0
+    row = lib.search("")[0]
+    assert row["in_scope"] == 1
+    assert row["scope_reason"] == ""

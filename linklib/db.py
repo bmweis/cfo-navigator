@@ -82,8 +82,21 @@ CREATE TABLE IF NOT EXISTS articles (
     enriched    INTEGER NOT NULL DEFAULT 0,    -- 1 once Claude summary/tags applied
     enrich_model TEXT NOT NULL DEFAULT '',      -- model that produced the enrichment
     enrich_rules TEXT NOT NULL DEFAULT '',      -- ENRICH_RULES_VERSION used
-    in_scope    INTEGER NOT NULL DEFAULT 1,     -- 0 = flagged off-audience for review
-    scope_reason TEXT NOT NULL DEFAULT '',      -- why it was flagged in/out of scope
+    in_scope    INTEGER NOT NULL DEFAULT 1,     -- FROZEN (PR 4, "Remove content"
+                                                 -- retirement, 2026-09): the enricher no
+                                                 -- longer judges audience fit at all — the
+                                                 -- archive is hand-curated one article at a
+                                                 -- time now, so this scaffolding from the
+                                                 -- initial bulk import has nothing left to
+                                                 -- do. Production had 0 rows with
+                                                 -- in_scope=0 at the time this was retired.
+                                                 -- Column kept, not dropped (non-destructive
+                                                 -- retirement) — always 1 going forward.
+                                                 -- Was: 0 = flagged off-audience for review,
+                                                 -- surfaced on the now-removed
+                                                 -- /admin/library/review-removals page.
+    scope_reason TEXT NOT NULL DEFAULT '',      -- FROZEN alongside in_scope above — was:
+                                                 -- why it was flagged in/out of scope.
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -1617,7 +1630,9 @@ class Library:
             "ALTER TABLE articles ADD COLUMN enrich_rules TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE library_queue ADD COLUMN enrich_model TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE library_queue ADD COLUMN enrich_rules TEXT NOT NULL DEFAULT ''",
-            # Audience-scope review — flag off-audience rows (e.g. how-to-get-into-VC).
+            # Audience-scope review (FROZEN, PR 4 "Remove content" retirement,
+            # 2026-09 — see the articles.in_scope column comment above). Kept
+            # only so an older DB still gets these two columns on upgrade.
             "ALTER TABLE articles ADD COLUMN in_scope INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE articles ADD COLUMN scope_reason TEXT NOT NULL DEFAULT ''",
             # Per-user Ask dollar-cap override. NULL = inherit the global default
@@ -2753,8 +2768,9 @@ class Library:
         future article reusing the same id (SQLite recycles AUTOINCREMENT
         ids once a table is VACUUMed, though not otherwise) inherit a
         stranger's history. This is a general fix to every existing caller
-        of delete_article (dedupe removal, review-removals, the member
-        Reader's own delete), not something new only the purge flow needed.
+        of delete_article (dedupe removal, the member Reader's own delete —
+        review-removals was a caller too until its PR 4, 2026-09 retirement),
+        not something new only the purge flow needed.
 
         Deliberately NOT deleted: enrichment_cost (a real-money spend
         ledger — the API call cost actual dollars regardless of whether the
@@ -2891,6 +2907,12 @@ class Library:
     def apply_enrichment(self, article_id: int, summary: str, tags: list[str],
                          model: str = "", rules: str = "",
                          in_scope: bool = True, scope_reason: str = "") -> None:
+        """`in_scope`/`scope_reason` are frozen (PR 4, "Remove content"
+        retirement, 2026-09) — nothing computes a non-default value for
+        either any more (see the `articles.in_scope` column comment), so
+        every real caller now leaves both at their True/"" defaults. Kept as
+        parameters, not dropped, purely so the column write stays explicit
+        and no caller signature needed to change."""
         row = self.conn.execute("SELECT summary, tags_json FROM articles WHERE id=?", (article_id,)).fetchone()
         if row is None:
             return
@@ -3460,27 +3482,6 @@ class Library:
         # longer exists (delete_article cleans up articles_vec too, so this
         # is just a guard against drift, not an expected case).
         return [by_id[rid] for (rid,) in rows if rid in by_id]
-
-    # -- audience-scope review (Phase 3) ---------------------------------------
-
-    def list_flagged(self, limit: int = 2000) -> list[dict]:
-        """Articles the enricher flagged as off-audience (in_scope=0), for review."""
-        rows = self.conn.execute(
-            "SELECT * FROM articles WHERE in_scope=0 ORDER BY id LIMIT ?", (limit,)
-        ).fetchall()
-        return [self._row_to_dict(r) for r in rows]
-
-    def flagged_count(self) -> int:
-        return self.conn.execute(
-            "SELECT COUNT(*) FROM articles WHERE in_scope=0"
-        ).fetchone()[0]
-
-    def keep_article(self, article_id: int) -> None:
-        """Clear an out-of-scope flag — a false positive you want to keep."""
-        self.conn.execute(
-            "UPDATE articles SET in_scope=1, updated_at=? WHERE id=?", (_now(), article_id)
-        )
-        self.conn.commit()
 
     # -- reads --------------------------------------------------------------
 
