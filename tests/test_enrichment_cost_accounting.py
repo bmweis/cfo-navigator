@@ -18,7 +18,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from linklib import enrich
 from linklib.db import Article, Library
 from linklib import pipeline
-from linklib import queue as queue_mod
 
 
 @pytest.fixture
@@ -91,17 +90,18 @@ def test_enrich_library_backfill_records_one_row_per_article(lib, monkeypatch):
     assert {r["article_id"] for r in rows} == {aid1, aid2}
 
 
-def test_queue_candidate_enrichment_records_null_article_id(lib, monkeypatch):
+def test_costed_enrichment_with_no_article_yet_records_null_article_id(lib, monkeypatch):
+    """`record_enrichment_cost(None, ...)` is the documented shape for
+    enrichment spend that has no `articles.id` yet to attach to — used by
+    every batch-generation script (scripts/regen_ai_drafted_fields.py and
+    friends), not just the now-retired Archive Queue's own candidates."""
     _mock_anthropic(monkeypatch, _PAYLOAD, input_tokens=300, output_tokens=60)
-    item = {"url": "https://ex.com/c", "title": "C", "source": "Test"}
-    cand = queue_mod._enrich_candidate(item, lib.known_tags(), enrich=True,
-                                       model="claude-opus-4-8")
-    assert cand["cost_usd"] > 0
+    result = enrich.enrich("C", "Some candidate text", model="claude-opus-4-8")
+    assert result is not None
+    assert result.cost_usd > 0
 
-    in_tok, out_tok, cost = (cand.pop("input_tokens"), cand.pop("output_tokens"),
-                             cand.pop("cost_usd"))
-    lib.record_enrichment_cost(None, cand.get("enrich_model", ""),
-                               input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost)
+    lib.record_enrichment_cost(None, result.model, input_tokens=result.input_tokens,
+                               output_tokens=result.output_tokens, cost_usd=result.cost_usd)
 
     row = lib.conn.execute(
         "SELECT article_id, cost_usd FROM enrichment_cost WHERE article_id IS NULL"
