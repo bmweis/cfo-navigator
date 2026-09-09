@@ -2785,6 +2785,45 @@ Details worth knowing:
   asset, not the renderer. See CLAUDE.md's matching bullet for the full
   item-by-item write-up and `tests/test_empty_state_visual_qa.py`/
   `tests/test_audit_tool_logo_dimensions.py` for the regression coverage.
+- **Logo Tile Fit fix (2026-09) — the audit's "presumed source-asset padding"
+  read turns out to be the wrong mechanism for most of the 69/75 flagged
+  logos; the real bug was an asset-TYPE preference in `linklib/brandfetch.py`.**
+  Every on-site render is a fixed square (`_logo_box()`: 64px/56px/32px
+  tiles), but `best_logo_asset()`'s `type_rank` always put Brandfetch's
+  `"logo"` type (the wordmark/lockup) ahead of `"icon"`/`"symbol"` (the
+  square mark) — so a brand with both simply never got its square asset
+  selected. A wide wordmark shrunk by `object-fit:contain` into a square box
+  leaves most of the box empty: Airbase (4:1), Airwallex (7.3:1), NetSuite
+  (14:1), and ~45 more. Cube/Kintsugi remain the one genuinely-undersized-
+  raster case the original audit correctly identified. Fixed at the module's
+  one shared choke point (its own docstring: "there is exactly ONE
+  implementation of how we talk to Brandfetch," used by both
+  `scripts/backfill_logos.py`'s monthly batch and `webapp/app.py`'s
+  `_live_refetch_logo` admin button) with a new `TYPE_PREFERENCE = ("icon",
+  "symbol", "logo")`, so both ongoing fetch paths — not just the historical
+  backlog — get the fix. `best_logo_asset()`/`fetch_logo_asset()` grew a
+  third return value, `asset_type`, so a caller can distinguish "found a
+  square mark" from "fell back to the wordmark" without a second API call;
+  both existing call sites' tuple-unpacking updated. New run-once
+  `scripts/refetch_lopsided_logos.py` re-fetches the historical backlog —
+  re-deriving its "lopsided" candidate set LIVE from what's actually on disk
+  (reusing `audit_tool_logo_dimensions.py`'s own probe) rather than a stale
+  CSV snapshot, which also structurally excludes Cube/Kintsugi (flagged
+  `"undersized"`, not `"lopsided"`) without a hardcoded list — though one is
+  kept anyway, defensively, per explicit instruction. Preview mode makes
+  zero Brandfetch calls (same quota-conscious discipline as
+  `backfill_logos.py`); `--apply` only overwrites a record when it actually
+  gets a different (icon/symbol) asset, leaving a still-wordmark-only
+  result completely untouched and reported for the manual logo-override
+  worklist instead of being silently "fixed" with an identically-shaped
+  file. Deliberately not added to `_SCRIPT_REGISTRY`/`/admin/system/scripts`
+  — matching this repo's actual practice for a one-time backlog-clearer (no
+  other one-off migration/backfill script is registered there either) —
+  it's meant to be archived once its single `--apply` run is confirmed.
+  `_logo_box()` itself is untouched, per the original audit's own finding
+  that the renderer was never the bug. See CLAUDE.md's matching bullet for
+  the full write-up and `tests/test_brandfetch.py`/
+  `tests/test_refetch_lopsided_logos.py` for the regression coverage.
 - **Gate-Extraction PR B (2026-09) — the radical-transparency review-state
   decision moves into a new shared module, `linklib/gates.py`, the single
   source of truth for the three-state table PR A ratified. Behavior-

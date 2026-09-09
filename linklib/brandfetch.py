@@ -34,6 +34,23 @@ FORMAT_PREFERENCE = ("svg", "png")
 # than one designed for dark. Not every brand publishes both.
 THEME_PREFERENCE = ("light", "dark")
 
+# Logo "type" preference (Logo Tile Fit fix, 2026-09) — every on-site render
+# surface (_logo_box() in webapp/app.py: 64px directory tile, 56px profile
+# header, 32px Competitors table) is a fixed SQUARE. Brandfetch's Brand API
+# returns three shapes under "type": "icon"/"symbol" (a square mark, built
+# for exactly this kind of tile) and "logo" (the full wordmark/lockup,
+# usually wide). The ORIGINAL preference order here put "logo" first — that
+# was backwards for a square tile and is what produced the thin-sliver
+# wordmark renders an audit (scripts/audit_tool_logo_dimensions.py) flagged
+# on ~48 assets (Airbase 4:1, Airwallex 7.3:1, NetSuite 14:1, ...): a wide
+# wordmark SVG shrunk by object-fit:contain to fit a square box leaves most
+# of the box empty. Square marks now win; the wordmark is still selected
+# when a brand publishes no icon/symbol asset at all — never worse than the
+# old behavior, just no longer the default. "icon" is ranked ahead of
+# "symbol" (both square) since Brandfetch's own docs describe "icon" as the
+# primary square mark and "symbol" as a secondary/alternate one.
+TYPE_PREFERENCE = ("icon", "symbol", "logo")
+
 
 def extract_domain(url: str) -> str | None:
     """Bare registrable-ish domain from a stored tool/community URL, e.g.
@@ -56,19 +73,25 @@ def extract_domain(url: str) -> str | None:
     return host
 
 
-def best_logo_asset(data: dict) -> tuple[str, str] | None:
+def best_logo_asset(data: dict) -> tuple[str, str, str] | None:
     """Given a Brand API /v2/brands/domain/{domain} response body, pick the
-    best logo asset: prefer the "logo" type (primary brand mark) over
-    "icon"/"symbol", prefer a "light"-theme variant, prefer SVG over PNG —
-    falling back gracefully at each step since not every brand publishes
-    every combination. Returns (src_url, format_ext) or None if the response
-    has no usable logo asset at all."""
+    best logo asset: prefer a square "icon"/"symbol" mark over the "logo"
+    wordmark (see TYPE_PREFERENCE above), prefer a "light"-theme variant,
+    prefer SVG over PNG — falling back gracefully at each step since not
+    every brand publishes every combination. Returns
+    (src_url, format_ext, asset_type) or None if the response has no usable
+    logo asset at all. `asset_type` is one of TYPE_PREFERENCE's values (or
+    "" for a type Brandfetch didn't label) — callers use it to tell "found a
+    real square mark" from "fell back to the wordmark, no icon exists"."""
     logos = data.get("logos") or []
     if not logos:
         return None
 
     def type_rank(logo: dict) -> int:
-        return 0 if logo.get("type") == "logo" else 1
+        try:
+            return TYPE_PREFERENCE.index(logo.get("type"))
+        except ValueError:
+            return len(TYPE_PREFERENCE)  # unknown/missing type sorts last
 
     def theme_rank(logo: dict) -> int:
         theme = logo.get("theme")
@@ -82,13 +105,13 @@ def best_logo_asset(data: dict) -> tuple[str, str] | None:
         for logo in ordered:
             for fmt in logo.get("formats") or []:
                 if (fmt.get("format") or "").lower() == fmt_pref and fmt.get("src"):
-                    return fmt["src"], fmt_pref
+                    return fmt["src"], fmt_pref, (logo.get("type") or "")
     return None
 
 
-def fetch_logo_asset(domain: str, api_key: str, session: requests.Session | None = None) -> tuple[tuple[str, str] | None, str | None]:
-    """Calls the Brand API for one domain. Returns ((src_url, ext), None) on
-    success, or (None, reason) on any kind of miss/failure. `reason` starting
+def fetch_logo_asset(domain: str, api_key: str, session: requests.Session | None = None) -> tuple[tuple[str, str, str] | None, str | None]:
+    """Calls the Brand API for one domain. Returns ((src_url, ext, asset_type),
+    None) on success, or (None, reason) on any kind of miss/failure. `reason` starting
     with "QUOTA" signals a caller doing a multi-record run should stop the
     whole run, not just skip this record — see scripts/backfill_logos.py's
     main() for that handling; a single-record caller just surfaces it.

@@ -59,10 +59,14 @@ def test_extract_domain_returns_none_for_empty_or_garbage():
 
 # --- best_logo_asset -------------------------------------------------------
 
-def test_best_logo_asset_prefers_logo_type_light_theme_svg():
+def test_best_logo_asset_prefers_icon_type_over_logo_wordmark():
+    """Logo Tile Fit fix (2026-09): every on-site render is a square tile, so
+    the square "icon" mark must win over the "logo" wordmark even when the
+    wordmark is otherwise the more "complete" candidate (light theme, both
+    formats available)."""
     data = {
         "logos": [
-            {"type": "icon", "theme": "light", "formats": [{"format": "svg", "src": "icon.svg"}]},
+            {"type": "icon", "theme": "light", "formats": [{"format": "svg", "src": "icon-light.svg"}]},
             {"type": "logo", "theme": "dark", "formats": [{"format": "svg", "src": "logo-dark.svg"}]},
             {"type": "logo", "theme": "light", "formats": [
                 {"format": "png", "src": "logo-light.png"},
@@ -70,12 +74,40 @@ def test_best_logo_asset_prefers_logo_type_light_theme_svg():
             ]},
         ]
     }
-    assert brandfetch.best_logo_asset(data) == ("logo-light.svg", "svg")
+    assert brandfetch.best_logo_asset(data) == ("icon-light.svg", "svg", "icon")
+
+
+def test_best_logo_asset_prefers_symbol_over_logo_when_no_icon():
+    data = {
+        "logos": [
+            {"type": "logo", "theme": "light", "formats": [{"format": "svg", "src": "logo-light.svg"}]},
+            {"type": "symbol", "theme": "dark", "formats": [{"format": "svg", "src": "symbol-dark.svg"}]},
+        ]
+    }
+    assert brandfetch.best_logo_asset(data) == ("symbol-dark.svg", "svg", "symbol")
+
+
+def test_best_logo_asset_falls_back_to_logo_wordmark_when_no_icon_or_symbol():
+    """A brand that publishes no square icon/symbol asset at all still gets
+    a usable logo — the wordmark fallback, never worse than before this
+    fix."""
+    data = {"logos": [{"type": "logo", "theme": "light", "formats": [{"format": "svg", "src": "logo-light.svg"}]}]}
+    assert brandfetch.best_logo_asset(data) == ("logo-light.svg", "svg", "logo")
 
 
 def test_best_logo_asset_falls_back_to_png_when_no_svg():
-    data = {"logos": [{"type": "logo", "theme": "light", "formats": [{"format": "png", "src": "x.png"}]}]}
-    assert brandfetch.best_logo_asset(data) == ("x.png", "png")
+    data = {"logos": [{"type": "icon", "theme": "light", "formats": [{"format": "png", "src": "x.png"}]}]}
+    assert brandfetch.best_logo_asset(data) == ("x.png", "png", "icon")
+
+
+def test_best_logo_asset_unlabeled_type_sorts_after_known_types():
+    data = {
+        "logos": [
+            {"type": None, "theme": "light", "formats": [{"format": "svg", "src": "unlabeled.svg"}]},
+            {"type": "logo", "theme": "light", "formats": [{"format": "svg", "src": "logo-light.svg"}]},
+        ]
+    }
+    assert brandfetch.best_logo_asset(data) == ("logo-light.svg", "svg", "logo")
 
 
 def test_best_logo_asset_none_when_no_usable_asset():
@@ -87,12 +119,12 @@ def test_best_logo_asset_none_when_no_usable_asset():
 # --- fetch_logo_asset ------------------------------------------------------
 
 def test_fetch_logo_asset_success():
-    data = {"domain": "getaleph.com", "logos": [{"type": "logo", "theme": "light",
+    data = {"domain": "getaleph.com", "logos": [{"type": "icon", "theme": "light",
                                                   "formats": [{"format": "svg", "src": "https://x/logo.svg"}]}]}
     session = _FakeSession(_FakeResponse(json_data=data, status_code=200))
     asset, err = brandfetch.fetch_logo_asset("getaleph.com", "fake-key", session)
     assert err is None
-    assert asset == ("https://x/logo.svg", "svg")
+    assert asset == ("https://x/logo.svg", "svg", "icon")
 
 
 def test_fetch_logo_asset_404():
@@ -125,20 +157,20 @@ def test_fetch_logo_asset_domain_echo_guard_rejects_mismatch():
 def test_fetch_logo_asset_domain_echo_guard_allows_www_variant():
     """A response echoing "www.<domain>" is still the same site — not a
     mismatch."""
-    data = {"domain": "www.getaleph.com", "logos": [{"type": "logo", "theme": "light",
+    data = {"domain": "www.getaleph.com", "logos": [{"type": "icon", "theme": "light",
                                                        "formats": [{"format": "svg", "src": "https://x/logo.svg"}]}]}
     session = _FakeSession(_FakeResponse(json_data=data, status_code=200))
     asset, err = brandfetch.fetch_logo_asset("getaleph.com", "fake-key", session)
     assert err is None
-    assert asset == ("https://x/logo.svg", "svg")
+    assert asset == ("https://x/logo.svg", "svg", "icon")
 
 
 def test_fetch_logo_asset_no_domain_field_in_response_is_not_rejected():
     """Not every real response necessarily echoes "domain" — absence isn't
     itself grounds for rejection, only an actual mismatch is."""
-    data = {"logos": [{"type": "logo", "theme": "light",
+    data = {"logos": [{"type": "icon", "theme": "light",
                         "formats": [{"format": "svg", "src": "https://x/logo.svg"}]}]}
     session = _FakeSession(_FakeResponse(json_data=data, status_code=200))
     asset, err = brandfetch.fetch_logo_asset("getaleph.com", "fake-key", session)
     assert err is None
-    assert asset == ("https://x/logo.svg", "svg")
+    assert asset == ("https://x/logo.svg", "svg", "icon")

@@ -2594,7 +2594,7 @@ def _live_refetch_logo(lib: "Library", kind: str, entity_id: int, entity: dict) 
             return False, ("Reverted to automatic, but Brandfetch's free-tier quota (100/month) is exhausted right "
                             "now. It'll pick up on the next scripts/backfill_logos.py run once quota resets.")
         return False, f"Reverted to automatic, but Brandfetch had nothing usable for {domain}: {err}"
-    src_url, ext = asset
+    src_url, ext, asset_type = asset
     slug = entity["slug"]
     logo_dir = _LOGO_DIR if kind == "tools" else _COMMUNITY_LOGO_DIR
     dest = os.path.join(logo_dir, f"{slug}.{ext}")
@@ -2607,7 +2607,8 @@ def _live_refetch_logo(lib: "Library", kind: str, entity_id: int, entity: dict) 
         lib.set_tool_logo(entity_id, rel_path)
     else:
         lib.set_community_logo(entity_id, rel_path)
-    return True, f"Re-fetched a fresh logo from Brandfetch for {domain}."
+    type_note = "" if asset_type in ("icon", "symbol") else " (wordmark-style — no square icon/symbol asset was available)"
+    return True, f"Re-fetched a fresh logo from Brandfetch for {domain}.{type_note}"
 
 
 # Shared client-side crop flow (Phase E) for the "Upload app screenshot"

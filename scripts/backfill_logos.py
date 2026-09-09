@@ -216,7 +216,7 @@ def main() -> int:
                 failed.append((kind, name, err))
                 print(f"{prefix} ({domain}): MISS — {err}")
             else:
-                src_url, ext = asset
+                src_url, ext, asset_type = asset
                 rel_path = f"logos/{_DIR_BY_KIND[kind]}/{slug}.{ext}"
                 dest_path = os.path.join(logos_root, _DIR_BY_KIND[kind], f"{slug}.{ext}")
                 try:
@@ -237,7 +237,7 @@ def main() -> int:
                         wrote = lib.set_community_logo(row["id"], rel_path)
                     if wrote:
                         updated.append((kind, row["id"], name, rel_path))
-                        print(f"{prefix} ({domain}): OK — saved {rel_path}")
+                        print(f"{prefix} ({domain}): OK — saved {rel_path} (type={asset_type or 'unlabeled'})")
                     else:
                         print(f"{prefix} ({domain}): SKIPPED — manual logo override is active, not overwritten")
 
