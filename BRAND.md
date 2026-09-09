@@ -398,11 +398,14 @@ of the old 960px box. The Growth Engine Ratio's long-form paragraphs nest a narr
 comfortably, but the calculator itself benefits from the extra width.
 
 `.tool-prose` isn't limited to `.tool-inner` — it's a general-purpose narrow-reading
-wrapper (max-width 760px, centered) usable inside any wider tier. The three
-`/admin/system/*` reference pages (Database, Page Index, How FP&A Buddy works) reuse it
-directly inside `.page-admin` (1500px): each nests its intro copy and any prose-only
-section in `.tool-prose`, while diagrams and tables stay at the full `page-admin` width
-so they don't get squeezed into a 760px column meant for reading text.
+wrapper (max-width 760px, centered) usable inside any wider tier. (An earlier version
+of this passage claimed the three `/admin/system/*` reference pages — Database, Page
+Index, How FP&A Buddy works — all reused it directly inside `.page-admin`. Corrected,
+2026-09: "How FP&A Buddy works" moved off `/admin/*` to the public
+`/tools/fpa-buddy/how-it-works` and renders on `.page-full`, not `.page-admin`; Database
+and Page Index render their intro copy as a bare `<p>` with no `.tool-prose` wrapper at
+all. Neither gained a wrapper as part of this correction — this is a doc fix, not a
+code change.)
 
 The brand audit's Phase 4 also found four pages with *no* reading-width constraint at
 all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, and the
@@ -454,13 +457,23 @@ and treatment so each reads as what it is:
 | **CTA** | `.article-cta` | Navy (`--navy-wash` fill, `--navy` left border) | Boxed, `border-radius:0 10px 10px 0`, `padding:18px 22px` — "here's a link to follow" | Body-copy (760px, `.tool-prose`) |
 | **Tips** | `.article-callout` | Seafoam (`--seafoam-wash` fill, `--seafoam-mid` top border) | Boxed, titled (`.article-callout-title`, uppercase seafoam-deep), `border-radius:0 0 10px 10px` — "here's a fact/technique" | Body-copy (760px) |
 | **Warnings** | `.article-warn` | Alert red (`--alert-wash` fill, `--alert` top border) | Boxed, titled (`.article-warn-title`, uppercase `--alert`), `border-radius:0 0 10px 10px` — "here's a failure mode to avoid" | Body-copy (760px) |
-| **Quotes** | `.article-pull` | No fill — `--navy` left border only | Unboxed: `font-family:var(--font-head)`, 600 weight, italic, 22px, `line-height:1.45` — "this is the idea," not a boxed fact. No surrounding quotation marks — the rule/type treatment already signals "this is a quote." | Wider breakout (1040px, centered under `.tool-inner` via `left:50%`/`transform:translateX(-50%)` against `width:calc(100vw - 48px)`) |
+| **Quotes** | `.article-pull` | No fill — `--navy` left border only | Unboxed: `font-family:var(--font-head)`, 600 weight, italic, 22px, `line-height:1.45` — "this is the idea," not a boxed fact. No surrounding quotation marks — the rule/type treatment already signals "this is a quote." | Body-copy (760px, `.tool-prose`) |
 
-**Width is part of the taxonomy.** CTA/Tips/Warnings stay at body-copy width —
-they're mostly multi-line instructional prose, and a wide box reads as an odd
-second column, not a design choice. Quotes are short by nature, so widening them
-(1040px — a middle ground between the 760px reading column and `.tool-inner`'s full
-1300px) reads as a deliberate editorial moment instead.
+**Width is part of the taxonomy — and the rule is now "one shared left edge, no
+exceptions" (revised 2026-09, PR 1 of the article-alignment pass).** Every element
+on an article page — CTA/Tips/Warnings, Quotes, the back-link, and the body text
+itself — renders at body-copy width so the whole page anchors on one left margin.
+Quotes used to widen to 1040px (a middle ground between the 760px reading column
+and `.tool-inner`'s full 1300px, via `left:50%`/`transform:translateX(-50%)` against
+`width:calc(100vw - 48px)`), on the reasoning that a short quote reads as a
+deliberate editorial moment when it's set wider than the paragraphs around it. In
+practice that breakout put the quote at a different left AND right edge than every
+other element on the page, and — combined with the back-link rendering outside
+`.tool-prose` on two pages — meant an article page had no single edge to anchor on
+at all: three or four different widths stacked on top of each other read as
+scattered, not editorial. The breakout is removed outright, not left dormant —
+`.article-pull` keeps its navy left-rule/italic treatment, just at the same width
+as everything else.
 
 **Informational asides that aren't warnings or quotable ideas** (e.g. a
 per-person/per-account setup note) belong in the Tips family — don't invent a

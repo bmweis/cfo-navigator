@@ -1392,7 +1392,7 @@ p{margin:0 0 16px;color:var(--ink-soft);}
    Phase 9 sweep — every route now carries one of the five tiers below. */
 .page{width:100%;max-width:780px;margin:0 auto;padding:48px 24px 72px;}
 
-.page-full{max-width:1900px;}   /* full-width content — homepage/about, TL landing, library landing, reader */
+.page-full{max-width:1900px;}   /* full-width content — homepage/about, TL landing, reader */
 .page-grid{max-width:1300px;}   /* card grids (CFO Toolbox landing) and the Software
                                     add/edit forms, which need the extra width for the
                                     long-form description field */
@@ -3944,7 +3944,6 @@ def growth_engine_ratio_redirect(request: Request):
 def growth_engine_calculator(request: Request):
     body = """<div class="page page-full article-atlantic">
 <div class="tool-inner">
-<p style="margin:0 0 12px;"><a href="/thought-leadership/growth-engine-ratio" style="font-size:13px;color:var(--muted);">&larr; The Growth Engine Ratio</a></p>
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
@@ -3976,6 +3975,7 @@ def growth_engine_calculator(request: Request):
 </style>
 
 <div class="tool-prose">
+<p style="margin:0 0 12px;"><a href="/thought-leadership/growth-engine-ratio" style="font-size:13px;color:var(--muted);">&larr; The Growth Engine Ratio</a></p>
 <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Calculator</p>
 <h1 style="margin:0 0 8px;">Growth Engine Ratio calculator</h1>
 <p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
@@ -13764,11 +13764,13 @@ _OC_HACKATHON_CSS = (
 # the right color instead of relying on the row showing through underneath
 # it.
 #
-# .ger-pull's 1040px breakout math is unchanged from the original page:
-# .tool-prose/.tool-inner/.page share a center axis, so
-# left:50%+translateX(-50%) re-centers the wider quote box under
-# .tool-inner regardless of viewport, collapsing to no breakout once the
-# viewport is too narrow for one.
+# .ger-pull's 1040px breakout (left:50%+translateX(-50%) re-centering the
+# quote box wider than .tool-prose) was removed in the article-alignment
+# pass (PR 1, 2026-09) — pull-quotes now stay at prose width like every
+# other element on the page, so .ger-pull carries no CSS of its own any
+# more; .article-pull's shared border-left/italic treatment (webapp/app.py's
+# top-level CSS block) is all that's left to style it. See BRAND.md's
+# "Callout taxonomy" entry for the current width rule.
 _OC_GER_CSS = (
     '.oc-body .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}'
     # Post-merge follow-up bug, found live: the wrapper's own inline style
@@ -13795,7 +13797,6 @@ _OC_GER_CSS = (
     '.oc-body .ger-table th{background:var(--navy);color:#fff;}'
     '.oc-body .ger-table th:nth-child(1),.oc-body .ger-table td:nth-child(1){white-space:nowrap;width:1%;}'
     '.oc-body .ger-table th:nth-child(2),.oc-body .ger-table td:nth-child(2){white-space:nowrap;}'
-    '.oc-body .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}'
     '@media(max-width:640px){'
     '.oc-body .ger-table th,.oc-body .ger-table td{padding:8px 10px !important;font-size:13px !important;}'
     '}'
@@ -13816,9 +13817,9 @@ def _original_content_article_body(row: dict) -> str:
     )
     body_html = _render_original_content_markdown(row["body_md"] or "")
     return f"""<div class="page page-full article-atlantic">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
 <style>{_OC_ARTICLE_CSS}{_OC_NETSUITE_MCP_CSS}{_OC_HACKATHON_CSS}{_OC_GER_CSS}</style>
 <div class="tool-prose">
+<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
 {tag_html}
 <h1 style="margin:0 0 8px;">{_esc(row["title"])}</h1>
 <p style="color:var(--muted);font-size:14px;margin:0 0 36px;">{date_bits}</p>
