@@ -6343,6 +6343,33 @@ never reads as something to tap.
   and note `tests/test_models_freshness.py`'s own `_models_section` helper
   was widened to bound its split on both sides, since a third section now
   follows it on the page.
+- **Public `/tools/software` directory card's Delete button — a broken URL,
+  not a broken HTTP method (2026-09).** Reported symptom: clicking Delete on
+  a tool's card on the public directory (admin-visible controls only, same
+  `AUTHED`-gated block as Quick edit/Full edit) navigated to
+  `/admin/tools/{id}/delete` and errored instead of deleting. The initial
+  hypothesis — a plain GET `<a href>` hitting a POST-only route — was wrong
+  and confirmed wrong, not just dropped: `renderTools()`'s Delete affordance
+  was already a real `<form method="post">` with its own `confirm()` dialog
+  and the correct tool id. The actual bug was a missing path segment: the
+  form's `action` was hardcoded as `/admin/tools/' + t.id + '/delete'`,
+  omitting `software/` — matching no route at all
+  (`admin_tools_delete` is registered at
+  `/admin/tools/software/{tool_id}/delete`), so the browser navigated
+  straight into a plain 404 rather than completing the delete. `delete_tool()`'s
+  cascade cleanup was never implicated — the request never reached the route
+  handler at all. Fixed by correcting the action URL to the real route and
+  adding an explicit `redirect_to` hidden input, matching the admin table's
+  own already-working Delete form (`/admin/tools/software`, `_tool_row`)
+  byte-for-byte rather than inventing a second mechanism — no auth check was
+  touched. **`/tools/communities` was checked and found NOT to have the same
+  bug, because it doesn't have the affordance at all**: `renderCommunities()`
+  never gates on `AUTHED` and renders no edit/delete controls on its public
+  cards, unlike `renderTools()` — confirmed by reading the function, not
+  assumed clean because the report didn't mention it. See
+  `tests/test_public_directory_delete_affordance.py` for the regression
+  coverage, including a real reproduction of the old broken URL 404ing and a
+  full create → delete-via-the-fixed-affordance → confirm-gone cycle.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
