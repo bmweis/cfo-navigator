@@ -6715,7 +6715,7 @@ Not sure which tool's for you? {(
   oninput="filterTools()"
   style="display:block;width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;box-sizing:border-box;margin-bottom:10px;">
 
-<details open style="margin-bottom:8px;">
+<details style="margin-bottom:8px;">
   <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
     <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#129305; Advisor</button>
@@ -8600,9 +8600,9 @@ def tools_communities(request: Request):
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
 groups, associations, and Slack channels. Not sure which community's for you? {(
-    '<a href="/tools/communities/find" style="font-weight:500;">Community matchmaker &rarr;</a>'
+    '<a href="/tools/communities/find" style="font-weight:500;">Community matchmaker&nbsp;&rarr;</a>'
     if is_member else
-    '<a href="/login?next=%2Ftools%2Fcommunities%2Ffind" style="font-weight:500;">Sign in for access to Community matchmaker &rarr;</a>'
+    '<a href="/login?next=%2Ftools%2Fcommunities%2Ffind" style="font-weight:500;">Sign in for access to Community matchmaker&nbsp;&rarr;</a>'
 )}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
@@ -8620,7 +8620,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
   </select>
 </div>
 
-<details open style="margin-bottom:8px;">
+<details style="margin-bottom:8px;">
   <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
     <button class="ccat-btn ccat-all ccat-active" data-cat="" onclick="filterCommCat(this)">All categories</button>
@@ -12629,7 +12629,7 @@ def admin_tools_features(request: Request, msg: str = "", error: str = "",
     groups_html = "".join(
         _feature_category_group_html(
             c, features, cat_pending, tools_by_id,
-            is_open=(str(c["id"]) in forced_open) if forced_open is not None else bool(features),
+            is_open=(str(c["id"]) in forced_open) if forced_open is not None else False,
         )
         for c, features, cat_pending in cat_data
     )
@@ -17329,7 +17329,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   {table_html}
 </div>"""
         feature_ids_input = "".join(f'<input type="hidden" name="feature_ids" value="{fid}">' for fid in all_feature_ids)
-        _governed_features_html = f"""<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);" open>
+        _governed_features_html = f"""<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
       <h2 style="font-size:16px;font-weight:600;margin:0;">Key features</h2>
