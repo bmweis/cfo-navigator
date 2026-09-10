@@ -231,8 +231,11 @@ def test_quadrants_reuse_the_admin_index_disclosure_component(env):
     grid = html[html.index('class="lib-cols"'):]
 
     # The component's own output, rendered directly, appears on the page.
+    # count_label is "2 tools" now, not 3 — Tag cleanup and Tagging style
+    # merged into one page (PR 7, 2026-09), so this quadrant holds one fewer
+    # card than it used to.
     rendered = appmod._disclosure_group("Tag management", "<p>x</p>",
-                                        count_label="3 tools",
+                                        count_label="2 tools",
                                         extra_class="lib-quad")
     summary = rendered[rendered.index("<summary"):rendered.index("</summary>")]
     assert summary in grid
@@ -274,7 +277,7 @@ def test_each_quadrant_holds_its_specified_tools(env):
     html = _library_html(env)
     bounds = [("lib-q-existing", ["/admin/reader/backfill-content", "/admin/reader/dedupe",
                                   "/admin/reader/bulk-delete"]),
-              ("lib-q-tags", ["/admin/library/tags", "/admin/library/tag-style",
+              ("lib-q-tags", ["/admin/reader/tag-management",
                               "/admin/reader/enrich"])]
     for cls, hrefs in bounds:
         start = html.index(f'class="{cls}"')

@@ -5,10 +5,11 @@ ARCHITECTURE.md write-up on why it keeps the word "library"). No
 compatibility redirects: every old path must 404, both signed in and signed
 out, and every new path must actually render for an authenticated admin.
 
-Two pages are deliberately NOT part of this move — Tag cleanup
-(`/admin/library/tags`) and Tagging style (`/admin/library/tag-style`) merge
-into a single `/admin/reader/tag-management` page in a later PR, so they
-stay exactly where they are here.
+Two pages were deliberately NOT part of this move — Tag cleanup
+(`/admin/library/tags`) and Tagging style (`/admin/library/tag-style`).
+They've since merged into a single `/admin/reader/tag-management` page
+(PR 7, 2026-09) — see tests/test_tag_management_merge.py for that move's
+own coverage; this file stays scoped to the five PR 6 moves.
 """
 import os
 import pathlib
@@ -31,13 +32,6 @@ _RENAMED_PAGES = [
     ("/admin/library/bulk-delete", "/admin/reader/bulk-delete"),
     ("/admin/library/backup", "/admin/library-backup"),
 ]
-
-# Untouched by this PR — must still resolve at their pre-existing paths.
-_UNTOUCHED_LIBRARY_PAGES = [
-    "/admin/library/tags",
-    "/admin/library/tag-style",
-]
-
 
 @pytest.fixture
 def env(monkeypatch, tmp_path):
@@ -109,16 +103,6 @@ def test_admin_reader_bare_prefix_is_not_a_page(env):
     with _admin_client(env) as client:
         resp = client.get("/admin/reader", follow_redirects=False)
     assert resp.status_code == 404
-
-
-@pytest.mark.parametrize("path", _UNTOUCHED_LIBRARY_PAGES)
-def test_tag_pages_are_untouched_by_this_pr(env, path):
-    """Tag cleanup and Tagging style merge into /admin/reader/tag-management
-    in a future PR — they stay at their pre-existing /admin/library/*
-    paths here."""
-    with _admin_client(env) as client:
-        resp = client.get(path)
-    assert resp.status_code == 200, (path, resp.status_code)
 
 
 def test_backup_now_post_route_is_unaffected(env):
