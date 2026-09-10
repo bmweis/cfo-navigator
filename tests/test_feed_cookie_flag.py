@@ -592,11 +592,17 @@ def test_new_content_quadrant_counts_five_tools(app_env):
 def test_other_quadrants_still_count_their_real_cards(app_env):
     """The override is scoped to one quadrant; the rest stay literal.
 
-    lib-q-backup dropped from 2 tools to 1 (just Archive backup) once the
-    Archive Queue link was removed from that section — 2026-09, PR 3."""
+    lib-q-existing dropped from 4 to 3 tools when "Remove content" was
+    retired (PR 4, 2026-09, review-removals removed outright) — see
+    linklib/db.py's articles.in_scope column comment. lib-q-backup
+    independently dropped from 2 tools to 1 (just Archive backup) once the
+    Archive Queue link was removed from that section — 2026-09, PR 3. Both
+    retirements landed in the same window and touched different quadrants,
+    so both reductions apply together here.
+    """
     with _client(app_env) as client:
         html = client.get("/admin/library").text
-    assert "4 tools" in _quadrant(html, "lib-q-existing")
+    assert "3 tools" in _quadrant(html, "lib-q-existing")
     assert "1 tool" in _quadrant(html, "lib-q-backup")
     assert "3 tools" in _quadrant(html, "lib-q-tags")
 

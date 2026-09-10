@@ -79,7 +79,7 @@ def test_enrich_injects_tag_guide_into_prompt(monkeypatch):
 
     class _Block:
         type = "text"
-        text = '{"summary":"s","tags":["arr"],"in_scope":true,"scope_reason":"keep"}'
+        text = '{"summary":"s","tags":["arr"]}'
 
     class _Resp:
         content = [_Block()]

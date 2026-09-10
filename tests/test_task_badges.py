@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from linklib.db import Library, Article
+from linklib.db import Library
 
 
 @pytest.fixture
@@ -55,15 +55,10 @@ def test_count_tool_leads_since(lib):
     assert lib.count_tool_leads_since("") == 1
 
 
-def test_flagged_count_already_exists(lib):
-    # Backs the "Remove content" badge — pinning it's the right shape for tasks.py.
-    # (The Archive Queue's own pending count, formerly pinned alongside this
-    # one, was retired along with the queue itself — 2026-09, PR 3.)
-    assert lib.flagged_count() == 0
-    art = Article(url="https://x.example/1", title="t", source="s")
-    aid = lib.upsert(art)
-    lib.apply_enrichment(aid, "summary", ["tag"], "model", "rules", in_scope=False, scope_reason="off-audience")
-    assert lib.flagged_count() == 1
+# The Archive Queue badge (queue_count) and the "Remove content" badge
+# (flagged_count) were both retired along with their underlying features —
+# 2026-09, PR 3 and PR 4 respectively. See CLAUDE.md's "Archive Queue
+# retired outright" and "'Remove content' retired" bullets.
 
 
 def test_password_reset_request_lifecycle(lib):

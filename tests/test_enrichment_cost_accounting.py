@@ -43,7 +43,7 @@ def _mock_anthropic(monkeypatch, payload_json, input_tokens=100, output_tokens=4
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
 
 
-_PAYLOAD = '{"summary": "s", "tags": ["finance"], "in_scope": true, "scope_reason": ""}'
+_PAYLOAD = '{"summary": "s", "tags": ["finance"]}'
 
 
 def test_enrich_returns_real_usage_and_cost(monkeypatch):

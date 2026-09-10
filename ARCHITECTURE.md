@@ -332,7 +332,7 @@ used manual check rather than a per-turn or overhead cost.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `articles` | The archive: ~1,500+ curated articles. **URL is the natural key** (`UNIQUE`, normalized) — upserts merge tags and fill empty fields, never duplicate. | `url`, `summary` (Claude-generated, the member-facing asset), `content` (fetched full text — internal input only, never served), `tags_json`/`tags_text` (structured list + flattened copy for FTS), `enriched`/`enrich_model`/`enrich_rules` (provenance), `in_scope`/`scope_reason` (off-audience review flags), `needs_content_check`/`content_check_reason` (durability audit item 1: set by `ingest_url` right after a fresh fetch fails `extract.assess_extraction_quality()` — never blocks the save, only flags it; cleared by `set_article_content_html` the moment a later backfill succeeds), `is_own_content` (FP&A Buddy published-content ingestion, 2026-09 — a **provenance flag, not a ranking signal**; see "Published-content ingestion" under FP&A Buddy below) |
+| `articles` | The archive: ~1,500+ curated articles. **URL is the natural key** (`UNIQUE`, normalized) — upserts merge tags and fill empty fields, never duplicate. | `url`, `summary` (Claude-generated, the member-facing asset), `content` (fetched full text — internal input only, never served), `tags_json`/`tags_text` (structured list + flattened copy for FTS), `enriched`/`enrich_model`/`enrich_rules` (provenance), `in_scope`/`scope_reason` — **frozen, not dropped, as of PR 4 (2026-09)**: the enricher no longer judges audience fit at all (the archive is hand-curated one article at a time now, so this bulk-import-era pre-filter had nothing left to do; production had 0 flagged rows at retirement time) — always `1`/`''` going forward, kept for non-destructive-retirement reasons only. `needs_content_check`/`content_check_reason` (durability audit item 1: set by `ingest_url` right after a fresh fetch fails `extract.assess_extraction_quality()` — never blocks the save, only flags it; cleared by `set_article_content_html` the moment a later backfill succeeds), `is_own_content` (FP&A Buddy published-content ingestion, 2026-09 — a **provenance flag, not a ranking signal**; see "Published-content ingestion" under FP&A Buddy below) |
 | `articles_fts` | FTS5 virtual table (`content='articles'`, porter tokenizer) over title/author/source/summary/content/notes/tags_text. | Kept in sync by three triggers (`articles_ai`/`_ad`/`_au`) on insert/delete/update — no manual reindex, ever. |
 | `articles_vec` | `sqlite-vec` vec0 virtual table (#93) — one embedding vector per article, `rowid = articles.id` (same external-content-by-rowid idiom as `articles_fts`, minus trigger sync — see §4, "Hybrid retrieval..."). Powers the vector half of hybrid retrieval. | `embedding` (`float[1536]`, OpenAI `text-embedding-3-small`) |
 | `article_embeddings` | Companion ledger table (#93): which articles are embedded, with what text, and at what cost. Also **an overhead-cost ledger** for embed-on-save/backfill spend — never summed into `ask_questions`, never counts toward a user's Ask cap. Its sibling ledger, `enrichment_cost` (#105), covers enrichment spend; the two stay separate rather than sharing a schema — see §4, "Embedding cost is split by who pays for it" and "Enrichment cost gets its own ledger, not a shared one" below. | `article_id` (PK), `content_hash` (of the exact embedded text — detects staleness after an edit), `model`, `input_tokens`, `cost_usd` |
@@ -1933,7 +1933,7 @@ erDiagram
         text content "internal grounding input only"
         text tags_json
         int enriched
-        int in_scope
+        int in_scope "FROZEN, PR 4 2026-09 — always 1 now"
     }
     ask_questions {
         int id PK
@@ -5558,16 +5558,21 @@ segment, silently 404ing forever, so the UI never live-updated without a
 full page reload. The redirect (not a hard removal) is deliberate: this was
 a real bookmarked admin tool, not a public URL nobody had saved.
 
-The remaining 7 `/admin/library` tools are grouped into three labeled
-sections:
+The remaining 6 `/admin/library` tools (this count was 7 as of Phase 6,
+before PR 4's "Remove content" retirement below) are grouped into three
+labeled sections:
 - **Archive additions & backup** — bringing new content in, plus protecting
   what's already there: Archive Queue (which now contains the merged
   Historical sweep panel) and the ongoing feed-scan button on the same
   page, plus Archive backup.
 - **Existing archive management** — working with what's already saved:
-  Reader content backfill, Content de-dupe, Remove content.
+  Reader content backfill, Content de-dupe.
 - **Tagging** — how tags get created, taught, and kept tidy: Tag cleanup,
   Tagging style, Enrich archive.
+
+(A "Bulk delete articles" tool was added after this phase — see `/admin/library`'s
+live route list in `webapp/app.py`'s `_LIBRARY_TOOLS` for the current, authoritative
+set rather than treating this count as exact going forward.)
 
 Two placements were genuinely ambiguous and decided by judgment rather than
 silently. **Archive backup** first shipped as its own standalone,
@@ -5697,8 +5702,10 @@ backup") is explicitly no longer required.
 - **Lower-right** — Archive additions & backup (unchanged content).
 
 `/admin/library/feeds` remains a `_LIBRARY_TOOLS` entry (so the Admin hub's
-Library card counts 9 tools and the link picks up badge support); only where its
-card renders changed.
+Library card counts toward its badge support); only where its card renders
+changed. (The exact tool count named here — 9 at the time of this phase — has
+since drifted with later additions/retirements; see `_LIBRARY_TOOLS` in
+`webapp/app.py` for the live, authoritative list rather than this number.)
 
 **Mobile** collapses to one column at the same 900px breakpoint. DOM order is
 column-major (new, tags, existing, backup) but the required reading order is
@@ -5738,6 +5745,109 @@ user-visible label only — `view=saved` stays the URL param (`GET
 `saved_total`, `saved_tags`, the `view == "saved"` branches) is unchanged,
 to keep the diff purely cosmetic and avoid touching any tested route
 contract.
+
+### "Remove content" retirement, PR 4 (2026-09)
+
+`/admin/library/review-removals` ("Remove content" — see the quadrant
+bullets above) is removed outright, along with its three sub-routes
+(`/check-link`, `/keep`, `/remove`), its `_LIBRARY_TOOLS` entry, its slot in
+the "Existing archive management" quadrant, and its `webapp.tasks`
+open-task badge (`lib.flagged_count()`). It was scaffolding for the initial
+bulk Feedly import — a Claude-judged "is this off-audience?" pre-filter
+(podcasts, VC-career content, annual predictions) that surfaced flagged
+rows for a human to keep-or-remove. The archive is now curated one article
+at a time by hand, so that pre-filter has nothing left to do; production
+had **zero** articles with `in_scope=0` at the time this was retired — no
+data migration, no unbury step, nothing to preserve.
+
+**Investigated first, per the standing gate, before any removal**: a full
+grep of every reader of `articles.in_scope` across `webapp/`, `linklib/`,
+and `scripts/` found the flag was **read nowhere outside the
+review-removals feature itself** — not by the Reader (`linklib/feed.py`,
+`/read`/`/read/{id}`/`/api/read-article`), not by `Library.search()` or
+`Library.vector_search()`, not by `linklib.agent.retrieve()`/
+`retrieve_feed()` (FP&A Buddy's library/feed retrieval), and not by the
+matchmaker. The one query touching `in_scope=0` beyond the feature's own
+`list_flagged()`/`flagged_count()`/`keep_article()` was the
+`/check-link` sub-route's own restriction (never propose a link-health
+check for an article outside the flagged set) — removed along with the
+route it belonged to. So `in_scope=0` was purely a "flagged for review"
+bookkeeping fact, never an exclusion filter on normal display, search, or
+retrieval — the one real behavior change this PR causes is that a
+found-off-audience article (there are currently none) simply stays
+visible everywhere exactly like any other, since there's no longer a
+review queue to route it through. No fifth "default the filter to include
+everything" change was needed, because no filter to default ever existed
+outside this one feature.
+
+**A separate, real side effect this same grep surfaced**: `linklib.enrich.enrich()`
+is shared by both the post-save enrichment pipeline (`linklib/pipeline.py`)
+AND `linklib/queue.py`'s pre-queue candidate scoring — `_enrich_candidate()`
+read the SAME `result.in_scope` signal to skip an off-audience candidate
+before it was ever proposed into the Archive Queue at all
+(`scan_feed_into_queue`'s ongoing feed scan, and the sitemap-backfill
+Historical sweep — both tracked a `skipped_scope` stat, shown on
+`/admin/library/queue` as "N skipped as off-audience"). Since the prompt
+instruction asking Claude to judge audience fit is removed from `enrich()`
+entirely (not just discarded downstream), this pre-queue skip mechanism
+is now dead too — `cand.pop("in_scope", True)` always resolves to the
+default and never skips. Rather than leave that as silently-inert dead
+code, it's removed outright in the same PR: `_enrich_candidate()` no
+longer tracks an `in_scope` value at all, both `cand.pop("in_scope", ...)`
+skip blocks are gone, `skipped_scope` is dropped from both functions'
+return/report dicts, and `/admin/library/queue`'s sweep-report copy no
+longer mentions an off-audience count. This is a genuine behavior change
+beyond the review-removals page itself — a would-be off-audience
+candidate (podcasts, VC-career content) now flows into the Archive Queue
+for the admin's own one-at-a-time review, instead of being silently
+filtered out before ever reaching it — consistent with the same "hand-
+curated, one article at a time" reasoning the retirement itself rests on.
+
+`linklib.enrich.Enrichment`'s `in_scope`/`scope_reason` fields are dropped
+from the dataclass (nothing computes a value for either any more); every
+caller that used to thread `result.in_scope`/`result.scope_reason` into
+`Library.apply_enrichment(in_scope=..., scope_reason=...)`
+(`linklib/pipeline.py`'s two call sites) now calls it with neither kwarg,
+relying on the method's own `True`/`""` defaults — `apply_enrichment`
+itself keeps both parameters, unchanged in shape, purely so the column
+write stays explicit (see the `articles.in_scope` schema-comment above for
+the full non-destructive-retirement note). `Library.list_flagged`/
+`flagged_count`/`keep_article` — the three methods that existed solely for
+this feature, confirmed by the same grep to have no other caller — are
+deleted outright.
+
+**A dedicated test file DID exist and was missed by the original grep** —
+`tests/test_scope_rules.py`, asserting the prompt's permanent audience-only
+exclusion language directly against `enrich._PROMPT`. The original grep
+searched for `review-removals|list_flagged|flagged_count|keep_article` and
+separately `in_scope|scope_reason|skipped_scope`, and somehow this file's
+own match didn't surface in the captured results — it only turned up as a
+real failure in the full local test-suite run, `test_prompt_is_audience_only`
+asserting `"career in venture capital" in enrich._PROMPT.lower()`, which the
+retirement makes false. Rewritten in full: it now asserts the audience-scope
+judgment is gone from the prompt entirely (`"career in venture capital"`,
+`"in_scope"`, and `"scope_reason"` all absent), that `Enrichment`'s
+dataclass fields no longer include `in_scope`/`scope_reason`, and that the
+already-retired cleanup-mode mechanism (unrelated, checked separately) stays
+gone. `ENRICH_RULES_VERSION` was bumped from `"v4"` to `"v5"` alongside this
+— the prompt's own comment says "BUMP THIS whenever `_PROMPT` changes," and
+the prompt genuinely changed (two of its four JSON keys, and their entire
+governing rule, removed) — with `test_rules_version` updated to match.
+
+Beyond that dedicated file, coverage was also scattered across
+`tests/test_admin_library_layout.py` (a quadrant-contents assertion, updated
+for the "Existing archive management" quadrant's tool count),
+`tests/test_feed_cookie_flag.py` (a separate quadrant-tool-count assertion
+that also needed updating — `lib-q-existing` dropped from 4 to 3 tools),
+`tests/test_task_badges.py` (`flagged_count()` shape — the removed test
+replaced with a narrower one pinning only `queue_count()`, the badge concept
+that's still real), `tests/test_reenrich.py` (a full scope-flag-and-keep
+round trip, replaced with a test asserting `in_scope` lands at its frozen
+default of `1` regardless of content), and two mocked-JSON-payload fixtures
+(`tests/test_tag_style.py`, `tests/test_enrichment_cost_accounting.py`) that
+included now-unused `in_scope`/`scope_reason` keys — each updated or removed
+in place rather than skipped, per the standing "delete removed tests, don't
+skip them" rule.
 
 ### Admin URL convention, Phase 1b PR 1 (2026-08)
 

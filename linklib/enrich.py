@@ -190,7 +190,11 @@ _STRUCTURE_GUIDANCE = (
 # Version of the enrichment "rules" (the prompt below). Stored alongside each
 # article's enrichment so you can tell which ruleset produced a given summary,
 # and re-run rows enriched under older rules. BUMP THIS whenever _PROMPT changes.
-ENRICH_RULES_VERSION = "v4"
+# v5 (PR 4, "Remove content" retirement, 2026-09): the audience-scope judgment
+# (the in_scope/scope_reason JSON keys and their VC-career-content exclusion
+# rule) was removed from the prompt entirely — see linklib/db.py's
+# articles.in_scope column comment for the full retirement note.
+ENRICH_RULES_VERSION = "v5"
 
 # Floor for every generate_*() call's max_tokens below. Claude's on-by-default
 # adaptive thinking shares the same budget as the response (max_tokens caps
@@ -228,7 +232,7 @@ summary must be substantive and retrievable — it is the material the assistant
 reasons from, not a teaser.
 
 Given an article's title and text, return STRICT JSON only (no prose, no markdown
-fences) with exactly these four keys:
+fences) with exactly these two keys:
 
   "summary": 4-7 sentences, written to be retrieved and reasoned from. Lead with
      the article's central claim or recommendation. Include the specific figures
@@ -243,21 +247,6 @@ fences) with exactly these four keys:
 
      Only invent a new lowercase tag when nothing in the vocabulary fits.
 {guide_block}
-  "in_scope": true or false. TRUE if this is a WRITTEN ARTICLE useful to a finance
-     leader, founder, or executive at a high-growth tech company — INCLUDING venture
-     capital and fundraising content that helps operators (how investors evaluate
-     metrics, term sheets, board management, raising a round).
-
-     The audience is OPERATORS — finance leaders, founders, and executives running
-     companies. So return FALSE when the piece is off-audience — most importantly
-     content about pursuing a personal CAREER in venture capital (how to break into
-     VC, get a job at a fund, become an investor), or material unrelated to
-     operating and finance leadership.
-     Otherwise, when in doubt, return true.
-
-  "scope_reason": one short phrase explaining the in_scope decision (e.g.
-     "operator fundraising guidance - keep", "how to get a job in VC - off-audience").
-
 Title: {title}
 
 Text:
@@ -271,8 +260,9 @@ class Enrichment:
     tags: list[str]
     model: str = ""           # model that produced this enrichment
     rules_version: str = ""   # ENRICH_RULES_VERSION at the time
-    in_scope: bool = True     # False = off-audience (e.g. how-to-get-into-VC)
-    scope_reason: str = ""    # short rationale for the in_scope call
+    # in_scope/scope_reason retired (PR 4, "Remove content" retirement) — the
+    # enricher no longer judges audience fit at all. See linklib/db.py's
+    # articles.in_scope column comment for the full retirement note.
     input_tokens: int = 0     # real usage from this call, for the overhead-cost
     output_tokens: int = 0    # ledger (linklib.db.Library.record_enrichment_cost,
     cost_usd: float = 0.0     # issue #105) — callers persist it, not enrich() itself
@@ -301,7 +291,7 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=_checked_max_tokens(2000),  # room for a fuller answer-bearing summary + scope
+            max_tokens=_checked_max_tokens(2000),  # room for a fuller answer-bearing summary
                               # JSON, plus headroom for Opus 5's on-by-default adaptive thinking
                               # (max_tokens caps thinking + response together)
             messages=[{"role": "user", "content": _PROMPT.format(known=known, guide_block=guide_block, title=title, text=snippet)}],
@@ -322,8 +312,6 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         return Enrichment(
             summary=str(data.get("summary", "")).strip(), tags=tags,
             model=model, rules_version=ENRICH_RULES_VERSION,
-            in_scope=bool(data.get("in_scope", True)),
-            scope_reason=str(data.get("scope_reason", "")).strip(),
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:

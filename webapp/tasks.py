@@ -65,9 +65,9 @@ def _failing_checks_count() -> int:
 def open_task_counts(lib: Library) -> dict[str, int]:
     """Non-zero open-task counts keyed by the admin href they badge."""
     counts = {
-        # The Archive Queue's own "pending" badge was retired along with the
-        # queue itself — 2026-09, PR 3.
-        "/admin/library/review-removals": lib.flagged_count(),
+        # The Archive Queue's own "pending" badge (2026-09, PR 3) and the
+        # "Remove content" review-queue badge (2026-09, PR 4) were both
+        # retired along with their underlying features — see CLAUDE.md.
         "/admin/contacts": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
         # 2026-09: both Software's and Communities' badges used to be a SUM
         # of two separate counts (pending-approval + needing-review) —

@@ -659,3 +659,7 @@ def test_duplicate_section_name_is_rejected(app_env):
         resp = client.post("/admin/library/feeds/sections/new",
                            data={"name": "blogs"}, follow_redirects=False)
     assert "error=" in resp.headers["location"]
+
+# Archive-queue exclusion tests (queue scan / sitemap sweep skipping
+# read-only feeds) were removed — 2026-09, PR 3 — along with the Archive
+# Queue itself. See CLAUDE.md's "Archive Queue retired outright" bullet.
