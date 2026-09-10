@@ -19650,7 +19650,7 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
     # row form and the reader's inline editor). Native <datalist>, same pattern
     # the overhead-category admin inputs already use — no JS autocomplete
     # widget, and it degrades to a plain text input where unsupported. This is
-    # the same vocabulary /admin/library/tags curates, read live from all_tags().
+    # the same vocabulary /admin/reader/tag-management curates, read live from all_tags().
     tag_vocab_html = (
         '<datalist id="rr-tag-vocab">'
         + "".join(f'<option value="{_esc(t)}"></option>' for t in tag_vocab)
@@ -21500,9 +21500,10 @@ _LIBRARY_TOOLS = [
     ("/admin/reader/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
     ("/admin/reader/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. It re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
     ("/admin/reader/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
-    ("/admin/library/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
-    ("/admin/library/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
-    ("/admin/reader/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content—this is the material FP&A Buddy reads from, so depth here pays off there."),
+    # Tag cleanup and Tagging style merged into one page (PR 7, 2026-09) — see
+    # admin_tag_management()'s own docstring for the two-section structure.
+    ("/admin/reader/tag-management", "Tag cleanup &amp; style", "Merge, rename, or remove existing tags, and edit the guide that steers how new ones get chosen."),
+    ("/admin/reader/enrich",       "Enrich archive",      "Uses Claude to draft a summary and tags for each saved article. This is where new tags get created."),
     ("/admin/reader/bulk-delete",   "Bulk delete articles", "Permanently remove a specific list of articles you've already decided aren't needed&mdash;paste their URLs into the CSV template, mark <code>confirm_delete</code>, and re-upload. For a known list, not a scan&mdash;different from the &lt;60-word Purge tool under Reader content backfill. A single article can also be removed straight from its Reader toolbar."),
 ]
 
@@ -24272,7 +24273,7 @@ def admin_library(request: Request):
 
     tag_mgmt_html = _lib_section(
         "Tag management",
-        ["/admin/library/tags", "/admin/library/tag-style", "/admin/reader/enrich"],
+        ["/admin/reader/tag-management", "/admin/reader/enrich"],
         "How tags get created, taught, and kept tidy&mdash;and the summaries that ride along with them.")
 
     # Reader route moves (PR 6, 2026-09): Archive backup's card left this page
@@ -25050,16 +25051,31 @@ def _tag_merge_background() -> None:
         lib.close()
 
 
-@app.get("/admin/library/tags", response_class=HTMLResponse)
-def admin_tags(request: Request, msg: str = "", merging: int = 0):
+@app.get("/admin/reader/tag-management", response_class=HTMLResponse)
+def admin_tag_management(request: Request, msg: str = "", merging: int = 0, generating: int = 0):
+    """Merged Tag cleanup + Tagging style (PR 7, 2026-09) — one page, two
+    sections. Tag cleanup acts on tags articles already carry (a data-cleanup
+    tool); Tagging style shapes tags that don't exist yet (configuration for
+    future auto-tagging). Kept as two clearly headed sections rather than
+    blended or collapsed — both are used regularly enough that a disclosure
+    would just add a click, not reduce clutter. Section copy below is carried
+    over from the two original pages verbatim, not rewritten to the
+    plain-language standard the new page intro is piloting — see the PR
+    description for the inventory of what a future site-wide copy pass still
+    needs to touch."""
     if not _is_authed(request):
         return _login_redirect(request)
     import json as _json
+    from linklib import tagstyle
     lib = _lib()
     try:
         tags = lib.all_tags()   # [(tag, count)] desc by count
         proposals = _json.loads(lib.get_setting("tag_merge_suggestions") or "[]")
         merge_status = lib.get_setting("tag_merge_status")
+        guide = lib.get_setting("tag_guide")
+        style_status = lib.get_setting("tag_guide_status")
+        objective = tagstyle.get_tag_objective(lib)
+        n_tags = len(tags)
     finally:
         lib.close()
 
@@ -25094,7 +25110,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
     <span style="color:var(--muted);"> &rarr; </span><strong>{canon}</strong>
     {f'<span style="color:var(--muted);font-size:12px;"> &middot; {reason}</span>' if reason else ''}
   </div>
-  <form method="post" action="/admin/library/tags/merge-group" style="margin:0;">
+  <form method="post" action="/admin/reader/tag-management/tags/merge-group" style="margin:0;">
     <input type="hidden" name="canonical" value="{canon}"><textarea name="merge" style="display:none;">{merges_val}</textarea>
     <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Merge</button>
   </form>
@@ -25102,7 +25118,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
             merge_html = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 18px;margin-bottom:18px;">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <strong style="font-family:var(--font-head);font-size:15px;color:var(--navy);">Proposed merges ({len(groups)})</strong>
-    <form method="post" action="/admin/library/tags/merge-all" style="margin:0;" onsubmit="return confirm('Apply all {len(groups)} proposed merges?');"><button type="submit" class="btn" style="font-size:13px;padding:6px 16px;">Apply all</button></form>
+    <form method="post" action="/admin/reader/tag-management/tags/merge-all" style="margin:0;" onsubmit="return confirm('Apply all {len(groups)} proposed merges?');"><button type="submit" class="btn" style="font-size:13px;padding:6px 16px;">Apply all</button></form>
   </div>
   {cards}
 </div>"""
@@ -25114,14 +25130,14 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
   <td style="padding:9px 12px;font-size:14px;font-weight:500;">{t}</td>
   <td style="padding:9px 12px;font-size:13px;color:var(--muted);">{count:,}</td>
   <td style="padding:9px 12px;">
-    <form method="post" action="/admin/library/tags/rename" style="display:flex;gap:6px;align-items:center;margin:0;">
+    <form method="post" action="/admin/reader/tag-management/tags/rename" style="display:flex;gap:6px;align-items:center;margin:0;">
       <input type="hidden" name="old" value="{t}">
       <input type="text" name="new" value="{t}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:180px;">
       <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Rename</button>
     </form>
   </td>
   <td style="padding:9px 12px;">
-    <form method="post" action="/admin/library/tags/delete" style="margin:0;" onsubmit="return confirm('Remove the tag &quot;{t}&quot; from every article?');">
+    <form method="post" action="/admin/reader/tag-management/tags/delete" style="margin:0;" onsubmit="return confirm('Remove the tag &quot;{t}&quot; from every article?');">
       <input type="hidden" name="tag" value="{t}">
       <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
     </form>
@@ -25130,9 +25146,27 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
     if not tags:
         rows = '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--muted);">No tags yet.</td></tr>'
 
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
-<h1>Tag cleanup</h1>
+    # --- Section 2 data: Tagging style (configuration — how future tags get
+    # chosen, as opposed to section 1's cleanup of tags that already exist).
+    is_generating = bool(generating) or style_status == "generating"
+    style_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
+                     'padding:12px 16px;margin-bottom:18px;font-size:14px;color:var(--seafoam-deep);">'
+                     'Studying your archive in the background&mdash;reload in about a minute to see the guide.</div>'
+                     if is_generating else '')
+    has_guide = bool(guide and guide.strip())
+    state_badge = ('<span style="font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Active</span>'
+                   if has_guide else
+                   '<span style="font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;">Not set&mdash;auto-tagging uses your vocabulary only</span>')
+    gen_label = "Re-learn from my archive" if has_guide else "Learn from my archive"
+
+    def _section_header(title_html: str) -> str:
+        """Same h2/border-top pattern used elsewhere on the admin surface
+        (e.g. the Community profile edit page's section dividers) — reused
+        here, not a new style, to divide the two halves of this page."""
+        return (f'<h2 style="font-size:18px;font-weight:600;margin:32px 0 16px;'
+                f'padding-top:24px;border-top:1px solid var(--line);">{title_html}</h2>')
+
+    section1_html = f"""{_section_header("Tag cleanup")}
 <p style="color:var(--muted);margin:-6px 0 6px;">Tags are generated automatically during enrichment. Use this to tidy the vocabulary:</p>
 <ul style="color:var(--muted);margin:0 0 10px;padding-left:20px;">
 <li><strong>Renaming</strong> a tag to one that already exists merges them.</li>
@@ -25142,7 +25176,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
 {banner}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap;">
   <p style="font-size:13px;color:var(--muted);margin:0;">{len(tags)} tags across the archive</p>
-  <form method="post" action="/admin/library/tags/suggest-merges" style="margin:0;"><button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Suggest merges</button></form>
+  <form method="post" action="/admin/reader/tag-management/tags/suggest-merges" style="margin:0;"><button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Suggest merges</button></form>
 </div>
 {merge_html}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
@@ -25155,20 +25189,61 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
-</div>
 </div>"""
-    return HTMLResponse(_page("Tag cleanup—Admin", "Admin", body, authed=True))
+
+    section2_html = f"""{_section_header(f"Tagging style{state_badge}")}
+<p style="color:var(--muted);margin:-6px 0 6px;">Auto-tagging already reuses your vocabulary. This goes further—it studies <strong>how</strong> you tagged your {n_tags} tags:</p>
+<ul style="color:var(--muted);margin:0 0 8px;padding-left:20px;">
+<li>What each tag means.</li>
+<li>How granular you go.</li>
+<li>What you leave untagged.</li>
+</ul>
+<p style="color:var(--muted);margin:0 0 6px;">From that, it distills soft rules injected into enrichment, so new tags match your judgment.</p>
+<p style="color:var(--muted);margin:0 0 18px;">Review and edit anything below&mdash;your edits are what the tagger follows.</p>
+{style_notice}
+
+<form method="post" action="/admin/reader/tag-management/tag-style/objective" style="margin:0 0 22px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;">
+  <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging objective&mdash;why these tags exist</label>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">The north star for tagging. It steers both the learning below and live auto-tagging, even before a guide exists. Frame it around the jobs a strategic finance leader gets pulled into.</p>
+  <textarea name="objective" rows="5" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(objective)}</textarea>
+  <button type="submit" class="btn" style="font-size:14px;padding:8px 18px;margin-top:10px;">Save objective</button>
+</form>
+
+<form method="post" action="/admin/reader/tag-management/tag-style/generate" style="margin:0 0 18px;">
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" {"disabled style='opacity:.5;'" if is_generating else ""}>{gen_label}</button>
+  <span style="font-size:13px;color:var(--muted);margin-left:12px;">Reads your tags + example articles and writes the guide. Runs in the background.</span>
+</form>
+
+<form method="post" action="/admin/reader/tag-management/tag-style/save" style="margin:0;">
+  <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging guide</label>
+  <textarea name="guide" rows="20" placeholder="Click “{gen_label}” to draft this from your archive, or write your own rules here."
+    style="width:100%;padding:14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(guide)}</textarea>
+  <div style="display:flex;gap:10px;margin-top:12px;">
+    <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Save guide</button>
+    <button type="submit" formaction="/admin/reader/tag-management/tag-style/clear" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;color:#b91c1c;border-color:#fca5a5;"
+      onclick="return confirm('Clear the tagging guide? Auto-tagging will fall back to vocabulary only.');">Clear</button>
+  </div>
+</form>"""
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<h1>Tag cleanup &amp; style</h1>
+<p style="color:var(--muted);margin:-6px 0 6px;">This page does two jobs. Tag cleanup fixes tags already on your saved articles. Tagging style controls how new tags get chosen automatically.</p>
+{section1_html}
+{section2_html}
+</div>"""
+    return HTMLResponse(_page("Tag cleanup & style—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/library/tags/suggest-merges")
+@app.post("/admin/reader/tag-management/tags/suggest-merges")
 def admin_tags_suggest_merges(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
     background_tasks.add_task(_tag_merge_background)
-    return RedirectResponse("/admin/library/tags?merging=1", status_code=303)
+    return RedirectResponse("/admin/reader/tag-management?merging=1", status_code=303)
 
 
-@app.post("/admin/library/tags/merge-group")
+@app.post("/admin/reader/tag-management/tags/merge-group")
 async def admin_tags_merge_group(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25186,10 +25261,10 @@ async def admin_tags_merge_group(request: Request, background_tasks: BackgroundT
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
     msg = f'Merged {len(merges)} tag{"s" if len(merges) != 1 else ""} into “{canonical}” ({total} article updates).'
-    return RedirectResponse(f"/admin/library/tags?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/reader/tag-management?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/library/tags/merge-all")
+@app.post("/admin/reader/tag-management/tags/merge-all")
 def admin_tags_merge_all(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25211,11 +25286,11 @@ def admin_tags_merge_all(request: Request, background_tasks: BackgroundTasks):
     finally:
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
-    return RedirectResponse(f"/admin/library/tags?msg={quote(f'Applied all proposed merges ({applied} tags folded in).')}",
+    return RedirectResponse(f"/admin/reader/tag-management?msg={quote(f'Applied all proposed merges ({applied} tags folded in).')}",
                             status_code=303)
 
 
-@app.post("/admin/library/tags/rename")
+@app.post("/admin/reader/tag-management/tags/rename")
 async def admin_tags_rename(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25231,10 +25306,10 @@ async def admin_tags_rename(request: Request, background_tasks: BackgroundTasks)
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
     msg = f'Renamed “{old}” → “{new}” on {n} article{"s" if n != 1 else ""}.' if n else f'No change—“{old}” not found.'
-    return RedirectResponse(f"/admin/library/tags?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/reader/tag-management?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/library/tags/delete")
+@app.post("/admin/reader/tag-management/tags/delete")
 async def admin_tags_delete(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25249,7 +25324,7 @@ async def admin_tags_delete(request: Request, background_tasks: BackgroundTasks)
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
     msg = f'Removed “{tag}” from {n} article{"s" if n != 1 else ""}.'
-    return RedirectResponse(f"/admin/library/tags?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/reader/tag-management?msg={quote(msg)}", status_code=303)
 
 
 def _tag_guide_background() -> None:
@@ -25271,73 +25346,7 @@ def _tag_guide_background() -> None:
         lib.close()
 
 
-@app.get("/admin/library/tag-style", response_class=HTMLResponse)
-def admin_tag_style(request: Request, generating: int = 0):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    from linklib import tagstyle
-    lib = _lib()
-    try:
-        guide = lib.get_setting("tag_guide")
-        status = lib.get_setting("tag_guide_status")
-        objective = tagstyle.get_tag_objective(lib)
-        n_tags = len(lib.all_tags())
-    finally:
-        lib.close()
-
-    is_generating = bool(generating) or status == "generating"
-    notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
-              'padding:12px 16px;margin-bottom:18px;font-size:14px;color:var(--seafoam-deep);">'
-              'Studying your archive in the background&mdash;reload in about a minute to see the guide.</div>'
-              if is_generating else '')
-
-    has_guide = bool(guide and guide.strip())
-    state_badge = ('<span style="font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Active</span>'
-                   if has_guide else
-                   '<span style="font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;">Not set&mdash;auto-tagging uses your vocabulary only</span>')
-
-    gen_label = "Re-learn from my archive" if has_guide else "Learn from my archive"
-
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
-<h1>Tagging style{state_badge}</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Auto-tagging already reuses your vocabulary. This goes further—it studies <strong>how</strong> you tagged your {n_tags} tags:</p>
-<ul style="color:var(--muted);margin:0 0 8px;padding-left:20px;">
-<li>What each tag means.</li>
-<li>How granular you go.</li>
-<li>What you leave untagged.</li>
-</ul>
-<p style="color:var(--muted);margin:0 0 6px;">From that, it distills soft rules injected into enrichment, so new tags match your judgment.</p>
-<p style="color:var(--muted);margin:0 0 18px;">Review and edit anything below—your edits are what the tagger follows.</p>
-{notice}
-
-<form method="post" action="/admin/library/tag-style/objective" style="margin:0 0 22px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;">
-  <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging objective&mdash;why these tags exist</label>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">The north star for tagging. It steers both the learning below and live auto-tagging, even before a guide exists. Frame it around the jobs a strategic finance leader gets pulled into.</p>
-  <textarea name="objective" rows="5" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(objective)}</textarea>
-  <button type="submit" class="btn" style="font-size:14px;padding:8px 18px;margin-top:10px;">Save objective</button>
-</form>
-
-<form method="post" action="/admin/library/tag-style/generate" style="margin:0 0 18px;">
-  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" {"disabled style='opacity:.5;'" if is_generating else ""}>{gen_label}</button>
-  <span style="font-size:13px;color:var(--muted);margin-left:12px;">Reads your tags + example articles and writes the guide. Runs in the background.</span>
-</form>
-
-<form method="post" action="/admin/library/tag-style/save" style="margin:0;">
-  <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging guide</label>
-  <textarea name="guide" rows="20" placeholder="Click “{gen_label}” to draft this from your archive, or write your own rules here."
-    style="width:100%;padding:14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(guide)}</textarea>
-  <div style="display:flex;gap:10px;margin-top:12px;">
-    <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Save guide</button>
-    <button type="submit" formaction="/admin/library/tag-style/clear" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;color:#b91c1c;border-color:#fca5a5;"
-      onclick="return confirm('Clear the tagging guide? Auto-tagging will fall back to vocabulary only.');">Clear</button>
-  </div>
-</form>
-</div>"""
-    return HTMLResponse(_page("Tagging style—Admin", "Admin", body, authed=True))
-
-
-@app.post("/admin/library/tag-style/generate")
+@app.post("/admin/reader/tag-management/tag-style/generate")
 def admin_tag_style_generate(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25347,10 +25356,10 @@ def admin_tag_style_generate(request: Request, background_tasks: BackgroundTasks
     finally:
         lib.close()
     background_tasks.add_task(_tag_guide_background)
-    return RedirectResponse("/admin/library/tag-style?generating=1", status_code=303)
+    return RedirectResponse("/admin/reader/tag-management?generating=1", status_code=303)
 
 
-@app.post("/admin/library/tag-style/save")
+@app.post("/admin/reader/tag-management/tag-style/save")
 async def admin_tag_style_save(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25361,10 +25370,10 @@ async def admin_tag_style_save(request: Request):
         lib.set_setting("tag_guide", guide)
     finally:
         lib.close()
-    return RedirectResponse("/admin/library/tag-style", status_code=303)
+    return RedirectResponse("/admin/reader/tag-management", status_code=303)
 
 
-@app.post("/admin/library/tag-style/objective")
+@app.post("/admin/reader/tag-management/tag-style/objective")
 async def admin_tag_style_objective(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25375,10 +25384,10 @@ async def admin_tag_style_objective(request: Request):
         lib.set_setting("tag_objective", objective)   # blank falls back to the default
     finally:
         lib.close()
-    return RedirectResponse("/admin/library/tag-style", status_code=303)
+    return RedirectResponse("/admin/reader/tag-management", status_code=303)
 
 
-@app.post("/admin/library/tag-style/clear")
+@app.post("/admin/reader/tag-management/tag-style/clear")
 async def admin_tag_style_clear(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25387,7 +25396,7 @@ async def admin_tag_style_clear(request: Request):
         lib.set_setting("tag_guide", "")
     finally:
         lib.close()
-    return RedirectResponse("/admin/library/tag-style", status_code=303)
+    return RedirectResponse("/admin/reader/tag-management", status_code=303)
 
 
 # ---------------------------------------------------------------------------
