@@ -55,12 +55,10 @@ def test_count_tool_leads_since(lib):
     assert lib.count_tool_leads_since("") == 1
 
 
-def test_queue_count_already_exists(lib):
-    # Backs the Archive Queue badge — pinning it's the right shape for tasks.py.
-    # (The sibling "in_scope"/flagged_count check this test used to also cover
-    # was removed in PR 4's "Remove content" retirement — see
-    # linklib/db.py's articles.in_scope column comment.)
-    assert lib.queue_count(status="pending") == 0
+# The Archive Queue badge (queue_count) and the "Remove content" badge
+# (flagged_count) were both retired along with their underlying features —
+# 2026-09, PR 3 and PR 4 respectively. See CLAUDE.md's "Archive Queue
+# retired outright" and "'Remove content' retired" bullets.
 
 
 def test_password_reset_request_lifecycle(lib):

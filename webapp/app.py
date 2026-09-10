@@ -600,9 +600,10 @@ def _seed_and_publish_feeds():
     edit made through the admin UI would otherwise survive only until the next
     deploy and then silently revert to whatever's in git. Rewriting it from
     the DB at startup makes the file a pure cache of the database, so its
-    ephemerality stops mattering and the four consumers that read it
-    (parse_opml, preferred_domains, scan_feed_into_queue, authcheck) need no
-    changes at all.
+    ephemerality stops mattering and the three consumers that read it
+    (parse_opml, preferred_domains, authcheck) need no changes at all.
+    (A fourth, scan_feed_into_queue — the now-retired Archive Queue's own
+    feed scan — was removed along with the queue itself, 2026-09, PR 3.)
 
     Both halves are individually guarded: seeding is settings-flagged so it
     happens exactly once per database (never resurrecting a deleted feed on a
@@ -6426,10 +6427,20 @@ def privacy_page(request: Request):
 
 # ---------------------------------------------------------------------------
 # Library submissions — a member-gated (any signed-in account) "suggest a
-# piece" form. Submissions land UN-ENRICHED in the Archive Queue (no
-# server-side fetch, no Claude call), so it can't be used to run up cost or
-# fetch arbitrary URLs even from a low-friction account. Brian reviews them
-# in /admin/library/queue; enrichment happens only on approval.
+# piece" form. A submission is never fetched or stored anywhere in this
+# app — it becomes one email to Brian (see the notify_to resolution below),
+# same as every other outward-facing submission form (contact, tool/
+# community submissions). No server-side fetch, no Claude call, so it can't
+# be used to run up cost or fetch arbitrary URLs even from a low-friction
+# account. Brian reads the email and saves the article himself with the
+# bookmarklet if it's a fit.
+#
+# Retired 2026-09 (PR 3): this used to insert UN-ENRICHED into the Archive
+# Queue (linklib/queue.py) for review at /admin/library/queue — that whole
+# mechanism (5,508 rows, 100% dismissed, 0 pending, 0 member submissions
+# ever in production) was retired outright, and this route became a plain
+# email notification in its place. See CLAUDE.md's Archive Queue retirement
+# note for the full reasoning.
 #
 # Reachable only by direct URL until the FP&A Buddy suggest-content link
 # (webapp/app.py's srcListHtml()) started pointing here.
@@ -6501,19 +6512,26 @@ async def library_submit(request: Request):
     email = (form.get("email") or "").strip()[:200]
 
     who = name or "anonymous"
-    note_bits = [f"Reader suggestion from {who}" + (f" ({email})" if email else "") + "."]
+    body_lines = [f"From: {who}" + (f" ({email})" if email else ""), "", url]
     if why:
-        note_bits.append(f"Why: {why}")
-    note = " ".join(note_bits)
+        body_lines += ["", f"Why: {why}"]
+    body = "\n".join(body_lines)
 
+    from linklib.email_utils import send_notification_email, default_notify_email
     lib = _lib()
     try:
-        # Un-enriched insert; no fetch. add_to_queue dedupes against library + queue.
-        lib.add_to_queue(url, source="Reader submissions", summary=note,
-                         origin=f"submission:{who}", enriched=False)
+        notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
+        if notify_to:
+            _send_email_safely(
+                lib, "library_submission", send_notification_email,
+                notify_to,
+                subject=f"Archive suggestion from {who}",
+                body=body,
+                notification_type="library_submission",
+            )
     finally:
         lib.close()
-    # Always confirm — never reveal whether the URL was already in the archive.
+    # Always confirm — no queue/table to check, so there's nothing to leak either way.
     return RedirectResponse("/library/submit?submitted=1", status_code=303)
 
 # The 4-tile 2x2 CFO Toolbox grid (Phase 3, "Toolbox Illustration Concepts"
@@ -21468,16 +21486,20 @@ async def read_later_refresh(request: Request):
 # "Open Reader" was dropped from this list — it's not a management tool, and
 # it's reachable via a dedicated callout at the top of the page instead (see
 # admin_library()), plus Admin's own CFO Toolbox -> Library entry point.
-# "Historical sweep" was dropped too — merged into Archive Queue (see
-# admin_queue()'s Historical sweep panel; GET /admin/library/backfill now
-# redirects there). This list backs BOTH the flat description text below AND
-# admin_library()'s 3-way visual grouping (Archive backup stands outside all
-# three — see that function's own note on why).
+# "Historical sweep" and "Archive queue" are both gone outright (2026-09,
+# PR 3) — the Archive Queue mechanism they belonged to (linklib/queue.py,
+# the library_queue table) was retired: a production query found 5,508 rows,
+# all dismissed, 0 pending, 0 member submissions ever, dormant for months —
+# the archive now grows by a couple articles a week via the bookmarklet,
+# which doesn't justify an AI-enriched proposal/review pipeline. See
+# CLAUDE.md's Archive Queue retirement note. This list backs BOTH the flat
+# description text below AND admin_library()'s 3-way visual grouping
+# (Archive backup stands outside all three — see that function's own note
+# on why).
 _LIBRARY_TOOLS = [
-    ("/admin/library/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into sections, and set which ones are read-only (in the Reader, but never proposed into the archive queue). The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
+    ("/admin/library/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
     ("/admin/library/backup",       "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily on a schedule (a Railway Cron Service syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
-    ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. Different from Archive Queue's Historical sweep panel: this re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
-    ("/admin/library/queue",        "Archive queue",       "Review every proposed save—from an ongoing feed scan, or the page's own Historical sweep panel (a one-time catch-up on an older source's back catalog)—fix dates, edit tags, and approve into the archive or dismiss."),
+    ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. It re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
     ("/admin/library/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
     ("/admin/library/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
     ("/admin/library/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
@@ -21591,45 +21613,6 @@ _ADMIN_GROUPS = [
 # in this static list, so they're added explicitly here to keep this view
 # genuinely complete.
 _ADMIN_SECTIONS = _LIBRARY_TOOLS + _FPA_BUDDY_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
-
-
-def _content_flow_diagram(highlight: str = "") -> str:
-    """Shared visual for the Historical sweep and Archive Queue pages: two
-    producers (a one-time sitemap sweep, an ongoing feed scan) both land
-    candidates in one queue, which you review before anything joins the
-    Archive. Exists because those two pages read as redundant without it —
-    they're producer and consumer of the same table, not duplicate tools.
-    `highlight` outlines one stage ('sweep' | 'feed' | 'queue' | 'archive')
-    to orient the reader on the page they're currently viewing.
-    """
-    def _box(bg: str, border: str, label_color: str, title: str, sub: str, key: str) -> str:
-        ring = f"box-shadow:0 0 0 2px {border};" if key == highlight else ""
-        return (f'<div style="background:{bg};border:1px solid {border};border-radius:10px;'
-                f'padding:10px 14px;font-size:13px;line-height:1.5;{ring}">'
-                f'<strong style="color:{label_color};">{title}</strong><br>'
-                f'<span style="color:var(--muted);">{sub}</span></div>')
-
-    arrow = '<div style="padding:0 14px;color:var(--navy);font-size:20px;flex-shrink:0;">&rarr;</div>'
-    sources = (
-        '<div style="display:flex;flex-direction:column;gap:8px;">'
-        + _box("var(--seafoam-wash)", "var(--seafoam)", "var(--seafoam-deep)",
-               "Historical sweep", "one-time &middot; sitemap crawl &middot; reaches back in time", "sweep")
-        + _box("var(--seafoam-wash)", "var(--seafoam)", "var(--seafoam-deep)",
-               "Scan feed", "ongoing &middot; RSS &middot; keeps you current", "feed")
-        + '</div>'
-    )
-    queue = _box("var(--navy-wash)", "var(--navy-light)", "var(--navy)",
-                "Archive Queue", "you review, edit tags, approve or dismiss", "queue")
-    archive = _box("#fff", "var(--line)", "var(--ink)",
-                   "Archive", "searchable &middot; FP&amp;A Buddy reads from it", "archive")
-    return (
-        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;'
-        'padding:18px 22px;margin:0 0 22px;overflow-x:auto;">'
-        '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
-        'letter-spacing:.07em;margin-bottom:14px;">How new content reaches the archive</div>'
-        f'<div style="display:flex;align-items:center;gap:0;min-width:640px;">{sources}{arrow}{queue}{arrow}{archive}</div>'
-        '</div>'
-    )
 
 
 # Open-source the site is built on — celebrated on /admin/open-source.
@@ -24187,12 +24170,10 @@ def admin_library(request: Request):
     # both are about keeping the archive intact and current, not a single
     # curation pass over content that's already there. Renamed the section to
     # "Archive additions & backup" so the heading still says what's inside it.
-    # The flow diagram runs full width on its own now, between the intro and
-    # the quadrant grid. Nothing shares its row (Open Reader is a header action
-    # above), which also retires the phantom-margin height mismatch that row's
-    # `align-items:stretch` used to produce against the diagram card's own
-    # margin-bottom.
-    flow_html = _content_flow_diagram()
+    # (2026-09, PR 3: the section used to also hold the Archive Queue link and
+    # a full-width flow diagram above the quadrant grid — both retired along
+    # with the queue mechanism itself; see CLAUDE.md's Archive Queue
+    # retirement note. This is now just the backup card.)
 
     # Upper-left quadrant, "New content": the Manage feeds card over the two
     # capture-path accordions. Both halves keep their own shape — a _lib_card
@@ -24201,8 +24182,8 @@ def admin_library(request: Request):
     saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
 <div style="margin-bottom:22px;">{_lib_card(
     "/admin/library/feeds", "Manage feeds",
-    "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into "
-    "sections, and set which ones are read-only. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
+    "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into "
+    "sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
     "web search is restricted to.",
     _badge_for_href("/admin/library/feeds", task_counts.get("/admin/library/feeds", 0)))}</div>
 <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving to the archive</div>
@@ -24298,8 +24279,8 @@ def admin_library(request: Request):
         "Working with what's already saved.")
 
     archive_additions_html = _lib_section(
-        "Archive additions & backup", ["/admin/library/backup", "/admin/library/queue"],
-        "Bringing new content in&mdash;an ongoing feed scan plus an occasional historical sweep, both reviewed on one page before anything's saved&mdash;plus an on-demand snapshot for right before something risky.")
+        "Archive backup", ["/admin/library/backup"],
+        "An on-demand snapshot for right before something risky, on top of the daily automated one.")
 
     tag_mgmt_html = _lib_section(
         "Tag management",
@@ -24316,7 +24297,7 @@ def admin_library(request: Request):
    makes both cells in a row share that row's height, so expanding one quadrant
    pushed the whole next row down in both columns at once. Column independence
    is the deliberate trade-off: row-2 headings ("Tag management" vs "Archive
-   additions & backup") are no longer guaranteed to share a Y. */
+   backup") are no longer guaranteed to share a Y. */
 .lib-cols{{display:flex;gap:28px;align-items:flex-start;}}
 .lib-col{{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:34px;}}
 /* Quadrant boxes come from the shared `_disclosure_group` component (same row
@@ -24352,7 +24333,6 @@ def admin_library(request: Request):
   {open_reader_button}
 </div>
 <p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
-{flow_html}
 <div class="lib-cols">
 <div class="lib-col">
 <div class="lib-q-new">{saving_articles_html}</div>
@@ -24424,7 +24404,6 @@ def _feed_form_fields(sections: list, values: dict) -> str:
            "font:inherit;font-size:15px;background:#fff;box-sizing:border-box;")
     lab = "display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;"
     hint = "font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;"
-    exclude_checked = " checked" if values.get("exclude_from_queue") else ""
     sub_checked = " checked" if values.get("has_active_subscription") else ""
     cookie_readout = _feed_cookie_readout(values.get("xml_url", ""))
     return f"""  <div>
@@ -24447,14 +24426,7 @@ def _feed_form_fields(sections: list, values: dict) -> str:
     <label style="{lab}">Site URL <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
     <input type="url" name="html_url" value="{_esc(values.get('html_url', ''))}"
       placeholder="https://example.com/" style="{inp}">
-    <p style="{hint}">The publication's own address. This is the one FP&amp;A Buddy's web search is restricted to, and the one the historical sweep crawls for back catalog. Left blank, it's taken from the feed itself.</p>
-  </div>
-  <div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">
-      <input type="checkbox" name="exclude_from_queue" value="1"{exclude_checked}>
-      Read only
-    </label>
-    <p style="{hint}">Read it in the Reader, but never propose it into the archive queue. Set per feed, so one source in a section can be read-only without affecting the rest.</p>
+    <p style="{hint}">The publication's own address. This is the one FP&amp;A Buddy's web search is restricted to. Left blank, it's taken from the feed itself.</p>
   </div>
 {cookie_readout}  <div>
     <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">
@@ -24486,9 +24458,8 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
                     if error else '')
 
     # -- one flat feed table -------------------------------------------------
-    # Section is a per-row dropdown and read-only a per-row checkbox, both
-    # posting on change, so a feed's grouping and its queue eligibility are
-    # edited in place rather than through a section-level control.
+    # Section is a per-row dropdown, posting on change, so a feed's grouping
+    # is edited in place rather than through a section-level control.
     from linklib.extract import has_configured_cookie
     feed_rows = ""
     for f in feeds:
@@ -24506,12 +24477,6 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     <form method="post" action="/admin/library/feeds/{f['id']}/section" style="margin:0;">
       <select name="section_id" onchange="this.form.submit()" aria-label="Section for {_esc(f['name'])}"
         style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">{opts}</select>
-    </form>
-  </td>
-  <td class="ff-readonly">
-    <form method="post" action="/admin/library/feeds/{f['id']}/read-only" style="margin:0;">
-      <input type="checkbox" name="exclude_from_queue" value="1" onchange="this.form.submit()"
-        aria-label="Read only: {_esc(f['name'])}"{' checked' if f['exclude_from_queue'] else ''}>
     </form>
   </td>
   <td class="ff-cookie">
@@ -24536,7 +24501,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   </td>
 </tr>"""
     if not feeds:
-        feed_rows = ('<tr class="ff-row"><td colspan="7" class="ff-empty">'
+        feed_rows = ('<tr class="ff-row"><td colspan="6" class="ff-empty">'
                      'No feeds yet. Add a section below, then add a feed to it.</td></tr>')
 
     # -- manage sections: a table matching the feed table above --------------
@@ -24623,10 +24588,9 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .ff-url{{font-size:13px;color:var(--muted);width:23%;}}
 .ff-url a{{word-break:break-all;}}
 .ff-section{{width:14%;}}
-.ff-readonly{{width:8%;text-align:center;}}
 .ff-cookie{{width:10%;text-align:center;}}
 .ff-sub{{width:10%;text-align:center;}}
-.ff-actions{{width:17%;text-align:right;white-space:nowrap;}}
+.ff-actions{{width:25%;text-align:right;white-space:nowrap;}}
 .ff-empty{{padding:16px 12px;color:var(--muted);font-size:13.5px;}}
 /* Sections table — same shape as the feed table, three columns. */
 .fs-name{{width:50%;}}
@@ -24639,11 +24603,11 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
    everywhere, including touch, where there's no hover. */
 .fs-remove-off{{font-size:12px;padding:5px 12px;color:var(--muted);border-color:var(--line);
   opacity:.55;cursor:not-allowed;margin-left:4px;}}
-/* Below this width five columns can't coexist: the URL cell gets narrow enough
+/* Below this width the columns can't coexist: the URL cell gets narrow enough
    that word-break:break-all wraps a feed address one character per line, which
    turned a single row several hundred pixels tall on a phone. Stacking the
    cells gives each one the full width, with a label so the section dropdown
-   and the read-only box are still identifiable out of table context. */
+   is still identifiable out of table context. */
 @media (max-width:820px){{
   .ff-table,.ff-table tbody,.ff-row,.ff-row>td,
   .fs-table,.fs-table tbody,.fs-row,.fs-row>td{{display:block;width:auto;}}
@@ -24651,10 +24615,8 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   .ff-row,.fs-row{{border-top:1px solid var(--line);padding:10px 0;}}
   .ff-table tbody tr:first-child,.fs-table tbody tr:first-child{{border-top:0;}}
   .ff-row>td,.fs-row>td{{border-top:0;padding:3px 12px;}}
-  .ff-readonly,.ff-cookie,.ff-sub,.ff-actions,.fs-actions{{text-align:left;}}
+  .ff-cookie,.ff-sub,.ff-actions,.fs-actions{{text-align:left;}}
   .ff-section::before{{content:"Section";display:block;font-size:11.5px;color:var(--muted);
-    text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
-  .ff-readonly::before{{content:"Read only";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   /* Always labelled, unlike the cookie cell: this is a checkbox that carries
      meaning in both states, so an unchecked box still needs its label. */
@@ -24679,7 +24641,6 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <p style="color:var(--muted);margin:8px 0 6px;">The RSS subscriptions behind the Reader's Feed view. This same list is the domain allowlist FP&amp;A Buddy's web search is restricted to, so a source added here becomes citable there too. Changes take effect on the next page load, with no restart or deploy needed.</p>
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
-<li><strong>Read only</strong> feeds stay live in the Reader but are never proposed into the <a href="/admin/library/queue">archive queue</a>. It's set per feed, so one source in a section can be read-only without affecting the rest.</li>
 <li><strong>Cookie</strong> shows whether this feed's domain currently has a subscriber cookie configured &mdash; computed live from the host environment, not something you set here. Each domain's cookie lives in its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable, and <code>extract.fetch_page</code> applies it automatically wherever the domain matches (see <code>RUNBOOK.md</code> &sect;5 for finding and setting one). <strong>No cookie value is ever stored in this database</strong> &mdash; only the domain names checked are baked into the code.</li>
 <li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
 </ul>
@@ -24689,10 +24650,9 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     <thead><tr>
       <th style="width:18%;">Name</th><th style="width:23%;">URL</th>
       <th style="width:14%;">Section</th>
-      <th style="width:8%;text-align:center;">Read only</th>
       <th style="width:10%;text-align:center;">Cookie</th>
       <th style="width:10%;text-align:center;">Subscriber</th>
-      <th style="width:17%;text-align:right;">Actions</th>
+      <th style="width:25%;text-align:right;">Actions</th>
     </tr></thead>
     <tbody>{feed_rows}</tbody>
   </table>
@@ -24702,7 +24662,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 </p>
 
 <h2 style="font-size:17px;margin:34px 0 4px;">Manage sections</h2>
-<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Sections group feeds in the Reader's Sources rail. They carry no settings of their own: whether a source reaches the archive queue is set per feed in the table above. A section can only be removed once it's empty.</p>
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Sections group feeds in the Reader's Sources rail. They carry no settings of their own. A section can only be removed once it's empty.</p>
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;max-width:680px;">
   <table class="fs-table">
     <thead><tr>
@@ -24829,39 +24789,11 @@ async def admin_feeds_set_section(request: Request, feed_id: int):
     return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
 
 
-@app.post("/admin/library/feeds/{feed_id}/read-only")
-async def admin_feeds_set_read_only(request: Request, feed_id: int):
-    """Toggle a feed's archive-queue eligibility from the table's checkbox.
-
-    Same narrowness as the section route: exclude_from_queue only, never the
-    URL. An unchecked box posts no field at all, which is the off state.
-    """
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    form = await request.form()
-    excluded = bool(form.get("exclude_from_queue"))
-    lib = _lib()
-    try:
-        feed = lib.get_feed(feed_id)
-        if not feed:
-            raise HTTPException(status_code=404, detail="feed not found")
-        lib.set_feed_excluded(feed_id, excluded)
-        # No OPML rewrite: the file has no field for this flag, and the queue
-        # reads it straight from the DB. Regenerating here would be a no-op
-        # write that only churns the file's mtime.
-        state = "read only" if excluded else "eligible for the archive queue"
-        detail = f"{feed['name']} is now {state}."
-    finally:
-        lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
-
-
-
 @app.post("/admin/library/feeds/{feed_id}/subscription")
 async def admin_feeds_set_subscription(request: Request, feed_id: int):
     """Toggle the informational subscription flag from the table's checkbox.
 
-    Same narrowness as the read-only route: one column, never the URL. An
+    Same narrowness as the section route: one column, never the URL. An
     unchecked box posts no field at all, which is the off state.
 
     Nothing downstream reads this flag, so there's deliberately no OPML
@@ -24935,7 +24867,6 @@ async def admin_feeds_new_submit(request: Request):
         "xml_url": (form.get("xml_url") or "").strip(),
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
-        "exclude_from_queue": bool(form.get("exclude_from_queue")),
         # Informational only — nothing reads it.
         "has_active_subscription": bool(form.get("has_active_subscription")),
     }
@@ -24962,11 +24893,11 @@ async def admin_feeds_new_submit(request: Request):
 
         name = values["name"] or probe.title or values["xml_url"]
         html_url = values["html_url"] or probe.html_url
-        # has_paywall_cookie is no longer admin-settable — it's a frozen,
-        # unread historical column (see CLAUDE.md's Feeds-page Cookie
-        # indicator note), so every new feed just takes the column default.
+        # has_paywall_cookie and exclude_from_queue are no longer
+        # admin-settable — both are frozen, unread historical columns (see
+        # CLAUDE.md's Feeds-page Cookie indicator note and its Archive Queue
+        # retirement note), so every new feed just takes the column defaults.
         lib.add_feed(int(values["section_id"]), name, values["xml_url"], html_url,
-                     exclude_from_queue=values["exclude_from_queue"],
                      has_active_subscription=values["has_active_subscription"])
         _publish_feeds(lib)
     finally:
@@ -24988,7 +24919,6 @@ def admin_feeds_edit(request: Request, feed_id: int):
         raise HTTPException(status_code=404, detail="feed not found")
     values = {"name": feed["name"], "xml_url": feed["xml_url"],
               "html_url": feed["html_url"], "section_id": feed["section_id"],
-              "exclude_from_queue": bool(feed["exclude_from_queue"]),
               # Round-tripped so a save that doesn't touch this field can't
               # clear it — update_feed writes it on every call.
               "has_active_subscription": bool(feed["has_active_subscription"])}
@@ -25010,7 +24940,6 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
         "xml_url": (form.get("xml_url") or "").strip(),
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
-        "exclude_from_queue": bool(form.get("exclude_from_queue")),
         # Informational only — see the add route.
         "has_active_subscription": bool(form.get("has_active_subscription")),
     }
@@ -25048,12 +24977,13 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
                 return _reject(probe.error)
             html_url = values["html_url"] or probe.html_url
 
-        # has_paywall_cookie is no longer admin-settable (see the add-route
-        # comment) — preserve the row's existing value rather than letting
-        # update_feed's default overwrite it with False on every save.
+        # has_paywall_cookie and exclude_from_queue are no longer
+        # admin-settable (see the add-route comment) — preserve each row's
+        # existing value rather than letting update_feed's defaults
+        # overwrite them with False on every save.
         lib.update_feed(feed_id, int(values["section_id"]), values["name"],
                         values["xml_url"], html_url,
-                        exclude_from_queue=values["exclude_from_queue"],
+                        exclude_from_queue=bool(feed["exclude_from_queue"]),
                         has_paywall_cookie=bool(feed["has_paywall_cookie"]),
                         has_active_subscription=values["has_active_subscription"])
         _publish_feeds(lib)
@@ -25110,534 +25040,6 @@ def admin_auth_recheck(request: Request):
     # library-page-specific, so moving it under /admin/library/feeds/... would
     # make that second caller read oddly for no gain.
     return RedirectResponse("/admin/library/feeds", status_code=303)
-
-
-# ---------------------------------------------------------------------------
-# Archive Queue — staging area for proposed saves
-# ---------------------------------------------------------------------------
-
-def _scan_feed_background() -> None:
-    """Pull current feed items into the queue (enriched). Runs off-request."""
-    lib = _lib()
-    try:
-        from linklib.queue import scan_feed_into_queue
-        scan_feed_into_queue(lib, OPML_PATH)
-        backup.maybe_backup(DB_PATH)
-    except Exception:
-        pass
-    finally:
-        lib.close()
-
-
-def _embed_article_background(article_id: int) -> None:
-    """Best-effort embed-on-save for one promoted queue article (#93).
-    Off-request, mirroring the other _*_background jobs here: promotion
-    already returned to the admin before this runs, so a slow or failed
-    embedding call never delays the response — the article stays fully
-    searchable via FTS5 either way."""
-    lib = _lib()
-    try:
-        from linklib.pipeline import embed_article
-        embed_article(lib, article_id)
-    except Exception:
-        pass
-    finally:
-        lib.close()
-
-
-def _redate_background(source: str) -> None:
-    """Re-read true publish dates from article pages for a source. Off-request."""
-    lib = _lib()
-    try:
-        from linklib.queue import redate_from_article_pages
-        redate_from_article_pages(lib, source)
-        backup.maybe_backup(DB_PATH)
-    except Exception:
-        pass
-    finally:
-        lib.close()
-
-
-def _suggest_background(source: str) -> None:
-    """Predict keep/skip for a source's pending queue from past picks. Off-request.
-    Records a status so the queue page can show what happened (no silent no-ops)."""
-    import json as _json
-    from datetime import datetime, timezone
-    lib = _lib()
-    try:
-        from linklib.suggest import suggest_approvals
-        preds = suggest_approvals(lib, source)
-        now = datetime.now(timezone.utc).isoformat()
-        if preds is None:
-            note = (f"Couldn’t predict {source}. Approve a few articles first so it has "
-                    f"something to learn from—or the AI may be briefly unavailable.")
-            n = 0
-        elif not preds:
-            note = f"No pending candidates for {source}."
-            n = 0
-        else:
-            existing = _json.loads(lib.get_setting("queue_suggestions") or "{}")
-            existing.update(preds)
-            lib.set_setting("queue_suggestions", _json.dumps(existing))
-            n = len(preds)
-            note = f"Predicted {n} {source} candidate{'s' if n != 1 else ''} from your past picks."
-        lib.set_setting("queue_suggest_status",
-                        _json.dumps({"source": source, "n": n, "note": note, "at": now}))
-    except Exception as exc:
-        try:
-            from datetime import datetime, timezone
-            lib.set_setting("queue_suggest_status", _json.dumps(
-                {"source": source, "n": 0, "note": f"Prediction failed: {exc}",
-                 "at": datetime.now(timezone.utc).isoformat()}))
-        except Exception:
-            pass
-    finally:
-        lib.close()
-
-
-@app.get("/admin/library/queue", response_class=HTMLResponse)
-def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesting: int = 0):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        pending = lib.list_queue(status="pending")
-        dismissed_n = lib.queue_count(status="dismissed")
-        last_saved = lib.last_saved_at()
-        import json as _json
-        suggestions = _json.loads(lib.get_setting("queue_suggestions") or "{}")
-        suggest_status = _json.loads(lib.get_setting("queue_suggest_status") or "{}")
-    finally:
-        lib.close()
-
-    # Group by source so you can approve a whole publication at once.
-    groups: dict[str, list[dict]] = {}
-    for c in pending:
-        groups.setdefault(c.get("source") or "Other", []).append(c)
-
-    def _short_model(m: str) -> str:
-        # claude-opus-4-8 -> opus; claude-haiku-4-5-20251001 -> haiku
-        parts = (m or "").split("-")
-        return parts[1] if len(parts) > 1 and parts[0] == "claude" else (m or "")
-
-    def _badge(c: dict) -> str:
-        if c.get("enriched"):
-            label = "enriched"
-            sm = _short_model(c.get("enrich_model") or "")
-            if sm:
-                label = f"enriched &middot; {_esc(sm)}"
-            return ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
-                    f'background:var(--seafoam-wash);color:var(--seafoam-deep);">{label}</span>')
-        return ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
-                'background:var(--surface-2);color:var(--muted);">needs enrichment</span>')
-
-    def _card(c: dict) -> str:
-        url = _esc(c["url"])
-        title = _esc(c.get("title") or c["url"])
-        date = _esc((c.get("published_at") or "")[:10])
-        summary = _esc((c.get("summary") or "")[:340])
-        tags_list = c.get("suggested_tags") or []
-        tags_val = _esc(", ".join(tags_list))
-        chips = "".join(
-            f'<span style="font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:2px 8px;">{_esc(t)}</span>'
-            for t in tags_list
-        ) or '<span style="font-size:12px;color:var(--muted);">auto-tagged on enrich</span>'
-        sub_badge = ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
-                     'background:var(--coral-wash);color:var(--navy);margin-right:6px;">Reader suggestion</span>'
-                     if (c.get("origin") or "").startswith("submission:") else "")
-        meta = f"{sub_badge}{date}" if date else sub_badge
-        # Approval prediction (advisory) from the suggestion engine.
-        sug = suggestions.get(c["url"])
-        suggest_attr = ""
-        suggest_badge = ""
-        if sug:
-            keep = bool(sug.get("keep"))
-            suggest_attr = f' data-suggest="{"keep" if keep else "skip"}"'
-            reason = _esc(sug.get("reason", ""))
-            if keep:
-                suggest_badge = (f'<div style="font-size:12px;color:var(--seafoam-deep);margin:0 0 8px;">'
-                                 f'&#10003; <strong>Likely keep</strong>{("&mdash;" + reason) if reason else ""}</div>')
-            else:
-                suggest_badge = (f'<div style="font-size:12px;color:var(--navy);margin:0 0 8px;">'
-                                 f'&#8855; <strong>Likely skip</strong>{("&mdash;" + reason) if reason else ""}</div>')
-        return f"""<div data-card data-url="{url}"{suggest_attr} style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
-    <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
-    {_badge(c)}
-  </div>
-  <div style="font-size:12px;color:var(--muted);margin:3px 0 8px;">{meta}</div>
-  {suggest_badge}
-  <p style="font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{summary}</p>
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-    {chips}
-    <button type="button" onclick="editQTags(this)" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline;padding:0;">edit</button>
-  </div>
-  <input class="qtags" type="text" value="{tags_val}" style="display:none;width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:var(--bg);margin-bottom:12px;">
-  <div style="display:flex;gap:9px;">
-    <button class="add-btn btn" onclick="addOne(this)" style="font-size:13px;padding:8px 18px;">Add to archive</button>
-    <button class="btn btn-ghost" onclick="dismissOne(this)" style="font-size:13px;padding:8px 18px;">Dismiss</button>
-  </div>
-</div>"""
-
-    # -- Historical sweep panel (Phase 6 merge) --------------------------------
-    # Was its own page at /admin/library/backfill; now a collapsible section
-    # here since it's the producer half of the same discovery -> review
-    # workflow this page's own diagram describes (GET /admin/library/backfill
-    # now just redirects here). Same _job_set("backfill", ...) job state, same
-    # POST /admin/library/backfill/start + GET .../status routes, unchanged —
-    # only the page embedding this form moved. Collapsed by default (it's a
-    # rare tool, mainly right after adding a new source — see its own copy
-    # below) unless a sweep is running or just finished, so there's always
-    # something to see when it matters and nothing in the way when it doesn't.
-    from linklib.queue import QUEUE_ENRICH_MODEL
-    from linklib.models import models_for
-    sweep_model_options = "".join(
-        f'<option value="{m["id"]}" {"selected" if QUEUE_ENRICH_MODEL == m["id"] else ""}>'
-        f'{m["label"]}—{m["blurb"]}{" (recommended)" if m["id"] == QUEUE_ENRICH_MODEL else ""}</option>'
-        for m in reversed(models_for(blurb="short"))
-    )
-    sweep_default_since = (last_saved or "2024-06-01")[:10]
-    sweep_job = _job_get("backfill")
-    sweep_running = sweep_job.get("running", False)
-    sweep_error = sweep_job.get("error", "")
-    sweep_report = sweep_job.get("report", [])
-    sweep_done = sweep_job.get("done", 0)
-    sweep_total = sweep_job.get("total", 0)
-
-    sweep_status_html = ""
-    if sweep_running:
-        sweep_pct = round(sweep_done / sweep_total * 100) if sweep_total else 0
-        sweep_status_html = f"""
-<div id="sweep-job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">
-  <div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:4px;">Sitemap sweep in progress&hellip;</div>
-  <div style="font-size:13px;color:var(--muted);">{sweep_done} / {sweep_total} sources scanned</div>
-  <div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">
-    <div style="background:#2563eb;height:8px;width:{sweep_pct}%;transition:width .3s;"></div>
-  </div>
-</div>"""
-    elif sweep_error:
-        sweep_status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: {_esc(sweep_error)}</div>'
-    elif sweep_report:
-        sweep_added = sum(r.get("added", 0) for r in sweep_report)
-        sweep_cands = sum(r.get("candidates", 0) for r in sweep_report)
-        sweep_status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;{sweep_added} articles queued from {sweep_cands} candidates&mdash;see them in the queue below.</div>'
-
-    def _sweep_report_row(r):
-        added = r.get("added", 0)
-        cands = r.get("candidates", 0)
-        note = r.get("note", "")
-        sitemap = r.get("sitemap") or ""
-        sm_link = (f'<a href="{_esc(sitemap)}" style="font-size:11px;color:var(--muted);" target="_blank">'
-                   f'{_esc(sitemap[:60])}{"…" if len(sitemap) > 60 else ""}</a>'
-                   if sitemap else '<span style="font-size:11px;color:var(--muted);">—</span>')
-        status = note if note else f'{added} added / {cands} candidates'
-        status_color = "#b91c1c" if note else ("#16a34a" if added else "#92400e")
-        return (f'<tr><td style="padding:8px 12px;font-size:13px;font-weight:500;">{_esc(r.get("source", ""))}</td>'
-                f'<td style="padding:8px 12px;">{sm_link}</td>'
-                f'<td style="padding:8px 12px;font-size:13px;color:{status_color};">{_esc(status)}</td></tr>')
-
-    sweep_report_html = ""
-    if sweep_report:
-        sweep_rows_html = "".join(_sweep_report_row(r) for r in sweep_report)
-        sweep_report_html = f"""
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:8px;">
-  <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;font-size:14px;">Coverage report</div>
-  <div style="overflow-x:auto;">
-  <table style="width:100%;border-collapse:collapse;">
-    <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
-      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Sitemap</th>
-      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Result</th>
-    </tr></thead>
-    <tbody>{sweep_rows_html}</tbody>
-  </table>
-  </div>
-</div>"""
-
-    sweep_disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if sweep_running else ""
-    sweep_open_attr = " open" if (sweep_running or sweep_error or sweep_report) else ""
-
-    sweep_panel = f"""<details class="admin-group" style="margin-bottom:20px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;"{sweep_open_attr}>
-  <summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
-    <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
-      <span style="font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">Historical sweep</span>
-      <span style="font-size:12px;color:var(--muted);">rare&mdash;mainly right after adding a new source</span>
-    </span>
-    <span class="disclosure-caret">&#9654;</span>
-  </summary>
-  <div style="padding:0 20px 20px;">
-    <p style="color:var(--muted);margin:0 0 6px;font-size:13.5px;">Walks a source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet&mdash;a one-time back-catalog catch-up, typically run once right after you add a new source, not something to reach for routinely. It doesn&rsquo;t save anything by itself, it just adds to the queue below for you to review. <strong>Different from Reader content backfill</strong> (elsewhere on the Library page), which re-processes articles you&rsquo;ve <em>already</em> saved for better structure&mdash;this only ever finds articles you haven&rsquo;t saved yet.</p>
-    <p style="color:var(--muted);margin:0 0 16px;font-size:13.5px;">Once a source&rsquo;s back catalog is swept, &ldquo;Scan feed&rdquo; below is what keeps you current going forward&mdash;you shouldn&rsquo;t need to run this again for that source.</p>
-    {_job_run_banner("backfill")}
-    <div id="sweep-poll-container">{sweep_status_html}</div>
-    <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
-      <form id="backfill-form" method="post" action="/admin/library/backfill/start" style="display:grid;gap:18px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-          <div>
-            <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Articles published since</label>
-            <input type="date" name="since" value="{sweep_default_since}" max="{datetime.now().strftime('%Y-%m-%d')}"
-              style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);" required>
-            <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Auto-detected from your oldest save: <strong>{sweep_default_since}</strong></p>
-          </div>
-          <div>
-            <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Max articles per source</label>
-            <input type="number" name="per_source" value="150" min="10" max="2000"
-              style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-            <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">150 is a safe starting point. Raise it to reach further back&mdash;the sweep takes the most recent N, so a low cap stops early on prolific sources.</p>
-          </div>
-        </div>
-        <div>
-          <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Limit to sources <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
-          <input type="text" name="only_sources" placeholder="e.g. Kellblog, Stratechery, SaaStr"
-            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-          <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Comma-separated. Leave blank to sweep everything. Re-running is safe&mdash;already-queued and saved URLs are skipped, so a bigger limit only adds the older articles you haven&rsquo;t seen yet.</p>
-        </div>
-        <div>
-          <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Enrichment model</label>
-          <select name="model" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);min-width:240px;">
-            {sweep_model_options}
-          </select>
-        </div>
-        <div>
-          <label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
-            <input type="checkbox" name="dry_run" value="1" checked style="margin-top:3px;accent-color:var(--accent);">
-            <span><strong>Dry run</strong>
-            <span style="display:block;font-size:12px;color:var(--muted);">Count candidates without fetching or enriching anything. Uncheck to do the real sweep.</span></span>
-          </label>
-        </div>
-        <div>
-          <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {sweep_disable}>Run sweep</button>
-          <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side&mdash;you can leave this page.</span>
-        </div>
-      </form>
-    </div>
-    {sweep_report_html}
-  </div>
-</details>"""
-
-    group_blocks = ""
-    for source, cards in groups.items():
-        cards_html = "".join(_card(c) for c in cards)
-        s = _esc(source)
-        keeps = sum(1 for c in cards if (suggestions.get(c["url"]) or {}).get("keep") is True)
-        skips = sum(1 for c in cards if (suggestions.get(c["url"]) or {}).get("keep") is False)
-        suggest_bar = ""
-        if keeps or skips:
-            kb = (f'<button class="btn btn-ghost" onclick="approveKeeps(this)" style="font-size:12px;padding:6px 14px;color:var(--seafoam-deep);">Approve {keeps} likely keep{"s" if keeps != 1 else ""}</button>' if keeps else "")
-            sb = (f'<button class="btn btn-ghost" onclick="dismissSkips(this)" style="font-size:12px;padding:6px 14px;color:var(--navy);">Dismiss {skips} likely skip{"s" if skips != 1 else ""}</button>' if skips else "")
-            suggest_bar = (f'<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 12px;font-size:13px;color:var(--muted);">'
-                           f'<span>Predicted from your past picks:</span>{kb}{sb}</div>')
-        group_blocks += f"""<details data-group class="q-group" style="margin-bottom:12px;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
-  <summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;">
-    <span style="display:flex;align-items:center;gap:10px;min-width:0;">
-      <span class="disclosure-caret">&#9654;</span>
-      <h2 style="margin:0;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{s} <span class="grp-count" style="color:var(--muted);font-weight:500;font-size:14px;">({len(cards)})</span></h2>
-    </span>
-    <span style="display:flex;gap:9px;flex-shrink:0;">
-      <form method="post" action="/admin/library/queue/suggest" style="margin:0;" onsubmit="event.stopPropagation();"><input type="hidden" name="source" value="{s}"><button type="submit" onclick="event.stopPropagation();" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Suggest</button></form>
-      <button class="btn btn-ghost" onclick="event.stopPropagation();addAll(this)" style="font-size:12px;padding:6px 14px;">Add all</button>
-      <button class="btn btn-ghost" onclick="event.stopPropagation();dismissAll(this)" style="font-size:12px;padding:6px 14px;">Dismiss all</button>
-    </span>
-  </summary>
-  <div style="padding:2px 18px 8px;">
-    {suggest_bar}
-    {cards_html}
-  </div>
-</details>"""
-
-    pending_n = len(pending)
-    if pending_n == 0:
-        group_blocks = ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
-                        'padding:32px;text-align:center;color:var(--muted);">Nothing waiting. Scan the feed to '
-                        'find recent articles you haven&rsquo;t saved yet.</div>')
-
-    scan_notice = ""
-    if scanning:
-        scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
-                       'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
-                       'Scanning the feed in the background&mdash;reload this page in a minute to see new candidates.</div>')
-    elif redating:
-        scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
-                       'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
-                       'Re-reading publish dates from the article pages in the background&mdash;reload in a minute to see corrected dates.</div>')
-    elif suggesting:
-        scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
-                       'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
-                       'Predicting which candidates you&rsquo;d keep, from your past picks&mdash;reload in a minute to see &ldquo;Likely keep / skip&rdquo; on each card.</div>')
-    elif suggest_status.get("note"):
-        # Show the result of the last prediction run so it's never a silent no-op.
-        ok = suggest_status.get("n", 0) > 0
-        bg = "var(--seafoam-wash)" if ok else "var(--coral-wash)"
-        bd = "var(--seafoam)" if ok else "var(--coral)"
-        col = "var(--seafoam-deep)" if ok else "var(--coral-deep)"
-        scan_notice = (f'<div style="background:{bg};border:1px solid {bd};border-radius:10px;'
-                       f'padding:12px 16px;margin-bottom:20px;font-size:14px;color:{col};">'
-                       f'{_esc(suggest_status["note"])}</div>')
-
-    dismissed_note = (f'<span style="color:var(--muted);font-size:13px;">{dismissed_n} dismissed</span>'
-                      if dismissed_n else "")
-
-    expand_controls = (
-        '<span style="font-size:13px;color:var(--muted);">'
-        '<a href="#" onclick="setAllGroups(true);return false;" style="color:var(--navy);">Expand all</a>'
-        ' &middot; <a href="#" onclick="setAllGroups(false);return false;" style="color:var(--navy);">Collapse all</a>'
-        '</span>' if pending_n else ''
-    )
-
-    body = f"""<div class="page page-admin">
-<style>
-.q-group summary:hover{{background:var(--surface);}}
-</style>
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
-<h1>Archive Queue</h1>
-<p style="color:var(--muted);margin:4px 0 6px;">Proposed saves waiting for your review—from &ldquo;Scan feed&rdquo; below (ongoing) or the &ldquo;Historical sweep&rdquo; panel above it (occasional, mainly right after adding a new source).</p>
-<p style="color:var(--muted);margin:0 0 22px;">Approve into the archive (edit the tags first if you like), or dismiss what you don&rsquo;t want.</p>
-{_content_flow_diagram(highlight="queue")}
-{sweep_panel}
-{scan_notice}
-<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
-  <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note} &nbsp; {expand_controls}</div>
-  <form method="post" action="/admin/library/queue/refresh-feed" style="margin:0;"><button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Scan feed</button></form>
-</div>
-<form method="post" action="/admin/library/queue/redate" style="margin:0 0 24px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-  <span style="font-size:13px;color:var(--muted);">Dates look wrong? Re-read them from the article pages</span>
-  <input type="text" name="source" placeholder="source (blank = all)" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);width:180px;">
-  <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">Fix dates</button>
-</form>
-{group_blocks}
-</div>
-
-<script>
-function cardOf(btn){{ return btn.closest('[data-card]'); }}
-async function postForm(path, data){{
-  try {{
-    const r = await fetch(path, {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:new URLSearchParams(data)}});
-    return r.ok;
-  }} catch(e) {{ return false; }}
-}}
-function setPending(delta){{
-  const el = document.getElementById('pending-count');
-  el.textContent = Math.max(0, parseInt(el.textContent || '0', 10) + delta);
-}}
-function removeCard(card){{
-  const grp = card.closest('[data-group]');
-  card.remove();
-  setPending(-1);
-  if (grp) {{
-    const left = grp.querySelectorAll('[data-card]').length;
-    const cnt = grp.querySelector('.grp-count');
-    if (cnt) cnt.textContent = '(' + left + ')';
-    if (left === 0) grp.remove();
-  }}
-}}
-async function addOne(btn){{
-  const card = cardOf(btn);
-  const addBtn = card.querySelector('.add-btn');
-  addBtn.disabled = true; addBtn.textContent = 'Adding…';
-  const ok = await postForm('/admin/library/queue/add', {{url: card.dataset.url, tags: card.querySelector('.qtags').value}});
-  if (ok) {{ removeCard(card); }}
-  else {{ addBtn.disabled = false; addBtn.textContent = 'Add to archive'; }}
-  return ok;
-}}
-async function dismissOne(btn){{
-  const card = cardOf(btn);
-  if (await postForm('/admin/library/queue/dismiss', {{url: card.dataset.url}})) removeCard(card);
-}}
-function setAllGroups(open){{
-  document.querySelectorAll('.q-group').forEach(function(g){{ g.open = open; }});
-}}
-function editQTags(btn){{
-  // Reveal the (otherwise hidden) tag input — tags are auto-set; editing is opt-in.
-  const card = btn.closest('[data-card]');
-  const input = card.querySelector('.qtags');
-  btn.parentElement.style.display = 'none';
-  input.style.display = 'block';
-  input.focus();
-}}
-async function addAll(btn){{
-  const grp = btn.closest('[data-group]');
-  const cards = Array.from(grp.querySelectorAll('[data-card]'));
-  for (const c of cards) {{ await addOne(c.querySelector('.add-btn')); }}
-}}
-async function approveKeeps(btn){{
-  const grp = btn.closest('[data-group]');
-  const cards = Array.from(grp.querySelectorAll('[data-card][data-suggest="keep"]'));
-  for (const c of cards) {{ await addOne(c.querySelector('.add-btn')); }}
-}}
-async function dismissSkips(btn){{
-  const grp = btn.closest('[data-group]');
-  const cards = Array.from(grp.querySelectorAll('[data-card][data-suggest="skip"]'));
-  for (const c of cards) {{ await dismissOne(c.querySelector('.add-btn')); }}
-}}
-async function dismissAll(btn){{
-  const grp = btn.closest('[data-group]');
-  const cards = Array.from(grp.querySelectorAll('[data-card]'));
-  for (const c of cards) {{ await dismissOne(c.querySelector('.add-btn')); }}
-}}
-(function() {{
-  // Historical sweep's own status poller (Phase 6 merge) — was previously on
-  // its own page. Fixed a real bug while moving it: this used to fetch
-  // '/admin/backfill/status' (missing the /library segment), a 404 that
-  // silently never updated the UI; the real route is
-  // '/admin/library/backfill/status'.
-  var sweepReloadOnDone = false;
-  function pollSweep() {{
-    fetch('/admin/library/backfill/status').then(r => r.json()).then(function(s) {{
-      var container = document.getElementById('sweep-poll-container');
-      if (!container) return;
-      var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
-      if (s.running) {{
-        sweepReloadOnDone = true;
-        container.innerHTML = '<div id="sweep-job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">'
-          + '<div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:4px;">Sitemap sweep in progress&hellip;</div>'
-          + '<div style="font-size:13px;color:var(--muted);">' + s.done + ' / ' + s.total + ' sources scanned</div>'
-          + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
-          + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div></div>';
-        setTimeout(pollSweep, 3000);
-      }} else if (sweepReloadOnDone) {{
-        // Job finished while we were watching — reload so the full coverage table (and the queue below) render.
-        window.location.reload();
-      }} else if (s.error) {{
-        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
-      }}
-    }}).catch(function() {{ setTimeout(pollSweep, 4000); }});
-  }}
-  if ({str(sweep_running).lower()}) {{ sweepReloadOnDone = true; setTimeout(pollSweep, 3000); }}
-  var backfillForm = document.getElementById('backfill-form');
-  if (backfillForm) {{
-    backfillForm.addEventListener('submit', function() {{ setTimeout(function() {{ pollSweep(); }}, 2000); }});
-  }}
-}})();
-</script>"""
-    return HTMLResponse(_page("Archive Queue—Admin", "Admin", body, authed=True))
-
-
-@app.post("/admin/library/queue/refresh-feed")
-def admin_queue_refresh(request: Request, background_tasks: BackgroundTasks):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    background_tasks.add_task(_scan_feed_background)
-    return RedirectResponse("/admin/library/queue?scanning=1", status_code=303)
-
-
-@app.post("/admin/library/queue/redate")
-async def admin_queue_redate(request: Request, background_tasks: BackgroundTasks):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    form = await request.form()
-    source = (form.get("source") or "").strip()
-    background_tasks.add_task(_redate_background, source)
-    return RedirectResponse("/admin/library/queue?redating=1", status_code=303)
-
-
-@app.post("/admin/library/queue/suggest")
-async def admin_queue_suggest(request: Request, background_tasks: BackgroundTasks):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    form = await request.form()
-    source = (form.get("source") or "").strip()
-    background_tasks.add_task(_suggest_background, source)
-    return RedirectResponse("/admin/library/queue?suggesting=1", status_code=303)
 
 
 def _tag_merge_background() -> None:
@@ -28521,43 +27923,6 @@ async def admin_users_bulk_delete(request: Request):
     return JSONResponse({"ok": True, "deleted": deleted})
 
 
-@app.post("/admin/library/queue/add")
-async def admin_queue_add(request: Request, background_tasks: BackgroundTasks):
-    _require_api(request)
-    form = await request.form()
-    url = (form.get("url") or "").strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="url required")
-    tags_raw = form.get("tags")
-    tags = ([t.strip() for t in tags_raw.split(",") if t.strip()]
-            if tags_raw is not None else None)
-    lib = _lib()
-    try:
-        article_id = lib.promote_queue_item(url, tags=tags)
-        if not article_id:
-            raise HTTPException(status_code=404, detail="not in queue")
-        _log_archive_audit(lib, request, "add", article_id, detail=url)
-        background_tasks.add_task(_embed_article_background, article_id)
-        background_tasks.add_task(backup.maybe_backup, DB_PATH)
-        return JSONResponse({"ok": True, "id": article_id})
-    finally:
-        lib.close()
-
-
-@app.post("/admin/library/queue/dismiss")
-async def admin_queue_dismiss(request: Request):
-    _require_api(request)
-    form = await request.form()
-    url = (form.get("url") or "").strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="url required")
-    lib = _lib()
-    try:
-        lib.dismiss_queue_item(url)
-        return JSONResponse({"ok": True})
-    finally:
-        lib.close()
-
 
 # ---------------------------------------------------------------------------
 # Re-enrich archive — force-refresh Claude summaries + tags server-side
@@ -28768,113 +28133,19 @@ def admin_enrich_status(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Historical sitemap backfill — queue articles going back to the saves cutoff
-# ---------------------------------------------------------------------------
-
-def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool,
-                  only_sources_raw: str = "") -> None:
-    """Background thread: run scan_sitemaps_into_queue, updating _JOB_STATE["backfill"].
-
-    `only_sources_raw` (comma/newline separated) restricts the sweep to matching
-    sources — case-insensitive substring match against the OPML name, so
-    "Stratechery" matches "Ben Thompson (Stratechery)". Empty = all sources.
-
-    Durability audit item 3: also writes a durable job_run_log row (start,
-    then finish) — see _enrich_job's docstring for why this doesn't touch
-    _JOB_STATE itself."""
-    _job_set("backfill", running=True, report=[], error="", done=0, total=0)
-    lib = _lib()
-    run_id = lib.start_job_run("backfill")
-    try:
-        from linklib.feed import parse_opml
-        from linklib.queue import scan_sitemaps_into_queue
-
-        feeds = parse_opml(OPML_PATH)
-        tokens = [t.strip().lower() for t in only_sources_raw.replace("\n", ",").split(",") if t.strip()]
-        if tokens:
-            feeds = [f for f in feeds if any(tok in f.name.lower() for tok in tokens)]
-        total = len(feeds)
-        _job_set("backfill", total=total)
-        sources_done = [0]
-
-        def _progress(source_name, i, n):
-            if i == n:  # last item in this source
-                sources_done[0] += 1
-                _job_set("backfill", done=sources_done[0])
-
-        report = scan_sitemaps_into_queue(
-            lib, feeds, since_str,
-            enrich=True, model=model,
-            per_source_limit=per_source,
-            dry_run=dry_run,
-            progress=_progress,
-        )
-        _job_set("backfill", running=False, report=report, done=total)
-        if not dry_run:
-            backup.maybe_backup(DB_PATH)
-        added = sum(r.get("added", 0) for r in report)
-        summary = f"{added:,} article(s) added across {total:,} source(s)"
-        if dry_run:
-            summary = f"dry run — {sum(r.get('candidates', 0) for r in report):,} candidate(s) across {total:,} source(s)"
-        lib.finish_job_run(run_id, "success", summary=summary)
-    except Exception as exc:
-        _job_set("backfill", running=False, error=str(exc))
-        lib.finish_job_run(run_id, "failure", error=str(exc))
-    finally:
-        lib.close()
-
-
-@app.get("/admin/library/backfill")
-def admin_backfill(request: Request):
-    """Retired as its own page (Phase 6) — Historical sweep is now a
-    collapsible panel on /admin/library/queue, the same page that reviews
-    what it finds (see the panel-building code in admin_queue()). Redirects
-    rather than removed outright: this was a real bookmarked admin tool,
-    not a public URL nobody had saved."""
-    return RedirectResponse("/admin/library/queue", status_code=301)
-
-
-@app.post("/admin/library/backfill/start")
-async def admin_backfill_start(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    if _job_get("backfill").get("running"):
-        return RedirectResponse("/admin/library/queue", status_code=303)
-    form = await request.form()
-    since = (form.get("since") or "2024-06-01").strip()
-    try:
-        per_source = int(form.get("per_source") or 150)
-    except ValueError:
-        per_source = 150
-    model = (form.get("model") or "claude-opus-4-8").strip()
-    dry_run = bool(form.get("dry_run"))
-    only_sources = (form.get("only_sources") or "").strip()
-    t = threading.Thread(target=_backfill_job,
-                         args=(since, per_source, model, dry_run, only_sources), daemon=True)
-    t.start()
-    return RedirectResponse("/admin/library/queue", status_code=303)
-
-
-@app.get("/admin/library/backfill/status")
-def admin_backfill_status(request: Request):
-    if not _is_authed(request):
-        raise HTTPException(status_code=401)
-    return JSONResponse(_job_get("backfill"))
-
-
-# ---------------------------------------------------------------------------
 # Reader content-structure backfill (Phase 5b) — reprocess already-saved
 # articles so the merged Reader can show real structure (paragraphs, images,
 # links) instead of the flattened plain text every save was stored as before
-# the Reader-bugfixes PR. Same background-thread/_JOB_STATE pattern as re-enrich and Historical
-# sweep above, with two additions neither of those has: a `stop_requested`
+# the Reader-bugfixes PR. Same background-thread/_JOB_STATE pattern as
+# re-enrich, with two additions that job doesn't have: a `stop_requested`
 # flag (checked once per article, between fetches — a 2+ hour realistic
 # runtime makes "let me stop this without waiting for a crash" worth having,
 # not just crash-recovery resumability) and a fixed delay between fetches
-# (nothing in this codebase rate-limits outbound crawling today — Historical
-# sweep's sitemap fetches and the queue scanner both hit sources back-to-back
-# — so this is a deliberate new, explicit convention for this tool, not a
-# reuse of an existing one).
+# (nothing in this codebase rate-limits outbound crawling today, so this is a
+# deliberate new, explicit convention for this tool, not a reuse of an
+# existing one). (The Historical sweep/Archive Queue's own sitemap crawl,
+# which used to be the other point of comparison here, was retired along
+# with the queue itself — see CLAUDE.md's Archive Queue retirement note.)
 # ---------------------------------------------------------------------------
 
 _CONTENT_BACKFILL_DELAY_SEC = 1.5
@@ -31522,6 +30793,8 @@ _INTERNAL_EMAIL_ROWS = [
      "notification_type": "tool_submission"},
     {"title": "Community submission notice", "recipient": "You", "trigger": "A member submits a community on /tools/communities/submit",
      "notification_type": "community_submission"},
+    {"title": "Library submission notice", "recipient": "You", "trigger": "A member suggests an archive piece on /library/submit",
+     "notification_type": "library_submission"},
     {"title": "Contact form notice", "recipient": "You", "trigger": "Someone submits /contact",
      "notification_type": "contact"},
     {"title": "Password reset notice", "recipient": "You",

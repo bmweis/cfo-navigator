@@ -543,12 +543,31 @@ CREATE TABLE IF NOT EXISTS email_failures (
 
 CREATE INDEX IF NOT EXISTS idx_email_failures_resolved ON email_failures(resolved_at);
 
--- Staging area for proposed library additions (the "Library Queue"). Candidates
--- — from the live feed or a one-time historical sweep — land here enriched but
--- unsaved, so they can be reviewed before they enter the library (and the Ask
--- corpus). URL is the natural key, matching `articles`. `content` (third-party
--- full text) is an internal enrichment/search input only; the resale-safe
--- surface is `summary` + tags. Promoting a row moves it into `articles`,
+-- RETIRED, frozen not dropped (2026-09, PR 3) — the "Library Queue" staging
+-- mechanism (linklib/queue.py: an ongoing feed scan + a one-time historical
+-- sitemap sweep, both landing candidates here for review at
+-- /admin/library/queue before promotion into `articles`) was removed
+-- outright. A 2026-09-09 production query found 5,508 rows here, 100%
+-- dismissed, 0 pending, 0 member submissions ever, dormant since 2026-06-28
+-- — the archive now grows by 1-2 articles every few days via the
+-- bookmarklet, which doesn't justify an AI-enriched proposal/review
+-- pipeline. This is a deliberate retirement of working code, not a bug fix.
+-- Every read/write path (Library.add_to_queue/list_queue/queue_count/
+-- dismiss_queue_item/remove_from_queue/update_queue_published/
+-- promote_queue_item, and linklib/queue.py + linklib/suggest.py in full)
+-- is gone from the codebase; this table stays, unread and unwritten, as the
+-- historical record of 5,508 real (mostly automated) dismissal decisions —
+-- not reconstructible from anywhere else. `/library/submit`'s "suggest an
+-- addition" form no longer writes here either — it now sends Brian a plain
+-- email notification instead (see webapp/app.py's library_submit route);
+-- he reads it and saves the article himself with the bookmarklet.
+--
+-- Original comment, preserved for context: candidates — from the live feed
+-- or a one-time historical sweep — landed here enriched but unsaved, so
+-- they could be reviewed before entering the library (and the Ask corpus).
+-- URL was the natural key, matching `articles`. `content` (third-party full
+-- text) was an internal enrichment/search input only; the resale-safe
+-- surface was `summary` + tags. Promoting a row moved it into `articles`,
 -- preserving any enrichment already paid for.
 CREATE TABLE IF NOT EXISTS library_queue (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -935,9 +954,12 @@ CREATE TABLE IF NOT EXISTS article_embeddings (
 -- — an article can be enriched more than once (backfill force-reruns, a
 -- rules-version bump), and each real call's cost should stay in history
 -- rather than overwrite the previous call's row. article_id is NULL for
--- enrichment that happens before a candidate is saved (linklib.queue's
--- pre-save enrichment path) — the API call still cost real money even if
--- the candidate is later dismissed rather than promoted into articles.
+-- enrichment that has no `articles.id` yet to attach to — every batch/regen
+-- generation script (scripts/regen_ai_drafted_fields.py and friends) is the
+-- live example today; the Archive Queue's own pre-save enrichment path used
+-- to be another, retired along with the queue itself (2026-09, PR 3) — the
+-- API call still cost real money even when a NULL-article_id row's source
+-- was never saved anywhere.
 -- cost_usd here is Brian's overhead spend, same rule as article_embeddings:
 -- never summed into ask_questions, never counts toward a user's Ask cap.
 CREATE TABLE IF NOT EXISTS enrichment_cost (
@@ -1357,15 +1379,16 @@ CREATE TABLE IF NOT EXISTS tool_name_dedupe_decisions (
 -- on every deploy — anything written there by the running app is destroyed on
 -- the next deploy. Regenerating at boot makes that ephemerality irrelevant.
 --
--- All four downstream consumers still read the FILE, unmodified:
+-- Three downstream consumers still read the FILE, unmodified (a fourth,
+-- queue.scan_feed_into_queue -> the ongoing feed scan into the now-retired
+-- Archive Queue, was removed along with the queue itself — 2026-09, PR 3):
 --   feed.parse_opml        -> the Reader's Feed view + its Sources tree
 --   sources.preferred_domains -> FP&A Buddy's web-search domain allowlist
---   queue.scan_feed_into_queue -> the ongoing feed scan into the archive queue
 --   authcheck              -> picks a probe URL per paywalled domain
 --
--- Sections are pure grouping: a name and an order, nothing else. Read-only
--- (exclude_from_queue) deliberately lives on `feeds`, not here — see that
--- table's comment.
+-- Sections are pure grouping: a name and an order, nothing else. The
+-- retired Read-only flag (exclude_from_queue) lived on `feeds`, not here —
+-- see that table's comment.
 CREATE TABLE IF NOT EXISTS feed_sections (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT NOT NULL UNIQUE,
@@ -1375,18 +1398,28 @@ CREATE TABLE IF NOT EXISTS feed_sections (
 
 -- One row per RSS/Atom subscription. xml_url is the natural key (the same
 -- feed can't be subscribed twice); html_url is the publication's own site,
--- used by the historical sitemap sweep and by preferred_domains, which
--- prefers it over xml_url when building the allowlist.
+-- used by preferred_domains, which prefers it over xml_url when building
+-- the allowlist.
 --
--- exclude_from_queue replaces the old QUEUE_EXCLUDE_CATEGORIES string-match
--- set (a name-matched env var). It's per-FEED rather than per-section: a
--- section is a display grouping, and "should this source be proposed into the
--- archive queue" is a judgment about the source itself, so one feed in a
--- section can be read-only without dragging its neighbours along. Because it's
--- stored rather than matched on a name, renaming a section (or moving a feed
--- between sections) can't silently change which sources reach the queue.
--- Seeded 1 for the two feeds that were in the "News" section, preserving the
--- exact pre-migration behavior.
+-- exclude_from_queue is RETIRED, frozen not dropped (2026-09, PR 3) —
+-- along with the Archive Queue itself (see the library_queue table's own
+-- comment above for the full reasoning), the admin "Read only" checkbox,
+-- its POST route, and Library.set_feed_excluded/excluded_feed_urls/
+-- has_feeds are all gone from the codebase. The column stays, frozen at
+-- whatever value each row last had, on the same non-destructive-retirement
+-- precedent as has_paywall_cookie elsewhere in this table — nothing reads
+-- it any more.
+--
+-- Original comment, preserved for context: exclude_from_queue replaced the
+-- old QUEUE_EXCLUDE_CATEGORIES string-match set (a name-matched env var).
+-- It was per-FEED rather than per-section: a section is a display grouping,
+-- and "should this source be proposed into the archive queue" was a
+-- judgment about the source itself, so one feed in a section could be
+-- read-only without dragging its neighbours along. Because it was stored
+-- rather than matched on a name, renaming a section (or moving a feed
+-- between sections) couldn't silently change which sources reached the
+-- queue. Seeded 1 for the two feeds that were in the "News" section,
+-- preserving the exact pre-migration behavior.
 --
 -- NOTE: xml_url is stored and regenerated verbatim. Some feeds carry a
 -- subscriber token in the URL; nothing in the add/edit path may normalize,
@@ -1397,7 +1430,7 @@ CREATE TABLE IF NOT EXISTS feeds (
     name               TEXT NOT NULL,
     xml_url            TEXT NOT NULL UNIQUE,
     html_url           TEXT NOT NULL DEFAULT '',
-    exclude_from_queue INTEGER NOT NULL DEFAULT 0,  -- 1 = read in the Reader, never proposed to the queue
+    exclude_from_queue INTEGER NOT NULL DEFAULT 0,  -- RETIRED (2026-09, PR 3) — frozen, unread
     display_order      INTEGER NOT NULL DEFAULT 0,
     created_at         TEXT NOT NULL DEFAULT ''
 );
@@ -2976,9 +3009,10 @@ class Library:
         """Append one enrichment API call's real cost to the overhead ledger
         (#105). A plain INSERT, not an upsert like upsert_article_embedding —
         enrichment_cost keeps every call's history rather than the latest
-        call only. `article_id=None` records enrichment that happened before
-        a candidate was saved (linklib.queue's pre-save path) — the spend
-        still counts even if the candidate is later dismissed."""
+        call only. `article_id=None` records enrichment that has no
+        `articles.id` yet to attach to (every batch/regen generation script
+        is the live example) — the spend still counts even when that
+        generation's source is never saved anywhere."""
         self.conn.execute(
             """INSERT INTO enrichment_cost
                (article_id, model, input_tokens, output_tokens, cost_usd, created_at)
@@ -7397,124 +7431,11 @@ class Library:
         self.conn.commit()
         return cur.rowcount > 0
 
-    # -- library queue ---------------------------------------------------------
-
-    def article_urls(self) -> set[str]:
-        """Every URL already in the library — the dedupe set for the queue."""
-        return {r[0] for r in self.conn.execute("SELECT url FROM articles")}
-
-    def queue_urls(self) -> set[str]:
-        """Every URL in the queue (pending OR dismissed), so we never re-surface
-        a candidate you've already saved or rejected."""
-        return {r[0] for r in self.conn.execute("SELECT url FROM library_queue")}
-
-    def last_saved_at(self) -> Optional[str]:
-        """The most recent `saved_at` in the library — i.e. your saves cutoff.
-
-        Used by the one-time historical sweep to know how far back to reach.
-        """
-        row = self.conn.execute("SELECT MAX(saved_at) FROM articles").fetchone()
-        return row[0] if row and row[0] else None
-
-    def add_to_queue(self, url: str, title: str = "", author: str = "",
-                     source: str = "", summary: str = "", content: str = "",
-                     suggested_tags: Optional[list[str]] = None,
-                     published_at: Optional[str] = None, origin: str = "",
-                     enriched: bool = False, enrich_model: str = "",
-                     enrich_rules: str = "") -> bool:
-        """Queue a candidate. No-op (returns False) if the URL is already in the
-        library or already queued — keeps the queue idempotent like `upsert`.
-        The URL is canonicalized first so trivial variants collapse to one."""
-        url = normalize_url(url)
-        if not url:
-            return False
-        if self.conn.execute("SELECT 1 FROM articles WHERE url=?", (url,)).fetchone():
-            return False
-        if self.conn.execute("SELECT 1 FROM library_queue WHERE url=?", (url,)).fetchone():
-            return False
-        tags = sorted(set(t.strip() for t in (suggested_tags or []) if t.strip()))
-        self.conn.execute(
-            """INSERT INTO library_queue
-               (url, title, author, source, summary, content, suggested_tags_json,
-                published_at, origin, status, enriched, enrich_model, enrich_rules,
-                created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (url, title, author, source, summary, content, json.dumps(tags),
-             published_at, origin, "pending", int(enriched), enrich_model,
-             enrich_rules, _now()),
-        )
-        self.conn.commit()
-        return True
-
-    def list_queue(self, status: str = "pending", limit: int = 2000) -> list[dict]:
-        rows = self.conn.execute(
-            """SELECT * FROM library_queue WHERE status=?
-               ORDER BY COALESCE(published_at,'') DESC, id DESC LIMIT ?""",
-            (status, limit),
-        ).fetchall()
-        return [self._queue_to_dict(r) for r in rows]
-
-    def queue_count(self, status: str = "pending") -> int:
-        return self.conn.execute(
-            "SELECT COUNT(*) FROM library_queue WHERE status=?", (status,)
-        ).fetchone()[0]
-
-    def dismiss_queue_item(self, url: str) -> None:
-        """Reject a candidate. It stays in the table as 'dismissed' so a later
-        sweep won't propose it again."""
-        self.conn.execute(
-            "UPDATE library_queue SET status='dismissed' WHERE url=?", (url,)
-        )
-        self.conn.commit()
-
-    def remove_from_queue(self, url: str) -> None:
-        self.conn.execute("DELETE FROM library_queue WHERE url=?", (url,))
-        self.conn.commit()
-
-    def update_queue_published(self, url: str, published_at: str) -> None:
-        """Correct a queued candidate's publish date (e.g. after re-reading it from
-        the article page when the sitemap date was a build stamp)."""
-        self.conn.execute(
-            "UPDATE library_queue SET published_at=? WHERE url=?", (published_at, url)
-        )
-        self.conn.commit()
-
-    def update_article_published(self, article_id: int, published_at: str) -> None:
-        """Correct a saved article's publish date."""
-        self.conn.execute(
-            "UPDATE articles SET published_at=?, updated_at=? WHERE id=?",
-            (published_at, _now(), article_id),
-        )
-        self.conn.commit()
-
-    def promote_queue_item(self, url: str, tags: Optional[list[str]] = None) -> int:
-        """Move a queued candidate into the library, preserving its enrichment,
-        then drop it from the queue. `tags`, if given, overrides the suggestions
-        (so your edits at review time win). Returns the article id, or 0 if the
-        URL isn't queued."""
-        row = self.conn.execute(
-            "SELECT * FROM library_queue WHERE url=?", (url,)
-        ).fetchone()
-        if row is None:
-            return 0
-        use_tags = tags if tags is not None else json.loads(row["suggested_tags_json"] or "[]")
-        art = Article(
-            url=row["url"], title=row["title"], author=row["author"],
-            source=row["source"], summary=row["summary"], content=row["content"],
-            tags=use_tags, published_at=row["published_at"],
-            saved_at=_now(), enriched=bool(row["enriched"]),
-            enrich_model=row["enrich_model"], enrich_rules=row["enrich_rules"],
-        )
-        article_id = self.upsert(art)
-        self.conn.execute("DELETE FROM library_queue WHERE url=?", (url,))
-        self.conn.commit()
-        return article_id
-
-    @staticmethod
-    def _queue_to_dict(r: sqlite3.Row) -> dict:
-        d = dict(r)
-        d["suggested_tags"] = json.loads(d.pop("suggested_tags_json", "[]") or "[]")
-        return d
+    # The "library queue" section that used to live here (add_to_queue,
+    # list_queue, queue_count, dismiss_queue_item, remove_from_queue,
+    # update_queue_published, promote_queue_item, article_urls, queue_urls,
+    # last_saved_at, _queue_to_dict) was retired in full, 2026-09 (PR 3) —
+    # see the library_queue table's own comment in _SCHEMA above for why.
 
     # -- tool leads ------------------------------------------------------------
 
@@ -8288,16 +8209,9 @@ class Library:
     #
     # These two tables are the source of truth; preferred_sites.opml is a
     # derived cache. See the feed_sections table comment in _SCHEMA for why
-    # the file can't be authoritative on Railway, and which four consumers
-    # still read it unmodified.
-
-    # Legacy default, preserved for the one case where the tables can't answer:
-    # a DB that has never been seeded (a fresh test fixture, or the window
-    # before the boot-time seed runs). Without this, an unseeded DB would report
-    # "nothing is excluded" and start funnelling News into the archive queue —
-    # a silent behavior change in the wrong direction. Matches the value the
-    # retired QUEUE_EXCLUDE_CATEGORIES set defaulted to.
-    _LEGACY_QUEUE_EXCLUDED_SECTIONS = frozenset({"News"})
+    # the file can't be authoritative on Railway, and which three consumers
+    # still read it unmodified (a fourth, the Archive Queue's own feed scan,
+    # was retired along with the queue itself — 2026-09, PR 3).
 
     def list_feed_sections(self) -> list[dict]:
         rows = self.conn.execute(
@@ -8347,28 +8261,9 @@ class Library:
             "SELECT COUNT(*) FROM feeds WHERE section_id = ?", (section_id,)
         ).fetchone()[0]
 
-    def excluded_feed_urls(self) -> set[str]:
-        """`xml_url` of every feed that's read in the Reader but never proposed
-        into the archive queue. Replaces QUEUE_EXCLUDE_CATEGORIES.
-
-        Keyed on xml_url rather than feed name because names aren't unique and
-        are freely editable, while xml_url is the table's natural key — so the
-        queue's lookup can't be broken by a rename.
-        """
-        rows = self.conn.execute(
-            "SELECT xml_url FROM feeds WHERE exclude_from_queue = 1"
-        ).fetchall()
-        return {r[0] for r in rows}
-
-    def has_feeds(self) -> bool:
-        """Whether the subscription tables have been populated at all.
-
-        Callers use this to decide whether `excluded_feed_urls()` is
-        authoritative: on an unseeded DB it returns an empty set, which is
-        indistinguishable from "nothing is excluded" and would start
-        funnelling News into the archive queue.
-        """
-        return self.conn.execute("SELECT 1 FROM feeds LIMIT 1").fetchone() is not None
+    # excluded_feed_urls()/has_feeds() (the Archive Queue's own "which feeds
+    # are read-only" lookup and its unseeded-DB fallback check) were retired
+    # along with the queue itself — 2026-09, PR 3.
 
     def add_feed_section(self, name: str) -> int:
         next_order = self.conn.execute(
@@ -8450,8 +8345,8 @@ class Library:
 
     def set_feed_paywall_cookie(self, feed_id: int, needs_cookie: bool) -> None:
         """Toggle the cookie flag from the feed table's own row control. Narrow
-        single-column update, same shape as move_feed_to_section and
-        set_feed_excluded: it can't rewrite a URL in passing."""
+        single-column update, same shape as move_feed_to_section (and the
+        now-retired set_feed_excluded): it can't rewrite a URL in passing."""
         self.conn.execute("UPDATE feeds SET has_paywall_cookie=? WHERE id=?",
                           (int(bool(needs_cookie)), feed_id))
         self.conn.commit()
@@ -8470,11 +8365,8 @@ class Library:
                           (section_id, feed_id))
         self.conn.commit()
 
-    def set_feed_excluded(self, feed_id: int, excluded: bool) -> None:
-        """Toggle read-only straight from the feed table's row control."""
-        self.conn.execute("UPDATE feeds SET exclude_from_queue=? WHERE id=?",
-                          (int(bool(excluded)), feed_id))
-        self.conn.commit()
+    # set_feed_excluded (the "Read only" row-control toggle) was retired
+    # along with the Archive Queue itself — 2026-09, PR 3.
 
     def delete_feed(self, feed_id: int) -> None:
         self.conn.execute("DELETE FROM feeds WHERE id = ?", (feed_id,))
@@ -8531,7 +8423,7 @@ class Library:
         deploy, silently. Making the two inseparable means no write path can
         forget one.
 
-        Writes atomically (temp file + os.replace) because four separate
+        Writes atomically (temp file + os.replace) because three separate
         consumers read this file at request time; a half-written file would be
         a parse error for all of them at once.
 
@@ -8600,12 +8492,11 @@ class Library:
                 new_sections += 1
             if self.find_feed_by_url(meta.xml_url):
                 continue
-            # Every feed that was in a previously-excluded SECTION becomes an
-            # excluded FEED, so the queue sees exactly the same set of sources
-            # before and after the move. meta.xml_url goes in untouched.
+            # exclude_from_queue is retired (frozen, unread — see the feeds
+            # table's own schema comment); every newly seeded feed just
+            # takes the column default. meta.xml_url goes in untouched.
             self.add_feed(section_ids[cat], meta.name or meta.xml_url,
-                          meta.xml_url, meta.html_url or "",
-                          exclude_from_queue=cat in self._LEGACY_QUEUE_EXCLUDED_SECTIONS)
+                          meta.xml_url, meta.html_url or "")
             new_feeds += 1
 
         self.set_setting("feeds_seeded_from_opml", "1")

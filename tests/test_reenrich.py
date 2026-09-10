@@ -84,18 +84,6 @@ def test_enrichment_provenance_is_recorded(lib, monkeypatch):
     assert row["enrich_rules"] == "v9"
 
 
-def test_queue_provenance_survives_promotion(lib):
-    """A queued candidate's model/rules carry into the library on approval."""
-    lib.add_to_queue("https://ex.com/a", title="A", summary="s", enriched=True,
-                     enrich_model="claude-opus-4-8", enrich_rules="v1")
-    queued = lib.list_queue()[0]
-    assert queued["enrich_model"] == "claude-opus-4-8"
-    lib.promote_queue_item("https://ex.com/a")
-    art = lib.search("")[0]
-    assert art["enrich_model"] == "claude-opus-4-8"
-    assert art["enrich_rules"] == "v1"
-
-
 def test_apply_enrichment_leaves_in_scope_at_its_frozen_default(lib, monkeypatch):
     """The audience-scope judgment is retired (PR 4, "Remove content" —
     see linklib/db.py's articles.in_scope column comment): enrich() no

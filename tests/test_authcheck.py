@@ -74,11 +74,10 @@ def test_recent_post_url_falls_back_to_sitemap(monkeypatch):
     """When the RSS feed yields nothing (e.g. a beehiiv custom domain), the probe
     finds a post via the sitemap instead."""
     from datetime import datetime, timezone
-    from linklib import queue as q
     # No OPML feed match -> RSS path returns nothing.
     monkeypatch.setattr("linklib.feed.parse_opml", lambda p: [])
-    monkeypatch.setattr(q, "discover_sitemaps", lambda site: ["https://mostlymetrics.com/sitemap.xml"])
-    monkeypatch.setattr(q, "fetch_sitemap_entries", lambda sm: [
+    monkeypatch.setattr(authcheck, "discover_sitemaps", lambda site: ["https://mostlymetrics.com/sitemap.xml"])
+    monkeypatch.setattr(authcheck, "fetch_sitemap_entries", lambda sm: [
         {"url": "https://mostlymetrics.com/tag/x", "lastmod": None},          # non-post, skipped
         {"url": "https://mostlymetrics.com/p/old", "lastmod": datetime(2024, 1, 1, tzinfo=timezone.utc)},
         {"url": "https://mostlymetrics.com/p/new", "lastmod": datetime(2025, 6, 1, tzinfo=timezone.utc)},

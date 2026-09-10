@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""Logo Tile Fit fix (2026-09) — re-fetches a square Brandfetch asset for
-every tool/community whose CURRENT on-disk logo is a lopsided (wordmark-
-shaped) wide/tall image, now that linklib/brandfetch.py prefers a square
-"icon"/"symbol" asset over the "logo" wordmark (see that module's
-TYPE_PREFERENCE comment for the full root-cause story: an audit —
-scripts/audit_tool_logo_dimensions.py — found ~48 assets (Airbase 4:1,
-Airwallex 7.3:1, NetSuite 14:1, ...) rendering as thin slivers inside the
-site's fixed-square logo tiles because the OLD fetch logic always preferred
-the wordmark shape).
+"""Logo Tile Fit fix (2026-09) — re-fetches a square logo asset for every
+tool/community whose CURRENT on-disk logo is a lopsided (wordmark-shaped)
+wide/tall image (see scripts/audit_tool_logo_dimensions.py for the full
+root-cause story: an audit found ~48 assets (Airbase 4:1, Airwallex 7.3:1,
+NetSuite 14:1, ...) rendering as thin slivers inside the site's fixed-square
+logo tiles because the fetch logic in use at the time always preferred the
+wordmark shape).
+
+SOURCE (2026-09): fetches via linklib/logodev.py, the same Logo.dev-backed
+module scripts/backfill_logos.py and webapp/app.py's `_live_refetch_logo`
+already switched to — Brandfetch's Brand API free tier is confirmed
+exhausted for good, so linklib/brandfetch.py stays dormant/unused (see its
+own module docstring). Logo.dev's free image endpoint is, per Logo.dev's
+own docs, already scoped to return the square icon/symbol — there's no
+wordmark-vs-icon ranking left to do the way Brandfetch's Brand API needed.
 
 WHY THIS SCRIPT DOESN'T READ /data/logo_audit.csv: the original build brief
 assumed re-running from that CSV's flagged list, but a CSV is a point-in-
@@ -21,33 +27,33 @@ fixed by hand since the audit last ran.
 
 SCOPE, DELIBERATELY NARROW: only the "lopsided" (aspect-ratio) flag is in
 scope here — never "undersized" (a low-resolution raster, a genuinely
-different problem: no amount of re-fetching from Brandfetch fixes a source
-image that's just small; see scripts/audit_tool_logo_dimensions.py's own
-two-signal model) and never "missing-file"/"unreadable" (different failure
-modes entirely). Cube and Kintsugi — the two known genuinely-undersized
-rasters from the original investigation — are structurally out of scope
-because they're not flagged "lopsided" in the first place, and are ALSO
-skipped by name defensively as a second, explicit guard, per instruction.
-Neither is re-fetched by this script under any circumstance; they stay on
-Brian's existing manual logo-override worklist.
+different problem: no amount of re-fetching fixes a source image that's
+just small; see scripts/audit_tool_logo_dimensions.py's own two-signal
+model) and never "missing-file"/"unreadable" (different failure modes
+entirely). Cube and Kintsugi — the two known genuinely-undersized rasters
+from the original investigation — are structurally out of scope because
+they're not flagged "lopsided" in the first place, and are ALSO skipped by
+name defensively as a second, explicit guard, per instruction. Neither is
+re-fetched by this script under any circumstance; they stay on Brian's
+existing manual logo-override worklist.
 
 NEVER TOUCHES A MANUAL OVERRIDE: rows with logo_manual_override=1 are
-excluded from selection, and linklib.brandfetch's shared
+excluded from selection, and linklib.logodev's shared
 set_tool_logo/set_community_logo (called here exactly as backfill_logos.py
 and the admin "Revert & re-fetch" button call them) refuse to write over
 one regardless, as defense in depth.
 
 Safe by default, same convention as scripts/backfill_logos.py: with no
 flags, this ONLY lists which records are currently flagged lopsided and
-why — ZERO Brandfetch API calls, so a preview never spends any of the
-100/month free-tier quota. Pass --apply to actually call the Brand API,
-download, and write. A record where Brandfetch still has no square
-icon/symbol asset (still wordmark-only after the fetch-preference fix) is
-left UNCHANGED — never rewritten with the same-shaped asset — and reported
-as a residual case for the manual logo-override process. Per the
-write-then-read-back standing practice, an --apply run re-SELECTs every
-row it wrote after the run and asserts logo_path (and, for a changed
-asset, the new file's own dimensions) match what was intended.
+why — ZERO Logo.dev calls, so a preview never spends anything. Pass
+--apply to actually call Logo.dev, download, and write. A record where
+Logo.dev still has nothing but a wordmark-shaped asset (still wordmark-only
+after the fetch-preference fix) is left UNCHANGED — never rewritten with
+the same-shaped asset — and reported as a residual case for the manual
+logo-override process. Per the write-then-read-back standing practice, an
+--apply run re-SELECTs every row it wrote after the run and asserts
+logo_path (and, for a changed asset, the new file's own dimensions) match
+what was intended.
 
 Usage:
     python -m scripts.refetch_lopsided_logos --db library.db            # preview, zero API calls
@@ -55,8 +61,8 @@ Usage:
     python -m scripts.refetch_lopsided_logos --db library.db --apply --limit 20
     python -m scripts.refetch_lopsided_logos --db library.db --max-ratio 2.0
 
-Requires BRANDFETCH_API_KEY in the environment for --apply (not required
-for a preview run).
+Requires LOGODEV_API_KEY in the environment for --apply (not required for
+a preview run).
 """
 from __future__ import annotations
 
@@ -69,7 +75,7 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from linklib.db import Library, resolve_db_path
-from linklib.brandfetch import extract_domain, fetch_logo_asset, download_asset
+from linklib.logodev import extract_domain, fetch_logo_asset, download_asset
 from scripts.audit_tool_logo_dimensions import (
     DEFAULT_MAX_RATIO,
     _DIR_BY_KIND,
@@ -77,7 +83,7 @@ from scripts.audit_tool_logo_dimensions import (
     probe_dimensions,
 )
 
-DEFAULT_DELAY = 0.25  # seconds between Brand API calls — matches backfill_logos.py
+DEFAULT_DELAY = 0.25  # seconds between Logo.dev calls — matches backfill_logos.py
 
 # Defensive, explicit skip for the two known genuinely-undersized rasters
 # (low-resolution source images, not a wordmark/aspect-ratio problem — see
@@ -132,10 +138,10 @@ def main() -> int:
                           f"candidate (default {DEFAULT_MAX_RATIO}, matching scripts/audit_tool_logo_dimensions.py)")
     ap.add_argument("--limit", type=int, default=0, help="max records to process this run (0 = no limit)")
     ap.add_argument("--apply", action="store_true",
-                     help="Actually call the Brand API, download assets, and write to the DB. "
+                     help="Actually call Logo.dev, download assets, and write to the DB. "
                           "Without this flag, only a preview is printed — no API calls, no writes.")
     ap.add_argument("--delay", type=float, default=DEFAULT_DELAY,
-                     help=f"seconds to sleep between Brand API calls (default {DEFAULT_DELAY})")
+                     help=f"seconds to sleep between Logo.dev calls (default {DEFAULT_DELAY})")
     args = ap.parse_args()
     args.db = resolve_db_path(args.db, allow_missing=False)
     print(f"Reading from: {args.db}\n")
@@ -157,18 +163,17 @@ def main() -> int:
 
         if not args.apply:
             print(
-                "\nPREVIEW ONLY — zero Brandfetch API calls made, no files saved, no DB writes.\n"
+                "\nPREVIEW ONLY — zero Logo.dev calls made, no files saved, no DB writes.\n"
                 "This is exactly the record list --apply would process, in the same order. Whether\n"
                 "each one actually resolves a square icon/symbol asset can only be known by calling\n"
-                "the Brand API for real, which this preview deliberately skips so a dry run never\n"
-                "spends any of the 100/month free-tier quota. Re-run with --apply to fetch for real."
+                "Logo.dev for real, which this preview deliberately skips. Re-run with --apply to\n"
+                "fetch for real."
             )
             return 0
 
-        api_key = os.environ.get("BRANDFETCH_API_KEY")
+        api_key = os.environ.get("LOGODEV_API_KEY")
         if not api_key:
-            print("\nERROR: BRANDFETCH_API_KEY is not set in the environment "
-                  "(the Brand API Bearer token, distinct from BRANDFETCH_CLIENT_ID).", file=sys.stderr)
+            print("\nERROR: LOGODEV_API_KEY is not set in the environment.", file=sys.stderr)
             return 1
 
         print(f"\nSaving downloaded logos under: {logos_root}\n")
@@ -198,14 +203,14 @@ def main() -> int:
                 failed.append((kind, name, err))
                 print(f"{prefix} ({domain}): MISS — {err}")
             else:
-                src_url, ext, asset_type = asset
+                image_bytes, ext, asset_type = asset
                 if asset_type not in _SQUARE_TYPES:
-                    # Brandfetch still has nothing but the wordmark for this
+                    # Logo.dev still has nothing but the wordmark for this
                     # brand — re-downloading it would just replace one
                     # wordmark file with an identically-shaped one. Leave the
                     # existing asset in place and flag it for manual review.
                     residual_wordmark.append((kind, name))
-                    print(f"{prefix} ({domain}): STILL WORDMARK-ONLY — Brandfetch has no icon/symbol "
+                    print(f"{prefix} ({domain}): STILL WORDMARK-ONLY — Logo.dev has no icon/symbol "
                           f"asset for this brand; left unchanged, flag for manual override")
                     if i < len(candidates):
                         time.sleep(args.delay)
@@ -214,10 +219,10 @@ def main() -> int:
                 rel_path = f"logos/{_DIR_BY_KIND[kind]}/{slug}.{ext}"
                 dest_path = os.path.join(logos_root, _DIR_BY_KIND[kind], f"{slug}.{ext}")
                 try:
-                    download_asset(src_url, dest_path, session)
-                except requests.RequestException as exc:
-                    failed.append((kind, name, f"asset download failed: {exc}"))
-                    print(f"{prefix} ({domain}): MISS — asset download failed: {exc}")
+                    download_asset(image_bytes, dest_path)
+                except OSError as exc:
+                    failed.append((kind, name, f"asset save failed: {exc}"))
+                    print(f"{prefix} ({domain}): MISS — asset save failed: {exc}")
                 else:
                     if kind == "tool":
                         wrote = lib.set_tool_logo(row["id"], rel_path)

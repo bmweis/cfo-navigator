@@ -1,11 +1,17 @@
-"""Durability audit item 3 — a durable start/finish record for the three
-_JOB_STATE-backed background jobs (re-enrich, Historical sweep, Reader
-content backfill), so a Railway redeploy/crash doesn't erase whether a job
-last succeeded, failed, or ever ran.
+"""Durability audit item 3 — a durable start/finish record for
+_JOB_STATE-backed background jobs (re-enrich, Reader content backfill), so
+a Railway redeploy/crash doesn't erase whether a job last succeeded,
+failed, or ever ran.
 
 Covers:
-- Library.start_job_run/finish_job_run/latest_job_run/list_job_run_log.
-- Each of the three job functions (_enrich_job, _backfill_job,
+- Library.start_job_run/finish_job_run/latest_job_run/list_job_run_log —
+  generic, job-name-agnostic methods; "backfill" (below) is kept as a
+  second job-name pin for the per-job scoping tests even though the
+  Archive Queue's own Historical sweep job function that used to write it
+  (_backfill_job) was retired along with the queue itself (2026-09, PR 3),
+  since these Library-layer tests exercise the storage layer, not that
+  route.
+- Each of the two still-live job functions (_enrich_job,
   _content_backfill_job) writes a start row and a matching finish row on
   success, on failure, and (content backfill only) on a deliberate stop.
 - _JOB_STATE itself is untouched by any of this (still the live-progress
@@ -284,12 +290,3 @@ def test_enrich_page_suppresses_crash_banner_when_job_is_live(env):
     assert "still in progress" in r.text
 
 
-def test_queue_page_shows_backfill_banner(env):
-    lib = env._lib()
-    lib.finish_job_run(lib.start_job_run("backfill"), "success", summary="3 article(s) added across 5 source(s)")
-    lib.close()
-
-    c = _admin_client(env)
-    r = c.get("/admin/library/queue")
-    assert r.status_code == 200
-    assert "3 article(s) added across 5 source(s)" in r.text

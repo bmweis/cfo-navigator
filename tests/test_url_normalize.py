@@ -1,9 +1,9 @@
 """URL canonicalization for dedup (linklib.db.normalize_url + its use in
-upsert / add_to_queue).
+upsert).
 
-The queue surfaced the same article twice when a source exposed it under two
-URL variants (http/https, www, trailing slash, ?utm=). These pin that such
-variants collapse to one library row and one queue card.
+A source can expose the same article under two URL variants (http/https,
+www, trailing slash, ?utm=). These pin that such variants collapse to one
+library row.
 """
 import pathlib
 import sys
@@ -66,17 +66,3 @@ def test_upsert_merges_url_variants(lib):
     assert len(rows) == 1
     assert set(rows[0]["tags"]) == {"deals", "m&a"}
     assert rows[0]["url"] == "https://ex.com/m-and-a"
-
-
-def test_queue_dedupes_url_variants(lib):
-    assert lib.add_to_queue("https://ex.com/post", title="A") is True
-    # trailing-slash + www variant of the same article must not queue again
-    assert lib.add_to_queue("https://www.ex.com/post/", title="A dup") is False
-    assert lib.queue_count() == 1
-
-
-def test_queue_skips_variant_already_in_library(lib):
-    lib.upsert(Article(url="https://ex.com/saved"))
-    # http + trailing slash variant of a saved article is not a new candidate
-    assert lib.add_to_queue("http://ex.com/saved/") is False
-    assert lib.queue_count() == 0

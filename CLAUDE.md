@@ -36,8 +36,8 @@ linklib/           # core library (the only thing that matters long-term)
   feed.py          # RSS/Atom reader over the OPML list: concurrent fetch, 30-min cache
   models.py        # curated Claude model registry, reconciled with the live Models API
   pricing.py       # per-call USD cost table → per-user FP&A Buddy budget caps
-  queue.py         # fills the Archive Queue from RSS (ongoing) + sitemaps (backfill)
-  suggest.py       # Claude-predicted keep/skip for queue candidates (advisory only)
+                   #   (queue.py/suggest.py — the Archive Queue's RSS/sitemap scan +
+                   #   advisory keep/skip predictor — retired 2026-09, see below)
   dedupe.py        # near-duplicate detection (similarity + Claude verification)
   tagstyle.py      # learns Brian's tagging style; feeds the enrichment prompt
   passwords.py     # scrypt password hashing (stdlib only)
@@ -271,12 +271,18 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   key now carried on every item by `feed.get_feed_items`, not the `category` string;
   `queue._excluded_feed_urls()` falls back to the two original News feed URLs when
   `Library.has_feeds()` is False, so an unseeded DB keeps the pre-migration behavior
-  instead of defaulting to "nothing is excluded." **A feed's `xml_url` is stored and
+  instead of defaulting to "nothing is excluded." (**Retired 2026-09, PR 3, along with
+  the Archive Queue itself**: `exclude_from_queue`, the "Read only" checkbox, its
+  `POST /admin/library/feeds/{id}/read-only` route, and `Library.set_feed_excluded`/
+  `excluded_feed_urls`/`has_feeds` are all gone from the codebase — see the Archive
+  Queue retirement bullet below. The column stays in the schema, frozen at whatever
+  value each row last had, same non-destructive-retirement precedent as
+  `has_paywall_cookie`.) **A feed's `xml_url` is stored and
   regenerated verbatim** (only `.strip()` for surrounding whitespace) because a paid
   subscription's feed URL can carry a per-subscriber token, and a normalized token is a
-  silently dead feed; the per-row section dropdown and read-only checkbox are backed by
-  deliberately narrow one-column update methods (`move_feed_to_section`,
-  `set_feed_excluded`) so neither can rewrite a URL in passing. **Sections are pure
+  silently dead feed; the per-row section dropdown is backed by a
+  deliberately narrow one-column update method (`move_feed_to_section`)
+  so it can't rewrite a URL in passing. **Sections are pure
   grouping** — one flat feed table on the page, with a separate "Manage sections" area
   for add/rename/remove and no per-section settings at all. Adding a feed validates it
   server-side first
@@ -2537,9 +2543,17 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   sound" are two different facts. See ARCHITECTURE.md's `integrity_check_log`
   table row and `backup_now()`'s docstring for the full write-up.
 - **Durability audit item 3 — a durable start/finish record for the three
-  `_JOB_STATE`-backed background jobs, so a redeploy or crash doesn't erase
-  whether re-enrich, Historical sweep, or the Reader content backfill last
-  succeeded, failed, or ever ran.** `_JOB_STATE` (`webapp/app.py`) is an
+  `_JOB_STATE`-backed background jobs (at the time — now two, see below), so
+  a redeploy or crash doesn't erase whether re-enrich, Historical sweep, or
+  the Reader content backfill last
+  succeeded, failed, or ever ran.** (**Superseded 2026-09, PR 3**: Historical
+  sweep — the Archive Queue's own sitemap-backfill job — was retired along
+  with the queue itself, so only re-enrich and the Reader content backfill
+  remain live; `job_run_log`'s "backfill" job-name value is kept only as a
+  historical/test pin at the storage layer, not a still-running job — see
+  ARCHITECTURE.md's `job_run_log` schema-table row and
+  `tests/test_job_run_log.py`'s own module docstring for the corrected,
+  current shape.) `_JOB_STATE` (`webapp/app.py`) is an
   in-process dict — correct and unchanged for LIVE progress polling, but
   wiped silently on every Railway redeploy with no trace left behind. New
   `job_run_log` table (shape mirrors `backup_log`/`integrity_check_log`),
@@ -3843,7 +3857,11 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Library) and merged Historical Sweep into Archive Queue as a collapsible
   panel — `/admin/library/backfill` now 301s to `/admin/library/queue`; the
   underlying `POST .../backfill/start` and `GET .../backfill/status` routes
-  are unchanged. The remaining 7 Library tools are grouped into three
+  are unchanged. **(Superseded 2026-09, PR 3 — this whole Historical
+  Sweep/Archive Queue merge, and the `/admin/library/backfill` redirect
+  stub, are gone: the Archive Queue was retired outright, see the Archive
+  Queue retirement bullet below.)** The remaining 7 Library tools are
+  grouped into three
   sections (Archive additions &amp; backup / Existing archive management /
   Tagging), with Archive backup folded into the first section (a live-preview
   follow-up moved it there from a standalone headingless card, which read
@@ -6444,20 +6462,112 @@ never reads as something to tap.
   prompt instruction asking Claude to judge audience fit is removed entirely —
   not just discarded downstream — and the `Enrichment` dataclass's
   `in_scope`/`scope_reason` fields are dropped with it. **One real side effect
-  this same grep surfaced and this PR also fixes**: `enrich()` is shared by
-  both the post-save enrichment pipeline and `linklib/queue.py`'s pre-queue
-  candidate scoring, which used the identical `result.in_scope` signal to skip
-  an off-audience candidate before it was ever proposed into the Archive Queue
-  (tracked as a `skipped_scope` stat, shown on `/admin/library/queue`'s sweep
-  report as "N skipped as off-audience"). With the prompt gone, that skip could
-  only ever silently no-op — removed outright instead of left as dead code:
-  both `cand.pop("in_scope", ...)` skip blocks, the `skipped_scope` stat, and
-  its admin-page copy are gone. A genuine behavior change beyond the
-  review-removals page itself — a would-be off-audience candidate now reaches
-  the Archive Queue for one-at-a-time human review instead of being filtered
-  before it gets there — consistent with the same hand-curation reasoning the
-  retirement rests on. See ARCHITECTURE.md's "'Remove content' retirement,
+  this same grep surfaced, since made entirely moot by PR 3's own retirement of
+  the Archive Queue (see the bullet immediately below — the two PRs shipped in
+  the same window and touched the same shared `enrich()` call)**: at the time
+  this PR was built, `enrich()` was shared by both the post-save enrichment
+  pipeline and `linklib/queue.py`'s pre-queue candidate scoring, which used the
+  identical `result.in_scope` signal to skip an off-audience candidate before it
+  was ever proposed into the Archive Queue (a `skipped_scope` stat). With the
+  audience-fit prompt gone, that skip logic would have silently no-op'd, so this
+  PR removed it outright rather than leave it dead — but `linklib/queue.py`
+  itself, the `skipped_scope` stat, and the Archive Queue it fed all no longer
+  exist at all as of PR 3, so this whole side effect is now purely historical:
+  there's no queue left for an off-audience candidate to reach or be filtered
+  from either way. See ARCHITECTURE.md's "'Remove content' retirement,
   PR 4 (2026-09)" section for the full write-up.
+- **Archive Queue retired outright (2026-09, PR 3) — a deliberate retirement
+  of working code, not a bug fix; read this before ever considering rebuilding
+  it.** A production query on 2026-09-09 found `library_queue` at 5,508
+  rows, **every single one `status='dismissed'`, zero `pending`, and zero
+  member submissions ever** — the AI-enriched proposal/review pipeline
+  (`linklib/queue.py`'s RSS scan + one-time historical sitemap sweep,
+  `linklib/suggest.py`'s Claude keep/skip advisory, `/admin/library/queue`'s
+  review UI, the Historical Sweep panel merged into it in Phase 6 above) had
+  been dormant since 2026-06-28. The archive itself keeps growing fine
+  without it — 1-2 articles every few days via the bookmarklet, which was
+  never gated by the queue to begin with. An AI-enriched proposal/review
+  pipeline doesn't earn its keep at that volume, so it's gone, not paused:
+  `linklib/queue.py`, `linklib/suggest.py`, and `scripts/backfill_queue.py`
+  are deleted in full; every `GET`/`POST /admin/library/queue*` route, the
+  Historical Sweep panel, `POST /admin/library/backfill/start`,
+  `GET /admin/library/backfill/status`, and the `/admin/library/backfill`
+  redirect stub are all gone with no replacement or redirect (nothing was
+  bookmarked outside the admin nav itself, which was updated in the same
+  PR); the Archive Queue card/quadrant is gone from `/admin/library`, and
+  the `_LIBRARY_TOOLS` hub-nav entry with it. On the data layer,
+  `Library.add_to_queue`/`list_queue`/`queue_count`/`dismiss_queue_item`/
+  `remove_from_queue`/`update_queue_published`/`promote_queue_item` (plus
+  the queue-only helpers `article_urls`/`queue_urls`/`last_saved_at`) are
+  removed, and the `library_queue` badge entry in `webapp.tasks.
+  open_task_counts()` is gone. **`library_queue`'s own table definition is
+  FROZEN in `_SCHEMA`, not dropped** — same non-destructive-retirement
+  precedent as `screenshot_is_product`/`field_reviews` elsewhere in this
+  doc — kept as inert historical record with a comment marking the
+  retirement, why, and pointing at PR 3; nothing reads or writes it any
+  more. `linklib.authcheck` turned out to have a real, undocumented
+  dependency on `queue.py`'s sitemap-discovery helpers
+  (`discover_sitemaps`/`fetch_sitemap_entries`/`_looks_like_post`, used by
+  `_recent_post_url()`'s fallback path when probing subscriber access) —
+  found by grep, not anticipated by the retirement's own Phase 0 — so those
+  functions (and their small dependencies: a User-Agent constant, a
+  sitemap-XML parser, an HTTP-GET helper, a lastmod parser) were relocated
+  directly into `authcheck.py` itself rather than left as a broken import;
+  `authcheck` is now their only consumer, so `parse_sitemap_xml` was made
+  private (`_parse_sitemap_xml`) in the move.
+
+  **The `feeds.exclude_from_queue` fallout, retired alongside it**: the
+  per-feed "Read only" checkbox on `/admin/library/feeds`, its
+  `POST /admin/library/feeds/{feed_id}/read-only` route, and
+  `Library.set_feed_excluded`/`excluded_feed_urls`/`has_feeds` are all gone
+  — the checkbox's whole reason to exist was steering `scan_feed_into_queue`
+  away from certain feeds, and that scanner no longer exists to steer.
+  `exclude_from_queue` itself is FROZEN in the `feeds` table (same
+  non-destructive precedent as the table above), and
+  `_LEGACY_QUEUE_EXCLUDED_SECTIONS` — the old News-section fallback
+  `excluded_feed_urls()` used on an unseeded DB — is deleted along with the
+  method that read it; `seed_feeds_from_opml()` no longer passes
+  `exclude_from_queue` at all when seeding a fresh feed row.
+  **Verified explicitly, per this retirement's own "treat with extra
+  care" instruction, since a mistake here would silently degrade FP&A
+  Buddy's web search**: (1) `Library.write_opml()`/`opml_xml()` were read
+  directly, line by line — neither ever referenced `exclude_from_queue` at
+  all, so removing the column's write path changes nothing about what
+  `preferred_sites.opml` contains. (2) `linklib/sources.py`'s
+  `preferred_domains()` — the function FP&A Buddy's web-search allowlist
+  actually calls — was read in full (36 lines): it parses the OPML XML for
+  `<outline>` elements' `htmlUrl`/`xmlUrl` attributes only, with zero
+  reference to `exclude_from_queue`, `library_queue`, or any queue concept
+  whatsoever. The web-search allowlist is untouched by this retirement.
+
+  **`/library/submit` (FP&A Buddy's "Suggest it for the archive →" citation
+  link, shipped in #504, still points here) changed from a queue write to a
+  plain email notification to Brian — never used as a queue write in
+  practice (zero submissions, ever), so this is a mechanism swap with no
+  user-visible behavior change for the one real caller.** No replacement
+  table, no admin inbox page, no approve route, no badge — reusing
+  `linklib/email_utils.py`'s existing `send_notification_email` (the same
+  Gmail-REST infrastructure and `email_failures` tracking the tool/community
+  submission notifications already use, editable at `/admin/emails` via a
+  new `_INTERNAL_EMAIL_ROWS` entry, `notification_type="library_submission"`)
+  instead. The `_is_member` gate, the honeypot, and every form field
+  (`url` required, `why`/`name`/`email` all optional and length-capped) are
+  unchanged; the on-page confirmation copy is unchanged too (pre-existing
+  text, not newly authored). **Deliberately no confirmation email to the
+  submitter** — only the notification to Brian, per explicit instruction.
+  Since there's no queue/table to check any more, the route always shows the
+  same confirmation regardless of what happens to the notification email
+  (a failed send is logged to `email_failures`, never surfaced to the
+  visitor) — there's nothing left to leak either way. See
+  `tests/test_library_submit.py` (fully rewritten for this new behavior) for
+  the coverage.
+
+  **If a future session is tempted to rebuild queue-style proposal/review
+  tooling for the archive: re-check the actual submission volume first.**
+  The numbers that justified retiring this (5,508 rows, 100% dismissed, 0
+  pending, 0 member submissions ever, 1-2 bookmarklet saves every few days)
+  are the reason it's gone — don't restore it on the assumption it might be
+  useful again without confirming the volume has actually changed.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -7259,15 +7369,18 @@ except the first one:
    `test_every_effort_tier_model_has_a_cost_estimate_row`, `tests/test_pricing.py`)
    now also checks it against `EFFORT_SETTINGS`, since a tier's model can (and
    does, per point 2) live outside the registry entirely.
-5. **Assorted standalone `DEFAULT_MODEL`/`QUEUE_ENRICH_MODEL` fallbacks** —
-   `linklib/agent.py`, `linklib/matchmaker.py`, `linklib/suggest.py`,
-   `linklib/dedupe.py`, `linklib/queue.py`, `linklib/enrich.py`, and
+5. **Assorted standalone `DEFAULT_MODEL` fallbacks** —
+   `linklib/agent.py`, `linklib/matchmaker.py`,
+   `linklib/dedupe.py`, `linklib/enrich.py`, and
    `linklib/embeddings.py` each declare their own `os.environ.get("LINKLIB_..._MODEL",
    "<hardcoded literal>")` default. None of these read the registry, and
-   `queue.py`/`enrich.py`/`embeddings.py` each pick their own deliberately
+   `enrich.py`/`embeddings.py` each pick their own deliberately
    different literal for a deliberately different reason (see the
    model-config-consolidation bullet below) — each is its own literal to
    update if that default itself (not a picker option) should change.
+   (`linklib/queue.py`'s own `QUEUE_ENRICH_MODEL`, and `linklib/suggest.py`'s
+   own fallback, were retired along with the Archive Queue itself — 2026-09,
+   PR 3 — so this list is now five modules, not seven.)
    `linklib/agent.py`'s `MODEL_ALIASES` (friendly short names like
    `"opus"`/`"sonnet5"` -> canonical id) is a sixth, smaller list in the same
    category — it's used internally by `agent.py` itself (`REWRITE_MODEL`,
@@ -7338,7 +7451,12 @@ than assuming uniformity:
   different task class (background enrichment depth, same "quality over
   cost" reasoning as `enrich.py`'s own `DEFAULT_MODEL`), not a copy of the
   chat default that happened to diverge. Forcing it onto the shared constant
-  would be false consistency, not a fix.
+  would be false consistency, not a fix. (`linklib/queue.py` itself no
+  longer exists — the whole module, `QUEUE_ENRICH_MODEL` included, was
+  retired along with the Archive Queue — 2026-09, PR 3 — so this bullet is
+  now purely historical: at the time this decision was made, leaving it
+  untouched was the right call, and the module simply isn't there to touch
+  any more.)
 - **`linklib/agent.py`'s `MODEL_ALIASES` stays in `agent.py`** — the task's
   original premise (flagged as one of five things to re-verify, not assumed)
   that it's "used only by a CLI script" turned out to be wrong: it's used
