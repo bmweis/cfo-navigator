@@ -212,8 +212,12 @@ Exceptions:
   article-title exemption (see below).
 
 **Not exempt, despite reading like a named concept at first glance:**
-- **"Thought Leadership"** sentence-cases to "Thought leadership" (nav link, page headers, admin
-  group/card name) — it never made the named-product list above.
+- **"Thought Leadership"** sentence-cases to "Thought leadership" (nav link, the public page's own
+  header, and the admin hub-nav GROUP name) — it never made the named-product list above. The
+  admin page/card once titled "Thought leadership" itself was relabeled "Third-party content" in
+  the Admin URL restructure (group A, 2026-09) once it moved inside a "Thought leadership" hub-nav
+  group alongside Original content and Sail, don't row settings — same page/group-name-collision
+  reasoning as never letting a page be titled the same as the section it lives inside.
 - **"Warm Intro" and other CTA text** sentence-case the same way ("Warm intro") — a CTA's wording
   isn't a named feature just because it recurs across pages.
 - **Software Matchmaker / Community Matchmaker** sentence-case to "Software matchmaker" / "Community
@@ -224,7 +228,7 @@ Exceptions:
   comma, no apostrophe curl, Title Case) and reads as ordinary imperative phrasing once you look
   past the capitalization, not a coined product name the way "FP&A Buddy" is. Canonical form
   everywhere it appears — the game's own h1, `/play`'s and the leaderboard's tab titles,
-  `/admin/game-settings`' h1 and its admin-dashboard card, and the article-title case below — is
+  `/admin/thought-leadership/game-settings`' h1 and its admin-dashboard card, and the article-title case below — is
   now the single sentence-cased form **"Sail, don't row"** (comma, lowercase after it). There is no
   longer a second, differently-capitalized form for the game itself vs. an article title reusing
   the phrase; both read the same way.

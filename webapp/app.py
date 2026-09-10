@@ -35,7 +35,7 @@ Private routes (require login cookie; API routes also accept a token):
     GET  /api/search           JSON search API
     GET  /bookmarklet          One-click Archive saver script
     GET  /read-later-bookmarklet  One-click Read Later saver script
-    GET  /admin/contacts       View contact form submissions
+    GET  /admin/inbox/contact-submissions       View contact form submissions
 """
 from __future__ import annotations
 
@@ -733,7 +733,7 @@ def _feature_suggestion_rate_limited(ip: str) -> bool:
 # Blunt substring match against common SEO/marketing pitch phrasing seen in
 # spam contact submissions. Case-insensitive. Deliberately a plain list, not a
 # DB table, so tuning it is a one-line source edit — no migration, no admin
-# UI. Add more phrases here as new spam patterns show up on /admin/contacts.
+# UI. Add more phrases here as new spam patterns show up on /admin/inbox/contact-submissions.
 _CONTACT_SPAM_PHRASES = [
     "boost your rankings",
     "first page of google",
@@ -1279,7 +1279,7 @@ def _send_email_safely(lib: Library, context: str, fn, *args, **kwargs) -> bool:
     emails, password resets, warm intros) should go through this instead of
     a bare try/except — on error it logs to stdout (for local/Railway log
     tailing) AND persists to the email_failures table, so a broken send
-    surfaces as an admin task badge (/admin/email-failures) rather than only
+    surfaces as an admin task badge (/admin/inbox/email-failures) rather than only
     ever showing up in a log nobody's watching."""
     try:
         return fn(*args, **kwargs)
@@ -4597,7 +4597,7 @@ def original_content_article(request: Request, slug: str):
 # backdrops extend that same visual language (no mockup existed for those
 # four, so they're an original fill using the established technique). Rank
 # tuning (pace, wind, obstacle density, collision rule) is admin-editable at
-# /admin/game-settings and read live here — the rank-select pills'
+# /admin/thought-leadership/game-settings and read live here — the rank-select pills'
 # collision-rule line (_sdr_collision_description) and the leaderboard's
 # Difficulty Index (_sdr_difficulty_index) are both derived from those same
 # live values, not hardcoded, so an admin retune can't leave either display
@@ -4625,7 +4625,7 @@ def original_content_article(request: Request, slug: str):
 # a rank badge) — list_game_leaderboard's `rank` param is now an optional
 # filter rather than required. The portrait footnote became an
 # auto-dismissing toast (was a persistent overlay sitting on top of active
-# gameplay) and the "/admin/game-settings is tunable" footer line is now
+# gameplay) and the "/admin/thought-leadership/game-settings is tunable" footer line is now
 # admin-gated (the "runs save to the leaderboard" sentence next to it stays
 # public).
 #
@@ -6132,7 +6132,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
 <template id="sdrBuoyTpl">""" + _SDR_BUOY_SVG + """</template>
 
 <p class="sdr-hint">Signed-in runs save automatically to the <a href="/play/leaderboard">leaderboard</a>.""" + (
-    ' Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.' if is_admin else ''
+    ' Rank pace/difficulty is tunable at <code>/admin/thought-leadership/game-settings</code>.' if is_admin else ''
 ) + """</p>
 </div>
 </div>
@@ -10744,7 +10744,7 @@ async def tools_submit(request: Request, background_tasks: BackgroundTasks):
                 notify_to,
                 subject=f"Tool submission: {name}",
                 body=(f"Submitted by: {submitted_by}\n\n{name}\n{url}\n\n{description}\n\n"
-                      f"Review at /admin/tools."),
+                      f"Review at /admin/inbox/toolbox-intros."),
                 notification_type="tool_submission",
             )
         _send_email_safely(
@@ -10760,7 +10760,7 @@ async def tools_submit(request: Request, background_tasks: BackgroundTasks):
     return RedirectResponse("/tools/submit?submitted=1", status_code=303)
 
 
-@app.get("/admin/contacts", response_class=HTMLResponse)
+@app.get("/admin/inbox/contact-submissions", response_class=HTMLResponse)
 def admin_contacts(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10828,7 +10828,7 @@ def admin_contacts(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Contact submissions</h1>
 {email_status}
-<form method="post" action="/admin/contacts/delete">
+<form method="post" action="/admin/inbox/contact-submissions/delete">
 <div style="display:flex;align-items:center;gap:12px;margin:24px 0 -8px;">
   <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;"
     onclick="return document.querySelectorAll('.contact-row-cb:checked').length &amp;&amp; confirm('Delete ' + document.querySelectorAll('.contact-row-cb:checked').length + ' selected submission(s)?');">Delete selected</button>
@@ -10859,7 +10859,7 @@ def admin_contacts(request: Request):
     return HTMLResponse(_page("Contacts—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/contacts/delete")
+@app.post("/admin/inbox/contact-submissions/delete")
 async def admin_contacts_delete(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10880,10 +10880,10 @@ async def admin_contacts_delete(request: Request):
             _log_contact_audit(lib, request, None, detail=f"{len(deleted)} submissions—{summary}")
     finally:
         lib.close()
-    return RedirectResponse("/admin/contacts", status_code=303)
+    return RedirectResponse("/admin/inbox/contact-submissions", status_code=303)
 
 
-@app.get("/admin/email-failures", response_class=HTMLResponse)
+@app.get("/admin/inbox/email-failures", response_class=HTMLResponse)
 def admin_email_failures(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10899,7 +10899,7 @@ def admin_email_failures(request: Request):
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:pre-wrap;">{_esc(f['detail'])}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
             {'<span style="color:var(--muted);">dismissed</span>' if f['resolved_at'] else
-             f'<form method="post" action="/admin/email-failures/{f["id"]}/dismiss" style="margin:0;">'
+             f'<form method="post" action="/admin/inbox/email-failures/{f["id"]}/dismiss" style="margin:0;">'
              f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;">Dismiss</button></form>'}
           </td>
         </tr>"""
@@ -10923,7 +10923,7 @@ def admin_email_failures(request: Request):
     return HTMLResponse(_page("Email failures—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/email-failures/{failure_id}/dismiss")
+@app.post("/admin/inbox/email-failures/{failure_id}/dismiss")
 def admin_email_failure_dismiss(request: Request, failure_id: int):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10932,7 +10932,7 @@ def admin_email_failure_dismiss(request: Request, failure_id: int):
         lib.dismiss_email_failure(failure_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/email-failures", status_code=303)
+    return RedirectResponse("/admin/inbox/email-failures", status_code=303)
 
 
 # Shared column-picker + bulk-edit UI for the Communities and Software admin
@@ -11671,7 +11671,7 @@ def admin_software(request: Request, filter: str = ""):
     def _approved_row(t: dict) -> str:
         cats = ", ".join(t["categories"]) or "—"
         n_leads = lead_counts.get(t["id"], 0)
-        lead_badge = (f'<a href="/admin/tools/software/leads?tool_id={t["id"]}" '
+        lead_badge = (f'<a href="/admin/inbox/toolbox-intros?tool_id={t["id"]}" '
                       f'style="display:inline-block;background:var(--coral);color:#fff;border-radius:5px;'
                       f'padding:2px 8px;font-size:11px;font-weight:700;text-decoration:none;white-space:nowrap;">'
                       f'{n_leads} intro{"s" if n_leads != 1 else ""}</a>') if n_leads else \
@@ -11790,7 +11790,7 @@ def admin_software(request: Request, filter: str = ""):
 <p style="margin:0 0 12px;">
   <a href="/tools/software" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
-  <a href="/admin/tools/software/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
+  <a href="/admin/inbox/toolbox-intros" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/software/name-duplicates" style="font-size:13px;color:{'#92400e' if n_name_dupes else 'var(--muted)'};font-weight:{'700' if n_name_dupes else '400'};">Check for name duplicates{f' ({n_name_dupes})' if n_name_dupes else ''} →</a>
   {review_filter_link}{clear_filter_link}
@@ -12242,7 +12242,7 @@ async def admin_software_bulk_delete(request: Request):
     return JSONResponse({"ok": True})
 
 
-@app.get("/admin/tools/software/leads", response_class=HTMLResponse)
+@app.get("/admin/inbox/toolbox-intros", response_class=HTMLResponse)
 def admin_tools_leads(request: Request, tool_id: int | None = None):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -14056,7 +14056,7 @@ def _tl_form_fields(item: dict | None = None) -> str:
   </div>"""
 
 
-@app.get("/admin/thought-leadership", response_class=HTMLResponse)
+@app.get("/admin/thought-leadership/third-party", response_class=HTMLResponse)
 def admin_thought_leadership(request: Request, type: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -14081,8 +14081,8 @@ def admin_thought_leadership(request: Request, type: str = ""):
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(it['date_label']) or '—'}{date_warning}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{url_cell}</td>
   <td style="padding:10px 12px;white-space:nowrap;">
-    <a href="/admin/thought-leadership/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
-    <form method="post" action="/admin/thought-leadership/{it['id']}/delete" style="display:inline;"
+    <a href="/admin/thought-leadership/third-party/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <form method="post" action="/admin/thought-leadership/third-party/{it['id']}/delete" style="display:inline;"
           onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot; from thought leadership?');">
       <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
     </form>
@@ -14094,7 +14094,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
 
     def _filter_link(t: str, label: str) -> str:
         active = t == type
-        href = "/admin/thought-leadership" + (f"?type={t}" if t else "")
+        href = "/admin/thought-leadership/third-party" + (f"?type={t}" if t else "")
         style = "font-weight:700;color:var(--navy);" if active else "color:var(--muted);"
         return f'<a href="{href}" style="font-size:13px;margin-right:14px;{style}">{label}</a>'
 
@@ -14103,8 +14103,8 @@ def admin_thought_leadership(request: Request, type: str = ""):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Thought leadership</h1>
-  <a href="/admin/thought-leadership/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add entry</a>
+  <h1>Third-party content</h1>
+  <a href="/admin/thought-leadership/third-party/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add entry</a>
 </div>
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
@@ -14126,20 +14126,20 @@ def admin_thought_leadership(request: Request, type: str = ""):
   hardcoded on the public page rather than migrated. See CLAUDE.md.
 </p>
 </div>"""
-    return HTMLResponse(_page("Thought leadership—Admin", "", body, authed=True))
+    return HTMLResponse(_page("Third-party content—Admin", "", body, authed=True))
 
 
-@app.get("/admin/thought-leadership/new", response_class=HTMLResponse)
+@app.get("/admin/thought-leadership/third-party/new", response_class=HTMLResponse)
 def admin_thought_leadership_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     body = f"""<div class="page page-form">
 <h1>Add a thought leadership entry</h1>
-<form method="post" action="/admin/thought-leadership/new" style="display:grid;gap:20px;">
+<form method="post" action="/admin/thought-leadership/third-party/new" style="display:grid;gap:20px;">
 {_tl_form_fields()}
   <div>
     <button type="submit" class="btn">Add entry</button>
-    <a href="/admin/thought-leadership" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/admin/thought-leadership/third-party" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>"""
@@ -14183,7 +14183,7 @@ def _tl_form_values(form) -> dict:
     }
 
 
-@app.post("/admin/thought-leadership/new")
+@app.post("/admin/thought-leadership/third-party/new")
 async def admin_thought_leadership_new_submit(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14198,10 +14198,10 @@ async def admin_thought_leadership_new_submit(request: Request):
                                    v["featured_home"])
     finally:
         lib.close()
-    return RedirectResponse("/admin/thought-leadership", status_code=303)
+    return RedirectResponse("/admin/thought-leadership/third-party", status_code=303)
 
 
-@app.get("/admin/thought-leadership/{item_id}/edit", response_class=HTMLResponse)
+@app.get("/admin/thought-leadership/third-party/{item_id}/edit", response_class=HTMLResponse)
 def admin_thought_leadership_edit(request: Request, item_id: int):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -14214,11 +14214,11 @@ def admin_thought_leadership_edit(request: Request, item_id: int):
         raise HTTPException(status_code=404, detail="Thought leadership entry not found")
     body = f"""<div class="page page-form">
 <h1>Edit thought leadership entry</h1>
-<form method="post" action="/admin/thought-leadership/{item_id}/edit" style="display:grid;gap:20px;">
+<form method="post" action="/admin/thought-leadership/third-party/{item_id}/edit" style="display:grid;gap:20px;">
 {_tl_form_fields(it)}
   <div>
     <button type="submit" class="btn">Save changes</button>
-    <a href="/admin/thought-leadership" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/admin/thought-leadership/third-party" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>"""
@@ -14229,7 +14229,7 @@ def admin_thought_leadership_edit(request: Request, item_id: int):
     return HTMLResponse(_page(f"Edit {it['title']}—Admin", "", body, authed=True))
 
 
-@app.post("/admin/thought-leadership/{item_id}/edit")
+@app.post("/admin/thought-leadership/third-party/{item_id}/edit")
 async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14245,10 +14245,10 @@ async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
                                       v["featured_home"])
     finally:
         lib.close()
-    return RedirectResponse("/admin/thought-leadership", status_code=303)
+    return RedirectResponse("/admin/thought-leadership/third-party", status_code=303)
 
 
-@app.post("/admin/thought-leadership/{item_id}/delete")
+@app.post("/admin/thought-leadership/third-party/{item_id}/delete")
 def admin_thought_leadership_delete(request: Request, item_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14257,11 +14257,11 @@ def admin_thought_leadership_delete(request: Request, item_id: int):
         lib.delete_thought_leadership(item_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/thought-leadership", status_code=303)
+    return RedirectResponse("/admin/thought-leadership/third-party", status_code=303)
 
 
 # -- Original Content admin (Phase 3 — see CLAUDE.md) ------------------------
-# Same CRUD pattern as /admin/thought-leadership just above, with one
+# Same CRUD pattern as /admin/thought-leadership/third-party just above, with one
 # addition: slug validation. A bad slug is a real failure mode here (an
 # unreachable page, or a page that silently loses to a bespoke route) in a
 # way thought_leadership's free-text title never risked, so this follows the
@@ -14443,14 +14443,14 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
     else:
         preview_html = ""
     return f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original content</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/thought-leadership/original" style="font-size:13px;color:var(--muted);">&larr; Original content</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
 <form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_oc_form_fields(values)}
   <div>
     <button type="submit" class="btn">{_esc(submit_label)}</button>
-    <a href="/admin/original-content" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/admin/thought-leadership/original" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
     {preview_html}
   </div>
 </form>
@@ -14490,7 +14490,7 @@ def _oc_values_from_form(form) -> dict:
     }
 
 
-@app.get("/admin/original-content", response_class=HTMLResponse)
+@app.get("/admin/thought-leadership/original", response_class=HTMLResponse)
 def admin_original_content(request: Request, status: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -14518,8 +14518,8 @@ def admin_original_content(request: Request, status: str = ""):
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{it['display_order']}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(_relative_age(it['updated_at'])) or '—'}</td>
   <td style="padding:10px 12px;white-space:nowrap;">
-    <a href="/admin/original-content/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
-    <form method="post" action="/admin/original-content/{it['id']}/delete" style="display:inline;"
+    <a href="/admin/thought-leadership/original/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <form method="post" action="/admin/thought-leadership/original/{it['id']}/delete" style="display:inline;"
           onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot;?');">
       <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
     </form>
@@ -14531,7 +14531,7 @@ def admin_original_content(request: Request, status: str = ""):
 
     def _filter_link(s: str, label: str) -> str:
         active = s == status
-        href = "/admin/original-content" + (f"?status={s}" if s else "")
+        href = "/admin/thought-leadership/original" + (f"?status={s}" if s else "")
         style = "font-weight:700;color:var(--navy);" if active else "color:var(--muted);"
         return f'<a href="{href}" style="font-size:13px;margin-right:14px;{style}">{label}</a>'
 
@@ -14541,7 +14541,7 @@ def admin_original_content(request: Request, status: str = ""):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Original content</h1>
-  <a href="/admin/original-content/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add piece</a>
+  <a href="/admin/thought-leadership/original/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add piece</a>
 </div>
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
@@ -14568,17 +14568,17 @@ def admin_original_content(request: Request, status: str = ""):
     return HTMLResponse(_page("Original content—Admin", "", body, authed=True))
 
 
-@app.get("/admin/original-content/new", response_class=HTMLResponse)
+@app.get("/admin/thought-leadership/original/new", response_class=HTMLResponse)
 def admin_original_content_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     return HTMLResponse(_page("Add original content—Admin", "",
-                              _oc_form_page("Add a piece", "/admin/original-content/new",
+                              _oc_form_page("Add a piece", "/admin/thought-leadership/original/new",
                                            {"status": "draft"}, "", "Add piece"),
                               authed=True))
 
 
-@app.post("/admin/original-content/new")
+@app.post("/admin/thought-leadership/original/new")
 async def admin_original_content_new_submit(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14589,7 +14589,7 @@ async def admin_original_content_new_submit(request: Request):
         def _reject(message: str):
             return HTMLResponse(_page(
                 "Add original content—Admin", "",
-                _oc_form_page("Add a piece", "/admin/original-content/new", v, message, "Add piece"),
+                _oc_form_page("Add a piece", "/admin/thought-leadership/original/new", v, message, "Add piece"),
                 authed=True), status_code=400)
 
         if not v["title"]:
@@ -14617,10 +14617,10 @@ async def admin_original_content_new_submit(request: Request):
         sync_original_content_article(lib, new_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/original-content", status_code=303)
+    return RedirectResponse("/admin/thought-leadership/original", status_code=303)
 
 
-@app.get("/admin/original-content/{item_id}/edit", response_class=HTMLResponse)
+@app.get("/admin/thought-leadership/original/{item_id}/edit", response_class=HTMLResponse)
 def admin_original_content_edit(request: Request, item_id: int):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -14637,12 +14637,12 @@ def admin_original_content_edit(request: Request, item_id: int):
     # already-_esc()'d fragment here would double-escape (e.g. "&amp;amp;"),
     # the same class of bug CLAUDE.md's "Speaking &amp; Events" fix covers.
     return HTMLResponse(_page(f"Edit {it['title']}—Admin", "",
-                              _oc_form_page(f"Edit {it['title']}", f"/admin/original-content/{item_id}/edit",
+                              _oc_form_page(f"Edit {it['title']}", f"/admin/thought-leadership/original/{item_id}/edit",
                                            values, "", "Save changes", show_preview=True),
                               authed=True))
 
 
-@app.post("/admin/original-content/{item_id}/edit")
+@app.post("/admin/thought-leadership/original/{item_id}/edit")
 async def admin_original_content_edit_submit(request: Request, item_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14660,7 +14660,7 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
             # validation, and the common case leaves slug unchanged anyway.
             return HTMLResponse(_page(
                 f"Edit {v['title']}—Admin", "",
-                _oc_form_page(f"Edit {v['title']}", f"/admin/original-content/{item_id}/edit",
+                _oc_form_page(f"Edit {v['title']}", f"/admin/thought-leadership/original/{item_id}/edit",
                              v, message, "Save changes", show_preview=True),
                 authed=True), status_code=400)
 
@@ -14692,10 +14692,10 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
         sync_original_content_article(lib, item_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/original-content", status_code=303)
+    return RedirectResponse("/admin/thought-leadership/original", status_code=303)
 
 
-@app.post("/admin/original-content/{item_id}/delete")
+@app.post("/admin/thought-leadership/original/{item_id}/delete")
 def admin_original_content_delete(request: Request, item_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14710,7 +14710,7 @@ def admin_original_content_delete(request: Request, item_id: int):
         lib.delete_original_content(item_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/original-content", status_code=303)
+    return RedirectResponse("/admin/thought-leadership/original", status_code=303)
 
 
 _COMMUNITY_COST_BANDS = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
@@ -15191,7 +15191,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Per-profile mini-CTA:</strong> &ldquo;Not quite the right fit? Tell us why &rarr;&rdquo; &mdash; links to the gap form pre-filled with <code>closest_community_id</code>; the &ldquo;Re: [Name] wasn't quite the right fit&hellip;&rdquo; line itself renders on the gap form, not here (see below).</li>
 <li><strong>Empty-profile fallback:</strong> when a community has no <code>community_profiles</code> row, only the directory-card fields render (name, cost, region, access, sponsor, &ldquo;Visit website&rdquo; button) &mdash; no verdict/deep-profile sections.</li>
-<li><strong>Suggest-a-correction</strong> (<code>/tools/communities/correct?community_id=&lt;id&gt;</code>): &ldquo;Something here out of date? Suggest a correction &rarr;&rdquo; &mdash; a public, no-login, single free-text field ("What's incorrect or out of date?") plus optional email, distinct from the gap form's fit-feedback purpose. Requires a known <code>community_id</code> (404s otherwise, since a correction is always about one specific listing, unlike the gap form's "none in particular" option). Lands in the same <code>community_gap_submissions</code> table as gap/recommender rows, tagged <code>submission_type='correction'</code>, and is reviewed alongside them at <code>/admin/community-gaps</code> &mdash; it lands in a review queue and is never auto-applied to the listing.</li>
+<li><strong>Suggest-a-correction</strong> (<code>/tools/communities/correct?community_id=&lt;id&gt;</code>): &ldquo;Something here out of date? Suggest a correction &rarr;&rdquo; &mdash; a public, no-login, single free-text field ("What's incorrect or out of date?") plus optional email, distinct from the gap form's fit-feedback purpose. Requires a known <code>community_id</code> (404s otherwise, since a correction is always about one specific listing, unlike the gap form's "none in particular" option). Lands in the same <code>community_gap_submissions</code> table as gap/recommender rows, tagged <code>submission_type='correction'</code>, and is reviewed alongside them at <code>/admin/inbox/community-gaps</code> &mdash; it lands in a review queue and is never auto-applied to the listing.</li>
 </ul>
 </section>
 
@@ -15255,7 +15255,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <li><strong><code>community_gap_submissions</code> table:</strong> stores the free-text fields (current communities, gaps, looking-for), <code>search_context_json</code> (the search/filter state, quiz answers, or the quiz's optional weighting-step choices, at submission time), <code>viewed_community_ids_json</code> (computed server-side from <code>community_profile_views</code>, never trusted from the client), <code>closest_community_id</code>, optional email, a <code>reviewed</code> flag for admin triage, and <code>submission_type</code> (<code>'gap'</code>, <code>'recommender'</code>, <code>'weight_preferences'</code>, or <code>'correction'</code>) distinguishing gap-form submissions, logged recommender-quiz completions, a visitor's own weighting choices (logged only when they set at least one, never on a skip), and per-profile correction reports (which reuse just <code>gaps</code> for the free text and <code>closest_community_id</code> for the listing being corrected) from each other.</li>
 <li><strong>No PII is collected</strong> &mdash; nothing reads or stores IP address, user agent, or <code>X-Forwarded-For</code>. The only header touched is <code>x-forwarded-proto</code>, used once to set the cookie's <code>secure</code> flag, never persisted.</li>
 <li><strong>Retention:</strong> everything is kept indefinitely, no automatic deletion &mdash; documented publicly at <a href="/privacy">/privacy</a>.</li>
-<li><strong>Admin visibility:</strong> submissions are triaged at <a href="/admin/community-gaps">/admin/community-gaps</a>, mirroring the <code>/admin/ask-feedback</code> layout, and feed a badge in the CFO Toolbox admin nav group via <code>community_gap_counts()</code>.</li>
+<li><strong>Admin visibility:</strong> submissions are triaged at <a href="/admin/inbox/community-gaps">/admin/inbox/community-gaps</a>, mirroring the <code>/admin/fpa-buddy/feedback</code> layout, and feed a badge in the CFO Toolbox admin nav group via <code>community_gap_counts()</code>.</li>
 </ul>
 </section>
 </div>
@@ -21527,20 +21527,18 @@ _SOFTWARE_TOOLS = [
 
 # CFO Toolbox items, used as one of the expandable groups below (same pattern
 # as the other groups — no separate hub page). Sail, Don't Row's settings
-# live here too (added Phase 6): the game itself isn't part of the public
-# /tools directory (it's an easter egg linked only from the AI Hackathon
-# Playbook thought-leadership page — see the /play route), so this group's
-# description line ("Everything behind the public /tools directory.") is a
-# slightly loose fit for it. Left as-is rather than reworded to force a fit —
-# flagged in the Phase 6 PR for Brian to decide whether it's worth adjusting.
-# The four Software-directory cards moved out of this flat list into
-# _SOFTWARE_TOOLS above (Phase 1c) — see the CFO Toolbox special-case note
-# further down for how that nested sub-group gets spliced back in.
+# card moved out of this group (Admin URL restructure, group A) into Thought
+# leadership instead — its URL is now under /admin/thought-leadership/*
+# alongside Third-party content and Original content, so the card moved
+# with it rather than leaving a CFO Toolbox card pointing at a Thought
+# leadership URL. The four Software-directory cards moved out of this flat
+# list into _SOFTWARE_TOOLS above (Phase 1c) — see the CFO Toolbox
+# special-case note further down for how that nested sub-group gets spliced
+# back in.
 _TOOLBOX_TOOLS = [
     ("/admin/tools/resources", "Resources", "Add, edit, or remove the sources listed in the Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
     ("/admin/tools/communities/categories", "Community categories", "Add, rename, or remove the category pills communities are tagged with on /tools/communities—the Communities parallel to Software categories above."),
-    ("/admin/game-settings",    "Sail, don't row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
 ]
 
 # FP&A Buddy's own admin pages, consolidated into one section (Phase 6) —
@@ -21550,8 +21548,8 @@ _TOOLBOX_TOOLS = [
 # the section's 4th card.
 _FPA_BUDDY_TOOLS = [
     ("/tools/fpa-buddy/how-it-works", "How FP&amp;A Buddy works", "The retrieval tiers, effort levels, citations, and cost model behind the Q&amp;A tool&mdash;for anyone who wants the real mechanism. Public page, not admin-only."),
-    ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
-    ("/admin/ask-feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
+    ("/admin/fpa-buddy/report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
+    ("/admin/fpa-buddy/feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
     ("/admin/exa-settings",  "Exa web search",       "Turn Exa on or off for the web tier, and test the connection."),
 ]
 
@@ -21569,24 +21567,26 @@ _FPA_BUDDY_TOOLS = [
 # special-case in admin_page()) because that nesting needs access to
 # admin_page()'s own task_counts/_group_html closures. The entry here
 # carries _TOOLBOX_TOOLS as its remaining flat base items (Resources,
-# Communities, Sail Don't Row settings) plus the Software sub-group — every
+# Communities, Community categories) plus the Software sub-group — every
 # one of those is KEPT as a direct child (or nested sub-group) rather than
 # dropped to match the brief's shorter "Software/Benchmarking/Communities"
-# prose list, since dropping "Toolbox categories" or "Sail, Don't Row
-# settings" would remove their only path without a replacement (the same
-# "don't just delete the only path" standard the brief applies to Library's
-# own "Open Reader" removal) — flagged in the Phase 6 PR.
+# prose list, since dropping "Toolbox categories" would remove its only path
+# without a replacement (the same "don't just delete the only path" standard
+# the brief applies to Library's own "Open Reader" removal) — flagged in the
+# Phase 6 PR. (Sail, Don't Row settings moved to Thought leadership in the
+# Admin URL restructure, group A — see that group's own card list below.)
 # Inbox holds only things that actually arrive and wait on Brian.
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
-        ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
-        ("/admin/tools/software/leads",  "Toolbox intros",          "Warm intro requests from readers—name, email, company, and which tool they want an intro to."),
-        ("/admin/community-gaps", "Community gaps",        "Where visitors say finance communities fall short—what they're missing, and which community came closest."),
-        ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
+        ("/admin/inbox/contact-submissions",     "Contact submissions",     "Messages sent through the public contact form."),
+        ("/admin/inbox/toolbox-intros",  "Toolbox intros",          "Warm intro requests from readers—name, email, company, and which tool they want an intro to."),
+        ("/admin/inbox/community-gaps", "Community gaps",        "Where visitors say finance communities fall short—what they're missing, and which community came closest."),
+        ("/admin/inbox/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
     ("Thought leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
-        ("/admin/thought-leadership", "Thought leadership", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
-        ("/admin/original-content", "Original content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
+        ("/admin/thought-leadership/third-party", "Third-party content", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
+        ("/admin/thought-leadership/original", "Original content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
+        ("/admin/thought-leadership/game-settings", "Sail, don't row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Brand, voice, and content", "How the site looks and sounds.", [
@@ -25411,7 +25411,7 @@ def _game_settings_num_field(label: str, name: str, value, step: str = "1", suff
     </div>"""
 
 
-@app.get("/admin/game-settings", response_class=HTMLResponse)
+@app.get("/admin/thought-leadership/game-settings", response_class=HTMLResponse)
 def admin_game_settings(request: Request, msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25452,7 +25452,7 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
             _game_settings_num_field("Gust boost", "sail_speed", r["sail_speed"], suffix="u/sec bonus in a gust"),
         ]) + shark_fields
         cards += f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:16px;">
-  <form method="post" action="/admin/game-settings/{r['rank']}/edit">
+  <form method="post" action="/admin/thought-leadership/game-settings/{r['rank']}/edit">
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
       <div style="display:flex;flex-direction:column;gap:2px;width:16px;flex-shrink:0;">{stripes}</div>
       <input type="text" name="label" value="{_esc(r['label'])}" required maxlength="40"
@@ -25481,7 +25481,7 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
     return HTMLResponse(_page("Sail, don't row settings—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/game-settings/{rank}/edit")
+@app.post("/admin/thought-leadership/game-settings/{rank}/edit")
 async def admin_game_settings_edit(request: Request, rank: str):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -25518,10 +25518,10 @@ async def admin_game_settings_edit(request: Request, rank: str):
                 shark_lunge_duration_sec=max(0.0, _num("shark_lunge_duration_sec", float, current["shark_lunge_duration_sec"])),
             )
         except ValueError as e:
-            return RedirectResponse(f"/admin/game-settings?error={quote(str(e))}", status_code=303)
+            return RedirectResponse(f"/admin/thought-leadership/game-settings?error={quote(str(e))}", status_code=303)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/game-settings?msg={quote(f'Saved {label}.')}", status_code=303)
+    return RedirectResponse(f"/admin/thought-leadership/game-settings?msg={quote(f'Saved {label}.')}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -25805,7 +25805,7 @@ def _ask_settings_badge(row: dict) -> str:
 def _render_cited_answer(answer: str, citations_json: str,
                          truncate: int | None = None) -> tuple[str, str]:
     """Citation rendering for the server-rendered ask surfaces — /ask/history,
-    /questions, and /admin/ask-feedback all call this one helper (never a
+    /questions, and /admin/fpa-buddy/feedback all call this one helper (never a
     per-surface reimplementation). Returns (answer_html, sources_html):
     answer_html is the escaped answer text with each [n] marker linkified
     against the turn's persisted citation snapshot
@@ -25877,7 +25877,7 @@ def _render_cited_answer(answer: str, citations_json: str,
     return answer_html, sources_html
 
 
-@app.get("/admin/ask-report", response_class=HTMLResponse)
+@app.get("/admin/fpa-buddy/report", response_class=HTMLResponse)
 def admin_ask_report(request: Request, user: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25982,13 +25982,13 @@ def admin_ask_report(request: Request, user: str = ""):
   </div>
 </div>
 
-<form method="get" action="/admin/ask-report" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+<form method="get" action="/admin/fpa-buddy/report" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
   <label style="font-size:13px;color:var(--muted);">Filter by user:</label>
   <select name="user" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
     <option value="">All users</option>
     {user_options}
   </select>
-  <a href="/admin/ask-report/export.csv{('?user=' + quote(user)) if user else ''}" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;margin-left:auto;">Download CSV &darr;</a>
+  <a href="/admin/fpa-buddy/report/export.csv{('?user=' + quote(user)) if user else ''}" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;margin-left:auto;">Download CSV &darr;</a>
 </form>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
@@ -26023,7 +26023,7 @@ function toggleConvo(g) {{
     return HTMLResponse(_page("FP&A Buddy report—Admin", "Admin", body, authed=True))
 
 
-@app.get("/admin/ask-report/export.csv")
+@app.get("/admin/fpa-buddy/report/export.csv")
 def admin_ask_report_export(request: Request, user: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -26776,7 +26776,7 @@ _FEEDBACK_RATINGS = {
 }
 
 
-@app.get("/admin/ask-feedback", response_class=HTMLResponse)
+@app.get("/admin/fpa-buddy/feedback", response_class=HTMLResponse)
 def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     """Triage view for member feedback on FP&A Buddy answers: every rating,
     newest first, with the full context needed to judge a flagged answer —
@@ -26785,7 +26785,7 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     here feeds back into prompts or retrieval automatically.
 
     Reviewed state (2026-09, Phase 3) is a manual per-row "Mark reviewed"
-    toggle, matching /admin/community-gaps' own reviewed column/toggle/
+    toggle, matching /admin/inbox/community-gaps' own reviewed column/toggle/
     filter shape exactly — not auto-clear-on-view. See toggle_ask_feedback_
     reviewed's docstring for why."""
     if not _is_authed(request):
@@ -26824,11 +26824,11 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
             f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;margin:8px 0 0;">{a_html}</p>'
         )
         model = (r.get("model") or "").replace("claude-", "")
-        report_link = (f'/admin/ask-report?user={quote(r["rater_username"])}'
-                       if r.get("rater_username") else "/admin/ask-report")
+        report_link = (f'/admin/fpa-buddy/report?user={quote(r["rater_username"])}'
+                       if r.get("rater_username") else "/admin/fpa-buddy/report")
         back_qs = f"?reviewed={reviewed}" if reviewed else ""
         reviewed_badge, reviewed_action = _reviewed_toggle_html(
-            is_reviewed, f"/admin/ask-feedback/{r['id']}/toggle-reviewed{back_qs}", form_style="margin:0;",
+            is_reviewed, f"/admin/fpa-buddy/feedback/{r['id']}/toggle-reviewed{back_qs}", form_style="margin:0;",
         )
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -26852,7 +26852,7 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
         '<div style="padding:24px;text-align:center;color:var(--muted);border:1px solid var(--line);border-radius:12px;background:var(--surface);">No feedback yet.</div>'
 
     # Unreviewed is deliberately all-time, not month-scoped — same choice
-    # /admin/community-gaps makes for its own Unreviewed stat tile (Total
+    # /admin/inbox/community-gaps makes for its own Unreviewed stat tile (Total
     # submissions/This calendar month are the two that scope; Unreviewed
     # answers a different question, "how much is left to triage," which
     # isn't naturally a monthly figure).
@@ -26885,7 +26885,7 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
   {stat_cards}
 </div>
 
-<form method="get" action="/admin/ask-feedback" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+<form method="get" action="/admin/fpa-buddy/feedback" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
   <label style="font-size:13px;color:var(--muted);">Filter by rating:</label>
   <select name="rating" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
     <option value="">All ratings</option>
@@ -26904,7 +26904,7 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     return HTMLResponse(_page("FP&A Buddy feedback—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/ask-feedback/{feedback_id}/toggle-reviewed")
+@app.post("/admin/fpa-buddy/feedback/{feedback_id}/toggle-reviewed")
 def admin_ask_feedback_toggle(request: Request, feedback_id: int, reviewed: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -26914,13 +26914,13 @@ def admin_ask_feedback_toggle(request: Request, feedback_id: int, reviewed: str 
     finally:
         lib.close()
     qs = f"?reviewed={reviewed}" if reviewed else ""
-    return RedirectResponse(f"/admin/ask-feedback{qs}", status_code=303)
+    return RedirectResponse(f"/admin/fpa-buddy/feedback{qs}", status_code=303)
 
 
-@app.get("/admin/community-gaps", response_class=HTMLResponse)
+@app.get("/admin/inbox/community-gaps", response_class=HTMLResponse)
 def admin_community_gaps(request: Request, reviewed: str = ""):
     """Triage view for the native gap-collection form on /tools/communities
-    (Phase 5), mirroring /admin/ask-feedback's layout exactly: 3-stat summary
+    (Phase 5), mirroring /admin/fpa-buddy/feedback's layout exactly: 3-stat summary
     row, single-select GET filter that auto-submits, card list newest-first
     with collapsible long text, metadata footer."""
     if not _is_authed(request):
@@ -27026,7 +27026,7 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
         )
         back_qs = f"?reviewed={reviewed}" if reviewed else ""
         badge, action = _reviewed_toggle_html(
-            is_reviewed, f"/admin/community-gaps/{r['id']}/toggle-reviewed{back_qs}", form_style="margin-left:auto;",
+            is_reviewed, f"/admin/inbox/community-gaps/{r['id']}/toggle-reviewed{back_qs}", form_style="margin-left:auto;",
         )
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -27067,7 +27067,7 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
   {stat_cards}
 </div>
 
-<form method="get" action="/admin/community-gaps" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+<form method="get" action="/admin/inbox/community-gaps" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
   <label style="font-size:13px;color:var(--muted);">Filter:</label>
   <select name="reviewed" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
     <option value="">All submissions</option>
@@ -27081,7 +27081,7 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
     return HTMLResponse(_page("Community gaps—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/community-gaps/{submission_id}/toggle-reviewed")
+@app.post("/admin/inbox/community-gaps/{submission_id}/toggle-reviewed")
 def admin_community_gap_toggle(request: Request, submission_id: int, reviewed: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -27091,7 +27091,7 @@ def admin_community_gap_toggle(request: Request, submission_id: int, reviewed: s
     finally:
         lib.close()
     qs = f"?reviewed={reviewed}" if reviewed else ""
-    return RedirectResponse(f"/admin/community-gaps{qs}", status_code=303)
+    return RedirectResponse(f"/admin/inbox/community-gaps{qs}", status_code=303)
 
 
 # Reference content for the "How to set up a new MCP user" disclosure block
@@ -29010,7 +29010,7 @@ def admin_backfill_content_manual_review_export(request: Request):
         lib.close()
 
     def _csv_safe(val) -> str:
-        # Same formula-injection guard as /admin/ask-report/export.csv — a
+        # Same formula-injection guard as /admin/fpa-buddy/report/export.csv — a
         # title is asker/enrichment-derived text, could start with any of
         # these by accident.
         s = str(val)
@@ -30713,7 +30713,7 @@ def _email_template_registry() -> list[dict]:
             "id": "warm-intro", "prefix": "warm_intro", "title": "Warm intro email",
             "recipient": "Vendor contact (requester cc&rsquo;d)",
             "trigger": "A member requests an intro on /tools",
-            "blurb": "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/software/leads). The requester is cc&rsquo;d automatically.",
+            "blurb": "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/inbox/toolbox-intros). The requester is cc&rsquo;d automatically.",
             "placeholders": eu.WARM_INTRO_PLACEHOLDERS,
             "subject_default": eu.WARM_INTRO_SUBJECT_DEFAULT,
             "body_default": eu.WARM_INTRO_BODY_DEFAULT,

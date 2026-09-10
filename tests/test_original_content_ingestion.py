@@ -346,7 +346,7 @@ VALID_FORM = {
 
 def test_admin_create_route_mirrors_into_articles(env):
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     lib = env._lib()
     try:
         row = lib.get_original_content_by_slug("a-test-piece")
@@ -360,7 +360,7 @@ def test_admin_create_route_mirrors_into_articles(env):
 
 def test_admin_edit_route_resyncs_mirror(env):
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     lib = env._lib()
     try:
         item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
@@ -368,7 +368,7 @@ def test_admin_edit_route_resyncs_mirror(env):
         lib.close()
 
     edited = dict(VALID_FORM, body_md="# Hi\n\nEdited content, brand new text.")
-    c.post(f"/admin/original-content/{item_id}/edit", data=edited, follow_redirects=False)
+    c.post(f"/admin/thought-leadership/original/{item_id}/edit", data=edited, follow_redirects=False)
 
     lib = env._lib()
     try:
@@ -382,7 +382,7 @@ def test_admin_edit_route_resyncs_mirror(env):
 
 def test_admin_delete_route_cascades_the_mirror(env):
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     lib = env._lib()
     try:
         row = lib.get_original_content_by_slug("a-test-piece")
@@ -390,7 +390,7 @@ def test_admin_delete_route_cascades_the_mirror(env):
     finally:
         lib.close()
 
-    c.post(f"/admin/original-content/{item_id}/delete", follow_redirects=False)
+    c.post(f"/admin/thought-leadership/original/{item_id}/delete", follow_redirects=False)
 
     lib = env._lib()
     try:

@@ -6,16 +6,24 @@ CFO Toolbox; Features is removed entirely once it's empty.
 
 Pure reorganization — no route changes, no new functionality. See
 tests/test_admin_how_buddy_works.py for the "How FP&A Buddy works" page's
-own content tests, and tests/test_game_settings.py for /admin/game-settings'.
+own content tests, and tests/test_game_settings.py for /admin/thought-leadership/game-settings'.
 
 **Superseded in part by the later Phase 6 (Layout Width Fixes, Admin Nav
 Restructure, Library Admin Cleanup)**: FP&A Buddy is no longer its own
 top-level `_ADMIN_GROUPS` entry — it nests inside CFO Toolbox as a
 sub-group (`_FPA_BUDDY_TOOLS`, rendered via a recursive `_group_html()`
 call inside `admin_page()`, not stored in `_ADMIN_GROUPS` itself), matching
-the public nav's own Toolbox->FP&A Buddy relationship. Sail, Don't Row
-staying inside CFO Toolbox, Features staying gone, and the four routes
-themselves are all still true and still covered below.
+the public nav's own Toolbox->FP&A Buddy relationship. Features staying
+gone and the four routes themselves are all still true and still covered
+below.
+
+**Superseded again by the Admin URL restructure (group A)**: Sail, Don't
+Row settings moved a second time, out of CFO Toolbox into Thought
+leadership — its URL changed from `/admin/game-settings` to
+`/admin/thought-leadership/game-settings` in the same move, and the FP&A
+Buddy report/feedback pages moved from `/admin/ask-report`/
+`/admin/ask-feedback` to `/admin/fpa-buddy/report`/`/admin/fpa-buddy/
+feedback`. See test_sail_dont_row_moved_into_thought_leadership below.
 """
 import pathlib
 import sys
@@ -68,21 +76,27 @@ def test_fpa_buddy_tools_list_has_all_expected_pages(env):
     hrefs = [href for href, _, _ in env._FPA_BUDDY_TOOLS]
     assert hrefs == [
         "/tools/fpa-buddy/how-it-works",
-        "/admin/ask-report",
-        "/admin/ask-feedback",
+        "/admin/fpa-buddy/report",
+        "/admin/fpa-buddy/feedback",
         "/admin/exa-settings",
     ]
 
 
-def test_sail_dont_row_moved_into_cfo_toolbox(env):
-    toolbox_groups = [items for gname, _, items in env._ADMIN_GROUPS if gname == "CFO Toolbox"]
-    assert len(toolbox_groups) == 1
-    hrefs = [href for href, _, _ in toolbox_groups[0]]
-    assert "/admin/game-settings" in hrefs
-    # Wasn't duplicated — it should appear in CFO Toolbox and nowhere else.
+def test_sail_dont_row_moved_into_thought_leadership(env):
+    """Superseded by the Admin URL restructure (group A): Sail, Don't Row
+    settings moved a second time, out of CFO Toolbox into Thought
+    leadership, alongside Third-party content and Original content — its
+    URL moved with it (/admin/game-settings -> /admin/thought-leadership/
+    game-settings), so the card had to move too rather than point a CFO
+    Toolbox card at a Thought leadership URL."""
+    tl_groups = [items for gname, _, items in env._ADMIN_GROUPS if gname == "Thought leadership"]
+    assert len(tl_groups) == 1
+    hrefs = [href for href, _, _ in tl_groups[0]]
+    assert "/admin/thought-leadership/game-settings" in hrefs
+    # Wasn't duplicated — it should appear in Thought leadership and nowhere else.
     for gname, _, items in env._ADMIN_GROUPS:
-        if gname != "CFO Toolbox":
-            assert "/admin/game-settings" not in [href for href, _, _ in items]
+        if gname != "Thought leadership":
+            assert "/admin/thought-leadership/game-settings" not in [href for href, _, _ in items]
 
 
 def test_no_route_appears_in_two_sections(env):
@@ -105,8 +119,8 @@ def test_all_four_moved_routes_still_resolve_at_the_same_urls(env):
     """The reorg only changes section placement — none of the four pages'
     own routes or content should have moved."""
     c = _admin_client(env)
-    for path in ("/tools/fpa-buddy/how-it-works", "/admin/ask-report",
-                 "/admin/ask-feedback", "/admin/game-settings"):
+    for path in ("/tools/fpa-buddy/how-it-works", "/admin/fpa-buddy/report",
+                 "/admin/fpa-buddy/feedback", "/admin/thought-leadership/game-settings"):
         resp = c.get(path)
         assert resp.status_code == 200, path
 

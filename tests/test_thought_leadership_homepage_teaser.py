@@ -187,7 +187,7 @@ def test_reader_access_box_admin_only(env):
 
 def test_add_and_edit_forms_have_feature_on_homepage_checkbox(env):
     c = _admin_client(env)
-    add_html = c.get("/admin/thought-leadership/new").text
+    add_html = c.get("/admin/thought-leadership/third-party/new").text
     assert 'name="featured_home"' in add_html
     assert "Feature on homepage" in add_html
 
@@ -197,14 +197,14 @@ def test_add_and_edit_forms_have_feature_on_homepage_checkbox(env):
                                               "Forbes", "Jan 2026", "2026-01")
     finally:
         lib.close()
-    edit_html = c.get(f"/admin/thought-leadership/{item_id}/edit").text
+    edit_html = c.get(f"/admin/thought-leadership/third-party/{item_id}/edit").text
     assert 'name="featured_home"' in edit_html
     assert "Feature on homepage" in edit_html
 
 
 def test_featured_home_checkbox_persists_via_add_and_edit_routes(env):
     c = _admin_client(env)
-    c.post("/admin/thought-leadership/new", data={
+    c.post("/admin/thought-leadership/third-party/new", data={
         "type": "writing", "title": "Pinned Piece", "url": "https://example.com/pinned",
         "venue": "Forbes", "date_label": "Jan 2020", "display_order": "",
         "featured_home": "1",
@@ -218,7 +218,7 @@ def test_featured_home_checkbox_persists_via_add_and_edit_routes(env):
     assert items[0]["featured_home"] == 1
 
     item_id = items[0]["id"]
-    c.post(f"/admin/thought-leadership/{item_id}/edit", data={
+    c.post(f"/admin/thought-leadership/third-party/{item_id}/edit", data={
         "type": "writing", "title": "Pinned Piece", "url": "https://example.com/pinned",
         "venue": "Forbes", "date_label": "Jan 2020", "display_order": "0",
     }, follow_redirects=False)

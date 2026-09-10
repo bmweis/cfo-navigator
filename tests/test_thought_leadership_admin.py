@@ -1,6 +1,6 @@
 """Thought Leadership Admin CRUD, Phase 1 (see CLAUDE.md): the four
 /thought-leadership columns (Writing, Speaking & Events, Podcasts, Press)
-now read from the `thought_leadership` DB table via `/admin/thought-leadership`
+now read from the `thought_leadership` DB table via `/admin/thought-leadership/third-party`
 CRUD, replacing the pre-Phase-1 hardcoded webapp/thought_leadership_data.py.
 """
 import pathlib
@@ -43,7 +43,7 @@ def test_thought_leadership_in_admin_nav(env):
     tl_groups = [items for gname, _, items in env._ADMIN_GROUPS if gname == "Thought leadership"]
     assert len(tl_groups) == 1
     hrefs = [href for href, _, _ in tl_groups[0]]
-    assert "/admin/thought-leadership" in hrefs
+    assert "/admin/thought-leadership/third-party" in hrefs
 
 
 def test_public_page_requires_no_auth_and_renders_empty_state(env):
@@ -56,14 +56,14 @@ def test_public_page_requires_no_auth_and_renders_empty_state(env):
 
 def test_admin_crud_requires_auth(env):
     c = _client(env)
-    assert c.get("/admin/thought-leadership", follow_redirects=False).status_code in (302, 303, 307)
-    assert c.post("/admin/thought-leadership/new", data={"type": "press", "title": "x"}).status_code == 401
+    assert c.get("/admin/thought-leadership/third-party", follow_redirects=False).status_code in (302, 303, 307)
+    assert c.post("/admin/thought-leadership/third-party/new", data={"type": "press", "title": "x"}).status_code == 401
 
 
 def test_add_edit_delete_round_trip(env):
     c = _admin_client(env)
 
-    resp = c.post("/admin/thought-leadership/new", data={
+    resp = c.post("/admin/thought-leadership/third-party/new", data={
         "type": "writing", "title": "A New Essay", "url": "https://example.com/essay",
         "venue": "Example Pub", "date_label": "Jan 2027", "sort_key": "2027-01",
         "description": "A synopsis.", "display_order": "0",
@@ -71,11 +71,11 @@ def test_add_edit_delete_round_trip(env):
     assert resp.status_code == 303
 
     # Shows up in the admin list, filtered and unfiltered.
-    resp = c.get("/admin/thought-leadership")
+    resp = c.get("/admin/thought-leadership/third-party")
     assert "A New Essay" in resp.text
-    resp = c.get("/admin/thought-leadership?type=writing")
+    resp = c.get("/admin/thought-leadership/third-party?type=writing")
     assert "A New Essay" in resp.text
-    resp = c.get("/admin/thought-leadership?type=press")
+    resp = c.get("/admin/thought-leadership/third-party?type=press")
     assert "A New Essay" not in resp.text
 
     # Shows up on the public page.
@@ -92,11 +92,11 @@ def test_add_edit_delete_round_trip(env):
     item_id = rows[0]["id"]
 
     # Edit.
-    resp = c.get(f"/admin/thought-leadership/{item_id}/edit")
+    resp = c.get(f"/admin/thought-leadership/third-party/{item_id}/edit")
     assert resp.status_code == 200
     assert "A New Essay" in resp.text
 
-    resp = c.post(f"/admin/thought-leadership/{item_id}/edit", data={
+    resp = c.post(f"/admin/thought-leadership/third-party/{item_id}/edit", data={
         "type": "writing", "title": "A Renamed Essay", "url": "https://example.com/essay",
         "venue": "Example Pub", "date_label": "Jan 2027", "sort_key": "2027-01",
         "description": "A synopsis.", "display_order": "0",
@@ -108,7 +108,7 @@ def test_add_edit_delete_round_trip(env):
     assert "A New Essay" not in resp.text
 
     # Delete.
-    resp = c.post(f"/admin/thought-leadership/{item_id}/delete", follow_redirects=False)
+    resp = c.post(f"/admin/thought-leadership/third-party/{item_id}/delete", follow_redirects=False)
     assert resp.status_code == 303
     resp = c.get("/thought-leadership")
     assert "A Renamed Essay" not in resp.text
@@ -116,13 +116,13 @@ def test_add_edit_delete_round_trip(env):
 
 def test_type_is_required_and_validated(env):
     c = _admin_client(env)
-    resp = c.post("/admin/thought-leadership/new", data={"type": "bogus", "title": "x"})
+    resp = c.post("/admin/thought-leadership/third-party/new", data={"type": "bogus", "title": "x"})
     assert resp.status_code == 400
 
 
 def test_title_is_required(env):
     c = _admin_client(env)
-    resp = c.post("/admin/thought-leadership/new", data={"type": "press", "title": "   "})
+    resp = c.post("/admin/thought-leadership/third-party/new", data={"type": "press", "title": "   "})
     assert resp.status_code == 400
 
 
@@ -131,7 +131,7 @@ def test_photo_entry_not_editable_via_admin(env):
     row — it must not appear as a row in the admin CRUD list (only in the
     page's explanatory footnote), and must still render on the public page."""
     c = _admin_client(env)
-    resp = c.get("/admin/thought-leadership")
+    resp = c.get("/admin/thought-leadership/third-party")
     # No Edit/Delete row for it — only the one explanatory mention below the table.
     assert resp.text.count("Abacum AI Summit") == 1
     resp = c.get("/thought-leadership")
@@ -168,11 +168,11 @@ def test_sort_key_is_derived_from_date_label_not_a_form_field(env):
     c = _admin_client(env)
 
     # The form itself no longer has a sort_key input.
-    resp = c.get("/admin/thought-leadership/new")
+    resp = c.get("/admin/thought-leadership/third-party/new")
     assert 'name="sort_key"' not in resp.text
     assert 'name="date_label"' in resp.text
 
-    resp = c.post("/admin/thought-leadership/new", data={
+    resp = c.post("/admin/thought-leadership/third-party/new", data={
         "type": "press", "title": "Full Month Name Entry", "date_label": "March 2027",
     }, follow_redirects=False)
     assert resp.status_code == 303
@@ -187,7 +187,7 @@ def test_sort_key_is_derived_from_date_label_not_a_form_field(env):
     assert row["sort_key"] == "2027-03"
 
     # Edit form doesn't expose sort_key either.
-    resp = c.get(f"/admin/thought-leadership/{row['id']}/edit")
+    resp = c.get(f"/admin/thought-leadership/third-party/{row['id']}/edit")
     assert 'name="sort_key"' not in resp.text
 
 
@@ -197,7 +197,7 @@ def test_unparseable_date_label_floats_to_top_with_warning(env):
     but is flagged with a visible warning, not silently indistinguishable
     from a deliberate blank."""
     c = _admin_client(env)
-    resp = c.post("/admin/thought-leadership/new", data={
+    resp = c.post("/admin/thought-leadership/third-party/new", data={
         "type": "press", "title": "Weird Date Entry", "date_label": "Q2 2027",
     }, follow_redirects=False)
     assert resp.status_code == 303
@@ -212,12 +212,12 @@ def test_unparseable_date_label_floats_to_top_with_warning(env):
     assert row["sort_key"] == ""
 
     # Warning icon on the admin list row.
-    resp = c.get("/admin/thought-leadership")
+    resp = c.get("/admin/thought-leadership/third-party")
     assert "&#9888;" in resp.text
     assert "didn" in resp.text.lower() and "parse" in resp.text.lower()
 
     # Inline warning on the edit form.
-    resp = c.get(f"/admin/thought-leadership/{row['id']}/edit")
+    resp = c.get(f"/admin/thought-leadership/third-party/{row['id']}/edit")
     assert "Date label" in resp.text
     assert "didn" in resp.text.lower() and "parse" in resp.text.lower()
 
@@ -232,7 +232,7 @@ def test_blank_date_label_has_no_parse_warning(env):
     NOT trigger the didn't-parse warning — only a non-blank, unparseable
     value should."""
     c = _admin_client(env)
-    resp = c.post("/admin/thought-leadership/new", data={
+    resp = c.post("/admin/thought-leadership/third-party/new", data={
         "type": "podcast", "title": "Standing Feed Link", "date_label": "",
     }, follow_redirects=False)
     assert resp.status_code == 303
@@ -246,12 +246,12 @@ def test_blank_date_label_has_no_parse_warning(env):
     row = next(r for r in rows if r["title"] == "Standing Feed Link")
     assert row["sort_key"] == ""
 
-    resp = c.get(f"/admin/thought-leadership/{row['id']}/edit")
+    resp = c.get(f"/admin/thought-leadership/third-party/{row['id']}/edit")
     assert "Date label" in resp.text
     assert "didn&rsquo;t parse" not in resp.text
 
     # And no warning icon on the admin list row for this entry either.
-    resp = c.get("/admin/thought-leadership?type=podcast")
+    resp = c.get("/admin/thought-leadership/third-party?type=podcast")
     row_html = resp.text[resp.text.index("Standing Feed Link"):]
     assert "&#9888;" not in row_html.split("</tr>")[0]
 
@@ -316,7 +316,7 @@ def test_edit_page_title_is_not_double_escaped(env):
     Original Content Phase 3's admin_original_content_edit (see CLAUDE.md's
     Original Content Phase 5 cleanup entry)."""
     c = _admin_client(env)
-    resp = c.post("/admin/thought-leadership/new", data={
+    resp = c.post("/admin/thought-leadership/third-party/new", data={
         "type": "writing", "title": "AI & Finance", "url": "https://example.com/ai-finance",
         "venue": "Example Pub", "date_label": "Jan 2027", "sort_key": "2027-01",
         "description": "A synopsis.", "display_order": "0",
@@ -331,6 +331,6 @@ def test_edit_page_title_is_not_double_escaped(env):
     finally:
         lib.close()
 
-    html = c.get(f"/admin/thought-leadership/{item_id}/edit").text
+    html = c.get(f"/admin/thought-leadership/third-party/{item_id}/edit").text
     assert "&amp;amp;" not in html
     assert "<title>BMW CFO · Edit AI &amp; Finance</title>" in html

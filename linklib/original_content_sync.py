@@ -11,7 +11,7 @@ Ingestion" entry for the full design writeup, including the Step 0
 investigation's locked decisions.
 
 sync_original_content_article() is the one call site both admin routes
-(`POST /admin/original-content/new`, `POST /admin/original-content/{id}/edit`)
+(`POST /admin/thought-leadership/original/new`, `POST /admin/thought-leadership/original/{id}/edit`)
 use — mirrors pipeline.ingest_url's role as the single shared entry point for
 "go get this content indexed," just from an internal row instead of a URL
 fetch. Called synchronously at the mutation point (same "regenerate at the

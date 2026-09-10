@@ -90,7 +90,7 @@ def test_open_task_counts_empty_by_default(lib):
     assert "/admin/library/queue" not in counts
     assert "/admin/tools/software" not in counts
     assert "/admin/tools/communities" not in counts
-    assert "/admin/contacts" not in counts
+    assert "/admin/inbox/contact-submissions" not in counts
     assert tasks.has_open_tasks(lib) is (len(counts) > 0)
 
 
@@ -194,10 +194,10 @@ def test_open_task_counts_reflects_new_contact(lib):
     from webapp import tasks
     lib.save_contact("Jane", "jane@x.com", "hi")
     counts = tasks.open_task_counts(lib)
-    assert counts["/admin/contacts"] == 1
+    assert counts["/admin/inbox/contact-submissions"] == 1
     lib.set_setting("admin_viewed_contacts", lib.list_contacts()[0]["created_at"])
     counts = tasks.open_task_counts(lib)
-    assert "/admin/contacts" not in counts   # viewing clears it
+    assert "/admin/inbox/contact-submissions" not in counts   # viewing clears it
 
 
 def test_open_task_counts_reflects_pending_password_reset(lib):
@@ -228,7 +228,7 @@ def test_open_task_counts_reflects_email_failure(lib):
     from webapp import tasks
     lib.log_email_failure("tool_submission", "boom")
     counts = tasks.open_task_counts(lib)
-    assert counts["/admin/email-failures"] == 1
+    assert counts["/admin/inbox/email-failures"] == 1
 
 
 # --- dot-vs-count rendering ---------------------------------------------------
@@ -237,16 +237,16 @@ def test_open_task_counts_reflects_email_failure(lib):
 
 def test_dot_only_hrefs_are_all_or_none_sources():
     from webapp import tasks
-    assert tasks.DOT_ONLY_HREFS == {"/admin/contacts", "/admin/tools/software/leads"}
+    assert tasks.DOT_ONLY_HREFS == {"/admin/inbox/contact-submissions", "/admin/inbox/toolbox-intros"}
 
 
 def test_badge_for_href_renders_dot_for_all_or_none(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
-    assert appmod._badge_for_href("/admin/contacts", 3) == '<span class="task-badge-dot" aria-label="Unread"></span>'
-    assert appmod._badge_for_href("/admin/tools/software/leads", 1) == '<span class="task-badge-dot" aria-label="Unread"></span>'
-    assert appmod._badge_for_href("/admin/contacts", 0) == ""
+    assert appmod._badge_for_href("/admin/inbox/contact-submissions", 3) == '<span class="task-badge-dot" aria-label="Unread"></span>'
+    assert appmod._badge_for_href("/admin/inbox/toolbox-intros", 1) == '<span class="task-badge-dot" aria-label="Unread"></span>'
+    assert appmod._badge_for_href("/admin/inbox/contact-submissions", 0) == ""
 
 
 def test_badge_for_href_renders_count_for_individually_actionable(monkeypatch):
@@ -254,7 +254,7 @@ def test_badge_for_href_renders_count_for_individually_actionable(monkeypatch):
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     assert appmod._badge_for_href("/admin/tools/software", 2) == '<span class="task-badge">2</span>'
-    assert appmod._badge_for_href("/admin/email-failures", 1) == '<span class="task-badge">1</span>'
+    assert appmod._badge_for_href("/admin/inbox/email-failures", 1) == '<span class="task-badge">1</span>'
     assert appmod._badge_for_href("/admin/tools/software", 0) == ""
 
 
@@ -262,8 +262,8 @@ def test_group_badge_dot_when_only_all_or_none_pending(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
-    counts = {"/admin/contacts": 2, "/admin/tools/software/leads": 1, "/admin/email-failures": 0}
-    hrefs = ["/admin/contacts", "/admin/tools/software/leads", "/admin/email-failures"]
+    counts = {"/admin/inbox/contact-submissions": 2, "/admin/inbox/toolbox-intros": 1, "/admin/inbox/email-failures": 0}
+    hrefs = ["/admin/inbox/contact-submissions", "/admin/inbox/toolbox-intros", "/admin/inbox/email-failures"]
     assert appmod._group_badge(counts, hrefs) == '<span class="task-badge-dot" aria-label="Unread"></span>'
 
 
@@ -273,8 +273,8 @@ def test_group_badge_counts_when_individually_actionable_pending(monkeypatch):
     importlib.reload(appmod)
     # A real per-item task (an email failure) dominates the section total —
     # the all-or-none contact isn't double-counted as if it were 1 more task.
-    counts = {"/admin/contacts": 1, "/admin/email-failures": 2}
-    hrefs = ["/admin/contacts", "/admin/email-failures"]
+    counts = {"/admin/inbox/contact-submissions": 1, "/admin/inbox/email-failures": 2}
+    hrefs = ["/admin/inbox/contact-submissions", "/admin/inbox/email-failures"]
     assert appmod._group_badge(counts, hrefs) == '<span class="task-badge">2</span>'
 
 
@@ -282,7 +282,7 @@ def test_group_badge_empty_when_nothing_pending(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
-    assert appmod._group_badge({}, ["/admin/contacts", "/admin/tools/software"]) == ""
+    assert appmod._group_badge({}, ["/admin/inbox/contact-submissions", "/admin/tools/software"]) == ""
 
 
 # --- end-to-end: badge clears at every level after viewing --------------------
@@ -307,7 +307,7 @@ def test_admin_pages_are_never_cached(admin_client):
     client, appmod, db = admin_client
     r = client.get("/admin")
     assert r.headers.get("cache-control") == "no-store"
-    r2 = client.get("/admin/contacts")
+    r2 = client.get("/admin/inbox/contact-submissions")
     assert r2.headers.get("cache-control") == "no-store"
     # Public pages are untouched — no reason to disable caching there.
     r3 = client.get("/health")
@@ -325,7 +325,7 @@ def test_contacts_badge_clears_after_viewing_at_every_level(admin_client):
     assert '<span class="task-dot"' in r1.text                      # nav dot
     assert '<span class="task-badge-dot" aria-label="Unread"></span>' in r1.text  # card dot, not a count
 
-    client.get("/admin/contacts")   # visiting clears the read-state
+    client.get("/admin/inbox/contact-submissions")   # visiting clears the read-state
 
     r2 = client.get("/admin")
     assert '<span class="task-dot"' not in r2.text
@@ -348,7 +348,7 @@ def test_tool_leads_badge_clears_after_viewing(admin_client):
     r1 = client.get("/admin")
     assert '<span class="task-badge-dot" aria-label="Unread"></span>' in r1.text
 
-    client.get("/admin/tools/software/leads")   # unfiltered view clears it
+    client.get("/admin/inbox/toolbox-intros")   # unfiltered view clears it
 
     r2 = client.get("/admin")
     assert '<span class="task-dot"' not in r2.text
