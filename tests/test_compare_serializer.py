@@ -159,7 +159,7 @@ def test_communities_compare_every_section_present_even_empty():
     entities, diff = compare.build_communities_compare(communities, {}, {}, {})
     e = entities[0]
     titles = [s.title for s in e.sections]
-    assert titles == ["Bottom line", "Who it's for", "What you get", "How it works", "Cost & structure"]
+    assert titles == ["Bottom line", "Who it's for", "What you get", "How it works", "Cost and structure"]
     for s in e.sections:
         for f in s.fields:
             assert f.state == gates.GateState.EMPTY

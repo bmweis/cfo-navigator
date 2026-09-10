@@ -83,7 +83,7 @@ COMMUNITY_PROFILE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("Engagement level", "engagement_level"),
         ("Application friction", "application_friction"),
     ]),
-    ("Cost & structure", [
+    ("Cost and structure", [
         ("Cost vs. value", "cost_value_verdict"),
         ("Sponsor relationship", "sponsor_relationship_note"),
         ("Business model", "business_model"),

@@ -547,9 +547,11 @@ def test_feature_review_queue_page_no_coverage_warning_when_articulation_covers_
 def test_feature_review_queue_card_labels_new_feature_fields(env):
     """The card's "Feature (NEW)" section used to stack the feature-name and
     pointer-note text inputs with no visible labels — distinguishable only
-    by position. Both fields must now carry a real <label>, and neither
-    input should still be full-width (narrowed per the request that
-    prompted this)."""
+    by position. Both fields must now carry a real <label>, and (PR 11,
+    2026-09) render side by side in one flex row instead of two stacked
+    rows — each input fills its own flex child at width:100%, not the
+    fixed 320px both used to carry when they were stacked full column-width
+    apart."""
     client = _client(env)
     _login(client)
     from linklib.db import Library
@@ -570,10 +572,13 @@ def test_feature_review_queue_card_labels_new_feature_fields(env):
     assert r.status_code == 200
     assert ">Name</label>" in r.text
     assert "Pointer note" in r.text and "(optional)</span></label>" in r.text
-    # Both inputs are narrowed, not full-width, per the request this fixed.
-    assert 'name="feature_name" value="Business bank accounts" maxlength="500" style="width:320px' in r.text
-    assert 'name="pointer_note" value="core" maxlength="500" style="width:320px' in r.text
-    assert 'name="feature_name" value="Business bank accounts" maxlength="500" style="width:100%' not in r.text
+    # Both fields now sit in one flex row (PR 11) — each input is width:100%
+    # of its own flex child, not a fixed 320px stacked one above the other.
+    assert 'name="feature_name" value="Business bank accounts" maxlength="500" style="width:100%' in r.text
+    assert 'name="pointer_note" value="core" maxlength="500" style="width:100%' in r.text
+    # The two fields share one row: Name's flex wrapper opens before
+    # Pointer note's label closes the row, i.e. no full-width stack.
+    assert r.text.index('>Name</label>') < r.text.index('Pointer note')
 
 
 def test_feature_review_queue_approve_shows_merge_confirmation_before_executing(env):

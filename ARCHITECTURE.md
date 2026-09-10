@@ -7093,7 +7093,7 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     in Phase 3b against the same card system as Software's Phase 3 page — a
     "Bottom line" callout, a Details card for cost/access/sponsorship/format/reach/
     founded/CPE, four themed Community Profile cards ("Who it's for" / "What you
-    get" / "How it works" / "Cost & structure") grouping the qualitative narrative
+    get" / "How it works" / "Cost and structure") grouping the qualitative narrative
     fields instead of one long flat scroll, and a screenshot card built from
     scratch — opened in a new tab from a directory card),
     `/tools/communities/screenshot/{filename}` (Communities equivalent of
@@ -7389,7 +7389,7 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   joins "Who it's for" (a company-stage targeting fact, a natural peer of
   the existing seniority-band "Who it targets" entry); Jobs program joins
   "What you get" (a member benefit, same category as Resources included);
-  Individual or team joins "Cost & structure" (a membership-structure/
+  Individual or team joins "Cost and structure" (a membership-structure/
   purchasing fact, closer to Business model's "how this sustains itself"
   than to who it's personally for). No new gating logic — `_narrative_field`/
   `gates.field_state` handle all three exactly like every other group

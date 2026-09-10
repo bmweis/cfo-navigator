@@ -151,9 +151,11 @@ def test_hub_nav_has_no_orphans_after_the_move(env):
 
 
 def test_archive_backup_card_lives_under_system_group(env):
-    system_items = next(items for gname, _gdesc, items in env._ADMIN_GROUPS
-                         if gname == "System")
-    hrefs = [href for href, _title, _desc in system_items]
+    """System split into Configuration/Health and maintenance (PR 11,
+    2026-09) — Archive backup landed in Health and maintenance."""
+    health_items = next(items for gname, _gdesc, items in env._ADMIN_GROUPS
+                         if gname == "Health and maintenance")
+    hrefs = [href for href, _title, _desc in health_items]
     assert "/admin/library-backup" in hrefs
     assert not any(href == "/admin/library-backup" for href, _t, _d in env._LIBRARY_TOOLS)
 
