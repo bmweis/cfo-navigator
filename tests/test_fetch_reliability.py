@@ -599,7 +599,7 @@ def test_admin_page_shows_via_wayback_badge_on_wayback_success_row(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "via Wayback" in r.text
 
@@ -611,14 +611,14 @@ def test_admin_page_shows_wayback_count_note_only_when_nonzero(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert "1 via Wayback" in r.text
     assert "look for the matching badge in the attempts log below" in r.text
 
 
 def test_admin_page_no_wayback_note_when_zero(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "look for the matching badge in the attempts log below" not in r.text
 
@@ -639,7 +639,7 @@ def test_admin_page_source_breakdown_joins_multiple_sources(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert (
         "1 via Wayback, 1 via Migration, 1 via Medium fetch, and 1 via Medium search"
@@ -660,7 +660,7 @@ def test_admin_page_shows_defunct_service_pill_and_exclusion_note(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "Defunct service" in r.text
     assert "permanently excluded from retry" in r.text
@@ -681,7 +681,7 @@ def test_admin_page_source_breakdown_excludes_excluded_count(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert "via Wayback" in r.text
     assert "permanently excluded from future runs" not in r.text
 
@@ -699,7 +699,7 @@ def test_admin_page_structured_stat_not_inflated_by_defunct_exclusion(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     # 2 total, 1 structured, 1 excluded, 0 remaining — "Structured" must
     # read 1, not 2.

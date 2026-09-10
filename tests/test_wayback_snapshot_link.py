@@ -64,7 +64,7 @@ def test_manual_review_row_has_wayback_snapshot_link(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "Snapshot on Wayback" in r.text
     assert "https://web.archive.org/save/https://example.com/stuck-article" in r.text
@@ -77,7 +77,7 @@ def test_manual_review_explainer_has_wayback_guidance_sentence(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert "archive.org" in r.text
     assert "Save Page Now" not in r.text or "archive.org" in r.text  # guidance mentions the mechanism, not necessarily the product name
 
@@ -86,6 +86,6 @@ def test_no_manual_review_section_when_nothing_flagged(env):
     """No manual-review rows at all -> the whole section (and any Wayback
     link) is simply absent, same as before this change."""
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "Snapshot on Wayback" not in r.text

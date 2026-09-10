@@ -345,16 +345,16 @@ def test_content_backfill_job_stops_between_articles(env, monkeypatch):
 def test_content_backfill_status_route_requires_auth(env):
     from fastapi.testclient import TestClient
     c = TestClient(env.app)
-    r = c.get("/admin/library/backfill-content/status")
+    r = c.get("/admin/reader/backfill-content/status")
     assert r.status_code == 401
 
 
 def test_content_backfill_admin_page_renders(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "Reader content backfill" in r.text
-    assert 'action="/admin/library/backfill-content/start"' in r.text
+    assert 'action="/admin/reader/backfill-content/start"' in r.text
 
 
 def test_content_backfill_admin_page_shows_domain_clustering_banner(env):
@@ -365,7 +365,7 @@ def test_content_backfill_admin_page_shows_domain_clustering_banner(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "Failures clustering on one source" in r.text
     assert "boardtips.example.com" in r.text
@@ -379,7 +379,7 @@ def test_content_backfill_admin_page_no_clustering_banner_for_single_failures(en
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "Failures clustering on one source" not in r.text, \
         "a single failure from a source is an ordinary dead link, not a clustering signal"

@@ -792,12 +792,12 @@ CREATE INDEX IF NOT EXISTS idx_contact_audit_created ON contact_audit_log(create
 -- existed, the only record of an attempt was a print() to stdout inside
 -- maybe_backup()'s exception handler — invisible to anyone not tailing
 -- Railway's runtime logs. Those print() calls stay as a secondary signal;
--- this table is the one the admin UI (/admin/library/backup) reads from.
+-- this table is the one the admin UI (/admin/library-backup) reads from.
 -- drive_file_id/bytes/row_count are populated on success only; error is
 -- populated on failure only. row_count is SELECT COUNT(*) FROM articles
 -- against the snapshot at backup time — the sanity check the Phase O
 -- investigation recommended, reusing the same check the restore path
--- (/admin/library/backup/upload-db) already runs on upload.
+-- (/admin/library-backup/upload-db) already runs on upload.
 CREATE TABLE IF NOT EXISTS backup_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     status        TEXT NOT NULL,              -- 'success' | 'failure'
@@ -904,7 +904,7 @@ CREATE INDEX IF NOT EXISTS idx_content_refetch_log_article ON content_refetch_lo
 
 -- Phase 5b follow-up #2 (retry backoff + manual URL correction): a durable,
 -- distinct trace every time an article's stored URL is corrected via the
--- manual-review CSV import (webapp /admin/library/backfill-content's export/
+-- manual-review CSV import (webapp /admin/reader/backfill-content's export/
 -- import round trip) — see CLAUDE.md's "every production data change leaves
 -- a trace" rule. Deliberately its own table, not folded into
 -- content_refetch_log (which records FETCH attempts, not URL edits) or
@@ -2150,7 +2150,7 @@ class Library:
             # ingest_url runs extract.assess_extraction_quality() on the fresh
             # fetch, by Library.set_content_check_flag. needs_content_check
             # never blocks or rejects a save — see ingest_url's docstring —
-            # it only flags the row so /admin/library/backfill-content can
+            # it only flags the row so /admin/reader/backfill-content can
             # surface it distinctly from "just hasn't been through a backfill
             # run yet" (which is the entire existing corpus, by definition,
             # since content_html starts empty for every row). Cleared back to
@@ -2832,7 +2832,7 @@ class Library:
         not stored) and `reason` (content_check_reason — durability audit
         item 1 — when set, else '' for an article saved before that flag
         existed) — the same reason vocabulary already shown elsewhere on
-        /admin/library/backfill-content, not a new one invented for this
+        /admin/reader/backfill-content, not a new one invented for this
         list.
 
         Deliberately NOT the same set as articles_needing_content_backfill()'s
@@ -3464,7 +3464,7 @@ class Library:
     def get_article_by_url(self, url: str) -> Optional[dict]:
         """One article by its exact stored URL, or None — the lookup key
         the bulk-delete CSV tool (webapp/app.py's
-        /admin/library/bulk-delete/*) uses to resolve a pasted URL to a
+        /admin/reader/bulk-delete/*) uses to resolve a pasted URL to a
         current article_id before deleting, mirroring the inline SQL
         _resolve_reader_content already ran for a Feed item that turns out
         to already be saved (Phase 5c). Kept as a real Library method
@@ -3997,7 +3997,7 @@ class Library:
 
     def count_needs_content_check(self) -> int:
         """How many articles are currently flagged at save time — surfaced
-        as its own tile on /admin/library/backfill-content, distinct from
+        as its own tile on /admin/reader/backfill-content, distinct from
         Remaining (which is every article with no content_html yet,
         structured-or-not, and says nothing about whether the save itself
         looked suspect)."""

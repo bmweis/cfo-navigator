@@ -16,7 +16,7 @@ exactly:
   1. Prints the live `tool_features` row count.
   2. Requires TYPING that exact row count back to confirm — not a bare
      y/n — so a stale or misremembered expectation can't slip through.
-  3. Shows the most recent `backup_log` entry (from `/admin/library/backup`'s
+  3. Shows the most recent `backup_log` entry (from `/admin/library-backup`'s
      own log) and requires a separate typed confirmation that a same-day
      successful backup exists before proceeding — shown as a courtesy, not
      trusted blindly: the typed confirmation is still required even if the
@@ -33,7 +33,7 @@ exactly:
      the same mechanism the nightly backup runs) against the live DB and
      prints the result — the standing post-destructive-write verification,
      also logged to `integrity_check_log` so it shows up on
-     `/admin/library/backup` like any other check.
+     `/admin/library-backup` like any other check.
 
 No --apply/dry-run flag, unlike most scripts/archive/ migrations: this
 script IS the confirmation flow — there's nothing meaningfully different a
@@ -95,7 +95,7 @@ def main() -> int:
 
         confirm_backup = input(
             "Confirm a SAME-DAY successful backup of this database exists before "
-            "continuing (check /admin/library/backup if unsure). Type 'yes' to confirm: "
+            "continuing (check /admin/library-backup if unsure). Type 'yes' to confirm: "
         ).strip()
         if confirm_backup.lower() != "yes":
             print("Aborted — no confirmed same-day backup.")

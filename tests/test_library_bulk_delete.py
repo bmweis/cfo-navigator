@@ -199,20 +199,20 @@ def _admin_client(appmod):
 def test_page_requires_auth(env):
     from fastapi.testclient import TestClient
     c = TestClient(env.app)
-    r = c.get("/admin/library/bulk-delete", follow_redirects=False)
+    r = c.get("/admin/reader/bulk-delete", follow_redirects=False)
     assert r.status_code in (302, 303)
 
 
 def test_page_lists_the_tool(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/bulk-delete")
+    r = c.get("/admin/reader/bulk-delete")
     assert r.status_code == 200
     assert "Bulk delete articles" in r.text
 
 
 def test_template_download_has_the_two_required_columns(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/bulk-delete/template.csv")
+    r = c.get("/admin/reader/bulk-delete/template.csv")
     assert r.status_code == 200
     assert r.text.strip() == "url,confirm_delete"
 
@@ -220,7 +220,7 @@ def test_template_download_has_the_two_required_columns(env):
 def test_preview_route_requires_auth(env):
     from fastapi.testclient import TestClient
     c = TestClient(env.app)
-    r = c.post("/admin/library/bulk-delete/preview",
+    r = c.post("/admin/reader/bulk-delete/preview",
                files={"file": ("d.csv", b"url,confirm_delete\nhttps://a,yes", "text/csv")})
     assert r.status_code == 401
 
@@ -232,7 +232,7 @@ def test_preview_route_shows_confirmed_rows_and_typed_count_field(env):
 
     c = _admin_client(env)
     csv_body = b"url,confirm_delete\nhttps://example.com/target,yes"
-    r = c.post("/admin/library/bulk-delete/preview",
+    r = c.post("/admin/reader/bulk-delete/preview",
               files={"file": ("d.csv", csv_body, "text/csv")})
     assert r.status_code == 200
     assert "Confirmed for deletion (1)" in r.text
@@ -247,7 +247,7 @@ def test_preview_route_shows_confirmed_rows_and_typed_count_field(env):
 def test_preview_route_flags_unmatched_url_as_an_error(env):
     c = _admin_client(env)
     csv_body = b"url,confirm_delete\nhttps://example.com/never-saved,yes"
-    r = c.post("/admin/library/bulk-delete/preview",
+    r = c.post("/admin/reader/bulk-delete/preview",
               files={"file": ("d.csv", csv_body, "text/csv")})
     assert r.status_code == 200
     assert "Errors (1)" in r.text
@@ -261,7 +261,7 @@ def test_commit_route_requires_matching_typed_count(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post("/admin/library/bulk-delete/commit",
+    r = c.post("/admin/reader/bulk-delete/commit",
               data={"article_id": [str(aid)], "url": [url], "confirm_count": "2"},
               follow_redirects=False)
     assert r.status_code == 303
@@ -279,7 +279,7 @@ def test_commit_route_deletes_when_count_matches(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post("/admin/library/bulk-delete/commit",
+    r = c.post("/admin/reader/bulk-delete/commit",
               data={"article_id": [str(aid)], "url": [url], "confirm_count": "1"},
               follow_redirects=False)
     assert r.status_code == 303
@@ -301,7 +301,7 @@ def test_commit_route_logs_archive_audit_for_a_real_admin(env):
     c = TestClient(env.app, raise_server_exceptions=True)
     c.post("/login", data={"username": "realadmin", "password": "realpass"}, follow_redirects=False)
 
-    r = c.post("/admin/library/bulk-delete/commit",
+    r = c.post("/admin/reader/bulk-delete/commit",
               data={"article_id": [str(aid)], "url": [url], "confirm_count": "1"},
               follow_redirects=False)
     assert r.status_code == 303
@@ -324,7 +324,7 @@ def test_commit_route_skips_row_whose_url_changed_since_preview(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post("/admin/library/bulk-delete/commit",
+    r = c.post("/admin/reader/bulk-delete/commit",
               data={"article_id": [str(aid)], "url": ["https://example.com/target"],
                     "confirm_count": "1"},
               follow_redirects=False)
@@ -343,7 +343,7 @@ def test_commit_route_enforces_per_run_cap_even_on_a_hand_crafted_post(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post("/admin/library/bulk-delete/commit",
+    r = c.post("/admin/reader/bulk-delete/commit",
               data={"article_id": [p[0] for p in pairs], "url": [p[1] for p in pairs],
                     "confirm_count": str(len(pairs))},
               follow_redirects=False)
@@ -368,7 +368,7 @@ def test_commit_route_aborts_if_pre_delete_backup_fails(env, monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Drive unreachable")))
 
     c = _admin_client(env)
-    r = c.post("/admin/library/bulk-delete/commit",
+    r = c.post("/admin/reader/bulk-delete/commit",
               data={"article_id": [str(aid)], "url": [url], "confirm_count": "1"},
               follow_redirects=False)
     assert r.status_code == 303

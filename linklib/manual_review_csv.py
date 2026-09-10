@@ -1,4 +1,4 @@
-"""CSV parsing for the /admin/library/backfill-content manual-review
+"""CSV parsing for the /admin/reader/backfill-content manual-review
 export/import round trip (Phase 5b follow-up #2).
 
 Mirrors linklib/overhead_csv.py's shape and discipline: kept separate from

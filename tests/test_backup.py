@@ -4,7 +4,7 @@ Covers the three things that changed: (1) linklib.backup logs every attempt
 (success or failure) to the new backup_log table instead of only print()ing,
 (2) /admin/backup-now returns a real non-2xx status on failure so the daily
 Railway Cron Service (originally a GitHub Action, migrated 2026-08) can tell
-success from failure, and (3) /admin/library/backup's
+success from failure, and (3) /admin/library-backup's
 status banner correctly distinguishes "not configured", "configured but the
 last attempt failed", "configured but the folder ID is missing", and "on".
 
@@ -112,7 +112,7 @@ def test_resolve_folder_id_reuses_persisted_folder(lib, monkeypatch, configured_
 def test_known_folder_id_never_creates(lib, monkeypatch, configured_env):
     """known_folder_id is the read-only display lookup — must never call
     the Drive API, even indirectly, since it's called on every page view
-    of /admin/library/backup."""
+    of /admin/library-backup."""
     monkeypatch.delenv("GOOGLE_DRIVE_FOLDER_ID", raising=False)
     assert backup.known_folder_id(lib.path) == ""
     lib.set_setting(backup._FOLDER_SETTING_KEY, "persisted-id")
@@ -260,7 +260,7 @@ def test_backup_now_route_logs_a_failed_row_when_not_configured(admin_client):
     while Drive wasn't configured returned a 503 with nothing written to
     backup_log at all — the route short-circuited before ever calling
     backup.backup_now() (the only place that used to log anything), so an
-    admin scanning the history table on /admin/library/backup would see no
+    admin scanning the history table on /admin/library-backup would see no
     trace of the attempt, even though the top banner separately showed
     "Backups are off" via its own live is_configured() check. The route now
     always calls backup.backup_now() (which logs before it raises, per its
@@ -304,11 +304,11 @@ def test_backup_now_route_returns_200_on_success(admin_client, monkeypatch):
     assert "uploaded" in r.text.lower()
 
 
-# --- /admin/library/backup: status banner states -----------------------------
+# --- /admin/library-backup: status banner states -----------------------------
 
 def test_admin_backup_page_shows_red_banner_when_not_configured(admin_client):
     client, appmod, db = admin_client
-    r = client.get("/admin/library/backup")
+    r = client.get("/admin/library-backup")
     assert r.status_code == 200
     assert "backups are <strong>off</strong>" in r.text.lower()
 
@@ -322,7 +322,7 @@ def test_admin_backup_page_shows_amber_banner_on_last_failure(admin_client, monk
     lib = appmod._lib()
     lib.record_backup_attempt(status="failure", error="token expired")
     lib.close()
-    r = client.get("/admin/library/backup")
+    r = client.get("/admin/library-backup")
     assert "failed" in r.text.lower()
     assert "token expired" in r.text
 
@@ -335,7 +335,7 @@ def test_admin_backup_page_folder_line_before_any_run(admin_client, monkeypatch)
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
     monkeypatch.setenv("GOOGLE_OAUTH_REFRESH_TOKEN", "rtoken")
     monkeypatch.delenv("GOOGLE_DRIVE_FOLDER_ID", raising=False)
-    r = client.get("/admin/library/backup")
+    r = client.get("/admin/library-backup")
     assert "created on the first successful run" in r.text.lower()
     assert "drive.google.com/drive/folders" not in r.text
 
@@ -349,7 +349,7 @@ def test_admin_backup_page_folder_line_shows_persisted_folder(admin_client, monk
     lib = appmod._lib()
     lib.set_setting(appmod.backup._FOLDER_SETTING_KEY, "created-folder-xyz")
     lib.close()
-    r = client.get("/admin/library/backup")
+    r = client.get("/admin/library-backup")
     assert 'href="https://drive.google.com/drive/folders/created-folder-xyz"' in r.text
     assert "cfo navigator" in r.text.lower() and "library backups" in r.text.lower()
 
@@ -364,7 +364,7 @@ def test_admin_backup_page_shows_green_banner_when_healthy(admin_client, monkeyp
     lib.record_backup_attempt(status="success", filename="library-20260810-090000.db",
                                drive_file_id="abc123", size_bytes=4096, row_count=1500)
     lib.close()
-    r = client.get("/admin/library/backup")
+    r = client.get("/admin/library-backup")
     assert "backups are <strong>on</strong>" in r.text.lower()
     assert "library-20260810-090000.db" in r.text
     assert 'href="https://drive.google.com/file/d/abc123/view"' in r.text
@@ -376,7 +376,7 @@ def test_admin_backup_page_history_table_shows_no_backups_yet(admin_client, monk
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
     monkeypatch.setenv("GOOGLE_OAUTH_REFRESH_TOKEN", "rtoken")
     monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "folder123")
-    r = client.get("/admin/library/backup")
+    r = client.get("/admin/library-backup")
     assert "no off-site backups recorded yet" in r.text.lower()
 
 

@@ -20,7 +20,7 @@ Design notes
   (tracked by a marker file beside the database, so it survives restarts).
 - **Every attempt is logged to `backup_log`** (success or failure), via
   ``Library.record_backup_attempt`` — not just printed to stdout. This is
-  what powers the status banner + history table on ``/admin/library/backup``
+  what powers the status banner + history table on ``/admin/library-backup``
   (Phase O). The ``print()`` calls below stay as a redundant secondary
   signal in Railway's runtime logs, but they're no longer the only record.
 - **Scheduling lives outside this module.** A Railway Cron Service in the
@@ -153,7 +153,7 @@ def _resolve_folder_id(db_path: str, token: str) -> str:
 
 def known_folder_id(db_path: str) -> str:
     """Read-only lookup of the folder snapshots upload into, for display
-    (e.g. /admin/library/backup) — never creates a folder as a side effect
+    (e.g. /admin/library-backup) — never creates a folder as a side effect
     of a page view, unlike _resolve_folder_id which is called mid-upload
     and will create one on first use. Returns '' if nothing's been
     configured or created yet."""

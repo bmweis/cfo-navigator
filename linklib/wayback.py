@@ -36,7 +36,7 @@ The request/parsing logic here is standard and low-risk, but "a real snapshot
 gets fetched and extracted correctly" is unverified pending archive.org's
 rate limiting clearing — see the Phase 5b follow-up PR description and
 CLAUDE.md for the full write-up. Verify via a small backfill batch
-(`/admin/library/backfill-content`) once that clears, same as the tool's own
+(`/admin/reader/backfill-content`) once that clears, same as the tool's own
 standing "verify small before full run" convention.
 
 **Follow-up finding: the failure mode isn't always a 429.** The first real

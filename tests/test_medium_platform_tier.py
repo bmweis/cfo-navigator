@@ -771,7 +771,7 @@ def test_admin_page_shows_via_medium_fetch_badge(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert "via Medium fetch" in r.text
 
 
@@ -888,13 +888,13 @@ def test_admin_page_shows_via_medium_search_badge(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert "via Medium search" in r.text
 
 
 def test_admin_page_has_host_scope_input(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert 'name="host_scope"' in r.text
 
 
@@ -908,7 +908,7 @@ def test_admin_backfill_start_parses_host_scope_into_suffix_list(env, monkeypatc
 
     monkeypatch.setattr(env, "_content_backfill_job", _fake_job)
     c = _admin_client(env)
-    resp = c.post("/admin/library/backfill-content/start",
+    resp = c.post("/admin/reader/backfill-content/start",
                   data={"limit": "10", "host_scope": "medium.com, bothsidesofthetable.com"},
                   follow_redirects=False)
     assert resp.status_code == 303
@@ -929,7 +929,7 @@ def test_admin_backfill_start_blank_host_scope_is_none(env, monkeypatch):
 
     monkeypatch.setattr(env, "_content_backfill_job", _fake_job)
     c = _admin_client(env)
-    c.post("/admin/library/backfill-content/start", data={"limit": "10"}, follow_redirects=False)
+    c.post("/admin/reader/backfill-content/start", data={"limit": "10"}, follow_redirects=False)
 
     import time as _time
     for _ in range(20):

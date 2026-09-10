@@ -12,7 +12,7 @@ Covers:
   Drive request is made, and a matching backup_log failure row is written
   too so the existing status banner picks it up.
 - A healthy check doesn't change backup_now's existing success behavior.
-- /admin/library/backup renders the new integrity banner.
+- /admin/library-backup renders the new integrity banner.
 
 Doesn't hit the real Google Drive API — same monkeypatch convention as
 tests/test_backup.py.
@@ -199,7 +199,7 @@ def test_backup_now_blocks_upload_when_integrity_check_fails(monkeypatch, config
     assert integrity_rows[0]["status"] == "failure"
     assert integrity_rows[0]["detail"] == "row 7 missing"
     # A blocked backup is still a logged backup_log failure, so the
-    # existing /admin/library/backup status banner surfaces it with no
+    # existing /admin/library-backup status banner surfaces it with no
     # second code path.
     assert len(backup_rows) == 1
     assert backup_rows[0]["status"] == "failure"
@@ -245,7 +245,7 @@ def admin_client(monkeypatch):
 
 def test_admin_backup_page_shows_no_checks_yet_banner(admin_client):
     client, appmod, db = admin_client
-    r = client.get("/admin/library/backup")
+    r = client.get("/admin/library-backup")
     assert r.status_code == 200
     assert "Pre-backup integrity check" in r.text
     assert "No integrity check has run yet" in r.text
@@ -257,7 +257,7 @@ def test_admin_backup_page_shows_ok_banner(admin_client):
     lib.record_integrity_check(status="ok", detail="ok")
     lib.close()
 
-    r = client.get("/admin/library/backup")
+    r = client.get("/admin/library-backup")
     assert r.status_code == 200
     assert "ok</strong>&mdash;structural check and FTS5 self-check both passed" in r.text
 
@@ -268,7 +268,7 @@ def test_admin_backup_page_shows_failure_banner_loudly(admin_client):
     lib.record_integrity_check(status="failure", detail="row 42 missing from index")
     lib.close()
 
-    r = client.get("/admin/library/backup")
+    r = client.get("/admin/library-backup")
     assert r.status_code == 200
     assert "failed</strong>" in r.text
     assert "row 42 missing from index" in r.text

@@ -20258,7 +20258,7 @@ async function rrRefreshReadLater() {{
 // from an AJAX context. Reuses the same delete mechanism (Library.
 // purge_article, via delete_article's full cascade — FTS, embeddings,
 // content_refetch_log, url_correction_log) the CSV bulk-delete tool at
-// /admin/library/bulk-delete uses, just reached one article at a time.
+// /admin/reader/bulk-delete uses, just reached one article at a time.
 async function rrDeleteCurrent() {{
   if (!rrCurrent || !rrCurrent.id) return;
   var title = rrCurrent.title || 'this article';
@@ -21497,14 +21497,13 @@ async def read_later_refresh(request: Request):
 # (Archive backup stands outside all three — see that function's own note
 # on why).
 _LIBRARY_TOOLS = [
-    ("/admin/library/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
-    ("/admin/library/backup",       "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily on a schedule (a Railway Cron Service syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
-    ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. It re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
-    ("/admin/library/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
+    ("/admin/reader/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
+    ("/admin/reader/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. It re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
+    ("/admin/reader/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
     ("/admin/library/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
     ("/admin/library/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
-    ("/admin/library/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content—this is the material FP&A Buddy reads from, so depth here pays off there."),
-    ("/admin/library/bulk-delete",   "Bulk delete articles", "Permanently remove a specific list of articles you've already decided aren't needed&mdash;paste their URLs into the CSV template, mark <code>confirm_delete</code>, and re-upload. For a known list, not a scan&mdash;different from the &lt;60-word Purge tool under Reader content backfill. A single article can also be removed straight from its Reader toolbar."),
+    ("/admin/reader/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content—this is the material FP&A Buddy reads from, so depth here pays off there."),
+    ("/admin/reader/bulk-delete",   "Bulk delete articles", "Permanently remove a specific list of articles you've already decided aren't needed&mdash;paste their URLs into the CSV template, mark <code>confirm_delete</code>, and re-upload. For a known list, not a scan&mdash;different from the &lt;60-word Purge tool under Reader content backfill. A single article can also be removed straight from its Reader toolbar."),
 ]
 
 # Software-directory admin, nested as its own sub-group inside CFO Toolbox
@@ -21596,6 +21595,7 @@ _ADMIN_GROUPS = [
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
     ]),
     ("System", "Accounts, health, and plumbing—no public-nav counterpart, so this stays its own catch-all rather than folding into one of the three above.", [
+        ("/admin/library-backup",  "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily on a schedule (a Railway Cron Service syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/system/model",    "AI model",            "Which Claude model powers enrichment&mdash;Description, Agent taxonomy, Competitive differentiation, Community profiles, and article summaries&mdash;switchable live, no redeploy."),
@@ -23829,7 +23829,7 @@ def _cookie_status_panel(cookies, status: dict) -> str:
 def _auth_cookie_controls(request: Request,
                           background_tasks: BackgroundTasks) -> tuple[str, str]:
     """Subscriber-cookie status control, shown at the top of
-    /admin/library/feeds. It's a feed-specific tool — it probes a recent post
+    /admin/reader/feeds. It's a feed-specific tool — it probes a recent post
     per paywalled source to confirm that source's subscriber cookie still
     fetches full text — so it lives with feed management rather than on the
     Library hub, where it sat before the Feeds page existed. Only rendered
@@ -24101,18 +24101,17 @@ def admin_library(request: Request):
     )
 
     # Regrouped by function (Phase 6), not the old single top-to-bottom
-    # workflow list. Archive backup was originally a standalone headingless
-    # card outside all three groups — it applies to the whole archive, not
-    # just "existing" content, so filing it under "Existing archive
-    # management" would misdescribe it — but that read oddly once every
-    # other tool had a labeled section, so it's now folded into "Archive
-    # additions & backup" instead (see that section below). Enrich archive
-    # stays in "Tagging" (the other genuinely ambiguous placement from the
-    # Phase 6 brief) even though it also drafts summaries: it's what
-    # actually applies the tag vocabulary Tag cleanup curates and Tagging
-    # style teaches, so the three read as "how tags get created, taught,
-    # and refined" as one cluster, even though summaries are a real second
-    # output of the third.
+    # workflow list. Archive backup used to be a card here too (first in
+    # "Archive additions & backup"), but the Reader route moves (PR 6,
+    # 2026-09) relocated it to the System hub-nav group entirely — a
+    # whole-DB snapshot is accounts/health/plumbing, not archive-specific —
+    # so it's gone from this page's cards and quadrants outright, not just
+    # relinked. Enrich archive stays in "Tagging" (the other genuinely
+    # ambiguous placement from the Phase 6 brief) even though it also drafts
+    # summaries: it's what actually applies the tag vocabulary Tag cleanup
+    # curates and Tagging style teaches, so the three read as "how tags get
+    # created, taught, and refined" as one cluster, even though summaries
+    # are a real second output of the third.
     lib_by_href = {href: (title, desc) for href, title, desc in _LIBRARY_TOOLS}
 
     def _lib_quadrant(title, inner_html, hrefs=(), count_override=None):
@@ -24161,19 +24160,12 @@ def admin_library(request: Request):
             f'<div style="display:grid;gap:12px;">{section_cards}</div>'
         ), hrefs)
 
-    # Archive backup used to render as its own headingless card above the
-    # three labeled sections — visually odd once everything else had a
-    # heading (flagged live after this shipped). Folded into "Archive
-    # additions" instead, first in that section, rather than kept standalone:
-    # it doesn't fit "existing archive management" (see the note above), but
-    # it reads fine alongside "bringing new content in" as one shared idea —
-    # both are about keeping the archive intact and current, not a single
-    # curation pass over content that's already there. Renamed the section to
-    # "Archive additions & backup" so the heading still says what's inside it.
-    # (2026-09, PR 3: the section used to also hold the Archive Queue link and
-    # a full-width flow diagram above the quadrant grid — both retired along
-    # with the queue mechanism itself; see CLAUDE.md's Archive Queue
-    # retirement note. This is now just the backup card.)
+    # (Archive backup's own "Archive additions & backup" quadrant — which
+    # briefly also held the Archive Queue link and a full-width flow diagram,
+    # both retired with the queue itself in 2026-09 PR 3 — is gone entirely
+    # as of the Reader route moves, PR 6: the backup card moved to the
+    # System hub-nav group, so there's nothing left in that quadrant to
+    # render. This page is three quadrants now, not four.)
 
     # Upper-left quadrant, "New content": the Manage feeds card over the two
     # capture-path accordions. Both halves keep their own shape — a _lib_card
@@ -24181,11 +24173,11 @@ def admin_library(request: Request):
     # than being blended into a single undifferentiated block.
     saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
 <div style="margin-bottom:22px;">{_lib_card(
-    "/admin/library/feeds", "Manage feeds",
+    "/admin/reader/feeds", "Manage feeds",
     "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into "
     "sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
     "web search is restricted to.",
-    _badge_for_href("/admin/library/feeds", task_counts.get("/admin/library/feeds", 0)))}</div>
+    _badge_for_href("/admin/reader/feeds", task_counts.get("/admin/reader/feeds", 0)))}</div>
 <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving to the archive</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 
@@ -24269,35 +24261,39 @@ def admin_library(request: Request):
     # Share-Sheet accordions and the Read Later bookmarklet/Share-Sheet
     # accordions. See _lib_quadrant's count_override note.
     saving_articles_html = _lib_quadrant("New content", saving_articles_body,
-                                         ["/admin/library/feeds"],
+                                         ["/admin/reader/feeds"],
                                          count_override=5)
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
-        ["/admin/library/backfill-content", "/admin/library/dedupe",
-         "/admin/library/bulk-delete"],
+        ["/admin/reader/backfill-content", "/admin/reader/dedupe",
+         "/admin/reader/bulk-delete"],
         "Working with what's already saved.")
-
-    archive_additions_html = _lib_section(
-        "Archive backup", ["/admin/library/backup"],
-        "An on-demand snapshot for right before something risky, on top of the daily automated one.")
 
     tag_mgmt_html = _lib_section(
         "Tag management",
-        ["/admin/library/tags", "/admin/library/tag-style", "/admin/library/enrich"],
+        ["/admin/library/tags", "/admin/library/tag-style", "/admin/reader/enrich"],
         "How tags get created, taught, and kept tidy&mdash;and the summaries that ride along with them.")
 
+    # Reader route moves (PR 6, 2026-09): Archive backup's card left this page
+    # entirely — it now lives under the System group on /admin (see
+    # /admin/library-backup in _ADMIN_GROUPS above), since a whole-DB snapshot
+    # is accounts/health/plumbing, not archive-specific. That drops this page
+    # from four quadrants to three; the two-column flex layout below is kept
+    # (still no row-coupling — see the comment on .lib-cols), just with the
+    # second column now holding a single quadrant instead of two stacked ones.
     body = f"""<div class="page page-admin">
 <style>
-/* Four quadrants on explicitly named grid areas, not auto-placement. Auto-flow
+/* Three quadrants on explicitly named grid areas, not auto-placement. Auto-flow
    is what produced the earlier ragged layout — blocks landed wherever content
    length pushed them, and an odd count left a hole. Named areas pin each
    quadrant regardless of how much content it holds. */
 /* Two INDEPENDENT flowing columns, not a row-coupled grid. A real 2-row grid
    makes both cells in a row share that row's height, so expanding one quadrant
    pushed the whole next row down in both columns at once. Column independence
-   is the deliberate trade-off: row-2 headings ("Tag management" vs "Archive
-   backup") are no longer guaranteed to share a Y. */
+   is the deliberate trade-off — kept even though the right column is now a
+   single quadrant, since a future addition to either column shouldn't force
+   the other to match its height. */
 .lib-cols{{display:flex;gap:28px;align-items:flex-start;}}
 .lib-col{{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:34px;}}
 /* Quadrant boxes come from the shared `_disclosure_group` component (same row
@@ -24309,22 +24305,20 @@ def admin_library(request: Request):
    query below something to `order`, and to name each quadrant for tests. */
 @media (max-width:900px){{
   /* One column. `display:contents` dissolves the two column wrappers so all
-     four quadrants become direct flex children of .lib-cols, which is what
+     three quadrants become direct flex children of .lib-cols, which is what
      lets `order` interleave them across the columns — DOM order is
-     new/tags/existing/backup (column order), the required reading order is
-     new/existing/tags/backup. */
+     new/tags/existing (column order), the required reading order is
+     new/existing/tags. */
   /* align-items must be reset here, not just inherited from the desktop rule.
      It governs the CROSS axis, so `flex-start` — correct in row direction,
      where it stops the two columns stretching to a shared height — becomes
      horizontal once this flips to column, shrinking every box to its own
-     content width (measured 261/342/306/342px at 390px wide before this).
-     `stretch` gives all four the container's full width. */
+     content width. `stretch` gives all three the container's full width. */
   .lib-cols{{flex-direction:column;gap:30px;align-items:stretch;}}
   .lib-col{{display:contents;}}
   .lib-q-new{{order:1;}}
   .lib-q-existing{{order:2;}}
   .lib-q-tags{{order:3;}}
-  .lib-q-backup{{order:4;}}
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -24332,7 +24326,7 @@ def admin_library(request: Request):
   <h1 style="margin:0;">Library</h1>
   {open_reader_button}
 </div>
-<p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
+<p style="color:var(--muted);margin:4px 0 18px;">The tools below cover bringing new content in, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need. (Archive backup moved to the System group on <a href="/admin" style="color:var(--navy);">/admin</a>.)</p>
 <div class="lib-cols">
 <div class="lib-col">
 <div class="lib-q-new">{saving_articles_html}</div>
@@ -24340,7 +24334,6 @@ def admin_library(request: Request):
 </div>
 <div class="lib-col">
 <div class="lib-q-existing">{existing_mgmt_html}</div>
-<div class="lib-q-backup">{archive_additions_html}</div>
 </div>
 </div>
 </div>"""
@@ -24437,7 +24430,7 @@ def _feed_form_fields(sections: list, values: dict) -> str:
   </div>"""
 
 
-@app.get("/admin/library/feeds", response_class=HTMLResponse)
+@app.get("/admin/reader/feeds", response_class=HTMLResponse)
 def admin_feeds(request: Request, background_tasks: BackgroundTasks,
                 msg: str = "", error: str = ""):
     if not _is_authed(request):
@@ -24474,7 +24467,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   <td class="ff-name">{_esc(f['name'])}</td>
   <td class="ff-url"><a href="{_esc(f['xml_url'])}" target="_blank" rel="noopener">{_esc(f['xml_url'])}</a></td>
   <td class="ff-section">
-    <form method="post" action="/admin/library/feeds/{f['id']}/section" style="margin:0;">
+    <form method="post" action="/admin/reader/feeds/{f['id']}/section" style="margin:0;">
       <select name="section_id" onchange="this.form.submit()" aria-label="Section for {_esc(f['name'])}"
         style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">{opts}</select>
     </form>
@@ -24487,14 +24480,14 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     </span>
   </td>
   <td class="ff-sub">
-    <form method="post" action="/admin/library/feeds/{f['id']}/subscription" style="margin:0;">
+    <form method="post" action="/admin/reader/feeds/{f['id']}/subscription" style="margin:0;">
       <input type="checkbox" name="has_active_subscription" value="1" onchange="this.form.submit()"
         aria-label="Subscriber: {_esc(f['name'])}"{' checked' if f['has_active_subscription'] else ''}>
     </form>
   </td>
   <td class="ff-actions">
-    <a href="/admin/library/feeds/{f['id']}/edit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Edit</a>
-    <form method="post" action="/admin/library/feeds/{f['id']}/delete" style="display:inline;margin:0 0 0 4px;"
+    <a href="/admin/reader/feeds/{f['id']}/edit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Edit</a>
+    <form method="post" action="/admin/reader/feeds/{f['id']}/delete" style="display:inline;margin:0 0 0 4px;"
           onsubmit="return confirm('Remove &quot;{_esc(f['name'])}&quot; from your feeds? Articles already saved from it stay in the archive.');">
       <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button>
     </form>
@@ -24523,13 +24516,13 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
                 f'feed{"s" if n != 1 else ""} to another section first.">Remove</button>')
         else:
             remove = (
-                f'<form method="post" action="/admin/library/feeds/sections/{s["id"]}/delete" '
+                f'<form method="post" action="/admin/reader/feeds/sections/{s["id"]}/delete" '
                 f'style="display:inline;margin:0 0 0 4px;" '
                 f'onsubmit="return confirm(\'Remove the empty section &quot;{_esc(s["name"])}&quot;?\');">'
                 f'<button type="submit" class="btn btn-ghost fs-remove">Remove</button></form>')
         section_rows += f"""<tr class="fs-row">
   <td class="fs-name">
-    <form id="{form_id}" method="post" action="/admin/library/feeds/sections/{s['id']}/rename" style="margin:0;">
+    <form id="{form_id}" method="post" action="/admin/reader/feeds/sections/{s['id']}/rename" style="margin:0;">
       <input type="text" name="name" value="{_esc(s['name'])}" required maxlength="80"
         aria-label="Section name" style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
     </form>
@@ -24634,7 +24627,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   <h1 style="margin:0;">Feeds</h1>
   <div class="ff-head-actions">
     {auth_button}
-    <a href="/admin/library/feeds/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add feed</a>
+    <a href="/admin/reader/feeds/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add feed</a>
   </div>
 </div>
 {auth_panel}
@@ -24672,7 +24665,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     <tbody>{section_rows}</tbody>
   </table>
 </div>
-<form method="post" action="/admin/library/feeds/sections/new"
+<form method="post" action="/admin/reader/feeds/sections/new"
       style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 0;">
   <input type="text" name="name" required maxlength="80" placeholder="New section name"
     style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;">
@@ -24682,7 +24675,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     return HTMLResponse(_page("Feeds—Library Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/library/feeds/sections/new")
+@app.post("/admin/reader/feeds/sections/new")
 async def admin_feeds_section_new(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -24690,22 +24683,22 @@ async def admin_feeds_section_new(request: Request):
     name = (form.get("name") or "").strip()
     if not name:
         return RedirectResponse(
-            f"/admin/library/feeds?error={quote('Give the section a name.')}", status_code=303)
+            f"/admin/reader/feeds?error={quote('Give the section a name.')}", status_code=303)
     lib = _lib()
     try:
         if any(s["name"].lower() == name.lower() for s in lib.list_feed_sections()):
             return RedirectResponse(
-                f"/admin/library/feeds?error={quote(f'A section called {name} already exists.')}",
+                f"/admin/reader/feeds?error={quote(f'A section called {name} already exists.')}",
                 status_code=303)
         lib.add_feed_section(name)
         _publish_feeds(lib)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Added the {name} section.')}",
+    return RedirectResponse(f"/admin/reader/feeds?msg={quote(f'Added the {name} section.')}",
                             status_code=303)
 
 
-@app.post("/admin/library/feeds/sections/{section_id}/rename")
+@app.post("/admin/reader/feeds/sections/{section_id}/rename")
 async def admin_feeds_section_rename(request: Request, section_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -24713,7 +24706,7 @@ async def admin_feeds_section_rename(request: Request, section_id: int):
     name = (form.get("name") or "").strip()
     if not name:
         return RedirectResponse(
-            f"/admin/library/feeds?error={quote('A section needs a name.')}", status_code=303)
+            f"/admin/reader/feeds?error={quote('A section needs a name.')}", status_code=303)
     lib = _lib()
     try:
         if not lib.get_feed_section(section_id):
@@ -24722,17 +24715,17 @@ async def admin_feeds_section_rename(request: Request, section_id: int):
                  if s["name"].lower() == name.lower() and s["id"] != section_id]
         if clash:
             return RedirectResponse(
-                f"/admin/library/feeds?error={quote(f'A section called {name} already exists.')}",
+                f"/admin/reader/feeds?error={quote(f'A section called {name} already exists.')}",
                 status_code=303)
         lib.rename_feed_section(section_id, name)
         _publish_feeds(lib)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Renamed the section to {name}.')}",
+    return RedirectResponse(f"/admin/reader/feeds?msg={quote(f'Renamed the section to {name}.')}",
                             status_code=303)
 
 
-@app.post("/admin/library/feeds/sections/{section_id}/delete")
+@app.post("/admin/reader/feeds/sections/{section_id}/delete")
 def admin_feeds_section_delete(request: Request, section_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -24749,17 +24742,17 @@ def admin_feeds_section_delete(request: Request, section_id: int):
             plural = "s" if remaining != 1 else ""
             detail = (f"{name} still has {remaining} feed{plural}. "
                       f"Move them to another section first.")
-            return RedirectResponse(f"/admin/library/feeds?error={quote(detail)}",
+            return RedirectResponse(f"/admin/reader/feeds?error={quote(detail)}",
                                     status_code=303)
         lib.delete_feed_section(section_id)
         _publish_feeds(lib)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Removed the {name} section.')}",
+    return RedirectResponse(f"/admin/reader/feeds?msg={quote(f'Removed the {name} section.')}",
                             status_code=303)
 
 
-@app.post("/admin/library/feeds/{feed_id}/section")
+@app.post("/admin/reader/feeds/{feed_id}/section")
 async def admin_feeds_set_section(request: Request, feed_id: int):
     """Move a feed to another section, from the table's per-row dropdown.
 
@@ -24778,7 +24771,7 @@ async def admin_feeds_set_section(request: Request, feed_id: int):
             raise HTTPException(status_code=404, detail="feed not found")
         if not raw.isdigit() or not lib.get_feed_section(int(raw)):
             return RedirectResponse(
-                f"/admin/library/feeds?error={quote('Pick an existing section.')}",
+                f"/admin/reader/feeds?error={quote('Pick an existing section.')}",
                 status_code=303)
         section = lib.get_feed_section(int(raw))
         lib.move_feed_to_section(feed_id, int(raw))
@@ -24786,10 +24779,10 @@ async def admin_feeds_set_section(request: Request, feed_id: int):
         detail = f"Moved {feed['name']} to {section['name']}."
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
+    return RedirectResponse(f"/admin/reader/feeds?msg={quote(detail)}", status_code=303)
 
 
-@app.post("/admin/library/feeds/{feed_id}/subscription")
+@app.post("/admin/reader/feeds/{feed_id}/subscription")
 async def admin_feeds_set_subscription(request: Request, feed_id: int):
     """Toggle the informational subscription flag from the table's checkbox.
 
@@ -24813,10 +24806,10 @@ async def admin_feeds_set_subscription(request: Request, feed_id: int):
         detail = f"{feed['name']} is {state}."
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
+    return RedirectResponse(f"/admin/reader/feeds?msg={quote(detail)}", status_code=303)
 
 
-@app.get("/admin/library/feeds/new", response_class=HTMLResponse)
+@app.get("/admin/reader/feeds/new", response_class=HTMLResponse)
 def admin_feeds_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -24827,10 +24820,10 @@ def admin_feeds_new(request: Request):
         lib.close()
     if not sections:
         return RedirectResponse(
-            f"/admin/library/feeds?error={quote('Add a section first, then add feeds to it.')}",
+            f"/admin/reader/feeds?error={quote('Add a section first, then add feeds to it.')}",
             status_code=303)
     return HTMLResponse(_page("Add a feed—Library Admin", "Admin",
-                              _feed_form_page("Add a feed", "/admin/library/feeds/new",
+                              _feed_form_page("Add a feed", "/admin/reader/feeds/new",
                                               sections, {}, "", "Add feed"),
                               authed=True))
 
@@ -24841,20 +24834,20 @@ def _feed_form_page(heading: str, action: str, sections: list, values: dict,
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
     return f"""<div class="page page-form">
-<p style="margin:0 0 4px;"><a href="/admin/library/feeds" style="font-size:13px;color:var(--muted);">&larr; Feeds</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/reader/feeds" style="font-size:13px;color:var(--muted);">&larr; Feeds</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
 <form method="post" action="{action}" style="display:grid;gap:20px;">
 {_feed_form_fields(sections, values)}
   <div>
     <button type="submit" class="btn">{_esc(submit_label)}</button>
-    <a href="/admin/library/feeds" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/admin/reader/feeds" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>"""
 
 
-@app.post("/admin/library/feeds/new")
+@app.post("/admin/reader/feeds/new")
 async def admin_feeds_new_submit(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -24877,7 +24870,7 @@ async def admin_feeds_new_submit(request: Request):
         def _reject(message: str):
             return HTMLResponse(_page(
                 "Add a feed—Library Admin", "Admin",
-                _feed_form_page("Add a feed", "/admin/library/feeds/new",
+                _feed_form_page("Add a feed", "/admin/reader/feeds/new",
                                 sections, values, message, "Add feed"),
                 authed=True), status_code=400)
 
@@ -24902,10 +24895,10 @@ async def admin_feeds_new_submit(request: Request):
         _publish_feeds(lib)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Added {name}.')}", status_code=303)
+    return RedirectResponse(f"/admin/reader/feeds?msg={quote(f'Added {name}.')}", status_code=303)
 
 
-@app.get("/admin/library/feeds/{feed_id}/edit", response_class=HTMLResponse)
+@app.get("/admin/reader/feeds/{feed_id}/edit", response_class=HTMLResponse)
 def admin_feeds_edit(request: Request, feed_id: int):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -24924,12 +24917,12 @@ def admin_feeds_edit(request: Request, feed_id: int):
               "has_active_subscription": bool(feed["has_active_subscription"])}
     return HTMLResponse(_page("Edit feed—Library Admin", "Admin",
                               _feed_form_page(f'Edit {feed["name"]}',
-                                              f"/admin/library/feeds/{feed_id}/edit",
+                                              f"/admin/reader/feeds/{feed_id}/edit",
                                               sections, values, "", "Save feed"),
                               authed=True))
 
 
-@app.post("/admin/library/feeds/{feed_id}/edit")
+@app.post("/admin/reader/feeds/{feed_id}/edit")
 async def admin_feeds_edit_submit(request: Request, feed_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -24954,7 +24947,7 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
             return HTMLResponse(_page(
                 "Edit feed—Library Admin", "Admin",
                 _feed_form_page(f'Edit {feed["name"]}',
-                                f"/admin/library/feeds/{feed_id}/edit",
+                                f"/admin/reader/feeds/{feed_id}/edit",
                                 sections, values, message, "Save feed"),
                 authed=True), status_code=400)
 
@@ -24990,11 +24983,11 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
         saved_name = values["name"]
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Saved {saved_name}.')}",
+    return RedirectResponse(f"/admin/reader/feeds?msg={quote(f'Saved {saved_name}.')}",
                             status_code=303)
 
 
-@app.post("/admin/library/feeds/{feed_id}/delete")
+@app.post("/admin/reader/feeds/{feed_id}/delete")
 def admin_feeds_delete(request: Request, feed_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -25008,7 +25001,7 @@ def admin_feeds_delete(request: Request, feed_id: int):
         _publish_feeds(lib)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Removed {name}.')}",
+    return RedirectResponse(f"/admin/reader/feeds?msg={quote(f'Removed {name}.')}",
                             status_code=303)
 
 
@@ -25037,9 +25030,9 @@ def admin_auth_recheck(request: Request):
     # Redirects to Feeds, where the control now lives. The PATH is deliberately
     # unchanged: the Reader's own subscriber-access banner posts here too (see
     # the fetch() in the reader shell), and /admin/auth/recheck isn't
-    # library-page-specific, so moving it under /admin/library/feeds/... would
+    # library-page-specific, so moving it under /admin/reader/feeds/... would
     # make that second caller read oddly for no gain.
-    return RedirectResponse("/admin/library/feeds", status_code=303)
+    return RedirectResponse("/admin/reader/feeds", status_code=303)
 
 
 def _tag_merge_background() -> None:
@@ -25532,7 +25525,7 @@ async def admin_game_settings_edit(request: Request, rank: str):
 _DEDUPE_PRESETS = {"aggressive": 0.55, "balanced": 0.62, "conservative": 0.72}
 
 
-@app.get("/admin/library/dedupe", response_class=HTMLResponse)
+@app.get("/admin/reader/dedupe", response_class=HTMLResponse)
 def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                  days: int = 90, msg: str = ""):
     if not _is_authed(request):
@@ -25585,7 +25578,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
         f'<option value="{d}"{" selected" if d == days else ""}>±{d} days</option>'
         for d in (30, 90, 180, 365))
 
-    controls = f"""<form method="get" action="/admin/library/dedupe" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;">
+    controls = f"""<form method="get" action="/admin/reader/dedupe" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;">
   <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Source</label>
     <select name="source" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);min-width:180px;"><option value="">Choose a source…</option>{opts}</select></div>
   <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Strictness</label>
@@ -25628,10 +25621,10 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                                f'<input type="hidden" name="dup_title" value="{_esc(a.get("title") or "")}">'
                                f'<input type="hidden" name="source" value="{_esc(source)}">'
                                f'<input type="hidden" name="back" value="{_esc(source)}|{level}|{days}">')
-                        accept = (f'<form method="post" action="/admin/library/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this duplicate?\');">'
+                        accept = (f'<form method="post" action="/admin/reader/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this duplicate?\');">'
                                   f'<input type="hidden" name="id" value="{a["id"]}">{ctx}'
                                   f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
-                        reject = (f'<form method="post" action="/admin/library/dedupe/not-dupe" style="margin:0;">{ctx}'
+                        reject = (f'<form method="post" action="/admin/reader/dedupe/not-dupe" style="margin:0;">{ctx}'
                                   f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:var(--ink-soft);">Not a dupe</button></form>')
                         tag = f'<div style="display:flex;gap:6px;flex-shrink:0;">{reject}{accept}</div>'
                         pct = round(a.get("_dup_score", 0) * 100)
@@ -25647,7 +25640,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
             verify_banner = (f'<div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;'
                              f'padding:10px 14px;font-size:13px;margin:0 0 16px;line-height:1.5;">{verify_note}</div>'
                              if verify_note else '')
-            bulk = f"""<form method="post" action="/admin/library/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} duplicate(s), keeping one per group? A backup is taken first.');">
+            bulk = f"""<form method="post" action="/admin/reader/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} duplicate(s), keeping one per group? A backup is taken first.');">
   <input type="hidden" name="source" value="{_esc(source)}"><input type="hidden" name="level" value="{level}"><input type="hidden" name="days" value="{days}">
   <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Remove all {dupe_total} duplicate{'s' if dupe_total != 1 else ''} (keep one each)</button>
   <span style="font-size:13px;color:var(--muted);margin-left:10px;">{len(clusters)} duplicate group{'s' if len(clusters) != 1 else ''} found.</span>
@@ -25678,10 +25671,10 @@ def _dedupe_back(form) -> str:
     src = quote(back[0]) if back and back[0] else ""
     lvl = back[1] if len(back) > 1 else "balanced"
     dys = back[2] if len(back) > 2 else "90"
-    return f"/admin/library/dedupe?source={src}&level={lvl}&days={dys}"
+    return f"/admin/reader/dedupe?source={src}&level={lvl}&days={dys}"
 
 
-@app.post("/admin/library/dedupe/remove")
+@app.post("/admin/reader/dedupe/remove")
 async def admin_dedupe_remove(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25704,7 +25697,7 @@ async def admin_dedupe_remove(request: Request, background_tasks: BackgroundTask
     return RedirectResponse(_dedupe_back(form), status_code=303)
 
 
-@app.post("/admin/library/dedupe/not-dupe")
+@app.post("/admin/reader/dedupe/not-dupe")
 async def admin_dedupe_not_dupe(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25719,7 +25712,7 @@ async def admin_dedupe_not_dupe(request: Request):
     return RedirectResponse(_dedupe_back(form), status_code=303)
 
 
-@app.post("/admin/library/dedupe/remove-older")
+@app.post("/admin/reader/dedupe/remove-older")
 async def admin_dedupe_remove_older(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -25751,7 +25744,7 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
     finally:
         lib.close()
     msg = f"Removed {removed} older duplicate{'s' if removed != 1 else ''} from {source}."
-    return RedirectResponse(f"/admin/library/dedupe?source={quote(source)}&level={level}&days={days}&msg={quote(msg)}",
+    return RedirectResponse(f"/admin/reader/dedupe?source={quote(source)}&level={level}&days={days}&msg={quote(msg)}",
                             status_code=303)
 
 
@@ -27935,7 +27928,7 @@ def _enrich_job(force: bool, model: str, limit: int) -> None:
     then finish) — _JOB_STATE itself stays exactly as it was, for live
     in-request progress, but it's wiped by every redeploy/crash with no
     record left behind; job_run_log is what survives that and backs the
-    "last run" line on /admin/library/enrich."""
+    "last run" line on /admin/reader/enrich."""
     _job_set("enrich", running=True, done=0, total=0, error="", model=model)
     lib = _lib()
     run_id = lib.start_job_run("enrich")
@@ -27961,7 +27954,7 @@ def _enrich_job(force: bool, model: str, limit: int) -> None:
         lib.close()
 
 
-@app.get("/admin/library/enrich", response_class=HTMLResponse)
+@app.get("/admin/reader/enrich", response_class=HTMLResponse)
 def admin_enrich(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -28042,7 +28035,7 @@ def admin_enrich(request: Request):
   </div>
   <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Current rules version: <strong>{ENRICH_RULES_VERSION}</strong></p>
 
-  <form id="enrich-form" method="post" action="/admin/library/enrich/start" style="display:grid;gap:18px;">
+  <form id="enrich-form" method="post" action="/admin/reader/enrich/start" style="display:grid;gap:18px;">
     <div>
       <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px;">Model</div>
       <div style="display:flex;flex-direction:column;">{model_radios}</div>
@@ -28108,12 +28101,12 @@ def admin_enrich(request: Request):
     return HTMLResponse(_page("Re-enrich archive—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/library/enrich/start")
+@app.post("/admin/reader/enrich/start")
 async def admin_enrich_start(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     if _job_get("enrich").get("running"):
-        return RedirectResponse("/admin/library/enrich?running=1", status_code=303)
+        return RedirectResponse("/admin/reader/enrich?running=1", status_code=303)
     form = await request.form()
     force = bool(form.get("force"))
     model = (form.get("model") or "").strip()
@@ -28122,10 +28115,10 @@ async def admin_enrich_start(request: Request):
         model = DEFAULT_MODEL
     t = threading.Thread(target=_enrich_job, args=(force, model, 100000), daemon=True)
     t.start()
-    return RedirectResponse("/admin/library/enrich", status_code=303)
+    return RedirectResponse("/admin/reader/enrich", status_code=303)
 
 
-@app.get("/admin/library/enrich/status")
+@app.get("/admin/reader/enrich/status")
 def admin_enrich_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
@@ -28222,7 +28215,7 @@ def _wayback_429_retry_job() -> None:
     already recovered (its latest attempt is now 'success') simply isn't
     in the next run's list — nothing here re-processes an already-good
     article. Admin-triggered only, not scheduled — see the
-    /admin/library/backfill-content page's "Retry Wayback rate-limited
+    /admin/reader/backfill-content page's "Retry Wayback rate-limited
     articles" panel."""
     _job_set("wayback_429_retry", running=True, stop_requested=False,
              done=0, total=0, ok=0, failed=0, error="", stopped=False)
@@ -28262,7 +28255,7 @@ def _wayback_429_retry_job() -> None:
         lib.close()
 
 
-@app.get("/admin/library/backfill-content", response_class=HTMLResponse)
+@app.get("/admin/reader/backfill-content", response_class=HTMLResponse)
 def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -28327,7 +28320,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">
     <div style="background:#2563eb;height:8px;width:{prog_pct}%;transition:width .3s;"></div>
   </div>
-  <form method="post" action="/admin/library/backfill-content/stop" style="margin-top:12px;">
+  <form method="post" action="/admin/reader/backfill-content/stop" style="margin-top:12px;">
     <button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button>
   </form>
 </div>"""
@@ -28463,7 +28456,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">
     <div style="background:#2563eb;height:8px;width:{wb429_pct}%;transition:width .3s;"></div>
   </div>
-  <form method="post" action="/admin/library/backfill-content/wayback-429/stop" style="margin-top:12px;">
+  <form method="post" action="/admin/reader/backfill-content/wayback-429/stop" style="margin-top:12px;">
     <button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button>
   </form>
 </div>"""
@@ -28476,7 +28469,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">archive.org&rsquo;s own Availability API has been observed to rate-limit (HTTP 429) broadly and unpredictably (see linklib/wayback.py)&mdash;not a per-article problem, and not something the ordinary sweep above knows to revisit once the rate limit clears. This re-attempts, once, exactly the articles whose last recorded failure was a Wayback 429&mdash;the same three-tier fetch (direct &rarr; migration/Medium &rarr; Wayback) as the ordinary sweep, same {_CONTENT_BACKFILL_DELAY_SEC}s pacing, same logging. Never touches an article whose latest attempt succeeded or failed a different way.</p>
   <div id="wb429-poll-container">{wb429_status_html}</div>
   {_job_run_banner("wayback_429_retry")}
-  <form id="wb429-form" method="post" action="/admin/library/backfill-content/wayback-429/start" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px;">
+  <form id="wb429-form" method="post" action="/admin/reader/backfill-content/wayback-429/start" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px;">
     <button type="submit" class="btn" style="font-size:14px;padding:9px 22px;" {wb429_disable}>
       Retry {wayback_429_count:,} article{"s" if wayback_429_count != 1 else ""} now
     </button>
@@ -28503,7 +28496,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
                       f'style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
                       if url else title)
         last = _esc((r.get("last_attempted_at") or "")[:19].replace("T", " "))
-        accept_form = (f'<form method="post" action="/admin/library/backfill-content/{r["article_id"]}/accept" '
+        accept_form = (f'<form method="post" action="/admin/reader/backfill-content/{r["article_id"]}/accept" '
                        f'onsubmit="return confirm(\'Accept this article\\u2019s current content as final? '
                        f'It will stop showing up here and stop being auto-retried.\');">'
                        f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;white-space:nowrap;">Accept as final</button></form>')
@@ -28535,7 +28528,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
                       f'style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
                       if url else title)
         when = _esc((r.get("accepted_at") or "")[:19].replace("T", " "))
-        undo_form = (f'<form method="post" action="/admin/library/backfill-content/{r["article_id"]}/unaccept">'
+        undo_form = (f'<form method="post" action="/admin/reader/backfill-content/{r["article_id"]}/unaccept">'
                      f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;white-space:nowrap;">Undo</button></form>')
         return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}</td>'
                 f'<td style="padding:7px 12px;font-size:13px;">{reason_label}</td>'
@@ -28553,10 +28546,10 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
       <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Failed {Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD}+ times in a row&mdash;excluded from automatic retry, but NOT considered permanently dead (unlike Defunct service below). Export, fill in a corrected URL for any you can find, and re-import to fix and requeue them. If the content that's already saved is actually fine as-is (a real but short article, say), use &ldquo;Accept as final&rdquo; on that row instead&mdash;per-article only, no bulk option. If the live page loads fine in a browser but our fetcher can&rsquo;t reach it, use a row&rsquo;s &ldquo;Snapshot on Wayback&rdquo; link&mdash;archive.org&rsquo;s own crawler isn&rsquo;t subject to the same block ours is, so a fresh snapshot gives the next backfill run a copy it can reach.</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <a href="/admin/library/backfill-content/manual-review/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>
+      <a href="/admin/reader/backfill-content/manual-review/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>
     </div>
   </div>
-  <form method="post" action="/admin/library/backfill-content/manual-review/import/preview" enctype="multipart/form-data"
+  <form method="post" action="/admin/reader/backfill-content/manual-review/import/preview" enctype="multipart/form-data"
         style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg);">
     <input type="file" name="file" accept=".csv,text/csv" required
       style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:#fff;">
@@ -28607,10 +28600,10 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
       <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Articles with essentially nothing saved&mdash;under {_esc(str(_MIN_CONTENT_WORDS))} words of plain text AND no structured content ever backfilled. Not the same as Remaining above, which is mostly articles with perfectly good text just waiting on a backfill pass. Permanent&mdash;review carefully before confirming.</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <a href="/admin/library/backfill-content/purge/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>
+      <a href="/admin/reader/backfill-content/purge/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>
     </div>
   </div>
-  <form method="post" action="/admin/library/backfill-content/purge/import/preview" enctype="multipart/form-data"
+  <form method="post" action="/admin/reader/backfill-content/purge/import/preview" enctype="multipart/form-data"
         style="padding:14px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg);">
     <input type="file" name="file" accept=".csv,text/csv" required
       style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:#fff;">
@@ -28787,7 +28780,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 {_job_run_banner("content_backfill")}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;">
-  <form id="content-backfill-form" method="post" action="/admin/library/backfill-content/start" style="display:grid;gap:18px;">
+  <form id="content-backfill-form" method="post" action="/admin/reader/backfill-content/start" style="display:grid;gap:18px;">
     <div>
       <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Limit</label>
       <input type="number" name="limit" value="25" min="1" max="100000"
@@ -28826,7 +28819,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 (function() {{
   var reloadOnDone = false;
   function poll() {{
-    fetch('/admin/library/backfill-content/status').then(r => r.json()).then(function(s) {{
+    fetch('/admin/reader/backfill-content/status').then(r => r.json()).then(function(s) {{
       var container = document.getElementById('poll-container');
       if (!container) return;
       var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
@@ -28837,7 +28830,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
           + '<div style="font-size:13px;color:var(--muted);">' + s.done + ' / ' + s.total + ' processed &middot; ' + s.ok + ' succeeded &middot; ' + s.failed + ' failed</div>'
           + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
           + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div>'
-          + '<form method="post" action="/admin/library/backfill-content/stop" style="margin-top:12px;">'
+          + '<form method="post" action="/admin/reader/backfill-content/stop" style="margin-top:12px;">'
           + '<button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button></form></div>';
         setTimeout(poll, 3000);
       }} else if (reloadOnDone) {{
@@ -28855,7 +28848,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 (function() {{
   var reloadOnDone = false;
   function poll() {{
-    fetch('/admin/library/backfill-content/wayback-429/status').then(r => r.json()).then(function(s) {{
+    fetch('/admin/reader/backfill-content/wayback-429/status').then(r => r.json()).then(function(s) {{
       var container = document.getElementById('wb429-poll-container');
       if (!container) return;
       var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
@@ -28866,7 +28859,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
           + '<div style="font-size:13px;color:var(--muted);">' + s.done + ' / ' + s.total + ' processed &middot; ' + s.ok + ' succeeded &middot; ' + s.failed + ' failed</div>'
           + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
           + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div>'
-          + '<form method="post" action="/admin/library/backfill-content/wayback-429/stop" style="margin-top:12px;">'
+          + '<form method="post" action="/admin/reader/backfill-content/wayback-429/stop" style="margin-top:12px;">'
           + '<button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button></form></div>';
         setTimeout(poll, 3000);
       }} else if (reloadOnDone) {{
@@ -28888,12 +28881,12 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     return HTMLResponse(_page("Reader content backfill—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/library/backfill-content/start")
+@app.post("/admin/reader/backfill-content/start")
 async def admin_backfill_content_start(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     if _job_get("content_backfill").get("running"):
-        return RedirectResponse("/admin/library/backfill-content?running=1", status_code=303)
+        return RedirectResponse("/admin/reader/backfill-content?running=1", status_code=303)
     form = await request.form()
     try:
         limit = int(form.get("limit") or 25)
@@ -28904,26 +28897,26 @@ async def admin_backfill_content_start(request: Request):
     host_suffixes = [h.strip().lower() for h in host_scope_raw.split(",") if h.strip()] or None
     t = threading.Thread(target=_content_backfill_job, args=(limit, force, host_suffixes), daemon=True)
     t.start()
-    return RedirectResponse("/admin/library/backfill-content", status_code=303)
+    return RedirectResponse("/admin/reader/backfill-content", status_code=303)
 
 
-@app.post("/admin/library/backfill-content/stop")
+@app.post("/admin/reader/backfill-content/stop")
 def admin_backfill_content_stop(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     if _job_get("content_backfill").get("running"):
         _job_set("content_backfill", stop_requested=True)
-    return RedirectResponse("/admin/library/backfill-content", status_code=303)
+    return RedirectResponse("/admin/reader/backfill-content", status_code=303)
 
 
-@app.get("/admin/library/backfill-content/status")
+@app.get("/admin/reader/backfill-content/status")
 def admin_backfill_content_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
     return JSONResponse(_job_get("content_backfill"))
 
 
-@app.post("/admin/library/backfill-content/wayback-429/start")
+@app.post("/admin/reader/backfill-content/wayback-429/start")
 def admin_backfill_content_wayback_429_start(request: Request):
     """Admin-triggered only, deliberately not scheduled — see
     Library._wayback_429_retry_ids's docstring and _wayback_429_retry_job's
@@ -28934,29 +28927,29 @@ def admin_backfill_content_wayback_429_start(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     if _job_get("wayback_429_retry").get("running"):
-        return RedirectResponse("/admin/library/backfill-content?running=1", status_code=303)
+        return RedirectResponse("/admin/reader/backfill-content?running=1", status_code=303)
     t = threading.Thread(target=_wayback_429_retry_job, daemon=True)
     t.start()
-    return RedirectResponse("/admin/library/backfill-content", status_code=303)
+    return RedirectResponse("/admin/reader/backfill-content", status_code=303)
 
 
-@app.post("/admin/library/backfill-content/wayback-429/stop")
+@app.post("/admin/reader/backfill-content/wayback-429/stop")
 def admin_backfill_content_wayback_429_stop(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     if _job_get("wayback_429_retry").get("running"):
         _job_set("wayback_429_retry", stop_requested=True)
-    return RedirectResponse("/admin/library/backfill-content", status_code=303)
+    return RedirectResponse("/admin/reader/backfill-content", status_code=303)
 
 
-@app.get("/admin/library/backfill-content/wayback-429/status")
+@app.get("/admin/reader/backfill-content/wayback-429/status")
 def admin_backfill_content_wayback_429_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
     return JSONResponse(_job_get("wayback_429_retry"))
 
 
-@app.post("/admin/library/backfill-content/{article_id}/accept")
+@app.post("/admin/reader/backfill-content/{article_id}/accept")
 def admin_backfill_content_accept(request: Request, article_id: int):
     """Durability audit item 4 — mark one needs-manual-review article's
     current content accepted as final. Per-article only, no bulk/select-all
@@ -28971,11 +28964,11 @@ def admin_backfill_content_accept(request: Request, article_id: int):
         lib.close()
     msg = "Accepted as final." if ok else "Article not found."
     key = "msg" if ok else "error"
-    return RedirectResponse(f"/admin/library/backfill-content?{key}={quote(msg)}#accepted-content",
+    return RedirectResponse(f"/admin/reader/backfill-content?{key}={quote(msg)}#accepted-content",
                             status_code=303)
 
 
-@app.post("/admin/library/backfill-content/{article_id}/unaccept")
+@app.post("/admin/reader/backfill-content/{article_id}/unaccept")
 def admin_backfill_content_unaccept(request: Request, article_id: int):
     """Reverses accept_article_content — see its docstring. Also
     per-article, same page."""
@@ -28988,10 +28981,10 @@ def admin_backfill_content_unaccept(request: Request, article_id: int):
         lib.close()
     msg = "Un-accepted—back in normal scope." if ok else "That article isn't currently accepted."
     key = "msg" if ok else "error"
-    return RedirectResponse(f"/admin/library/backfill-content?{key}={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/reader/backfill-content?{key}={quote(msg)}", status_code=303)
 
 
-@app.get("/admin/library/backfill-content/manual-review/export.csv")
+@app.get("/admin/reader/backfill-content/manual-review/export.csv")
 def admin_backfill_content_manual_review_export(request: Request):
     """CSV of every needs-manual-review article, article_id-keyed (the
     stable match key — the URL itself is what's being corrected, so it
@@ -29033,7 +29026,7 @@ def admin_backfill_content_manual_review_export(request: Request):
     )
 
 
-@app.post("/admin/library/backfill-content/manual-review/import/preview")
+@app.post("/admin/reader/backfill-content/manual-review/import/preview")
 async def admin_backfill_content_manual_review_import_preview(request: Request, file: UploadFile = File(...)):
     """Parses the uploaded corrections CSV and shows what would change —
     nothing is written to the DB here. Valid corrections are round-tripped
@@ -29054,11 +29047,11 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
     try:
         updates, skipped, errors = parse_manual_review_corrections_csv(data, current_urls)
     except ValueError as e:
-        return RedirectResponse(f"/admin/library/backfill-content?error={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"/admin/reader/backfill-content?error={quote(str(e))}", status_code=303)
 
     if not updates and not skipped and not errors:
         return RedirectResponse(
-            f"/admin/library/backfill-content?error={quote('The file had no data rows to import.')}", status_code=303)
+            f"/admin/reader/backfill-content?error={quote('The file had no data rows to import.')}", status_code=303)
 
     hidden_fields = "".join(
         f'<input type="hidden" name="article_id" value="{u["article_id"]}">'
@@ -29123,7 +29116,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
     )
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library/backfill-content" style="font-size:13px;color:var(--muted);">&larr; Reader content backfill</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/reader/backfill-content" style="font-size:13px;color:var(--muted);">&larr; Reader content backfill</a></p>
 <h1>Preview URL corrections</h1>
 <p style="color:var(--muted);margin:0 0 18px;">Nothing has been saved yet. Review the rows below, then confirm to apply them.</p>
 
@@ -29139,10 +29132,10 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
   </table>
 </div>
 
-<form method="post" action="/admin/library/backfill-content/manual-review/import/commit" style="margin:14px 0 8px;display:flex;gap:10px;">
+<form method="post" action="/admin/reader/backfill-content/manual-review/import/commit" style="margin:14px 0 8px;display:flex;gap:10px;">
   {hidden_fields}
   {confirm_button}
-  <a href="/admin/library/backfill-content" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+  <a href="/admin/reader/backfill-content" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
 </form>
 {skipped_section}
 {errors_section}
@@ -29150,7 +29143,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
     return HTMLResponse(_page("Preview URL corrections—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/library/backfill-content/manual-review/import/commit")
+@app.post("/admin/reader/backfill-content/manual-review/import/commit")
 async def admin_backfill_content_manual_review_import_commit(request: Request):
     """Applies the corrections the preview step showed, one
     Library.apply_article_url_correction call per row (which itself writes
@@ -29183,7 +29176,7 @@ async def admin_backfill_content_manual_review_import_commit(request: Request):
 
     if not article_ids:
         return RedirectResponse(
-            f"/admin/library/backfill-content?error={quote('No corrections to apply—upload a CSV first.')}",
+            f"/admin/reader/backfill-content?error={quote('No corrections to apply—upload a CSV first.')}",
             status_code=303)
 
     lib = _lib()
@@ -29224,7 +29217,7 @@ async def admin_backfill_content_manual_review_import_commit(request: Request):
     if failures:
         shown = "; ".join(failures[:5]) + (" …" if len(failures) > 5 else "")
         msg += f' {len(failures)} row(s) failed: {shown}'
-    return RedirectResponse(f"/admin/library/backfill-content?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/reader/backfill-content?msg={quote(msg)}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -29237,7 +29230,7 @@ async def admin_backfill_content_manual_review_import_commit(request: Request):
 # confirm-marker vocabulary and the MAX_PURGE_PER_RUN cap.
 # ---------------------------------------------------------------------------
 
-@app.get("/admin/library/backfill-content/purge/export.csv")
+@app.get("/admin/reader/backfill-content/purge/export.csv")
 def admin_backfill_content_purge_export(request: Request):
     """CSV of every current purge candidate, article_id-keyed, with a blank
     confirm_purge column for the admin to fill in (yes/y/1/x to mark a row
@@ -29274,7 +29267,7 @@ def admin_backfill_content_purge_export(request: Request):
     )
 
 
-@app.post("/admin/library/backfill-content/purge/import/preview")
+@app.post("/admin/reader/backfill-content/purge/import/preview")
 async def admin_backfill_content_purge_import_preview(request: Request, file: UploadFile = File(...)):
     """Parses the uploaded confirmation CSV and shows exactly what would be
     permanently deleted — nothing is written here. Re-validates every
@@ -29304,11 +29297,11 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
     try:
         confirmed, skipped, errors = parse_purge_confirmations_csv(data, current_candidates)
     except ValueError as e:
-        return RedirectResponse(f"/admin/library/backfill-content?error={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"/admin/reader/backfill-content?error={quote(str(e))}", status_code=303)
 
     if not confirmed and not skipped and not errors:
         return RedirectResponse(
-            f"/admin/library/backfill-content?error={quote('The file had no data rows to import.')}", status_code=303)
+            f"/admin/reader/backfill-content?error={quote('The file had no data rows to import.')}", status_code=303)
 
     hidden_fields = "".join(
         f'<input type="hidden" name="article_id" value="{c["article_id"]}">'
@@ -29380,7 +29373,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
     )
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library/backfill-content" style="font-size:13px;color:var(--muted);">&larr; Reader content backfill</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/reader/backfill-content" style="font-size:13px;color:var(--muted);">&larr; Reader content backfill</a></p>
 <h1>Preview article purge</h1>
 <p style="color:var(--muted);margin:0 0 6px;">Nothing has been deleted yet. Review the rows below carefully&mdash;this is permanent.</p>
 <p style="color:var(--muted);margin:0 0 18px;">A fresh off-site backup is taken automatically right before the delete runs, in addition to the regular nightly one.</p>
@@ -29397,11 +29390,11 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
   </table>
 </div>
 
-<form method="post" action="/admin/library/backfill-content/purge/import/commit" style="margin:14px 0 8px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+<form method="post" action="/admin/reader/backfill-content/purge/import/commit" style="margin:14px 0 8px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
   {hidden_fields}
   {count_confirm_field}
   {confirm_button}
-  <a href="/admin/library/backfill-content" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+  <a href="/admin/reader/backfill-content" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
 </form>
 {skipped_section}
 {errors_section}
@@ -29409,7 +29402,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
     return HTMLResponse(_page("Preview article purge—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/library/backfill-content/purge/import/commit")
+@app.post("/admin/reader/backfill-content/purge/import/commit")
 async def admin_backfill_content_purge_import_commit(request: Request):
     """Executes the purge the preview step showed. Two independent guards
     before anything is deleted: (1) the typed confirm_count must equal the
@@ -29434,18 +29427,18 @@ async def admin_backfill_content_purge_import_commit(request: Request):
 
     if not article_ids_raw:
         return RedirectResponse(
-            f"/admin/library/backfill-content?error={quote('No articles to purge—upload a CSV first.')}",
+            f"/admin/reader/backfill-content?error={quote('No articles to purge—upload a CSV first.')}",
             status_code=303)
 
     try:
         article_ids = [int(x) for x in article_ids_raw]
     except ValueError:
         return RedirectResponse(
-            f"/admin/library/backfill-content?error={quote('Malformed purge request.')}", status_code=303)
+            f"/admin/reader/backfill-content?error={quote('Malformed purge request.')}", status_code=303)
 
     if confirm_count_raw != str(len(article_ids)):
         return RedirectResponse(
-            f"/admin/library/backfill-content?error="
+            f"/admin/reader/backfill-content?error="
             f"{quote(f'Typed count ({confirm_count_raw!r}) did not match the {len(article_ids)} confirmed article(s)—nothing was deleted. Re-upload and try again.')}",
             status_code=303)
 
@@ -29454,7 +29447,7 @@ async def admin_backfill_content_purge_import_commit(request: Request):
         # this at preview time, but a hand-crafted POST shouldn't be able
         # to bypass it.
         return RedirectResponse(
-            f"/admin/library/backfill-content?error="
+            f"/admin/reader/backfill-content?error="
             f"{quote(f'{len(article_ids)} articles exceeds the {MAX_PURGE_PER_RUN}-per-run cap—nothing was deleted.')}",
             status_code=303)
 
@@ -29463,7 +29456,7 @@ async def admin_backfill_content_purge_import_commit(request: Request):
             backup.backup_now(DB_PATH)
         except Exception as exc:
             return RedirectResponse(
-                f"/admin/library/backfill-content?error="
+                f"/admin/reader/backfill-content?error="
                 f"{quote(f'Pre-purge backup failed, so nothing was deleted: {exc}')}",
                 status_code=303)
 
@@ -29490,7 +29483,7 @@ async def admin_backfill_content_purge_import_commit(request: Request):
     if skipped_ids:
         msg += (f' {len(skipped_ids)} row(s) skipped (no longer a purge candidate, or already gone): '
                 f'{", ".join(f"#{i}" for i in skipped_ids[:10])}{" …" if len(skipped_ids) > 10 else ""}')
-    return RedirectResponse(f"/admin/library/backfill-content?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/reader/backfill-content?msg={quote(msg)}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -29505,7 +29498,7 @@ async def admin_backfill_content_purge_import_commit(request: Request):
 # vocabulary and the MAX_DELETE_PER_RUN cap.
 # ---------------------------------------------------------------------------
 
-@app.get("/admin/library/bulk-delete", response_class=HTMLResponse)
+@app.get("/admin/reader/bulk-delete", response_class=HTMLResponse)
 def admin_library_bulk_delete(request: Request, msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -29520,7 +29513,7 @@ def admin_library_bulk_delete(request: Request, msg: str = "", error: str = ""):
 <h1>Bulk delete articles</h1>
 <p style="color:var(--muted);margin:0 0 18px;max-width:70ch;">For a specific list of articles you've already decided
 aren't needed&mdash;permanently removes them by URL. Different from the Purge tool under
-<a href="/admin/library/backfill-content">Reader content backfill</a>, which only ever targets articles with
+<a href="/admin/reader/backfill-content">Reader content backfill</a>, which only ever targets articles with
 essentially nothing saved for them; this tool has no scan of its own and only acts on URLs you provide. Removing a
 single article one at a time is also available straight from its toolbar in the <a href="/read">Reader</a>.</p>
 {banner}{error_banner}
@@ -29530,10 +29523,10 @@ single article one at a time is also available straight from its toolbar in the 
   <code>url</code> and <code>confirm_delete</code>. Paste in the URLs you want gone, filling
   <code>confirm_delete</code> with <code>yes</code> for each row to remove&mdash;leave it blank for a URL you're not
   sure about yet.</p>
-  <a href="/admin/library/bulk-delete/template.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Download CSV template</a>
+  <a href="/admin/reader/bulk-delete/template.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Download CSV template</a>
 
   <h3 style="font-size:14px;margin:22px 0 10px;">2. Upload it back</h3>
-  <form method="post" action="/admin/library/bulk-delete/preview" enctype="multipart/form-data"
+  <form method="post" action="/admin/reader/bulk-delete/preview" enctype="multipart/form-data"
         style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
     <input type="file" name="file" accept=".csv,text/csv" required>
     <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Preview deletion</button>
@@ -29544,7 +29537,7 @@ single article one at a time is also available straight from its toolbar in the 
     return HTMLResponse(_page("Bulk delete articles—Admin", "Admin", body, authed=True))
 
 
-@app.get("/admin/library/bulk-delete/template.csv")
+@app.get("/admin/reader/bulk-delete/template.csv")
 def admin_library_bulk_delete_template(request: Request):
     """Header-only CSV — there's no fixed candidate list to export the way
     Purge has (any URL currently in the library is a valid target), so
@@ -29559,7 +29552,7 @@ def admin_library_bulk_delete_template(request: Request):
     )
 
 
-@app.post("/admin/library/bulk-delete/preview")
+@app.post("/admin/reader/bulk-delete/preview")
 async def admin_library_bulk_delete_preview(request: Request, file: UploadFile = File(...)):
     """Parses the uploaded CSV and shows exactly what would be permanently
     deleted — nothing is written here. Each url is resolved against a FRESH
@@ -29585,13 +29578,13 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
         try:
             confirmed, skipped, errors = parse_library_delete_csv(data, _resolve)
         except ValueError as e:
-            return RedirectResponse(f"/admin/library/bulk-delete?error={quote(str(e))}", status_code=303)
+            return RedirectResponse(f"/admin/reader/bulk-delete?error={quote(str(e))}", status_code=303)
     finally:
         lib.close()
 
     if not confirmed and not skipped and not errors:
         return RedirectResponse(
-            f"/admin/library/bulk-delete?error={quote('The file had no data rows to import.')}", status_code=303)
+            f"/admin/reader/bulk-delete?error={quote('The file had no data rows to import.')}", status_code=303)
 
     hidden_fields = "".join(
         f'<input type="hidden" name="article_id" value="{c["article_id"]}">'
@@ -29664,7 +29657,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
     )
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library/bulk-delete" style="font-size:13px;color:var(--muted);">&larr; Bulk delete articles</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/reader/bulk-delete" style="font-size:13px;color:var(--muted);">&larr; Bulk delete articles</a></p>
 <h1>Preview bulk delete</h1>
 <p style="color:var(--muted);margin:0 0 6px;">Nothing has been deleted yet. Review the rows below carefully&mdash;this is permanent.</p>
 <p style="color:var(--muted);margin:0 0 18px;">A fresh off-site backup is taken automatically right before the delete runs, in addition to the regular nightly one.</p>
@@ -29681,11 +29674,11 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
   </table>
 </div>
 
-<form method="post" action="/admin/library/bulk-delete/commit" style="margin:14px 0 8px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+<form method="post" action="/admin/reader/bulk-delete/commit" style="margin:14px 0 8px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
   {hidden_fields}
   {count_confirm_field}
   {confirm_button}
-  <a href="/admin/library/bulk-delete" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+  <a href="/admin/reader/bulk-delete" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
 </form>
 {skipped_section}
 {errors_section}
@@ -29693,7 +29686,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
     return HTMLResponse(_page("Preview bulk delete—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/library/bulk-delete/commit")
+@app.post("/admin/reader/bulk-delete/commit")
 async def admin_library_bulk_delete_commit(request: Request):
     """Executes the deletion the preview step showed. Two independent
     guards before anything is deleted: (1) the typed confirm_count must
@@ -29718,22 +29711,22 @@ async def admin_library_bulk_delete_commit(request: Request):
 
     if not article_ids_raw:
         return RedirectResponse(
-            f"/admin/library/bulk-delete?error={quote('No articles to delete—upload a CSV first.')}",
+            f"/admin/reader/bulk-delete?error={quote('No articles to delete—upload a CSV first.')}",
             status_code=303)
 
     if len(article_ids_raw) != len(urls_raw):
         return RedirectResponse(
-            f"/admin/library/bulk-delete?error={quote('Malformed delete request.')}", status_code=303)
+            f"/admin/reader/bulk-delete?error={quote('Malformed delete request.')}", status_code=303)
 
     try:
         article_ids = [int(x) for x in article_ids_raw]
     except ValueError:
         return RedirectResponse(
-            f"/admin/library/bulk-delete?error={quote('Malformed delete request.')}", status_code=303)
+            f"/admin/reader/bulk-delete?error={quote('Malformed delete request.')}", status_code=303)
 
     if confirm_count_raw != str(len(article_ids)):
         return RedirectResponse(
-            f"/admin/library/bulk-delete?error="
+            f"/admin/reader/bulk-delete?error="
             f"{quote(f'Typed count ({confirm_count_raw!r}) did not match the {len(article_ids)} confirmed article(s)—nothing was deleted. Re-upload and try again.')}",
             status_code=303)
 
@@ -29742,7 +29735,7 @@ async def admin_library_bulk_delete_commit(request: Request):
         # at preview time, but a hand-crafted POST shouldn't be able to
         # bypass it.
         return RedirectResponse(
-            f"/admin/library/bulk-delete?error="
+            f"/admin/reader/bulk-delete?error="
             f"{quote(f'{len(article_ids)} articles exceeds the {MAX_DELETE_PER_RUN}-per-run cap—nothing was deleted.')}",
             status_code=303)
 
@@ -29751,7 +29744,7 @@ async def admin_library_bulk_delete_commit(request: Request):
             backup.backup_now(DB_PATH)
         except Exception as exc:
             return RedirectResponse(
-                f"/admin/library/bulk-delete?error="
+                f"/admin/reader/bulk-delete?error="
                 f"{quote(f'Pre-delete backup failed, so nothing was deleted: {exc}')}",
                 status_code=303)
 
@@ -29778,7 +29771,7 @@ async def admin_library_bulk_delete_commit(request: Request):
     if skipped_ids:
         msg += (f' {len(skipped_ids)} row(s) skipped (already changed or gone since preview): '
                 f'{", ".join(f"#{i}" for i in skipped_ids[:10])}{" …" if len(skipped_ids) > 10 else ""}')
-    return RedirectResponse(f"/admin/library/bulk-delete?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/reader/bulk-delete?msg={quote(msg)}", status_code=303)
 
 
 def _backup_status_banner(backup_rows: list[dict]) -> str:
@@ -29848,7 +29841,7 @@ def _integrity_status_banner(integrity_rows: list[dict]) -> str:
             f'padding:14px 18px;margin:0 0 16px;font-size:14px;line-height:1.5;">{html}</div>')
 
 
-@app.get("/admin/library/backup", response_class=HTMLResponse)
+@app.get("/admin/library-backup", response_class=HTMLResponse)
 def admin_backup(request: Request, uploaded: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -29927,12 +29920,12 @@ def admin_backup(request: Request, uploaded: str = ""):
     <div>
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
-      <a href="/admin/library/backup/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;width:202px;text-align:center;box-sizing:border-box;">Download library.db</a>
+      <a href="/admin/library-backup/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;width:202px;text-align:center;box-sizing:border-box;">Download library.db</a>
     </div>
     <div class="backup-action-divider">
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately—no restart needed.</p>
-      <form method="post" action="/admin/library/backup/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+      <form method="post" action="/admin/library-backup/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
         <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
           style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
         <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;align-self:flex-start;width:202px;text-align:center;box-sizing:border-box;">Upload and replace</button>
@@ -31003,7 +30996,7 @@ async def admin_emails_save(section_id: str, request: Request):
     return JSONResponse({"ok": True})
 
 
-@app.post("/admin/library/backup/upload-db", response_class=HTMLResponse)
+@app.post("/admin/library-backup/upload-db", response_class=HTMLResponse)
 async def upload_db(request: Request, file: UploadFile = File(...), token: str | None = None):
     _require_api(request, token)
     import sqlite3
@@ -31039,10 +31032,10 @@ async def upload_db(request: Request, file: UploadFile = File(...), token: str |
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
 
-    return RedirectResponse(f"/admin/library/backup?uploaded={n}", status_code=303)
+    return RedirectResponse(f"/admin/library-backup?uploaded={n}", status_code=303)
 
 
-@app.get("/admin/library/backup/download-db")
+@app.get("/admin/library-backup/download-db")
 def download_db(request: Request):
     """Download a consistent snapshot of the live database (manual backup)."""
     if not _is_authed(request):
