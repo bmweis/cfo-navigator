@@ -5622,8 +5622,8 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   back at 523KB uncapped. See ARCHITECTURE.md's matching section for the
   full write-up.
 - **MCP server, Phase 3 (2026-09) — six read-only Toolbox/Communities
-  content tools (`search_tools`, `get_tool`, `search_communities`,
-  `get_community`, `compare_tools`, `compare_communities`), a new
+  content tools (`search_software`, `get_software`, `search_communities`,
+  `get_community`, `compare_software`, `compare_communities`), a new
   `webapp/mcp_toolbox.py` registered onto the same `/mcp` FastMCP instance
   the Phase 1 introspection tools live on.** Deliberately **not**
   admin-only like those three — any valid, active, unrevoked token may
@@ -5632,8 +5632,8 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   they replicate; the caller's role only changes what's visible *within* a
   result (a pending field's badge text — "under review" vs. "unverified,
   visible to visitors" — via `linklib.gates`, never whether the tool runs
-  at all). `get_tool`/`get_community` build their own gated dicts over the
-  full profile-page field text; `compare_tools`/`compare_communities` call
+  at all). `get_software`/`get_community` build their own gated dicts over the
+  full profile-page field text; `compare_software`/`compare_communities` call
   `linklib.compare.build_software_compare`/`build_communities_compare`
   completely unmodified (confirmed neither takes a role parameter — badge
   text is applied afterward, per field) and reject rather than silently
@@ -5644,9 +5644,17 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   an agentic conversation can't spend against the shared daily cost cap.
   See ARCHITECTURE.md's "MCP server — Toolbox & Communities content tools
   (Phase 3)" section for the full write-up and `tests/test_mcp_toolbox.py`
-  for the gate-enforcement coverage.
+  for the gate-enforcement coverage. **PR 8 (2026-09)** added
+  `search_benchmarking`/`search_books` (closing the Toolbox's last real
+  MCP coverage gap — benchmarking resources and book recommendations,
+  both reading the same `benchmarks` table via `section='benchmarking'`|
+  `'books'`, no `compare_benchmarking` since neither has comparable fields
+  or a Compare page to mirror) and renamed `search_tools`/`get_tool`/
+  `compare_tools` to `search_software`/`get_software`/`compare_software`
+  for consistency with the Communities naming — old names gone, not
+  aliased. See ARCHITECTURE.md's Phase 3 PR 8 note for the full write-up.
 - **MCP server, Phase 4 (2026-09) — Library (Archive) search
-  (`search_library`, `get_article`) + Feed browse/search (`browse_feed`,
+  (`search_archive`, `get_article`) + Feed browse/search (`browse_feed`,
   `search_feed`), a new `webapp/mcp_library.py`.** Wraps existing logic
   completely unmodified: `linklib.agent.retrieve()` (hybrid FTS5+vector,
   RRF-merged) and `Library.get_article`/`get_article_by_url` for Track A;
@@ -5662,14 +5670,15 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   confirmed against the real `/read?view=feed` route) — hence two tools,
   not one: `browse_feed` (chronological, optional category filter) and
   `search_feed` (keyword-relevance, `retrieve_feed`'s existing
-  overlap-count scoring). `search_library` returns compact hits (an
+  overlap-count scoring). `search_archive` (renamed from `search_library`
+  in PR 8, 2026-09, to pair with `search_feed`) returns compact hits (an
   excerpt, `is_own_content` included) with `get_article` as the full-text
   companion — the published-content ingestion PR's `is_own_content` flag
   needs no separate "own writing" tool, since it's just an `articles`
   column. See ARCHITECTURE.md's "MCP server — Library (Archive) search &
   Feed browse/search (Phase 4)" section for the full write-up (including
   the disclosed, uncapped query-embedding cost on a non-empty
-  `search_library` call) and `tests/test_mcp_library.py` for the
+  `search_archive` call) and `tests/test_mcp_library.py` for the
   auth-model regression coverage.
 - **MCP server, Phase 5 (2026-09) — FP&A Buddy & Matchmaker proxy tools
   (`ask_fpa_buddy`, `ask_matchmaker(kind, ...)`), a new `webapp/mcp_qa.py`.**

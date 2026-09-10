@@ -1,7 +1,7 @@
 """MCP server, Phase 4: Library (Archive) search + Feed browse/search.
 
 Two tools registered onto the same FastMCP instance `webapp/mcp_server.py`
-builds: `search_library`/`get_article` (Track A, the Archive's indexed
+builds: `search_archive`/`get_article` (Track A, the Archive's indexed
 `articles` corpus) and `browse_feed`/`search_feed` (Track B, the live RSS
 Feed). Kept in its own module for the same reason `mcp_toolbox.py` is
 separate from `mcp_server.py`: this is domain content, reusing the shared
@@ -23,7 +23,7 @@ admin-only enforcement.)
 
 Track A reuses `linklib.agent.retrieve()` (hybrid FTS5+vector, RRF-merged)
 and `Library.get_article`/`get_article_by_url` completely unmodified — no
-new search infrastructure. `search_library` returns compact hits (an
+new search infrastructure. `search_archive` returns compact hits (an
 excerpt, not full article text); `get_article` is the full-detail
 companion, mirroring Phase 3's search-thin/get-full split
 (`search_tools`/`get_tool`).
@@ -71,7 +71,7 @@ def _excerpt(text: str, max_chars: int = _EXCERPT_CHARS) -> str:
     a visible marker — same "cap it, mark the cut" discipline
     `sample_rows`'s own `max_cell_chars` truncation uses, just fixed-length
     here rather than tool-configurable (a search hit's excerpt is a
-    preview, not the point of calling search_library — the full text is
+    preview, not the point of calling search_archive — the full text is
     one `get_article` call away)."""
     collapsed = re.sub(r"\s+", " ", (text or "")).strip()
     if len(collapsed) <= max_chars:
@@ -123,7 +123,7 @@ def register_library_tools(mcp: FastMCP, lib_factory: Callable[[], Library],
     and independently testable against any OPML fixture path."""
 
     @mcp.tool()
-    async def search_library(ctx: Context, query: str = "",
+    async def search_archive(ctx: Context, query: str = "",
                               limit: int = _DEFAULT_SEARCH_LIMIT) -> list[dict]:
         """Search Brian's saved-article Archive (the CFO Library) — the
         same hybrid FTS5 + vector semantic search (RRF-merged) FP&A Buddy
@@ -167,7 +167,7 @@ def register_library_tools(mcp: FastMCP, lib_factory: Callable[[], Library],
     @mcp.tool()
     async def get_article(ctx: Context, id_or_url: str) -> dict:
         """Full detail for one Archive article — the companion to
-        `search_library` for full-text retrieval. `id_or_url` may be the
+        `search_archive` for full-text retrieval. `id_or_url` may be the
         article's numeric id or its exact stored URL. Returns the full
         plain-text `content` (never `content_html` — this tool never
         returns markup, same as every other /mcp tool). Refuses

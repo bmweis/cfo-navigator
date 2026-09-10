@@ -3714,9 +3714,10 @@ def homepage(request: Request):
       {_sticker("🚧 building", rotate=4, top="-14px", right="20px", size=14)}
       <div style="font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:10px;">CFO Toolbox</div>
       <h3 style="margin:0 0 8px;font-family:var(--font-head);font-weight:600;font-size:19px;">Everything in the toolbox</h3>
-      <p style="font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 20px;">Software, benchmarks, communities, and an AI research buddy.</p>
+      <p style="font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 20px;">Software, benchmarks, books, communities, and an AI research buddy.</p>
       <div class="home-toolbox-rows">{toolbox_rows}</div>
       <a href="/tools" style="display:inline-block;margin-top:22px;font-family:var(--font-body);font-weight:600;font-size:14px;color:var(--navy);text-decoration:none;">See the full toolbox &rarr;</a>
+      {_mcp_callout_html(compact=True)}
     </div>
 
     {reader_access_box}
@@ -6534,6 +6535,54 @@ async def library_submit(request: Request):
     # Always confirm — no queue/table to check, so there's nothing to leak either way.
     return RedirectResponse("/library/submit?submitted=1", status_code=303)
 
+# /tools page intro copy (PR 8, 2026-09) — replaces the old one-line
+# subtitle ("Tools, benchmarks, and communities for the Office of the
+# CFO."). Copy is Brian's own, approved verbatim — do not paraphrase or
+# tighten it. A real <ul>, not a manual bullet layout, since these are six
+# genuinely separate questions, not a design-file-specific bullet glyph
+# treatment the way the homepage's .home-tl-bullets is.
+_TOOLS_INTRO_HTML = """<div style="max-width:640px;">
+<h2 style="margin:0 0 14px;font-family:var(--font-head);font-weight:600;font-size:20px;color:var(--navy);">I built this for you.</h2>
+<p style="color:var(--ink-soft);line-height:1.65;margin:0 0 14px;">Over the years I&rsquo;ve been asked a lot of these questions, and wondered plenty of them myself:</p>
+<ul style="margin:0 0 16px;padding-left:22px;color:var(--ink-soft);line-height:1.65;">
+<li>Which vendor is right for my particular planning, billing, or close management need?</li>
+<li>Which community is actually full of finance executives who&rsquo;ve done the job, not just anyone who signed up?</li>
+<li>How does account exec ramp hit the sales funnel, and do we still make budget?</li>
+<li>Does that &ldquo;absolutely necessary&rdquo; event sponsorship hold up on payback?</li>
+<li>Am I recovering product development costs in the revenue I&rsquo;m growing, or is my growth engine leaking?</li>
+<li>What benchmarking sources are worth trusting for a B2B SaaS business?</li>
+</ul>
+<p style="color:var(--ink-soft);line-height:1.65;margin:0 0 24px;">This is for those questions. Software, communities, benchmarks, books, and an FP&amp;A assistant that answers with sources.</p>
+</div>"""
+
+
+def _mcp_callout_html(*, compact: bool = False) -> str:
+    """Statement of capability, not a CTA — no link, no button, since MCP
+    tokens are minted manually (scripts/mint_api_token.py, via `railway
+    ssh`) with no self-serve flow to send anyone to. Navy, not coral:
+    checked against both call sites' actual signed-out accent count before
+    choosing — /tools already spends its one warm accent on the Communities
+    directory icon tile (`_CARD_ICON_STYLES` cycles seafoam/navy/coral by
+    tile index, and Communities lands on coral), and the homepage already
+    spends it twice over (the Toolbox panel's own Communities mini-tile,
+    same cycle, plus the "Recent highlights" grid's Podcasts tile landing
+    on the same coral slot) — so a coral callout on either page would be a
+    second (or third) warm highlight on one screen, breaking BRAND.md's
+    "coral is the rare highlight you notice precisely because it's rare"
+    rule. `compact` tightens padding/font-size for the homepage's Toolbox
+    panel, where the callout sits inside an already-dense card rather than
+    open page whitespace."""
+    pad = "10px 14px" if compact else "14px 18px"
+    size = "13px" if compact else "14px"
+    margin = "margin-top:16px;" if compact else "margin:0 0 24px;"
+    return (
+        f'<p style="background:var(--navy-wash);border:1px solid rgba(0,41,117,.15);'
+        f'border-radius:10px;padding:{pad};font-size:{size};line-height:1.5;color:var(--navy);'
+        f'{margin}">Use it here, or connect it to your own AI assistant. '
+        f'The whole toolbox runs over MCP.</p>'
+    )
+
+
 # The 4-tile 2x2 CFO Toolbox grid (Phase 3, "Toolbox Illustration Concepts"
 # design, option 2a) — shared between the /tools landing page's full-size
 # tiles and the homepage's compact teaser mini-tiles. (href, title, icon,
@@ -6632,7 +6681,8 @@ def tools_landing(request: Request):
   <h1 style="margin:0 0 6px;">CFO Toolbox</h1>
   {_sticker("🚧 building", rotate=-4, top="-14px", right="-52px", size=14)}
 </div>
-<p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO.</p>
+{_TOOLS_INTRO_HTML}
+{_mcp_callout_html()}
 <div style="background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:28px;">
   <div class="toolbox-grid">{tiles}</div>
 </div>
@@ -31451,19 +31501,19 @@ _mcp = _mcp_server.build_mcp(
     extra_allowed_origins=[f"https://{h}" for h in _mcp_production_hosts],
 )
 
-# MCP Phase 3: six read-only Toolbox/Communities content tools (search_tools,
-# get_tool, search_communities, get_community, compare_tools,
-# compare_communities), registered onto the same FastMCP instance — see
-# webapp/mcp_toolbox.py's module docstring for the auth-model distinction
-# from the three admin-gated introspection tools above (any valid token,
-# any role, may call these six; the caller's role only changes what's
-# visible *within* a result, via linklib.gates — never whether the tool can
-# be called at all).
+# MCP Phase 3 (+ PR 8): eight read-only Toolbox/Communities content tools
+# (search_software, get_software, search_communities, get_community,
+# compare_software, compare_communities, search_benchmarking, search_books),
+# registered onto the same FastMCP instance — see webapp/mcp_toolbox.py's
+# module docstring for the auth-model distinction from the three admin-gated
+# introspection tools above (any valid token, any role, may call these
+# eight; the caller's role only changes what's visible *within* a result,
+# via linklib.gates — never whether the tool can be called at all).
 from webapp import mcp_toolbox as _mcp_toolbox  # noqa: E402
 
 _mcp_toolbox.register_toolbox_tools(_mcp, _lib)
 
-# MCP Phase 4: Library (Archive) search + Feed browse/search (search_library,
+# MCP Phase 4: Library (Archive) search + Feed browse/search (search_archive,
 # get_article, browse_feed, search_feed) — admin-role only, re-verified
 # against /read's own actual enforcement rather than assumed. See
 # webapp/mcp_library.py's module docstring for the full auth-model

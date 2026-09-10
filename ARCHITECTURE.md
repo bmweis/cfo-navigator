@@ -3880,8 +3880,9 @@ staying un-exempted is pinned by `test_well_known_oauth_on_www_still_redirects_n
 
 ### MCP server — Toolbox & Communities content tools (Phase 3)
 
-Six new read-only tools — `search_tools`, `get_tool`, `search_communities`,
-`get_community`, `compare_tools`, `compare_communities` — registered onto
+Eight new read-only tools — `search_software`, `get_software`, `search_communities`,
+`get_community`, `compare_software`, `compare_communities`, `search_benchmarking`,
+`search_books` — registered onto
 the same `/mcp` FastMCP instance the Phase 1 introspection tools live on,
 via a new `webapp/mcp_toolbox.py` module (`register_toolbox_tools(mcp,
 lib_factory)`, called from `webapp/app.py` right after `_mcp_server.
@@ -3926,10 +3927,10 @@ module docstring).
 **Two different content strategies for single-entity vs. comparison, both
 deliberate:**
 
-- `get_tool`/`get_community` build their own lightweight dicts directly
+- `get_software`/`get_community` build their own lightweight dicts directly
   over `linklib.gates`, using the FULL field text (`tools.description`,
   not `linklib.compare`'s summary-preferring excerpt) — matching the real
-  profile page's own field selection. `get_tool` assembles this by hand
+  profile page's own field selection. `get_software` assembles this by hand
   (description/agent_taxonomy/bottom_line/competitors/key_features);
   `get_community` instead calls `linklib.compare.build_communities_compare`
   with a single-entity list and takes `entities[0]` — reusable as-is here
@@ -3938,7 +3939,7 @@ deliberate:**
   summary substitution), so single-entity reuse costs nothing in fidelity
   and buys byte-for-byte parity with the Compare page's own gating and
   Key-facts logic.
-- `compare_tools`/`compare_communities` call `linklib.compare.
+- `compare_software`/`compare_communities` call `linklib.compare.
   build_software_compare`/`build_communities_compare` **completely
   unmodified** — confirmed in Step 0 that neither function accepts or
   needs a role/authed parameter at all: they only ever compute the
@@ -3969,7 +3970,7 @@ human ever seeing a web page or a cap-hit banner.
 **Serialization** is hand-written, not `dataclasses.asdict` — every
 `CompareField`/`CompareEntity`/etc. needs its `GateState` enum turned into
 a plain string, its citations list conditionally attached only when
-non-empty, and (for `compare_tools`/`compare_communities`) its badge text
+non-empty, and (for `compare_software`/`compare_communities`) its badge text
 computed live from the caller's role — a blind `asdict()` pass would still
 need a second pass for all three, so explicit per-field serializer
 functions (`_gated_field`, `_compare_field`, `_serialize_compare_entity`,
@@ -3978,7 +3979,7 @@ etc.) were simpler and more auditable than asdict-plus-postprocessing.
 **Resolution matches each entity's own approved-only convention.**
 `get_tool_by_slug`/`get_community_by_slug` already filter `approved=1`
 (an unapproved entity has no public profile page, so its MCP-visible
-profile shouldn't be reachable either); `get_tool`/`get_community` (by
+profile shouldn't be reachable either); `get_software`/`get_community` (by
 numeric id) do not, so `webapp/mcp_toolbox.py`'s `_resolve_tool`/
 `_resolve_community` add that same approved-only check when the caller
 passes a bare id, closing what would otherwise be a real gap (an id-based
@@ -3986,7 +3987,7 @@ lookup bypassing the approved-only rule a slug-based one already
 enforces).
 
 **No server-side search index — confirmed still unnecessary at this
-scale.** `search_tools`/`search_communities` are an in-memory, case-
+scale.** `search_software`/`search_communities` are an in-memory, case-
 insensitive substring match over `Library.list_tools(approved_only=True)`/
 `list_communities(approved_only=True)` (name/summary/description, or
 name/demographic/notes for communities) plus an exact category match —
@@ -4006,14 +4007,37 @@ gate-enforcement tests proving a pending field's content and badge, and an
 empty field's placeholder copy, come back identical in shape and wording
 to what the HTML routes render, for both a non-admin and an admin caller.
 
+**PR 8 (2026-09) — two additions, one rename, closing a real coverage
+gap.** The Toolbox has five components (software, communities, FP&A Buddy,
+benchmarking resources, book recommendations); only the first three were
+reachable over MCP. `search_benchmarking`/`search_books` close that gap —
+both are the same in-memory case-insensitive substring match as
+`search_tools`/`search_communities`, over `benchmarks` (`section=
+'benchmarking'`|`'books'` — one table with a type discriminator, confirmed
+in this PR's own Phase 0, not two tables), any valid token any role, same
+as every other Toolbox tool. No `compare_benchmarking` — a benchmarking/
+book row has none of the structured comparable fields that make
+`compare_software`/`compare_communities` useful, and there's no Compare
+page for Resources to mirror. Separately, `search_tools`/`get_tool`/
+`compare_tools` were renamed to `search_software`/`get_software`/
+`compare_software` in the same PR — "tools" read as ambiguous once the
+Toolbox had five components, and the new names match `search_communities`/
+`get_community`/`compare_communities`'s own naming. Old names are gone,
+not aliased — a saved prompt in a connected MCP client referencing them by
+hand needs updating.
+
 ### MCP server — Library (Archive) search & Feed browse/search (Phase 4)
 
-Four new read-only tools — `search_library`, `get_article`, `browse_feed`,
+Four new read-only tools — `search_archive`, `get_article`, `browse_feed`,
 `search_feed` — registered onto the same `/mcp` FastMCP instance via a new
 `webapp/mcp_library.py` module (`register_library_tools(mcp, lib_factory,
 opml_path)`, called from `webapp/app.py` right after `_mcp_toolbox.
-register_toolbox_tools(...)`). Kept in its own module for the same reason
-`mcp_toolbox.py` is separate from `mcp_server.py`: pure domain content,
+register_toolbox_tools(...)`). (Renamed from `search_library` in PR 8,
+2026-09, to pair correctly with `search_feed` and match the site's own
+Library-to-Reader renaming — see this doc's Phase 3 PR 8 note above; not
+aliased, so an old reference needs updating.) Kept in its own module for
+the same reason `mcp_toolbox.py` is separate from `mcp_server.py`: pure
+domain content,
 reusing the shared auth/host-security plumbing rather than duplicating it.
 
 **Auth model — re-verified against the live route code, not inherited from
@@ -4061,18 +4085,18 @@ tier — `require_admin`/`require_caller` cover exactly the two tiers that
 exist among the tools built so far, not every tier this app's route model
 supports.
 
-**Track A — `search_library`/`get_article` wrap `linklib.agent.retrieve()`
+**Track A — `search_archive`/`get_article` wrap `linklib.agent.retrieve()`
 and `Library.get_article`/`get_article_by_url` completely unmodified.** No
 new search infrastructure: `retrieve()` is the exact hybrid FTS5 + vector
 search (RRF-merged) FP&A Buddy already uses for library retrieval. An empty
 query skips `retrieve()` entirely and calls `Library.search("", ...)`
 directly (which already returns most-recently-saved articles) — avoiding a
 wasted OpenAI query-embedding call for what's really a "browse recent"
-request, not a search. `search_library` returns compact hits (title/url/
+request, not a search. `search_archive` returns compact hits (title/url/
 source/author/tags/dates/`is_own_content`/a truncated excerpt), never the
 full `content`/`content_html` — `get_article` (by numeric id or exact URL)
 is the full-detail companion, mirroring Phase 3's search-thin/get-full split
-(`search_tools`/`get_tool`). `is_own_content` rides along on every hit for
+(`search_software`/`get_software`). `is_own_content` rides along on every hit for
 free (it's a plain `articles` column, included in `Library._row_to_dict`'s
 `SELECT *`) — no separate "published content" tool exists or is needed:
 once a piece is mirrored/bookmarklet-saved into `articles` (see the
@@ -4082,7 +4106,7 @@ only, never `content_html` — no tool in this codebase ever returns HTML/
 markup, same discipline `mcp_toolbox.py` established.
 
 **A real, disclosed cost/tracking gap, not silently absorbed**: a
-non-empty `search_library` query can trigger one OpenAI query-embedding
+non-empty `search_archive` query can trigger one OpenAI query-embedding
 call (the vector half of hybrid retrieval) — a fraction of a cent, but
 unlike FP&A Buddy's own query-embed cost (which folds into
 `ask_questions.cost_usd`, under a user's dollar cap), this tool call has no
@@ -4205,7 +4229,7 @@ must be `role=="admin"`.
 
 **One tool, `ask_matchmaker(kind, ...)`, not two** — a deliberate departure
 from Phase 3's own "separate tools per entity type" precedent
-(`search_tools`/`search_communities`, etc.), because `linklib.matchmaker`'s
+(`search_software`/`search_communities`, etc.), because `linklib.matchmaker`'s
 own `_answer()` is already one shared function differentiated by an
 internal `kind` string; mirroring that with one MCP tool matches the
 implementation it wraps more closely than two near-duplicate tool
