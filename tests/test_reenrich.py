@@ -84,18 +84,6 @@ def test_enrichment_provenance_is_recorded(lib, monkeypatch):
     assert row["enrich_rules"] == "v9"
 
 
-def test_queue_provenance_survives_promotion(lib):
-    """A queued candidate's model/rules carry into the library on approval."""
-    lib.add_to_queue("https://ex.com/a", title="A", summary="s", enriched=True,
-                     enrich_model="claude-opus-4-8", enrich_rules="v1")
-    queued = lib.list_queue()[0]
-    assert queued["enrich_model"] == "claude-opus-4-8"
-    lib.promote_queue_item("https://ex.com/a")
-    art = lib.search("")[0]
-    assert art["enrich_model"] == "claude-opus-4-8"
-    assert art["enrich_rules"] == "v1"
-
-
 def test_scope_flag_recorded_and_reviewable(lib, monkeypatch):
     """Enrichment that returns in_scope=False flags the row for the removal review."""
     from linklib.enrich import Enrichment

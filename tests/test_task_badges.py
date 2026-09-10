@@ -55,10 +55,11 @@ def test_count_tool_leads_since(lib):
     assert lib.count_tool_leads_since("") == 1
 
 
-def test_flagged_and_queue_counts_already_exist(lib):
-    # These back the Archive badge — pinning they're the right shape for tasks.py.
+def test_flagged_count_already_exists(lib):
+    # Backs the "Remove content" badge — pinning it's the right shape for tasks.py.
+    # (The Archive Queue's own pending count, formerly pinned alongside this
+    # one, was retired along with the queue itself — 2026-09, PR 3.)
     assert lib.flagged_count() == 0
-    assert lib.queue_count(status="pending") == 0
     art = Article(url="https://x.example/1", title="t", source="s")
     aid = lib.upsert(art)
     lib.apply_enrichment(aid, "summary", ["tag"], "model", "rules", in_scope=False, scope_reason="off-audience")

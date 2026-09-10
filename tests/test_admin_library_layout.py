@@ -87,12 +87,12 @@ def test_open_reader_is_a_stock_navy_ghost_button(env):
     assert "background" not in button
 
 
-def test_flow_diagram_is_full_width_above_the_columns(env):
+def test_flow_diagram_is_gone(env):
+    """The Historical-sweep/Archive-Queue flow diagram (_content_flow_diagram)
+    was retired along with the queue mechanism itself — 2026-09, PR 3."""
     html = _library_html(env)
     assert "lib-top-row" not in html                          # the two-up row is gone
-    flow = html.index("How new content reaches the archive")
-    cols = html.index('class="lib-cols"')
-    assert flow < cols
+    assert "How new content reaches the archive" not in html
 
 
 def test_layout_is_two_independent_columns_not_a_coupled_grid(env):
@@ -213,7 +213,7 @@ def test_all_four_quadrants_are_collapsible_and_closed_by_default(env):
     assert grid.count('class="admin-group lib-quad"') == 4
     assert 'class="admin-group lib-quad" open' not in grid
     for title in ("New content", "Existing archive management",
-                  "Tag management", "Archive additions &amp; backup"):
+                  "Tag management", "Archive backup"):
         assert f">{title}</span>" in grid
 
 
@@ -272,7 +272,7 @@ def test_each_quadrant_holds_its_specified_tools(env):
                                   "/admin/library/review-removals"]),
               ("lib-q-tags", ["/admin/library/tags", "/admin/library/tag-style",
                               "/admin/library/enrich"]),
-              ("lib-q-backup", ["/admin/library/backup", "/admin/library/queue"])]
+              ("lib-q-backup", ["/admin/library/backup"])]
     for cls, hrefs in bounds:
         start = html.index(f'class="{cls}"')
         rest = html[start + 1:]

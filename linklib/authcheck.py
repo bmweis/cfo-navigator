@@ -13,12 +13,142 @@ Status is persisted in the settings KV under `auth_cookie_status` as JSON:
 from __future__ import annotations
 
 import json
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlparse, urlsplit
+
+import requests
 
 from .db import Library
 
 STATUS_KEY = "auth_cookie_status"
+
+# -- sitemap discovery, for _recent_post_url's fallback path ----------------
+#
+# Originally lived in linklib/queue.py (the Archive Queue's historical
+# sitemap sweep), which authcheck._recent_post_url reused for its own
+# "find something recent to probe" fallback. Retired along with the queue
+# (PR 3) — this is the one real caller left, so the small set of functions
+# it actually needs moved here directly rather than surviving as a new
+# single-consumer shared module.
+
+_SITEMAP_UA = "Mozilla/5.0 (compatible; CFONavigator/1.0; +https://bmweis.com)"
+_SITEMAP_TIMEOUT = 12
+
+# Path fragments that are almost never article posts — skip to cut noise.
+_NON_POST = ("/tag/", "/tags/", "/category/", "/categories/", "/author/",
+             "/authors/", "/page/", "/about", "/contact", "/privacy",
+             "/terms", "/feed", "/archive", "/search", "/subscribe", "/wp-content/")
+
+
+def _http_get(url: str):
+    return requests.get(url, timeout=_SITEMAP_TIMEOUT,
+                        headers={"User-Agent": _SITEMAP_UA}, allow_redirects=True)
+
+
+def _parse_lastmod(s: str | None):
+    if not s:
+        return None
+    s = s.strip()
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        pass
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _localname(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1].lower()
+
+
+def _looks_like_post(url: str) -> bool:
+    low = url.lower().rstrip("/")
+    return not any(frag in low for frag in _NON_POST)
+
+
+def discover_sitemaps(site_url: str) -> list[str]:
+    """Candidate sitemap URLs for a site: robots.txt declarations first, then
+    the common conventional paths. Order matters — the caller uses the first
+    that yields entries."""
+    if not urlparse(site_url).scheme:
+        site_url = "https://" + site_url
+    p = urlparse(site_url)
+    root = f"{p.scheme}://{p.netloc}"
+    found: list[str] = []
+    try:
+        r = _http_get(urljoin(root, "/robots.txt"))
+        if r.ok:
+            for line in r.text.splitlines():
+                if line.lower().startswith("sitemap:"):
+                    sm = line.split(":", 1)[1].strip()
+                    if sm:
+                        found.append(sm)
+    except Exception:
+        pass
+    for path in ("/sitemap.xml", "/sitemap_index.xml", "/sitemap-index.xml",
+                 "/wp-sitemap.xml", "/sitemap/sitemap-index.xml"):
+        found.append(urljoin(root, path))
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in found:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def _parse_sitemap_xml(content: bytes) -> tuple[str, list[dict]]:
+    """Parse sitemap XML bytes. Returns (kind, entries) where kind is
+    'sitemapindex' (entries are {'url'} sub-sitemaps) or 'urlset' (entries are
+    {'url', 'lastmod'}). Returns ('', []) on parse failure."""
+    try:
+        root = ET.fromstring(content)
+    except Exception:
+        return "", []
+    kind = _localname(root.tag)
+    entries: list[dict] = []
+    for node in root:
+        loc = None
+        lastmod = None
+        for child in node:
+            ln = _localname(child.tag)
+            if ln == "loc":
+                loc = (child.text or "").strip()
+            elif ln == "lastmod":
+                lastmod = _parse_lastmod(child.text)
+        if loc:
+            entries.append({"url": loc, "lastmod": lastmod})
+    return kind, entries
+
+
+def fetch_sitemap_entries(sitemap_url: str, *, _depth: int = 0,
+                          _budget: list[int] | None = None) -> list[dict]:
+    """Return [{'url', 'lastmod'}] from a sitemap, recursing one level into a
+    sitemap index. Best-effort — returns [] on any network/parse error."""
+    if _budget is None:
+        _budget = [50]
+    if _depth > 2:
+        return []
+    try:
+        r = _http_get(sitemap_url)
+        if not r.ok:
+            return []
+    except Exception:
+        return []
+    kind, entries = _parse_sitemap_xml(r.content)
+    if kind == "sitemapindex":
+        out: list[dict] = []
+        for sm in entries:
+            if _budget[0] <= 0:
+                break
+            _budget[0] -= 1
+            out.extend(fetch_sitemap_entries(sm["url"], _depth=_depth + 1, _budget=_budget))
+        return out
+    return entries
 
 
 def _host(url: str) -> str:
@@ -47,7 +177,6 @@ def _recent_post_url(domain: str, opml_path: str) -> tuple[str, str]:
         pass
     # 2) Sitemap fallback — find a post-like URL on the domain.
     try:
-        from .queue import discover_sitemaps, fetch_sitemap_entries, _looks_like_post
         for sm in discover_sitemaps(f"https://{domain}"):
             entries = fetch_sitemap_entries(sm)
             posts = [e for e in entries if _looks_like_post(e["url"])]

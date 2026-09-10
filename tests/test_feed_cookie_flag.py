@@ -231,9 +231,11 @@ def test_every_row_shows_a_computed_cookie_indicator(app_env, monkeypatch):
 
 
 def test_cookie_indicator_has_its_own_aria_label_shape(app_env):
-    """Deliberately different from Read only/Subscriber's aria-label — this is
+    """Deliberately different from Subscriber's aria-label — this is
     a computed fact, not a per-row control, so it isn't held to the same
-    "boolean checkbox" labelling convention."""
+    "boolean checkbox" labelling convention. (Read only's own checkbox and
+    aria-label were retired along with the Archive Queue itself — 2026-09,
+    PR 3 — so it's no longer part of this comparison.)"""
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
         lib = app_env._lib()
@@ -241,8 +243,7 @@ def test_cookie_indicator_has_its_own_aria_label_shape(app_env):
             name = lib.list_feeds()[0]["name"]
         finally:
             lib.close()
-    for label in ("Read only", "Subscriber"):
-        assert f'aria-label="{label}: {name}"' in html
+    assert f'aria-label="Subscriber: {name}"' in html
     assert f'aria-label="Cookie for {name}:' in html
 
 
@@ -347,11 +348,13 @@ def test_startup_hook_seeds_the_flags(app_env):
 
 def test_checkbox_columns_are_centre_justified(app_env):
     """BRAND.md: checkbox/boolean-indicator columns centre, everything else
-    stays left."""
+    stays left. (Read only came out of the table entirely along with the
+    Archive Queue itself — 2026-09, PR 3.)"""
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
-    for label in ("Read only", "Cookie", "Subscriber"):
+    for label in ("Cookie", "Subscriber"):
         assert f'text-align:center;">{label}</th>' in html
+    assert "Read only</th>" not in html
     assert '<th style="width:18%;">Name</th>' in html
     assert '<th style="width:14%;">Section</th>' in html
 
@@ -587,11 +590,14 @@ def test_new_content_quadrant_counts_five_tools(app_env):
 
 
 def test_other_quadrants_still_count_their_real_cards(app_env):
-    """The override is scoped to one quadrant; the rest stay literal."""
+    """The override is scoped to one quadrant; the rest stay literal.
+
+    lib-q-backup dropped from 2 tools to 1 (just Archive backup) once the
+    Archive Queue link was removed from that section — 2026-09, PR 3."""
     with _client(app_env) as client:
         html = client.get("/admin/library").text
     assert "4 tools" in _quadrant(html, "lib-q-existing")
-    assert "2 tools" in _quadrant(html, "lib-q-backup")
+    assert "1 tool" in _quadrant(html, "lib-q-backup")
     assert "3 tools" in _quadrant(html, "lib-q-tags")
 
 

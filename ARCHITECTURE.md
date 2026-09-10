@@ -336,8 +336,8 @@ used manual check rather than a per-turn or overhead cost.
 | `articles_fts` | FTS5 virtual table (`content='articles'`, porter tokenizer) over title/author/source/summary/content/notes/tags_text. | Kept in sync by three triggers (`articles_ai`/`_ad`/`_au`) on insert/delete/update — no manual reindex, ever. |
 | `articles_vec` | `sqlite-vec` vec0 virtual table (#93) — one embedding vector per article, `rowid = articles.id` (same external-content-by-rowid idiom as `articles_fts`, minus trigger sync — see §4, "Hybrid retrieval..."). Powers the vector half of hybrid retrieval. | `embedding` (`float[1536]`, OpenAI `text-embedding-3-small`) |
 | `article_embeddings` | Companion ledger table (#93): which articles are embedded, with what text, and at what cost. Also **an overhead-cost ledger** for embed-on-save/backfill spend — never summed into `ask_questions`, never counts toward a user's Ask cap. Its sibling ledger, `enrichment_cost` (#105), covers enrichment spend; the two stay separate rather than sharing a schema — see §4, "Embedding cost is split by who pays for it" and "Enrichment cost gets its own ledger, not a shared one" below. | `article_id` (PK), `content_hash` (of the exact embedded text — detects staleness after an edit), `model`, `input_tokens`, `cost_usd` |
-| `enrichment_cost` | Overhead-cost ledger for `linklib.enrich.enrich()` calls (#105). Unlike `article_embeddings`, this is **append-only**, not upserted — an article can be enriched more than once (backfill force-reruns, a rules-version bump), and each call's real cost stays in history. `article_id` is nullable: `linklib/queue.py`'s pre-save enrichment (a candidate enriched before it's queued or promoted) has no `articles.id` yet, but the API call still cost real money even if the candidate is later dismissed. | `id` (PK, autoincrement), `article_id` (nullable), `model`, `input_tokens`, `output_tokens`, `cost_usd` |
-| `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
+| `enrichment_cost` | Overhead-cost ledger for `linklib.enrich.enrich()` calls (#105). Unlike `article_embeddings`, this is **append-only**, not upserted — an article can be enriched more than once (backfill force-reruns, a rules-version bump), and each call's real cost stays in history. `article_id` is nullable for enrichment that has no `articles.id` yet to attach to — every batch/regen generation script is the live example today; the Archive Queue's own pre-save enrichment (a candidate enriched before it was queued or promoted) used to be another, retired along with the queue itself (2026-09, PR 3) — either way the API call still cost real money even when the NULL-`article_id` row's source is never saved anywhere. | `id` (PK, autoincrement), `article_id` (nullable), `model`, `input_tokens`, `output_tokens`, `cost_usd` |
+| `library_queue` | **RETIRED, frozen not dropped (2026-09, PR 3).** Used to be the staging area for proposed additions (RSS scan, sitemap backfill, reader submissions) — candidates arrived enriched-but-unsaved for review at `/admin/library/queue`, and promoting a row moved it into `articles`, preserving enrichment already paid for. A 2026-09-09 production query found 5,508 rows, 100% dismissed, 0 pending, 0 member submissions ever, dormant since 2026-06-28 — the archive now grows by 1-2 articles every few days via the bookmarklet, which doesn't justify an AI-enriched proposal/review pipeline. `linklib/queue.py`, `linklib/suggest.py`, every `Library` read/write method for this table, and every admin route/page for it are all gone from the codebase; the table stays, unread and unwritten, as the historical record of 5,508 real dismissal decisions — not reconstructible from anywhere else. `/library/submit`'s "suggest an addition" form no longer writes here either — it now sends Brian a plain email notification instead (see the "Archive save / enrichment pipeline" section's member-reader-submissions bullet below); he reads it and saves the article himself with the bookmarklet. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed`) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. `content`/`content_html` (2026-08 follow-up) cache a save-time fetch the same way `articles` does — see the "Read Later content caching + manual refresh" write-up below — write-once-on-empty (never blanked by a failed re-fetch), replaceable via the per-item "Refresh" action (`Library.update_read_later_content`). | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
 | `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). Also backs the "needs manual review" capped-retry tier (Phase 5b follow-up #2, see the write-up below) — `Library._manual_review_article_ids()` counts attempts per article *since its last `url_correction_log` row* (or ever, if never corrected). A THIRD `status` value, `'accepted'` (durability audit item 4), is the "accept as final" override — see the write-up below — and composes with `_manual_review_article_ids()` for free: that query already only looks at the most recent attempt and requires `status='failure'`, so an `'accepted'` row as the latest attempt drops the article out of the manual-review list without any change to that query; `articles_needing_content_backfill()`'s default scope and `count_content_backfill_remaining()` separately exclude the same latest-row-`'accepted'` set (`Library._accepted_content_ids()`) so the override also sticks against future automatic retries, not just the one list. | `article_id` (no FK), `status` (`success` \| `failure` \| `accepted`), `reason` (failure only, or copied from the prior failure onto an `accepted` row for display/undo: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error` \| `defunct-service`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback or migration success, the URL actually used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` \| `'migration'` \| `'medium-fetch'` \| `'medium-search'` \| `'save'` — distinguishes a Wayback-archived-snapshot, known-domain-migration, Medium-platform-tier (`'medium-fetch'` for a direct Exa fetch of the article's own URL, `'medium-search'` for a search-by-title match — see the "Medium-platform tier follow-up" note in §3), or save-time (durability audit item 1 — `ingest_url` itself, not a backfill re-fetch) success/failure from a normal live-fetch success; see the "fetch reliability", "retry backoff", and "Medium-platform Exa fetch tier" notes in §3 below) |
@@ -1845,20 +1845,22 @@ from the public page. Not editable via the admin CRUD.
 | `contact_audit_log` | Same shape for contact deletions — kept separate so `item_id` is never ambiguous about which table it references. | as above, `item_id` → `contacts.id` |
 | `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily Railway Cron Service, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled cron run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. A backup skipped because the pre-backup integrity check failed (durability audit item 2, see `integrity_check_log` below) also logs a `'failure'` row here, `error` prefixed `"Backup skipped — integrity check failed: ..."`, so the existing status banner surfaces it without a second banner-reading code path. **Failure-logging completeness audit (2026-08, post-Railway-Cron-migration):** the "Drive not configured" path used to be the one exception to "every attempt is logged" — `backup_now()` raised immediately on `not is_configured()` with no `_log_attempt` call, and `backup_now_route()` in `webapp/app.py` had its own separate pre-check that returned a `503` without ever calling `backup_now()` at all, so this specific failure never left a `backup_log` row from either code path. A pre-existing test explicitly asserted this was intentional ("not being configured isn't a real attempt"), reasoning that the status banner's own live `is_configured()` check already surfaces it — true for the banner, but it left the history table below it completely silent for the entire span of a misconfiguration (e.g. a lapsed OAuth grant that keeps the daily cron pinging a broken instance for days with no trace anywhere but Railway's own run log). Reversed: `backup_now()` now logs this path too, matching its own docstring's contract, and `backup_now_route()` was simplified to always call `backup_now()` (removing its separate pre-check) so there's one logging code path instead of two divergent ones — the route now infers its 503-vs-502 response purely from re-checking `is_configured()` in the `except` block, after the failure is already logged. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
 | `integrity_check_log` | Durability audit item 2 (elevated, 2026-08) — one row per `linklib.backup.check_integrity()` run, shape mirrors `backup_log` exactly. Nothing previously ran `PRAGMA integrity_check` against the live DB; corruption would only ever have surfaced at restore time, by which point it would already be baked into every retained snapshot. `check_integrity()` runs `PRAGMA integrity_check` plus the FTS5 self-check (`INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')` — the exact command RUNBOOK.md §4's restore rehearsal already runs by hand) against the live DB, on the same cadence as the backup itself, immediately before every snapshot. **A failure blocks that night's backup upload** (see `backup_now()`'s docstring for the full "block vs. upload-and-flag" reasoning) rather than uploading a possibly-corrupt snapshot anyway. Read by the "Pre-backup integrity check" status banner on `/admin/library/backup`, which sits above the existing backup-status banner — deliberately a separate banner, since "the backup succeeded" and "the DB is structurally sound" are two different facts a single banner would conflate. | `status` (`'ok'`\|`'failure'`), `detail` (the failing `PRAGMA integrity_check` row text, or the FTS5 self-check's exception text; `'ok'` on success) |
-| `job_run_log` | Durability audit item 3 (2026-08) — durable start/finish record for each of the three `_JOB_STATE`-backed background jobs (re-enrich, Historical sweep, Reader content backfill), shape mirrors `backup_log`/`integrity_check_log`. `_JOB_STATE` (`webapp/app.py`, an in-process dict) is unchanged and still owns LIVE in-request progress — this table is written only twice per run (`Library.start_job_run` at the top of each job function, `Library.finish_job_run` at every exit path, including a deliberate stop) and exists purely so a Railway redeploy or crash doesn't erase whether a job last succeeded, failed, or ever ran. Read by `_job_run_banner()`, a shared "last run: outcome, N ago" banner rendered on each of the three jobs' own admin-page section (`/admin/library/enrich`, the Historical sweep panel on `/admin/library/queue`, `/admin/library/backfill-content`) — same green/amber/coral posture as the backup/integrity banners. A row stuck at `status='running'` with an empty `finished_at` is exactly what a crash mid-run looks like, and is called out as such rather than shown as live progress — **but only when nothing live actually corresponds to it** (2026-08 wrap-up sprint item 3 fix): `_job_run_banner()` originally rendered the crash interpretation for ANY open row, so it showed "never finished — likely interrupted by a deploy or crash" directly above the same page's own genuinely-in-progress status panel whenever a job happened to still be running, confirmed in production twice. Fixed by checking `_job_get(job_name)["running"]` before assuming an open row means a crash — when the job is actually live, the open row IS that live run, and the banner renders a plain in-progress line instead. | `job_name` (`'enrich'`\|`'backfill'`\|`'content_backfill'`), `status` (`'running'`\|`'success'`\|`'failure'`\|`'stopped'`), `summary` (short human-readable counts, e.g. `'42/50 succeeded'`), `error` (failure only), `started_at`, `finished_at` (`''` while running) |
+| `job_run_log` | Durability audit item 3 (2026-08) — durable start/finish record for `_JOB_STATE`-backed background jobs (re-enrich, Reader content backfill; the Historical sweep job that used to write the `'backfill'` job_name here was retired along with the Archive Queue itself, 2026-09, PR 3 — the job_name value is kept below as a historical/test pin, not a live job), shape mirrors `backup_log`/`integrity_check_log`. `_JOB_STATE` (`webapp/app.py`, an in-process dict) is unchanged and still owns LIVE in-request progress — this table is written only twice per run (`Library.start_job_run` at the top of each job function, `Library.finish_job_run` at every exit path, including a deliberate stop) and exists purely so a Railway redeploy or crash doesn't erase whether a job last succeeded, failed, or ever ran. Read by `_job_run_banner()`, a shared "last run: outcome, N ago" banner rendered on each live job's own admin-page section (`/admin/library/enrich`, `/admin/library/backfill-content`) — same green/amber/coral posture as the backup/integrity banners. A row stuck at `status='running'` with an empty `finished_at` is exactly what a crash mid-run looks like, and is called out as such rather than shown as live progress — **but only when nothing live actually corresponds to it** (2026-08 wrap-up sprint item 3 fix): `_job_run_banner()` originally rendered the crash interpretation for ANY open row, so it showed "never finished — likely interrupted by a deploy or crash" directly above the same page's own genuinely-in-progress status panel whenever a job happened to still be running, confirmed in production twice. Fixed by checking `_job_get(job_name)["running"]` before assuming an open row means a crash — when the job is actually live, the open row IS that live run, and the banner renders a plain in-progress line instead. | `job_name` (`'enrich'`\|`'backfill'`\|`'content_backfill'`), `status` (`'running'`\|`'success'`\|`'failure'`\|`'stopped'`), `summary` (short human-readable counts, e.g. `'42/50 succeeded'`), `error` (failure only), `started_at`, `finished_at` (`''` while running) |
 
 ### Feed subscriptions
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `feed_sections` | The subscription list's top-level groups, one per OPML folder ("News", "Blogs", "Substacks", …). Rendered as the Reader's Sources tree headings and as the section dropdown on `/admin/library/feeds`. **Pure grouping — sections carry no settings of their own.** | `name` (unique), `display_order` |
-| `feeds` | One row per RSS/Atom subscription. | `xml_url` (**the natural key**, unique — the same feed can't be subscribed twice; **stored and regenerated verbatim**, see §4), `html_url` (the publication's own site: what `sources.preferred_domains` turns into FP&A Buddy's web-search allowlist, and what the historical sitemap sweep crawls), `section_id` (FK → `feed_sections`), `name` (the label shown in the Reader), `exclude_from_queue` (`1` = read in the Reader, never proposed into the archive queue — replaces the retired `QUEUE_EXCLUDE_CATEGORIES` name-matched env var; see §4), `has_paywall_cookie` (frozen historical value as of 2026-08 — the admin checkbox that wrote it was replaced with a computed live indicator, `extract.has_configured_cookie`; nothing reads this column going forward, same retirement as `paywall_cookie_note`; see §4), `paywall_cookie_note` (retired free-text predecessor, frozen; see §4), `has_active_subscription` (`1` = Brian currently pays for this source — **informational only, nothing reads it**; see §4) |
+| `feeds` | One row per RSS/Atom subscription. | `xml_url` (**the natural key**, unique — the same feed can't be subscribed twice; **stored and regenerated verbatim**, see §4), `html_url` (the publication's own site: what `sources.preferred_domains` turns into FP&A Buddy's web-search allowlist), `section_id` (FK → `feed_sections`), `name` (the label shown in the Reader), `exclude_from_queue` (**RETIRED, frozen not dropped (2026-09, PR 3)** — used to mean "read in the Reader, never proposed into the archive queue," replacing the retired `QUEUE_EXCLUDE_CATEGORIES` name-matched env var; the Archive Queue itself, and every read/write path for this column, is gone — see the `library_queue` row above), `has_paywall_cookie` (frozen historical value as of 2026-08 — the admin checkbox that wrote it was replaced with a computed live indicator, `extract.has_configured_cookie`; nothing reads this column going forward, same retirement as `paywall_cookie_note`; see §4), `paywall_cookie_note` (retired free-text predecessor, frozen; see §4), `has_active_subscription` (`1` = Brian currently pays for this source — **informational only, nothing reads it**; see §4) |
 
 These two tables are the source of truth; **`preferred_sites.opml` is a derived
 cache**, regenerated by `Library.write_opml()` on every mutation and again on
-every boot. All four of the file's consumers (`feed.parse_opml`,
-`sources.preferred_domains`, `queue.scan_feed_into_queue`, `authcheck`) read the
-file unmodified. See §4 for why the file can't be authoritative on Railway.
+every boot. All three of the file's remaining consumers (`feed.parse_opml`,
+`sources.preferred_domains`, `authcheck`) read the
+file unmodified. (A fourth, `queue.scan_feed_into_queue` — the now-retired
+Archive Queue's own ongoing feed scan — was retired along with the queue
+itself, 2026-09, PR 3.) See §4 for why the file can't be authoritative on Railway.
 
 ### "Sail, Don't Row" (the /play game)
 
@@ -1886,7 +1888,7 @@ erDiagram
     articles ||--o| articles_vec : "rowid, written from Python (#93)"
     articles ||--o| article_embeddings : "article_id"
     articles ||--o{ enrichment_cost : "article_id (nullable)"
-    library_queue }o--|| articles : "promoted into (by URL)"
+    library_queue }o--|| articles : "promoted into (by URL) — retired 2026-09, PR 3"
     articles ||--o{ archive_audit_log : "item_id (nullable)"
     contacts ||--o{ contact_audit_log : "item_id (nullable)"
     tools ||--o{ tool_leads : "tool_id"
@@ -4248,8 +4250,13 @@ pass completely unmodified against the refactored routes.
 
 ### Archive save / enrichment pipeline
 
-All capture paths converge on `linklib/pipeline.py::ingest_url` or the
-`library_queue` review flow:
+All capture paths converge on `linklib/pipeline.py::ingest_url` — the only
+ingestion path since the `library_queue` review flow (an RSS scan + one-time
+sitemap backfill, both landing candidates for review at
+`/admin/library/queue` before promotion) was retired outright, 2026-09
+(PR 3): a production query found 5,508 rows there, 100% dismissed, 0
+pending, 0 member submissions ever, dormant for months — see
+`library_queue`'s own schema-table row above for the full reasoning.
 
 - **Direct saves** (trusted — go straight into `articles`): the bookmarklet →
   `POST /save` (token auth), `POST /feed/save` from the feed reader (admin),
@@ -4275,16 +4282,19 @@ All capture paths converge on `linklib/pipeline.py::ingest_url` or the
   `OPENAI_API_KEY` or a failed call just leaves the article FTS5-searchable
   but not yet in `articles_vec`, for `scripts/embed_backfill.py` to catch
   later.
-- **Queued candidates** (reviewed — land in `library_queue` first): the RSS
-  scan and one-time sitemap backfill (`linklib/queue.py`), and member reader
-  submissions (`POST /library/submit`, honeypot-protected, deliberately
-  un-enriched until review). `linklib/suggest.py` adds an advisory
-  Claude-predicted keep/skip. The admin reviews at `/admin/library/queue`;
-  **promoting** moves the row into `articles` preserving any enrichment
-  already paid for, **dismissing** keeps the row so it's never re-proposed.
-  Embedding happens after promotion too, off-request (`background_tasks`,
-  same pattern as the post-promotion DB backup) since promotion itself has no
-  other network call to piggyback the latency on.
+- **Member reader submissions** (`POST /library/submit`, honeypot-protected
+  and `_is_member`-gated) no longer write anywhere — 2026-09, PR 3. A
+  submission is a plain email notification to Brian
+  (`linklib.email_utils.send_notification_email`, context
+  `'library_submission'`, same `_send_email_safely`/`email_failures`
+  pattern every other outward-facing submission form — contact, tool,
+  community — already uses); he reads it and saves the article himself
+  with the bookmarklet if it's a fit. No confirmation email goes to the
+  submitter, only the existing on-page confirmation. (This used to land
+  UN-ENRICHED in `library_queue` for review at `/admin/library/queue`,
+  alongside the RSS scan and one-time sitemap backfill that also fed that
+  table — all retired together; see `library_queue`'s own schema-table row
+  above.)
 - FTS5 stays in sync automatically via the triggers — every insert/update
   cascades into the index. `articles_vec` does **not**: a SQL trigger can't
   make a network call, so embeddings are written from Python instead
@@ -4672,8 +4682,9 @@ phase is that re-fetch, run as a resumable, rate-limited, observable admin batch
   cause on the admin page. A re-run after a stop or a crash adds new rows rather than
   overwriting old ones, so a flaky source's full history stays visible.
 - **Admin job**: `/admin/library/backfill-content` — same background-thread/
-  `_JOB_STATE["content_backfill"]` pattern as re-enrich and Historical sweep (see those
-  sections above), plus two things neither of those has:
+  `_JOB_STATE["content_backfill"]` pattern as re-enrich (see that section above),
+  plus two things it doesn't have (the Historical sweep job this used to also be
+  compared against was retired along with the Archive Queue itself, 2026-09, PR 3):
   - **Stoppable**, not just crash-recoverable. A `stop_requested` flag on the job state,
     checked once per article (between fetches, never mid-fetch) — `POST
     .../backfill-content/stop` sets it, the loop notices on its next iteration and exits
@@ -4683,11 +4694,10 @@ phase is that re-fetch, run as a resumable, rate-limited, observable admin batch
     which skips whatever a prior run — complete, stopped, or crashed — already succeeded
     on. `force=True` re-runs every row regardless, the same escape hatch the re-enrich
     job's own `force` option provides.
-  - **Rate-limited.** Nothing else in this codebase throttles outbound crawling
-    (Historical sweep's sitemap fetches and the queue scanner both hit sources
-    back-to-back) — a fixed ~1.5s delay between fetches here is a deliberate new
-    convention for this tool specifically, not a reuse of an existing one, since a
-    full run means several thousand requests against sites Brian doesn't want to hammer.
+  - **Rate-limited.** Nothing else in this codebase throttles outbound crawling — a
+    fixed ~1.5s delay between fetches here is a deliberate new convention for this
+    tool specifically, not a reuse of an existing one, since a full run means several
+    thousand requests against sites Brian doesn't want to hammer.
   - The admin page's Limit field defaults to a small batch (25) so a first run can be
     verified before a full pass is even offered, and shows live success/failure counts
     plus a failure-reason breakdown (`Library.content_refetch_failure_counts()`, latest
@@ -5604,6 +5614,33 @@ whole class of problem: nothing shares a row with the diagram any more.
 ### /admin/library page restructure: header action, full-width flow, four quadrants
 
 This supersedes the layout described above rather than extending it.
+
+**Superseded again (2026-09, PR 3) — the Archive Queue mechanism this whole
+Phase 6 section describes merging into one page was retired outright, not
+just reorganized.** A production query found `library_queue` at 5,508 rows,
+100% dismissed, 0 pending, 0 member submissions ever, dormant since
+2026-06-28 — see `library_queue`'s own schema-table row above for the full
+reasoning. What's actually true on `/admin/library` now: the full-width flow
+diagram (`_content_flow_diagram()`) described below is gone entirely, not
+just relocated — there's no longer a producer/consumer relationship to
+diagram, since there's no queue to be either end of it. The lower-right
+quadrant that used to hold "Archive Queue" (with the merged Historical sweep
+panel inside it) is now just **Archive backup** on its own — a single card,
+no sub-panel. `GET /admin/library/backfill` and `/admin/library/queue`
+(along with their `/start`/`/status`/`/add`/`/dismiss`/`/refresh-feed`/
+`/redate`/`/suggest` sub-routes) are all gone, no redirect kept — unlike the
+Phase 6 merge's own redirect-not-remove call for `/admin/library/backfill`,
+described below, this is a genuine full retirement of the destination too,
+so there's nowhere left to redirect to. `_LIBRARY_TOOLS` is 9 entries now
+(Manage feeds, Archive backup, Reader content backfill, Content de-dupe, Tag
+cleanup, Tagging style, Enrich archive, Remove content, Bulk delete
+articles — the exact count moves as tools are added/removed elsewhere on
+this page too, so treat this as illustrative, not load-bearing). The rest
+of this section (the header-action button, the collapsible-quadrant
+mechanism, the two-independent-columns layout, the mobile reflow, the
+shared `_disclosure_group` extraction, the Reader "Saved" → "Archive"
+rename) is all still accurate — only the flow diagram and the Archive
+Queue quadrant's own contents are gone.
 
 **Open Reader is a header action, not a box.** The seafoam callout card is
 removed. In its place, a ghost button beside the `<h1>`, using the same
@@ -7035,9 +7072,11 @@ recorded anywhere, it's flagged rather than invented.
   destroyed on the next deploy and silently revert to the git copy — the same
   ephemeral-container trap that the Brandfetch logo backfill hit with
   `webapp/static/logos`. Regenerating at boot makes the file a pure cache of
-  the database, so its ephemerality stops mattering, and all four consumers
-  (`feed.parse_opml`, `sources.preferred_domains`, `queue.scan_feed_into_queue`,
-  `authcheck`) keep reading it completely unmodified. Two guards keep the
+  the database, so its ephemerality stops mattering, and the three remaining
+  consumers (`feed.parse_opml`, `sources.preferred_domains`, `authcheck`) keep
+  reading it completely unmodified. (A fourth, `queue.scan_feed_into_queue` —
+  the Archive Queue's own ongoing feed scan — was retired along with the
+  queue itself, 2026-09, PR 3.) Two guards keep the
   inversion safe in both directions: seeding from the existing file is
   **settings-flagged, not emptiness-checked** (an emptiness check looks
   identical on a fresh DB but would re-import the whole file on the next
@@ -7056,35 +7095,29 @@ recorded anywhere, it's flagged rather than invented.
   mutation routes each remembering to call it is six chances to miss one.
   `write_opml` skips the clear only in the branch where content was unchanged,
   where the cached value is by definition still correct.
-- **Queue exclusion is a stored per-FEED boolean, not a name match and not
-  per-section.** `feeds.exclude_from_queue` replaces the
-  `QUEUE_EXCLUDE_CATEGORIES` set built from `LINKLIB_QUEUE_EXCLUDE_CATEGORIES`
-  and matched against a section's *name*. *Why not a name match:* once sections
-  became renameable from an admin page, the old shape meant renaming "News"
-  would silently start funnelling News items into the archive queue — a
-  data-affecting side effect of an edit that looks purely cosmetic. *Why per
-  feed rather than per section:* a section is a display grouping, while "should
-  this source be proposed into the archive queue" is a judgment about the
-  source itself, so one feed can be read-only without dragging its
-  section-mates along, and moving a feed between sections can't change its
-  queue eligibility. `queue.scan_feed_into_queue` matches each item back to its
-  originating feed via `feed_url` (the feed's own `xml_url`, carried on every
-  item by `feed.get_feed_items`) rather than the item's `category` string;
-  `scan_sitemaps_into_queue` matches each `FeedMeta.xml_url` the same way.
-  `queue._excluded_feed_urls()` falls back to the two original News feed URLs
-  when `Library.has_feeds()` is False (an unseeded DB or a fresh test fixture),
-  since an empty exclusion set is otherwise indistinguishable from "nothing is
-  excluded."
+- **Queue exclusion (`feeds.exclude_from_queue`) is RETIRED, frozen not
+  dropped — 2026-09, PR 3.** Used to be a stored per-FEED boolean (replacing
+  the older `QUEUE_EXCLUDE_CATEGORIES` set, matched against a section's
+  *name*, and per-feed specifically so one feed could be read-only without
+  dragging its section-mates along) driving the now-retired Archive Queue's
+  feed scan: `queue.scan_feed_into_queue` matched each item back to its
+  originating feed via `feed_url` rather than the item's `category` string,
+  and `scan_sitemaps_into_queue` matched each `FeedMeta.xml_url` the same
+  way. All of that — `linklib/queue.py` in full, the admin "Read only"
+  checkbox, its `POST /admin/library/feeds/{id}/read-only` route, and
+  `Library.set_feed_excluded`/`excluded_feed_urls`/`has_feeds` — is gone from
+  the codebase. The column itself stays, frozen at whatever value each row
+  last had, on the same non-destructive-retirement precedent as
+  `has_paywall_cookie` below — nothing reads it any more.
 - **A feed's `xml_url` is stored and regenerated verbatim.** Nothing in the
-  add, edit, move-section, or read-only path normalizes, trims, re-encodes, or
-  rewrites it; the only transformation anywhere is `.strip()` for surrounding
+  add, edit, or move-section path normalizes, trims, re-encodes, or rewrites
+  it; the only transformation anywhere is `.strip()` for surrounding
   whitespace. *Why:* a paid subscription's feed URL can carry a per-subscriber
   token as a query parameter, and a "cleaned up" token is a silently dead feed
-  with no error to notice. The per-row section dropdown and read-only checkbox
-  are deliberately backed by narrow update methods
-  (`Library.move_feed_to_section`, `Library.set_feed_excluded`) that touch one
-  column each, so regrouping or flagging a feed cannot rewrite its URL in
-  passing. `probe_feed` requests the URL exactly as entered and treats a query
+  with no error to notice. The per-row section dropdown is deliberately backed
+  by a narrow update method (`Library.move_feed_to_section`) that touches one
+  column, so regrouping a feed cannot rewrite its URL in passing.
+  `probe_feed` requests the URL exactly as entered and treats a query
   string as ordinary. Covered by round-trip tests in
   `tests/test_feed_management.py` against both the real stored URLs and a
   synthetic tokenized one.
@@ -7266,7 +7299,7 @@ recorded anywhere, it's flagged rather than invented.
   where `article_embeddings` is upserted (only the latest vector matters).
   Building a shared schema from one real case would have meant guessing at
   the shape of a second. Other Claude-calling modules (`dedupe.py`,
-  `suggest.py`, `tagstyle.py`, `voice_review.py`) spend real API money with
+  `tagstyle.py`, `voice_review.py`) spend real API money with
   no cost capture at all today, but were deliberately left out of this
   ledger too — none share `enrich()`'s per-article entity shape (they're
   batch- or free-text-scoped), and two of them need bigger plumbing changes
@@ -7572,8 +7605,8 @@ linklib/                    # the core library — everything durable lives here
   archive.py                # parses the one-time Feedly "Download your data" export
   feed.py                   # RSS/Atom reader over the OPML list (concurrent, 30-min cache)
   sources.py                # preferred_sites.opml → web-search domain allowlist
-  queue.py                  # fills the Archive Queue from RSS (ongoing) + sitemaps (backfill)
-  suggest.py                # advisory Claude keep/skip predictions for queue candidates
+                            #   (queue.py/suggest.py — the Archive Queue's RSS/sitemap
+                            #   scan + advisory keep/skip predictor — retired 2026-09, PR 3)
   dedupe.py                 # near-duplicate detection (similarity + Claude verification)
   tagstyle.py               # learns the curator's tagging style; feeds enrichment
   models.py                 # curated model registry reconciled with the live Models API
@@ -7625,7 +7658,7 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
   Claude-calling modules aren't yet (#105).** `article_embeddings.cost_usd`
   and `enrichment_cost.cost_usd` cover embed-on-save/backfill and enrichment
   spend, surfaced together on `/admin/overhead-spend`. `dedupe.py`,
-  `suggest.py`, `tagstyle.py`, and `voice_review.py` still spend real API
+  `tagstyle.py`, and `voice_review.py` still spend real API
   money with zero cost capture — deliberately out of scope for #105's build
   (see §4, "Enrichment cost gets its own ledger, not a shared one"), a
   natural follow-up if/when tracking their spend matters enough to justify
