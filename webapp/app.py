@@ -24059,10 +24059,16 @@ def admin_page(request: Request):
     # header action beside the old page's <h1>; with no page left to head, the
     # group's description is the equivalent spot, and `.btn.btn-ghost` is
     # carried over unchanged (BRAND.md's secondary button, no colour override).
+    #
+    # The description is one sentence on purpose. It briefly carried a trailing
+    # "grouped by what they're for, not a fixed order" clause, carried over from
+    # the retired page's intro; Brian cut it in review — how the quadrants are
+    # organised is a design note for ARCHITECTURE.md, not something a group
+    # header needs to explain to the one person who arranged them.
     reader_hrefs = [href for href, _, _ in _LIBRARY_TOOLS]
     reader_desc = (
         "Bringing new content in, keeping it clean, and readying it for FP&amp;A Buddy to "
-        "reason from&mdash;grouped by what they're for, not a fixed order."
+        "reason from."
         '<div style="margin-top:12px;"><a href="/read" class="btn btn-ghost" '
         'style="font-size:14px;padding:8px 18px;white-space:nowrap;">Open Reader</a></div>'
     )
