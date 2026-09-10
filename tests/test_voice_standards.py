@@ -120,6 +120,12 @@ def test_lint_ignores_an_escape_map_value():
     assert typography_findings('def _esc(s): return s.replace("&", "&amp;")') == []
 
 
+def test_lint_ignores_a_url_query_separator():
+    """`?a=1&amp;b=2` separates parameters; it isn't the word "and"."""
+    assert typography_findings('LINK = "<a href=\\"/admin/x?filter=all&amp;page=2\\">Next</a>"') == []
+    assert typography_findings('LINK = "/tools?cat=erp&amp;sort=name"') == []
+
+
 def test_lint_ignores_javascript_and_operators():
     assert typography_findings("JS = \"if (a && b) { go(); }\"") == []
     assert typography_findings('ATTR = "onclick=\\"a &amp;&amp; b\\""') == []

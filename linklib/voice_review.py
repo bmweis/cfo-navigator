@@ -112,6 +112,11 @@ _AMP_CODE_PATTERNS = [
     re.compile(r"&amp;&amp;"),
     re.compile(r"&&"),
     re.compile(r"replace\(\s*/&/g\s*,\s*'&amp;'\s*\)"),
+    # A URL query string: `?a=1&amp;b=2`. The ampersand there is a parameter
+    # separator, not the word "and" — no copy in webapp/app.py currently has
+    # a two-parameter link, but the next one added would otherwise be a
+    # guaranteed false positive.
+    re.compile(r"""\?[A-Za-z_][\w\-]*=[^\s"'<>]*"""),
 ]
 
 # A literal that is nothing but one HTML entity is an escape-map value, never
