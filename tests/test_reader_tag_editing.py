@@ -10,7 +10,7 @@ parallel one — POST /library/{id}/tags (which survived Phase 5 with no callers
 once the old Archive page's "Edit tags" button was removed) and POST /feed/save's
 already-supported `tags` field. Library.update_tags writes tags_text, so the
 articles_au FTS trigger keeps search in sync with no extra work; that's the same
-propagation path /admin/library/tags' rename/delete already rely on.
+propagation path /admin/reader/tag-management's rename/delete already rely on.
 
 See CLAUDE.md's "Reader tag editing (Phase 5c)" bullet and ARCHITECTURE.md's
 Reader section for the full write-up.
@@ -197,9 +197,9 @@ def test_reader_tag_write_round_trips_with_admin(env):
     assert r.status_code == 200
     assert r.json()["tags"] == ["cash", "roundtrip"]
     # Admin's Tag cleanup reads the same all_tags() vocabulary.
-    assert "roundtrip" in c.get("/admin/library/tags").text
+    assert "roundtrip" in c.get("/admin/reader/tag-management").text
     # ...and an Admin-side rename is visible to the Reader's own API.
-    c.post("/admin/library/tags/rename", data={"old": "roundtrip", "new": "renamed"},
+    c.post("/admin/reader/tag-management/tags/rename", data={"old": "roundtrip", "new": "renamed"},
            follow_redirects=False)
     assert "renamed" in c.get(f"/api/read-article?id={aid}").json()["tags"]
 

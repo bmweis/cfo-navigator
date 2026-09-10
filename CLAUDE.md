@@ -6662,10 +6662,11 @@ it supersedes the old "`/save` is token-gated" note.
   `/admin/library/*`, and is untouched here.
 
   **Tag cleanup (`/admin/library/tags`) and Tagging style
-  (`/admin/library/tag-style`) are deliberately NOT renamed in this PR** —
-  they merge into a single `/admin/reader/tag-management` page in a future
+  (`/admin/library/tag-style`) were deliberately NOT renamed in this PR** —
+  they merge into a single `/admin/reader/tag-management` page in a later
   PR, so renaming them now would just be renamed again almost immediately.
-  Both stay exactly where they are.
+  Both stay exactly where they are here. (**They've since merged — see the
+  Tag management merge (PR 7) bullet below.**)
 
   **The archive-backup card moved hub-nav groups, not just its URL**: it
   leaves `_LIBRARY_TOOLS` (and `/admin/library`'s own page, which drops
@@ -6685,6 +6686,37 @@ it supersedes the old "`/save` is token-gated" note.
   PR flagged as out of scope at the time. Fixed here since this PR was
   already touching RUNBOOK.md for the backup-page path anyway: the queue
   step is removed from the checklist with a note explaining why.
+
+- **Tag management merge (PR 7, 2026-09) — Tag cleanup and Tagging style,
+  left in place by the Reader route moves above, merge into one page,
+  `/admin/reader/tag-management`.** No compatibility redirect — both old
+  paths 404, signed in and signed out, sub-routes included. Two clearly
+  headed sections, not blended and not collapsed into a disclosure: Tag
+  cleanup is a data-cleanup tool (acts on tags articles already carry —
+  merge, rename, delete, plus the AI-suggested-merges flow); Tagging style
+  is configuration (shapes tags that don't exist yet — the objective and
+  the learned guide that steer the enrichment prompt via `linklib.tagstyle`).
+  Both are used regularly enough that a disclosure would add a click without
+  reducing clutter. The page is titled "Tag cleanup &amp; style," not "Tag
+  management" — the hub-nav quadrant on `/admin/library` holding this card
+  is already named "Tag management," and naming the card the same as its
+  own containing group would repeat the exact self-nesting problem the
+  "Third-party content" rename (see the Admin URL restructure bullet above)
+  exists to avoid; the quadrant's name and description are unchanged. Every
+  action from both original pages works unmodified from the merged page —
+  nothing was dropped. Section copy (the intro text and bullet lists under
+  each half) carries over from the two original pages verbatim — it
+  predates the plain-language copy standard this page's own new intro
+  pilots, and a planned site-wide copy pass is the right place to bring it
+  in line, not a one-off touch here; that pass's starting inventory is in
+  this PR's own description. **Rider, same workstream**: the Enrich archive
+  hub-nav description was rewritten in the same PR — it used to undersell
+  what the tool does ("Generate Claude summaries and tags..."), and it's
+  grouped with the tagging tools specifically because the tags it drafts are
+  the vocabulary Tag cleanup tidies and Tagging style teaches; the new copy
+  says that plainly. See ARCHITECTURE.md's "Tag management merge" section
+  for the full write-up and `tests/test_tag_management_merge.py` for the
+  regression coverage.
 
 ## Authentication & security
 

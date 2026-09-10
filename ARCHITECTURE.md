@@ -4833,12 +4833,13 @@ phase found both write paths already present and simply unreachable:
   its saved state (and know where to POST later edits) without a reload.
 
 `/admin/library`'s two tag tools were confirmed to be **vocabulary-level, not
-per-article**: "Tag cleanup" (`/admin/library/tags`) merges/renames/deletes a
-tag across the whole library (`Library.rename_tag`/`delete_tag`), and
-"Tagging style" (`/admin/library/tag-style`) learns Brian's tagging style to
-feed the enrichment prompt. Neither edits one article's tags, so nothing here
-duplicates them — they read and write the same `articles.tags_json` through
-the same `Library` methods.
+per-article**: "Tag cleanup" merges/renames/deletes a tag across the whole
+library (`Library.rename_tag`/`delete_tag`), and "Tagging style" learns
+Brian's tagging style to feed the enrichment prompt. (The two have since
+merged into one page, `/admin/reader/tag-management` — see the Tag
+management merge bullet below.) Neither edits one article's tags, so nothing
+here duplicates them — they read and write the same `articles.tags_json`
+through the same `Library` methods.
 
 **Propagation matches what those Admin tools already do.**
 `Library.update_tags` hard-replaces the list (stripped, de-duplicated,
@@ -6001,9 +6002,11 @@ Railway origin" note above) is a different route entirely and is untouched by
 this PR; it was never under `/admin/library/*` to begin with.
 
 **Tag cleanup (`/admin/library/tags`) and Tagging style
-(`/admin/library/tag-style`) are deliberately NOT renamed in this PR** — they
-merge into a single `/admin/reader/tag-management` page in a future PR, and
-renaming them twice would be wasted motion. Both stay exactly where they are.
+(`/admin/library/tag-style`) were deliberately NOT renamed in this PR** — they
+merge into a single `/admin/reader/tag-management` page in a later PR, and
+renaming them twice would be wasted motion. Both stay at their pre-existing
+paths here. (**They've since merged — see the Tag management merge bullet
+below for that PR's own write-up.**)
 
 **The Archive backup card moved hub-nav groups, not just URLs**: it leaves
 `_LIBRARY_TOOLS` (and `/admin/library`'s own page, which drops from four
@@ -6025,6 +6028,60 @@ outright in 2026-09 PR 3 (see CLAUDE.md's Archive Queue retirement note) —
 as a page to spot-check after a restore. Fixed in this same PR: the queue
 reference is removed from the checklist, with a note explaining why (no
 queue page exists any more to check).
+
+### Tag management merge (PR 7, 2026-09)
+
+Tag cleanup (`/admin/library/tags`) and Tagging style
+(`/admin/library/tag-style`) — the two pages PR 6 above deliberately left in
+place — merge into one page, `/admin/reader/tag-management`
+(`admin_tag_management()`). Both old paths 404 outright, signed in and
+signed out; every sub-route moved with its parent
+(`/admin/reader/tag-management/tags/*`, `/admin/reader/tag-management/tag-style/*`).
+
+**Two sections, no disclosure.** Tag cleanup is a data-cleanup tool — it acts
+on tags articles already carry (merge, rename, delete against the live
+vocabulary, plus the AI-suggested-merges flow). Tagging style is
+configuration — it shapes tags that don't exist yet (the tagging objective
+and the learned guide, both fed into the enrichment prompt via
+`linklib.tagstyle`). Both were judged used regularly enough that collapsing
+either into a closed `<details>` would just add a click without reducing
+clutter, so the page stacks them as two full, always-visible sections
+instead, divided by the same h2/border-top `_section_header` pattern already
+used on the Community profile edit page — reused here, not a new component.
+Order is unchanged from the two cards' original order: cleanup first (acts
+on today's data), style second (shapes tomorrow's).
+
+**Naming**: the merged page is titled "Tag cleanup &amp; style", not "Tag
+management" — the hub-nav quadrant on `/admin/library` that contains this
+card is *already* named "Tag management" (holding this card plus Enrich
+archive), and naming the card the same as its containing quadrant would
+nest a same-named box inside a same-named group, the exact pattern
+CLAUDE.md's "Third-party content" rename exists to avoid. The quadrant's own
+name/description are unchanged — still accurate for two cards instead of
+three, just with a lower `count_label` (`"2 tools"`, not `"3 tools"`).
+
+**Nothing was dropped.** Every action from both original pages — suggest
+merges, merge one group, merge all, rename, delete (Tag cleanup); save the
+objective, generate the guide, save the guide, clear the guide (Tagging
+style) — works from the merged page, each exercised directly in
+`tests/test_tag_management_merge.py`. Section copy (the intro paragraph and
+bullet list under each `<h2>`) is carried over from the two original pages
+verbatim, not rewritten — it predates the plain-language copy standard this
+merge pilots, and a planned site-wide copy pass is the right place to bring
+it in line, not a one-off touch here. See that copy pass's own future PR for
+the inventory (recorded in this PR's description) of exactly which strings
+still need it.
+
+**Rider — the Enrich archive hub-nav description was rewritten** in the same
+PR (same workstream, one line): it used to undersell what the tool does
+("Generate Claude summaries and tags..."). It's grouped with the tagging
+tools specifically because the tags it drafts are the vocabulary Tag cleanup
+tidies and Tagging style teaches — new copy says that plainly instead of
+leaving the "why here" implicit.
+
+`webapp.hub_nav_orphans()`/`_hub_nav_all_hrefs()` needed no logic change —
+both derive their href set live from `_LIBRARY_TOOLS`, so collapsing two
+tuple entries into one was the entire fix.
 
 ### Feature Taxonomy, Phase 1b PR 2 (2026-08) — public rendering + full legacy `tool_features` retirement
 
