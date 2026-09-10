@@ -51,7 +51,7 @@ def test_three_fields_are_in_the_expected_groups():
     by_group = {title: [key for _, key in fields] for title, fields in COMMUNITY_PROFILE_GROUPS}
     assert "stage_focus" in by_group["Who it's for"]
     assert "jobs_program" in by_group["What you get"]
-    assert "team_or_individual" in by_group["Cost & structure"]
+    assert "team_or_individual" in by_group["Cost and structure"]
     # Not duplicated into any other group.
     for title, keys in by_group.items():
         if title == "Who it's for":
@@ -62,7 +62,7 @@ def test_three_fields_are_in_the_expected_groups():
             assert keys.count("jobs_program") == 1
         else:
             assert "jobs_program" not in keys
-        if title == "Cost & structure":
+        if title == "Cost and structure":
             assert keys.count("team_or_individual") == 1
         else:
             assert "team_or_individual" not in keys
@@ -275,7 +275,7 @@ def test_build_communities_compare_states_for_the_three_fields():
     entities, _ = compare_mod.build_communities_compare(communities, profiles, {}, {})
     who_group = next(s for s in entities[0].sections if s.title == "Who it's for")
     what_group = next(s for s in entities[0].sections if s.title == "What you get")
-    cost_group = next(s for s in entities[0].sections if s.title == "Cost & structure")
+    cost_group = next(s for s in entities[0].sections if s.title == "Cost and structure")
 
     stage_field = next(f for f in who_group.fields if f.key == "stage_focus")
     assert stage_field.state == gates.GateState.PENDING

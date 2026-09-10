@@ -142,10 +142,12 @@ def _group_heading_index(body: str, name: str) -> int:
 
 
 def test_admin_grid_reorder_renders_in_the_new_order(env):
+    """System split into Configuration/Health and maintenance (PR 11,
+    2026-09) — both still render, in that order, where System used to."""
     c = _admin_client(env)
     body = c.get("/admin").text
     order = ["Inbox", "Thought leadership", "CFO Toolbox",
-             "Brand, voice, and content", "System"]
+             "Brand, voice, and content", "Configuration", "Health and maintenance"]
     indexes = [_group_heading_index(body, name) for name in order]
     assert indexes == sorted(indexes), (
         "expected admin groups to render in order "

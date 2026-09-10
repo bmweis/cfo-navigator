@@ -347,11 +347,13 @@ def test_the_box_is_admin_only(env):
 
 def test_archive_backup_lives_under_system_not_the_reader_box(env):
     """Reader route moves (PR 6, 2026-09): a whole-DB snapshot is
-    accounts/health/plumbing, not archive management."""
+    accounts/health/plumbing, not archive management. System split into
+    Configuration/Health and maintenance (PR 11, 2026-09) — Archive backup
+    landed in Health and maintenance."""
     html = _admin_html(env)
     reader = _disclosure_body(html, "Reader")
     assert 'href="/admin/library-backup"' not in reader
 
-    system = _disclosure_body(html, "System")
-    assert 'href="/admin/library-backup"' in system
-    assert "Archive backup" in system
+    health = _disclosure_body(html, "Health and maintenance")
+    assert 'href="/admin/library-backup"' in health
+    assert "Archive backup" in health

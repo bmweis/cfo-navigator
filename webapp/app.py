@@ -12368,6 +12368,29 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
                      f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
 
+    # Add-a-category is its own row at the top of the table (PR 11, 2026-09) —
+    # matching the table's own Name/Description/Tools columns exactly, rather
+    # than a separate oversized stacked-label card below it. Same
+    # first-input-owns-the-form, later-inputs-reference-it-via-form="" pattern
+    # every edit row already uses (see the per-row comment below), so a plain
+    # HTML association carries the two fields into one POST with no JS.
+    add_form_id = "cat-add"
+    add_row = f"""<tr style="border-top:1px solid var(--line);background:var(--bg);">
+  <td style="padding:9px 12px;">
+    <form id="{add_form_id}" method="post" action="/admin/tools/software/categories/new" style="margin:0;">
+      <input type="text" name="name" required maxlength="80" placeholder="e.g. Payroll"
+        style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:14px;background:#fff;">
+    </form>
+  </td>
+  <td style="padding:9px 12px;">
+    <input type="text" name="description" form="{add_form_id}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
+      style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+  </td>
+  <td style="padding:9px 12px;vertical-align:top;">
+    <button type="submit" form="{add_form_id}" class="btn" style="font-size:13px;padding:6px 14px;white-space:nowrap;">+ Add category</button>
+  </td>
+</tr>"""
+
     rows = ""
     for c in categories:
         cid = c["id"]
@@ -12379,12 +12402,14 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
         # button stacked underneath them.
         rows += f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:9px 12px;">
-    <form id="{edit_form_id}" method="post" action="/admin/tools/software/categories/{cid}/edit" style="display:grid;gap:6px;margin:0;">
+    <form id="{edit_form_id}" method="post" action="/admin/tools/software/categories/{cid}/edit" style="margin:0;">
       <input type="text" name="name" value="{_esc(c['name'])}" required maxlength="80"
         style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:14px;font-weight:500;background:var(--bg);">
-      <input type="text" name="description" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
-        style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
     </form>
+  </td>
+  <td style="padding:9px 12px;">
+    <input type="text" name="description" form="{edit_form_id}" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
+      style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
   </td>
   <td style="padding:9px 12px;vertical-align:top;">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -12398,7 +12423,8 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
   </td>
 </tr>"""
     if not categories:
-        rows = '<tr><td colspan="2" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one below.</td></tr>'
+        rows += '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one above.</td></tr>'
+    rows = add_row + rows
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -12409,33 +12435,19 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 <li><strong>Deleting</strong> removes the tag from tagged tools, but leaves the tools themselves in the directory—they still show under <strong>All</strong>, just not under any specific pill.</li>
 </ul>
 {banner}{error_banner}
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:28px;">
-  <table style="width:100%;border-collapse:collapse;">
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
+  <div style="overflow-x:auto;">
+  <table style="width:100%;min-width:620px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name and description</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Description</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tools</th>
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  </div>
 </div>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 14px;">Add a category</h2>
-  <form method="post" action="/admin/tools/software/categories/new" style="display:grid;gap:12px;">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
-      <input type="text" name="name" required maxlength="80" placeholder="e.g. Payroll"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description <span style="font-weight:400;color:var(--muted);">(tooltip on the pill, optional)</span></label>
-      <input type="text" name="description" maxlength="300"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add category</button></div>
-  </form>
-  <p style="font-size:12px;color:var(--muted);margin:12px 0 0;">&ldquo;Uncategorized&rdquo; is reserved&mdash;it's the directory's built-in filter for tools with no categories, not a real category, so that name can't be used here.</p>
-</div>
+<p style="font-size:12px;color:var(--muted);margin:0 0 28px;">&ldquo;Uncategorized&rdquo; is reserved&mdash;it's the directory's built-in filter for tools with no categories, not a real category, so that name can't be used here.</p>
 </div>"""
     return HTMLResponse(_page("Software categories—CFO Toolbox Admin", "Admin", body, authed=True))
 
@@ -12729,32 +12741,22 @@ def admin_tools_features(request: Request, msg: str = "", error: str = "",
 controlled vocabulary tools get mapped against. See <a href="https://github.com/bmweis/cfo-navigator/blob/main/docs/FEATURE_TAXONOMY.md" target="_blank" rel="noopener">docs/FEATURE_TAXONOMY.md</a> for the naming/curation rules.</p>
 {banner}{error_banner}{pending_banner}
 
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:24px;max-width:640px;">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 14px;">Add a feature</h2>
-  <form method="post" action="/admin/tools/software/features/new" onsubmit="return featureTaxStateInputs(this)" style="display:grid;gap:12px;">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Category *</label>
-      <select name="category_id" required style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-        <option value="" disabled selected>Choose a category&hellip;</option>
-        {category_options_html}
-      </select>
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
-      <input type="text" name="name" required maxlength="150" placeholder="e.g. Automated journal entry creation"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Definition <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
-      <input type="text" name="definition" maxlength="500"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Pointer note <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
-      <input type="text" name="pointer_note" maxlength="500"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add feature</button></div>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 18px;margin-bottom:24px;">
+  <div style="font-size:13px;font-weight:600;color:var(--navy);margin-bottom:8px;">Add a feature</div>
+  <form method="post" action="/admin/tools/software/features/new" onsubmit="return featureTaxStateInputs(this)"
+        style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+    <select name="category_id" required aria-label="Category"
+      style="flex:1 1 160px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
+      <option value="" disabled selected>Category&hellip;</option>
+      {category_options_html}
+    </select>
+    <input type="text" name="name" required maxlength="150" placeholder="Name" aria-label="Name"
+      style="flex:2 1 220px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
+    <input type="text" name="definition" maxlength="500" placeholder="Definition (optional)" aria-label="Definition"
+      style="flex:2 1 200px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
+    <input type="text" name="pointer_note" maxlength="500" placeholder="Pointer note (optional)" aria-label="Pointer note"
+      style="flex:2 1 200px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
+    <button type="submit" class="btn" style="font-size:13px;padding:8px 16px;white-space:nowrap;">+ Add feature</button>
   </form>
 </div>
 
@@ -12968,7 +12970,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
 
     def _in(name, value, extra="", width="auto"):
         return (f'<input type="text" name="{name}" value="{_esc(str(value))}" maxlength="500" {extra}'
-                f'style="width:{width};padding:5px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13px;background:#fff;">')
+                f'style="width:{width};box-sizing:border-box;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13px;background:#fff;">')
 
     link_rows = ""
     for i, link in enumerate(payload.get("links", [])):
@@ -12995,14 +12997,16 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
     source_badge_fg = {"admin": "var(--navy)", "scan": "var(--seafoam-deep)", "public": "#92400e"}.get(item["source"], "var(--ink)")
 
     feature_field_html = (
-        f'<div style="margin:0 0 10px;">'
+        f'<div style="display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;">'
+        f'<div style="flex:1 1 220px;">'
         f'<label style="display:block;font-size:12px;font-weight:500;color:var(--navy);margin-bottom:4px;">Name</label>'
-        f'{_in("feature_name", feature_name, width="320px")}'
+        f'{_in("feature_name", feature_name, width="100%")}'
         f'</div>'
-        f'<div>'
+        f'<div style="flex:1 1 220px;">'
         f'<label style="display:block;font-size:12px;font-weight:500;color:var(--navy);margin-bottom:4px;">Pointer note '
         f'<span style="font-weight:400;color:var(--muted);">(optional)</span></label>'
-        f'{_in("pointer_note", feature.get("pointer_note", ""), width="320px")}'
+        f'{_in("pointer_note", feature.get("pointer_note", ""), width="100%")}'
+        f'</div>'
         f'</div>'
         if is_new_feature else
         f'<p style="margin:0 0 6px;font-size:14px;">Existing feature id={payload.get("feature_id")}'
@@ -13295,9 +13299,19 @@ def _benchmark_form_fields(b: dict | None = None) -> str:
   <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">Coverage and Pricing only render on the public page for Benchmarking resources&mdash;Book recommendations ignore them.</p>"""
 
 
+# Both the Benchmarking and Book recommendations tables render through this
+# one shared builder — but as two separate <table> elements, each one
+# auto-sizes its own columns from its own content when no width is fixed,
+# so two tables sharing this exact markup/CSS can still land on visibly
+# different column proportions purely because one has longer names/URLs
+# than the other. Explicit column widths (PR 11, 2026-09) make both
+# instances line up regardless of content.
+_ADMIN_RESOURCE_TABLE_COL_WIDTHS = ("20%", "30%", "18%", "17%", "15%")
+
+
 def _admin_resource_table(benchmarks: list[dict]) -> str:
     rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
-  <td style="padding:10px 12px;font-weight:600;">{_esc(b['name'])}</td>
+  <td style="padding:10px 12px;font-weight:600;word-break:break-word;">{_esc(b['name'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);"><a href="{_esc(b['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(b['url'][:50])}{'…' if len(b['url']) > 50 else ''}</a></td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(b['coverage'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(b['pricing'])}</td>
@@ -13309,8 +13323,10 @@ def _admin_resource_table(benchmarks: list[dict]) -> str:
     </form>
   </td>
 </tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">None yet.</td></tr>'
+    colgroup = "".join(f'<col style="width:{w};">' for w in _ADMIN_RESOURCE_TABLE_COL_WIDTHS)
     return f"""<div style="overflow-x:auto;">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:640px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;table-layout:fixed;">
+<colgroup>{colgroup}</colgroup>
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
@@ -15827,29 +15843,55 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
     error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
                      f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
 
+    # Add-a-category is its own top row, matching the table's own
+    # Name/Description/Communities columns (PR 11, 2026-09) — same treatment
+    # as /admin/tools/software/categories.
+    add_form_id = "commcat-add"
+    add_row = f"""<tr style="border-top:1px solid var(--line);background:var(--bg);">
+  <td style="padding:9px 12px;">
+    <form id="{add_form_id}" method="post" action="/admin/tools/communities/categories/new" style="margin:0;">
+      <input type="text" name="name" required maxlength="80" placeholder="e.g. Treasury"
+        style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:14px;background:#fff;">
+    </form>
+  </td>
+  <td style="padding:9px 12px;">
+    <input type="text" name="description" form="{add_form_id}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
+      style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+  </td>
+  <td style="padding:9px 12px;vertical-align:top;">
+    <button type="submit" form="{add_form_id}" class="btn" style="font-size:13px;padding:6px 14px;white-space:nowrap;">+ Add category</button>
+  </td>
+</tr>"""
+
     rows = ""
     for c in categories:
         cid = c["id"]
+        edit_form_id = f"commcat-edit-{cid}"
         rows += f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:9px 12px;">
-    <form method="post" action="/admin/tools/communities/categories/{cid}/edit" style="display:grid;gap:6px;margin:0;max-width:420px;">
+    <form id="{edit_form_id}" method="post" action="/admin/tools/communities/categories/{cid}/edit" style="margin:0;">
       <input type="text" name="name" value="{_esc(c['name'])}" required maxlength="80"
-        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:var(--bg);">
-      <input type="text" name="description" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
-        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);">
-      <div><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button></div>
+        style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:14px;font-weight:500;background:var(--bg);">
     </form>
   </td>
-  <td style="padding:9px 12px;font-size:13px;color:var(--muted);vertical-align:top;">{c['community_count']} communit{'y' if c['community_count'] == 1 else 'ies'}</td>
+  <td style="padding:9px 12px;">
+    <input type="text" name="description" form="{edit_form_id}" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
+      style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
+  </td>
   <td style="padding:9px 12px;vertical-align:top;">
-    <form method="post" action="/admin/tools/communities/categories/{cid}/delete" style="margin:0;"
-          onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['community_count']} communit{'y' if c['community_count'] == 1 else 'ies'}, which stay in the directory under All, just untagged for this category.');">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
-    </form>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:13px;color:var(--muted);white-space:nowrap;">{c['community_count']} communit{'y' if c['community_count'] == 1 else 'ies'}</span>
+      <button type="submit" form="{edit_form_id}" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
+      <form method="post" action="/admin/tools/communities/categories/{cid}/delete" style="margin:0;"
+            onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['community_count']} communit{'y' if c['community_count'] == 1 else 'ies'}, which stay in the directory under All, just untagged for this category.');">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+      </form>
+    </div>
   </td>
 </tr>"""
     if not categories:
-        rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet. Add one below.</td></tr>'
+        rows += '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one above.</td></tr>'
+    rows = add_row + rows
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
@@ -15860,34 +15902,19 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
 <li><strong>Deleting</strong> removes the tag from tagged communities, but leaves the communities themselves in the directory: they still show under <strong>All</strong>, just not under any specific pill.</li>
 </ul>
 {banner}{error_banner}
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:28px;">
-  <table style="width:100%;border-collapse:collapse;">
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
+  <div style="overflow-x:auto;">
+  <table style="width:100%;min-width:620px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name and description</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Description</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Communities</th>
-      <th style="padding:9px 12px;"></th>
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  </div>
 </div>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 14px;">Add a category</h2>
-  <form method="post" action="/admin/tools/communities/categories/new" style="display:grid;gap:12px;">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
-      <input type="text" name="name" required maxlength="80" placeholder="e.g. Treasury"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description <span style="font-weight:400;color:var(--muted);">(tooltip on the pill, optional)</span></label>
-      <input type="text" name="description" maxlength="300"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add category</button></div>
-  </form>
-  <p style="font-size:12px;color:var(--muted);margin:12px 0 0;">&ldquo;Uncategorized&rdquo; is reserved&mdash;it's the directory's built-in filter for communities with no categories, not a real category, so that name can't be used here.</p>
-</div>
+<p style="font-size:12px;color:var(--muted);margin:0 0 28px;">&ldquo;Uncategorized&rdquo; is reserved&mdash;it's the directory's built-in filter for communities with no categories, not a real category, so that name can't be used here.</p>
 </div>"""
     return HTMLResponse(_page("Community categories—CFO Toolbox Admin", "Admin", body, authed=True))
 
@@ -21591,6 +21618,16 @@ _SOFTWARE_TOOLS = [
     ("/admin/tools/software/feature-review-queue", "Feature review queue", "Proposed feature-taxonomy changes&mdash;from admin edits, the AI scan, or public suggestions&mdash;awaiting approval before they reach the live tables."),
 ]
 
+# Communities admin, nested as its own sub-group inside CFO Toolbox (PR 11,
+# 2026-09) — the same pattern _SOFTWARE_TOOLS already uses, brought over so
+# the two entity types nest the same way. No feature-taxonomy or
+# name-duplicates equivalent exists for Communities, so this is just the two
+# routes that used to sit as flat CFO Toolbox siblings.
+_COMMUNITIES_TOOLS = [
+    ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and approve or reject reader submissions before they go live."),
+    ("/admin/tools/communities/categories", "Community categories", "Add, rename, or remove the category pills communities are tagged with on /tools/communities—the Communities parallel to Software categories above."),
+]
+
 # CFO Toolbox items, used as one of the expandable groups below (same pattern
 # as the other groups — no separate hub page). Sail, Don't Row's settings
 # card moved out of this group (Admin URL restructure, group A) into Thought
@@ -21598,13 +21635,12 @@ _SOFTWARE_TOOLS = [
 # alongside Third-party content and Original content, so the card moved
 # with it rather than leaving a CFO Toolbox card pointing at a Thought
 # leadership URL. The four Software-directory cards moved out of this flat
-# list into _SOFTWARE_TOOLS above (Phase 1c) — see the CFO Toolbox
-# special-case note further down for how that nested sub-group gets spliced
-# back in.
+# list into _SOFTWARE_TOOLS above (Phase 1c); Communities and Community
+# categories moved out the same way into _COMMUNITIES_TOOLS above (PR 11) —
+# see the CFO Toolbox special-case note further down for how both nested
+# sub-groups get spliced back in.
 _TOOLBOX_TOOLS = [
     ("/admin/tools/resources", "Resources", "Add, edit, or remove the sources listed in the Resources section—name, URL, description, coverage, and pricing."),
-    ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
-    ("/admin/tools/communities/categories", "Community categories", "Add, rename, or remove the category pills communities are tagged with on /tools/communities—the Communities parallel to Software categories above."),
 ]
 
 # FP&A Buddy's own admin pages, consolidated into one section (Phase 6) —
@@ -21663,16 +21699,24 @@ _ADMIN_GROUPS = [
         ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email (warm intro, welcome, password reset, and submission confirmations)—changes go live immediately, no redeploy."),
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
     ]),
-    ("System", "Accounts, health, and plumbing—no public-nav counterpart, so this stays its own catch-all rather than folding into one of the three above.", [
-        ("/admin/library-backup",  "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily on a schedule (a Railway Cron Service syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
+    # System split into two groups (PR 11, 2026-09) — it had grown into a
+    # flat list of nine cards with no internal grouping of its own.
+    # Configuration/Health and maintenance are two top-level siblings, not a
+    # nested sub-group — System never had a nesting mechanism, and building
+    # one for a nine-card list is more machinery than the job needs; two
+    # groups side by side read the same and cost nothing.
+    ("Configuration", "Accounts, AI settings, and the site's open-source credits.", [
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
-        ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/system/ai",       "AI configuration and usage", "The enrichment model, the Exa web-search toggle, and a map of every AI surface in the app."),
-        ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
+    ]),
+    ("Health and maintenance", "Automated checks, spend, backups, and database tools.", [
+        ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
+        ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
         ("/admin/system/page-index", "Page index",        "A live, self-updating map of every route and its width tier."),
         ("/admin/system/scripts",   "Scripts",             "The recurring CLI scripts still worth running&mdash;purpose, cadence, env vars, and how to invoke each."),
+        ("/admin/library-backup",  "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily on a schedule (a Railway Cron Service syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
     ]),
 ]
 
@@ -22740,9 +22784,9 @@ def _hub_nav_all_hrefs() -> set[str]:
     today — the identical assembly admin_page() performs at render time
     (_LIBRARY_TOOLS, now rendered as the Reader group's own quadrant cards,
     + the Compare-summary-feedback card + _FPA_BUDDY_TOOLS + _SOFTWARE_TOOLS
-    + every _ADMIN_GROUPS item), kept as its own function so admin_page() and
-    this detector can never build two different sets from the same source
-    tuples.
+    + _COMMUNITIES_TOOLS + every _ADMIN_GROUPS item), kept as its own
+    function so admin_page() and this detector can never build two different
+    sets from the same source tuples.
 
     `/admin/library` is deliberately absent as of PR 9 (2026-09): the
     standalone page it named is gone, so there is no longer a route for a
@@ -22751,6 +22795,7 @@ def _hub_nav_all_hrefs() -> set[str]:
     rather than on a page of their own."""
     hrefs = {href for href, _, _ in _LIBRARY_TOOLS}
     hrefs.add("/admin/compare-summary-feedback")
+    hrefs |= {href for href, _, _ in _COMMUNITIES_TOOLS}
     hrefs |= {href for href, _, _ in _FPA_BUDDY_TOOLS if href.startswith("/admin")}
     hrefs |= {href for href, _, _ in _SOFTWARE_TOOLS}
     for _gname, _gdesc, items in _ADMIN_GROUPS:
@@ -24122,23 +24167,34 @@ def admin_page(request: Request):
         _SOFTWARE_TOOLS, badge_hrefs=software_hrefs, nested=True,
     )
 
+    # Community nests the same way (PR 11, 2026-09) — the two
+    # Communities-directory cards, formerly flat siblings in CFO Toolbox
+    # alongside Resources, now read as their own cluster, matching Software's
+    # own nesting.
+    communities_hrefs = [href for href, _, _ in _COMMUNITIES_TOOLS]
+    communities_subgroup_html = _group_html(
+        "Community", "Community listings and the categories they're filed under.",
+        _COMMUNITIES_TOOLS, badge_hrefs=communities_hrefs, nested=True,
+    )
+
     # Two columns on wide viewports: left carries Inbox plus Thought
     # leadership and CFO Toolbox (2026-09 reorder — these two used to sit at
     # the top of the right column; Brand/voice/content and System shifted up
-    # to fill that slot); right now carries just Brand/voice/content and the
-    # System catch-all. Below the breakpoint both stacks concatenate into a
+    # to fill that slot); right now carries Brand/voice/content plus the two
+    # groups System split into (PR 11, 2026-09) — Configuration and Health
+    # and maintenance. Below the breakpoint both stacks concatenate into a
     # single-column order — unchanged from before this split, and still
     # correct after the reorder since _ADMIN_GROUPS' own iteration order
-    # already puts these five in the desired top-to-bottom sequence.
+    # already puts these six in the desired top-to-bottom sequence.
     _LEFT_GROUPS = {"Inbox", "Thought leadership", "CFO Toolbox"}
     left_html = ""
     right_html = ""
     for gname, gdesc, items in _ADMIN_GROUPS:
         if gname == "CFO Toolbox":
-            toolbox_hrefs = ([href for href, _, _ in items] + software_hrefs + fpa_hrefs + reader_hrefs
-                              + ["/admin/compare-summary-feedback"])
+            toolbox_hrefs = ([href for href, _, _ in items] + software_hrefs + communities_hrefs
+                              + fpa_hrefs + reader_hrefs + ["/admin/compare-summary-feedback"])
             html = _group_html(gname, gdesc,
-                               [software_subgroup_html] + list(items)
+                               [software_subgroup_html, communities_subgroup_html] + list(items)
                                + [fpa_subgroup_html, reader_subgroup_html, compare_summary_feedback_card],
                                badge_hrefs=toolbox_hrefs)
         else:

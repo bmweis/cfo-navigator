@@ -36,16 +36,16 @@ def test_detector_actually_catches_a_real_gap(monkeypatch):
     2026-09 incident by removing Communities' category-CRUD card from the
     live tuples and confirming it's flagged as an orphan. The route itself
     (GET /admin/tools/communities/categories) still exists — only its
-    hub-nav card is removed here, the same shape the real bug had."""
-    trimmed = [item for item in appmod._TOOLBOX_TOOLS
-               if item[0] != "/admin/tools/communities/categories"]
-    assert len(trimmed) == len(appmod._TOOLBOX_TOOLS) - 1  # sanity: something was actually removed
+    hub-nav card is removed here, the same shape the real bug had.
 
-    patched_groups = [
-        (gname, gdesc, trimmed if gname == "CFO Toolbox" else items)
-        for gname, gdesc, items in appmod._ADMIN_GROUPS
-    ]
-    monkeypatch.setattr(appmod, "_ADMIN_GROUPS", patched_groups)
+    Communities nested into its own CFO Toolbox sub-group in PR 11
+    (2026-09), so this card now lives in `_COMMUNITIES_TOOLS`, not
+    `_TOOLBOX_TOOLS` — patched here to match."""
+    trimmed = [item for item in appmod._COMMUNITIES_TOOLS
+               if item[0] != "/admin/tools/communities/categories"]
+    assert len(trimmed) == len(appmod._COMMUNITIES_TOOLS) - 1  # sanity: something was actually removed
+
+    monkeypatch.setattr(appmod, "_COMMUNITIES_TOOLS", trimmed)
 
     orphans = appmod.hub_nav_orphans()
     assert orphans == ["/admin/tools/communities/categories"]
@@ -60,13 +60,9 @@ def test_checks_run_all_reports_hub_nav_orphans_pass():
 
 
 def test_checks_run_all_reports_hub_nav_orphans_fail_when_gap_reintroduced(monkeypatch):
-    trimmed = [item for item in appmod._TOOLBOX_TOOLS
+    trimmed = [item for item in appmod._COMMUNITIES_TOOLS
                if item[0] != "/admin/tools/communities/categories"]
-    patched_groups = [
-        (gname, gdesc, trimmed if gname == "CFO Toolbox" else items)
-        for gname, gdesc, items in appmod._ADMIN_GROUPS
-    ]
-    monkeypatch.setattr(appmod, "_ADMIN_GROUPS", patched_groups)
+    monkeypatch.setattr(appmod, "_COMMUNITIES_TOOLS", trimmed)
 
     results = checks.run_all()
     row = next(r for r in results if r["name"] == "Hub-nav orphans")

@@ -7148,6 +7148,27 @@ external source or human judgment call). See `tests/test_hub_nav_orphans.py` for
 the coverage, including a reproduction of the exact 2026-09 gap proving the detector
 actually catches it, not just passes trivially.
 
+**PR 11 (2026-09) follow-up — Communities nests inside CFO Toolbox the same
+way Software does, and System splits into two groups.** A new
+`_COMMUNITIES_TOOLS` tuple (Communities, Community categories) pulls those
+two cards out of `_TOOLBOX_TOOLS`'s flat item list into their own nested
+"Community" sub-group, mirroring `_SOFTWARE_TOOLS`'s existing shape exactly
+— same `_group_html(..., nested=True)` mechanism, same aggregate-badge
+pattern via `badge_hrefs`. `_hub_nav_all_hrefs()` gained a line folding in
+`_COMMUNITIES_TOOLS`'s hrefs, same as it already did for `_SOFTWARE_TOOLS`.
+System (nine flat cards, no internal grouping) splits into two top-level
+siblings — **Configuration** (Users, AI configuration, Open source) and
+**Health and maintenance** (Checks, Overhead spend, Database, Page index,
+Scripts, Archive backup) — spelled "and" rather than "&" so the new group
+name passes `linklib.voice_review.typography_findings()`'s bare-ampersand
+check without extending its allowlist. Two plain top-level groups, not a
+nested sub-group: System never had a nesting mechanism, and building one
+for a nine-card list would be more machinery than the job needs. Both new
+groups render in the right column, after Brand/voice/content, same spot
+System used to occupy. See `tests/test_hub_nav_orphans.py` for the
+regression coverage (updated to patch `_COMMUNITIES_TOOLS` directly, since
+the category-CRUD card it exercises moved out of `_TOOLBOX_TOOLS`).
+
 ## Freshness-Banner & Reviewed-Toggle Consolidation
 
 An admin-sprawl review (2026-09-08) found two duplication patterns on `/admin/checks`

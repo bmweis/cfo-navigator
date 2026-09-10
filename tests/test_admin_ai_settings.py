@@ -446,11 +446,15 @@ def test_fpa_buddy_tools_no_longer_carries_exa_settings(env):
 
 
 def test_system_group_has_exactly_one_ai_card(env):
-    system_items = next(items for gname, _, items in env._ADMIN_GROUPS if gname == "System")
-    hrefs = [href for href, _, _ in system_items]
+    """System split into Configuration/Health and maintenance (PR 11,
+    2026-09) — AI configuration and usage landed in Configuration."""
+    config_items = next(items for gname, _, items in env._ADMIN_GROUPS if gname == "Configuration")
+    hrefs = [href for href, _, _ in config_items]
     assert hrefs.count("/admin/system/ai") == 1
     assert "/admin/system/model" not in hrefs
     assert "/admin/system/ai-usage" not in hrefs
+    all_hrefs = [href for _, _, items in env._ADMIN_GROUPS for href, _, _ in items]
+    assert all_hrefs.count("/admin/system/ai") == 1
 
 
 # -- inverted guard: proven to catch a real violation, not just pass --------

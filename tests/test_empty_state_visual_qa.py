@@ -147,7 +147,7 @@ def test_community_group_card_shows_its_own_title_even_when_empty(env):
     lib.close()
 
     r = _client(env).get(f"/tools/communities/{slug}")
-    for title in ("Who it's for", "What you get", "How it works", "Cost &amp; structure"):
+    for title in ("Who it's for", "What you get", "How it works", "Cost and structure"):
         idx = r.text.index(f'<h2 class="tp-card-h">{title}')
         following = r.text[idx:idx + 400]
         assert "This section hasn&#x27;t been researched yet." in following or \

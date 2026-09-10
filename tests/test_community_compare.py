@@ -153,7 +153,7 @@ def test_compare_groups_fields_into_the_four_profile_page_themes(env):
 
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
     for title in ("Key facts", "Bottom line", "Who it's for", "What you get", "How it works",
-                  "Cost &amp; structure", "Similar communities"):
+                  "Cost and structure", "Similar communities"):
         assert f'cc-section" colspan="3"><span class="cmp-sticky-label">{title}</span></td>' in r.text, title
 
 
