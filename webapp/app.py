@@ -21667,7 +21667,7 @@ _ADMIN_GROUPS = [
         ("/admin/library-backup",  "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily on a schedule (a Railway Cron Service syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
-        ("/admin/system/ai",       "AI configuration and usage", "The enrichment model and Exa web-search toggle, live and editable&mdash;plus a read-only map of every Claude/Exa/OpenAI surface, which model or mechanism powers it, and whether it's live-editable. One page&mdash;merges the old separate AI model, Exa web search, and AI usage cards."),
+        ("/admin/system/ai",       "AI configuration and usage", "The enrichment model, the Exa web-search toggle, and a map of every AI surface in the app."),
         ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
@@ -23395,15 +23395,15 @@ def admin_system_ai(request: Request):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>AI configuration and usage</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Model selection, Exa's web-search toggle, and a read-only map of every Claude/Exa/OpenAI surface in the app&mdash;together on one page. Configuration is editable directly below; the usage index further down is read-only&mdash;every change happens in the two Configuration cards above it, never there. For dollar totals, see <a href="/admin/overhead-spend" style="color:var(--accent);">Overhead spend &rarr;</a>.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Two live settings, plus a read-only map of every Claude, Exa, and OpenAI surface in the app. Everything editable is in Configuration below. For dollar totals, see <a href="/admin/overhead-spend" style="color:var(--accent);">Overhead spend &rarr;</a>.</p>
 
 <h2 style="margin:0 0 4px;">Configuration</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Two live settings&mdash;neither needs a redeploy to take effect.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Changes take effect immediately. No redeploy.</p>
 {_card("Enrichment model", _ai_model_config_html(enrich_model))}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
 
 <h2 style="margin:28px 0 4px;">Usage index</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Which model or mechanism powers each surface, and whether it's live-editable or code-only. Read-only&mdash;every mutation happens in Configuration above, or on /admin/checks below.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Which model or mechanism powers each surface, and whether it can be changed live or needs a code change. Read-only.</p>
 <div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:0 0 22px;">
 {claude_freshness}{exa_freshness}
 </div>
