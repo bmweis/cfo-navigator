@@ -1,5 +1,5 @@
 """Feed management: the feed_sections/feeds tables, OPML regeneration, and the
-/admin/library/feeds CRUD page.
+/admin/reader/feeds CRUD page.
 
 The load-bearing property this file protects is that preferred_sites.opml is
 now GENERATED but still consumed unmodified by three separate systems
@@ -414,7 +414,7 @@ def test_subscriber_access_control_lives_on_the_feeds_page(monkeypatch, tmp_path
     importlib.reload(appmod)
 
     with _client(appmod) as client:
-        feeds = client.get("/admin/library/feeds").text
+        feeds = client.get("/admin/reader/feeds").text
         library = client.get("/admin/library").text
 
     assert "Re-check subscriber access" in feeds
@@ -434,20 +434,20 @@ def test_recheck_redirects_back_to_feeds(app_env):
     with _client(app_env) as client:
         resp = client.post("/admin/auth/recheck", follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/admin/library/feeds"
+    assert resp.headers["location"] == "/admin/reader/feeds"
 
 
 def test_feeds_page_requires_admin(app_env):
     from fastapi.testclient import TestClient
     anon = TestClient(app_env.app)
-    resp = anon.get("/admin/library/feeds", follow_redirects=False)
+    resp = anon.get("/admin/reader/feeds", follow_redirects=False)
     assert resp.status_code in (302, 303, 307)
     assert "/login" in resp.headers["location"]
 
 
 def test_feeds_page_lists_every_feed_in_one_flat_table(app_env):
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     for section in ("News", "Market Insights", "Blogs", "Tools", "Substacks"):
         assert section in html           # as dropdown options and section rows
     assert "Mostly Metrics (CJ Gustafson)" in html
@@ -461,7 +461,7 @@ def test_sections_render_as_a_table_with_disabled_remove_when_non_empty(app_env)
     feeds, and there's no per-row explanatory line — the count plus the
     disabled state carry it."""
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
 
     assert '<table class="fs-table">' in html
     assert html.count('class="fs-row"') == 5          # one row per section
@@ -473,9 +473,9 @@ def test_sections_render_as_a_table_with_disabled_remove_when_non_empty(app_env)
 
 def test_an_emptied_section_gets_a_live_remove_button(app_env):
     with _client(app_env) as client:
-        client.post("/admin/library/feeds/sections/new",
+        client.post("/admin/reader/feeds/sections/new",
                     data={"name": "Operators"}, follow_redirects=False)
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
 
     assert html.count('class="fs-row"') == 6
     # The new empty section has a real Remove form; the other five stay disabled.
@@ -485,7 +485,7 @@ def test_an_emptied_section_gets_a_live_remove_button(app_env):
 
 def test_feeds_page_shows_the_mostly_metrics_url_exactly(app_env):
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert MOSTLY_METRICS_URL in html
 
 
@@ -499,7 +499,7 @@ def test_row_dropdown_moves_a_feed_to_a_new_section(app_env):
         finally:
             lib.close()
 
-        client.post(f"/admin/library/feeds/{feed['id']}/section",
+        client.post(f"/admin/reader/feeds/{feed['id']}/section",
                     data={"section_id": str(target["id"])}, follow_redirects=False)
 
         lib = app_env._lib()
@@ -521,7 +521,7 @@ def test_add_feed_writes_through_to_the_opml_file(app_env, monkeypatch):
             section_id = lib.list_feed_sections()[0]["id"]
         finally:
             lib.close()
-        resp = client.post("/admin/library/feeds/new",
+        resp = client.post("/admin/reader/feeds/new",
                            data={"name": "Example", "xml_url": "https://example.com/feed",
                                  "html_url": "", "section_id": str(section_id)},
                            follow_redirects=False)
@@ -542,7 +542,7 @@ def test_add_feed_rejects_an_invalid_url_without_saving(app_env, monkeypatch):
             before = len(lib.list_feeds())
         finally:
             lib.close()
-        resp = client.post("/admin/library/feeds/new",
+        resp = client.post("/admin/reader/feeds/new",
                            data={"name": "Bad", "xml_url": "https://example.com/nope",
                                  "html_url": "", "section_id": str(section_id)})
         assert resp.status_code == 400
@@ -565,7 +565,7 @@ def test_add_feed_rejects_a_duplicate_url(app_env):
             existing = lib.list_feeds()[0]["xml_url"]
         finally:
             lib.close()
-        resp = client.post("/admin/library/feeds/new",
+        resp = client.post("/admin/reader/feeds/new",
                            data={"name": "Dupe", "xml_url": existing,
                                  "html_url": "", "section_id": str(section_id)})
     assert resp.status_code == 400
@@ -585,7 +585,7 @@ def test_edit_feed_does_not_reprobe_when_the_url_is_unchanged(app_env, monkeypat
             feed = lib.list_feeds()[0]
         finally:
             lib.close()
-        resp = client.post(f"/admin/library/feeds/{feed['id']}/edit",
+        resp = client.post(f"/admin/reader/feeds/{feed['id']}/edit",
                            data={"name": "Renamed", "xml_url": feed["xml_url"],
                                  "html_url": feed["html_url"],
                                  "section_id": str(feed["section_id"])},
@@ -601,7 +601,7 @@ def test_delete_feed_removes_it_from_the_opml(app_env):
             feed = lib.list_feeds()[0]
         finally:
             lib.close()
-        client.post(f"/admin/library/feeds/{feed['id']}/delete", follow_redirects=False)
+        client.post(f"/admin/reader/feeds/{feed['id']}/delete", follow_redirects=False)
 
     assert feed["xml_url"] not in [f.xml_url for f in parse_opml(app_env._OPML_FOR_TESTS)]
 
@@ -613,7 +613,7 @@ def test_delete_section_is_blocked_while_it_holds_feeds(app_env):
             section = lib.list_feed_sections()[0]
         finally:
             lib.close()
-        resp = client.post(f"/admin/library/feeds/sections/{section['id']}/delete",
+        resp = client.post(f"/admin/reader/feeds/sections/{section['id']}/delete",
                            follow_redirects=False)
         assert resp.status_code == 303
         assert "error=" in resp.headers["location"]
@@ -627,7 +627,7 @@ def test_delete_section_is_blocked_while_it_holds_feeds(app_env):
 
 def test_section_crud_round_trip(app_env):
     with _client(app_env) as client:
-        client.post("/admin/library/feeds/sections/new",
+        client.post("/admin/reader/feeds/sections/new",
                     data={"name": "Operators"}, follow_redirects=False)
         lib = app_env._lib()
         try:
@@ -637,7 +637,7 @@ def test_section_crud_round_trip(app_env):
         finally:
             lib.close()
 
-        client.post(f"/admin/library/feeds/sections/{created['id']}/rename",
+        client.post(f"/admin/reader/feeds/sections/{created['id']}/rename",
                     data={"name": "Operator blogs"}, follow_redirects=False)
         lib = app_env._lib()
         try:
@@ -645,7 +645,7 @@ def test_section_crud_round_trip(app_env):
         finally:
             lib.close()
 
-        client.post(f"/admin/library/feeds/sections/{created['id']}/delete",
+        client.post(f"/admin/reader/feeds/sections/{created['id']}/delete",
                     follow_redirects=False)
         lib = app_env._lib()
         try:
@@ -656,7 +656,7 @@ def test_section_crud_round_trip(app_env):
 
 def test_duplicate_section_name_is_rejected(app_env):
     with _client(app_env) as client:
-        resp = client.post("/admin/library/feeds/sections/new",
+        resp = client.post("/admin/reader/feeds/sections/new",
                            data={"name": "blogs"}, follow_redirects=False)
     assert "error=" in resp.headers["location"]
 

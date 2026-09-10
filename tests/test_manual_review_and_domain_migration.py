@@ -492,7 +492,7 @@ def test_admin_page_shows_needs_review_tile_and_section(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "Needs review" in r.text
     assert "Needs manual review (1)" in r.text
@@ -508,7 +508,7 @@ def test_admin_page_shows_via_migration_badge(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert "via Migration" in r.text
 
 
@@ -517,7 +517,7 @@ def test_admin_page_5_stat_tiles_use_responsive_grid_not_fixed_columns(env):
     (Phase P): a fixed repeat(N,1fr) can't shrink below its content's
     min-width and forces horizontal scroll on narrow viewports."""
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert "repeat(auto-fit,minmax(130px,1fr))" in r.text
     assert "repeat(3,1fr)" not in r.text
 
@@ -536,7 +536,7 @@ def test_manual_review_csv_export_import_round_trip_live(env):
     c = _admin_client(env)
 
     # 1. Export.
-    export_resp = c.get("/admin/library/backfill-content/manual-review/export.csv")
+    export_resp = c.get("/admin/reader/backfill-content/manual-review/export.csv")
     assert export_resp.status_code == 200
     assert "article_id,title,current_url,reason,attempt_count,last_attempted_at,corrected_url" in export_resp.text
     assert f"{a}," in export_resp.text
@@ -550,7 +550,7 @@ def test_manual_review_csv_export_import_round_trip_live(env):
 
     # 3. Preview — nothing written yet.
     preview_resp = c.post(
-        "/admin/library/backfill-content/manual-review/import/preview",
+        "/admin/reader/backfill-content/manual-review/import/preview",
         files={"file": ("corrections.csv", edited_csv, "text/csv")},
     )
     assert preview_resp.status_code == 200
@@ -565,7 +565,7 @@ def test_manual_review_csv_export_import_round_trip_live(env):
 
     # 4. Confirm — commit.
     commit_resp = c.post(
-        "/admin/library/backfill-content/manual-review/import/commit",
+        "/admin/reader/backfill-content/manual-review/import/commit",
         data={"article_id": [str(a)], "corrected_url": ["https://new-blog.example/post-1"]},
         follow_redirects=False,
     )
@@ -589,7 +589,7 @@ def test_manual_review_csv_export_import_round_trip_live(env):
 
 def test_manual_review_import_commit_alone_without_preview_still_requires_form_data(env):
     c = _admin_client(env)
-    resp = c.post("/admin/library/backfill-content/manual-review/import/commit",
+    resp = c.post("/admin/reader/backfill-content/manual-review/import/commit",
                   data={}, follow_redirects=False)
     assert resp.status_code == 303
     assert "error=" in resp.headers["location"]
@@ -616,7 +616,7 @@ def test_manual_review_import_commit_url_collision_does_not_500_batch(env):
 
     c = _admin_client(env)
     resp = c.post(
-        "/admin/library/backfill-content/manual-review/import/commit",
+        "/admin/reader/backfill-content/manual-review/import/commit",
         data={
             "article_id": [str(before_id), str(colliding_id), str(after_id)],
             "corrected_url": [

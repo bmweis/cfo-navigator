@@ -1,4 +1,4 @@
-"""CSV parsing for the /admin/library/backfill-content article-purge
+"""CSV parsing for the /admin/reader/backfill-content article-purge
 export/import round trip (durability follow-up, 2026-08).
 
 Mirrors linklib/manual_review_csv.py's shape and discipline exactly, same

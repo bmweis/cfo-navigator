@@ -1,4 +1,4 @@
-"""Dashboard clarity pass for /admin/library/backfill-content (2026-08).
+"""Dashboard clarity pass for /admin/reader/backfill-content (2026-08).
 
 Covers:
 - Library.remaining_content_backfill_breakdown(): never-attempted vs.
@@ -196,7 +196,7 @@ def test_admin_page_renders_segmented_bar(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "here&rsquo;s how" in r.text
     assert "break down" in r.text or "breaks down" in r.text
@@ -212,7 +212,7 @@ def test_admin_page_no_standalone_total_articles_card(env):
     assert no_url
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert ">Total articles<" not in r.text
     assert "1 unreachable" in r.text
@@ -221,7 +221,7 @@ def test_admin_page_no_standalone_total_articles_card(env):
 
 def test_admin_page_lead_sentence_omits_unreachable_clause_when_zero(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "unreachable" not in r.text
     assert "0 articles total" in r.text
@@ -229,7 +229,7 @@ def test_admin_page_lead_sentence_omits_unreachable_clause_when_zero(env):
 
 def test_admin_page_needs_review_tile_links_to_section_only_when_present(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert 'href="#manual-review"' not in r.text
 
@@ -239,14 +239,14 @@ def test_admin_page_needs_review_tile_links_to_section_only_when_present(env):
         lib.log_content_refetch_attempt(a, "failure", reason="bot-challenge")
     lib.close()
 
-    r2 = c.get("/admin/library/backfill-content")
+    r2 = c.get("/admin/reader/backfill-content")
     assert 'href="#manual-review"' in r2.text
     assert 'id="manual-review"' in r2.text
 
 
 def test_admin_page_accepted_tile_links_to_section_only_when_present(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert 'href="#accepted-content"' not in r.text
 
     lib = env._lib()
@@ -254,19 +254,19 @@ def test_admin_page_accepted_tile_links_to_section_only_when_present(env):
     lib.accept_article_content(a)
     lib.close()
 
-    r2 = c.get("/admin/library/backfill-content")
+    r2 = c.get("/admin/reader/backfill-content")
     assert 'href="#accepted-content"' in r2.text
 
 
 def test_admin_page_flagged_at_save_is_a_separate_overlay_not_a_sixth_tile(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert "not one of the five buckets above" in r.text
 
 
 def test_admin_page_no_spaced_em_dash_in_new_overlay_copy(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert " &mdash; " not in r.text, "em dash must be unspaced per the em-dash policy"
 
 
@@ -277,7 +277,7 @@ def test_admin_page_structured_tile_dom_still_matches_legacy_regex(env):
     must render AFTER the label div, never between the value and label."""
     import re
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     m = re.search(r'([\d,]+)</div>\s*<div[^>]*>Structured</div>', r.text)
     assert m is not None
     assert m.group(1) == "0"
@@ -295,7 +295,7 @@ def test_live_status_renders_above_historical_crash_banner(env):
     env._job_set("content_backfill", running=True, done=3, total=10, ok=3, failed=0)
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     poll_idx = r.text.index('id="poll-container"')
     live_status_idx = r.text.index("Content backfill in progress")
@@ -314,7 +314,7 @@ def test_crash_banner_alone_still_renders_when_not_live(env):
     assert env._job_get("content_backfill").get("running") is not True
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "never finished" in r.text
     assert "likely interrupted" in r.text

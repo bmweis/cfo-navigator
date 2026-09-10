@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One-off fix for 49 articles stuck as feedproxy.google.com redirect stubs
 (0 words, never resolved) that were NOT in the needs-manual-review queue —
-so the existing /admin/library/backfill-content CSV-import tool couldn't
+so the existing /admin/reader/backfill-content CSV-import tool couldn't
 reach them (`Library.apply_article_url_correction`, gated at the CSV-parse
 layer by `parse_manual_review_corrections_csv`, which only accepts an
 article_id already in `list_articles_needing_manual_review()`). Brian

@@ -1,4 +1,4 @@
-"""CSV parsing for the /admin/library/bulk-delete export/preview/confirm
+"""CSV parsing for the /admin/reader/bulk-delete export/preview/confirm
 round trip (one-off cleanup batches — Brian deciding a specific list of
 articles isn't needed, distinct from the Purge tool's narrow "essentially
 nothing was ever saved" scope in linklib/purge_csv.py).

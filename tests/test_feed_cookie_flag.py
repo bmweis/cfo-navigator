@@ -195,14 +195,14 @@ def test_feed_table_has_a_cookie_column_with_no_checkbox(app_env):
     """2026-08: the Cookie column is a computed, read-only indicator now —
     there is nothing left for an admin to tick."""
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert ">Cookie</th>" in html
     assert 'name="has_paywall_cookie"' not in html
 
 
 def test_cookie_cell_has_no_input_or_form(app_env):
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     start = html.index('<td class="ff-cookie">')
     end = html.index("</td>", start)
     cell = html[start:end]
@@ -217,7 +217,7 @@ def test_every_row_shows_a_computed_cookie_indicator(app_env, monkeypatch):
     monkeypatch.setattr(extract_mod, "_COOKIE_DOMAINS", ("mostlymetrics.com",))
     monkeypatch.setenv(extract_mod._cookie_env_var("mostlymetrics.com"), "sid=1")
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
         lib = app_env._lib()
         try:
             feeds = lib.list_feeds()
@@ -237,7 +237,7 @@ def test_cookie_indicator_has_its_own_aria_label_shape(app_env):
     aria-label were retired along with the Archive Queue itself — 2026-09,
     PR 3 — so it's no longer part of this comparison.)"""
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
         lib = app_env._lib()
         try:
             name = lib.list_feeds()[0]["name"]
@@ -249,7 +249,7 @@ def test_cookie_indicator_has_its_own_aria_label_shape(app_env):
 
 def test_footnote_explains_the_column_once(app_env):
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert "<strong>Cookie</strong> shows whether this feed's domain currently has a subscriber cookie configured" in html
     assert "No cookie value is ever stored in this database" in html
 
@@ -263,7 +263,7 @@ def test_cookie_route_is_gone(app_env):
             feed = lib.list_feeds()[0]
         finally:
             lib.close()
-        resp = client.post(f"/admin/library/feeds/{feed['id']}/cookie",
+        resp = client.post(f"/admin/reader/feeds/{feed['id']}/cookie",
                            data={"has_paywall_cookie": "1"}, follow_redirects=False)
     assert resp.status_code in (404, 405)
 
@@ -279,7 +279,7 @@ def test_has_paywall_cookie_column_is_frozen_but_still_present(app_env):
         finally:
             lib.close()
         fid = feed["id"]
-        client.post(f"/admin/library/feeds/{fid}/edit", data={
+        client.post(f"/admin/reader/feeds/{fid}/edit", data={
             "name": "Renamed Again", "xml_url": feed["xml_url"],
             "html_url": feed["html_url"], "section_id": str(feed["section_id"]),
         }, follow_redirects=False)
@@ -295,8 +295,8 @@ def test_has_paywall_cookie_column_is_frozen_but_still_present(app_env):
 def test_no_free_text_note_field_remains(app_env):
     """The whole point of the change: no per-row text entry anywhere."""
     with _client(app_env) as client:
-        table = client.get("/admin/library/feeds").text
-        form = client.get("/admin/library/feeds/new").text
+        table = client.get("/admin/reader/feeds").text
+        form = client.get("/admin/reader/feeds/new").text
     for html in (table, form):
         assert 'name="paywall_cookie_note"' not in html
 
@@ -308,7 +308,7 @@ def test_edit_form_shows_a_computed_readout_not_a_checkbox(app_env):
             feed = lib.list_feeds()[0]
         finally:
             lib.close()
-        html = client.get(f"/admin/library/feeds/{feed['id']}/edit").text
+        html = client.get(f"/admin/reader/feeds/{feed['id']}/edit").text
     assert 'name="has_paywall_cookie"' not in html
     assert ("Cookie configured for this domain" in html
             or "No cookie configured for this domain" in html)
@@ -322,7 +322,7 @@ def test_editing_a_feed_without_touching_the_cookie_flag_keeps_it(app_env):
         finally:
             lib.close()
         fid = feed["id"]
-        client.post(f"/admin/library/feeds/{fid}/edit", data={
+        client.post(f"/admin/reader/feeds/{fid}/edit", data={
             "name": "Renamed", "xml_url": feed["xml_url"],
             "html_url": feed["html_url"], "section_id": str(feed["section_id"]),
             "has_paywall_cookie": "1",
@@ -351,7 +351,7 @@ def test_checkbox_columns_are_centre_justified(app_env):
     stays left. (Read only came out of the table entirely along with the
     Archive Queue itself — 2026-09, PR 3.)"""
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     for label in ("Cookie", "Subscriber"):
         assert f'text-align:center;">{label}</th>' in html
     assert "Read only</th>" not in html
@@ -442,14 +442,14 @@ def test_nothing_outside_the_admin_surface_reads_the_flag(app_env):
 
 def test_feed_table_has_an_active_subscription_column(app_env):
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert ">Subscriber</th>" in html
     assert 'name="has_active_subscription"' in html
 
 
 def test_row_checkbox_reflects_the_seeded_state(app_env):
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
         lib = app_env._lib()
         try:
             feeds = lib.list_feeds()
@@ -469,7 +469,7 @@ def test_row_toggle_posts_and_persists(app_env):
             lib.close()
         fid = feed["id"]
 
-        resp = client.post(f"/admin/library/feeds/{fid}/subscription",
+        resp = client.post(f"/admin/reader/feeds/{fid}/subscription",
                            data={"has_active_subscription": "1"},
                            follow_redirects=False)
         assert resp.status_code == 303
@@ -493,7 +493,7 @@ def test_row_toggle_unchecked_posts_nothing_and_clears(app_env):
             lib.close()
         fid = feed["id"]
 
-        client.post(f"/admin/library/feeds/{fid}/subscription", data={},
+        client.post(f"/admin/reader/feeds/{fid}/subscription", data={},
                     follow_redirects=False)
 
         lib = app_env._lib()
@@ -510,7 +510,7 @@ def test_edit_form_round_trips_the_flag(app_env):
             feed = [f for f in lib.list_feeds() if f["has_active_subscription"]][0]
         finally:
             lib.close()
-        html = client.get(f"/admin/library/feeds/{feed['id']}/edit").text
+        html = client.get(f"/admin/reader/feeds/{feed['id']}/edit").text
     assert 'name="has_active_subscription" value="1" checked' in html
 
 
@@ -523,7 +523,7 @@ def test_editing_a_feed_without_touching_the_flag_keeps_it(app_env):
             lib.close()
         fid = feed["id"]
 
-        client.post(f"/admin/library/feeds/{fid}/edit", data={
+        client.post(f"/admin/reader/feeds/{fid}/edit", data={
             "name": "Renamed", "xml_url": feed["xml_url"],
             "html_url": feed["html_url"], "section_id": str(feed["section_id"]),
             "has_paywall_cookie": "1" if feed["has_paywall_cookie"] else "",
@@ -541,7 +541,7 @@ def test_editing_a_feed_without_touching_the_flag_keeps_it(app_env):
 
 def test_form_helper_copy_says_it_is_informational(app_env):
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds/new").text
+        html = client.get("/admin/reader/feeds/new").text
     assert "as a note to yourself" in html
     assert "doesn&#x27;t affect fetching" in html or \
            "doesn't affect fetching" in html
@@ -550,7 +550,7 @@ def test_form_helper_copy_says_it_is_informational(app_env):
 
 def test_page_footnote_explains_the_flag(app_env):
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert "<strong>Subscriber</strong> marks whether you currently pay" in html
 
 
@@ -558,7 +558,7 @@ def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
     """Unlike the cookie cell, a checkbox carries meaning in both states, so an
     unchecked box still needs its label in the stacked layout."""
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert '.ff-sub::before{content:"Subscriber"' in html
 
 
@@ -566,10 +566,12 @@ def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
 # Part 2: the New content quadrant's count
 # ---------------------------------------------------------------------------
 
-# DOM order is column-major: left column (new, tags) then right (existing,
-# backup). Matching on `class="..."` rather than the bare class name is what
-# keeps this off the CSS rule block, which writes `.lib-q-new{`.
-_QUADRANT_ORDER = ["lib-q-new", "lib-q-tags", "lib-q-existing", "lib-q-backup"]
+# DOM order is column-major: left column (new, tags) then right (existing).
+# Archive backup's own quadrant moved to the System hub-nav group entirely
+# (Reader route moves, PR 6, 2026-09), so it's no longer one of the three.
+# Matching on `class="..."` rather than the bare class name is what keeps
+# this off the CSS rule block, which writes `.lib-q-new{`.
+_QUADRANT_ORDER = ["lib-q-new", "lib-q-tags", "lib-q-existing"]
 
 
 def _quadrant(html, cls):
@@ -594,17 +596,17 @@ def test_other_quadrants_still_count_their_real_cards(app_env):
 
     lib-q-existing dropped from 4 to 3 tools when "Remove content" was
     retired (PR 4, 2026-09, review-removals removed outright) — see
-    linklib/db.py's articles.in_scope column comment. lib-q-backup
-    independently dropped from 2 tools to 1 (just Archive backup) once the
-    Archive Queue link was removed from that section — 2026-09, PR 3. Both
-    retirements landed in the same window and touched different quadrants,
-    so both reductions apply together here.
+    linklib/db.py's articles.in_scope column comment. Archive backup's own
+    quadrant (lib-q-backup, 1 tool after the Archive Queue link was removed
+    from it in PR 3) is gone from this page entirely as of the Reader route
+    moves (PR 6, 2026-09) — its card moved to the System hub-nav group on
+    /admin, so there's nothing left here to assert a count for.
     """
     with _client(app_env) as client:
         html = client.get("/admin/library").text
     assert "3 tools" in _quadrant(html, "lib-q-existing")
-    assert "1 tool" in _quadrant(html, "lib-q-backup")
     assert "3 tools" in _quadrant(html, "lib-q-tags")
+    assert "lib-q-backup" not in html
 
 
 def test_shared_disclosure_component_has_no_count_override(app_env):

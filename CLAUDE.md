@@ -235,7 +235,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   proxy URLs (`feedly.com/web/...`) are skipped because they require auth. Paywalled
   sources are tagged in `feed.py` (`PAYWALLED_DOMAINS`) and shown with a badge; the
   in-app reader is disabled for them.
-- **Feed management (`/admin/library/feeds`) — the OPML file is now GENERATED from
+- **Feed management (`/admin/reader/feeds`) — the OPML file is now GENERATED from
   `feed_sections`/`feeds`, not hand-edited, and it is no longer the source of truth.**
   Feeds and their sections are managed from an admin page instead of by editing
   `preferred_sites.opml` and deploying. The file survives as a derived cache:
@@ -273,7 +273,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `Library.has_feeds()` is False, so an unseeded DB keeps the pre-migration behavior
   instead of defaulting to "nothing is excluded." (**Retired 2026-09, PR 3, along with
   the Archive Queue itself**: `exclude_from_queue`, the "Read only" checkbox, its
-  `POST /admin/library/feeds/{id}/read-only` route, and `Library.set_feed_excluded`/
+  `POST /admin/reader/feeds/{id}/read-only` route, and `Library.set_feed_excluded`/
   `excluded_feed_urls`/`has_feeds` are all gone from the codebase — see the Archive
   Queue retirement bullet below. The column stays in the schema, frozen at whatever
   value each row last had, same non-destructive-retirement precedent as
@@ -308,7 +308,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `screenshot_is_product`/`field_reviews`, and is what `seed_paywall_cookie_flags`
   migrates from. A boolean also makes pasting a cookie value structurally impossible
   rather than merely discouraged.) Follow-up to the Mostly Metrics finding above: the cookie mechanism works,
-  but nothing on `/admin/library/feeds` showed that a feed depended on one, or which env
+  but nothing on `/admin/reader/feeds` showed that a feed depended on one, or which env
   var to check when it stopped returning full text. The column holds a human-readable
   boolean, rendered as a plain checkbox visually identical to Read only and Subscriber,
   plus a page-level footnote naming `LINKLIB_AUTH_COOKIES` once for the whole page. (An
@@ -550,12 +550,12 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   alongside `/health`, and only that one path — deliberately not a blanket exemption for
   every token-authenticated route (see `webapp/app.py`'s `_canonical_host_redirect`
   docstring). **Lesson carried forward: a green CI/Action run is not verification** — the
-  only way this was caught was checking `/admin/library/backup`'s banner and history table
+  only way this was caught was checking `/admin/library-backup`'s banner and history table
   directly against what actually landed, not trusting an exit code. Two more gaps closed
   in the same phase: (1) every backup attempt, success or failure, now writes a row to the
   new `backup_log` table (`Library.record_backup_attempt`/`list_backup_log`) from inside
   `backup.py` itself, rather than only `print()`ing to stdout where nothing in the app
-  could see it; `/admin/library/backup` reads that table for a status banner (green/amber/
+  could see it; `/admin/library-backup` reads that table for a status banner (green/amber/
   red — "off" and "configured but failing" are deliberately different colors, not
   collapsed into one) and a history table. (2) `POST /admin/backup-now` now returns a real
   `503`/`502` on failure instead of always `200`, so the Action (and `curl -f`) can tell
@@ -572,7 +572,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   persisted in `settings` (`backup_drive_folder_id`) if a prior run created one, or
   creates a folder named "CFO Navigator — Library Backups" in My Drive root on first use.
   `GOOGLE_DRIVE_FOLDER_ID` still overrides this if set — normally left unset now.
-  `/admin/library/backup` shows a live link to whichever folder is currently in use. The
+  `/admin/library-backup` shows a live link to whichever folder is currently in use. The
   old hand-made "Library Backup" folder is abandoned, not deleted or referenced anywhere.
 - **Backup trigger moved from GitHub Actions to a Railway Cron Service (2026-08) — the
   GitHub-Actions dependency is gone entirely.** The GitHub Action above worked, but its
@@ -607,7 +607,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   a handful more — `_canonical_host_redirect`'s docstring, the Archive backup
   admin-tool description, a `backup_log` schema comment in `linklib/db.py`, and
   two test-file docstrings — all describing-the-mechanism prose, no behavior
-  change) and fixed the now-stale `/admin/library/backup` status banner copy
+  change) and fixed the now-stale `/admin/library-backup` status banner copy
   ("Scheduled weekly via GitHub Action…" → describes the daily Railway Cron
   Service and points at its Railway dashboard run history instead of a
   nonexistent in-app "Actions tab" equivalent). Also confirmed `LINKLIB_SAVE_TOKEN`
@@ -2176,7 +2176,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   (synchronous/foreground, wrong for a multi-hour job); and nothing in the
   codebase rate-limits outbound crawling today, so a new ~1.5s delay between
   fetches is a deliberate first, not a reuse. Built as
-  `/admin/library/backfill-content`: a new `articles.content_html` column
+  `/admin/reader/backfill-content`: a new `articles.content_html` column
   (never reusing `content`, which stays plain text — see `_resolve_reader_
   content`, now preferring `content_html` when populated) and a new
   `content_refetch_log` table (shape mirrors `backup_log` — one row per
@@ -2489,7 +2489,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   bad resave of an already-good article never mis-flags it. Clears
   automatically the moment `set_article_content_html` later succeeds for
   that article (a real backfill, or a resave that gets good content).
-  Surfaced as a "Flagged at save" tile on `/admin/library/backfill-content`,
+  Surfaced as a "Flagged at save" tile on `/admin/reader/backfill-content`,
   distinct from the existing Remaining tile (which is every row without
   `content_html` yet — true of the entire corpus by default, and says
   nothing about whether the original save itself looked suspect).
@@ -2505,7 +2505,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   and `count_content_backfill_remaining()` separately exclude the same
   latest-row-`'accepted'` set, so the override is durable against future
   automatic retries too, not just hidden from one admin list.
-  `POST /admin/library/backfill-content/{id}/accept` and `.../unaccept` are
+  `POST /admin/reader/backfill-content/{id}/accept` and `.../unaccept` are
   per-article only — **no bulk/select-all form exists on purpose**, this is
   a one-at-a-time escape hatch, not a backfill mechanism. Undo is fully
   additive (a new `'failure'` row, never deleting the `'accepted'` one), so
@@ -2536,7 +2536,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   procedure reaches for — the exact failure mode this item exists to close.
   Skipping the upload leaves every already-retained good snapshot untouched
   (`prune_old_backups` only ever runs after a successful upload). A new
-  "Pre-backup integrity check" banner on `/admin/library/backup` — coral on
+  "Pre-backup integrity check" banner on `/admin/library-backup` — coral on
   failure (not amber; a blocked backup isn't a routine/expected state),
   seafoam on ok — sits above the existing backup-status banner rather than
   merging into it, since "the backup succeeded" and "the DB is structurally
@@ -6517,8 +6517,8 @@ never reads as something to tap.
   private (`_parse_sitemap_xml`) in the move.
 
   **The `feeds.exclude_from_queue` fallout, retired alongside it**: the
-  per-feed "Read only" checkbox on `/admin/library/feeds`, its
-  `POST /admin/library/feeds/{feed_id}/read-only` route, and
+  per-feed "Read only" checkbox on `/admin/reader/feeds`, its
+  `POST /admin/reader/feeds/{feed_id}/read-only` route, and
   `Library.set_feed_excluded`/`excluded_feed_urls`/`has_feeds` are all gone
   — the checkbox's whole reason to exist was steering `scan_feed_into_queue`
   away from certain feeds, and that scanner no longer exists to steer.
@@ -6625,6 +6625,57 @@ it supersedes the old "`/save` is token-gated" note.
   rather than a separately hand-maintained href list, so updating those
   tuples' hrefs was the whole fix; the detector stayed accurate with no
   separate edit.
+
+- **Reader route moves, PR 6 (2026-09) — five more `/admin/library/*` routes
+  into `/admin/reader/*`, plus the archive-backup card's own move to a
+  different hub-nav group entirely.** Same shape as the Admin URL
+  restructure, group A bullet above — every sub-route (POST targets, nested
+  CRUD, start/status pairs, the manual-review and purge CSV trios) moves
+  with its parent, **no compatibility redirect for any of the six**.
+
+  | Old | New |
+  |---|---|
+  | `/admin/library/feeds` (+ add/edit/delete/section/subscription routes) | `/admin/reader/feeds` |
+  | `/admin/library/backfill-content` (+ start/stop/status, the manual-review CSV trio, the purge CSV trio, accept/unaccept) | `/admin/reader/backfill-content` |
+  | `/admin/library/enrich` (+ `/start`, `/status`) | `/admin/reader/enrich` |
+  | `/admin/library/dedupe` (+ `/remove`, `/not-dupe`, `/remove-older`) | `/admin/reader/dedupe` |
+  | `/admin/library/bulk-delete` (+ `/template.csv`, `/preview`, `/commit`) | `/admin/reader/bulk-delete` |
+  | `/admin/library/backup` (+ `/upload-db`, `/download-db`) | `/admin/library-backup` |
+
+  **`/admin/library-backup` deliberately keeps the word "library" instead of
+  becoming `/admin/reader/backup`** — it snapshots `library.db` in its
+  entirety (Toolbox, accounts, site operations, the game — not just
+  Reader/archive content), so "library" is the accurate name and "reader"
+  would misdescribe the page. This is a real, considered exception, not an
+  inconsistency to "fix" in a later pass. `/admin/backup-now` (the separate
+  token-authed POST trigger the daily Railway Cron Service and RUNBOOK.md's
+  manual curl call) is a different route entirely, was never under
+  `/admin/library/*`, and is untouched here.
+
+  **Tag cleanup (`/admin/library/tags`) and Tagging style
+  (`/admin/library/tag-style`) are deliberately NOT renamed in this PR** —
+  they merge into a single `/admin/reader/tag-management` page in a future
+  PR, so renaming them now would just be renamed again almost immediately.
+  Both stay exactly where they are.
+
+  **The archive-backup card moved hub-nav groups, not just its URL**: it
+  leaves `_LIBRARY_TOOLS` (and `/admin/library`'s own page, which drops
+  from four quadrants to three — see the Phase 6 admin-nav-restructure
+  bullet's own now-superseded "four quadrants" description) and joins the
+  System group's card list on `/admin` instead — a whole-DB snapshot is
+  accounts/health/plumbing, the same kind of thing as Users or Checks, not
+  archive-specific. `webapp.hub_nav_orphans()`/`_hub_nav_all_hrefs()` needed
+  no logic change for the same reason the group A PR's own didn't — both
+  derive their href set from the live tuples, so moving the entry between
+  `_LIBRARY_TOOLS` and `_ADMIN_GROUPS`' System list was the whole fix.
+
+  **RUNBOOK.md rider**: its post-restore validation checklist still named
+  `/admin/library/queue` — the Archive Queue's own admin page, retired
+  outright in 2026-09 PR 3 (see the Archive Queue retirement bullet above)
+  — as a page to spot-check after a restore, a stale reference the group A
+  PR flagged as out of scope at the time. Fixed here since this PR was
+  already touching RUNBOOK.md for the backup-page path anyway: the queue
+  step is removed from the checklist with a note explaining why.
 
 ## Authentication & security
 
@@ -7047,7 +7098,7 @@ instead, off that page — kept for git history, not meant to run again.
   Railway Cron Service (Phase O — originally a GitHub Action, migrated 2026-08;
   see Key architecture decisions above), with retention pruning
   (`linklib.backup.prune_old_backups`), a persistent `backup_log` audit trail, and a
-  status banner + history table on `/admin/library/backup`
+  status banner + history table on `/admin/library-backup`
 
 **Not yet built (from the migration plan):**
 - iOS Share Sheet shortcut

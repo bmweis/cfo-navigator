@@ -78,7 +78,7 @@ def test_checks_run_all_reports_hub_nav_orphans_fail_when_gap_reintroduced(monke
     "/admin",                                        # the hub page itself
     "/admin/tools/software/new",                      # .../new under an already-carded parent
     "/admin/tools/communities/new",                    # same
-    "/admin/library/feeds/new",                        # same
+    "/admin/reader/feeds/new",                        # same
     "/admin/thought-leadership/original/new",                     # same
     "/admin/thought-leadership/third-party/new",                   # same
     "/admin/tools/resources/new",                      # same
@@ -101,7 +101,7 @@ def test_path_param_routes_are_never_flagged():
     # sanity: these routes really do exist and really do have no card, so
     # the exclusion is doing real work, not vacuously true
     real_detail_routes = {
-        "/admin/library/feeds/{feed_id}/edit",
+        "/admin/reader/feeds/{feed_id}/edit",
         "/admin/thought-leadership/original/{item_id}/edit",
         "/admin/thought-leadership/third-party/{item_id}/edit",
         "/admin/tools/communities/{community_id}/profile",

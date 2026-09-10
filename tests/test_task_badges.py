@@ -433,7 +433,7 @@ def test_open_task_counts_reflects_content_backfill_needs(lib):
     aid = lib.upsert(art)
     lib.set_content_check_flag(aid, True, "too-thin")
     counts = tasks.open_task_counts(lib)
-    assert counts["/admin/library/backfill-content"] == 1
+    assert counts["/admin/reader/backfill-content"] == 1
 
 
 def test_open_task_counts_reflects_name_duplicates(lib):

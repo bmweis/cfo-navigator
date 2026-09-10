@@ -212,7 +212,7 @@ def _admin_client(appmod):
 
 def test_enrich_page_shows_never_run_banner(env):
     c = _admin_client(env)
-    r = c.get("/admin/library/enrich")
+    r = c.get("/admin/reader/enrich")
     assert r.status_code == 200
     assert "No run recorded yet." in r.text
 
@@ -223,7 +223,7 @@ def test_enrich_page_shows_success_banner(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/enrich")
+    r = c.get("/admin/reader/enrich")
     assert r.status_code == 200
     assert "succeeded" in r.text
     assert "7/7 enriched" in r.text
@@ -236,7 +236,7 @@ def test_content_backfill_page_shows_failure_banner(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "failed" in r.text
     assert "timeout" in r.text
@@ -251,7 +251,7 @@ def test_content_backfill_page_shows_crashed_banner_when_not_live(env):
     assert env._job_get("content_backfill").get("running") is not True
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "never finished" in r.text
     assert "likely interrupted" in r.text
@@ -268,7 +268,7 @@ def test_content_backfill_page_suppresses_crash_banner_when_job_is_live(env):
     env._job_set("content_backfill", running=True, done=3, total=10, ok=3, failed=0)
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "never finished" not in r.text
     assert "likely interrupted" not in r.text
@@ -284,7 +284,7 @@ def test_enrich_page_suppresses_crash_banner_when_job_is_live(env):
     env._job_set("enrich", running=True, done=1, total=5)
 
     c = _admin_client(env)
-    r = c.get("/admin/library/enrich")
+    r = c.get("/admin/reader/enrich")
     assert r.status_code == 200
     assert "never finished" not in r.text
     assert "still in progress" in r.text

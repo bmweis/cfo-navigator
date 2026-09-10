@@ -33,7 +33,7 @@ doesn't target a folder made by hand in the Drive UI, since the refresh
 token is minted with the narrow `drive.file` scope, which can only see
 files/folders the app created via the API (a hand-made folder 404s no
 matter how correct its id is — see `linklib/backup.py`'s module docstring
-for the full story). `/admin/library/backup` shows a live link to the
+for the full story). `/admin/library-backup` shows a live link to the
 current folder. `GOOGLE_DRIVE_FOLDER_ID`, if set, overrides this and takes
 priority — normally left unset. The override is read fresh on every backup
 attempt (not cached at startup), so setting or clearing it in Railway takes
@@ -41,7 +41,7 @@ effect on the very next attempt — no redeploy needed.
 
 ### Path A — the app is up (normal case)
 
-The app has a built-in restore endpoint: `POST /admin/library/backup/upload-db` validates
+The app has a built-in restore endpoint: `POST /admin/library-backup/upload-db` validates
 the upload is a real library DB, then swaps it onto the volume atomically
 and clears stale WAL/SHM sidecars. **No restart or redeploy is needed** —
 the app opens a fresh DB connection per request, so the very next request
@@ -50,23 +50,23 @@ reads the restored file.
 1. **Snapshot the current state first**, even if it's damaged — it may hold
    saves newer than the Drive snapshot that you'll want to merge back later:
 
-   - Browser: log in as admin → `/admin/library/backup` → **Download library.db**
-     (or hit `/admin/library/backup/download-db` directly).
+   - Browser: log in as admin → `/admin/library-backup` → **Download library.db**
+     (or hit `/admin/library-backup/download-db` directly).
 
 2. **Download the snapshot from Google Drive** you want to restore
    (normally the newest `library-*.db`).
 
-3. **Upload it.** Either use the upload form on `/admin/library/backup` (admin
+3. **Upload it.** Either use the upload form on `/admin/library-backup` (admin
    login), or from a terminal:
 
    ```bash
-   curl -si -X POST "https://bmweis.com/admin/library/backup/upload-db" \
+   curl -si -X POST "https://bmweis.com/admin/library-backup/upload-db" \
         -H "X-Save-Token: $LINKLIB_SAVE_TOKEN" \
         -F "file=@library-YYYYMMDD-HHMMSS.db"
    ```
 
    Expect `HTTP/1.1 303 See Other` with
-   `location: /admin/library/backup?uploaded=<N>` — **N is the article count the
+   `location: /admin/library-backup?uploaded=<N>` — **N is the article count the
    server found in the uploaded file** (it runs
    `SELECT COUNT(*) FROM articles` before swapping anything). Sanity-check
    it: production should be ~1,500+. A `400` means the file didn't parse as
@@ -102,7 +102,9 @@ shell on the volume:
 - [ ] FTS search works (search something specific on `/read?view=saved`, or
       `GET /api/search?q=netsuite` with the token) — the FTS index travels
       inside the DB file, so if the file is good, search is good
-- [ ] `/admin/inbox/contact-submissions`, `/admin/library/queue` load (spot-check non-article tables)
+- [ ] `/admin/inbox/contact-submissions` loads (spot-check non-article tables) — the
+      Archive Queue itself (`/admin/library/queue`) was retired in 2026-09 (PR 3), so
+      there's no longer a queue page to check here
 - [ ] If you restored an older snapshot: diff against the step-1 download
       for member saves / contacts / ask history created since the snapshot,
       and re-add anything worth keeping (article re-saves are idempotent —
@@ -113,7 +115,7 @@ shell on the volume:
       own right away if the `.last_backup` marker on the volume is recent —
       but the daily Railway Cron Service (§7, Phase O) bypasses that
       debounce, so it isn't the only path back to a fresh snapshot.
-- [ ] Confirm that snapshot on `/admin/library/backup` — the status banner
+- [ ] Confirm that snapshot on `/admin/library-backup` — the status banner
       should read green with this restore's timestamp, and the history table's
       top row should show `status=success` with a row count matching what you
       just validated above (not just that the request returned 200).
@@ -168,7 +170,7 @@ passwords are their own (scrypt, in the DB).
      action; only check this if it was ever set as a standalone copy
      instead. Miss it and the cron service starts failing with `401` on
      the next scheduled run, silently, until someone checks that service's
-     Railway run history or `/admin/library/backup`'s status banner shows
+     Railway run history or `/admin/library-backup`'s status banner shows
      a stale "last successful backup."
    - Any personal shell exports / scripts that call `/save`, `/api/search`,
      or `/ask` with `X-Save-Token` or `?token=`.
@@ -247,7 +249,7 @@ email-failure badges — outbound email during the outage will have landed in
 ## 4. Restore rehearsal — procedure and July 2026 record
 
 Rehearse the restore roughly yearly (or after any change to
-`linklib/backup.py` / `/admin/library/backup/upload-db`) so section 1 stays a checklist,
+`linklib/backup.py` / `/admin/library-backup/upload-db`) so section 1 stays a checklist,
 not a theory. The rehearsal never touches production — it's the same code
 paths against scratch files.
 
@@ -264,7 +266,7 @@ paths against scratch files.
    `LINKLIB_DB=.../live.db LINKLIB_SAVE_TOKEN=<anything> uvicorn webapp.app:app --port 8123`
 4. Confirm the pre-restore state through the API
    (`GET /api/search?q=&limit=50&token=…` shows only the live DB's rows).
-5. Restore with section 1's exact curl (`POST /admin/library/backup/upload-db`).
+5. Restore with section 1's exact curl (`POST /admin/library-backup/upload-db`).
 6. Validate: the 303 redirect's `uploaded=<N>` matches the good DB's
    article count; `/api/search` now returns the snapshot's rows (including
    an FTS query that missed before); the stale row is gone; on the file
@@ -278,8 +280,8 @@ paths against scratch files.
 - Snapshot via `snapshot_to_file()` → 233,472-byte self-contained file, no
   WAL sidecar.
 - Pre-restore: API listed 2 rows; FTS query `netsuite` → 0 hits.
-- `POST /admin/library/backup/upload-db` with `X-Save-Token` → `303`,
-  `location: /admin/library/backup?uploaded=5` (count matched the snapshot).
+- `POST /admin/library-backup/upload-db` with `X-Save-Token` → `303`,
+  `location: /admin/library-backup?uploaded=5` (count matched the snapshot).
 - Post-restore, **no restart**: API listed the snapshot's 5 rows; `netsuite`
   → 1 hit; stale row unfindable; `PRAGMA integrity_check` = `ok`; FTS
   self-check passed; `/health` → `{"ok": true}`.
@@ -302,7 +304,7 @@ the check below exists.
 Two places surface it, both fed by the same stored record
 (`authcheck.check_auth_cookies` → `settings.auth_cookie_status`):
 
-- **`/admin/library/feeds`**—the primary surface. With everything healthy
+- **`/admin/reader/feeds`**—the primary surface. With everything healthy
   you see only a compact **Re-check subscriber access** button, nothing else.
   When a cookie has actually gone stale, that button is absorbed into a coral
   **"Subscriber cookie expired"** panel carrying a status line per domain and
@@ -425,7 +427,7 @@ container.
 
 ### 5.4 Verify
 
-1. Open `/admin/library/feeds`.
+1. Open `/admin/reader/feeds`.
 2. Press **Re-check subscriber access** (don't rely on the 12-hour
    auto-refresh—you want a probe against the new value, now).
 3. The domain should flip to **working**, with `full text fetched (N chars)`.
@@ -441,7 +443,7 @@ actually read a full post in that same profile.
 check—not that the cookie failed. `authcheck._recent_post_url` tries the
 OPML feed first, then falls back to the site's sitemap. Both coming up empty
 usually means the feed URL is wrong or the source was down at probe time.
-Check the feed in `/admin/library/feeds`, then re-check. The cookie may well
+Check the feed in `/admin/reader/feeds`, then re-check. The cookie may well
 be fine.
 
 ---
@@ -550,12 +552,12 @@ one-time setup procedure.
    - A successful run's log should show the JSON body from
      `/admin/backup-now` (`Uploaded <name> (...) to Google Drive.`) and
      `HTTP status: 200`, and the run itself should show as succeeded.
-   - Then confirm the backup actually landed: check `/admin/library/backup`
+   - Then confirm the backup actually landed: check `/admin/library-backup`
      for a fresh green banner entry and a new row in the history table with
      a timestamp matching the run, and spot-check the Drive folder link on
      that page shows a new snapshot file.
 7. Once a manual run is confirmed working end-to-end, leave the schedule
-   in place and stop checking it manually — `/admin/library/backup`'s
+   in place and stop checking it manually — `/admin/library-backup`'s
    status banner is the ongoing signal; it goes amber/red if a scheduled
    run stops landing.
 
@@ -565,7 +567,7 @@ one-time setup procedure.
 no dry-run mode — so the manual "Run now" in step 6 above genuinely creates
 one more Drive snapshot. That's expected and harmless (it's the same
 action a manual "Force backup now" click already does from
-`/admin/library/backup`, and `prune_old_backups()` keeps the retained
+`/admin/library-backup`, and `prune_old_backups()` keeps the retained
 snapshot count bounded regardless of how it got there) — don't try to avoid
 it by skipping the manual verification run. If you want to confirm the
 service is wired correctly without touching production data at all, the
@@ -583,13 +585,13 @@ not a new failure mode of its own:
 - **A non-2xx status printed in the run log**: read the response body the
   command echoed — `503` means `GOOGLE_OAUTH_*` isn't configured, `502`
   means the upload itself failed (check the message for the underlying
-  Google API error). Fix per `/admin/library/backup`'s own status banner.
+  Google API error). Fix per `/admin/library-backup`'s own status banner.
 - **The run never started, or the service shows no run history**: check
   the cron schedule is still enabled on the service's Settings tab —
   unlike a GitHub Actions schedule, a Railway cron service doesn't
   auto-disable itself after a period of repo inactivity, but it can be
   paused manually from the dashboard.
-- **The run succeeded (2xx) but `/admin/library/backup` shows nothing
+- **The run succeeded (2xx) but `/admin/library-backup` shows nothing
   new**: this is the exact failure mode §Phase O's investigation found
   with the original GitHub Action (a redirect silently swallowing the
   request) — confirm the Custom Start Command is hitting the Railway

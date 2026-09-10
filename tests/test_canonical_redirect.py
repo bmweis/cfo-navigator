@@ -87,11 +87,11 @@ def test_other_admin_routes_on_legacy_host_still_redirect(appmod):
     """The exemption is scoped to exactly /admin/backup-now, not admin
     routes generally — pins that this stays narrow rather than quietly
     widening."""
-    r = _client(appmod).get("/admin/library/backup",
+    r = _client(appmod).get("/admin/library-backup",
                              headers={"host": "cfo-navigator-production.up.railway.app"},
                              follow_redirects=False)
     assert r.status_code == 301
-    assert r.headers["location"] == "https://bmweis.com/admin/library/backup"
+    assert r.headers["location"] == "https://bmweis.com/admin/library-backup"
 
 
 def test_no_redirect_when_base_is_localhost(monkeypatch):

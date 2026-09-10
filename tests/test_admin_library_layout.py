@@ -51,9 +51,12 @@ def _library_html(appmod):
 
 
 # DOM order is column-major since the two-independent-columns change: left
-# column (new, tags) then right column (existing, backup). Slicing a quadrant
-# means stopping at whichever marker actually follows it, not at a fixed one.
-_QUADRANT_ORDER = ["lib-q-new", "lib-q-tags", "lib-q-existing", "lib-q-backup"]
+# column (new, tags) then right column (existing). Archive backup's own
+# quadrant moved to the System hub-nav group entirely (Reader route moves,
+# PR 6, 2026-09) — this page is three quadrants now, not four. Slicing a
+# quadrant means stopping at whichever marker actually follows it, not at a
+# fixed one.
+_QUADRANT_ORDER = ["lib-q-new", "lib-q-tags", "lib-q-existing"]
 
 
 def _quadrant(html, cls):
@@ -105,20 +108,19 @@ def test_layout_is_two_independent_columns_not_a_coupled_grid(env):
     assert "grid-template-rows" not in html
     assert '.lib-cols{display:flex;gap:28px;align-items:flex-start;}' in html
     assert '.lib-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column' in html
-    for cls in ("lib-q-new", "lib-q-existing", "lib-q-tags", "lib-q-backup"):
+    for cls in ("lib-q-new", "lib-q-existing", "lib-q-tags"):
         assert f'class="{cls}"' in html
 
 
 def test_columns_pair_the_right_quadrants(env):
     """Left: New content then Tag management. Right: Existing archive
-    management then Archive additions & backup."""
+    management (alone — Archive backup moved to the System hub-nav group)."""
     html = _library_html(env)
     cols = html[html.index('class="lib-cols"'):]
     left = cols.index("lib-q-new")
     tags = cols.index("lib-q-tags")
     right = cols.index("lib-q-existing")
-    backup = cols.index("lib-q-backup")
-    assert left < tags < right < backup            # column-major DOM order
+    assert left < tags < right                     # column-major DOM order
 
 
 def test_mobile_resets_align_items_on_the_axis_flip(env):
@@ -133,14 +135,14 @@ def test_mobile_resets_align_items_on_the_axis_flip(env):
 
 
 def test_mobile_collapses_to_one_column_in_reading_order(env):
-    """DOM order is column-major (new, tags, existing, backup) but the required
-    reading order is new, existing, tags, backup — `display:contents` on the
+    """DOM order is column-major (new, tags, existing) but the required
+    reading order is new, existing, tags — `display:contents` on the
     column wrappers plus `order` is what interleaves them."""
     html = _library_html(env)
     assert "@media (max-width:900px)" in html
     assert ".lib-col{display:contents;}" in html
     for cls, order in (("lib-q-new", 1), ("lib-q-existing", 2),
-                       ("lib-q-tags", 3), ("lib-q-backup", 4)):
+                       ("lib-q-tags", 3)):
         assert f".{cls}{{order:{order};}}" in html
 
 
@@ -157,7 +159,7 @@ def test_new_content_quadrant_holds_feeds_card_and_both_accordions(env):
     html = _library_html(env)
     quadrant = _quadrant(html, "lib-q-new")
     assert "New content" in quadrant
-    assert 'href="/admin/library/feeds"' in quadrant
+    assert 'href="/admin/reader/feeds"' in quadrant
     assert "Saving to the archive" in quadrant
     assert "Saving to Read Later instead" in quadrant
     # 5 now: the collapsible quadrant itself plus two bookmarklet + two
@@ -205,16 +207,18 @@ def test_token_warning_is_a_footnote_below_the_accordions(env):
     assert "LINKLIB_SAVE_TOKEN" in quadrant and "LINKLIB_PUBLIC_BASE" in quadrant
 
 
-def test_all_four_quadrants_are_collapsible_and_closed_by_default(env):
-    """Landing on the page shows a tidy 2x2 of four header rows. Native
-    <details> with no `open` attribute."""
+def test_all_three_quadrants_are_collapsible_and_closed_by_default(env):
+    """Landing on the page shows three header rows (Archive backup's own
+    quadrant moved to the System hub-nav group, PR 6). Native <details> with
+    no `open` attribute."""
     html = _library_html(env)
     grid = html[html.index('class="lib-cols"'):]
-    assert grid.count('class="admin-group lib-quad"') == 4
+    assert grid.count('class="admin-group lib-quad"') == 3
     assert 'class="admin-group lib-quad" open' not in grid
     for title in ("New content", "Existing archive management",
-                  "Tag management", "Archive backup"):
+                  "Tag management"):
         assert f">{title}</span>" in grid
+    assert "Archive backup" not in grid
 
 
 def test_quadrants_reuse_the_admin_index_disclosure_component(env):
@@ -268,11 +272,10 @@ def test_nested_capture_accordions_keep_the_item_level_variant(env):
 
 def test_each_quadrant_holds_its_specified_tools(env):
     html = _library_html(env)
-    bounds = [("lib-q-existing", ["/admin/library/backfill-content", "/admin/library/dedupe",
-                                  "/admin/library/bulk-delete"]),
+    bounds = [("lib-q-existing", ["/admin/reader/backfill-content", "/admin/reader/dedupe",
+                                  "/admin/reader/bulk-delete"]),
               ("lib-q-tags", ["/admin/library/tags", "/admin/library/tag-style",
-                              "/admin/library/enrich"]),
-              ("lib-q-backup", ["/admin/library/backup"])]
+                              "/admin/reader/enrich"])]
     for cls, hrefs in bounds:
         start = html.index(f'class="{cls}"')
         rest = html[start + 1:]
@@ -285,7 +288,7 @@ def test_each_quadrant_holds_its_specified_tools(env):
 
 def test_manage_feeds_box_links_to_the_feed_admin_page(env):
     html = _library_html(env)
-    assert 'href="/admin/library/feeds"' in html
+    assert 'href="/admin/reader/feeds"' in html
     assert "Manage feeds" in html
 
 
@@ -293,7 +296,7 @@ def test_manage_feeds_box_reuses_the_page_link_card_style(env):
     """It should be the same _lib_card component as Tag cleanup and the rest,
     not a bespoke box — same surface, border, radius, and trailing arrow."""
     html = _library_html(env)
-    card_start = html.index('href="/admin/library/feeds"')
+    card_start = html.index('href="/admin/reader/feeds"')
     card = html[card_start - 200:card_start + 700]
     assert "border-radius:14px" in card
     assert "&rarr;" in card
@@ -304,3 +307,26 @@ def test_manage_feeds_box_is_admin_only(env):
     anon = TestClient(env.app)
     resp = anon.get("/admin/library", follow_redirects=False)
     assert resp.status_code in (302, 303, 307)
+
+
+def test_archive_backup_card_moved_to_system_not_here(env):
+    """Reader route moves (PR 6, 2026-09): Archive backup's card left this
+    page entirely for the System hub-nav group on /admin. /admin/library no
+    longer links to it, and /admin now carries it (as a System card, not a
+    Library one)."""
+    html = _library_html(env)
+    assert "/admin/library-backup" not in html
+    assert "lib-q-backup" not in html
+    # A short prose pointer to the card's new home is fine (and present) —
+    # what must be gone is the card/quadrant itself, not every mention of
+    # the words "Archive backup".
+    assert "moved to the System group" in html
+
+    with _admin_client(env) as client:
+        admin_html = client.get("/admin").text
+    assert 'href="/admin/library-backup"' in admin_html
+    assert "Archive backup" in admin_html
+    # It's under System, not Library — /admin/library itself is a plain
+    # Library link card there, with no backup href attached to it.
+    system_start = admin_html.index(">System</span>")
+    assert admin_html.index('href="/admin/library-backup"') > system_start

@@ -263,7 +263,7 @@ def _admin_client(appmod):
 def test_export_route_requires_auth(env):
     from fastapi.testclient import TestClient
     c = TestClient(env.app)
-    r = c.get("/admin/library/backfill-content/purge/export.csv", follow_redirects=False)
+    r = c.get("/admin/reader/backfill-content/purge/export.csv", follow_redirects=False)
     assert r.status_code in (302, 303)
 
 
@@ -273,7 +273,7 @@ def test_export_route_lists_candidates(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content/purge/export.csv")
+    r = c.get("/admin/reader/backfill-content/purge/export.csv")
     assert r.status_code == 200
     assert f"{aid}," in r.text
     assert "confirm_purge" in r.text
@@ -282,7 +282,7 @@ def test_export_route_lists_candidates(env):
 def test_preview_route_requires_auth(env):
     from fastapi.testclient import TestClient
     c = TestClient(env.app)
-    r = c.post("/admin/library/backfill-content/purge/import/preview",
+    r = c.post("/admin/reader/backfill-content/purge/import/preview",
                files={"file": ("p.csv", b"article_id,confirm_purge\n1,yes", "text/csv")})
     assert r.status_code == 401
 
@@ -294,7 +294,7 @@ def test_preview_route_shows_confirmed_rows_and_typed_count_field(env):
 
     c = _admin_client(env)
     csv_body = f"article_id,confirm_purge\n{aid},yes".encode()
-    r = c.post("/admin/library/backfill-content/purge/import/preview",
+    r = c.post("/admin/reader/backfill-content/purge/import/preview",
               files={"file": ("p.csv", csv_body, "text/csv")})
     assert r.status_code == 200
     assert "Confirmed for deletion (1)" in r.text
@@ -312,7 +312,7 @@ def test_commit_route_requires_matching_typed_count(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post("/admin/library/backfill-content/purge/import/commit",
+    r = c.post("/admin/reader/backfill-content/purge/import/commit",
               data={"article_id": [str(aid)], "confirm_count": "2"}, follow_redirects=False)
     assert r.status_code == 303
     assert "did not match" in unquote(r.headers["location"])
@@ -328,7 +328,7 @@ def test_commit_route_deletes_when_count_matches(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post("/admin/library/backfill-content/purge/import/commit",
+    r = c.post("/admin/reader/backfill-content/purge/import/commit",
               data={"article_id": [str(aid)], "confirm_count": "1"}, follow_redirects=False)
     assert r.status_code == 303
     assert "Purged 1 article" in unquote(r.headers["location"])
@@ -353,7 +353,7 @@ def test_commit_route_logs_archive_audit_for_a_real_admin(env):
     c = TestClient(env.app, raise_server_exceptions=True)
     c.post("/login", data={"username": "realadmin", "password": "realpass"}, follow_redirects=False)
 
-    r = c.post("/admin/library/backfill-content/purge/import/commit",
+    r = c.post("/admin/reader/backfill-content/purge/import/commit",
               data={"article_id": [str(aid)], "confirm_count": "1"}, follow_redirects=False)
     assert r.status_code == 303
 
@@ -374,7 +374,7 @@ def test_commit_route_skips_article_no_longer_a_candidate(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post("/admin/library/backfill-content/purge/import/commit",
+    r = c.post("/admin/reader/backfill-content/purge/import/commit",
               data={"article_id": [str(aid)], "confirm_count": "1"}, follow_redirects=False)
     assert r.status_code == 303
     assert "Purged 0 article" in unquote(r.headers["location"])
@@ -391,7 +391,7 @@ def test_commit_route_enforces_per_run_cap_even_on_a_hand_crafted_post(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post("/admin/library/backfill-content/purge/import/commit",
+    r = c.post("/admin/reader/backfill-content/purge/import/commit",
               data={"article_id": ids, "confirm_count": str(len(ids))}, follow_redirects=False)
     assert r.status_code == 303
     assert "per-run cap" in unquote(r.headers["location"])
@@ -413,7 +413,7 @@ def test_commit_route_aborts_if_pre_purge_backup_fails(env, monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Drive unreachable")))
 
     c = _admin_client(env)
-    r = c.post("/admin/library/backfill-content/purge/import/commit",
+    r = c.post("/admin/reader/backfill-content/purge/import/commit",
               data={"article_id": [str(aid)], "confirm_count": "1"}, follow_redirects=False)
     assert r.status_code == 303
     assert "Pre-purge backup failed" in unquote(r.headers["location"])
@@ -429,7 +429,7 @@ def test_admin_page_shows_purge_section_and_candidate_count(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "Purge articles (1 candidate)" in r.text
-    assert 'action="/admin/library/backfill-content/purge/import/preview"' in r.text
+    assert 'action="/admin/reader/backfill-content/purge/import/preview"' in r.text

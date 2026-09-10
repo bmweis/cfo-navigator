@@ -1,4 +1,4 @@
-"""Per-domain subscriber-cookie health summary on /admin/library/feeds.
+"""Per-domain subscriber-cookie health summary on /admin/reader/feeds.
 
 Before this, two of the three states rendered nothing at all: the page only
 showed a panel when `stale_domains()` was non-empty, and that returns domains
@@ -126,7 +126,7 @@ def _rows(html):
 def test_each_state_gets_its_own_colour_and_label(app_env):
     _seed_status(app_env)
     with _client(app_env) as client:
-        rows = _rows(client.get("/admin/library/feeds").text)
+        rows = _rows(client.get("/admin/reader/feeds").text)
 
     by_dom = {r["domain"]: r for r in rows}
     assert len(rows) == 3
@@ -147,7 +147,7 @@ def test_working_and_inconclusive_now_render_at_all(app_env):
     invisible."""
     _seed_status(app_env, mostly=True, strat=True, public=None)
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert "Subscriber cookie expired" not in html      # nothing is expired
     rows = _rows(html)
     assert {r["state"] for r in rows} == {"working", "inconclusive"}
@@ -158,7 +158,7 @@ def test_a_stale_but_passing_check_stays_green(app_env):
     _seed_status(app_env, mostly=True, strat=True, public=True,
                  hours=(11.5, 11.5, 11.5))
     with _client(app_env) as client:
-        rows = _rows(client.get("/admin/library/feeds").text)
+        rows = _rows(client.get("/admin/reader/feeds").text)
     assert all(r["colour"] == "#15803D" for r in rows)
     assert all(r["state"] == "working" for r in rows)
     assert all(r["age"].endswith("ago") for r in rows)
@@ -168,7 +168,7 @@ def test_a_never_checked_domain_reads_inconclusive(app_env):
     """No stored record at all — the panel must still render a row rather than
     omit the domain silently."""
     with _client(app_env) as client:
-        rows = _rows(client.get("/admin/library/feeds").text)
+        rows = _rows(client.get("/admin/reader/feeds").text)
     assert len(rows) == 3
     assert all(r["state"] == "inconclusive" for r in rows)
     assert all(r["colour"] == "#CA8A04" for r in rows)
@@ -182,8 +182,8 @@ def test_the_result_survives_a_reload(app_env):
     """It reads the stored record, so it is not a flash message."""
     _seed_status(app_env)
     with _client(app_env) as client:
-        first = _rows(client.get("/admin/library/feeds").text)
-        second = _rows(client.get("/admin/library/feeds").text)
+        first = _rows(client.get("/admin/reader/feeds").text)
+        second = _rows(client.get("/admin/reader/feeds").text)
     assert first == second
     assert {r["state"] for r in first} == {"working", "expired", "inconclusive"}
 
@@ -191,7 +191,7 @@ def test_the_result_survives_a_reload(app_env):
 def test_relative_age_is_shown_per_domain(app_env):
     _seed_status(app_env, hours=(3, 5, 9))
     with _client(app_env) as client:
-        by_dom = {r["domain"]: r for r in _rows(client.get("/admin/library/feeds").text)}
+        by_dom = {r["domain"]: r for r in _rows(client.get("/admin/reader/feeds").text)}
     assert by_dom["mostlymetrics.com"]["age"] == "3h ago"
     assert by_dom["stratechery.com"]["age"] == "5h ago"
     assert by_dom["blog.publiccomps.com"]["age"] == "9h ago"
@@ -206,7 +206,7 @@ def test_the_panel_holds_no_checkboxes_and_no_seafoam(app_env):
     health. A dot, not a checkbox, and none of the checkbox's accent colour."""
     _seed_status(app_env)
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     panel = _panel_markup(html)
     assert panel.count('class="ck-row"') == 3
     assert "<input" not in panel
@@ -218,7 +218,7 @@ def test_the_expired_panel_no_longer_repeats_the_domains(app_env):
     the part the summary cannot carry, which is how to fix it."""
     _seed_status(app_env, mostly=True, strat=False, public=None)
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     i = html.index("Subscriber cookie expired")
     coral = html[i:html.index("</div>", html.index("</ol>", i))]
     for dom in DOMAINS:
@@ -229,7 +229,7 @@ def test_the_expired_panel_no_longer_repeats_the_domains(app_env):
 def test_the_panel_sits_between_the_header_and_the_feed_table(app_env):
     _seed_status(app_env)
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert html.index('class="ff-head"') < html.index('class="ck-panel"')
     assert html.index('class="ck-panel"') < html.index('class="ff-table"')
 
@@ -251,7 +251,7 @@ def test_nothing_renders_when_no_cookies_are_configured(monkeypatch, tmp_path):
     importlib.reload(appmod)
 
     with _client(appmod) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert '<div class="ck-panel"' not in html   # the CSS rule is always emitted
     assert "Re-check subscriber access" not in html
 
@@ -291,7 +291,7 @@ def test_the_state_word_is_not_tinted_amber(app_env):
     the word stays readable ink."""
     _seed_status(app_env)
     with _client(app_env) as client:
-        panel = _panel_markup(client.get("/admin/library/feeds").text)
+        panel = _panel_markup(client.get("/admin/reader/feeds").text)
     assert 'class="ck-state" style="color:' not in panel
     assert "#CA8A04" in panel        # still present, on the dot
 
@@ -300,7 +300,7 @@ def test_the_red_reuses_the_destructive_action_value(app_env):
     """One red sitewide: the same #b91c1c as Delete/Reject, not a second red."""
     _seed_status(app_env, mostly=True, strat=False, public=True)
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
+        html = client.get("/admin/reader/feeds").text
     assert "#b91c1c" in _panel_markup(html)
     # It is the same value the Remove buttons already use on this page.
     assert html.count("#b91c1c") > 1

@@ -183,7 +183,7 @@ def _admin_client(appmod):
 def test_accept_route_requires_auth(env):
     from fastapi.testclient import TestClient
     c = TestClient(env.app)
-    r = c.post("/admin/library/backfill-content/1/accept", follow_redirects=False)
+    r = c.post("/admin/reader/backfill-content/1/accept", follow_redirects=False)
     assert r.status_code in (302, 303, 401)
     assert r.status_code != 200
 
@@ -195,7 +195,7 @@ def test_accept_route_accepts_and_redirects(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post(f"/admin/library/backfill-content/{aid}/accept", follow_redirects=False)
+    r = c.post(f"/admin/reader/backfill-content/{aid}/accept", follow_redirects=False)
     assert r.status_code == 303
 
     lib = env._lib()
@@ -211,7 +211,7 @@ def test_unaccept_route_reverses(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.post(f"/admin/library/backfill-content/{aid}/unaccept", follow_redirects=False)
+    r = c.post(f"/admin/reader/backfill-content/{aid}/unaccept", follow_redirects=False)
     assert r.status_code == 303
 
     lib = env._lib()
@@ -226,9 +226,9 @@ def test_admin_page_shows_accept_button_on_manual_review_row(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
-    assert f'/admin/library/backfill-content/{aid}/accept' in r.text
+    assert f'/admin/reader/backfill-content/{aid}/accept' in r.text
     assert "Accept as final" in r.text
 
 
@@ -240,8 +240,8 @@ def test_admin_page_shows_accepted_section_with_undo(env):
     lib.close()
 
     c = _admin_client(env)
-    r = c.get("/admin/library/backfill-content")
+    r = c.get("/admin/reader/backfill-content")
     assert r.status_code == 200
     assert "Accepted as final" in r.text
-    assert f'/admin/library/backfill-content/{aid}/unaccept' in r.text
+    assert f'/admin/reader/backfill-content/{aid}/unaccept' in r.text
     assert "Undo" in r.text

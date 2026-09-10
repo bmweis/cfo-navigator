@@ -136,7 +136,7 @@ Notes on the edges:
   unchanged and still fire opportunistically as a harmless bonus trigger.
   Every attempt from either path — success or failure — is logged to the
   `backup_log` table (see the Site operations table below) and surfaced on
-  `/admin/library/backup`'s status banner + history table; the cron
+  `/admin/library-backup`'s status banner + history table; the cron
   service's own run history in the Railway dashboard is a second,
   independent signal that catches the case where the site itself is
   unreachable and there's no in-app record at all.
@@ -1843,15 +1843,15 @@ from the public page. Not editable via the admin CRUD.
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
 | `contact_audit_log` | Same shape for contact deletions — kept separate so `item_id` is never ambiguous about which table it references. | as above, `item_id` → `contacts.id` |
-| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily Railway Cron Service, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled cron run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. A backup skipped because the pre-backup integrity check failed (durability audit item 2, see `integrity_check_log` below) also logs a `'failure'` row here, `error` prefixed `"Backup skipped — integrity check failed: ..."`, so the existing status banner surfaces it without a second banner-reading code path. **Failure-logging completeness audit (2026-08, post-Railway-Cron-migration):** the "Drive not configured" path used to be the one exception to "every attempt is logged" — `backup_now()` raised immediately on `not is_configured()` with no `_log_attempt` call, and `backup_now_route()` in `webapp/app.py` had its own separate pre-check that returned a `503` without ever calling `backup_now()` at all, so this specific failure never left a `backup_log` row from either code path. A pre-existing test explicitly asserted this was intentional ("not being configured isn't a real attempt"), reasoning that the status banner's own live `is_configured()` check already surfaces it — true for the banner, but it left the history table below it completely silent for the entire span of a misconfiguration (e.g. a lapsed OAuth grant that keeps the daily cron pinging a broken instance for days with no trace anywhere but Railway's own run log). Reversed: `backup_now()` now logs this path too, matching its own docstring's contract, and `backup_now_route()` was simplified to always call `backup_now()` (removing its separate pre-check) so there's one logging code path instead of two divergent ones — the route now infers its 503-vs-502 response purely from re-checking `is_configured()` in the `except` block, after the failure is already logged. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
-| `integrity_check_log` | Durability audit item 2 (elevated, 2026-08) — one row per `linklib.backup.check_integrity()` run, shape mirrors `backup_log` exactly. Nothing previously ran `PRAGMA integrity_check` against the live DB; corruption would only ever have surfaced at restore time, by which point it would already be baked into every retained snapshot. `check_integrity()` runs `PRAGMA integrity_check` plus the FTS5 self-check (`INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')` — the exact command RUNBOOK.md §4's restore rehearsal already runs by hand) against the live DB, on the same cadence as the backup itself, immediately before every snapshot. **A failure blocks that night's backup upload** (see `backup_now()`'s docstring for the full "block vs. upload-and-flag" reasoning) rather than uploading a possibly-corrupt snapshot anyway. Read by the "Pre-backup integrity check" status banner on `/admin/library/backup`, which sits above the existing backup-status banner — deliberately a separate banner, since "the backup succeeded" and "the DB is structurally sound" are two different facts a single banner would conflate. | `status` (`'ok'`\|`'failure'`), `detail` (the failing `PRAGMA integrity_check` row text, or the FTS5 self-check's exception text; `'ok'` on success) |
-| `job_run_log` | Durability audit item 3 (2026-08) — durable start/finish record for `_JOB_STATE`-backed background jobs (re-enrich, Reader content backfill; the Historical sweep job that used to write the `'backfill'` job_name here was retired along with the Archive Queue itself, 2026-09, PR 3 — the job_name value is kept below as a historical/test pin, not a live job), shape mirrors `backup_log`/`integrity_check_log`. `_JOB_STATE` (`webapp/app.py`, an in-process dict) is unchanged and still owns LIVE in-request progress — this table is written only twice per run (`Library.start_job_run` at the top of each job function, `Library.finish_job_run` at every exit path, including a deliberate stop) and exists purely so a Railway redeploy or crash doesn't erase whether a job last succeeded, failed, or ever ran. Read by `_job_run_banner()`, a shared "last run: outcome, N ago" banner rendered on each live job's own admin-page section (`/admin/library/enrich`, `/admin/library/backfill-content`) — same green/amber/coral posture as the backup/integrity banners. A row stuck at `status='running'` with an empty `finished_at` is exactly what a crash mid-run looks like, and is called out as such rather than shown as live progress — **but only when nothing live actually corresponds to it** (2026-08 wrap-up sprint item 3 fix): `_job_run_banner()` originally rendered the crash interpretation for ANY open row, so it showed "never finished — likely interrupted by a deploy or crash" directly above the same page's own genuinely-in-progress status panel whenever a job happened to still be running, confirmed in production twice. Fixed by checking `_job_get(job_name)["running"]` before assuming an open row means a crash — when the job is actually live, the open row IS that live run, and the banner renders a plain in-progress line instead. | `job_name` (`'enrich'`\|`'backfill'`\|`'content_backfill'`), `status` (`'running'`\|`'success'`\|`'failure'`\|`'stopped'`), `summary` (short human-readable counts, e.g. `'42/50 succeeded'`), `error` (failure only), `started_at`, `finished_at` (`''` while running) |
+| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily Railway Cron Service, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled cron run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library-backup`. A backup skipped because the pre-backup integrity check failed (durability audit item 2, see `integrity_check_log` below) also logs a `'failure'` row here, `error` prefixed `"Backup skipped — integrity check failed: ..."`, so the existing status banner surfaces it without a second banner-reading code path. **Failure-logging completeness audit (2026-08, post-Railway-Cron-migration):** the "Drive not configured" path used to be the one exception to "every attempt is logged" — `backup_now()` raised immediately on `not is_configured()` with no `_log_attempt` call, and `backup_now_route()` in `webapp/app.py` had its own separate pre-check that returned a `503` without ever calling `backup_now()` at all, so this specific failure never left a `backup_log` row from either code path. A pre-existing test explicitly asserted this was intentional ("not being configured isn't a real attempt"), reasoning that the status banner's own live `is_configured()` check already surfaces it — true for the banner, but it left the history table below it completely silent for the entire span of a misconfiguration (e.g. a lapsed OAuth grant that keeps the daily cron pinging a broken instance for days with no trace anywhere but Railway's own run log). Reversed: `backup_now()` now logs this path too, matching its own docstring's contract, and `backup_now_route()` was simplified to always call `backup_now()` (removing its separate pre-check) so there's one logging code path instead of two divergent ones — the route now infers its 503-vs-502 response purely from re-checking `is_configured()` in the `except` block, after the failure is already logged. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
+| `integrity_check_log` | Durability audit item 2 (elevated, 2026-08) — one row per `linklib.backup.check_integrity()` run, shape mirrors `backup_log` exactly. Nothing previously ran `PRAGMA integrity_check` against the live DB; corruption would only ever have surfaced at restore time, by which point it would already be baked into every retained snapshot. `check_integrity()` runs `PRAGMA integrity_check` plus the FTS5 self-check (`INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')` — the exact command RUNBOOK.md §4's restore rehearsal already runs by hand) against the live DB, on the same cadence as the backup itself, immediately before every snapshot. **A failure blocks that night's backup upload** (see `backup_now()`'s docstring for the full "block vs. upload-and-flag" reasoning) rather than uploading a possibly-corrupt snapshot anyway. Read by the "Pre-backup integrity check" status banner on `/admin/library-backup`, which sits above the existing backup-status banner — deliberately a separate banner, since "the backup succeeded" and "the DB is structurally sound" are two different facts a single banner would conflate. | `status` (`'ok'`\|`'failure'`), `detail` (the failing `PRAGMA integrity_check` row text, or the FTS5 self-check's exception text; `'ok'` on success) |
+| `job_run_log` | Durability audit item 3 (2026-08) — durable start/finish record for `_JOB_STATE`-backed background jobs (re-enrich, Reader content backfill; the Historical sweep job that used to write the `'backfill'` job_name here was retired along with the Archive Queue itself, 2026-09, PR 3 — the job_name value is kept below as a historical/test pin, not a live job), shape mirrors `backup_log`/`integrity_check_log`. `_JOB_STATE` (`webapp/app.py`, an in-process dict) is unchanged and still owns LIVE in-request progress — this table is written only twice per run (`Library.start_job_run` at the top of each job function, `Library.finish_job_run` at every exit path, including a deliberate stop) and exists purely so a Railway redeploy or crash doesn't erase whether a job last succeeded, failed, or ever ran. Read by `_job_run_banner()`, a shared "last run: outcome, N ago" banner rendered on each live job's own admin-page section (`/admin/reader/enrich`, `/admin/reader/backfill-content`) — same green/amber/coral posture as the backup/integrity banners. A row stuck at `status='running'` with an empty `finished_at` is exactly what a crash mid-run looks like, and is called out as such rather than shown as live progress — **but only when nothing live actually corresponds to it** (2026-08 wrap-up sprint item 3 fix): `_job_run_banner()` originally rendered the crash interpretation for ANY open row, so it showed "never finished — likely interrupted by a deploy or crash" directly above the same page's own genuinely-in-progress status panel whenever a job happened to still be running, confirmed in production twice. Fixed by checking `_job_get(job_name)["running"]` before assuming an open row means a crash — when the job is actually live, the open row IS that live run, and the banner renders a plain in-progress line instead. | `job_name` (`'enrich'`\|`'backfill'`\|`'content_backfill'`), `status` (`'running'`\|`'success'`\|`'failure'`\|`'stopped'`), `summary` (short human-readable counts, e.g. `'42/50 succeeded'`), `error` (failure only), `started_at`, `finished_at` (`''` while running) |
 
 ### Feed subscriptions
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `feed_sections` | The subscription list's top-level groups, one per OPML folder ("News", "Blogs", "Substacks", …). Rendered as the Reader's Sources tree headings and as the section dropdown on `/admin/library/feeds`. **Pure grouping — sections carry no settings of their own.** | `name` (unique), `display_order` |
+| `feed_sections` | The subscription list's top-level groups, one per OPML folder ("News", "Blogs", "Substacks", …). Rendered as the Reader's Sources tree headings and as the section dropdown on `/admin/reader/feeds`. **Pure grouping — sections carry no settings of their own.** | `name` (unique), `display_order` |
 | `feeds` | One row per RSS/Atom subscription. | `xml_url` (**the natural key**, unique — the same feed can't be subscribed twice; **stored and regenerated verbatim**, see §4), `html_url` (the publication's own site: what `sources.preferred_domains` turns into FP&A Buddy's web-search allowlist), `section_id` (FK → `feed_sections`), `name` (the label shown in the Reader), `exclude_from_queue` (**RETIRED, frozen not dropped (2026-09, PR 3)** — used to mean "read in the Reader, never proposed into the archive queue," replacing the retired `QUEUE_EXCLUDE_CATEGORIES` name-matched env var; the Archive Queue itself, and every read/write path for this column, is gone — see the `library_queue` row above), `has_paywall_cookie` (frozen historical value as of 2026-08 — the admin checkbox that wrote it was replaced with a computed live indicator, `extract.has_configured_cookie`; nothing reads this column going forward, same retirement as `paywall_cookie_note`; see §4), `paywall_cookie_note` (retired free-text predecessor, frozen; see §4), `has_active_subscription` (`1` = Brian currently pays for this source — **informational only, nothing reads it**; see §4) |
 
 These two tables are the source of truth; **`preferred_sites.opml` is a derived
@@ -4270,7 +4270,7 @@ pending, 0 member submissions ever, dormant for months — see
   `Library.set_content_check_flag` and writes a `content_refetch_log` row
   (`source='save'`) on failure. Never blocks or rejects the save; a flagged
   row simply enters the same backfill/manual-review scope with a real reason
-  attached, surfaced as its own tile on `/admin/library/backfill-content`,
+  attached, surfaced as its own tile on `/admin/reader/backfill-content`,
   instead of looking indistinguishable from a good save. Then enriches: one
   Haiku call
   (`linklib/enrich.py`) generates a summary and tags biased toward the
@@ -4681,7 +4681,7 @@ phase is that re-fetch, run as a resumable, rate-limited, observable admin batch
   success or failure, with a `reason` column so failures are groupable/countable by
   cause on the admin page. A re-run after a stop or a crash adds new rows rather than
   overwriting old ones, so a flaky source's full history stays visible.
-- **Admin job**: `/admin/library/backfill-content` — same background-thread/
+- **Admin job**: `/admin/reader/backfill-content` — same background-thread/
   `_JOB_STATE["content_backfill"]` pattern as re-enrich (see that section above),
   plus two things it doesn't have (the Historical sweep job this used to also be
   compared against was retired along with the Archive Queue itself, 2026-09, PR 3):
@@ -4704,9 +4704,9 @@ phase is that re-fetch, run as a resumable, rate-limited, observable admin batch
     attempt per article only, so a since-fixed failure doesn't keep inflating the tally)
     and a recent-attempts log table.
 
-### Dashboard clarity pass (`/admin/library/backfill-content`, 2026-08)
+### Dashboard clarity pass (`/admin/reader/backfill-content`, 2026-08)
 
-`/admin/library/backfill-content`'s seven summary tiles accumulated across six PRs
+`/admin/reader/backfill-content`'s seven summary tiles accumulated across six PRs
 (the original backfill feature, the Medium fetch tier, and PRs #351-354's durability
 sprint) with no single place stating how they actually relate. Brian correctly
 inferred six of seven relationships by reading the copy, but one real question
@@ -4973,7 +4973,7 @@ than a mechanism whose success depends on today's outage clearing:
 - **`content_refetch_log.source`** (new column, migration, default `'direct'`) —
   distinguishes a Wayback-sourced success from a direct-fetch success, since a
   Wayback-archived version can be stale or differ from what the live page shows
-  today. `/admin/library/backfill-content` shows a "via Wayback" badge on the
+  today. `/admin/reader/backfill-content` shows a "via Wayback" badge on the
   relevant log rows and a count of how many currently-structured articles are
   running on an archived copy (`Library.count_wayback_content()`, same latest-
   attempt-per-article de-dupe as the failure-count methods).
@@ -4989,7 +4989,7 @@ than a mechanism whose success depends on today's outage clearing:
   flagged explicitly rather than silently shipped as "confirmed fine."
 - **Verification of "real content actually comes back" is deferred to Brian**, via
   the backfill tool's own existing small-batch-first convention
-  (`/admin/library/backfill-content`, Limit field), once archive.org's rate limiting
+  (`/admin/reader/backfill-content`, Limit field), once archive.org's rate limiting
   clears — not something this PR claims to have confirmed itself. This was an
   explicit, discussed trade-off (see CLAUDE.md's matching bullet for the full
   decision point), not an oversight.
@@ -5172,7 +5172,7 @@ above for how it composes with `_manual_review_article_ids()` and the backfill-s
 exclusions for free, via the same latest-attempt-per-article idiom every other query in
 this table already uses). The prior failure `reason` is copied onto the accepted row for
 display and so `unaccept_article_content()` can restore it without a second query.
-`POST /admin/library/backfill-content/{article_id}/accept` and `.../unaccept` are the two
+`POST /admin/reader/backfill-content/{article_id}/accept` and `.../unaccept` are the two
 routes, both **per-article only — deliberately no bulk/select-all form**, since this is a
 one-at-a-time override for a specific false positive, not a backfill mechanism. The admin
 page gained a new "Accepted as final" section (mirrors "Needs manual review") with an Undo
@@ -5227,7 +5227,7 @@ A permanent-deletion escape hatch for the narrow set of articles with genuinely 
 useful saved — `Library.articles_eligible_for_purge()` returns articles whose plain-text
 `content` is under `extract._MIN_CONTENT_WORDS` AND whose `content_html` was never
 backfilled either, tagged with `content_check_reason` (durability audit item 1) when set.
-**Deliberately not the same set as the Remaining tile** on `/admin/library/backfill-content`
+**Deliberately not the same set as the Remaining tile** on `/admin/reader/backfill-content`
 — Remaining is every article without `content_html` yet, the vast majority of which have
 perfectly good plain-text content just waiting on a structure-backfill pass; purge
 candidates are the much narrower "nothing was ever really saved for this URL" set.
@@ -5379,7 +5379,7 @@ bullets for that history.
   on a Medium-tier success row in the attempts log.
 - **`host_suffixes` scoping** (`Library.articles_needing_content_backfill()`,
   new optional parameter, plus a "Scope to host(s)" text input on
-  `/admin/library/backfill-content`): narrows a backfill run to articles whose
+  `/admin/reader/backfill-content`): narrows a backfill run to articles whose
   URL host matches one of the given suffixes and, for those matching hosts
   ONLY, bypasses the needs-manual-review exclusion — most of the point of
   scoping a run to a specific host is re-attempting exactly the articles that
@@ -5701,7 +5701,22 @@ backup") is explicitly no longer required.
 - **Lower-left** — Tag management (unchanged content).
 - **Lower-right** — Archive additions & backup (unchanged content).
 
-`/admin/library/feeds` remains a `_LIBRARY_TOOLS` entry (so the Admin hub's
+**Superseded (2026-09, Reader route moves, PR 6):** the "Lower-right"
+quadrant above (Archive backup) no longer exists on this page at all —
+its card moved out of `_LIBRARY_TOOLS` entirely and into the System
+hub-nav group on `/admin` (now at `/admin/library-backup`, a deliberate
+exception to the `/admin/reader/*` rename below — see that section's own
+note on why the backup page keeps the word "library"). `/admin/library`
+is three quadrants now (New content, Existing archive management, Tag
+management), not four; the two-independent-columns layout described
+above is otherwise unchanged, just with the right column now holding a
+single quadrant instead of two stacked ones. The five other
+`/admin/library/*` paths this section names (`feeds`, `backfill-content`,
+`dedupe`, `bulk-delete`, `enrich`) moved to `/admin/reader/*` in the same
+PR — the prose below is updated for the new paths throughout, but
+predates the quadrant-count change.
+
+`/admin/reader/feeds` remains a `_LIBRARY_TOOLS` entry (so the Admin hub's
 Library card counts toward its badge support); only where its card renders
 changed. (The exact tool count named here — 9 at the time of this phase — has
 since drifted with later additions/retirements; see `_LIBRARY_TOOLS` in
@@ -5932,6 +5947,60 @@ both already derive their href set directly from `_ADMIN_GROUPS`/
 `_LIBRARY_TOOLS`/`_FPA_BUDDY_TOOLS`/`_SOFTWARE_TOOLS` rather than
 maintaining a separate hand-written union, so updating those tuples' hrefs
 was the entire fix — the orphan detector stayed accurate automatically.
+
+### Reader route moves, PR 6 (2026-09)
+
+Five admin routes moved from `/admin/library/*` into `/admin/reader/*`, plus
+one relocation of a hub-nav card between groups — same "full cutover, no
+redirects" convention as the Admin URL restructure group A PR above, and the
+same rule for a hub-nav card following its URL. No new pages, no schema
+changes.
+
+| Old | New |
+|---|---|
+| `/admin/library/feeds` (+ `/new`, `/{id}/edit`, `/{id}/delete`, `/{id}/section`, `/{id}/subscription`, `/sections/new`, `/sections/{id}/rename`, `/sections/{id}/delete`) | `/admin/reader/feeds` |
+| `/admin/library/backfill-content` (+ `/start`, `/stop`, `/status`, `/wayback-429/start`, `/wayback-429/stop`, `/wayback-429/status`, `/{article_id}/accept`, `/{article_id}/unaccept`, `/manual-review/export.csv`, `/manual-review/import/preview`, `/manual-review/import/commit`, `/purge/export.csv`, `/purge/import/preview`, `/purge/import/commit`) | `/admin/reader/backfill-content` |
+| `/admin/library/enrich` (+ `/start`, `/status`) | `/admin/reader/enrich` |
+| `/admin/library/dedupe` (+ `/remove`, `/not-dupe`, `/remove-older`) | `/admin/reader/dedupe` |
+| `/admin/library/bulk-delete` (+ `/template.csv`, `/preview`, `/commit`) | `/admin/reader/bulk-delete` |
+| `/admin/library/backup` (+ `/upload-db`, `/download-db`) | `/admin/library-backup` |
+
+**`/admin/library-backup` deliberately keeps the word "library," breaking
+the otherwise-uniform `/admin/reader/*` pattern above it — this is
+intentional, not an oversight to "fix" later.** It backs up `library.db`
+wholesale (every table in the app — Toolbox, accounts, site operations, the
+game — not just Reader/archive content), so "reader" would misdescribe what
+it actually does; the filename it protects is the more honest name. `/admin/
+backup-now` (the separate, token-authed POST trigger the daily Railway Cron
+Service and RUNBOOK.md's manual curl both call — see the "publicly reachable
+Railway origin" note above) is a different route entirely and is untouched by
+this PR; it was never under `/admin/library/*` to begin with.
+
+**Tag cleanup (`/admin/library/tags`) and Tagging style
+(`/admin/library/tag-style`) are deliberately NOT renamed in this PR** — they
+merge into a single `/admin/reader/tag-management` page in a future PR, and
+renaming them twice would be wasted motion. Both stay exactly where they are.
+
+**The Archive backup card moved hub-nav groups, not just URLs**: it leaves
+`_LIBRARY_TOOLS` (and `/admin/library`'s own page, which drops from four
+quadrants to three — see the "Superseded" note on the Phase 6 layout section
+above) and joins the System group's card list on `/admin`, first in that
+list. A whole-DB snapshot is accounts/health/plumbing, no different in kind
+from Users or Checks, and has no more claim to a Reader-specific home than
+any of System's other cards do.
+
+`webapp.hub_nav_orphans()`/`_hub_nav_all_hrefs()` needed no logic change —
+both already derive their href set from `_ADMIN_GROUPS`/`_LIBRARY_TOOLS`
+directly, so moving the tuple entry between the two lists was the entire fix
+(same precedent the group A PR above established for its own two card
+moves).
+
+**RUNBOOK.md rider**: the post-restore checklist still named
+`/admin/library/queue` — the Archive Queue's own admin page, retired
+outright in 2026-09 PR 3 (see CLAUDE.md's Archive Queue retirement note) —
+as a page to spot-check after a restore. Fixed in this same PR: the queue
+reference is removed from the checklist, with a note explaining why (no
+queue page exists any more to check).
 
 ### Feature Taxonomy, Phase 1b PR 2 (2026-08) — public rendering + full legacy `tool_features` retirement
 
@@ -6615,7 +6684,7 @@ gap-feedback flow's missing rate-limit/honeypot/spam-filter coverage
 unauthenticated, no-login-required surface — flagged for its own PR, not
 fixed here.
 
-### Feed management (`/admin/library/feeds`)
+### Feed management (`/admin/reader/feeds`)
 
 The admin surface for the RSS subscription list. Before this, feeds and their
 sections could only be changed by hand-editing `preferred_sites.opml` and
@@ -6632,8 +6701,8 @@ is configured; dormant otherwise.
 
 `POST /admin/auth/recheck` keeps its path — the Reader's own subscriber-access
 banner posts to it as well, and the path isn't library-page-specific, so moving
-it under `/admin/library/feeds/...` would make that second caller read oddly.
-Only its redirect target moved, from `/admin/library` to `/admin/library/feeds`.
+it under `/admin/reader/feeds/...` would make that second caller read oddly.
+Only its redirect target moved, from `/admin/library` to `/admin/reader/feeds`.
 
 *What the check actually probes, traced live:* for a configured domain it reads
 the OPML to find that domain's feed, requests **the stored feed URL verbatim**,
@@ -6643,7 +6712,7 @@ not the thing it fetches for the access test — see the Mostly Metrics note in
 §4.
 
 **Layout: one flat feed table, plus a separate sections area.** `GET
-/admin/library/feeds` renders every feed as a row in a single table (Name, URL,
+/admin/reader/feeds` renders every feed as a row in a single table (Name, URL,
 Section, Read only, Edit, Remove) rather than grouping them into a bordered box
 per section. Section and Read only are per-row controls that post on change
 (`POST .../feeds/{feed_id}/section`, `POST .../feeds/{feed_id}/read-only`), so
@@ -6652,8 +6721,8 @@ table, a plain "Manage sections" area handles section add/rename/remove as
 simple rows, with no per-section box and no settings beyond the name.
 
 **Routes.** Feeds get the `/admin/tools/resources` treatment — separate
-`GET|POST /admin/library/feeds/new` and `GET|POST
-/admin/library/feeds/{feed_id}/edit` pages sharing one `_feed_form_fields()`
+`GET|POST /admin/reader/feeds/new` and `GET|POST
+/admin/reader/feeds/{feed_id}/edit` pages sharing one `_feed_form_fields()`
 helper. Sections are handled inline (`POST .../feeds/sections/new`, `POST
 .../feeds/sections/{section_id}/rename`, `POST
 .../feeds/sections/{section_id}/delete`), matching `/admin/tools/software/categories`.
@@ -7063,7 +7132,7 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   is exactly what happened on the first live run after the GitHub Action
   was pointed at the Railway origin: `curl` reported success, but
   `backup_log` stayed empty, because the redirect meant `backup_now_route`
-  never executed at all — caught only by checking `/admin/library/backup`'s
+  never executed at all — caught only by checking `/admin/library-backup`'s
   banner directly rather than trusting the Action's exit code. The
   exemption is scoped to this exact path, not a general carve-out for
   token-authenticated routes — widening it needs the same deliberateness as
@@ -7213,7 +7282,7 @@ recorded anywhere, it's flagged rather than invented.
 - **Feed subscriptions live in the DB; `preferred_sites.opml` is generated from
   them, not edited.** `feed_sections` + `feeds` are the source of truth;
   `Library.write_opml()` regenerates the file on every mutation made from
-  `/admin/library/feeds`, and the startup hook regenerates it again on every
+  `/admin/reader/feeds`, and the startup hook regenerates it again on every
   boot. *Why the inversion rather than editing the file in place:* the file
   lives inside the Docker image at `/app/preferred_sites.opml`, which Railway
   rebuilds on every deploy, so anything the running app wrote there would be
@@ -7252,7 +7321,7 @@ recorded anywhere, it's flagged rather than invented.
   originating feed via `feed_url` rather than the item's `category` string,
   and `scan_sitemaps_into_queue` matched each `FeedMeta.xml_url` the same
   way. All of that — `linklib/queue.py` in full, the admin "Read only"
-  checkbox, its `POST /admin/library/feeds/{id}/read-only` route, and
+  checkbox, its `POST /admin/reader/feeds/{id}/read-only` route, and
   `Library.set_feed_excluded`/`excluded_feed_urls`/`has_feeds` — is gone from
   the codebase. The column itself stays, frozen at whatever value each row
   last had, on the same non-destructive-retirement precedent as
@@ -7405,7 +7474,7 @@ recorded anywhere, it's flagged rather than invented.
   file — but treat that as inference, not recorded rationale.
 - **SQLite + FTS5 on a Railway volume, not a hosted database.** *Why:* the
   scale is one curator plus a small member base; a single file needs zero
-  operational overhead, backs up by copying (`/admin/library/backup/download-db`, daily
+  operational overhead, backs up by copying (`/admin/library-backup/download-db`, daily
   Drive snapshots), and FTS5 gives ranked full-text search for free.
   `db.py`'s docstring records the exit path: the same schema works on
   libSQL/Turso/D1 later — only the connection changes.
@@ -7644,7 +7713,7 @@ recorded anywhere, it's flagged rather than invented.
   explicitly granted to the app some other way, such as a Drive Picker
   consent flow), but the default is now a folder the app can actually
   write into. `linklib.backup.known_folder_id` is the read-only lookup
-  `/admin/library/backup` uses to show the live folder link — it never
+  `/admin/library-backup` uses to show the live folder link — it never
   creates a folder as a side effect of a page view, only `backup_now()`
   does, mid-upload.
 - **Phase G: the Agent taxonomy "unverified" banner's call-to-action was
