@@ -87,9 +87,10 @@ def mechanical_findings(text: str) -> list[tuple[str, str]]:
 #     accounts for hundreds of ` — ` spans) — those get stripped per-literal.
 # Database-rendered content is never scanned: a real vendor or community name
 # legitimately contains an ampersand (Bain & Company, Ernst & Young), and
-# rewriting one would corrupt a real entity name. site_copy rows are Brian's
-# own copy but live in the DB and are edited at /admin/copy, so they're out of
-# scope here too — report them, don't rewrite them.
+# rewriting one would corrupt a real entity name. Brian's own editable copy is
+# out of scope for the same reason — it lives in `settings` (there is no
+# site_copy table) and is edited at /admin/copy and /admin/voice, so a
+# violation there gets reported to him, never rewritten from code.
 
 # Standard finance/business abbreviations that carry '&' as part of the term
 # itself. Matches voice_core's own generalized carve-out (see the 2026-08
