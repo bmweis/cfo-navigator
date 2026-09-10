@@ -507,7 +507,7 @@ def test_exa_connection() -> dict:
     except requests.exceptions.HTTPError as e:
         status = e.response.status_code if e.response is not None else None
         if status in (401, 403):
-            msg = f"Authentication failed (HTTP {status}) — check EXA_API_KEY."
+            msg = f"Authentication failed (HTTP {status})—check EXA_API_KEY."
         elif status == 429:
             msg = f"Rate limited (HTTP {status})."
         elif status == 402:

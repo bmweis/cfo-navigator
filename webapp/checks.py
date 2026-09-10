@@ -26,6 +26,28 @@ def _app_src() -> str:
     return _APP_PY.read_text(encoding="utf-8")
 
 
+# --- Typography lint file list (PR 10 rider) --------------------------------
+# `typography_findings()`'s own scope is UI copy a reader sees rendered in
+# HTML — webapp/app.py is where that copy actually lives. Investigated
+# whether other linklib/ modules (agent.py, matchmaker.py, enrich.py,
+# compare.py, feature_scan.py, dedupe.py, tagstyle.py) belong on this list
+# too: every real hit found there is LLM system-/generation-prompt
+# assembly text — instructions Claude reads, never HTML a person sees — so
+# none were added. VOICE_CORE_DEFAULT/VOICE_FPA_BUDDY_DEFAULT specifically
+# (the DB-backed settings text rendered, and editable, at /admin/voice) were
+# checked directly and confirmed already clean (0 violations each), matching
+# this codebase's own PR #526-adjacent history. See the PR description for
+# the full per-module violation count this investigation found and why each
+# was left out. Kept as a real list, not a single hardcoded path, so a
+# future file that DOES belong here (a second module with real rendered UI
+# copy) is a one-line addition, not a refactor.
+TYPOGRAPHY_SCANNED_FILES = (_APP_PY,)
+
+
+def _typography_sources() -> list[tuple[pathlib.Path, str]]:
+    return [(p, p.read_text(encoding="utf-8")) for p in TYPOGRAPHY_SCANNED_FILES]
+
+
 # --- open-source showcase ↔ dependencies sync -------------------------------
 # Celebrated projects that aren't direct lines in requirements*.txt: transitive
 # deps, the optional extractor, and a one-off build tool. Single source of truth.
@@ -81,6 +103,12 @@ def brand_docs_problems() -> list[str]:
 def hub_nav_orphan_problems() -> list[str]:
     from webapp import app
     return app.hub_nav_orphans()
+
+
+# --- AI config consolidation guard (PR 10) -----------------------------------
+def ai_config_orphan_problems() -> list[str]:
+    from webapp import app
+    return app.ai_config_editable_outside_ai_page()
 
 
 # --- shared <script> blocks parse as valid JS --------------------------------
@@ -190,11 +218,14 @@ def run_all() -> list[dict]:
         "what": "No banned buzzwords, filler, or performative phrases in the site copy.",
         "detail": ", ".join(f"{rule}: “{phrase}”" for rule, phrase in vf) if vf else "Copy is on-voice. (test_voice_standards)"})
 
-    tf = voice_review.typography_findings(src)
+    tf = []
+    for _path, _src in _typography_sources():
+        tf.extend((_path.name, rule, line, excerpt)
+                  for rule, line, excerpt in voice_review.typography_findings(_src))
     results.append({
         "name": "Typography (ampersands, em dashes)", "where": "Live + CI", "ok": not tf,
         "what": "UI copy spells out \"and\" (except FP&A and friends) and never spaces an em dash.",
-        "detail": "; ".join(f"{rule} (line {line}): {excerpt}" for rule, line, excerpt in tf[:6])
+        "detail": "; ".join(f"{fname} {rule} (line {line}): {excerpt}" for fname, rule, line, excerpt in tf[:6])
                   if tf else "Copy follows both typographic rules. (test_voice_standards)"})
 
     op = open_source_problems()
@@ -214,6 +245,12 @@ def run_all() -> list[dict]:
         "name": "Hub-nav orphans", "where": "Live + CI", "ok": not hn,
         "what": "Every real /admin route has a corresponding hub-nav card—nothing reachable only by guessing the URL.",
         "detail": "; ".join(hn) if hn else "Every admin route has a hub-nav card. (test_hub_nav_orphans)"})
+
+    ac = ai_config_orphan_problems()
+    results.append({
+        "name": "AI config consolidated", "where": "Live + CI", "ok": not ac,
+        "what": "No route reuses one of the three retired AI-settings URL shapes outside /admin/system/ai.",
+        "detail": "; ".join(ac) if ac else "AI configuration lives only at /admin/system/ai. (test_admin_ai_settings)"})
 
     pf = _pyflakes_problems()
     if pf is None:

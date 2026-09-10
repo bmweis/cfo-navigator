@@ -3,7 +3,7 @@ pickers that actually read this registry.
 
 **Corrected (issue #98 Piece 1, 2026-09) — this registry does NOT drive
 every model picker in the app.** It feeds exactly three admin surfaces:
-/admin/system/model (the live enrichment-model setting), the re-enrich
+/admin/system/ai (the live enrichment-model setting), the re-enrich
 picker, and the backfill picker. It does NOT feed FP&A Buddy — Buddy's
 Quick/Standard/Deep tiers map to hardcoded model ids in
 `linklib.agent.EFFORT_SETTINGS`, a separate dict this registry has no

@@ -7686,7 +7686,7 @@ class Library:
         """The live, DB-stored model id enrichment (Description, Agent
         taxonomy, Competitive differentiation, Community profile fields, and
         every other linklib.enrich generation call) actually uses — settable
-        from /admin/system/model without a redeploy, same reasoning
+        from /admin/system/ai without a redeploy, same reasoning
         get_exa_enabled's Phase 7 kill switch already established: env vars
         need a deploy to change, a DB-backed setting doesn't. Falls back to
         LINKLIB_ENRICH_MODEL (or its own hardcoded default) when no selection

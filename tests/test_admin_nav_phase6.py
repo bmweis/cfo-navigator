@@ -70,15 +70,15 @@ def test_fpa_buddy_is_no_longer_a_top_level_admin_group(env):
 
 
 def test_fpa_buddy_tools_list_has_all_expected_pages(env):
-    # 4th entry (/admin/exa-settings) added in Phase 7 — this test only
-    # pins the original Phase 6 moves; Phase 7's own tests cover the toggle
-    # page itself (tests/test_admin_exa_settings.py).
+    # The 4th entry (/admin/exa-settings) added in Phase 7 was merged into
+    # the System group's single /admin/system/ai card by the admin AI-page
+    # consolidation (PR 10) — see tests/test_admin_ai_settings.py for that
+    # page's own coverage. This test now pins the original Phase 6 three.
     hrefs = [href for href, _, _ in env._FPA_BUDDY_TOOLS]
     assert hrefs == [
         "/tools/fpa-buddy/how-it-works",
         "/admin/fpa-buddy/report",
         "/admin/fpa-buddy/feedback",
-        "/admin/exa-settings",
     ]
 
 
