@@ -6051,14 +6051,16 @@ used on the Community profile edit page — reused here, not a new component.
 Order is unchanged from the two cards' original order: cleanup first (acts
 on today's data), style second (shapes tomorrow's).
 
-**Naming**: the merged page is titled "Tag cleanup &amp; style", not "Tag
-management" — the hub-nav quadrant on `/admin/library` that contains this
-card is *already* named "Tag management" (holding this card plus Enrich
-archive), and naming the card the same as its containing quadrant would
-nest a same-named box inside a same-named group, the exact pattern
-CLAUDE.md's "Third-party content" rename exists to avoid. The quadrant's own
-name/description are unchanged — still accurate for two cards instead of
-three, just with a lower `count_label` (`"2 tools"`, not `"3 tools"`).
+**Naming**: the merged page is titled "Tag cleanup and style" (shipped as
+"Tag cleanup &amp; style"; the ampersand was spelled out in PR 9's
+typographic sweep — see below), not "Tag management" — the quadrant that
+contains this card is *already* named "Tag management" (holding this card
+plus Enrich archive), and naming the card the same as its containing
+quadrant would nest a same-named box inside a same-named group, the exact
+pattern CLAUDE.md's "Third-party content" rename exists to avoid. The
+quadrant's own name/description are unchanged. (That quadrant lived on
+`/admin/library` at the time; PR 9 retired the page and moved the quadrant
+into the Reader group on `/admin`.)
 
 **Nothing was dropped.** Every action from both original pages — suggest
 merges, merge one group, merge all, rename, delete (Tag cleanup); save the
@@ -6082,6 +6084,150 @@ leaving the "why here" implicit.
 `webapp.hub_nav_orphans()`/`_hub_nav_all_hrefs()` needed no logic change —
 both derive their href set live from `_LIBRARY_TOOLS`, so collapsing two
 tuple entries into one was the entire fix.
+
+### The Reader box, and Library → Reader (PR 9, 2026-09)
+
+`/admin/library` — a standalone page holding three quadrants of tool cards —
+is gone. **404 outright, signed in and signed out, no redirect**, same
+cutover convention every other admin route move in this sprint used. Its
+contents are now a collapsible **Reader** group on `/admin`, nested inside
+CFO Toolbox alongside the Software sub-group and the Communities card.
+
+**Structure: two levels of nesting, everything collapsed on load.** Reader
+group → three quadrants (New content, Existing archive management, Tag
+management) → the tool cards inside each. `webapp/app.py`'s
+`_reader_admin_quadrants(task_counts)` is what used to be the
+`admin_library()` route body, minus the page shell: it returns the three
+quadrants as pre-rendered HTML strings, which `admin_page()` drops straight
+into `_group_html`'s item list (that list already accepted a pre-rendered
+string alongside plain card tuples — the same mechanism the FP&A Buddy and
+Software sub-groups use, so no new plumbing). Each quadrant now renders with
+`nested=True` rather than the retired page's `extra_class="lib-quad"`. Every
+`<details>` in the chain — CFO Toolbox, Reader, each quadrant, and each
+capture-method accordion inside New content — loads closed;
+`tests/test_admin_reader_box.py::test_every_disclosure_level_loads_collapsed`
+walks all three levels in one assertion.
+
+**Deliberately not carried over: the page's own two-column layout.** The
+`.lib-cols`/`.lib-col` flex columns, the `.lib-q-*` order wrappers, and the
+mobile `align-items` axis-flip reset all existed to fill a full-width page.
+Inside one column of `/admin`'s own two-column grid there is no width left
+to split, so the three quadrants simply stack in `_group_html`'s existing
+`display:grid;gap:14px` list with no CSS of their own.
+
+**Also not carried over, because it no longer existed: the content-flow
+diagram.** The build brief asked for it to be shrunk to fit inside the
+collapsed box. It had already been retired with the Archive Queue itself
+(PR 3, 2026-09) — with no queue there is no producer/consumer relationship
+to diagram — so there was nothing to shrink, relocate, or drop. Guarded by
+`test_flow_diagram_is_still_gone`.
+
+**"Open Reader" is a ghost button in the group's description line**, the
+first thing inside the box and above the three quadrants. It was a header
+action beside the retired page's `<h1>`; with no page left to head, the
+group description is the equivalent position. Stock `.btn.btn-ghost` with no
+colour override, unchanged from before (BRAND.md's secondary button).
+
+**`_group_html` gained one parameter, `count_label`**, overriding the
+default `len(items)` count for a group whose items aren't themselves tools.
+Reader is the only caller: its three items are quadrants, so a literal "3
+tools" would undersell the six tools inside them — it shows
+`len(_LIBRARY_TOOLS)` instead. The aggregate task badge is unchanged, still
+built from the same `_LIBRARY_TOOLS` hrefs.
+
+**Hub-nav orphan detector.** `_hub_nav_all_hrefs()` no longer adds
+`/admin/library` to its set — there's no route left for a card to be an
+orphan of. The `_LIBRARY_TOOLS` hrefs it already contributed are unchanged;
+they're just rendered inside the Reader group now rather than on a page of
+their own. Detector and `/admin/system/page-index` both clean.
+
+**Library → Reader, user-facing copy only.** The line, stated explicitly so
+a later session doesn't blur it:
+
+| Renamed (what a person reads) | Untouched (internal vocabulary) |
+|---|---|
+| The `/tools` admin tile: "Library" → "Reader" | `linklib/`, `library.db`, the `Library` class |
+| The Reader's own nav label and rail back-link | `_LIBRARY_TOOLS` (the tuple name) |
+| The admin group heading: "Library" → "Reader" | `library_queue` (frozen table) |
+| Six Reader sub-pages' "← Library" back-links | `/admin/library-backup` (named for the file it backs up) |
+
+`/admin/library-backup` keeping the word "library" is a real, considered
+exception documented in PR 6's section above — it snapshots `library.db` in
+its entirety, not just Reader content. Do not "fix" it.
+
+**Two bugs on the `/tools` Reader tile, both confirmed in source before
+being changed.** It pointed at `/admin/library` — the admin management page,
+not the reading surface it promised — so the one tile offering a reading
+stash opened a page of maintenance tools. It now points at `/read` and opens
+in a new tab (`_toolbox_tile`'s new `new_tab` parameter, used only here: the
+Reader is somewhere you settle in rather than a step in a browse flow).
+Separately, `/read`'s own rail back-link pointed at `/admin/library` and
+read "← Library"; it now goes to `/tools` ("← Toolbox"). The tile remains
+admin-only, built conditionally in Python and absent from the HTML entirely
+for anyone else — confirmed, not assumed.
+
+The six Reader sub-pages that carried a "← Library" back-link
+(`/admin/reader/feeds`, `/admin/reader/tag-management`, `/admin/reader/dedupe`,
+`/admin/reader/enrich`, `/admin/reader/backfill-content`,
+`/admin/reader/bulk-delete`) plus `/admin/library-backup` now link to
+"← Admin". This was a real dependency the PR's own file list didn't
+anticipate — every one of them would have pointed at a 404.
+
+### Typography lint: bare ampersands and spaced em dashes (PR 9, 2026-09)
+
+`linklib.voice_review.typography_findings(source)` enforces two of
+`voice_core`'s HARD MECHANICAL RULES that the pre-existing
+`mechanical_findings` couldn't: "Spell out 'and'; never '&' except in terms
+like FP&A", and "Emdashes have NO surrounding spaces". Wired into
+`webapp.checks.run_all()` as its own "Typography (ampersands, em dashes)"
+row on `/admin/checks`, and into `tests/test_voice_standards.py` for CI.
+
+**Extends the existing mechanism rather than paralleling it.** The em-dash
+half imports `voice_mechanics._SPACED_EM_DASH` — the same regex the DB-write
+backstop already applies to every AI-drafted prose field — instead of
+defining a second, driftable idea of what a spaced em dash is. The two are
+the same rule on opposite sides of the same wall: the backstop normalizes
+what Claude writes *into* the database, this catches what a human hand-types
+into `webapp/app.py`'s inline HTML, which never passes through `Library`'s
+write methods at all.
+
+**Scope, and it's the whole design.** Python string literals only,
+docstrings excluded, embedded CSS/JS/HTML comments stripped per literal:
+
+* Python `#` comments are never string literals, so the AST walk skips them.
+* Docstrings *are* string literals, so they're excluded explicitly.
+* The inline `<style>`/`<script>` blocks live inside string literals and are
+  full of prose comments — the `:root` token table alone carries hundreds of
+  ` — ` spans. Those get stripped before scanning.
+* Literals are read as **source segments**, not evaluated `ast.Constant`
+  values. An f-string's value arrives as one Constant per `{...}` boundary,
+  so a comment that interpolates something (`/* ... — ~{compare.EXCERPT_LINE_CLAMP}
+  lines */`) lands with its opener in one fragment and its closer in another,
+  and no per-fragment stripper can pair them. Both such comments in
+  `webapp/app.py` were flagged as copy by a value-based scan before this was
+  fixed.
+* Database content is **never** scanned. A real vendor or community name
+  legitimately contains an ampersand (Bain & Company, Ernst & Young) and
+  rewriting one would corrupt a real entity name. `site_copy` rows are
+  Brian's own copy but live in the DB and are edited at `/admin/copy`, so
+  they're reported, never rewritten.
+
+Allowlists are two small lists in the same module, both following the
+"add a real one when it turns up" discipline `voice_core`'s own generalized
+ampersand carve-out already uses: `AMPERSAND_ACRONYMS` (FP&A, R&D, Q&A, P&L,
+M&A, S&P, S&M, D&A, T&E) and `AMPERSAND_NAMES` (Sales & Marketing, Research
+& Development — the GAAP line items spelled out on the Growth Engine
+calculator, where the ampersand is part of the name). JS `&&` (raw or
+HTML-escaped), the inline HTML-escaping helpers' `&`-to-`&amp;` replacement,
+and a literal that is nothing but one HTML entity (`_esc()`'s own escape-map
+value) are all excluded as code.
+
+**Tests are two-sided on purpose.** Asserting only that the live source
+passes would be satisfied by a lint that never finds anything, so each rule
+also has a test proving it FAILS on a real violation of exactly the shape it
+exists to catch, and PASSES on the legitimate near-miss beside it — every
+allowlisted acronym, and an unspaced em dash in both its literal and
+`&mdash;` spellings.
 
 ### Feature Taxonomy, Phase 1b PR 2 (2026-08) — public rendering + full legacy `tool_features` retirement
 

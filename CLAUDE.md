@@ -6671,7 +6671,9 @@ it supersedes the old "`/save` is token-gated" note.
   **The archive-backup card moved hub-nav groups, not just its URL**: it
   leaves `_LIBRARY_TOOLS` (and `/admin/library`'s own page, which drops
   from four quadrants to three — see the Phase 6 admin-nav-restructure
-  bullet's own now-superseded "four quadrants" description) and joins the
+  bullet's own now-superseded "four quadrants" description; that page is
+  itself gone as of PR 9, its three quadrants folded into the Reader group
+  on `/admin`) and joins the
   System group's card list on `/admin` instead — a whole-DB snapshot is
   accounts/health/plumbing, the same kind of thing as Users or Checks, not
   archive-specific. `webapp.hub_nav_orphans()`/`_hub_nav_all_hrefs()` needed
@@ -6697,9 +6699,11 @@ it supersedes the old "`/save` is token-gated" note.
   is configuration (shapes tags that don't exist yet — the objective and
   the learned guide that steer the enrichment prompt via `linklib.tagstyle`).
   Both are used regularly enough that a disclosure would add a click without
-  reducing clutter. The page is titled "Tag cleanup &amp; style," not "Tag
-  management" — the hub-nav quadrant on `/admin/library` holding this card
-  is already named "Tag management," and naming the card the same as its
+  reducing clutter. The page is titled "Tag cleanup and style" (shipped as
+  "Tag cleanup &amp; style"; the ampersand was spelled out in PR 9's
+  typographic sweep, below), not "Tag management" — the quadrant holding
+  this card is already named "Tag management," and naming the card the same
+  as its
   own containing group would repeat the exact self-nesting problem the
   "Third-party content" rename (see the Admin URL restructure bullet above)
   exists to avoid; the quadrant's name and description are unchanged. Every
@@ -6717,6 +6721,129 @@ it supersedes the old "`/save` is token-gated" note.
   says that plainly. See ARCHITECTURE.md's "Tag management merge" section
   for the full write-up and `tests/test_tag_management_merge.py` for the
   regression coverage.
+
+- **The Reader box, and Library -> Reader (PR 9, 2026-09) — `/admin/library`
+  stops being a page and becomes a collapsible group on `/admin`.** The
+  standalone page is gone, 404 outright signed in and signed out, no
+  redirect — same cutover convention every other admin route move in this
+  sprint used. Its three quadrants (New content, Existing archive
+  management, Tag management) are now a nested **Reader** group inside CFO
+  Toolbox, alongside the Software sub-group and the Communities card, built
+  by a new module-level `_reader_admin_quadrants(task_counts)` that returns
+  them as pre-rendered HTML strings for `_group_html`'s existing
+  accepts-a-string item list — the same mechanism FP&A Buddy and Software
+  already nest through, so no new plumbing. **Two levels of nesting, all
+  collapsed on load**: Reader -> quadrant -> cards, with the capture-method
+  accordions inside New content making a fourth `<details>` level, every one
+  of them closed (`test_every_disclosure_level_loads_collapsed` walks the
+  whole chain in one assertion).
+  **Three things the build brief named, and what actually happened to each**:
+  (1) The **content-flow diagram** was to be shrunk to fit inside the
+  collapsed box. It didn't exist — it was retired with the Archive Queue
+  itself in PR 3 (with no queue there's no producer/consumer relationship to
+  diagram), so there was nothing to shrink, relocate, or silently drop.
+  Flagged rather than quietly skipped, and guarded by
+  `test_flow_diagram_is_still_gone`. (2) The **bookmarklet/Share-Sheet
+  accordions** (~4,200 characters, two capture pairs) stay expandable inside
+  New content, the quadrant that covers bringing new material in.
+  (3) **"Open Reader"** is a `.btn.btn-ghost` link in the Reader group's own
+  description line — the first thing inside the box, above the quadrants.
+  It was a header action beside the retired page's `<h1>`; with no page left
+  to head, the group description is the equivalent position.
+  **The page's two-column `.lib-cols` layout is deliberately not carried
+  over** (nor its `.lib-q-*` order wrappers or mobile `align-items` reset):
+  that layout existed to fill a full-width page, and inside one column of
+  `/admin`'s own two-column grid there's no width left to split, so the
+  quadrants stack in `_group_html`'s existing grid with no CSS of their own.
+  `_group_html` gained one parameter, `count_label`, so the Reader group can
+  show `len(_LIBRARY_TOOLS)` rather than the literal 3 items (quadrants,
+  not tools) — every other caller is unaffected.
+  **Library -> Reader is user-facing copy only, and the line is worth not
+  blurring**: renamed are the `/tools` tile, the Reader's own nav label and
+  rail back-link, the admin group heading, and seven sub-page back-links.
+  Untouched are `linklib/`, `library.db`, the `Library` class,
+  `_LIBRARY_TOOLS` (the tuple name), the frozen `library_queue` table, and
+  `/admin/library-backup` — that last one keeps the word deliberately, since
+  it snapshots `library.db` in its entirety, and PR 6 already documented it
+  as an intentional exception. Do not "fix" it.
+  **Two real bugs on the `/tools` Reader tile**, both confirmed in source
+  before being changed rather than taken on faith from the brief: it pointed
+  at `/admin/library` (the admin management page, not the reading surface it
+  promised), so the one tile offering a reading stash opened a page of
+  maintenance tools; and it didn't open in a new tab. Now `/read`,
+  `target="_blank"` via `_toolbox_tile`'s new `new_tab` parameter. Confirmed
+  it is genuinely admin-only (built conditionally in Python, absent from the
+  HTML entirely otherwise), so a signed-out visitor sees nothing either way.
+  Separately, `/read`'s own rail back-link pointed at `/admin/library` and
+  read "&larr; Library"; it goes to `/tools` ("&larr; Toolbox") now.
+  **A dependency the brief's file list didn't predict, found by the mandated
+  grep sweep**: seven admin sub-pages carried a "&larr; Library" back-link
+  pointing at `/admin/library` (the six Reader tools plus
+  `/admin/library-backup`). Every one would have pointed at a 404; all now
+  read "&larr; Admin" -> `/admin`. `_hub_nav_all_hrefs()` also stopped
+  adding `/admin/library` to its set — there's no route left for a card to
+  be an orphan of; the `_LIBRARY_TOOLS` hrefs it already contributed are
+  unchanged. Detector and `/admin/system/page-index` both clean.
+  See ARCHITECTURE.md's "The Reader box, and Library -> Reader" section for
+  the full write-up and `tests/test_admin_reader_box.py` (renamed from
+  `test_admin_library_layout.py`) for the coverage.
+
+- **Typography lint: bare ampersands and spaced em dashes (PR 9, 2026-09) —
+  extends the existing voice lint, deliberately not a parallel checker.**
+  `linklib.voice_review.typography_findings(source)` enforces two of
+  `voice_core`'s HARD MECHANICAL RULES that `mechanical_findings` couldn't:
+  spell out "and" (except FP&A and friends), and never space an em dash.
+  Wired into `webapp.checks.run_all()` as its own `/admin/checks` row and
+  into `tests/test_voice_standards.py` for CI. Checked for an existing
+  mechanism first, per the brief: no em-dash or ampersand lint existed, but
+  `voice_mechanics._SPACED_EM_DASH` — the DB-write backstop's own regex —
+  did, so the lint imports it rather than defining a second, driftable idea
+  of what a spaced em dash is. **The two are the same rule on opposite sides
+  of the same wall**: the backstop normalizes what Claude writes *into* the
+  database; this catches what a human hand-types into `webapp/app.py`'s
+  inline HTML, which never passes through `Library`'s write methods at all.
+  **Scope is the whole design**: Python string literals only, docstrings
+  excluded, embedded CSS/JS/HTML comments stripped per literal (the `:root`
+  token table alone carries hundreds of spaced-em-dash spans in comments),
+  and literals read as **source segments** rather than evaluated
+  `ast.Constant` values — an f-string's value splits at each `{...}`, so a
+  comment that interpolates something lands with its opener in one fragment
+  and its closer in another, which a value-based scan flagged as copy for
+  two real comments in this file. Database content is never scanned: a
+  vendor or community name legitimately containing an ampersand (Bain &
+  Company, Ernst & Young) is real data, and `site_copy` rows are Brian's own
+  copy but edited at `/admin/copy` — those get reported, never rewritten.
+  **The sweep it triggered was large and is reported rather than buried**:
+  173 violations across `webapp/app.py`'s copy (120 spaced em dashes, 53
+  bare ampersands), all fixed in this PR. The em-dash half was mechanical
+  (collapse to unspaced); the ampersand half was per-phrase, with
+  `AMPERSAND_ACRONYMS` and `AMPERSAND_NAMES` as the two small allowlists,
+  both following the same "add a real one when it turns up" discipline
+  `voice_core`'s own generalized ampersand carve-out already uses.
+  **Tests are two-sided on purpose** — asserting only that the live source
+  passes would be satisfied by a lint that never finds anything, so each
+  rule also has a test proving it FAILS on a real violation of exactly the
+  shape it catches, and PASSES on the near-miss beside it.
+
+- **Brittle hardcoded-count tests, rewritten to assert on contents (PR 9,
+  2026-09).** `tests/test_feed_cookie_flag.py`'s quadrant section and
+  `tests/test_admin_library_layout.py` (renamed
+  `tests/test_admin_reader_box.py`) both pinned literal tool counts —
+  "3 tools", "2 tools", `count("<details") == 5`. They broke in PR 520,
+  again in 523, again in 524, and would have broken again here: four PRs,
+  four legitimate structural changes, zero real bugs caught. **A test that
+  fails every time the structure it describes legitimately changes is a
+  tax, not a safety net.** They assert on contents now — which tools are
+  present, in which quadrant, derived from `_LIBRARY_TOOLS` itself so adding
+  a tool needs no test edit — which is the fact actually worth protecting
+  (a tool silently dropping off the admin surface, or landing under the
+  wrong heading). One real bug in the rewrite is worth carrying forward:
+  the first draft sliced a quadrant from its label to the next sibling
+  label, which for the LAST quadrant swallowed every group rendered below
+  it on `/admin` and "found" Archive backup inside Tag management. Fixed
+  with a `<details>`-balancing slicer, which is what the shared
+  `_disclosure_body` helper in both files does now.
+
 
 ## Authentication & security
 

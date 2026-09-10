@@ -57,7 +57,9 @@ def test_merged_page_renders_for_an_authed_admin(env):
     assert resp.status_code == 200
     assert "Tag cleanup" in resp.text
     assert "Tagging style" in resp.text
-    assert "Tag cleanup &amp; style" in resp.text
+    # "&" -> "and" in PR 9's typographic sweep (see linklib.voice_review's
+    # typography_findings) — the page title was that lint's first fix.
+    assert "Tag cleanup and style" in resp.text
 
 
 def test_merged_page_carries_the_new_intro(env):
@@ -155,11 +157,13 @@ def test_hub_nav_has_no_orphans(env):
     assert env.hub_nav_orphans() == []
 
 
-def test_admin_library_renders_the_merged_card(env):
+def test_reader_box_renders_the_merged_card(env):
+    """Was /admin/library; that page was retired in PR 9 and its quadrants
+    are a Reader group on /admin now."""
     with _admin_client(env) as client:
-        html = client.get("/admin/library").text
+        html = client.get("/admin").text
     assert f'href="{NEW_PATH}"' in html
-    assert "Tag cleanup &amp; style" in html
+    assert "Tag cleanup and style" in html
     assert '/admin/library/tags"' not in html
     assert '/admin/library/tag-style"' not in html
 

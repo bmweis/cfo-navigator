@@ -228,7 +228,10 @@ def test_member_blocked_from_admin_and_reader(env):
 def test_admin_reaches_everything(env):
     c = _admin_client(env)
     assert c.get("/admin", follow_redirects=False).status_code == 200
-    assert c.get("/admin/library", follow_redirects=False).status_code == 200
+    # /admin/library is gone as of PR 9 (2026-09), no redirect — its three
+    # quadrants are a collapsible Reader group on /admin now. Its own tools
+    # are still admin-reachable; one stands in for the set here.
+    assert c.get("/admin/reader/feeds", follow_redirects=False).status_code == 200
     assert c.get("/read", follow_redirects=False).status_code == 200
 
 

@@ -323,7 +323,12 @@ def test_hero_polish_avatar_size(env):
 def test_speaking_and_events_renders_without_double_escaping(env):
     html = _client(env).get("/thought-leadership").text
     assert "&amp;amp;" not in html
-    assert "Speaking &amp; Events" in html  # correctly single-escaped in the raw HTML
+    # "Speaking & Events" -> "Speaking and Events" in PR 9's typographic
+    # sweep (linklib.voice_review.typography_findings). The double-escape bug
+    # this test was written for is unchanged and still guarded: what must
+    # never appear is a re-escaped entity, whatever the label says.
+    assert "Speaking and Events" in html
+    assert "&amp;amp;" not in html
 
 
 def test_mobile_dom_order_photo_card_between_hero_and_thought_leadership(env):

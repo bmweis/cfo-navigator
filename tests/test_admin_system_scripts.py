@@ -1,6 +1,6 @@
 """Phase N build: the /admin/system/scripts inventory page. A static,
 hand-maintained registry (see _SCRIPT_REGISTRY in webapp/app.py) covering
-the "Recurring & actively useful" and "Reusable diagnostic" buckets from the
+the "Recurring and actively useful" and "Reusable diagnostic" buckets from the
 Phase N investigation — one-time/job-done scripts live in scripts/archive/
 and are deliberately NOT listed here.
 """
@@ -83,7 +83,8 @@ def test_archived_one_time_scripts_are_not_listed(env):
 def test_both_bucket_headings_present(env):
     c = _admin_client(env)
     body = c.get("/admin/system/scripts").text
-    assert "Recurring &amp; actively useful" in body
+    # "&" -> "and" in PR 9's typographic sweep (linklib.voice_review).
+    assert "Recurring and actively useful" in body
     assert "Reusable diagnostic" in body
 
 
@@ -94,7 +95,7 @@ def test_registry_entries_have_no_missing_fields(env):
         assert purpose.strip(), name
         assert cadence.strip(), name
         assert invocation, name
-        assert bucket in ("Recurring & actively useful", "Reusable diagnostic"), name
+        assert bucket in ("Recurring and actively useful", "Reusable diagnostic"), name
 
 
 def test_admin_hub_links_to_scripts_page(env):

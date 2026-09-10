@@ -2302,7 +2302,7 @@ def _screenshot_card_html(entity: dict, featured_sticker: str = "") -> str:
                        # Self-contained <script>, emitted only when there are
                        # two slides to toggle between (mirrors the Phase J1
                        # expand/collapse convention: swap which element is
-                       # visible, swap the trigger's own label) — placed here
+                       # visible, swap the trigger's own label)—placed here
                        # rather than in an authed-only script region, since
                        # the toggle must work for every visitor, not just
                        # Brian signed in.
@@ -2484,7 +2484,7 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     in_form_html = f"""<div id="gen-host-logo-{idsfx}">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Logo{source_badge}</label>
     <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos auto-fetch from Logo.dev via a monthly batch script.
-      A manual override set here always wins, and that batch never touches it. "Revert &amp; re-fetch" clears the override and calls
+      A manual override set here always wins, and that batch never touches it. "Revert and re-fetch" clears the override and calls
       Logo.dev live right now instead of waiting for the batch. If nothing usable turns up, it still reverts to automatic so the
       batch can retry later.</p>
     {banner_html}
@@ -2503,7 +2503,7 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
             style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:180px;">
           <button type="submit" form="logo-upload-form-{idsfx}" class="tool-admin-btn">Upload</button>
         </div>
-        <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert &amp; re-fetch from Logo.dev</button>
+        <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert and re-fetch from Logo.dev</button>
       </div>
     </div>
   </div>"""
@@ -3871,7 +3871,7 @@ def thought_leadership(request: Request):
     try:
         sections = [
             ("Writing", "writing", lib.list_thought_leadership(type="writing")),
-            ("Speaking & Events", "speaking", lib.list_thought_leadership(type="speaking") + [_TL_PHOTO_ENTRY]),
+            ("Speaking and Events", "speaking", lib.list_thought_leadership(type="speaking") + [_TL_PHOTO_ENTRY]),
             ("Podcasts", "podcast", lib.list_thought_leadership(type="podcast")),
             ("Press", "press", lib.list_thought_leadership(type="press")),
         ]
@@ -4094,7 +4094,7 @@ def growth_engine_calculator(request: Request):
     <p style="font-size:14px;color:var(--muted);margin:0 0 16px;">
       Plot your ratio over time. Choose how many quarters to look <strong>back</strong> (actuals) and
       <strong>forward</strong> (projected)—up to 2 each, for up to 5 measured quarters. Forward quarters
-      are shaded and drawn dashed, with a best/worst band (revenue &amp; spend 10% better or worse than
+      are shaded and drawn dashed, with a best/worst band (revenue and spend 10% better or worse than
       plan). The first five rows are lookback context for the earliest measured quarter.
     </p>
     <div style="display:flex;gap:28px;flex-wrap:wrap;margin:0 0 20px;">
@@ -6614,15 +6614,18 @@ _TOOLBOX_TILES = (
 
 def _toolbox_tile(index: int, href: str, title: str, desc: str, icon_svg: str, *,
                    border: str = "1.5px solid rgba(0,41,117,.15)",
-                   background: str = "#fff") -> str:
+                   background: str = "#fff", new_tab: bool = False) -> str:
     """Landing-size CFO Toolbox tile (44x44 icon badge, no arrow — a grid
     tile, not the sitewide card-row list-item pattern _card_icon()/_hcard()
     render elsewhere). `background` defaults to plain white for the four
     public tiles; the admin-only 5th tile overrides both `border` and
     `background` to _ADMIN_ONLY_BORDER/_ADMIN_ONLY_BG (see that pair's own
-    comment) to match the homepage Reader-access box's treatment."""
+    comment) to match the homepage Reader-access box's treatment. `new_tab` is
+    used only by that same admin tile: the Reader is somewhere you settle in
+    and read, so it opens alongside the Toolbox rather than replacing it."""
+    target = ' target="_blank" rel="noopener"' if new_tab else ""
     return (
-        f'<a href="{href}" style="display:block;background:{background};border:{border};'
+        f'<a href="{href}"{target} style="display:block;background:{background};border:{border};'
         f'border-radius:14px;padding:20px;text-decoration:none;">'
         f'{_toolbox_icon_badge(index, icon_svg)}'
         f'<div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);'
@@ -6658,19 +6661,27 @@ def _toolbox_mini_tile(index: int, title: str, one_liner: str, icon_svg: str) ->
 def tools_landing(request: Request):
     """CFO Toolbox landing page: 2x2 tile grid (Phase 3) — Software, Resources,
     Communities, FP&A Buddy. Admins additionally see a 5th, seafoam-bordered tile
-    linking to /admin/library — rendered only when _is_authed(request), so it's
+    linking to the Reader — rendered only when _is_authed(request), so it's
     entirely absent from the HTML (not just CSS-hidden) for anyone else. That 5th
     tile is landing-only; the homepage teaser (see homepage()) never shows it,
-    for any visitor, so it looks identical regardless of auth state."""
+    for any visitor, so it looks identical regardless of auth state.
+
+    That tile carried two bugs until PR 9 (2026-09), both confirmed in source
+    before being fixed: it was labelled "Library" and pointed at
+    /admin/library — the admin management page, not the Reader itself — so the
+    one tile promising a reading stash opened a page of maintenance tools. It
+    now points at /read and opens in a new tab, since the Reader is a place you
+    stay in rather than a step in a browse-the-Toolbox flow."""
     tiles = "".join(
         _toolbox_tile(i, href, title, desc, icon)
         for i, (href, title, icon, desc, _one_liner) in enumerate(_TOOLBOX_TILES)
     )
     if _is_authed(request):
         tiles += _toolbox_tile(
-            len(_TOOLBOX_TILES), "/admin/library", "Library",
-            "Your private reading stash&mdash;Archive and Feed, admin only.",
-            _ICON_BOOK, border=_ADMIN_ONLY_BORDER, background=_ADMIN_ONLY_BG)
+            len(_TOOLBOX_TILES), "/read", "Reader",
+            "Your private reading stash&mdash;Feed, Archive, and Read Later, admin only.",
+            _ICON_BOOK, border=_ADMIN_ONLY_BORDER, background=_ADMIN_ONLY_BG,
+            new_tab=True)
 
     body = f"""<div class="page page-grid">
 <style>
@@ -7882,7 +7893,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     if _at_note:
         _at_badge = _review_state_badge(_at_unverified, authed, "tp-verify")
         agent_taxonomy_block = f"""<div class="tp-card">
-  <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy{_at_badge}</h2>
+  <h2 class="tp-card-h"><small>AI and Agent Capabilities</small>Agent taxonomy{_at_badge}</h2>
   <div class="narrative-md">{render_narrative_markdown(tool['agent_taxonomy_note'])}</div>
   {_at_citations_html}
 </div>"""
@@ -11895,7 +11906,7 @@ applySortFilter('software');
   automatically on the next deploy. No manual re-seed needed.
   <strong>Description, Categories, Advisor, Featured, and Warm Intro are database-only</strong>:
   edit them here (Full edit / Quick edit on <a href="/tools/software">/tools/software</a>), and this
-  sync will never touch them &mdash; description sync was retired (2026-08 incident: it was silently
+  sync will never touch them&mdash;description sync was retired (2026-08 incident: it was silently
   reverting AI-drafted/hand-edited descriptions back to this file's seed blurb on every deploy).
 </p>
 
@@ -12401,7 +12412,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:28px;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name &amp; description</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name and description</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tools</th>
     </tr></thead>
     <tbody>{rows}</tbody>
@@ -12941,7 +12952,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
     <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:{source_badge_bg};color:{source_badge_fg};border-radius:5px;padding:2px 9px;">{_esc(item['source'])}</span>
     <span style="font-size:13px;color:var(--muted);">Flag/question &middot; {_esc(category_name)}</span>
   </div>
-  <p style="margin:0 0 6px;font-size:14px;">{_esc(tool_label)} &mdash; feature id={feature_id}</p>
+  <p style="margin:0 0 6px;font-size:14px;">{_esc(tool_label)}&mdash;feature id={feature_id}</p>
   {f'<p style="font-size:13.5px;line-height:1.6;color:var(--ink);background:var(--bg);border-radius:8px;padding:10px 12px;margin:10px 0 0;">{_esc(item["articulation"])}</p>' if item.get("articulation") else '<p style="font-size:13.5px;color:var(--muted);margin:10px 0 0;">No note left&mdash;just flagged for review.</p>'}
   {f'<p style="font-size:13px;color:var(--muted);margin:8px 0 0;">From {_esc(item["submitter_name"])} ({_esc(item["submitter_email"])})</p>' if item.get("submitter_name") else ''}
   <form method="post" action="/admin/tools/software/feature-review-queue/{item['id']}/deny" style="margin:14px 0 0;display:flex;gap:6px;align-items:center;">
@@ -13003,7 +13014,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
         names = ", ".join(f'"{_esc(d["name"])}" (#{d["id"]})' for d in near_duplicates)
         near_dup_html = (
             f'<p style="font-size:12.5px;color:#92400e;background:#fef3c7;border-radius:8px;'
-            f'padding:6px 10px;margin:0 0 10px;">Possible near-duplicate of {names} — worth '
+            f'padding:6px 10px;margin:0 0 10px;">Possible near-duplicate of {names}—worth '
             f'checking these describe genuinely different jobs (FEATURE_TAXONOMY.md &sect;7) '
             f'before approving both.</p>'
         )
@@ -13018,7 +13029,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
             coverage_html = (
                 f'<p style="font-size:12.5px;color:#92400e;background:#fef3c7;border-radius:8px;'
                 f'padding:6px 10px;margin:10px 0 0;">Articulation names only {len(mentioned)} of '
-                f'{len(mentioned) + len(unmentioned)} linked tools ({_esc(", ".join(mentioned))}) — '
+                f'{len(mentioned) + len(unmentioned)} linked tools ({_esc(", ".join(mentioned))})—'
                 f'{_esc(", ".join(unmentioned))} '
                 f'{"aren&rsquo;t" if len(unmentioned) > 1 else "isn&rsquo;t"} mentioned. Worth checking '
                 f'whether this is a real feature for every linked tool, or a mismerge (a tool that '
@@ -13455,7 +13466,7 @@ def admin_resources_delete(request: Request, benchmark_id: int):
 
 _TL_TYPES = [
     ("writing", "Writing"),
-    ("speaking", "Speaking & Events"),
+    ("speaking", "Speaking and Events"),
     ("podcast", "Podcasts"),
     ("press", "Press"),
 ]
@@ -13617,13 +13628,13 @@ _OC_ARTICLE_CSS = (
     '.oc-body li{margin-bottom:.4em;}'
     '.oc-body a{color:var(--navy);}'
     # A body_md-authored CTA button (<a class="btn">, the sitewide button
-    # component — first used by the growth-engine-ratio port's "Download the
+    # component—first used by the growth-engine-ratio port's "Download the
     # full guide" CTA) needs its own white text preserved. .btn's own
     # `color:#fff` rule (0,1,0 specificity) loses to the generic
-    # `.oc-body a{color:var(--navy)}` rule directly above (0,1,1 — one class
+    # `.oc-body a{color:var(--navy)}` rule directly above (0,1,1—one class
     # AND one tag beats one class alone) regardless of source order, so a
-    # navy-background button rendered navy text on navy — invisible. Fixed
-    # with `.oc-body .btn` (0,2,0 — two classes beats one class + one tag by
+    # navy-background button rendered navy text on navy—invisible. Fixed
+    # with `.oc-body .btn` (0,2,0—two classes beats one class + one tag by
     # CSS's class-count-first comparison), a permanent fix for any future
     # body_md piece that uses this same button, not just this one.
     '.oc-body .btn{color:#fff;}'
@@ -13853,17 +13864,17 @@ _OC_GER_CSS = (
     # (background:#fff;border:1px solid var(--line);border-radius:12px —
     # copied verbatim from the retired bespoke page) bounds a white
     # bordered card with zero padding, meant to fit the table flush against
-    # its edges — but _OC_ARTICLE_CSS's generic `.oc-body table{margin:1.5em
+    # its edges—but _OC_ARTICLE_CSS's generic `.oc-body table{margin:1.5em
     # 0}` rule (written for markdown-generated tables, which have no
     # wrapper of their own to own that spacing) still applies here too,
     # since `.ger-table`'s own CSS never resets `margin`. The table ends up
     # sitting 21px inset from the wrapper's border on all four sides,
-    # inside the wrapper's own bounded white box — reading as an
+    # inside the wrapper's own bounded white box—reading as an
     # unintentional blank margin, not a design choice, confirmed by
     # measuring the actual gap (21px, matching the table's computed
     # margin exactly) rather than guessed at. `.ns-table`'s wrapper never
     # showed this because it has no background/border of its own to reveal
-    # the same inherited margin against — the gap is identically present
+    # the same inherited margin against—the gap is identically present
     # there too, just invisible. Fixed by resetting the table's own margin
     # to 0, so the wrapper (which already carries the correct outer
     # spacing via its own `margin:0 0 32px` inline style) is the single
@@ -14023,7 +14034,7 @@ def _tl_parse_warning(item: dict) -> str:
         return (
             '<p style="margin:-8px 0 0;padding:8px 12px;background:#fef3c7;border:1px solid #fde68a;'
             'border-radius:8px;font-size:12px;color:#92400e;">'
-            "Date didn&rsquo;t parse as Mon YYYY — this entry will float to the top of its section.</p>"
+            "Date didn&rsquo;t parse as Mon YYYY—this entry will float to the top of its section.</p>"
         )
     return ""
 
@@ -14064,7 +14075,7 @@ def _tl_form_fields(item: dict | None = None) -> str:
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
       <input name="date_label" maxlength="50" value="{_esc(item.get('date_label', ''))}"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="Mon YYYY, e.g. Jun 2026 — leave blank for a standing, undated link">
+        placeholder="Mon YYYY, e.g. Jun 2026—leave blank for a standing, undated link">
     </div>
   </div>
   {_tl_parse_warning(item)}
@@ -14072,13 +14083,13 @@ def _tl_form_fields(item: dict | None = None) -> str:
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (tiebreaker)</label>
     <input name="display_order" type="number" value="{item.get('display_order', '') if item else ''}"
       style="width:180px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-      placeholder="Leave blank — auto-assigned">
+      placeholder="Leave blank—auto-assigned">
   </div>
   <p style="margin:-8px 0 0;font-size:12px;color:var(--muted);">
-    Date label decides order (newest first) — it's parsed into the render order automatically, so you
+    Date label decides order (newest first)—it's parsed into the render order automatically, so you
     don&rsquo;t need to think about sort order when filling it in. Leave Date label blank for a standing
     link with no single date (e.g. a full episode feed); it floats to the top of its column. Display order
-    is a rare manual override — only needed if two entries share the same month and you want to control
+    is a rare manual override—only needed if two entries share the same month and you want to control
     which one shows first; leave it blank otherwise and the next value is assigned automatically.
   </p>
   <div>
@@ -14099,7 +14110,7 @@ def _tl_form_fields(item: dict | None = None) -> str:
       Feature on homepage
     </label>
     <p style="margin:4px 0 0 26px;font-size:12px;color:var(--muted);">
-      Represents this entry's type (Writing, Speaking &amp; Events, Podcasts, or Press) in the homepage's
+      Represents this entry's type (Writing, Speaking and Events, Podcasts, or Press) in the homepage's
       4-column breakdown. If more than one entry of the same type is checked, the most recently updated one
       wins. Leave unchecked and the most recent entry of that type is used automatically.
     </p>
@@ -14122,7 +14133,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
         # A non-blank date_label with no sort_key means it didn't parse as
         # Mon YYYY — flag it here too, not just on the edit form, since this
         # is the page an admin scans to spot something off at a glance.
-        date_warning = (' <span title="Didn&rsquo;t parse — floats to top of its section" '
+        date_warning = (' <span title="Didn&rsquo;t parse—floats to top of its section" '
                          'style="color:#92400e;">&#9888;</span>') if it['date_label'] and not it['sort_key'] else ''
         return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(_TL_TYPE_LABELS.get(it['type'], it['type']))}</td>
@@ -14172,7 +14183,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
 </table>
 </div>
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
-  The Abacum AI Summit entry (Speaking &amp; Events) isn&rsquo;t listed here&mdash;it&rsquo;s a one-off with photos,
+  The Abacum AI Summit entry (Speaking and Events) isn&rsquo;t listed here&mdash;it&rsquo;s a one-off with photos,
   hardcoded on the public page rather than migrated. See CLAUDE.md.
 </p>
 </div>"""
@@ -14374,7 +14385,7 @@ def _oc_parse_warning(values: dict) -> str:
         return (
             '<p style="margin:-8px 0 0;padding:8px 12px;background:#fef3c7;border:1px solid #fde68a;'
             'border-radius:8px;font-size:12px;color:#92400e;">'
-            "Date didn&rsquo;t parse as Mon YYYY — this piece won&rsquo;t get an automatic recency "
+            "Date didn&rsquo;t parse as Mon YYYY—this piece won&rsquo;t get an automatic recency "
             "tiebreak against others sharing its Display order.</p>"
         )
     return ""
@@ -14424,13 +14435,13 @@ def _oc_form_fields(values: dict) -> str:
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
       <input name="date_label" maxlength="50" value="{_esc(values.get('date_label', ''))}"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="Mon YYYY, e.g. Jun 2026 — optional">
+        placeholder="Mon YYYY, e.g. Jun 2026—optional">
     </div>
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (tiebreaker)</label>
       <input name="display_order" type="number" value="{_esc(str(values.get('display_order')) if values.get('display_order') not in (None, '') else '')}"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="Leave blank — auto-assigned">
+        placeholder="Leave blank—auto-assigned">
     </div>
   </div>
   {_oc_parse_warning(values)}
@@ -14488,7 +14499,7 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
         else:
             preview_html = ('<span class="btn btn-ghost" style="margin-left:10px;color:var(--muted);'
                              'border-color:var(--line);cursor:not-allowed;" '
-                             'title="Add body content first — a card-metadata-only piece has no page of its own to preview.">'
+                             'title="Add body content first—a card-metadata-only piece has no page of its own to preview.">'
                              'Preview &rarr;</span>')
     else:
         preview_html = ""
@@ -14915,7 +14926,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Demographic *</label>
       <input name="demographic" required maxlength="300" value="{_esc(c.get('demographic', ''))}"
-        placeholder="e.g. CFOs &amp; VP Finance"
+        placeholder="e.g. CFOs and VP Finance"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
     </div>
   </div>
@@ -15182,11 +15193,11 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 {_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual', confidence_key='format_reality')}
 {_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards', confidence_key='engagement_level')}
 {_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label', confidence_key='application_friction')}
-{_section_header('Business & sponsorship')}
+{_section_header('Business and sponsorship')}
 {_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.", confidence_key='business_model')}
 {_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.", confidence_key='sponsor_relationship_note')}
 {_field('cost_value_verdict', 'Cost vs. value', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
-{_section_header('Reputation & verdict')}
+{_section_header('Reputation and verdict')}
 {_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.', confidence_key='notable_members')}
 {_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.', confidence_key='public_criticism')}
 {_field('verdict_summary', 'Bottom line', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
@@ -15229,7 +15240,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Quiz mention</strong> (inline at the end of the subtitle paragraph, top of page): &ldquo;...Slack channels. Not sure which community's for you? Take the quiz &rarr;&rdquo; &mdash; links to the recommender. Plain inline text link, not a separate CTA block.</li>
+<li><strong>Quiz mention</strong> (inline at the end of the subtitle paragraph, top of page): &ldquo;...Slack channels. Not sure which community's for you? Take the quiz &rarr;&rdquo;&mdash;links to the recommender. Plain inline text link, not a separate CTA block.</li>
 <li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;, the link inline in the message itself rather than pointing the visitor to a separate CTA elsewhere on the page. Its href (and the bottom-of-page gap link's href) still carries the live search/filter state plus <code>?zero=1</code>, computed client-side by <code>gapFormHref()</code>, so the gap form can tailor its transparency note (see below).</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#129305; Formal advisor to these communities.&rdquo;</li>
 <li><strong>Footer</strong> (bottom of page, no box/button chrome): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members, &ldquo;Sign in to submit &rarr;&rdquo; for everyone else (submission is member-gated, not public), directly followed by &ldquo;Can't find the right one, or the one you're in isn't quite enough? I'd love to know what's missing &rarr;&rdquo; (links to the gap form, public, no login required). The seafoam CTA card that used to carry both prompts plus a &ldquo;Suggest a community&rdquo; button was removed; these two lines used to sit together below the filters as a separate top-of-page block before moving to the footer.</li>
@@ -15239,9 +15250,9 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Profile pages (/tools/communities/&lt;slug&gt;)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Per-profile mini-CTA:</strong> &ldquo;Not quite the right fit? Tell us why &rarr;&rdquo; &mdash; links to the gap form pre-filled with <code>closest_community_id</code>; the &ldquo;Re: [Name] wasn't quite the right fit&hellip;&rdquo; line itself renders on the gap form, not here (see below).</li>
-<li><strong>Empty-profile fallback:</strong> when a community has no <code>community_profiles</code> row, only the directory-card fields render (name, cost, region, access, sponsor, &ldquo;Visit website&rdquo; button) &mdash; no verdict/deep-profile sections.</li>
-<li><strong>Suggest-a-correction</strong> (<code>/tools/communities/correct?community_id=&lt;id&gt;</code>): &ldquo;Something here out of date? Suggest a correction &rarr;&rdquo; &mdash; a public, no-login, single free-text field ("What's incorrect or out of date?") plus optional email, distinct from the gap form's fit-feedback purpose. Requires a known <code>community_id</code> (404s otherwise, since a correction is always about one specific listing, unlike the gap form's "none in particular" option). Lands in the same <code>community_gap_submissions</code> table as gap/recommender rows, tagged <code>submission_type='correction'</code>, and is reviewed alongside them at <code>/admin/inbox/community-gaps</code> &mdash; it lands in a review queue and is never auto-applied to the listing.</li>
+<li><strong>Per-profile mini-CTA:</strong> &ldquo;Not quite the right fit? Tell us why &rarr;&rdquo;&mdash;links to the gap form pre-filled with <code>closest_community_id</code>; the &ldquo;Re: [Name] wasn't quite the right fit&hellip;&rdquo; line itself renders on the gap form, not here (see below).</li>
+<li><strong>Empty-profile fallback:</strong> when a community has no <code>community_profiles</code> row, only the directory-card fields render (name, cost, region, access, sponsor, &ldquo;Visit website&rdquo; button)&mdash;no verdict/deep-profile sections.</li>
+<li><strong>Suggest-a-correction</strong> (<code>/tools/communities/correct?community_id=&lt;id&gt;</code>): &ldquo;Something here out of date? Suggest a correction &rarr;&rdquo;&mdash;a public, no-login, single free-text field ("What's incorrect or out of date?") plus optional email, distinct from the gap form's fit-feedback purpose. Requires a known <code>community_id</code> (404s otherwise, since a correction is always about one specific listing, unlike the gap form's "none in particular" option). Lands in the same <code>community_gap_submissions</code> table as gap/recommender rows, tagged <code>submission_type='correction'</code>, and is reviewed alongside them at <code>/admin/inbox/community-gaps</code>&mdash;it lands in a review queue and is never auto-applied to the listing.</li>
 </ul>
 </section>
 
@@ -15253,7 +15264,7 @@ _COMMUNITIES_REFERENCE_HTML = """
   <ul style="margin:4px 0 0;padding-left:18px;">
     <li><em>Zero-result search:</em> &ldquo;That search came up empty. You were {search summary}. [You also {viewed profiles} before landing here.] Tell us what you were hoping to find instead, so we don't have to ask you to repeat it below.&rdquo;</li>
     <li><em>Non-zero search and/or viewed profiles:</em> &ldquo;We noticed you {were {search summary} on the directory} and/or {viewed profiles} before landing here. We'll use that context, so feel free to skip repeating it below.&rdquo;</li>
-    <li><em>No session detected:</em> no note block at all &mdash; only the always-shown heading.</li>
+    <li><em>No session detected:</em> no note block at all&mdash;only the always-shown heading.</li>
   </ul>
 </li>
 <li><strong>Per-profile-only intro</strong> (renders independently of, and alongside, the note block above when arrived via a profile's mini-CTA): &ldquo;Re: <strong>[Community Name]</strong> wasn't quite the right fit. What would have made it work, or what else should we know?&rdquo;</li>
@@ -15264,7 +15275,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Suggest-a-community (/tools/communities/submit)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Member-gated</strong> (redirects to <code>/login</code> if signed out) &mdash; not a public form. Three required fields: community name, URL, submitter email.</li>
+<li><strong>Member-gated</strong> (redirects to <code>/login</code> if signed out)&mdash;not a public form. Three required fields: community name, URL, submitter email.</li>
 <li>Confirmation email via <code>COMMUNITY_SUBMISSION_*</code> templates, admin-editable at <a href="/admin/emails">/admin/emails</a>, plus an internal notification email to Brian on each submission.</li>
 </ul>
 </section>
@@ -15280,31 +15291,31 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Matchmaker (/tools/communities/find)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li>Replaced the old 4-question quiz outright, same URL. Free-type chat: the visitor describes what they're looking for, Claude asks a small number of clarifying questions (one or two per turn), then narrows to 2&ndash;3 best-fit suggestions with links to their profile pages, drawn from a text block covering every approved community's directory listing plus its Community Profile (<code>linklib/matchmaker.py::_build_communities_context</code>) &mdash; sent as full context on every turn rather than retrieved, since the ~38-community dataset is small enough that this is cheap and simpler than a retrieval layer.</li>
-<li>Thumbs up/down per suggestion, UI-only &mdash; never persisted (no server call, no DB row), unlike FP&amp;A Buddy's <code>ask_feedback</code> table.</li>
-<li>Multi-turn, server-rebuilt history (mirroring <code>/tools/fpa-buddy</code>'s <code>conversation_id</code> pattern) capped at <code>linklib.matchmaker.MAX_FOLLOWUPS</code> turns &mdash; higher than FP&amp;A Buddy's cap, since narrowing down through clarifying questions naturally takes more turns even though each turn is individually cheaper (no retrieval, no web search).</li>
-<li><strong>Public, no login required</strong> (same as the quiz it replaces) &mdash; so unlike FP&amp;A Buddy's user-keyed dollar cap, rate limiting here keys off the anonymous <code>cfo_visitor</code> session cookie for the common signed-out case, falling back to a per-user cap only when the visitor happens to be signed in. See <code>matchmaker_questions</code> in ARCHITECTURE.md for the schema and <code>/admin/users</code>' "Matchmaker" cap fields for the admin controls.</li>
+<li>Replaced the old 4-question quiz outright, same URL. Free-type chat: the visitor describes what they're looking for, Claude asks a small number of clarifying questions (one or two per turn), then narrows to 2&ndash;3 best-fit suggestions with links to their profile pages, drawn from a text block covering every approved community's directory listing plus its Community Profile (<code>linklib/matchmaker.py::_build_communities_context</code>)&mdash;sent as full context on every turn rather than retrieved, since the ~38-community dataset is small enough that this is cheap and simpler than a retrieval layer.</li>
+<li>Thumbs up/down per suggestion, UI-only&mdash;never persisted (no server call, no DB row), unlike FP&amp;A Buddy's <code>ask_feedback</code> table.</li>
+<li>Multi-turn, server-rebuilt history (mirroring <code>/tools/fpa-buddy</code>'s <code>conversation_id</code> pattern) capped at <code>linklib.matchmaker.MAX_FOLLOWUPS</code> turns&mdash;higher than FP&amp;A Buddy's cap, since narrowing down through clarifying questions naturally takes more turns even though each turn is individually cheaper (no retrieval, no web search).</li>
+<li><strong>Public, no login required</strong> (same as the quiz it replaces)&mdash;so unlike FP&amp;A Buddy's user-keyed dollar cap, rate limiting here keys off the anonymous <code>cfo_visitor</code> session cookie for the common signed-out case, falling back to a per-user cap only when the visitor happens to be signed in. See <code>matchmaker_questions</code> in ARCHITECTURE.md for the schema and <code>/admin/users</code>' "Matchmaker" cap fields for the admin controls.</li>
 </ul>
 </section>
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Auto-fill from URL (/admin/tools/communities/new and /{id}/edit)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, next to Name/URL on the Add/Edit Community form &mdash; drafts the basic directory-listing fields (demographic, reach, local markets, cost band, cost note, sponsorship, sponsor name, access, format, categories) from one Claude call grounded in a fetch of the entered URL. Distinct from the &ldquo;Generate&rdquo; button on the Community Profile edit page, which drafts the deeper qualitative fields instead.</li>
-<li><strong>Status line while running:</strong> &ldquo;Generating&hellip;&rdquo;, then either &ldquo;Drafted. Review before saving &mdash; anything marked &lsquo;Needs verification&rsquo; needs a manual check.&rdquo; or, if the page fetch failed, &ldquo;Drafted. Could not fetch the page, so verify facts before saving.&rdquo; On failure: the request's own error message, or &ldquo;Generation failed. Fill in the form by hand.&rdquo;</li>
-<li><strong>&ldquo;Needs verification&rdquo; sentinel:</strong> when the model can't confidently determine a field, it drafts the literal string &ldquo;Needs verification&rdquo; into that field rather than guessing &mdash; a selectable option on the Reach/Cost band/Sponsorship selects, or the field's literal text otherwise. Deliberately a different label from the &ldquo;Needs review&rdquo; badge below (that one is Brian's own manual sign-off on the whole Community Profile; this one is a machine-set, per-field gap on the basic listing) so the two never get confused in the same admin table.</li>
-<li><strong>&ldquo;N fields need verification&rdquo; badge</strong> on the admin communities table: a passive count, not a save blocker &mdash; a nudge toward Edit for any community still carrying the sentinel on one or more fields. The sentinel is stripped back out to blank on every public-facing page (directory, profile, compare, recommender results) before a visitor ever sees it.</li>
+<li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, next to Name/URL on the Add/Edit Community form&mdash;drafts the basic directory-listing fields (demographic, reach, local markets, cost band, cost note, sponsorship, sponsor name, access, format, categories) from one Claude call grounded in a fetch of the entered URL. Distinct from the &ldquo;Generate&rdquo; button on the Community Profile edit page, which drafts the deeper qualitative fields instead.</li>
+<li><strong>Status line while running:</strong> &ldquo;Generating&hellip;&rdquo;, then either &ldquo;Drafted. Review before saving&mdash;anything marked &lsquo;Needs verification&rsquo; needs a manual check.&rdquo; or, if the page fetch failed, &ldquo;Drafted. Could not fetch the page, so verify facts before saving.&rdquo; On failure: the request's own error message, or &ldquo;Generation failed. Fill in the form by hand.&rdquo;</li>
+<li><strong>&ldquo;Needs verification&rdquo; sentinel:</strong> when the model can't confidently determine a field, it drafts the literal string &ldquo;Needs verification&rdquo; into that field rather than guessing&mdash;a selectable option on the Reach/Cost band/Sponsorship selects, or the field's literal text otherwise. Deliberately a different label from the &ldquo;Needs review&rdquo; badge below (that one is Brian's own manual sign-off on the whole Community Profile; this one is a machine-set, per-field gap on the basic listing) so the two never get confused in the same admin table.</li>
+<li><strong>&ldquo;N fields need verification&rdquo; badge</strong> on the admin communities table: a passive count, not a save blocker&mdash;a nudge toward Edit for any community still carrying the sentinel on one or more fields. The sentinel is stripped back out to blank on every public-facing page (directory, profile, compare, recommender results) before a visitor ever sees it.</li>
 </ul>
 </section>
 
 <section style="padding-top:6px;border-top:1px solid var(--line);">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:14px 0 8px;">How the anonymous tracking works</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong><code>cfo_visitor</code> cookie:</strong> unsigned, <code>httponly</code>, <code>samesite=lax</code>, 30-day TTL, value is <code>secrets.token_urlsafe(16)</code> &mdash; a random token with no IP, user agent, or fingerprint embedded. Set only once per visitor (never re-set on an existing cookie), so it never resets its own TTL on every page view.</li>
-<li><strong><code>community_profile_views</code> table:</strong> records <code>(session_id, community_id, viewed_at)</code> &mdash; which profile pages a session viewed, and when. Composite primary key on <code>(session_id, community_id)</code> dedups repeat views; a re-view just refreshes <code>viewed_at</code>.</li>
+<li><strong><code>cfo_visitor</code> cookie:</strong> unsigned, <code>httponly</code>, <code>samesite=lax</code>, 30-day TTL, value is <code>secrets.token_urlsafe(16)</code>&mdash;a random token with no IP, user agent, or fingerprint embedded. Set only once per visitor (never re-set on an existing cookie), so it never resets its own TTL on every page view.</li>
+<li><strong><code>community_profile_views</code> table:</strong> records <code>(session_id, community_id, viewed_at)</code>&mdash;which profile pages a session viewed, and when. Composite primary key on <code>(session_id, community_id)</code> dedups repeat views; a re-view just refreshes <code>viewed_at</code>.</li>
 <li><strong><code>community_gap_submissions</code> table:</strong> stores the free-text fields (current communities, gaps, looking-for), <code>search_context_json</code> (the search/filter state, quiz answers, or the quiz's optional weighting-step choices, at submission time), <code>viewed_community_ids_json</code> (computed server-side from <code>community_profile_views</code>, never trusted from the client), <code>closest_community_id</code>, optional email, a <code>reviewed</code> flag for admin triage, and <code>submission_type</code> (<code>'gap'</code>, <code>'recommender'</code>, <code>'weight_preferences'</code>, or <code>'correction'</code>) distinguishing gap-form submissions, logged recommender-quiz completions, a visitor's own weighting choices (logged only when they set at least one, never on a skip), and per-profile correction reports (which reuse just <code>gaps</code> for the free text and <code>closest_community_id</code> for the listing being corrected) from each other.</li>
-<li><strong>No PII is collected</strong> &mdash; nothing reads or stores IP address, user agent, or <code>X-Forwarded-For</code>. The only header touched is <code>x-forwarded-proto</code>, used once to set the cookie's <code>secure</code> flag, never persisted.</li>
-<li><strong>Retention:</strong> everything is kept indefinitely, no automatic deletion &mdash; documented publicly at <a href="/privacy">/privacy</a>.</li>
+<li><strong>No PII is collected</strong>&mdash;nothing reads or stores IP address, user agent, or <code>X-Forwarded-For</code>. The only header touched is <code>x-forwarded-proto</code>, used once to set the cookie's <code>secure</code> flag, never persisted.</li>
+<li><strong>Retention:</strong> everything is kept indefinitely, no automatic deletion&mdash;documented publicly at <a href="/privacy">/privacy</a>.</li>
 <li><strong>Admin visibility:</strong> submissions are triaged at <a href="/admin/inbox/community-gaps">/admin/inbox/community-gaps</a>, mirroring the <code>/admin/fpa-buddy/feedback</code> layout, and feed a badge in the CFO Toolbox admin nav group via <code>community_gap_counts()</code>.</li>
 </ul>
 </section>
@@ -15852,7 +15863,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:28px;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name &amp; description</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name and description</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Communities</th>
       <th style="padding:9px 12px;"></th>
     </tr></thead>
@@ -19537,7 +19548,7 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
             sources_html = f'<div class="rr-rail-label">Tags</div><div class="rr-tagbar">{tagbar}</div>'
 
     rail_html = f"""<div class="rr-rail" id="rr-rail">
-  <a class="rr-rail-back" href="/admin/library">&larr; Library</a>
+  <a class="rr-rail-back" href="/tools">&larr; Toolbox</a>
   <div class="rr-rail-title">Reader</div>
   <div>{quick_views_html}</div>
   <div class="rr-rope"></div>
@@ -19651,7 +19662,7 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
             '<div class="rr-alert">'
             '<span style="flex-shrink:0;width:18px;height:18px;border-radius:50%;background:var(--coral);'
             'color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;">!</span>'
-            f'<span style="flex:1;">Subscriber access looks stale for <strong>{_esc(dom)}</strong>{extra} &mdash; '
+            f'<span style="flex:1;">Subscriber access looks stale for <strong>{_esc(dom)}</strong>{extra}&mdash;'
             f'the cookie may have expired. Re-run the subscriber cookie refresh flow for {_esc(dom)}, then '
             f'<a href="#" onclick="rrRecheckAuth(event)">re-check subscriber access</a>.</span>'
             '</div>'
@@ -20374,7 +20385,7 @@ async function rrRecheckAuth(e) {{
 </script>"""
     )
 
-    return HTMLResponse(_page("Reader—Brian Weisberg", "Library", body, role=_role(request)))
+    return HTMLResponse(_page("Reader—Brian Weisberg", "Reader", body, role=_role(request)))
 
 
 # Note: /library/past-questions was retired in Phase 2 — folded into the
@@ -20580,7 +20591,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         usage_html = (
             f'<div id="ask-usage" style="font-size:13px;color:var(--muted);margin:-18px 0 22px;">'
             f'<span id="ask-usage-text">${usage_today["spent"]:.2f} of ${usage_today["cap"]:.2f} used this month</span>'
-            f' &middot; <a href="/ask/history" style="color:var(--accent);">Your usage &amp; past questions &rarr;</a>'
+            f' &middot; <a href="/ask/history" style="color:var(--accent);">Your usage and past questions &rarr;</a>'
             f'</div>'
         )
 
@@ -21532,27 +21543,32 @@ async def read_later_refresh(request: Request):
         lib.close()
 
 
-# Library management lives on its own page (/admin/library). Phase 6:
-# "Open Reader" was dropped from this list — it's not a management tool, and
-# it's reachable via a dedicated callout at the top of the page instead (see
-# admin_library()), plus Admin's own CFO Toolbox -> Library entry point.
+# The Reader's own management tools. These used to live on a standalone
+# /admin/library page; as of PR 9 (2026-09) that page is gone and they render
+# inside the collapsible Reader group on /admin instead — see
+# _reader_admin_quadrants(), which arranges this same list into three
+# quadrants. The NAME stayed `_LIBRARY_TOOLS` on purpose: "Library" is
+# internal vocabulary here (linklib, library.db, the Library class), and only
+# user-facing copy was renamed to "Reader".
+# "Open Reader" was dropped from this list in Phase 6 — it's not a management
+# tool; it's the ghost button in the Reader group's own description instead.
 # "Historical sweep" and "Archive queue" are both gone outright (2026-09,
 # PR 3) — the Archive Queue mechanism they belonged to (linklib/queue.py,
 # the library_queue table) was retired: a production query found 5,508 rows,
 # all dismissed, 0 pending, 0 member submissions ever, dormant for months —
 # the archive now grows by a couple articles a week via the bookmarklet,
 # which doesn't justify an AI-enriched proposal/review pipeline. See
-# CLAUDE.md's Archive Queue retirement note. This list backs BOTH the flat
-# description text below AND admin_library()'s 3-way visual grouping
-# (Archive backup stands outside all three — see that function's own note
-# on why).
+# CLAUDE.md's Archive Queue retirement note. This list backs BOTH the Reader
+# group's aggregate badge AND _reader_admin_quadrants()'s 3-way visual
+# grouping (Archive backup stands outside all three — see that function's own
+# note on why).
 _LIBRARY_TOOLS = [
     ("/admin/reader/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
     ("/admin/reader/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. It re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
     ("/admin/reader/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
     # Tag cleanup and Tagging style merged into one page (PR 7, 2026-09) — see
     # admin_tag_management()'s own docstring for the two-section structure.
-    ("/admin/reader/tag-management", "Tag cleanup &amp; style", "Merge, rename, or remove existing tags, and edit the guide that steers how new ones get chosen."),
+    ("/admin/reader/tag-management", "Tag cleanup and style", "Merge, rename, or remove existing tags, and edit the guide that steers how new ones get chosen."),
     ("/admin/reader/enrich",       "Enrich archive",      "Uses Claude to draft a summary and tags for each saved article. This is where new tags get created."),
     ("/admin/reader/bulk-delete",   "Bulk delete articles", "Permanently remove a specific list of articles you've already decided aren't needed&mdash;paste their URLs into the CSV template, mark <code>confirm_delete</code>, and re-upload. For a known list, not a scan&mdash;different from the &lt;60-word Purge tool under Reader content backfill. A single article can also be removed straight from its Reader toolbar."),
 ]
@@ -21633,8 +21649,8 @@ _ADMIN_GROUPS = [
         ("/admin/inbox/community-gaps", "Community gaps",        "Where visitors say finance communities fall short—what they're missing, and which community came closest."),
         ("/admin/inbox/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
-    ("Thought leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
-        ("/admin/thought-leadership/third-party", "Third-party content", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
+    ("Thought leadership", "Writing, Speaking and Events, Podcasts, and Press for the public /thought-leadership page.", [
+        ("/admin/thought-leadership/third-party", "Third-party content", "Add, edit, or delete entries in any of the four columns—Writing, Speaking and Events, Podcasts, Press."),
         ("/admin/thought-leadership/original", "Original content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
         ("/admin/thought-leadership/game-settings", "Sail, don't row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
     ]),
@@ -21685,7 +21701,7 @@ _OPEN_SOURCE = [
         ("MCP Python SDK", "mcp", "MIT", "https://github.com/modelcontextprotocol/python-sdk",
          "Powers the read-only /mcp server (Phase 1)—mounted in-process alongside the rest of the app, no second service."),
     ]),
-    ("Stores & searches", "Where your archive lives and how it's searched.", [
+    ("Stores and searches", "Where your archive lives and how it's searched.", [
         ("SQLite + FTS5", None, "Public Domain", "https://www.sqlite.org",
          "The entire database is a single SQLite file, with FTS5 powering full-text search across your archive."),
         ("sqlite-vec", "sqlite-vec", "Apache-2.0", "https://github.com/asg017/sqlite-vec",
@@ -21711,7 +21727,7 @@ _OPEN_SOURCE = [
         ("OpenAI SDK", "openai", "Apache-2.0", "https://github.com/openai/openai-python",
          "The Python client for text-embedding-3-small—turns saved articles and FP&A Buddy questions into vectors for semantic search."),
     ]),
-    ("Built & kept tidy", "The tools that make and maintain the site—including a couple we leaned on right here.", [
+    ("Built and kept tidy", "The tools that make and maintain the site—including a couple we leaned on right here.", [
         ("pytest", "pytest", "MIT", "https://pytest.org",
          "Runs the test suite that guards every change."),
         ("pytest-xdist", "pytest-xdist", "MIT", "https://github.com/pytest-dev/pytest-xdist",
@@ -21723,7 +21739,7 @@ _OPEN_SOURCE = [
         ("httpx", "httpx", "BSD-3-Clause", "https://www.python-httpx.org",
          "The HTTP client powering the test client."),
     ]),
-    ("Type & craft", "The look of the site.", [
+    ("Type and craft", "The look of the site.", [
         ("Outfit", None, "SIL OFL 1.1", "https://fonts.google.com/specimen/Outfit",
          "The headline typeface."),
         ("DM Sans", None, "SIL OFL 1.1", "https://fonts.google.com/specimen/DM+Sans",
@@ -21829,12 +21845,12 @@ def admin_open_source(request: Request):
 # Each entry: (name, module path, bucket, purpose, cadence, env vars, invocation lines).
 # bucket is "Recurring & actively useful" or "Reusable diagnostic".
 _SCRIPT_REGISTRY = [
-    ("backfill_logos.py", "scripts.backfill_logos", "Recurring & actively useful",
+    ("backfill_logos.py", "scripts.backfill_logos", "Recurring and actively useful",
      "Fetches a company logo for every Software tool/community still missing one, via "
      "Logo.dev's free image endpoint (500K requests/month, no credit card). Replaced "
      "Brandfetch as the active source in 2026-09 once Brandfetch's one-time 100-credit "
-     "free tier was confirmed permanently exhausted — see linklib/logodev.py.",
-     "Recurring-manual — run whenever new tools/communities need a logo; the whole "
+     "free tier was confirmed permanently exhausted—see linklib/logodev.py.",
+     "Recurring-manual—run whenever new tools/communities need a logo; the whole "
      "catalog fits in one pass now, no monthly batching required.",
      ["LOGODEV_API_KEY (required for --apply; not needed for a preview or --status)"],
      ["python -m scripts.backfill_logos --db library.db                 # preview (default limit 500)",
@@ -21842,159 +21858,159 @@ _SCRIPT_REGISTRY = [
       "python -m scripts.backfill_logos --db library.db --status         # coverage report only"]),
     ("audit_tool_logo_dimensions.py", "scripts.audit_tool_logo_dimensions", "Reusable diagnostic",
      "Read-only: reads every already-downloaded tool/community logo file on disk (PNG/JPEG/GIF/"
-     "WEBP/ICO/SVG, parsed by hand — no Pillow) and flags ones that are undersized or have a "
+     "WEBP/ICO/SVG, parsed by hand—no Pillow) and flags ones that are undersized or have a "
      "lopsided aspect ratio (the likely cause of a logo rendering tiny inside its object-fit:"
-     "contain tile, e.g. Airbase/Airwallex on the directory) — a hand-replacement worklist for "
+     "contain tile, e.g. Airbase/Airwallex on the directory)—a hand-replacement worklist for "
      "the existing manual logo-override process. Makes no Brand API calls, no file writes, no "
      "DB writes.",
-     "Recurring-manual — run whenever a batch of tiny/lopsided logos is reported, or as a "
+     "Recurring-manual—run whenever a batch of tiny/lopsided logos is reported, or as a "
      "periodic sweep after a backfill_logos.py run.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.audit_tool_logo_dimensions --db library.db",
       "python -m scripts.audit_tool_logo_dimensions --db library.db --min-px 96 --max-ratio 2.0",
       "python -m scripts.audit_tool_logo_dimensions --db library.db --csv logo_audit.csv"]),
-    ("capture_tool_screenshots.py", "scripts.capture_tool_screenshots", "Recurring & actively useful",
-     "Bulk homepage screenshot capture for the Software directory — the same "
+    ("capture_tool_screenshots.py", "scripts.capture_tool_screenshots", "Recurring and actively useful",
+     "Bulk homepage screenshot capture for the Software directory—the same "
      "capture_homepage() logic the live \"Recapture\" admin button uses, run across many "
      "tools in one pass instead of clicking the button repeatedly.",
-     "Recurring-manual — whenever a batch of new tools needs a first screenshot, or "
+     "Recurring-manual—whenever a batch of new tools needs a first screenshot, or "
      "existing ones need a refresh.",
-     ["None required, but needs Playwright's Chromium installed and real network egress — "
+     ["None required, but needs Playwright's Chromium installed and real network egress—"
       "run from a dev machine or railway ssh, not a sandboxed build session."],
      ["python -m scripts.capture_tool_screenshots --db library.db --tools \"Ramp,Brex\" --dry-run",
       "python -m scripts.capture_tool_screenshots --db library.db --limit 20"]),
-    ("seed_tools.py", "scripts.seed_tools", "Recurring & actively useful",
+    ("seed_tools.py", "scripts.seed_tools", "Recurring and actively useful",
      "Seeds the CFO Toolbox Software directory from a curated vendor list. Safe to "
-     "re-run — skips any tool whose URL is already in the DB.",
-     "Recurring-manual — run by hand whenever the curated seed list gains new tools, and "
+     "re-run—skips any tool whose URL is already in the DB.",
+     "Recurring-manual—run by hand whenever the curated seed list gains new tools, and "
      "once against a brand-new database.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.seed_tools --db library.db"]),
-    ("seed_communities.py", "scripts.seed_communities", "Recurring & actively useful",
-     "Seeds the CFO Toolbox Communities directory from a curated list. Safe to re-run — "
+    ("seed_communities.py", "scripts.seed_communities", "Recurring and actively useful",
+     "Seeds the CFO Toolbox Communities directory from a curated list. Safe to re-run—"
      "adds any community missing by URL and syncs name/notes/advisor on existing rows; "
      "every admin-owned field (reach, categories, approved, etc.) is left untouched.",
-     "Recurring-manual — run by hand whenever the curated seed list changes, and once "
+     "Recurring-manual—run by hand whenever the curated seed list changes, and once "
      "against a brand-new database.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.seed_communities --db library.db"]),
-    ("enrich_community_profiles.py", "scripts.enrich_community_profiles", "Recurring & actively useful",
-     "Bulk/backfill Community Profile drafting — the Communities equivalent of "
+    ("enrich_community_profiles.py", "scripts.enrich_community_profiles", "Recurring and actively useful",
+     "Bulk/backfill Community Profile drafting—the Communities equivalent of "
      "enrich_agent_taxonomy.py. One Claude call per community drafts the sixteen "
      "qualitative profile fields; every draft is saved needs_review=1, same review "
      "contract as the live \"Auto-fill from URL\" admin button.",
-     "Recurring-manual — whenever a batch of communities needs profile drafts.",
+     "Recurring-manual—whenever a batch of communities needs profile drafts.",
      ["ANTHROPIC_API_KEY", "LINKLIB_DB (or pass --db)"],
      ["python -m scripts.enrich_community_profiles --db library.db --communities \"Chief,Rho Community\" --dry-run",
       "python -m scripts.enrich_community_profiles --db library.db --limit 10"]),
-    ("enrich_agent_taxonomy.py", "scripts.enrich_agent_taxonomy", "Recurring & actively useful",
+    ("enrich_agent_taxonomy.py", "scripts.enrich_agent_taxonomy", "Recurring and actively useful",
      "Agent-taxonomy research for Software tools (renamed from enrich_tool_features.py in "
      "the Feature Taxonomy Phase 1b PR 2 legacy retirement, which dropped the feature-drafting "
-     "half — curated features are now managed directly on the tool edit page's governed "
-     "checklist, not LLM-drafted) — the exact same drafting logic the live app runs "
+     "half—curated features are now managed directly on the tool edit page's governed "
+     "checklist, not LLM-drafted)—the exact same drafting logic the live app runs "
      "automatically on a new tool, or on-demand via the \"Refresh AI research\" admin button; "
      "this script is the bulk/backfill path.",
-     "Recurring-manual — whenever a batch of tools needs agent-taxonomy research.",
+     "Recurring-manual—whenever a batch of tools needs agent-taxonomy research.",
      ["ANTHROPIC_API_KEY", "LINKLIB_DB (or pass --db)"],
      ["python -m scripts.enrich_agent_taxonomy --db library.db --tools \"Ramp,Brex\" --dry-run",
       "python -m scripts.enrich_agent_taxonomy --db library.db --limit 10"]),
-    ("mcp_server.py", "scripts.mcp_server", "Recurring & actively useful",
-     "Stdio MCP server wrapping the hosted CFO Library search (GET /api/search) — lets "
+    ("mcp_server.py", "scripts.mcp_server", "Recurring and actively useful",
+     "Stdio MCP server wrapping the hosted CFO Library search (GET /api/search)—lets "
      "Claude Desktop/Code search the archive directly, without going through the "
      "/tools/fpa-buddy web UI.",
-     "Long-running — launched by the MCP client (Claude Desktop/Code) per its own config, "
+     "Long-running—launched by the MCP client (Claude Desktop/Code) per its own config, "
      "not invoked manually per-use.",
      ["LINKLIB_PUBLIC_BASE (default http://localhost:8000)", "LINKLIB_SAVE_TOKEN"],
      ["python -m scripts.mcp_server   # normally launched by the MCP client's own config, not run directly"]),
-    ("generate_brand_docs.py", "scripts.generate_brand_docs", "Recurring & actively useful",
+    ("generate_brand_docs.py", "scripts.generate_brand_docs", "Recurring and actively useful",
      "Regenerates BRAND.md §7 (the CSS token reference table) from the live :root "
      "block in webapp/app.py's _CSS, so the doc can't drift from the real values.",
-     "Recurring-manual — run and commit the diff in the same PR as any change to that "
+     "Recurring-manual—run and commit the diff in the same PR as any change to that "
      "CSS :root block (CI fails on a stale table via tests/test_brand_docs_sync.py).",
      ["None"],
      ["python -m scripts.generate_brand_docs          # regenerate BRAND.md in place",
       "python -m scripts.generate_brand_docs --check   # exit 1 if BRAND.md is stale, no write"]),
-    ("report_orphaned_categories.py", "scripts.report_orphaned_categories", "Recurring & actively useful",
+    ("report_orphaned_categories.py", "scripts.report_orphaned_categories", "Recurring and actively useful",
      "Read-only: lists every tool/community carrying a category string no longer in the "
-     "active vocabulary. Makes no writes — a diagnostic to review before any manual cleanup.",
-     "Recurring-manual — run as needed if orphaned-category drift is suspected.",
+     "active vocabulary. Makes no writes—a diagnostic to review before any manual cleanup.",
+     "Recurring-manual—run as needed if orphaned-category drift is suspected.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.report_orphaned_categories --db library.db"]),
-    ("report_feature_taxonomy_coverage.py", "scripts.report_feature_taxonomy_coverage", "Recurring & actively useful",
+    ("report_feature_taxonomy_coverage.py", "scripts.report_feature_taxonomy_coverage", "Recurring and actively useful",
      "Read-only: per tool_categories row, reports tool count, live/retired category_features "
      "counts, and pending feature_review_queue counts by source. Built for the Feature Taxonomy "
      "scan tool's Phase 0/1 (docs/FEATURE_TAXONOMY.md §10) to confirm which categories are "
      "origination-mode candidates against real numbers instead of an estimate.",
-     "Recurring-manual — run before scoping/running an origination scan against a new category, "
+     "Recurring-manual—run before scoping/running an origination scan against a new category, "
      "to see current coverage and avoid duplicating proposals already in the queue.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.report_feature_taxonomy_coverage --db library.db"]),
-    ("originate_category_features.py", "scripts.originate_category_features", "Recurring & actively useful",
+    ("originate_category_features.py", "scripts.originate_category_features", "Recurring and actively useful",
      "Runs the Feature Taxonomy scan tool's Phase 3 pipeline (docs/FEATURE_TAXONOMY.md §10, "
-     "origination mode) against one category's whole tool roster — research, incremental §7 "
+     "origination mode) against one category's whole tool roster—research, incremental §7 "
      "clustering + merge judgment, and (with --apply) the feature_review_queue write. Preview "
      "mode (default) runs the SAME full pipeline and makes the SAME real Exa/Claude calls as "
-     "--apply — there's no cheap way to preview this pipeline's output the way a backfill "
+     "--apply—there's no cheap way to preview this pipeline's output the way a backfill "
      "script's preview is free, so previewing then applying pays for the whole run twice. "
      "Go straight to --apply once you trust the pipeline.",
-     "Recurring-manual — run once per category as each of the 14 (of 17) categories without a "
+     "Recurring-manual—run once per category as each of the 14 (of 17) categories without a "
      "curated feature list yet gets originated. Check /admin/tools/software/feature-review-queue "
      "for the results afterward.",
-     ["ANTHROPIC_API_KEY", "EXA_API_KEY (optional — falls back to the model's own knowledge without it)"],
+     ["ANTHROPIC_API_KEY", "EXA_API_KEY (optional—falls back to the model's own knowledge without it)"],
      ["python -m scripts.originate_category_features --db library.db --category Neobanking --apply"]),
-    ("deny_pending_scan_proposals.py", "scripts.deny_pending_scan_proposals", "Recurring & actively useful",
+    ("deny_pending_scan_proposals.py", "scripts.deny_pending_scan_proposals", "Recurring and actively useful",
      "Bulk-denies pending feature_review_queue items for one category/source, with a shared "
-     "resolution note — cleanup tool for a botched origination run (built for the real "
+     "resolution note—cleanup tool for a botched origination run (built for the real "
      "Neobanking incident, 364 bad singleton proposals from the pre-fix clustering bug). Denies "
      "rather than deletes, per the standing no-dead-data/always-leave-a-trace discipline.",
-     "Recurring-manual — run before a corrected re-run of originate_category_features.py "
+     "Recurring-manual—run before a corrected re-run of originate_category_features.py "
      "whenever a prior run's proposals need clearing.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.deny_pending_scan_proposals --db library.db --category Neobanking "
       "--reason \"Superseded by corrected clustering re-run\" --apply"]),
-    ("remap_queue_to_framework.py", "scripts.remap_queue_to_framework", "Recurring & actively useful",
+    ("remap_queue_to_framework.py", "scripts.remap_queue_to_framework", "Recurring and actively useful",
      "Remaps a category's pending source='scan' feature_review_queue proposals against a FIXED, "
-     "human-defined target feature list (a JSON file, not open-ended AI clustering) — matches each "
+     "human-defined target feature list (a JSON file, not open-ended AI clustering)—matches each "
      "proposal to a bucket or 'none' via one Claude call per batch, consolidates every proposal "
      "mapped to the same bucket into ONE rewritten queue row (canonical name from the framework, a "
      "synthesized definition, tool links unioned and deduped by tool_id), and denies the "
-     "now-redundant/out-of-scope rows — never deletes, per the standing no-dead-data discipline. "
+     "now-redundant/out-of-scope rows—never deletes, per the standing no-dead-data discipline. "
      "Never writes to category_features/tool_feature_links and never approves anything; every item "
      "ends up pending (rewritten) or denied, ready for a human's final approve/deny pass. Preview by "
-     "default (runs the real Claude calls — no cheaper way to preview a judgment call — but writes "
+     "default (runs the real Claude calls—no cheaper way to preview a judgment call—but writes "
      "nothing); --apply commits the plan. Built for the real Neobanking incident (2026-08, 202 "
      "pending proposals from the 8/23 corrected origination run, remapped against a 41-bucket list "
      "Brian defined by hand).",
-     "Recurring-manual — run once per category whenever a human-reviewed target framework "
+     "Recurring-manual—run once per category whenever a human-reviewed target framework "
      "supersedes that category's raw origination-scan output. Hand it a new --framework JSON file "
      "for the next category; the script itself doesn't change.",
      ["ANTHROPIC_API_KEY"],
      ["python -m scripts.remap_queue_to_framework --db library.db --category Neobanking --apply"]),
-    ("dump_communities.py", "scripts.dump_communities", "Recurring & actively useful",
-     "Read-only plain listing of every community's name, URL, and slug — no filtering or "
+    ("dump_communities.py", "scripts.dump_communities", "Recurring and actively useful",
+     "Read-only plain listing of every community's name, URL, and slug—no filtering or "
      "formatting. A quick ad hoc lookup tool.",
-     "Recurring-manual — run as needed.",
+     "Recurring-manual—run as needed.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.dump_communities --db library.db",
       "railway run python -m scripts.dump_communities --db /data/library.db   # against prod"]),
     ("diagnose_cookie_banner.py", "scripts.diagnose_cookie_banner", "Reusable diagnostic",
      "Reproduces linklib.screenshots.capture_homepage()'s exact navigation/wait sequence "
      "against a real URL and dumps the rendered DOM (including any Shadow DOM content and "
-     "cross-origin iframes) — built for the ApprovalMax cookie-banner investigation, but "
+     "cross-origin iframes)—built for the ApprovalMax cookie-banner investigation, but "
      "generalizes to any vendor whose screenshot capture is being blocked by something "
      "on the page and needs a real look at what's actually there.",
-     "Recurring-manual — run whenever a new screenshot-capture failure needs the same "
+     "Recurring-manual—run whenever a new screenshot-capture failure needs the same "
      "kind of DOM-level investigation.",
-     ["None, but needs real network egress — run from railway ssh or a dev machine, not a "
+     ["None, but needs real network egress—run from railway ssh or a dev machine, not a "
       "sandboxed build session."],
      ["python -m scripts.diagnose_cookie_banner --url https://example.com --out /tmp/example.html"]),
     ("verify_screenshot_capture.py", "scripts.verify_screenshot_capture", "Reusable diagnostic",
      "Runs the real, production capture_homepage() against a URL and writes the "
-     "resulting PNG somewhere it can be inspected — confirms a fix (e.g. a new cookie-"
+     "resulting PNG somewhere it can be inspected—confirms a fix (e.g. a new cookie-"
      "banner selector) actually works, rather than trusting the change looks right.",
-     "Recurring-manual — run after any fix to the screenshot-capture path, against the "
+     "Recurring-manual—run after any fix to the screenshot-capture path, against the "
      "URL that originally failed.",
-     ["None, but needs real network egress — run from railway ssh or a dev machine, not a "
+     ["None, but needs real network egress—run from railway ssh or a dev machine, not a "
       "sandboxed build session."],
      ["python -m scripts.verify_screenshot_capture --url https://example.com --out /tmp/verify.png"]),
     ("medium_platform_scale_check.py", "scripts.medium_platform_scale_check", "Reusable diagnostic",
@@ -22004,21 +22020,21 @@ _SCRIPT_REGISTRY = [
      "the whole library match a given set of domains and how many already have content_refetch_log "
      "history, then spikes Exa search+contents against the ones currently in the manual-review queue "
      "on those domains to report whether Exa can find/retrieve real content for them at all.",
-     "Recurring-manual — run again whenever a new fetch-failure domain cluster needs the same "
+     "Recurring-manual—run again whenever a new fetch-failure domain cluster needs the same "
      "scale-and-Exa-feasibility check before scoping a fetch-tier fix.",
-     ["EXA_API_KEY (only for the Exa spike — omit or pass --skip-exa to run the scale check alone)"],
+     ["EXA_API_KEY (only for the Exa spike—omit or pass --skip-exa to run the scale check alone)"],
      ["python -m scripts.medium_platform_scale_check --db library.db --skip-exa   # scale check only",
       "railway run python -m scripts.medium_platform_scale_check --db /data/library.db   # full report against prod"]),
     ("trace_medium_tier.py", "scripts.trace_medium_tier", "Reusable diagnostic",
      "Built for a live-proof round on the fetch-by-URL tier follow-up (2026-08 wrap-up sprint "
      "item 1): calls linklib.pipeline._try_medium_platform() directly (never the full "
      "backfill_article_content() write path) so you can watch its actual live behavior for a "
-     "specific stuck article, alongside its existing content_refetch_log history — answers "
+     "specific stuck article, alongside its existing content_refetch_log history—answers "
      "'did the Medium tier actually run for this one, and what did it do' definitively, since the "
      "logged detail alone can look identical whether a tier ran-and-missed or was never reached. "
      "Also inspects a stored Wayback snapshot's real content (word count, assess_extraction_quality "
      "verdict, a text preview) for the 'is this an empty JS shell' question.",
-     "Recurring-manual — run whenever a specific stuck article's fetch-tier behavior needs a direct, "
+     "Recurring-manual—run whenever a specific stuck article's fetch-tier behavior needs a direct, "
      "live answer rather than an inference from the log.",
      ["EXA_API_KEY (for the live _try_medium_platform re-trace; omit to see the same 'no result' "
       "behavior the tier itself falls back to)"],
@@ -22030,13 +22046,13 @@ _SCRIPT_REGISTRY = [
      "hand-picked host list, every saved article's URL plus its most recent content_refetch_log "
      "attempt, then issues a live bare-vs-www HEAD check per host to confirm or rule out a "
      "www-prefix mismatch as the real cause (as opposed to a code-level fetcher normalization "
-     "bug — every host-matching function in this codebase already strips 'www.' before "
+     "bug—every host-matching function in this codebase already strips 'www.' before "
      "comparing). Also reports bettereveryday.vc's saved-article scope (count, latest attempt, "
      "whether any already have a url_correction_log entry) and lists bulk-delete candidates for "
      "a given dead-host set (quora.com, twitter.com/x.com, thetechnologyletter.com, "
-     "gainsight.com) for review before feeding into the bulk-delete CSV tool. Read-only — never "
+     "gainsight.com) for review before feeding into the bulk-delete CSV tool. Read-only—never "
      "writes to the database.",
-     "Recurring-manual — run again whenever a new failure-cluster investigation needs the same "
+     "Recurring-manual—run again whenever a new failure-cluster investigation needs the same "
      "www-mismatch-vs-genuine-block check, or a candidate list for a bulk delete.",
      ["None required for --task www/bettereveryday/delete-candidates; needs real network egress "
       "for the live HEAD check (railway ssh or a dev machine, not a sandboxed build session)."],
@@ -22051,10 +22067,10 @@ def admin_system_scripts(request: Request):
         return _login_redirect(request)
 
     buckets = [
-        ("Recurring & actively useful",
-         "Run by hand, on their own cadence — not part of any automatic boot hook or CI job."),
+        ("Recurring and actively useful",
+         "Run by hand, on their own cadence—not part of any automatic boot hook or CI job."),
         ("Reusable diagnostic",
-         "Built for one investigation, but reusable — the question they answer can come up again."),
+         "Built for one investigation, but reusable—the question they answer can come up again."),
     ]
 
     def _script_card(name, module, purpose, cadence, env_vars, invocation):
@@ -22433,7 +22449,7 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 </div>
 </div>
 <div class="diagram-lightbox-stage"></div>
-<p class="diagram-lightbox-hint">Drag to pan, scroll or pinch to zoom{" — or search for a table to jump to it" if table_names is not None else ""}.</p>
+<p class="diagram-lightbox-hint">Drag to pan, scroll or pinch to zoom{"—or search for a table to jump to it" if table_names is not None else ""}.</p>
 </div>
 </div>
 
@@ -22475,12 +22491,12 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 #     entity_citations/matchmaker_questions above (entity_type='tool'|
 #     'community'), so they sit here for the identical reason.
 _TABLE_GROUPS: list[tuple[str, list[str]]] = [
-    ("Users & auth", ["users", "password_reset_requests", "read_later", "api_tokens"]),
-    ("Toolbox — Software", ["tools", "tool_categories", "tool_leads", "tool_audit_log",
+    ("Users and auth", ["users", "password_reset_requests", "read_later", "api_tokens"]),
+    ("Toolbox—Software", ["tools", "tool_categories", "tool_leads", "tool_audit_log",
                              "tool_competitors", "tool_name_dedupe_decisions",
                              "benchmarks", "category_features", "tool_feature_links",
                              "feature_review_queue"]),
-    ("Toolbox — Communities", ["communities", "community_audit_log", "community_categories",
+    ("Toolbox—Communities", ["communities", "community_audit_log", "community_categories",
                                 "community_competitors", "community_profiles",
                                 "community_gap_submissions", "community_profile_views"]),
     ("Thought leadership / game", ["thought_leadership", "original_content",
@@ -22489,7 +22505,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
                             "content_refetch_log", "url_correction_log",
                             "feed_sections", "feeds"]),
-    ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
+    ("Site utilities and system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
                                   "narrative_review_log", "entity_citations", "matchmaker_questions",
@@ -22721,12 +22737,18 @@ _HUB_NAV_KNOWN_NON_CARDED = {
 def _hub_nav_all_hrefs() -> set[str]:
     """Every href that actually renders as a real hub-nav card on /admin
     today — the identical assembly admin_page() performs at render time
-    (_LIBRARY_TOOLS + the Library link card + the Compare-summary-feedback
-    card + _FPA_BUDDY_TOOLS + _SOFTWARE_TOOLS + every _ADMIN_GROUPS item),
-    kept as its own function so admin_page() and this detector can never
-    build two different sets from the same source tuples."""
+    (_LIBRARY_TOOLS, now rendered as the Reader group's own quadrant cards,
+    + the Compare-summary-feedback card + _FPA_BUDDY_TOOLS + _SOFTWARE_TOOLS
+    + every _ADMIN_GROUPS item), kept as its own function so admin_page() and
+    this detector can never build two different sets from the same source
+    tuples.
+
+    `/admin/library` is deliberately absent as of PR 9 (2026-09): the
+    standalone page it named is gone, so there is no longer a route for a
+    card to be an orphan of. Its tools are still here — they're the
+    _LIBRARY_TOOLS hrefs on the line below, rendered inside the Reader group
+    rather than on a page of their own."""
     hrefs = {href for href, _, _ in _LIBRARY_TOOLS}
-    hrefs.add("/admin/library")
     hrefs.add("/admin/compare-summary-feedback")
     hrefs |= {href for href, _, _ in _FPA_BUDDY_TOOLS if href.startswith("/admin")}
     hrefs |= {href for href, _, _ in _SOFTWARE_TOOLS}
@@ -23132,7 +23154,7 @@ async function testExaConnection() {{
     }}
   }} catch(e) {{
     box.style.display = 'block';
-    box.innerHTML = '<span style="color:#b91c1c;">&#10007; Request failed — try again.</span>';
+    box.innerHTML = '<span style="color:#b91c1c;">&#10007; Request failed—try again.</span>';
   }} finally {{
     btn.disabled = false; btn.textContent = 'Test connection';
   }}
@@ -23213,7 +23235,7 @@ def admin_system_model(request: Request):
         options = options + [{"id": current, "label": current, "blurb": "Currently selected—no longer in the curated list"}]
 
     option_html = "".join(
-        f'<option value="{_esc(m["id"])}"{" selected" if m["id"] == current else ""}>{_esc(m["label"])} &mdash; {_esc(m["blurb"])}</option>'
+        f'<option value="{_esc(m["id"])}"{" selected" if m["id"] == current else ""}>{_esc(m["label"])}&mdash;{_esc(m["blurb"])}</option>'
         for m in options
     )
 
@@ -23280,7 +23302,7 @@ async function testModelConnection() {{
     }}
   }} catch(e) {{
     box.style.display = 'block';
-    box.innerHTML = '<span style="color:#b91c1c;">&#10007; Request failed — try again.</span>';
+    box.innerHTML = '<span style="color:#b91c1c;">&#10007; Request failed—try again.</span>';
   }} finally {{
     btn.disabled = false; btn.textContent = 'Test connection';
   }}
@@ -23372,7 +23394,7 @@ def _pricing_freshness_banner(last_verified: str) -> str:
         if last_verified:
             when = _relative_age(last_verified)
             html = (f'Pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
-                    f'against Anthropic&rsquo;s published rates &mdash; that&rsquo;s past the '
+                    f'against Anthropic&rsquo;s published rates&mdash;that&rsquo;s past the '
                     f'{PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
                     f'<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
                     f'Anthropic&rsquo;s current published rates, then mark it reviewed.')
@@ -23446,7 +23468,7 @@ def _exa_pricing_freshness_banner(last_verified: str) -> str:
         if last_verified:
             when = _relative_age(last_verified)
             html = (f'Exa pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
-                    f'against Exa&rsquo;s published rates &mdash; that&rsquo;s past the '
+                    f'against Exa&rsquo;s published rates&mdash;that&rsquo;s past the '
                     f'{EXA_PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
                     f'<code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table against '
                     f'<a href="https://exa.ai/pricing" target="_blank" rel="noopener" '
@@ -23634,7 +23656,7 @@ def _ai_usage_freshness_dot(label: str, last_value: str, stale: bool, anchor: st
     if not last_value:
         detail = "never reviewed"
     elif stale:
-        detail = f"reviewed {when or 'a while ago'} — stale"
+        detail = f"reviewed {when or 'a while ago'}—stale"
     else:
         detail = f"reviewed {when or 'recently'}"
     return (f'<a href="/admin/checks#{anchor}" style="display:flex;align-items:center;gap:8px;'
@@ -23694,17 +23716,17 @@ def admin_system_ai_usage(request: Request):
     # --- Claude ---------------------------------------------------------
     claude_rows = (
         _row("Enrichment", f'{_esc(_enrich_model_label(enrich_model))} <span style="font-size:12px;">({_esc(enrich_model)})</span>',
-             f'Description, Agent taxonomy, Bottom line, Community profile fields, article summaries. {live_badge} &mdash; '
+             f'Description, Agent taxonomy, Bottom line, Community profile fields, article summaries. {live_badge}&mdash;'
              f'<a href="/admin/system/model" style="color:var(--accent);">/admin/system/model &rarr;</a>')
         + _row("FP&amp;A Buddy",
                " / ".join(_esc(_enrich_model_label(t["model"])) for t in
                           [EFFORT_SETTINGS["quick"], EFFORT_SETTINGS["standard"], EFFORT_SETTINGS["deep"]]),
                f'Quick / Standard / Deep, one model per tier ({_esc(EFFORT_SETTINGS["quick"]["model"])} / '
                f'{_esc(EFFORT_SETTINGS["standard"]["model"])} / {_esc(EFFORT_SETTINGS["deep"]["model"])}). '
-               f'{code_badge} &mdash; hardcoded in <code>linklib.agent.EFFORT_SETTINGS</code>, no admin picker. '
+               f'{code_badge}&mdash;hardcoded in <code>linklib.agent.EFFORT_SETTINGS</code>, no admin picker. '
                f'<a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works &rarr;</a>')
         + _row("Matchmaker", _esc(_enrich_model_label(DEFAULT_CHAT_MODEL)),
-               f'Software &amp; Community matchmaker chat, one shared default. {code_badge} &mdash; '
+               f'Software and Community matchmaker chat, one shared default. {code_badge}&mdash;'
                f'<code>linklib.matchmaker.DEFAULT_MODEL</code>, resolved from <code>LINKLIB_CHAT_MODEL</code> / '
                f'<code>linklib.models.DEFAULT_CHAT_MODEL</code>, independent of the enrichment setting above.')
     )
@@ -23719,8 +23741,8 @@ def admin_system_ai_usage(request: Request):
     exa_toggle_html = (
         f'<div style="padding:10px 0;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-soft);">'
         f'Toggle: <strong style="color:var(--navy);">{"On" if exa_enabled else "Off"}</strong>'
-        f'{" &mdash; but EXA_API_KEY is unset, so every call site below is on its fallback regardless" if not has_exa_key and exa_enabled else ""}'
-        f' &mdash; <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings &rarr;</a></div>'
+        f'{"&mdash;but EXA_API_KEY is unset, so every call site below is on its fallback regardless" if not has_exa_key and exa_enabled else ""}'
+        f'&mdash;<a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings &rarr;</a></div>'
     )
     exa_rows = (
         _row("FP&amp;A Buddy web tier", "Tracked in <code>ask_questions</code>",
@@ -23987,7 +24009,7 @@ def admin_page(request: Request):
     # sub-group a visually lighter treatment (smaller padding/caret, filled
     # --bg instead of transparent) so it reads as nested rather than a
     # sibling of the same visual weight.
-    def _group_html(gname, gdesc, items, badge_hrefs=None, nested=False):
+    def _group_html(gname, gdesc, items, badge_hrefs=None, nested=False, count_label=None):
         cards = "".join(
             item if isinstance(item, str) else
             _card(item[0], item[1], item[2], _badge_for_href(item[0], task_counts.get(item[0], 0)))
@@ -24016,21 +24038,39 @@ def admin_page(request: Request):
             gname,
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
             f'<div style="display:grid;gap:14px;">{cards}</div>',
-            count_label=f'{len(items)} {"tool" if len(items) == 1 else "tools"}',
+            # `count_label` overrides the item count for a group whose items
+            # aren't themselves tools. Reader is the only caller: its three
+            # items are quadrants, so the literal count of 3 would undersell
+            # the 6 tools inside them.
+            count_label=(count_label if count_label is not None
+                         else f'{len(items)} {"tool" if len(items) == 1 else "tools"}'),
             badge_html=group_badge_html,
             open=False,
             nested=nested,
         )
 
-    # Library used to get its own always-expanded card floating above every
-    # group; it's now a direct link inside CFO Toolbox instead (Phase 6 —
-    # "CFO Toolbox → Library" is the new entry point for archive/library
-    # management). Its own aggregate badge (from all _LIBRARY_TOOLS
-    # hrefs) is unchanged — just relocated.
-    library_hrefs = [href for href, _, _ in _LIBRARY_TOOLS]
-    library_link_card = _card("/admin/library", "Library",
-                              f"Build, curate, enrich, and back up your archive&mdash;{len(_LIBRARY_TOOLS)} tools.",
-                              _group_badge(task_counts, library_hrefs))
+    # Reader (PR 9, 2026-09) — was a link card pointing at the standalone
+    # /admin/library page; that page is gone and its three quadrants live here
+    # instead, as a nested group beside the Software sub-group. Same aggregate
+    # badge over the same hrefs, just covering content that's now inline.
+    #
+    # "Open Reader" is a ghost button in this group's own description line —
+    # the first thing inside the box, above the three quadrants. It was a
+    # header action beside the old page's <h1>; with no page left to head, the
+    # group's description is the equivalent spot, and `.btn.btn-ghost` is
+    # carried over unchanged (BRAND.md's secondary button, no colour override).
+    reader_hrefs = [href for href, _, _ in _LIBRARY_TOOLS]
+    reader_desc = (
+        "Bringing new content in, keeping it clean, and readying it for FP&amp;A Buddy to "
+        "reason from&mdash;grouped by what they're for, not a fixed order."
+        '<div style="margin-top:12px;"><a href="/read" class="btn btn-ghost" '
+        'style="font-size:14px;padding:8px 18px;white-space:nowrap;">Open Reader</a></div>'
+    )
+    reader_subgroup_html = _group_html(
+        "Reader", reader_desc, _reader_admin_quadrants(task_counts),
+        badge_hrefs=reader_hrefs, nested=True,
+        count_label=f'{len(_LIBRARY_TOOLS)} tools',
+    )
 
     # Compare Redesign Phase 2 — spans both Software and Communities Compare
     # pages, so it's a direct CFO Toolbox card rather than nested under
@@ -24076,11 +24116,11 @@ def admin_page(request: Request):
     right_html = ""
     for gname, gdesc, items in _ADMIN_GROUPS:
         if gname == "CFO Toolbox":
-            toolbox_hrefs = ([href for href, _, _ in items] + software_hrefs + fpa_hrefs + library_hrefs
+            toolbox_hrefs = ([href for href, _, _ in items] + software_hrefs + fpa_hrefs + reader_hrefs
                               + ["/admin/compare-summary-feedback"])
             html = _group_html(gname, gdesc,
                                [software_subgroup_html] + list(items)
-                               + [fpa_subgroup_html, library_link_card, compare_summary_feedback_card],
+                               + [fpa_subgroup_html, reader_subgroup_html, compare_summary_feedback_card],
                                badge_hrefs=toolbox_hrefs)
         else:
             html = _group_html(gname, gdesc, items)
@@ -24107,18 +24147,31 @@ def admin_page(request: Request):
     return HTMLResponse(_page("Admin—Brian Weisberg", "Admin", body, authed=True))
 
 
-@app.get("/admin/library", response_class=HTMLResponse)
-def admin_library(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
+# Reader box (PR 9, 2026-09) — what used to be the standalone /admin/library
+# page. That route is gone, no redirect: its three quadrants are now a nested
+# collapsible group inside CFO Toolbox on /admin, alongside the Software
+# sub-group and the Communities card. Two levels of disclosure — Reader ->
+# quadrant -> the tool cards inside it — every one of them closed on load, per
+# the standing "every expandable menu loads collapsed" rule.
+#
+# Deliberately NOT carried over: the page's own two-column `.lib-cols` flex
+# layout and its mobile `order` reflow. Both existed to fill a full-width
+# admin page; inside a nested group in one column of /admin's own two-column
+# grid there's no width to split, so the three quadrants stack in
+# _group_html's existing `display:grid;gap:14px` list with no CSS of their own.
+#
+# Also NOT carried over, because it no longer exists: the content-flow diagram
+# the old page once ran full width. It was retired with the Archive Queue
+# itself (2026-09 PR 3) — there's no longer a producer/consumer relationship
+# to diagram — so there was nothing here to shrink or relocate. See
+# ARCHITECTURE.md's own note on that retirement.
+def _reader_admin_quadrants(task_counts: dict) -> list[str]:
+    """The Reader group's three quadrants, as pre-rendered HTML strings.
 
-    from webapp import tasks as _tasks
-    lib = _lib()
-    try:
-        task_counts = _tasks.open_task_counts(lib)
-    finally:
-        lib.close()
-
+    Returned as a list rather than one blob so `admin_page()` can drop them
+    straight into `_group_html`'s item list, which already accepts a
+    pre-rendered string alongside plain (href, title, desc) card tuples.
+    """
     # Card-style rendering (no numbered-step badge — Phase 6 dropped the
     # implied strict top-to-bottom sequence once the tools were regrouped by
     # function rather than workflow order; see the 3-way grouping below).
@@ -24133,23 +24186,6 @@ def admin_library(request: Request):
             f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
-
-    # Open Reader — a header-adjacent page action beside the H1, reusing the
-    # flex + `.btn` pattern /admin/tools/software and /admin/tools/resources
-    # already use for their "+ Add" links, rather than the seafoam callout box
-    # that used to sit beside the flow diagram.
-    #
-    # Stock secondary button, no colour overrides: `.btn.btn-ghost` is already
-    # navy border + navy text + transparent fill + --navy-wash hover + 10px
-    # radius, which is exactly BRAND.md §"Buttons" secondary. An earlier round
-    # of this build tinted it seafoam; that was wrong ("Buttons navy or ghost /
-    # Make a seafoam or coral button") and is reverted here. Only size is
-    # overridden, matching the "+ Add" header actions on the Toolbox admin
-    # pages.
-    open_reader_button = (
-        '<a href="/read" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;'
-        'white-space:nowrap;">Open Reader</a>'
-    )
 
     # Regrouped by function (Phase 6), not the old single top-to-bottom
     # workflow list. Archive backup used to be a card here too (first in
@@ -24177,15 +24213,19 @@ def admin_library(request: Request):
         everywhere — `hrefs` still drives the task badge, so the override
         can't desynchronise a badge from the pages it aggregates.
 
-        This cannot affect the /admin index's counts: that page computes its
-        own `count_label` from `len(items)` before calling _disclosure_group,
+        This cannot affect the Reader group's own count: `admin_page()`
+        computes that from `len(items)` before calling _disclosure_group,
         which only ever receives a finished string.
 
         Uses the shared `_disclosure_group` component — the same group-level
         row the /admin index's sections use: bordered box, bold all-caps label
         with a muted tool count and any task badge on the left, caret
         right-aligned pointing right collapsed and down expanded. Reused rather
-        than reimplemented so the two surfaces can't drift.
+        than reimplemented so the two surfaces can't drift. `nested=True`
+        because a quadrant is now one level down inside the Reader group,
+        which is itself nested inside CFO Toolbox — the lighter visual weight
+        is what makes that nesting readable, and it also zeroes the box's own
+        bottom margin so `_group_html`'s grid gap owns the spacing.
 
         The nested capture-path accordions inside New content deliberately keep
         the item-level variant (caret left of the label) — see BRAND.md
@@ -24198,7 +24238,7 @@ def admin_library(request: Request):
             title, inner_html,
             count_label=f'{n} {"tool" if n == 1 else "tools"}' if n else "",
             badge_html=_group_badge(task_counts, list(hrefs)),
-            extra_class="lib-quad",
+            nested=True,
         )
 
     def _lib_section(label, hrefs, desc_line):
@@ -24326,69 +24366,10 @@ def admin_library(request: Request):
         ["/admin/reader/tag-management", "/admin/reader/enrich"],
         "How tags get created, taught, and kept tidy&mdash;and the summaries that ride along with them.")
 
-    # Reader route moves (PR 6, 2026-09): Archive backup's card left this page
-    # entirely — it now lives under the System group on /admin (see
-    # /admin/library-backup in _ADMIN_GROUPS above), since a whole-DB snapshot
-    # is accounts/health/plumbing, not archive-specific. That drops this page
-    # from four quadrants to three; the two-column flex layout below is kept
-    # (still no row-coupling — see the comment on .lib-cols), just with the
-    # second column now holding a single quadrant instead of two stacked ones.
-    body = f"""<div class="page page-admin">
-<style>
-/* Three quadrants on explicitly named grid areas, not auto-placement. Auto-flow
-   is what produced the earlier ragged layout — blocks landed wherever content
-   length pushed them, and an odd count left a hole. Named areas pin each
-   quadrant regardless of how much content it holds. */
-/* Two INDEPENDENT flowing columns, not a row-coupled grid. A real 2-row grid
-   makes both cells in a row share that row's height, so expanding one quadrant
-   pushed the whole next row down in both columns at once. Column independence
-   is the deliberate trade-off — kept even though the right column is now a
-   single quadrant, since a future addition to either column shouldn't force
-   the other to match its height. */
-.lib-cols{{display:flex;gap:28px;align-items:flex-start;}}
-.lib-col{{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:34px;}}
-/* Quadrant boxes come from the shared `_disclosure_group` component (same row
-   as the /admin index's sections), so there's no bespoke summary styling here.
-   Only the bottom margin is dropped: the flex columns own the vertical rhythm
-   via their own gap. */
-.lib-quad{{margin-bottom:0 !important;}}
-/* The .lib-q-* classes carry no desktop rules — they exist to give the mobile
-   query below something to `order`, and to name each quadrant for tests. */
-@media (max-width:900px){{
-  /* One column. `display:contents` dissolves the two column wrappers so all
-     three quadrants become direct flex children of .lib-cols, which is what
-     lets `order` interleave them across the columns — DOM order is
-     new/tags/existing (column order), the required reading order is
-     new/existing/tags. */
-  /* align-items must be reset here, not just inherited from the desktop rule.
-     It governs the CROSS axis, so `flex-start` — correct in row direction,
-     where it stops the two columns stretching to a shared height — becomes
-     horizontal once this flips to column, shrinking every box to its own
-     content width. `stretch` gives all three the container's full width. */
-  .lib-cols{{flex-direction:column;gap:30px;align-items:stretch;}}
-  .lib-col{{display:contents;}}
-  .lib-q-new{{order:1;}}
-  .lib-q-existing{{order:2;}}
-  .lib-q-tags{{order:3;}}
-}}
-</style>
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;flex-wrap:wrap;">
-  <h1 style="margin:0;">Library</h1>
-  {open_reader_button}
-</div>
-<p style="color:var(--muted);margin:4px 0 18px;">The tools below cover bringing new content in, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need. (Archive backup moved to the System group on <a href="/admin" style="color:var(--navy);">/admin</a>.)</p>
-<div class="lib-cols">
-<div class="lib-col">
-<div class="lib-q-new">{saving_articles_html}</div>
-<div class="lib-q-tags">{tag_mgmt_html}</div>
-</div>
-<div class="lib-col">
-<div class="lib-q-existing">{existing_mgmt_html}</div>
-</div>
-</div>
-</div>"""
-    return HTMLResponse(_page("Library—Admin", "Admin", body, authed=True))
+    # Archive backup is deliberately absent: its card moved to the System
+    # hub-nav group in the Reader route moves (PR 6, 2026-09), since a whole-DB
+    # snapshot is accounts/health/plumbing, not archive-specific.
+    return [saving_articles_html, existing_mgmt_html, tag_mgmt_html]
 
 
 # ---------------------------------------------------------------------------
@@ -24428,7 +24409,7 @@ def _feed_cookie_readout(xml_url: str) -> str:
     return (f'  <div>\n'
             f'    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cookie</label>\n'
             f'    <p style="font-size:14px;color:{color};margin:0;">{_esc(label)}</p>\n'
-            f'    <p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;">Computed live from whether <code>{_esc(_cookie_env_var_name(domain))}</code> is set in the host environment — not something you set here. See the footnote below the table for how to find and set the right cookie.</p>\n'
+            f'    <p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;">Computed live from whether <code>{_esc(_cookie_env_var_name(domain))}</code> is set in the host environment—not something you set here. See the footnote below the table for how to find and set the right cookie.</p>\n'
             f'  </div>\n')
 
 
@@ -24525,7 +24506,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   </td>
   <td class="ff-cookie">
     <span aria-label="Cookie for {_esc(f['name'])}: {'configured' if _cookie_configured else 'not configured'}"
-      title="Computed from whether a subscriber cookie is configured for this domain — not editable here."
+      title="Computed from whether a subscriber cookie is configured for this domain—not editable here."
       style="color:{'var(--seafoam-deep)' if _cookie_configured else 'var(--muted)'};font-size:13px;">
       {'&#10003; configured' if _cookie_configured else '&mdash;'}
     </span>
@@ -24673,7 +24654,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
 }}
 </style>
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div class="ff-head">
   <h1 style="margin:0;">Feeds</h1>
   <div class="ff-head-actions">
@@ -24685,7 +24666,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <p style="color:var(--muted);margin:8px 0 6px;">The RSS subscriptions behind the Reader's Feed view. This same list is the domain allowlist FP&amp;A Buddy's web search is restricted to, so a source added here becomes citable there too. Changes take effect on the next page load, with no restart or deploy needed.</p>
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
-<li><strong>Cookie</strong> shows whether this feed's domain currently has a subscriber cookie configured &mdash; computed live from the host environment, not something you set here. Each domain's cookie lives in its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable, and <code>extract.fetch_page</code> applies it automatically wherever the domain matches (see <code>RUNBOOK.md</code> &sect;5 for finding and setting one). <strong>No cookie value is ever stored in this database</strong> &mdash; only the domain names checked are baked into the code.</li>
+<li><strong>Cookie</strong> shows whether this feed's domain currently has a subscriber cookie configured&mdash;computed live from the host environment, not something you set here. Each domain's cookie lives in its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable, and <code>extract.fetch_page</code> applies it automatically wherever the domain matches (see <code>RUNBOOK.md</code> &sect;5 for finding and setting one). <strong>No cookie value is ever stored in this database</strong>&mdash;only the domain names checked are baked into the code.</li>
 <li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
 </ul>
 {banner}{error_banner}
@@ -24702,7 +24683,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   </table>
 </div>
 <p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.6;">
-<strong>Finding the right cookie in DevTools:</strong> log into the site, open DevTools &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> for that domain, and copy the minimum cookie that carries the session &mdash; not the whole jar. It varies by platform: a <strong>Substack</strong> site's session cookie is typically named <code>connect.sid</code>; a <strong>beehiiv</strong> site (e.g. Mostly Metrics) uses a signed JWT, usually under a name containing <code>token</code> or <code>session</code>. When in doubt, RUNBOOK.md &sect;5.2's fallback still works: copy the entire <code>Cookie:</code> request header instead of hunting for one name.
+<strong>Finding the right cookie in DevTools:</strong> log into the site, open DevTools &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> for that domain, and copy the minimum cookie that carries the session&mdash;not the whole jar. It varies by platform: a <strong>Substack</strong> site's session cookie is typically named <code>connect.sid</code>; a <strong>beehiiv</strong> site (e.g. Mostly Metrics) uses a signed JWT, usually under a name containing <code>token</code> or <code>session</code>. When in doubt, RUNBOOK.md &sect;5.2's fallback still works: copy the entire <code>Cookie:</code> request header instead of hunting for one name.
 </p>
 
 <h2 style="font-size:17px;margin:34px 0 4px;">Manage sections</h2>
@@ -25276,13 +25257,13 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
 </form>"""
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
-<h1>Tag cleanup &amp; style</h1>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Tag cleanup and style</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">This page does two jobs. Tag cleanup fixes tags already on your saved articles. Tagging style controls how new tags get chosen automatically.</p>
 {section1_html}
 {section2_html}
 </div>"""
-    return HTMLResponse(_page("Tag cleanup & style—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Tag cleanup and style—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/reader/tag-management/tags/suggest-merges")
@@ -25707,7 +25688,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
             body_inner += verify_banner + bulk + blocks
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Content de-dupe</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Scans one source for articles that are likely duplicates or near-duplicates—most often the same piece republished under a different title, which exact-URL dedup misses.</p>
 <p style="color:var(--muted);margin:0 0 6px;">A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged.</p>
@@ -26342,7 +26323,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 </div>
 
 {filter_bar}
-<p style="margin:0 0 20px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">View &amp; edit every charge &rarr;</a></p>
+<p style="margin:0 0 20px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">View and edit every charge &rarr;</a></p>
 {datalist}
 
 <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
@@ -26350,7 +26331,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     <h3 style="font-size:15px;font-weight:600;margin:0 0 4px;">Monthly spend by category</h3>
     <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Last 12 months.</p>
     {monthly_chart_html}
-    <div style="margin-top:10px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">See full history &amp; edit &rarr;</a></div>
+    <div style="margin-top:10px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">See full history and edit &rarr;</a></div>
   </div>
 
   <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;min-width:0;">
@@ -26383,7 +26364,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         </div>
       </div>
       <div>
-        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Category <span style="font-weight:400;color:var(--muted);">(display tag only, e.g. Infrastructure / AI &amp; API / Other)</span></label>
+        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Category <span style="font-weight:400;color:var(--muted);">(display tag only, e.g. Infrastructure / AI and API / Other)</span></label>
         <input type="text" name="category" maxlength="60" list="overhead-categories"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
@@ -26416,7 +26397,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 <h2 style="font-size:16px;margin:0 0 4px;">Toolbox usage</h2>
 <p style="color:var(--muted);margin:0 0 4px;">Internal cost attribution for enrichment, embeddings, and FP&amp;A Buddy queries&mdash;computed from token counts and model pricing, not billed amounts.</p>
 <p style="color:var(--muted);margin:0 0 8px;font-style:italic;">Estimate only, for understanding usage patterns&mdash;this won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
-<p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong> &mdash; model choice directly affects the Enrichment row below. <a href="/admin/system/model" style="color:var(--accent);">Change it &rarr;</a></p>
+<p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong>&mdash;model choice directly affects the Enrichment row below. <a href="/admin/system/model" style="color:var(--accent);">Change it &rarr;</a></p>
 
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
   <!-- min-width:0 on both flex items below (same pattern as .tp-band>div
@@ -26738,7 +26719,7 @@ async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = 
 
     confirm_button = (
         f'<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">'
-        f'Confirm &amp; import {len(valid_rows)} row{"s" if len(valid_rows) != 1 else ""}</button>'
+        f'Confirm and import {len(valid_rows)} row{"s" if len(valid_rows) != 1 else ""}</button>'
         if valid_rows else
         '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to import</button>'
     )
@@ -27156,18 +27137,18 @@ def admin_community_gap_toggle(request: Request, submission_id: int, reviewed: s
 # block in the same PR.
 _MCP_USER_SETUP_HTML = """
 <ol style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.85;display:grid;gap:12px;">
-<li><strong>Create the account.</strong> Use &ldquo;Add a member&rdquo; below &mdash; pick a role and an active status.
+<li><strong>Create the account.</strong> Use &ldquo;Add a member&rdquo; below&mdash;pick a role and an active status.
 They can log in immediately with the temporary password you set. If you gave them an email, a welcome email with
 that password goes out automatically; otherwise, share it with them directly.</li>
-<li><strong>Raise their Ask/Matchmaker cap, if needed.</strong> There&rsquo;s no &ldquo;unlimited&rdquo; option
-&mdash; set a high dollar number instead of the default.</li>
+<li><strong>Raise their Ask/Matchmaker cap, if needed.</strong> There&rsquo;s no &ldquo;unlimited&rdquo;
+option&mdash;set a high dollar number instead of the default.</li>
 <li><strong>Mint their personal MCP token.</strong> <code>railway ssh</code>, then:<br>
 <code style="display:block;margin:6px 0;padding:8px 10px;background:var(--surface);border:1px solid var(--line);border-radius:6px;font-size:12.5px;overflow-x:auto;">python -m scripts.mint_api_token --db /data/library.db --username &lt;username&gt; --label &lt;label&gt;</code>
-The plaintext token is shown once &mdash; copy it to a password manager immediately. It can&rsquo;t be recovered
+The plaintext token is shown once&mdash;copy it to a password manager immediately. It can&rsquo;t be recovered
 later, only reissued.</li>
 <li><strong>They add the connector in their own Claude app:</strong> URL <code>https://mcp.bmweis.com/mcp</code>,
 header <code>authorization</code>, value <code>Bearer &lt;token&gt;</code> (the word &ldquo;Bearer&rdquo;, a space,
-the token &mdash; no other format), marked Required.</li>
+the token&mdash;no other format), marked Required.</li>
 </ol>
 """
 
@@ -28070,7 +28051,7 @@ def admin_enrich(request: Request):
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Re-enrich archive</h1>
 <p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what FP&A Buddy reasons from, so depth here pays off there.</p>
 
@@ -28235,7 +28216,7 @@ def _content_backfill_job(limit: int, force: bool, host_suffixes: list[str] | No
                 _job_set("content_backfill", running=False, stopped=True,
                          done=i, ok=ok_count, failed=failed_count)
                 lib.finish_job_run(run_id, "stopped",
-                                   summary=f"stopped after {i}/{total} — {ok_count} succeeded, {failed_count} failed")
+                                   summary=f"stopped after {i}/{total}—{ok_count} succeeded, {failed_count} failed")
                 return
             ok, _reason = _pl.backfill_article_content(lib, row)
             if ok:
@@ -28293,7 +28274,7 @@ def _wayback_429_retry_job() -> None:
                 _job_set("wayback_429_retry", running=False, stopped=True,
                          done=i, ok=ok_count, failed=failed_count)
                 lib.finish_job_run(run_id, "stopped",
-                                   summary=f"stopped after {i}/{total} — {ok_count} succeeded, {failed_count} failed")
+                                   summary=f"stopped after {i}/{total}—{ok_count} succeeded, {failed_count} failed")
                 return
             ok, _reason = _pl.backfill_article_content(lib, row)
             if ok:
@@ -28800,7 +28781,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     )
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Reader content backfill</h1>
 {banner}{error_banner}
 <p style="color:var(--muted);margin:-6px 0 6px;">Re-fetches already-saved articles so the Reader can show real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as.</p>
@@ -29169,7 +29150,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
 
     confirm_button = (
         f'<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">'
-        f'Confirm &amp; apply {len(updates)} correction{"s" if len(updates) != 1 else ""}</button>'
+        f'Confirm and apply {len(updates)} correction{"s" if len(updates) != 1 else ""}</button>'
         if updates else
         '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to apply</button>'
     )
@@ -29568,7 +29549,7 @@ def admin_library_bulk_delete(request: Request, msg: str = "", error: str = ""):
                      f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Bulk delete articles</h1>
 <p style="color:var(--muted);margin:0 0 18px;max-width:70ch;">For a specific list of articles you've already decided
 aren't needed&mdash;permanently removes them by URL. Different from the Purge tool under
@@ -29969,7 +29950,7 @@ def admin_backup(request: Request, uploaded: str = ""):
   .backup-log-table td[data-label]::before{{content:attr(data-label);font-weight:600;display:inline-block;min-width:76px;color:var(--ink-soft);}}
 }}
 </style>
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Archive backup</h1>
 {uploaded_banner}
 <p style="color:var(--muted);margin:-6px 0 24px;">Currently <strong>{count:,}</strong> articles in the live database.</p>
@@ -30082,7 +30063,7 @@ def admin_brand(request: Request):
         swatch("#001B4F", "Navy-deep", "Button hover, depth.")
         + swatch("#002975", "Navy", "Base—wordmark, links, buttons, headings accents.")
         + swatch("#3F5C9A", "Navy-light", "Lighter navy—secondary accents, borders. Text-capable (5.9:1).")
-        + swatch("#EEF1F7", "Navy-wash", "Soft navy fill—chip & ghost-button hovers.", border=True)
+        + swatch("#EEF1F7", "Navy-wash", "Soft navy fill—chip and ghost-button hovers.", border=True)
     )
     green_ramp = ramp_label("Seafoam / Green—cool accent") + grid(
         swatch("#1F7A66", "Seafoam-deep", "Deepest teal—text-capable on light (4.7:1).")
@@ -30092,7 +30073,7 @@ def admin_brand(request: Request):
     )
     coral_ramp = ramp_label("Coral—warm accent (rare)") + grid(
         swatch(CORAL_DEEP, "Coral-deep", "Text-capable coral (4.9:1)—only when coral must carry small text.")
-        + swatch(CORAL, "Coral", "Base—display pop, badges, data-viz R&D series. Graphics & ≥24px only.")
+        + swatch(CORAL, "Coral", "Base—display pop, badges, data-viz R&D series. Graphics and ≥24px only.")
         + swatch("#F4A98F", "Coral-light", "Lighter coral—soft highlights, fills only (never text).", border=True)
         + swatch(CORAL_WASH, "Coral-wash", "Soft fill—callout blocks (put navy text on it).", border=True)
     )
@@ -30113,7 +30094,7 @@ def admin_brand(request: Request):
         + swatch("#3a3833", "ink-soft", "Body copy.")
         + swatch("#6F6A60", "muted", "Meta, captions, kickers.")
         + swatch("#E4E0D6", "line", "Warm hairline.", border=True)
-        + swatch("#D6D1C4", "line-strong", "Heavier divider — section rules, table borders.", border=True)
+        + swatch("#D6D1C4", "line-strong", "Heavier divider—section rules, table borders.", border=True)
     )
 
     semantic_row = grid(
@@ -30127,13 +30108,13 @@ def admin_brand(request: Request):
 
     type_specimens = (
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;">'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Outfit—headings &amp; display</div>'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Outfit—headings and display</div>'
         '<div style="font-family:var(--font-head);font-weight:600;font-size:42px;letter-spacing:-0.025em;line-height:1.05;color:var(--ink);">Brian Weisberg</div>'
         '<div style="font-family:var(--font-head);font-weight:600;font-size:21px;letter-spacing:-0.01em;color:var(--ink);margin-top:10px;">Strategic finance for companies that are scaling</div>'
         '<div style="height:18px;"></div>'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">DM Sans—body &amp; UI</div>'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">DM Sans—body and UI</div>'
         '<p style="margin:0;color:var(--ink-soft);">The quick brown fox jumps over the lazy dog. Body copy is DM Sans at 16px / 1.65—warm, readable, and quiet enough to disappear behind the content. Eyebrows and labels use the same family, uppercase, with wide tracking.</p>'
-        # No third "Source Serif 4" specimen any more (2026-09) — that font
+        # No third "Source Serif 4" specimen any more (2026-09)—that font
         # is gone sitewide, its last holdout (the standalone /read/{id}
         # reader) moved to DM Sans in the same pass. Only Outfit/DM Sans
         # (plus Caveat/Permanent Marker, shown separately below as
@@ -30199,13 +30180,13 @@ def admin_brand(request: Request):
         '<thead><tr style="background:var(--navy);">'
         '<th style="padding:9px 12px;text-align:left;color:#fff;">Check</th>'
         '<th style="padding:9px 12px;text-align:left;color:#fff;">What it looks at</th>'
-        '<th style="padding:9px 12px;text-align:left;color:#fff;">When &amp; where</th>'
+        '<th style="padding:9px 12px;text-align:left;color:#fff;">When and where</th>'
         '<th style="padding:9px 12px;text-align:left;color:#fff;">Cost</th>'
         '</tr></thead><tbody>'
         '<tr style="border-top:1px solid var(--line);">'
         '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Brand check</td>'
         '<td style="padding:10px 12px;">Colors, fonts, and the voice <em>mechanics</em>&mdash;banned buzzwords, filler, performative phrases.</td>'
-        '<td style="padding:10px 12px;"><strong>Automatic.</strong> Every push &amp; pull request via GitHub Actions (<code>.github/workflows/qa.yml</code>); blocks merge on failure. Locally: <code>pytest -q</code>.</td>'
+        '<td style="padding:10px 12px;"><strong>Automatic.</strong> Every push and pull request via GitHub Actions (<code>.github/workflows/qa.yml</code>); blocks merge on failure. Locally: <code>pytest -q</code>.</td>'
         '<td style="padding:10px 12px;white-space:nowrap;">Free &middot; deterministic</td>'
         '</tr>'
         '<tr style="border-top:1px solid var(--line);background:var(--surface-2);">'
@@ -30340,7 +30321,7 @@ def admin_voice_page(request: Request):
             '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:14px;'
             'padding:16px 20px;margin:0 0 18px;color:#b91c1c;font-size:14px;">'
             f'<strong>Generation is blocked:</strong> {_esc(names)} {"is" if len(missing) == 1 else "are"} '
-            "empty. Nothing falls back to a built-in default any more — FP&amp;A Buddy, the Chat "
+            "empty. Nothing falls back to a built-in default any more—FP&amp;A Buddy, the Chat "
             "Matchmaker, and every AI-drafted Toolbox field that depends on the empty setting(s) "
             "above will refuse to run until you fill them back in below.</div>"
         )
@@ -30616,7 +30597,7 @@ def admin_copy_page(request: Request):
 <p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site&mdash;no redeploy.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage &mdash; hero headline &amp; subhead</div>
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage&mdash;hero headline and subhead</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The large text at the very top of the homepage, next to your photo.</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Headline</label>
 <textarea id="home-headline" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_headline)}</textarea>
@@ -30627,7 +30608,7 @@ def admin_copy_page(request: Request):
 <span id="headline-status" style="font-size:13px;color:var(--muted);"></span></div></div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage &mdash; bio box</div>
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage&mdash;bio box</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The card below the hero, above the 3-card row&mdash;a short lead line, then the rest of your bio, both always visible (under a fixed "STATUS:" label that isn't editable here).</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Lead line</label>
 <textarea id="home-teaser" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_teaser)}</textarea>
@@ -30638,7 +30619,7 @@ def admin_copy_page(request: Request):
 <span id="home-status" style="font-size:13px;color:var(--muted);"></span></div></div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">About page &mdash; bio</div>
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">About page&mdash;bio</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on <a href="/about">/about</a>. Separate paragraphs with a blank line.</p>
 <textarea id="about-copy" rows="14" style="{prose}">{_esc(about_copy)}</textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
