@@ -66,11 +66,11 @@ differentiated only by an internal `kind` string (`"software"`/
 `"community"`); mirroring that with one MCP tool matches the code it wraps
 more closely than inventing two near-duplicate tool definitions for what's
 really one enum value. This is a deliberate departure from Phase 3's own
-"separate tools per entity type" precedent (`search_tools`/
+"separate tools per entity type" precedent (`search_software`/
 `search_communities`, etc.) — that precedent applies where the underlying
 implementation and return shape genuinely differ per entity type; here
 they don't. `"tools"`/`"communities"` (matching this tool's own
-public vocabulary, and Phase 3's `search_tools`/`search_communities`
+public vocabulary, and Phase 3's `search_software`/`search_communities`
 naming) map internally to `linklib.matchmaker`'s own `"software"`/
 `"community"` kind strings.
 
@@ -121,7 +121,7 @@ _VALID_SOURCES = ("library", "feed", "web")
 _DEFAULT_SOURCES = ("library", "web")
 
 # ask_matchmaker's public `kind` vocabulary (matching Phase 3's
-# search_tools/search_communities naming) mapped to linklib.matchmaker's
+# search_software/search_communities naming) mapped to linklib.matchmaker's
 # own internal kind strings ("software"/"community").
 _MATCHMAKER_KINDS = {"tools": "software", "communities": "community"}
 

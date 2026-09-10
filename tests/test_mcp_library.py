@@ -1,4 +1,4 @@
-"""Tests for MCP Phase 4: search_library / get_article (Track A, the
+"""Tests for MCP Phase 4: search_archive / get_article (Track A, the
 Archive) and browse_feed / search_feed (Track B, the live RSS Feed).
 
 Same real-running-server pattern tests/test_mcp_toolbox.py establishes (a
@@ -135,29 +135,29 @@ def _seed_article(lib: Library, title: str, **overrides) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# search_library
+# search_archive
 # ---------------------------------------------------------------------------
 
-def test_search_library_matches_query(live_server):
+def test_search_archive_matches_query(live_server):
     lib = Library(live_server.db_path)
     _seed_article(lib, "Runway Modeling Guide", content="A deep guide to runway modeling and cash forecasting.")
     _seed_article(lib, "Hiring Playbook", content="A playbook about hiring finance leaders.")
     lib.close()
 
-    result = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_library",
+    result = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_archive",
                                       {"query": "runway"}))
     titles = [r["title"] for r in result]
     assert "Runway Modeling Guide" in titles
     assert "Hiring Playbook" not in titles
 
 
-def test_search_library_empty_query_returns_recent(live_server):
+def test_search_archive_empty_query_returns_recent(live_server):
     lib = Library(live_server.db_path)
     _seed_article(lib, "Older Article")
     _seed_article(lib, "Newer Article")
     lib.close()
 
-    result = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_library", {}))
+    result = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_archive", {}))
     assert len(result) >= 2
     for hit in result:
         assert set(hit.keys()) >= {
@@ -166,41 +166,41 @@ def test_search_library_empty_query_returns_recent(live_server):
         }
 
 
-def test_search_library_reflects_is_own_content(live_server):
+def test_search_archive_reflects_is_own_content(live_server):
     lib = Library(live_server.db_path)
     own = _seed_article(lib, "My Own Writing", content="Original writing about strategic finance.",
                          is_own_content=1)
     external = _seed_article(lib, "Saved External Piece", content="Some external article content.")
     lib.close()
 
-    result = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_library", {"query": "writing"}))
+    result = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_archive", {"query": "writing"}))
     hit = next(r for r in result if r["id"] == own["id"])
     assert hit["is_own_content"] is True
 
-    result2 = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_library", {"query": "external"}))
+    result2 = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_archive", {"query": "external"}))
     hit2 = next(r for r in result2 if r["id"] == external["id"])
     assert hit2["is_own_content"] is False
 
 
-def test_search_library_excerpt_is_truncated(live_server):
+def test_search_archive_excerpt_is_truncated(live_server):
     lib = Library(live_server.db_path)
     long_body = "word " * 200
     _seed_article(lib, "Long Article", content=long_body)
     lib.close()
 
-    result = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_library",
+    result = _list_result(_call_tool(live_server.base_url, live_server.admin, "search_archive",
                                       {"query": "long article"}))
     hit = next(r for r in result if r["title"] == "Long Article")
     assert len(hit["excerpt"]) <= 301
     assert "content" not in hit  # full text is get_article's job, not search's
 
 
-def test_search_library_requires_admin_role(live_server):
-    result = _call_tool(live_server.base_url, live_server.member, "search_library", {"query": "runway"})
+def test_search_archive_requires_admin_role(live_server):
+    result = _call_tool(live_server.base_url, live_server.member, "search_archive", {"query": "runway"})
     assert "admin" in _error_text(result).lower()
 
 
-def test_search_library_rejects_unauthenticated(live_server):
+def test_search_archive_rejects_unauthenticated(live_server):
     # A bad/unknown token is rejected at the transport level (webapp.app's
     # `_mcp_auth_gate`, before any MCP protocol handling starts) with a bare
     # HTTP 401 — not a clean MCP tool-call error, so this checks the raw

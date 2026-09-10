@@ -1,16 +1,38 @@
 """MCP server, Phase 3: Toolbox & Communities content tools.
 
-Six read-only tools — `search_tools`, `get_tool`, `search_communities`,
-`get_community`, `compare_tools`, `compare_communities` — registered onto
-the same FastMCP instance `webapp/mcp_server.py` builds (mounted at `/mcp`
-inside webapp/app.py). Kept in a separate module from `mcp_server.py` on
-purpose: that module's own scope is tightly focused on the three
-admin-gated schema-introspection tools plus the auth/host-security
-plumbing every /mcp tool shares; this module is pure Toolbox/Communities
-domain content, reusing that plumbing rather than duplicating it.
+Eight read-only tools — `search_software`, `get_software`, `search_communities`,
+`get_community`, `compare_software`, `compare_communities`, `search_benchmarking`,
+`search_books` — registered onto the same FastMCP instance
+`webapp/mcp_server.py` builds (mounted at `/mcp` inside webapp/app.py).
+Kept in a separate module from `mcp_server.py` on purpose: that module's
+own scope is tightly focused on the three admin-gated schema-introspection
+tools plus the auth/host-security plumbing every /mcp tool shares; this
+module is pure Toolbox/Communities domain content, reusing that plumbing
+rather than duplicating it.
+
+`search_benchmarking`/`search_books` (PR 8, 2026-09) close a real coverage
+gap found when the site was about to claim the whole Toolbox works over
+MCP: of the Toolbox's five components (software, communities, FP&A Buddy,
+benchmarking resources, book recommendations), the first three were
+already reachable; benchmarking resources and book recommendations had no
+tool at all. Both read the same `benchmarks` table (a `section` column
+discriminates `'benchmarking'`/`'books'` — confirmed in Phase 0 that this
+is one table with a type discriminator, not two, so the two tools share
+`list_benchmarks(section=...)` rather than each owning a query). No
+`compare_benchmarking` — considered and declined: a benchmarking/book row
+carries none of the structured comparable fields that make
+`compare_software`/`compare_communities` useful, there's no Compare page
+for Resources on the site to mirror, and a text search over the backing
+rows covers the real need.
+
+`search_tools`/`get_tool`/`compare_tools` were renamed to
+`search_software`/`get_software`/`compare_software` in the same PR, for
+consistency with `search_communities`/`get_community`/`compare_communities`
+— "tools" was ambiguous once the Toolbox grew to five components. Old
+names are gone, not aliased.
 
 Auth model — the one deliberate departure from mcp_server.py's three
-tools: these six require a **valid token, any role**, not admin-only. The
+tools: these eight require a **valid token, any role**, not admin-only. The
 underlying web pages (`/tools/software`, `/tools/communities`, their
 profile pages, and both Compare pages) are fully public, so these tools
 mirror that — `webapp.mcp_server.require_caller` resolves and re-verifies
@@ -29,11 +51,11 @@ Two different single-vs-compare content strategies, both real, deliberate
 choices (see CLAUDE.md's MCP Phase 3 pointer bullet / the Step 0 report
 for the full reasoning):
 
-- `get_tool`/`get_community` build their own lightweight dicts directly
+- `get_software`/`get_community` build their own lightweight dicts directly
   from `linklib.gates`, over the FULL field text (`tools.description`,
   not the Compare page's summary-preferring excerpt) — matching the real
   profile page's own field selection, not Compare's condensed view.
-- `compare_tools`/`compare_communities` call `linklib.compare.
+- `compare_software`/`compare_communities` call `linklib.compare.
   build_software_compare`/`build_communities_compare` **unmodified** —
   the exact same serializer the web Compare pages use — then apply
   `gates.badge_text`/`gates.COMPARE_EMPTY_LABELS` per field to render the
@@ -111,9 +133,9 @@ def _empty_copy_text(empty_key: str, authed: bool) -> str:
 
 def _gated_field(key: str, label: str, empty_key: str, text: str | None,
                   unverified: bool, authed: bool, citations: list | None = None) -> dict:
-    """One field's full gated representation for `get_tool`/`get_community`
+    """One field's full gated representation for `get_software`/`get_community`
     — the profile-page family of empty copy (`gates.EMPTY_COPY`, with the
-    admin suffix), unlike `compare_tools`/`compare_communities`'s own
+    admin suffix), unlike `compare_software`/`compare_communities`'s own
     `_compare_field` below which uses the shorter compare-matrix family
     (`gates.COMPARE_EMPTY_LABELS`, no admin suffix) — same split the HTML
     routes themselves make between a profile page and a compare cell."""
@@ -259,7 +281,7 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
     the introspection tools + transport/auth plumbing it was built for."""
 
     @mcp.tool()
-    async def search_tools(ctx: Context, query: str = "", category: str = "",
+    async def search_software(ctx: Context, query: str = "", category: str = "",
                             limit: int = _DEFAULT_SEARCH_LIMIT) -> list[dict]:
         """Search the CFO Toolbox software directory — mirrors `/tools/
         software`'s own client-side filtering (there's no server-side
@@ -295,7 +317,7 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         return out
 
     @mcp.tool()
-    async def get_tool(ctx: Context, slug_or_id: str) -> dict:
+    async def get_software(ctx: Context, slug_or_id: str) -> dict:
         """Full profile detail for one Software tool — mirrors `/tools/
         software/{slug}`. `slug_or_id` may be the tool's slug or its
         numeric id; an unapproved tool (by either lookup) is refused, same
@@ -360,7 +382,7 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
                                   limit: int = _DEFAULT_SEARCH_LIMIT) -> list[dict]:
         """Search the CFO Toolbox Communities directory — mirrors `/tools/
         communities`'s own client-side filtering, same reasoning as
-        `search_tools`. Returns approved communities only. `limit` capped
+        `search_software`. Returns approved communities only. `limit` capped
         at 50. Any valid token, any role."""
         require_caller(ctx, lib_factory)
         limit = max(1, min(int(limit), _MAX_SEARCH_RESULTS))
@@ -432,7 +454,7 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         return result
 
     @mcp.tool()
-    async def compare_tools(ctx: Context, ids: list[int]) -> dict:
+    async def compare_software(ctx: Context, ids: list[int]) -> dict:
         """Side-by-side comparison of 2-4 Software tools — mirrors `/tools/
         software/compare`. Calls `linklib.compare.build_software_compare`
         unmodified, the exact serializer the web Compare page uses.
@@ -446,9 +468,9 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         caller = require_caller(ctx, lib_factory)
         authed = caller.get("role") == "admin"
         if len(ids) > 4:
-            raise ToolError("compare_tools accepts at most 4 tool ids, matching /tools/software/compare's own cap")
+            raise ToolError("compare_software accepts at most 4 tool ids, matching /tools/software/compare's own cap")
         if len(ids) < 2:
-            raise ToolError("compare_tools needs at least 2 tool ids")
+            raise ToolError("compare_software needs at least 2 tool ids")
         lib = lib_factory()
         try:
             tools = []
@@ -520,13 +542,80 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
             "summary": summary,
         }
 
+    @mcp.tool()
+    async def search_benchmarking(ctx: Context, query: str = "",
+                                   limit: int = _DEFAULT_SEARCH_LIMIT) -> list[dict]:
+        """Search the Resources page's benchmarking sources
+        (`/tools/resources`) — mirrors `search_communities`'s own
+        in-memory case-insensitive substring shape, over the same
+        `benchmarks` table row set the public page reads
+        (`section='benchmarking'`; the separate `section='books'` rows are
+        `search_books`'s job, not this tool's — see that tool's own
+        docstring for why they're two tools, not one, despite sharing a
+        table). `query` matches against name/description; pass "" to
+        return every benchmarking source. `limit` capped at 50. Any valid
+        token, any role — the underlying page has no auth gate."""
+        require_caller(ctx, lib_factory)
+        limit = max(1, min(int(limit), _MAX_SEARCH_RESULTS))
+        lib = lib_factory()
+        try:
+            rows = lib.list_benchmarks(section="benchmarking")
+        finally:
+            lib.close()
+        out = []
+        for b in rows:
+            if not _matches(query, b.get("name"), b.get("description")):
+                continue
+            out.append({
+                "id": b["id"], "name": b["name"], "url": b.get("url") or "",
+                "description": (b.get("description") or "").strip(),
+                "coverage": b.get("coverage") or "", "pricing": b.get("pricing") or "",
+            })
+            if len(out) >= limit:
+                break
+        return out
+
+    @mcp.tool()
+    async def search_books(ctx: Context, query: str = "",
+                            limit: int = _DEFAULT_SEARCH_LIMIT) -> list[dict]:
+        """Search the Resources page's book recommendations
+        (`/tools/resources`) — same `benchmarks` table
+        `search_benchmarking` reads, filtered to `section='books'`
+        instead. Kept as its own tool rather than folded into
+        `search_benchmarking` with a type filter: they're two separate
+        things a caller asks for separately, and the public page itself
+        renders them as two headed sections, not one filterable list.
+        `coverage`/`pricing` are omitted from a book hit — the public page
+        doesn't render those badges for books either, since they encode a
+        data-access tier that doesn't apply to a reading list. `query`
+        matches against name/description; pass "" to return every book.
+        `limit` capped at 50. Any valid token, any role."""
+        require_caller(ctx, lib_factory)
+        limit = max(1, min(int(limit), _MAX_SEARCH_RESULTS))
+        lib = lib_factory()
+        try:
+            rows = lib.list_benchmarks(section="books")
+        finally:
+            lib.close()
+        out = []
+        for b in rows:
+            if not _matches(query, b.get("name"), b.get("description")):
+                continue
+            out.append({
+                "id": b["id"], "name": b["name"], "url": b.get("url") or "",
+                "description": (b.get("description") or "").strip(),
+            })
+            if len(out) >= limit:
+                break
+        return out
+
 
 def _gated_field_from_compare(f: "compare.CompareField", authed: bool) -> dict:
     """`get_community`'s field serialization — same profile-page empty-copy
     family (`gates.EMPTY_COPY`, with the admin suffix) as `_gated_field`
-    uses for `get_tool`, applied to a `CompareField` already built by
+    uses for `get_software`, applied to a `CompareField` already built by
     `build_communities_compare` rather than to raw dict fields. Kept
-    separate from `_compare_field` (used by `compare_tools`/
+    separate from `_compare_field` (used by `compare_software`/
     `compare_communities`), which deliberately uses the shorter
     compare-matrix empty family (`gates.COMPARE_EMPTY_LABELS`, no admin
     suffix) — same split the HTML routes make between a profile page and a
