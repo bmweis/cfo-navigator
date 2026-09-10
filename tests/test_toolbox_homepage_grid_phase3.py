@@ -64,24 +64,39 @@ def test_tools_landing_has_4_tile_grid_with_fpa_buddy(env):
     assert "still being built out" not in html
 
 
+# The admin-only 5th tile was labelled "Library" and pointed at
+# /admin/library — the admin management page, not the reading surface it
+# promised. PR 9 (2026-09) renamed it to "Reader" and repointed it at /read,
+# opening in a new tab. Both were confirmed in source before being changed.
 def test_tools_landing_anonymous_has_no_trace_of_admin_tile(env):
     html = _client(env).get("/tools").text
-    assert "/admin/library" not in html
-    assert ">Library<" not in html
+    assert 'href="/read"' not in html
+    assert ">Reader<" not in html
 
 
 def test_tools_landing_member_has_no_trace_of_admin_tile(env):
     # A signed-in non-admin member should be treated the same as anonymous.
     html = _member_client(env).get("/tools").text
-    assert "/admin/library" not in html
-    assert ">Library<" not in html
+    assert 'href="/read"' not in html
+    assert ">Reader<" not in html
 
 
 def test_tools_landing_admin_sees_5th_seafoam_bordered_tile(env):
     html = _admin_client(env).get("/tools").text
-    assert 'href="/admin/library"' in html
-    assert ">Library<" in html
+    assert 'href="/read"' in html
+    assert ">Reader<" in html
     assert "var(--seafoam)" in html
+    # Never the retired admin page it used to point at.
+    assert "/admin/library" not in html
+
+
+def test_admin_reader_tile_opens_in_a_new_tab(env):
+    """The Reader is somewhere you settle in and read, so it opens alongside
+    the Toolbox rather than replacing it."""
+    html = _admin_client(env).get("/tools").text
+    start = html.index('href="/read"')
+    assert 'target="_blank"' in html[start:start + 120]
+    assert 'rel="noopener"' in html[start:start + 120]
 
 
 def test_homepage_has_toolbox_teaser_section(env):
@@ -107,4 +122,4 @@ def test_homepage_old_cfo_toolbox_card_is_gone(env):
 def test_homepage_teaser_never_shows_admin_tile_even_for_admin(env):
     html = _admin_client(env).get("/").text
     assert "/admin/library" not in html
-    assert ">Library<" not in html
+    assert ">Reader<" not in html

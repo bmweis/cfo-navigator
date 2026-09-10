@@ -190,6 +190,13 @@ def run_all() -> list[dict]:
         "what": "No banned buzzwords, filler, or performative phrases in the site copy.",
         "detail": ", ".join(f"{rule}: “{phrase}”" for rule, phrase in vf) if vf else "Copy is on-voice. (test_voice_standards)"})
 
+    tf = voice_review.typography_findings(src)
+    results.append({
+        "name": "Typography (ampersands, em dashes)", "where": "Live + CI", "ok": not tf,
+        "what": "UI copy spells out \"and\" (except FP&A and friends) and never spaces an em dash.",
+        "detail": "; ".join(f"{rule} (line {line}): {excerpt}" for rule, line, excerpt in tf[:6])
+                  if tf else "Copy follows both typographic rules. (test_voice_standards)"})
+
     op = open_source_problems()
     results.append({
         "name": "Open-source showcase in sync", "where": "Live + CI", "ok": not op,

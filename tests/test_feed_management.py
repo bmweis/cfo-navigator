@@ -415,10 +415,13 @@ def test_subscriber_access_control_lives_on_the_feeds_page(monkeypatch, tmp_path
 
     with _client(appmod) as client:
         feeds = client.get("/admin/reader/feeds").text
-        library = client.get("/admin/library").text
+        # /admin/library is gone (PR 9, 2026-09); /admin is where the Reader
+        # tools live now, and it's still the surface that must NOT carry a
+        # second copy of this control.
+        admin = client.get("/admin").text
 
     assert "Re-check subscriber access" in feeds
-    assert "Re-check subscriber access" not in library
+    assert "Re-check subscriber access" not in admin
     # Now in the header's action group beside "+ Add feed", not stranded above
     # the H1 on a line of its own.
     assert feeds.index("<h1") < feeds.index("Re-check subscriber access")

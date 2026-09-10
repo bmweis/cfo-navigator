@@ -154,7 +154,9 @@ def test_summary_page_no_longer_shows_the_per_row_editable_table(client):
     r = client.get("/admin/overhead-spend")
     html = r.text
     assert "Vendor, date, category &amp; note" not in html  # old table's column header
-    assert "View &amp; edit every charge" in html
+    # "&" -> "and" in PR 9's typographic sweep (linklib.voice_review's
+    # typography_findings). Only the link's copy changed, not the split.
+    assert "View and edit every charge" in html
     assert "Total, all vendors" in html  # total card still present
     assert "Filter by category" in html  # filter still present
 

@@ -347,12 +347,15 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
   800 weight) — deliberately bolder, verified side-by-side against the 600-weight standard and kept
   distinct because it's a single bespoke result overlay, not a family of cards sharing a role.
 - **Disclosure/accordion** — two variants. *Group-level* (top-level Admin sections, e.g. `/admin`
-  index groups, `/admin/library` quadrants): bordered/boxed row, bold all-caps label + muted item
-  count left-aligned, arrow right-aligned, points right collapsed / down expanded. *Item-level*
-  (nested toggles within a section, e.g. capture-method instructions): bordered box, arrow
-  left-aligned before the label. Don't invent a third variant — pick group or item based on
-  hierarchy depth. The group-level row is one shared component, `_disclosure_group` in
-  `webapp/app.py`; reuse it rather than rebuilding the markup.
+  index groups, and the Reader group's quadrants nested inside CFO Toolbox): bordered/boxed row,
+  bold all-caps label + muted item count left-aligned, arrow right-aligned, points right collapsed
+  / down expanded. *Item-level* (nested toggles within a section, e.g. capture-method
+  instructions): bordered box, arrow left-aligned before the label. Don't invent a third variant —
+  pick group or item based on hierarchy depth. The group-level row is one shared component,
+  `_disclosure_group` in `webapp/app.py`; reuse it rather than rebuilding the markup. **Every
+  disclosure, at every nesting level, loads collapsed** — no exceptions, and nesting goes three
+  deep on `/admin` today (CFO Toolbox → Reader → a quadrant), so "collapsed by default" has to
+  hold for a group that only ever renders inside another one.
 - **Tables** — navy header row with white text; alt rows `--surface-2`.
   Checkbox/boolean-indicator columns are always center-justified, header and
   cells alike. Text, link, and dropdown columns are left-justified. Actions
@@ -676,12 +679,24 @@ dash" policy:
 - **Em dash (—)** is sentence-level punctuation — an aside, or a punchy two-part close. Always
   unspaced (`point—not like this`, never `point — not like this`), used sparingly. New em dashes
   in fresh copy get flagged to Brian with full sentence context before shipping — see CLAUDE.md's
-  "Voice — em dash policy" for the complete rule and the flagging workflow.
+  "Voice — em dash policy" for the complete rule and the flagging workflow. The *unspaced* half is
+  mechanically enforced as of PR 9 (2026-09): `linklib.voice_review.typography_findings` fails CI
+  on a spaced em dash in `webapp/app.py`'s UI copy, in both its literal and `&mdash;` spellings.
+  The flagging workflow still applies to every new em dash, spaced or not — the lint checks
+  typography, not cadence.
 - **En dash (–)** is a numeric-range separator — `$0.50–$0.70`, `Q3–Q4`, `1–10 employees`. Also
   always unspaced, same discipline as the em dash, but it's a different character doing a
   different job (a range, not a sentence-level pause), not a second flavor of em dash. No flagging
   workflow needed for en dashes — a spaced one is a straightforward typo to fix on sight, since
   there's no voice/tone judgment call involved, just a typographic convention.
+
+**Ampersands.** Spell out "and" in UI copy. The exception is a standard finance or business
+abbreviation that carries `&` as part of the term itself (FP&A, R&D, Q&A, P&L, M&A, S&P, S&M,
+D&A, T&E) or a proper name that genuinely contains one (Sales & Marketing and Research &
+Development as GAAP line items; a real company name like Bain & Company). Also mechanically
+enforced as of PR 9 — same `typography_findings` check, same allowlists, both living in
+`linklib/voice_review.py`. It scans Python source only, never database content: a vendor or
+community name legitimately containing an ampersand is real data, not a copy violation.
 
 **Standing disclosure lines.** A few claims on the site carry enough legal/editorial weight that
 they get a short, muted, footnote-style line placed right next to the claim rather than folded

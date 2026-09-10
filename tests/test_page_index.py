@@ -85,7 +85,10 @@ def test_page_index_excludes_non_page_endpoints(env):
 def test_page_index_includes_known_pages(env):
     rows = env._page_index_snapshot()
     paths = {r["path"] for r in rows}
-    for path in ["/", "/thought-leadership", "/admin/library", "/admin", "/admin/system/page-index", "/tools/fpa-buddy"]:
+    # /admin/library is deliberately absent — that page was retired in PR 9
+    # (2026-09), its quadrants folded into a Reader group on /admin itself.
+    for path in ["/", "/thought-leadership", "/admin/reader/feeds", "/admin",
+                 "/admin/system/page-index", "/tools/fpa-buddy"]:
         assert path in paths
 
 

@@ -563,81 +563,126 @@ def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
 
 
 # ---------------------------------------------------------------------------
-# Part 2: the New content quadrant's count
+# Part 2: the Reader box's quadrants
 # ---------------------------------------------------------------------------
 
-# DOM order is column-major: left column (new, tags) then right (existing).
-# Archive backup's own quadrant moved to the System hub-nav group entirely
-# (Reader route moves, PR 6, 2026-09), so it's no longer one of the three.
-# Matching on `class="..."` rather than the bare class name is what keeps
-# this off the CSS rule block, which writes `.lib-q-new{`.
-_QUADRANT_ORDER = ["lib-q-new", "lib-q-tags", "lib-q-existing"]
+# Rewritten in PR 9 (2026-09) on two counts.
+#
+# First, location: these quadrants used to render on a standalone
+# /admin/library page inside `class="lib-q-*"` wrappers that existed only to
+# drive that page's two-column flex layout. The page is gone and so are the
+# wrappers — the quadrants are now a nested Reader group on /admin, so the
+# slicing helper keys off each quadrant's own visible summary label instead.
+#
+# Second, and the reason this section is worth reading before editing it: the
+# tests here used to assert hardcoded tool counts ("3 tools", "2 tools").
+# That broke in PR 520, again in PR 523, again in PR 524, and would have broken
+# again here — four times in four PRs, every time for a legitimate structural
+# change, never once catching a real bug. A test that fails whenever the
+# structure it describes legitimately changes is a tax, not a safety net. They
+# assert on CONTENTS now: which tools land in which quadrant. That's the fact
+# worth protecting (a tool silently vanishing from the admin surface, or
+# landing under the wrong heading), and it survives adding or removing a
+# sibling tool without an edit.
+
+_QUADRANTS = ["New content", "Existing archive management", "Tag management"]
 
 
-def _quadrant(html, cls):
-    start = html.index(f'class="{cls}"')
-    after = _QUADRANT_ORDER[_QUADRANT_ORDER.index(cls) + 1:]
-    ends = [html.index(f'class="{c}"') for c in after if f'class="{c}"' in html]
-    return html[start:min(ends)] if ends else html[start:]
+def _disclosure_body(html, label):
+    """The rendered HTML of one <details> group, found by its summary label.
 
-
-def test_new_content_quadrant_counts_five_tools(app_env):
-    """One _lib_card plus two capture-method accordion pairs (Archive +
-    Read Later, added by the Read Later bookmarklet/Shortcut PR)."""
-    with _client(app_env) as client:
-        html = client.get("/admin/library").text
-    quadrant = _quadrant(html, "lib-q-new")
-    assert "5 tools" in quadrant
-    assert "1 tool" not in quadrant
-
-
-def test_other_quadrants_still_count_their_real_cards(app_env):
-    """The override is scoped to one quadrant; the rest stay literal.
-
-    lib-q-existing dropped from 4 to 3 tools when "Remove content" was
-    retired (PR 4, 2026-09, review-removals removed outright) — see
-    linklib/db.py's articles.in_scope column comment. Archive backup's own
-    quadrant (lib-q-backup, 1 tool after the Archive Queue link was removed
-    from it in PR 3) is gone from this page entirely as of the Reader route
-    moves (PR 6, 2026-09) — its card moved to the System hub-nav group on
-    /admin, so there's nothing left here to assert a count for. lib-q-tags
-    dropped from 3 to 2 tools when Tag cleanup and Tagging style merged into
-    one page (PR 7, 2026-09).
+    Slices by balancing <details>/</details> from the label backwards to its
+    own opening tag, rather than running to the next sibling label. The last
+    quadrant has no sibling after it, so a label-to-label slice would swallow
+    every group rendered below it on /admin — which is exactly how an earlier
+    draft of this test "found" Archive backup inside the Tag management
+    quadrant.
     """
+    start = html.rindex("<details", 0, html.index(f">{label}</span>"))
+    depth, i = 0, start
+    while i < len(html):
+        nxt_open = html.find("<details", i + 1)
+        nxt_close = html.find("</details>", i + 1)
+        if nxt_close == -1:
+            break
+        if nxt_open != -1 and nxt_open < nxt_close:
+            depth += 1
+            i = nxt_open
+        else:
+            if depth == 0:
+                return html[start:nxt_close]
+            depth -= 1
+            i = nxt_close
+    raise AssertionError(f"unbalanced <details> around {label!r}")
+
+
+def _quadrant(html, label):
+    return _disclosure_body(html, label)
+
+
+def test_every_reader_tool_renders_in_exactly_one_quadrant(app_env):
+    """No tool goes missing, and none is duplicated across quadrants.
+
+    The real risk this guards: a card quietly dropping out of the admin
+    surface (its page still routed, but no longer reachable by clicking) —
+    exactly the class of gap the hub-nav orphan detector exists for, checked
+    here from the other direction.
+    """
+    import webapp.app as appmod
     with _client(app_env) as client:
-        html = client.get("/admin/library").text
-    assert "3 tools" in _quadrant(html, "lib-q-existing")
-    assert "2 tools" in _quadrant(html, "lib-q-tags")
-    assert "lib-q-backup" not in html
+        html = client.get("/admin").text
+    quadrants = {label: _quadrant(html, label) for label in _QUADRANTS}
+    for href, _title, _desc in appmod._LIBRARY_TOOLS:
+        holding = [label for label, body in quadrants.items() if f'href="{href}"' in body]
+        assert len(holding) == 1, f"{href} appears in {holding or 'no quadrant'}"
+
+
+def test_quadrants_hold_the_tools_they_are_named_for(app_env):
+    """Placement, not count — a tool under the wrong heading is the bug."""
+    with _client(app_env) as client:
+        html = client.get("/admin").text
+    assert 'href="/admin/reader/feeds"' in _quadrant(html, "New content")
+
+    existing = _quadrant(html, "Existing archive management")
+    assert 'href="/admin/reader/backfill-content"' in existing
+    assert 'href="/admin/reader/dedupe"' in existing
+    assert 'href="/admin/reader/bulk-delete"' in existing
+
+    tags = _quadrant(html, "Tag management")
+    assert 'href="/admin/reader/tag-management"' in tags
+    assert 'href="/admin/reader/enrich"' in tags
+
+
+def test_new_content_quadrant_carries_the_capture_instructions(app_env):
+    """The bookmarklet and Share-Sheet accordions live with the tool that
+    brings new material in, and stay expandable rather than always-open."""
+    quadrant = None
+    with _client(app_env) as client:
+        quadrant = _quadrant(client.get("/admin").text, "New content")
+    assert "Saving to the archive" in quadrant
+    assert "Saving to Read Later instead" in quadrant
+    # Matched with the closing tag so the intro prose ("a bookmarklet and a
+    # Share-Sheet shortcut") doesn't count as a third accordion.
+    assert quadrant.count("Share-Sheet shortcut</summary>") == 2
+    assert quadrant.count("the bookmarklet</summary>") == 2
+
+
+def test_archive_backup_is_not_one_of_the_quadrants(app_env):
+    """Its card moved to the System hub-nav group in PR 6 — a whole-DB
+    snapshot is plumbing, not archive management."""
+    with _client(app_env) as client:
+        html = client.get("/admin").text
+    for label in _QUADRANTS:
+        assert 'href="/admin/library-backup"' not in _quadrant(html, label)
 
 
 def test_shared_disclosure_component_has_no_count_override(app_env):
-    """The override lives on admin_library's local _lib_quadrant closure, not
-    on the component /admin shares with it. _disclosure_group only ever
-    receives a finished `count_label` string, so there is no parameter through
-    which a fabricated count could reach the index page."""
+    """The override lives on _reader_admin_quadrants' local _lib_quadrant
+    closure, not on the component /admin shares with it. _disclosure_group
+    only ever receives a finished `count_label` string, so there is no
+    parameter through which a fabricated count could reach a group header."""
     import inspect
     import webapp.app as appmod
     params = inspect.signature(appmod._disclosure_group).parameters
     assert "count_override" not in params
     assert "count_label" in params
-
-
-def test_admin_index_counts_are_unchanged_by_rendering_the_library(app_env):
-    """Rendering /admin/library must not perturb /admin's own counts.
-
-    Compared before and after in one process rather than against hardcoded
-    numbers: /admin's CFO Toolbox group renders a nested count that isn't
-    len(items), so pinning literals here would encode a wrong assumption about
-    a page this PR doesn't touch.
-    """
-    import re
-    with _client(app_env) as client:
-        before = re.findall(r">(\d+) tools?</span>", client.get("/admin").text)
-        client.get("/admin/library")
-        after = re.findall(r">(\d+) tools?</span>", client.get("/admin").text)
-
-    assert before, "expected /admin to render counted groups"
-    assert before == after
-    # And the override's value isn't simply everywhere already.
-    assert before.count("3") < len(before)
