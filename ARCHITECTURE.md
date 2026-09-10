@@ -112,7 +112,7 @@ Notes on the edges:
   Claude's native tool (Anthropic-hosted, restored in Phase 7 after Phase 2
   had removed it outright) steps in instead. Exactly one of the two runs
   per question — see `linklib.agent._web_provider` for the unified
-  condition, and `/admin/exa-settings` for the toggle and its connection
+  condition, and `/admin/system/ai` for the toggle and its connection
   test.
 - **Email is the Gmail REST API, not SMTP** — Railway's Hobby plan blocks SMTP
   ports. Every send is best-effort and must never block the underlying DB
@@ -286,8 +286,9 @@ discoverability tier as a thought-leadership sub-page). A pre-move content
 audit found three admin-insider assumptions baked into the page and fixed
 each: the "← Admin" breadcrumb (a public visitor has no admin access to
 return to) became "← FP&A Buddy", matching every other public sub-page's
-own back-link convention; the inline `/admin/exa-settings` and
-`/admin/users` links were de-linked to plain prose ("the site admin"),
+own back-link convention; the inline `/admin/exa-settings` (since
+merged into `/admin/system/ai` — PR 10) and `/admin/users` links were
+de-linked to plain prose ("the site admin"),
 since a public reader would only ever hit a login wall on either; and the
 `ARCHITECTURE.md` link was removed outright, since this repository is
 private and the link 404s for exactly the outside audience the page is
@@ -316,12 +317,13 @@ by switching the outer class to `.page-full`, confirmed with a live
 bounding-box measurement showing the `.tool-prose` reading column is now
 identical in width and position to the reference page.
 
-**`/admin/exa-settings`** (Phase 7, FP&A Buddy nav group) is the Exa kill
-switch: an `exa_enabled` toggle (`settings` table, `Library.get_exa_enabled`/
+**The Exa kill switch** (Phase 7; originally its own `/admin/exa-settings`
+page, merged into `/admin/system/ai`'s Configuration section — PR 10): an
+`exa_enabled` toggle (`settings` table, `Library.get_exa_enabled`/
 `set_exa_enabled`, defaults on) plus a "Test connection" action that fires
 one real, minimal Exa `/search` call and reports pass/fail — manual and
 on-demand only, never a background job, via `linklib.agent.test_exa_connection`.
-The page also flags when `EXA_API_KEY` isn't set on the host at all, since
+The card also flags when `EXA_API_KEY` isn't set on the host at all, since
 that's an independent condition from the toggle and an admin could
 otherwise be confused about why Buddy is using the fallback. Not persisted
 to a cost ledger — the test's tiny real cost (via `compute_exa_cost`) is
@@ -2337,7 +2339,8 @@ Details worth knowing:
   its call fails mid-turn, that turn just gets zero web results (the
   existing best-effort contract) rather than falling back to the native
   tool for the same turn — avoiding any scenario where both could fire.
-  Toggle and connection test live at `/admin/exa-settings`.
+  Toggle and connection test live at `/admin/system/ai` (merged there
+  from the retired standalone `/admin/exa-settings` page — PR 10).
 - **Library retrieval is hybrid: FTS5 keyword search + vector semantic
   search, merged by reciprocal rank fusion (`agent._rrf_merge`, k=60).** Each
   path fetches 2x the tier's `max_library` so the merge has real rank signal
@@ -7423,30 +7426,59 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   (placement, verified/pending/empty on both the profile page and
   Compare).
 
-### AI usage/config dashboard — `/admin/system/ai-usage` (2026-09)
+### AI configuration and usage — `/admin/system/ai` (2026-09, PR 10)
 
-A single new read-only admin page indexing every Claude/Exa/OpenAI surface
-in the app: which model or mechanism powers it, whether it's a live DB
-setting or a code-only default that needs a deploy to change, and a link
-out to wherever it's actually changed. Built on a completed investigation
-(Step 0, reported and approved) plus three merged PRs that closed every gap
-it found — #508 (model-config consolidation), #509 (Exa pricing freshness
-banner), #510 (Exa cost tracking + settings-copy fix) — so this page reads
-already-accurate state, it computes nothing new of its own.
+Merges what used to be three separate pages — `/admin/exa-settings`
+(the Exa on/off toggle + connection test), `/admin/system/model` (the
+enrichment-model dropdown + connection test), and `/admin/system/ai-usage`
+(the original read-only Claude/Exa/OpenAI usage index) — into one page,
+none of which survive at their old URL (all three 404, signed in and
+signed out, no redirect — admin-only surface, nothing bookmarked
+externally, the same "nothing was bookmarked" precedent every other admin
+URL-restructure PR in this codebase has used). One hub-nav card
+(`/admin/system/ai`, in the System group) replaces the three it
+consolidates — the Exa card that used to live in the FP&A Buddy nav group,
+and the AI model/AI usage cards that used to live separately in System.
 
-**Explicitly does not absorb any functionality from the three pages it
-links to.** No new editing surface: the enrichment-model dropdown stays on
-`/admin/system/model`, the Exa on/off toggle and its connection test stay
-on `/admin/exa-settings`, and every "Mark reviewed" action for the three
-freshness reminders stays on `/admin/checks`. This page only reads and
-displays.
+**Structurally split into two clearly separated sections, per the build
+brief**: **Configuration** (editable — the same Enrichment-model dropdown
+and Exa toggle logic the two retired pages had, each with its own "Test
+connection" action, now posting to `/admin/system/ai/model/*` and
+`/admin/system/ai/exa/*`) and **Usage index** (read-only — the original
+`/admin/system/ai-usage` content, unchanged in substance: which model or
+mechanism powers each Claude/Exa/OpenAI surface, whether it's a live DB
+setting or a code-only default, and the three freshness-reminder status
+dots). Built on the same completed investigation (Step 0, reported and
+approved) plus three earlier merged PRs that closed every gap it found —
+#508 (model-config consolidation), #509 (Exa pricing freshness banner),
+#510 (Exa cost tracking + settings-copy fix) — so the usage-index half
+reads already-accurate state; this PR's own job was consolidating WHERE
+that state and the two editable settings live, not recomputing any of it.
+
+**The retired usage-only page's own "no `<form>` anywhere" test is
+inverted, not deleted** — that assertion described the correct shape of
+the OLD page (nothing editable there) and would now fail against the
+correct shape of the NEW one (Configuration genuinely lives here). Replaced
+with `webapp.app.ai_config_editable_outside_ai_page()` — the same live
+`app.routes` introspection technique `hub_nav_orphans()`/page-index already
+use, reused rather than reinvented — which flags any route reusing one of
+the three retired URL shapes (`/admin/exa-settings*`, `/admin/system/model*`,
+`/admin/system/ai-usage*`) outside `/admin/system/ai` itself. Wired into
+`webapp.checks.run_all()` as "AI config consolidated," a real automated
+pass/fail entry, not a fourth manual-attestation banner. **Disclosed
+limitation, not overclaimed**: this can only catch one of the three
+specific old URL shapes reappearing — it has no way to detect a
+brand-new, differently-named route that mutates the same underlying
+settings (`Library.set_exa_enabled`/`set_enrich_model`); that would need
+either a call-graph analysis or a hand-maintained "known AI settings"
+allowlist, neither of which this function attempts.
 
 - **Claude section** — three independent surfaces, confirmed as genuinely
   independent by direct code trace, not assumed:
   - **Enrichment** (Description, Agent taxonomy, Bottom line, Community
     profile fields, article summaries) — `Library.get_enrich_model()`, a
-    live `settings` value, editable at `/admin/system/model` with no
-    redeploy. Defaults to `claude-opus-5`.
+    live `settings` value, editable in the Configuration section of
+    `/admin/system/ai` with no redeploy. Defaults to `claude-opus-5`.
   - **FP&A Buddy** (Quick/Standard/Deep) — `linklib.agent.EFFORT_SETTINGS`,
     a fully separate hardcoded dict with one model per tier
     (`claude-haiku-4-5-20251001` / `claude-sonnet-4-6` / `claude-opus-4-8`).
@@ -7474,7 +7506,8 @@ displays.
   letting the uniform "Exa call site" list imply identical tracking. One
   shared on/off toggle (`Library.get_exa_enabled()`) gates all four; the
   page shows its current state and, if it's on but `EXA_API_KEY` is unset,
-  says so — links to `/admin/exa-settings`.
+  says so — the toggle is right there in Configuration, above the
+  usage index.
 - **OpenAI section** — footnote-weight, one call site: `text-embedding-3-small`
   in `linklib/embeddings.py`, cost tracked in two ledgers by payer
   (`article_embeddings.cost_usd` for Brian's overhead,
@@ -7493,7 +7526,7 @@ displays.
   link to `/admin/overhead-spend`, never a number of its own. This is a
   usage/config map, not a spend report.
 
-See `tests/test_ai_usage_dashboard.py` for the regression coverage
+See `tests/test_admin_ai_settings.py` for the regression coverage
 (auth gate, all three Claude surfaces reflecting live values including a
 changed enrichment-model setting, all four Exa call sites with the
 feature-scan one explicitly distinguished, the OpenAI footnote, every

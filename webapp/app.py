@@ -1030,7 +1030,7 @@ def _confidence_indicator_html(confident: object) -> str:
     id — every AI-generation call site in linklib/enrich.py is confirmed to
     go through the Anthropic SDK exclusively (no other provider), so
     "Claude" is accurate sitewide, but the specific model is admin-selectable
-    (see /admin/system/model) and shouldn't be hardcoded into copy that
+    (see /admin/system/ai) and shouldn't be hardcoded into copy that
     would silently go stale the next time the selection changes."""
     if confident is None:
         return ('<p style="font-size:12px;color:var(--muted);margin:4px 0 0;font-weight:500;">'
@@ -21610,13 +21610,15 @@ _TOOLBOX_TOOLS = [
 # FP&A Buddy's own admin pages, consolidated into one section (Phase 6) —
 # previously split between System ("How FP&A Buddy works") and the old
 # Features catch-all (report, feedback). Same three routes, same content,
-# only the section grouping changed. Exa web search settings (Phase 7) is
-# the section's 4th card.
+# only the section grouping changed. Exa web search settings (Phase 7) used
+# to be this section's 4th card — merged into the System group's single
+# "/admin/system/ai" card in the admin AI-page consolidation (PR 10), which
+# also absorbed the old separate AI model and AI usage cards; see that
+# card's own comment in _ADMIN_GROUPS below.
 _FPA_BUDDY_TOOLS = [
     ("/tools/fpa-buddy/how-it-works", "How FP&amp;A Buddy works", "The retrieval tiers, effort levels, citations, and cost model behind the Q&amp;A tool&mdash;for anyone who wants the real mechanism. Public page, not admin-only."),
     ("/admin/fpa-buddy/report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
     ("/admin/fpa-buddy/feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
-    ("/admin/exa-settings",  "Exa web search",       "Turn Exa on or off for the web tier, and test the connection."),
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
@@ -21665,8 +21667,7 @@ _ADMIN_GROUPS = [
         ("/admin/library-backup",  "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily on a schedule (a Railway Cron Service syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
-        ("/admin/system/model",    "AI model",            "Which Claude model powers enrichment&mdash;Description, Agent taxonomy, Competitive differentiation, Community profiles, and article summaries&mdash;switchable live, no redeploy."),
-        ("/admin/system/ai-usage", "AI usage",            "A read-only map of every Claude/Exa/OpenAI surface&mdash;which model or mechanism powers it, whether it's live-editable, and where to change it."),
+        ("/admin/system/ai",       "AI configuration and usage", "The enrichment model and Exa web-search toggle, live and editable&mdash;plus a read-only map of every Claude/Exa/OpenAI surface, which model or mechanism powers it, and whether it's live-editable. One page&mdash;merges the old separate AI model, Exa web search, and AI usage cards."),
         ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
@@ -22786,6 +22787,56 @@ def hub_nav_orphans() -> list[str]:
     return orphans
 
 
+# --- AI-config consolidation guard (PR 10, 2026-09) --------------------------
+# The build brief's own explicit ask: after merging /admin/exa-settings,
+# /admin/system/model, and /admin/system/ai-usage into one page
+# (/admin/system/ai), a test that /admin/system/ai-usage carried before
+# this PR ("no <form> anywhere on this page — every mutation happens on the
+# page it links to") is now the WRONG guard: editable AI config genuinely
+# lives on this merged page now, so a bare "no form" assertion would fail
+# on the correct, intended shape.
+#
+# Inverted, per the brief: instead of asserting nothing is editable HERE,
+# assert nothing AI-related is editable ANYWHERE ELSE. Reuses the exact live
+# `app.routes` introspection technique hub_nav_orphans()/page-index already
+# use, rather than a hand-maintained list of "routes that must not exist" —
+# same "sibling, not a parallel implementation" discipline as those two.
+#
+# HONEST LIMITATION, stated rather than overclaimed: this can only catch a
+# route reintroducing one of the three retired URL SHAPES this PR consolidated
+# (a literal /admin/exa-settings*, /admin/system/model*, or
+# /admin/system/ai-usage* path appearing again, anywhere other than under
+# /admin/system/ai itself). It has no way to detect a brand-new, differently
+# named route that mutates the same underlying settings
+# (Library.set_exa_enabled/set_enrich_model) — that would need either a
+# runtime call-graph analysis or a hand-maintained allowlist of "known AI
+# settings," neither of which this function attempts. It is a regression
+# guard against the three specific old shapes coming back, not a general
+# proof that AI configuration can never live anywhere else.
+_AI_CONFIG_RETIRED_PREFIXES = ("/admin/exa-settings", "/admin/system/model", "/admin/system/ai-usage")
+
+
+def ai_config_editable_outside_ai_page() -> list[str]:
+    """Every real route whose path starts with one of the three retired
+    AI-settings URL shapes (see the module comment above) but is NOT itself
+    /admin/system/ai or nested under /admin/system/ai/* — i.e., a sign one
+    of the three old pages/actions has quietly reappeared outside the merged
+    page this PR consolidated them into. Sorted for a stable, diffable
+    result, mirroring hub_nav_orphans()'s own return shape."""
+    from fastapi.routing import APIRoute
+    bad = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        path = route.path
+        if path == "/admin/system/ai" or path.startswith("/admin/system/ai/"):
+            continue
+        if path.startswith(_AI_CONFIG_RETIRED_PREFIXES):
+            bad.append(path)
+    bad.sort()
+    return bad
+
+
 @app.get("/admin/system/page-index", response_class=HTMLResponse)
 def admin_system_page_index(request: Request):
     if not _is_authed(request):
@@ -23047,148 +23098,6 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
     return HTMLResponse(_page("How FP&A Buddy works—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
-@app.get("/admin/exa-settings", response_class=HTMLResponse)
-def admin_exa_settings(request: Request):
-    """Exa kill switch (Phase 7): toggle which mechanism handles FP&A Buddy's
-    web tier, and an on-demand connection test. Turning Exa off doesn't
-    disable Buddy's own web search — it switches to Claude's native
-    web_search_20250305 tool as the fallback (see linklib.agent._web_provider);
-    that unified condition (toggle AND EXA_API_KEY) is why the page also
-    flags a missing key even when the toggle itself is on, so an admin isn't
-    left wondering why Buddy is still using the native tool.
-
-    Corrected 2026-09 (Exa cost-tracking foundation): this same toggle
-    (Library.get_exa_enabled(), checked via `lib is None or lib.get_exa_enabled()`
-    in every one of these) also gates the Reader content backfill's
-    domain-migration tier (linklib/domain_migration.py) and Medium-platform
-    tier (linklib/medium_platform.py) — neither has a fallback the way
-    Buddy's web tier does, so turning Exa off here doesn't switch either
-    backfill tier to something else, it just turns them off, silently
-    (both tiers still fall through to Wayback afterward, same as any other
-    miss). The page previously only ever mentioned Buddy's web tier; the
-    copy below now names all three call sites and says so explicitly."""
-    if not _is_authed(request):
-        return _login_redirect(request)
-
-    lib = _lib()
-    try:
-        exa_enabled = lib.get_exa_enabled()
-    finally:
-        lib.close()
-    has_key = bool(os.environ.get("EXA_API_KEY"))
-
-    key_banner = "" if has_key else (
-        '<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
-        'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">&#9888; <code>EXA_API_KEY</code> is not '
-        'set on this host&mdash;FP&amp;A Buddy is using the native web-search fallback regardless of '
-        'the toggle below.</p>'
-    )
-
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Exa web search</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">This one toggle gates every real Exa call in the app, not just FP&amp;A Buddy's web tier:</p>
-<ul style="color:var(--ink-soft);margin:0 0 20px;font-size:15px;line-height:1.7;padding-left:22px;">
-<li><strong>FP&amp;A Buddy's web tier.</strong> Turning Exa off here doesn't disable web search&mdash;it switches to Claude's own <code>web_search_20250305</code> tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</li>
-<li><strong>Reader content backfill's domain-migration tier</strong> (a URL on a confirmed migrated domain, e.g. avc.com&nbsp;&rarr;&nbsp;avc.xyz).</li>
-<li><strong>Reader content backfill's Medium-platform tier</strong> (medium.com and other recognized Cloudflare-blocked hosts).</li>
-</ul>
-<p style="color:var(--ink-soft);margin:-8px 0 20px;font-size:15px;line-height:1.6;"><strong>Unlike Buddy's web tier, the two backfill tiers have no fallback&mdash;turning Exa off here turns them off too, with no substitute mechanism.</strong> A backfill attempt that would have used either tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried.</p>
-{key_banner}
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Web search engine</div>
-<label style="display:flex;align-items:center;gap:10px;font-size:15px;cursor:pointer;">
-<input type="checkbox" id="exa-toggle" {"checked" if exa_enabled else ""} onchange="toggleExa()" style="width:18px;height:18px;">
-Use Exa for web search
-</label>
-<span id="exa-toggle-status" style="font-size:13px;color:var(--muted);margin-top:8px;display:inline-block;"></span>
-</div>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Test connection</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Fires one real, minimal Exa search to confirm <code>EXA_API_KEY</code> actually works. Manual and on-demand only&mdash;never runs automatically.</p>
-<div style="display:flex;gap:10px;align-items:center;">
-<button id="exa-test-btn" onclick="testExaConnection()" class="btn" style="font-size:14px;padding:9px 22px;">Test connection</button>
-<span id="exa-test-status" style="font-size:13px;color:var(--muted);"></span>
-</div>
-<div id="exa-test-result" style="display:none;margin-top:14px;font-size:14px;"></div>
-</div>
-
-<script>
-async function toggleExa() {{
-  var cb = document.getElementById('exa-toggle');
-  var status = document.getElementById('exa-toggle-status');
-  var enabled = cb.checked;
-  cb.disabled = true;
-  status.textContent = 'Saving…';
-  try {{
-    var r = await fetch('/admin/exa-settings/toggle', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{enabled: enabled}})}});
-    if (!r.ok) throw new Error();
-    status.textContent = enabled ? 'Exa is on.' : 'Exa is off—using the native web-search fallback.';
-    status.style.color = '#065f46';
-  }} catch(e) {{
-    cb.checked = !enabled;
-    status.textContent = 'Save failed—try again.';
-    status.style.color = '#b91c1c';
-  }} finally {{
-    cb.disabled = false;
-  }}
-}}
-
-async function testExaConnection() {{
-  var btn = document.getElementById('exa-test-btn');
-  var status = document.getElementById('exa-test-status');
-  var box = document.getElementById('exa-test-result');
-  btn.disabled = true; btn.textContent = 'Testing…';
-  status.textContent = '';
-  box.style.display = 'none';
-  try {{
-    var r = await fetch('/admin/exa-settings/test-connection', {{method:'POST'}});
-    var d = await r.json();
-    box.style.display = 'block';
-    if (d.ok) {{
-      box.innerHTML = '<span style="color:#065f46;">&#10003; Connected.</span> Cost of this test: $' + d.cost_usd.toFixed(4);
-    }} else {{
-      box.innerHTML = '<span style="color:#b91c1c;">&#10007; Failed:</span> ' + (d.error || 'Unknown error');
-    }}
-  }} catch(e) {{
-    box.style.display = 'block';
-    box.innerHTML = '<span style="color:#b91c1c;">&#10007; Request failed—try again.</span>';
-  }} finally {{
-    btn.disabled = false; btn.textContent = 'Test connection';
-  }}
-}}
-</script>
-</div>"""
-    return HTMLResponse(_page("Exa web search—Admin", "Admin", body, authed=True))
-
-
-@app.post("/admin/exa-settings/toggle")
-async def admin_exa_settings_toggle(request: Request):
-    """Save the exa_enabled kill switch (Phase 7)."""
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    payload = await request.json()
-    enabled = bool(payload.get("enabled"))
-    lib = _lib()
-    try:
-        lib.set_exa_enabled(enabled)
-    finally:
-        lib.close()
-    return JSONResponse({"ok": True, "enabled": enabled})
-
-
-@app.post("/admin/exa-settings/test-connection")
-def admin_exa_settings_test_connection(request: Request):
-    """Fire one real Exa call to verify EXA_API_KEY works — manual/on-demand
-    only, never a background job."""
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    from linklib.agent import test_exa_connection
-    return JSONResponse(test_exa_connection())
-
-
 def _enrich_model_label(model_id: str) -> str:
     """Friendly label for a model id, from the same curated registry every
     picker uses — falls back to the raw id for a model that's retired from
@@ -23201,30 +23110,13 @@ def _enrich_model_label(model_id: str) -> str:
     return model_id
 
 
-@app.get("/admin/system/model", response_class=HTMLResponse)
-def admin_system_model(request: Request):
-    """AI model selection (2026-08) — a live, DB-backed choice of which
-    Claude model powers linklib.enrich's generation calls (Description,
-    Agent taxonomy, Competitive differentiation, Community profile fields,
-    the basic community listing auto-fill, article enrichment), same
-    reasoning and same page pattern as /admin/exa-settings' kill switch:
-    an env var (LINKLIB_ENRICH_MODEL) needs a redeploy to change, a
-    DB-stored setting doesn't. Options come from linklib.models.models_for
-    — the same curated-registry-reconciled-with-the-live-Models-API list
-    every other model picker on the site already uses, so a model that's
-    retired there drops off here too with no separate list to keep in sync.
-    Defaults to the deepest/highest-quality curated model (quality over
-    cost for this use case — see Library._DEFAULT_ENRICH_MODEL) until an
-    admin picks something else."""
-    if not _is_authed(request):
-        return _login_redirect(request)
-
+def _ai_model_config_html(current: str) -> str:
+    """The Enrichment-model editable card — one of the two Configuration
+    cards on the merged /admin/system/ai page (PR 10, admin AI-page
+    consolidation). Unchanged logic from the retired standalone
+    /admin/system/model page — only the action URLs moved, to
+    /admin/system/ai/model/*."""
     from linklib.models import models_for
-    lib = _lib()
-    try:
-        current = lib.get_enrich_model()
-    finally:
-        lib.close()
     options = models_for(blurb="enrich", allow_new=False)
     known_ids = {m["id"] for m in options}
     if current not in known_ids:
@@ -23239,21 +23131,14 @@ def admin_system_model(request: Request):
         for m in options
     )
 
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>AI model</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Which Claude model runs every enrichment call site&mdash;tool Description/Short summary, Agent taxonomy, Competitive differentiation, Community profile fields, the basic community-listing auto-fill, and article-save enrichment. This is a live setting, not an environment variable&mdash;changing it takes effect immediately, no redeploy. Defaults to the deepest/highest-quality curated model (quality over cost for this use case). FP&amp;A Buddy's own Q&amp;A model is separate and unaffected&mdash;see <a href="/admin/system/how-fpa-buddy-works" style="color:var(--accent);">How FP&amp;A Buddy works</a>.</p>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+    return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrichment model</div>
 <select id="model-select" onchange="saveModel()" style="width:100%;max-width:520px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
 {option_html}
 </select>
 <span id="model-select-status" style="font-size:13px;color:var(--muted);margin-top:8px;display:inline-block;"></span>
 <p style="font-size:12px;color:var(--muted);margin:12px 0 0;">Curated from a fixed list (`linklib/models.py`), not auto-surfaced&mdash;check Anthropic's own current model lineup and recommendations before assuming this list is up to date: <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic model overview &#8599;</a></p>
-</div>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;">
+<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Test connection</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Fires one real, minimal call against the currently selected model to confirm it actually works. Manual and on-demand only&mdash;never runs automatically.</p>
 <div style="display:flex;gap:10px;align-items:center;">
@@ -23261,6 +23146,7 @@ def admin_system_model(request: Request):
 <span id="model-test-status" style="font-size:13px;color:var(--muted);"></span>
 </div>
 <div id="model-test-result" style="display:none;margin-top:14px;font-size:14px;"></div>
+</div>
 </div>
 
 <script>
@@ -23271,7 +23157,7 @@ async function saveModel() {{
   sel.disabled = true;
   status.textContent = 'Saving…';
   try {{
-    var r = await fetch('/admin/system/model/save', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{model: model}})}});
+    var r = await fetch('/admin/system/ai/model/save', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{model: model}})}});
     if (!r.ok) throw new Error();
     status.textContent = 'Saved.';
     status.style.color = '#065f46';
@@ -23292,7 +23178,7 @@ async function testModelConnection() {{
   box.style.display = 'none';
   try {{
     var model = document.getElementById('model-select').value;
-    var r = await fetch('/admin/system/model/test-connection', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{model: model}})}});
+    var r = await fetch('/admin/system/ai/model/test-connection', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{model: model}})}});
     var d = await r.json();
     box.style.display = 'block';
     if (d.ok) {{
@@ -23307,13 +23193,235 @@ async function testModelConnection() {{
     btn.disabled = false; btn.textContent = 'Test connection';
   }}
 }}
-</script>
+</script>"""
+
+
+def _ai_exa_config_html(exa_enabled: bool, has_key: bool) -> str:
+    """The Exa web-search editable card — the second of the two
+    Configuration cards on the merged /admin/system/ai page. Unchanged
+    logic from the retired standalone /admin/exa-settings page — only the
+    action URLs moved, to /admin/system/ai/exa/*."""
+    key_banner = "" if has_key else (
+        '<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
+        'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">&#9888; <code>EXA_API_KEY</code> is not '
+        'set on this host&mdash;FP&amp;A Buddy is using the native web-search fallback regardless of '
+        'the toggle below.</p>'
+    )
+
+    return f"""<div style="margin:0 0 4px;font-size:13.5px;color:var(--ink-soft);line-height:1.6;">This one toggle gates every real Exa call in the app, not just FP&amp;A Buddy's web tier:</div>
+<ul style="color:var(--ink-soft);margin:0 0 16px;font-size:13.5px;line-height:1.7;padding-left:20px;">
+<li><strong>FP&amp;A Buddy's web tier.</strong> Turning Exa off here doesn't disable web search&mdash;it switches to Claude's own <code>web_search_20250305</code> tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</li>
+<li><strong>Reader content backfill's domain-migration tier</strong> (a URL on a confirmed migrated domain, e.g. avc.com&nbsp;&rarr;&nbsp;avc.xyz).</li>
+<li><strong>Reader content backfill's Medium-platform tier</strong> (medium.com and other recognized Cloudflare-blocked hosts).</li>
+</ul>
+<p style="color:var(--ink-soft);margin:0 0 16px;font-size:13.5px;line-height:1.6;"><strong>Unlike Buddy's web tier, the two backfill tiers have no fallback&mdash;turning Exa off here turns them off too, with no substitute mechanism.</strong> A backfill attempt that would have used either tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried.</p>
+{key_banner}
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Web search engine</div>
+<label style="display:flex;align-items:center;gap:10px;font-size:15px;cursor:pointer;">
+<input type="checkbox" id="exa-toggle" {"checked" if exa_enabled else ""} onchange="toggleExa()" style="width:18px;height:18px;">
+Use Exa for web search
+</label>
+<span id="exa-toggle-status" style="font-size:13px;color:var(--muted);margin-top:8px;display:inline-block;"></span>
+<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Test connection</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Fires one real, minimal Exa search to confirm <code>EXA_API_KEY</code> actually works. Manual and on-demand only&mdash;never runs automatically.</p>
+<div style="display:flex;gap:10px;align-items:center;">
+<button id="exa-test-btn" onclick="testExaConnection()" class="btn" style="font-size:14px;padding:9px 22px;">Test connection</button>
+<span id="exa-test-status" style="font-size:13px;color:var(--muted);"></span>
+</div>
+<div id="exa-test-result" style="display:none;margin-top:14px;font-size:14px;"></div>
+</div>
+</div>
+
+<script>
+async function toggleExa() {{
+  var cb = document.getElementById('exa-toggle');
+  var status = document.getElementById('exa-toggle-status');
+  var enabled = cb.checked;
+  cb.disabled = true;
+  status.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/system/ai/exa/toggle', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{enabled: enabled}})}});
+    if (!r.ok) throw new Error();
+    status.textContent = enabled ? 'Exa is on.' : 'Exa is off—using the native web-search fallback.';
+    status.style.color = '#065f46';
+  }} catch(e) {{
+    cb.checked = !enabled;
+    status.textContent = 'Save failed—try again.';
+    status.style.color = '#b91c1c';
+  }} finally {{
+    cb.disabled = false;
+  }}
+}}
+
+async function testExaConnection() {{
+  var btn = document.getElementById('exa-test-btn');
+  var status = document.getElementById('exa-test-status');
+  var box = document.getElementById('exa-test-result');
+  btn.disabled = true; btn.textContent = 'Testing…';
+  status.textContent = '';
+  box.style.display = 'none';
+  try {{
+    var r = await fetch('/admin/system/ai/exa/test-connection', {{method:'POST'}});
+    var d = await r.json();
+    box.style.display = 'block';
+    if (d.ok) {{
+      box.innerHTML = '<span style="color:#065f46;">&#10003; Connected.</span> Cost of this test: $' + d.cost_usd.toFixed(4);
+    }} else {{
+      box.innerHTML = '<span style="color:#b91c1c;">&#10007; Failed:</span> ' + (d.error || 'Unknown error');
+    }}
+  }} catch(e) {{
+    box.style.display = 'block';
+    box.innerHTML = '<span style="color:#b91c1c;">&#10007; Request failed—try again.</span>';
+  }} finally {{
+    btn.disabled = false; btn.textContent = 'Test connection';
+  }}
+}}
+</script>"""
+
+
+@app.get("/admin/system/ai", response_class=HTMLResponse)
+def admin_system_ai(request: Request):
+    """The merged AI configuration + usage page (PR 10, 2026-09) — replaces
+    the three formerly separate pages /admin/exa-settings, /admin/system/model,
+    and /admin/system/ai-usage, none of which survive at their old URLs
+    (all three 404 now, no redirect — admin-only surface, nothing bookmarked
+    externally, same "nothing was bookmarked" precedent every other admin
+    URL-restructure PR in this codebase has used). One hub-nav card
+    replaces the three it consolidates.
+
+    Structurally split into two clearly separated sections, per the build
+    brief: **Configuration** (editable — the Enrichment-model picker and
+    the Exa web-search toggle, each with its own "Test connection" action)
+    and **Usage index** (read-only — a map of which model or mechanism
+    powers every Claude/Exa/OpenAI surface, plus the three /admin/checks
+    freshness-reminder status dots). Every mutation on this page posts to
+    /admin/system/ai/model/* or /admin/system/ai/exa/*; the usage index
+    itself has no <form> anywhere on it — see
+    ai_config_editable_outside_ai_page() for the mechanical guard that no
+    future AI-settings mutation route can quietly reappear at one of the
+    three retired URL shapes."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    from linklib.models import DEFAULT_CHAT_MODEL, models_review_is_stale
+    from linklib.agent import EFFORT_SETTINGS
+    from linklib.pricing import pricing_review_is_stale, exa_pricing_review_is_stale
+
+    lib = _lib()
+    try:
+        enrich_model = lib.get_enrich_model()
+        exa_enabled = lib.get_exa_enabled()
+        pricing_last_verified = lib.get_setting("pricing_last_verified")
+        models_last_reviewed = lib.get_setting("models_last_reviewed")
+        exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
+    finally:
+        lib.close()
+    has_exa_key = bool(os.environ.get("EXA_API_KEY"))
+
+    def _card(title: str, rows: str, extra: str = "") -> str:
+        return (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+                f'padding:18px 20px;margin-bottom:14px;">'
+                f'<div style="font:600 12px var(--font-body);letter-spacing:.06em;text-transform:uppercase;'
+                f'color:var(--muted);margin-bottom:10px;">{_esc(title)}</div>{rows}{extra}</div>')
+
+    def _row(label: str, value: str, note: str = "") -> str:
+        note_html = f'<div style="font-size:12.5px;color:var(--muted);margin-top:2px;">{note}</div>' if note else ""
+        return (f'<div style="padding:8px 0;border-top:1px solid var(--line);">'
+                f'<div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
+                f'<span style="font-size:13.5px;color:var(--ink-soft);">{label}</span>'
+                f'<span style="font-size:13.5px;font-weight:600;color:var(--navy);text-align:right;">{value}</span>'
+                f'</div>{note_html}</div>')
+
+    live_badge = '<span style="color:var(--seafoam-deep);font-weight:600;">Live&mdash;no redeploy</span>'
+    code_badge = '<span style="color:#92400e;font-weight:600;">Code-only&mdash;needs a deploy</span>'
+
+    # --- Claude ---------------------------------------------------------
+    claude_rows = (
+        _row("Enrichment", f'{_esc(_enrich_model_label(enrich_model))} <span style="font-size:12px;">({_esc(enrich_model)})</span>',
+             f'Description, Agent taxonomy, Bottom line, Community profile fields, article summaries. {live_badge}&mdash;'
+             f'set in Configuration above.')
+        + _row("FP&amp;A Buddy",
+               " / ".join(_esc(_enrich_model_label(t["model"])) for t in
+                          [EFFORT_SETTINGS["quick"], EFFORT_SETTINGS["standard"], EFFORT_SETTINGS["deep"]]),
+               f'Quick / Standard / Deep, one model per tier ({_esc(EFFORT_SETTINGS["quick"]["model"])} / '
+               f'{_esc(EFFORT_SETTINGS["standard"]["model"])} / {_esc(EFFORT_SETTINGS["deep"]["model"])}). '
+               f'{code_badge}&mdash;hardcoded in <code>linklib.agent.EFFORT_SETTINGS</code>, no admin picker. '
+               f'<a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works &rarr;</a>')
+        + _row("Matchmaker", _esc(_enrich_model_label(DEFAULT_CHAT_MODEL)),
+               f'Software and Community matchmaker chat, one shared default. {code_badge}&mdash;'
+               f'<code>linklib.matchmaker.DEFAULT_MODEL</code>, resolved from <code>LINKLIB_CHAT_MODEL</code> / '
+               f'<code>linklib.models.DEFAULT_CHAT_MODEL</code>, independent of the enrichment setting above.')
+    )
+    claude_freshness = (
+        _ai_usage_freshness_dot("Pricing", pricing_last_verified,
+                                 pricing_review_is_stale(pricing_last_verified), "pricing-freshness")
+        + _ai_usage_freshness_dot("New-model awareness", models_last_reviewed,
+                                   models_review_is_stale(models_last_reviewed), "new-model-awareness")
+    )
+
+    # --- Exa --------------------------------------------------------------
+    exa_toggle_html = (
+        f'<div style="padding:10px 0;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-soft);">'
+        f'Toggle: <strong style="color:var(--navy);">{"On" if exa_enabled else "Off"}</strong>'
+        f'{"&mdash;but EXA_API_KEY is unset, so every call site below is on its fallback regardless" if not has_exa_key and exa_enabled else ""}'
+        f'&mdash;set in Configuration above.</div>'
+    )
+    exa_rows = (
+        _row("FP&amp;A Buddy web tier", "Tracked in <code>ask_questions</code>",
+             "Has a fallback&mdash;Claude's native web_search_20250305 tool, same trusted-sites allowlist either way.")
+        + _row("Reader backfill: domain migration", "Tracked in <code>content_refetch_log</code>",
+               "No fallback (other than the existing Wayback tier)&mdash;a real hit is simply not tried when Exa is off.")
+        + _row("Reader backfill: Medium-platform", "Tracked in <code>content_refetch_log</code>",
+               "No fallback (other than the existing Wayback tier)&mdash;same as domain migration above.")
+        + _row("Feature Taxonomy vendor research", "Per-run script output only",
+               "<strong>Not a persistent ledger like the three above</strong>&mdash;<code>linklib.feature_scan."
+               "research_vendor_domain</code> computes and prints its own cost for that one script run "
+               "(<code>scripts/enrich_agent_taxonomy.py</code> / feature-drafting tools); nothing writes it to a "
+               "database table, so it doesn't show up in any of the ledgers the other three call sites use.")
+        + exa_toggle_html
+    )
+    exa_freshness = _ai_usage_freshness_dot("Exa pricing", exa_pricing_last_verified,
+                                             exa_pricing_review_is_stale(exa_pricing_last_verified),
+                                             "exa-pricing-freshness")
+
+    # --- OpenAI (footnote) ------------------------------------------------
+    openai_rows = _row("Embeddings", "text-embedding-3-small",
+                        "Embed-on-save, <code>embed_backfill</code>, and the vector half of hybrid Library retrieval. "
+                        "Cost tracked in two ledgers by payer: <code>article_embeddings.cost_usd</code> (Brian's overhead) "
+                        "and <code>ask_questions.embed_cost_usd</code> (user-cap cost, the query embedding at ask-time).")
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>AI configuration and usage</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Model selection, Exa's web-search toggle, and a read-only map of every Claude/Exa/OpenAI surface in the app&mdash;together on one page. Configuration is editable directly below; the usage index further down is read-only&mdash;every change happens in the two Configuration cards above it, never there. For dollar totals, see <a href="/admin/overhead-spend" style="color:var(--accent);">Overhead spend &rarr;</a>.</p>
+
+<h2 style="margin:0 0 4px;">Configuration</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Two live settings&mdash;neither needs a redeploy to take effect.</p>
+{_card("Enrichment model", _ai_model_config_html(enrich_model))}
+{_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
+
+<h2 style="margin:28px 0 4px;">Usage index</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Which model or mechanism powers each surface, and whether it's live-editable or code-only. Read-only&mdash;every mutation happens in Configuration above, or on /admin/checks below.</p>
+<div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:0 0 22px;">
+{claude_freshness}{exa_freshness}
+</div>
+
+<h3 style="margin:0 0 4px;">Claude</h3>
+{_card("Models by surface", claude_rows)}
+
+<h3 style="margin:24px 0 4px;">Exa</h3>
+{_card("Call sites", exa_rows)}
+
+<h3 style="margin:24px 0 4px;">OpenAI</h3>
+{_card("Embeddings", openai_rows)}
 </div>"""
-    return HTMLResponse(_page("AI model—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("AI configuration and usage—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/system/model/save")
-async def admin_system_model_save(request: Request):
+@app.post("/admin/system/ai/model/save")
+async def admin_system_ai_model_save(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
@@ -23328,8 +23436,8 @@ async def admin_system_model_save(request: Request):
     return JSONResponse({"ok": True, "model": model})
 
 
-@app.post("/admin/system/model/test-connection")
-async def admin_system_model_test_connection(request: Request):
+@app.post("/admin/system/ai/model/test-connection")
+async def admin_system_ai_model_test_connection(request: Request):
     """Fire one real, minimal Claude call to verify the given model id
     actually works — manual/on-demand only, never a background job."""
     if not _is_authed(request):
@@ -23345,6 +23453,33 @@ async def admin_system_model_test_connection(request: Request):
         lib.close()
     from linklib.enrich import test_model_connection
     return JSONResponse(test_model_connection(model))
+
+
+@app.post("/admin/system/ai/exa/toggle")
+async def admin_system_ai_exa_toggle(request: Request):
+    """Save the exa_enabled kill switch (Phase 7)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    enabled = bool(payload.get("enabled"))
+    lib = _lib()
+    try:
+        lib.set_exa_enabled(enabled)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "enabled": enabled})
+
+
+@app.post("/admin/system/ai/exa/test-connection")
+def admin_system_ai_exa_test_connection(request: Request):
+    """Fire one real Exa call to verify EXA_API_KEY works — manual/on-demand
+    only, never a background job."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    from linklib.agent import test_exa_connection
+    return JSONResponse(test_exa_connection())
+
+
 
 
 def _reviewed_freshness_banner(is_stale: bool, message_html: str, mark_url: str) -> str:
@@ -23664,128 +23799,6 @@ def _ai_usage_freshness_dot(label: str, last_value: str, stale: bool, anchor: st
             f'<span style="width:9px;height:9px;border-radius:50%;background:{color};flex-shrink:0;"></span>'
             f'<span style="color:var(--ink-soft);">{_esc(label)}: {_esc(detail)}</span>'
             f'<span style="color:var(--muted);">&rarr;</span></a>')
-
-
-@app.get("/admin/system/ai-usage", response_class=HTMLResponse)
-def admin_system_ai_usage(request: Request):
-    """AI usage/config dashboard — a read-only index of which Claude/Exa/
-    OpenAI surface uses which model or mechanism, whether each is live-
-    editable or needs a deploy, and a link to wherever it's actually
-    changed. Built on a completed investigation (Step 0, reported and
-    approved) plus PRs 508, 509, and 510, which closed every gap that
-    investigation found — this page is a map over already-accurate data,
-    not a new source of truth. No editing here: every "change something"
-    affordance is a link out to /admin/system/model, /admin/exa-settings,
-    or /admin/checks. Dollar totals live at /admin/overhead-spend, linked
-    at the bottom — this page is usage/config only, never spend."""
-    if not _is_authed(request):
-        return _login_redirect(request)
-
-    from linklib.models import DEFAULT_CHAT_MODEL, models_review_is_stale
-    from linklib.agent import EFFORT_SETTINGS
-    from linklib.pricing import pricing_review_is_stale, exa_pricing_review_is_stale
-
-    lib = _lib()
-    try:
-        enrich_model = lib.get_enrich_model()
-        exa_enabled = lib.get_exa_enabled()
-        pricing_last_verified = lib.get_setting("pricing_last_verified")
-        models_last_reviewed = lib.get_setting("models_last_reviewed")
-        exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
-    finally:
-        lib.close()
-    has_exa_key = bool(os.environ.get("EXA_API_KEY"))
-
-    def _card(title: str, rows: str, extra: str = "") -> str:
-        return (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
-                f'padding:18px 20px;margin-bottom:14px;">'
-                f'<div style="font:600 12px var(--font-body);letter-spacing:.06em;text-transform:uppercase;'
-                f'color:var(--muted);margin-bottom:10px;">{_esc(title)}</div>{rows}{extra}</div>')
-
-    def _row(label: str, value: str, note: str = "") -> str:
-        note_html = f'<div style="font-size:12.5px;color:var(--muted);margin-top:2px;">{note}</div>' if note else ""
-        return (f'<div style="padding:8px 0;border-top:1px solid var(--line);">'
-                f'<div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
-                f'<span style="font-size:13.5px;color:var(--ink-soft);">{label}</span>'
-                f'<span style="font-size:13.5px;font-weight:600;color:var(--navy);text-align:right;">{value}</span>'
-                f'</div>{note_html}</div>')
-
-    live_badge = '<span style="color:var(--seafoam-deep);font-weight:600;">Live&mdash;no redeploy</span>'
-    code_badge = '<span style="color:#92400e;font-weight:600;">Code-only&mdash;needs a deploy</span>'
-
-    # --- Claude ---------------------------------------------------------
-    claude_rows = (
-        _row("Enrichment", f'{_esc(_enrich_model_label(enrich_model))} <span style="font-size:12px;">({_esc(enrich_model)})</span>',
-             f'Description, Agent taxonomy, Bottom line, Community profile fields, article summaries. {live_badge}&mdash;'
-             f'<a href="/admin/system/model" style="color:var(--accent);">/admin/system/model &rarr;</a>')
-        + _row("FP&amp;A Buddy",
-               " / ".join(_esc(_enrich_model_label(t["model"])) for t in
-                          [EFFORT_SETTINGS["quick"], EFFORT_SETTINGS["standard"], EFFORT_SETTINGS["deep"]]),
-               f'Quick / Standard / Deep, one model per tier ({_esc(EFFORT_SETTINGS["quick"]["model"])} / '
-               f'{_esc(EFFORT_SETTINGS["standard"]["model"])} / {_esc(EFFORT_SETTINGS["deep"]["model"])}). '
-               f'{code_badge}&mdash;hardcoded in <code>linklib.agent.EFFORT_SETTINGS</code>, no admin picker. '
-               f'<a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works &rarr;</a>')
-        + _row("Matchmaker", _esc(_enrich_model_label(DEFAULT_CHAT_MODEL)),
-               f'Software and Community matchmaker chat, one shared default. {code_badge}&mdash;'
-               f'<code>linklib.matchmaker.DEFAULT_MODEL</code>, resolved from <code>LINKLIB_CHAT_MODEL</code> / '
-               f'<code>linklib.models.DEFAULT_CHAT_MODEL</code>, independent of the enrichment setting above.')
-    )
-    claude_freshness = (
-        _ai_usage_freshness_dot("Pricing", pricing_last_verified,
-                                 pricing_review_is_stale(pricing_last_verified), "pricing-freshness")
-        + _ai_usage_freshness_dot("New-model awareness", models_last_reviewed,
-                                   models_review_is_stale(models_last_reviewed), "new-model-awareness")
-    )
-
-    # --- Exa --------------------------------------------------------------
-    exa_toggle_html = (
-        f'<div style="padding:10px 0;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-soft);">'
-        f'Toggle: <strong style="color:var(--navy);">{"On" if exa_enabled else "Off"}</strong>'
-        f'{"&mdash;but EXA_API_KEY is unset, so every call site below is on its fallback regardless" if not has_exa_key and exa_enabled else ""}'
-        f'&mdash;<a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings &rarr;</a></div>'
-    )
-    exa_rows = (
-        _row("FP&amp;A Buddy web tier", "Tracked in <code>ask_questions</code>",
-             "Has a fallback&mdash;Claude's native web_search_20250305 tool, same trusted-sites allowlist either way.")
-        + _row("Reader backfill: domain migration", "Tracked in <code>content_refetch_log</code>",
-               "No fallback (other than the existing Wayback tier)&mdash;a real hit is simply not tried when Exa is off.")
-        + _row("Reader backfill: Medium-platform", "Tracked in <code>content_refetch_log</code>",
-               "No fallback (other than the existing Wayback tier)&mdash;same as domain migration above.")
-        + _row("Feature Taxonomy vendor research", "Per-run script output only",
-               "<strong>Not a persistent ledger like the three above</strong>&mdash;<code>linklib.feature_scan."
-               "research_vendor_domain</code> computes and prints its own cost for that one script run "
-               "(<code>scripts/enrich_agent_taxonomy.py</code> / feature-drafting tools); nothing writes it to a "
-               "database table, so it doesn't show up in any of the ledgers the other three call sites use.")
-        + exa_toggle_html
-    )
-    exa_freshness = _ai_usage_freshness_dot("Exa pricing", exa_pricing_last_verified,
-                                             exa_pricing_review_is_stale(exa_pricing_last_verified),
-                                             "exa-pricing-freshness")
-
-    # --- OpenAI (footnote) ------------------------------------------------
-    openai_rows = _row("Embeddings", "text-embedding-3-small",
-                        "Embed-on-save, <code>embed_backfill</code>, and the vector half of hybrid Library retrieval. "
-                        "Cost tracked in two ledgers by payer: <code>article_embeddings.cost_usd</code> (Brian's overhead) "
-                        "and <code>ask_questions.embed_cost_usd</code> (user-cap cost, the query embedding at ask-time).")
-
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>AI usage</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">Which model or mechanism powers each Claude/Exa/OpenAI surface in the app, and whether it's a live setting or a code default. Read-only&mdash;every change happens on the page it links to, not here. For dollar totals, see <a href="/admin/overhead-spend" style="color:var(--accent);">Overhead spend &rarr;</a>.</p>
-<div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:0 0 22px;">
-{claude_freshness}{exa_freshness}
-</div>
-
-<h2 style="margin:0 0 4px;">Claude</h2>
-{_card("Models by surface", claude_rows)}
-
-<h2 style="margin:24px 0 4px;">Exa</h2>
-{_card("Call sites", exa_rows)}
-
-<h2 style="margin:24px 0 4px;">OpenAI</h2>
-{_card("Embeddings", openai_rows)}
-</div>"""
-    return HTMLResponse(_page("AI usage—Admin", "Admin", body, authed=True))
 
 
 def _job_run_banner(job_name: str) -> str:
@@ -26403,7 +26416,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 <h2 style="font-size:16px;margin:0 0 4px;">Toolbox usage</h2>
 <p style="color:var(--muted);margin:0 0 4px;">Internal cost attribution for enrichment, embeddings, and FP&amp;A Buddy queries&mdash;computed from token counts and model pricing, not billed amounts.</p>
 <p style="color:var(--muted);margin:0 0 8px;font-style:italic;">Estimate only, for understanding usage patterns&mdash;this won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
-<p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong>&mdash;model choice directly affects the Enrichment row below. <a href="/admin/system/model" style="color:var(--accent);">Change it &rarr;</a></p>
+<p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong>&mdash;model choice directly affects the Enrichment row below. <a href="/admin/system/ai" style="color:var(--accent);">Change it &rarr;</a></p>
 
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
   <!-- min-width:0 on both flex items below (same pattern as .tp-band>div

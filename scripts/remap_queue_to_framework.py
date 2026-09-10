@@ -122,7 +122,7 @@ def main() -> int:
                           "neobanking_feature_framework.json for the shape).")
     ap.add_argument("--model", default=None,
                      help="Claude model for matching/synthesis. Defaults to the live "
-                          "enrichment-model setting (/admin/system/model).")
+                          "enrichment-model setting (/admin/system/ai).")
     ap.add_argument("--batch-size", type=int, default=50,
                      help="Pending items per matching call — the full bucket list is sent on "
                           "every batch regardless (default 50).")

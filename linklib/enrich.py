@@ -1804,7 +1804,7 @@ def voice_rewrite_community_fields(name: str, fields: dict, voice_core: str,
 
 def test_model_connection(model_id: str) -> dict:
     """Fire one minimal, real Claude call against `model_id` to verify it
-    actually works — manual/on-demand only from /admin/system/model's "Test
+    actually works — manual/on-demand only from /admin/system/ai's "Test
     connection" action, same shape and same "manual, never a background job"
     contract as linklib.agent.test_exa_connection. Returns
     {"ok", "error", "cost_usd"}: cost_usd is 0.0 on any failure (an

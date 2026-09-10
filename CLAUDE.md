@@ -6999,7 +6999,7 @@ for 8 further weeks, deleting the rest, so the folder doesn't grow without limit
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
-| `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's preferred web retrieval mechanism (`linklib/agent.py`'s `retrieve_exa`). Absent, or the `exa_enabled` setting toggled off at `/admin/exa-settings` → Claude's native `web_search_20250305` tool handles the web tier instead (Phase 7 kill switch); web search itself is never disabled, only which engine runs. No error either way. |
+| `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's preferred web retrieval mechanism (`linklib/agent.py`'s `retrieve_exa`). Absent, or the `exa_enabled` setting toggled off at `/admin/system/ai` (merged there from the retired standalone `/admin/exa-settings`, PR 10) → Claude's native `web_search_20250305` tool handles the web tier instead (Phase 7 kill switch); web search itself is never disabled, only which engine runs. No error either way. |
 | `LOGODEV_API_KEY` | — | Logo.dev image-endpoint token, required for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D) and for the admin edit page's "Revert & re-fetch from Logo.dev" live re-fetch action (2026-08 follow-up) — both go through `linklib/logodev.py`. The active logo source since 2026-09, replacing Brandfetch (see the Key architecture decisions bullet above). Absent → the batch script errors out on `--apply`; the button still reverts a manual override to automatic but reports it couldn't re-fetch live. |
 | `BRANDFETCH_API_KEY` | — | Brandfetch **Brand API** Bearer token. **Dormant since 2026-09** — Brandfetch's one-time 100-credit free tier is permanently exhausted, so `linklib/brandfetch.py` is no longer called by either the batch script or the admin re-fetch button; kept only so Brandfetch can be restored (swap the import back) if credits are ever renewed. A different product/credential from `BRANDFETCH_CLIENT_ID` below — do not confuse them. |
 | `BRANDFETCH_CLIENT_ID` | — | Public client ID for Brandfetch's free CDN Logo API (`cdn.brandfetch.io`). Kept for reference/potential future browser-embed use, but **not** used by the logo backfill — that product is browser-embed-only and blocks programmatic access (see the Key architecture decisions bullet above). |
@@ -7008,7 +7008,7 @@ for 8 further weeks, deleting the rest, so the folder doesn't grow without limit
 | `LINKLIB_SAVE_TOKEN` | (none) | Token for `POST /save` + bookmarklet; also the default login password. Set when hosted. |
 | `LINKLIB_PASSWORD` | = `LINKLIB_SAVE_TOKEN` | Login password for the private section. Set to decouple the login password from the save token. |
 | `LINKLIB_SECRET_KEY` | = password | HMAC key for signing session cookies. Set on the host so logins survive restarts/deploys. |
-| `LINKLIB_ENRICH_MODEL` | `claude-opus-5` | Claude model for enrichment. This table entry previously read `claude-haiku-4-5-20251001`, which never matched the actual code default — the code has always defaulted to Opus for depth (see `linklib/enrich.py`'s module docstring). Separately, the code's own literal fallback was briefly changed to `claude-opus-4-8` on a mistaken belief that `claude-opus-5` wasn't a valid current model id — corrected back: `claude-opus-5` is real, current, and Anthropic's own top recommendation for complex/enterprise work (confirmed against Anthropic's docs, `platform.claude.com/docs/en/about-claude/models/overview` — also linked from `/admin/system/model`), so it's the curated registry's "Best quality" entry (`linklib/models.py`), not `claude-opus-4-8`. As of the model-selection settings feature below, this env var is only the fallback used when no DB-stored selection exists — see "AI model selection" in Key architecture decisions. |
+| `LINKLIB_ENRICH_MODEL` | `claude-opus-5` | Claude model for enrichment. This table entry previously read `claude-haiku-4-5-20251001`, which never matched the actual code default — the code has always defaulted to Opus for depth (see `linklib/enrich.py`'s module docstring). Separately, the code's own literal fallback was briefly changed to `claude-opus-4-8` on a mistaken belief that `claude-opus-5` wasn't a valid current model id — corrected back: `claude-opus-5` is real, current, and Anthropic's own top recommendation for complex/enterprise work (confirmed against Anthropic's docs, `platform.claude.com/docs/en/about-claude/models/overview` — also linked from `/admin/system/ai`), so it's the curated registry's "Best quality" entry (`linklib/models.py`), not `claude-opus-4-8`. As of the model-selection settings feature below, this env var is only the fallback used when no DB-stored selection exists — see "AI model selection" in Key architecture decisions. |
 | `LINKLIB_CHAT_MODEL` | `claude-sonnet-4-6` | Claude model for Q&A and post drafting |
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
 | `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/read`'s Feed-view source list |
@@ -7530,7 +7530,9 @@ the em-dash form would otherwise be fine.
 - Embeddings (hybrid retrieval, `linklib/embeddings.py`): OpenAI `text-embedding-3-small`
 
 All three are overridable via environment variables; enrichment is also overridable
-live from `/admin/system/model` without a redeploy — see "AI model selection" below.
+live from `/admin/system/ai` without a redeploy — see "AI model selection" below.
+(This setting's own page moved there from a standalone `/admin/system/model`
+in the admin AI-page consolidation, PR 10, 2026-09 — see that bullet below.)
 
 **The model pickers are dynamic** (`linklib/models.py`): a single curated registry
 feeds every picker (re-enrich, backfill), and `models_for` reconciles it
@@ -7596,6 +7598,31 @@ picks something else — quality over cost for this use case, same reasoning
 enrichment model next to its existing AI-cost estimate, since model choice
 directly affects that number.
 
+**Admin AI-page consolidation (PR 10, 2026-09) — the standalone
+`/admin/system/model` page above, the standalone `/admin/exa-settings` page
+(the Exa kill switch — see the retrieval-mechanism bullet earlier in this
+doc), and the standalone `/admin/system/ai-usage` page (see the AI usage/
+config dashboard bullet below) all merge into one page, `/admin/system/ai`.**
+All three old URLs 404 now — no redirect, no compatibility stub, same
+"nothing was bookmarked externally" precedent every other admin
+URL-restructure in this codebase has used — and the three hub-nav cards
+they used to have (one under FP&A Buddy, two under System) collapse into
+one, in System. The new page is split into two clearly separated sections:
+**Configuration** (the same Enrichment-model dropdown and Exa toggle,
+unchanged logic, now posting to `/admin/system/ai/model/*` and
+`/admin/system/ai/exa/*`) and **Usage index** (the original read-only
+`/admin/system/ai-usage` content, unchanged in substance). The retired
+usage-only page's own "no `<form>` on this page" test is inverted, not
+deleted, since editable config genuinely lives here now — see
+`webapp.app.ai_config_editable_outside_ai_page()` (wired into
+`/admin/checks` as "AI config consolidated") and its own disclosed
+limitation (it can only catch a route reusing one of the three retired URL
+shapes, not a brand-new differently-named mutation route). See
+ARCHITECTURE.md's matching "AI configuration and usage" section and
+`tests/test_admin_ai_settings.py` for the full write-up and regression
+coverage — the old `tests/test_admin_exa_settings.py`/
+`test_model_selection.py`/`test_ai_usage_dashboard.py` are folded into it.
+
 ### Adding a new Claude model — every touchpoint
 
 **Investigated (issue #98, Piece 1, 2026-09) after #506 shipped a CI test guarding
@@ -7611,7 +7638,9 @@ not connected to each other and not connected to `linklib/models.py`'s registry
 except the first one:
 
 1. **`linklib/models.py`'s `_REGISTRY`** — feeds exactly three admin surfaces:
-   `/admin/system/model` (the live enrichment-model setting), the re-enrich
+   `/admin/system/ai` (the live enrichment-model setting, since the admin
+   AI-page consolidation, PR 10 — see the Key architecture decisions bullet
+   above), the re-enrich
    picker, and the backfill picker. Adding a row here is sufficient — and only
    sufficient — for those three. `models_for(allow_new=True)` also auto-surfaces
    a genuinely new model on the two chat-oriented pickers without a code change,
@@ -7752,12 +7781,14 @@ actually used anywhere, no changes to `EFFORT_SETTINGS`/`COST_ESTIMATES`/the
 pricing or registry CI tests (already addressed by the new-model-awareness
 PR above).
 
-**`/admin/system/ai-usage` (2026-09) is a read-only index over everything
-in this section** — which model/mechanism powers each Claude/Exa/OpenAI
-surface, live vs. code-only, and a link to wherever it's actually changed
-(`/admin/system/model`, `/admin/exa-settings`, `/admin/checks`), plus a
-compact status glance on the three freshness reminders above. No dollar
-totals — those stay at `/admin/overhead-spend`, which this page links to.
+**`/admin/system/ai`'s Usage index section (originally the standalone
+`/admin/system/ai-usage` page, merged in PR 10, 2026-09) is a read-only
+index over everything in this section** — which model/mechanism powers
+each Claude/Exa/OpenAI surface, live vs. code-only, and a link to wherever
+it's actually changed (the Configuration section directly above it on the
+same page, or `/admin/checks`), plus a compact status glance on the three
+freshness reminders above. No dollar totals — those stay at
+`/admin/overhead-spend`, which this page links to.
 See ARCHITECTURE.md's "AI usage/config dashboard" section for the full
 write-up.
 
