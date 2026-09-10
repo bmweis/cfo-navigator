@@ -102,7 +102,7 @@ shell on the volume:
 - [ ] FTS search works (search something specific on `/read?view=saved`, or
       `GET /api/search?q=netsuite` with the token) — the FTS index travels
       inside the DB file, so if the file is good, search is good
-- [ ] `/admin/contacts`, `/admin/library/queue` load (spot-check non-article tables)
+- [ ] `/admin/inbox/contact-submissions`, `/admin/library/queue` load (spot-check non-article tables)
 - [ ] If you restored an older snapshot: diff against the step-1 download
       for member saves / contacts / ask history created since the snapshot,
       and re-add anything worth keeping (article re-saves are idempotent —

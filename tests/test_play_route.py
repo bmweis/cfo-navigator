@@ -189,7 +189,7 @@ def test_collision_description_matches_mockup_defaults():
 
 
 def test_collision_description_tracks_admin_retuning():
-    """If Brian raises a rank's collision_limit at /admin/game-settings, the
+    """If Brian raises a rank's collision_limit at /admin/thought-leadership/game-settings, the
     pill text must follow — it's derived, not a hardcoded string that could
     silently drift out of sync."""
     from webapp.app import _sdr_collision_description
@@ -215,7 +215,7 @@ def test_play_embeds_rank_settings_json(env):
 
 def test_play_reflects_admin_edits_live(env):
     appmod, client = env
-    client.post("/admin/game-settings/mate/edit", data={
+    client.post("/admin/thought-leadership/game-settings/mate/edit", data={
         "label": "Mate", "difficulty_label": "Medium",
         "collision_limit": "3", "par_time_seconds": "222",
         "gust_coverage_pct": "35", "obstacle_density": "5",
@@ -230,7 +230,7 @@ def test_play_reflects_admin_edits_live(env):
 def test_play_links_to_admin_game_settings(env):
     _, client = env
     body = client.get("/play").text
-    assert "/admin/game-settings" in body
+    assert "/admin/thought-leadership/game-settings" in body
 
 
 def test_play_not_in_site_nav(env):
@@ -283,7 +283,7 @@ def test_play_embeds_gust_and_sail_settings(env):
 def test_play_gust_seed_independent_of_obstacle_seed(env):
     """Changing obstacle_density must not perturb gust placement, and vice
     versa — they're seeded with distinct '|gust' suffixed strings precisely
-    so the two knobs can be tuned independently at /admin/game-settings."""
+    so the two knobs can be tuned independently at /admin/thought-leadership/game-settings."""
     _, client = env
     body = client.get("/play").text
     assert "currentWeekKey() + '|' + rankKey);" in body          # obstacle seed
@@ -407,7 +407,7 @@ def test_admin_game_settings_shark_fields_hidden_for_deckhand(env):
     lib = Library(os.environ["LINKLIB_DB"])
     lib.seed_game_rank_settings()
     lib.close()
-    body = client.get("/admin/game-settings").text
+    body = client.get("/admin/thought-leadership/game-settings").text
     deckhand_card = body.split('rank id: deckhand')[1].split('rank id: mate')[0]
     mate_card = body.split('rank id: mate')[1].split('rank id: first_mate')[0]
     assert "Shark cruise distance" not in deckhand_card
@@ -526,7 +526,7 @@ def test_play_bottom_hud_no_longer_has_floating_checkpoint_text(env):
 
 
 def test_admin_game_settings_hint_is_admin_only(monkeypatch, tmp_path):
-    """The '/admin/game-settings is tunable' footer line must not leak to
+    """The '/admin/thought-leadership/game-settings is tunable' footer line must not leak to
     regular players or public visitors — only admins should see it. The
     leaderboard-save sentence stays visible to everyone."""
     db = str(tmp_path / "admingate.db")
@@ -543,12 +543,12 @@ def test_admin_game_settings_hint_is_admin_only(monkeypatch, tmp_path):
     client = TestClient(appmod.app)
 
     anon_body = client.get("/play").text
-    assert "/admin/game-settings" not in anon_body
+    assert "/admin/thought-leadership/game-settings" not in anon_body
     assert "save automatically to the" in anon_body
 
     client.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
     admin_body = client.get("/play").text
-    assert "/admin/game-settings" in admin_body
+    assert "/admin/thought-leadership/game-settings" in admin_body
 
 
 def test_play_rank_pill_name_and_sub_dont_run_together(env):

@@ -1,4 +1,4 @@
-"""Conversation grouping in /ask/history and /admin/ask-report (display-only).
+"""Conversation grouping in /ask/history and /admin/fpa-buddy/report (display-only).
 
 Multi-turn FP&A Buddy conversations used to render as N unrelated rows in
 both views. These tests pin the grouping helper's ordering rules and the two
@@ -131,7 +131,7 @@ def test_admin_report_rollups_and_filter(env):
     appmod, db = env
     seeded = _seed(db)
     c = _admin(appmod)
-    html = c.get("/admin/ask-report").text
+    html = c.get("/admin/fpa-buddy/report").text
     # Rollup: turn count chip, summed cost, distinct models used.
     assert "3 turns" in html
     assert "$0.0600" in html               # conversation cost rollup
@@ -142,16 +142,16 @@ def test_admin_report_rollups_and_filter(env):
     # Other users' rows still visible unfiltered.
     assert "Other member question" in html
     # User filter still works and shows whole conversations.
-    filtered = c.get("/admin/ask-report", params={"user": "member1"}).text
+    filtered = c.get("/admin/fpa-buddy/report", params={"user": "member1"}).text
     assert "3 turns" in filtered and "Other member question" not in filtered
-    filtered2 = c.get("/admin/ask-report", params={"user": "member2"}).text
+    filtered2 = c.get("/admin/fpa-buddy/report", params={"user": "member2"}).text
     assert "Other member question" in filtered2 and "3 turns" not in filtered2
 
 
 def test_admin_report_rewrite_cost_breakdown(env):
     appmod, db = env
     _seed(db)
-    html = _admin(appmod).get("/admin/ask-report").text
+    html = _admin(appmod).get("/admin/fpa-buddy/report").text
     # Follow-up turn rows split answer + rewrite, and the split sums to the
     # turn total (0.0196 + 0.0004 = 0.02; 0.0294 + 0.0006 = 0.03).
     assert "$0.0196 + $0.0004 rewrite" in html
@@ -169,7 +169,7 @@ def test_admin_report_rewrite_cost_breakdown(env):
 def test_csv_export_stays_flat(env):
     appmod, db = env
     _seed(db)
-    csv_text = _admin(appmod).get("/admin/ask-report/export.csv").text
+    csv_text = _admin(appmod).get("/admin/fpa-buddy/report/export.csv").text
     lines = [ln for ln in csv_text.strip().splitlines() if ln]
     # Header + one row per TURN (7 turns total across all conversations).
     assert len(lines) == 1 + 7

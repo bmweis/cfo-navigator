@@ -4,7 +4,7 @@ Phase 7 tightened the gating condition: a web-type citation alone is no
 longer enough (the native web_search_20250305 fallback also produces
 type "web" citations when Exa is off) — it must also carry provider "exa".
 Server-rendered surfaces (/ask/history, /tools/fpa-buddy's past-questions
-section, /admin/ask-feedback) are untouched — this is presentation-only on
+section, /admin/fpa-buddy/feedback) are untouched — this is presentation-only on
 the live-rendering page.
 """
 import pathlib
@@ -80,13 +80,13 @@ def test_ask_history_has_no_exa_caption(env):
 # now, via the ask box's own JS, regardless of any past-questions rows. The
 # underlying invariant this test protected is unchanged and still covered:
 # past-questions rows render through the same _render_cited_answer() helper
-# as /ask/history and /admin/ask-feedback, neither of which ever emits the
+# as /ask/history and /admin/fpa-buddy/feedback, neither of which ever emits the
 # caption (that's client-side-only logic in the live ask box's srcListHtml),
 # so a past-questions row can't get it either.
 
 
 def test_admin_ask_feedback_has_no_exa_caption(env):
     c = _admin_client(env)
-    resp = c.get("/admin/ask-feedback")
+    resp = c.get("/admin/fpa-buddy/feedback")
     assert resp.status_code == 200
     assert CAPTION not in resp.text

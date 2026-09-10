@@ -4,7 +4,7 @@ Covers the three layers of the feature: the storage contract (one upserted
 ask_feedback row per turn per user; ask_questions.citations_json snapshots
 what a turn actually cited), the member API (POST /ask/feedback — auth,
 validation, and you-rate-your-own-turns ownership), and the admin triage view
-(/admin/ask-feedback — admin-only, rating filter, cited sources rendered).
+(/admin/fpa-buddy/feedback — admin-only, rating filter, cited sources rendered).
 """
 import pathlib
 import sys
@@ -145,7 +145,7 @@ def test_agent_library_citations_carry_article_id():
 
 
 # ---------------------------------------------------------------------------
-# POST /ask/feedback endpoint + /admin/ask-feedback view
+# POST /ask/feedback endpoint + /admin/fpa-buddy/feedback view
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -225,9 +225,9 @@ def test_feedback_happy_path_and_rerate(env):
 
 def test_admin_feedback_view_is_admin_only(env):
     appmod, _, _, _ = env
-    assert _client(appmod).get("/admin/ask-feedback", follow_redirects=False).status_code == 303
+    assert _client(appmod).get("/admin/fpa-buddy/feedback", follow_redirects=False).status_code == 303
     member = _login(appmod, "member1", "supersecret")
-    assert member.get("/admin/ask-feedback", follow_redirects=False).status_code == 303
+    assert member.get("/admin/fpa-buddy/feedback", follow_redirects=False).status_code == 303
 
 
 def test_admin_feedback_view_renders_and_filters(env):
@@ -236,7 +236,7 @@ def test_admin_feedback_view_renders_and_filters(env):
     member.post("/ask/feedback", json={"question_id": turn_id, "rating": "inaccurate",
                                        "comment": "numbers looked stale"})
     admin = _login(appmod, "admin", "adminpass")
-    html = admin.get("/admin/ask-feedback").text
+    html = admin.get("/admin/fpa-buddy/feedback").text
     assert "What is CAC payback?" in html
     assert "numbers looked stale" in html
     # The turn's persisted citation snapshot renders as links, with the
@@ -244,14 +244,14 @@ def test_admin_feedback_view_renders_and_filters(env):
     assert "https://ex.com/a" in html and "https://ex.com/c" in html
     assert "archive #42" in html
     # Filtering to a rating with no rows hides the entry.
-    filtered = admin.get("/admin/ask-feedback?rating=helpful").text
+    filtered = admin.get("/admin/fpa-buddy/feedback?rating=helpful").text
     assert "What is CAC payback?" not in filtered
-    matching = admin.get("/admin/ask-feedback?rating=inaccurate").text
+    matching = admin.get("/admin/fpa-buddy/feedback?rating=inaccurate").text
     assert "What is CAC payback?" in matching
 
 
 # ---------------------------------------------------------------------------
-# Reviewed toggle (Phase 3) — same manual pattern as /admin/community-gaps,
+# Reviewed toggle (Phase 3) — same manual pattern as /admin/inbox/community-gaps,
 # not auto-clear-on-view. See Library.toggle_ask_feedback_reviewed's docstring.
 # ---------------------------------------------------------------------------
 
@@ -297,10 +297,10 @@ def test_open_task_counts_reflects_unreviewed_ask_feedback(lib):
     qid = lib.record_ask_question(1, "q", "a", "m", "standard", True, False, True)
     fid = lib.record_ask_feedback(qid, 1, "helpful")
     counts = tasks.open_task_counts(lib)
-    assert counts["/admin/ask-feedback"] == 1
+    assert counts["/admin/fpa-buddy/feedback"] == 1
     lib.toggle_ask_feedback_reviewed(fid)
     counts = tasks.open_task_counts(lib)
-    assert "/admin/ask-feedback" not in counts
+    assert "/admin/fpa-buddy/feedback" not in counts
 
 
 def test_admin_feedback_view_renders_reviewed_toggle(env):
@@ -309,7 +309,7 @@ def test_admin_feedback_view_renders_reviewed_toggle(env):
     member.post("/ask/feedback", json={"question_id": turn_id, "rating": "inaccurate",
                                        "comment": "numbers looked stale"})
     admin = _login(appmod, "admin", "adminpass")
-    html = admin.get("/admin/ask-feedback").text
+    html = admin.get("/admin/fpa-buddy/feedback").text
     assert "Mark reviewed" in html
     assert ">New<" in html   # unreviewed badge
     assert "Unreviewed" in html   # stat tile label
@@ -327,9 +327,9 @@ def test_admin_feedback_toggle_route_flips_and_redirects(env):
     finally:
         lib.close()
 
-    r = admin.post(f"/admin/ask-feedback/{feedback_id}/toggle-reviewed", follow_redirects=False)
+    r = admin.post(f"/admin/fpa-buddy/feedback/{feedback_id}/toggle-reviewed", follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/admin/ask-feedback"
+    assert r.headers["location"] == "/admin/fpa-buddy/feedback"
 
     lib = Library(os.environ["LINKLIB_DB"])
     try:
@@ -338,15 +338,15 @@ def test_admin_feedback_toggle_route_flips_and_redirects(env):
     finally:
         lib.close()
 
-    html = admin.get("/admin/ask-feedback").text
+    html = admin.get("/admin/fpa-buddy/feedback").text
     assert "Mark unreviewed" in html
     assert ">Reviewed<" in html
 
     # A non-admin can't flip it either.
     non_admin_resp = _client(appmod).post(
-        f"/admin/ask-feedback/{feedback_id}/toggle-reviewed", follow_redirects=False)
+        f"/admin/fpa-buddy/feedback/{feedback_id}/toggle-reviewed", follow_redirects=False)
     assert non_admin_resp.status_code == 303
-    assert non_admin_resp.headers["location"] != "/admin/ask-feedback"
+    assert non_admin_resp.headers["location"] != "/admin/fpa-buddy/feedback"
 
 
 def test_admin_feedback_view_reviewed_filter(env):
@@ -362,9 +362,9 @@ def test_admin_feedback_view_reviewed_filter(env):
     finally:
         lib.close()
 
-    unreviewed_view = admin.get("/admin/ask-feedback?reviewed=no").text
+    unreviewed_view = admin.get("/admin/fpa-buddy/feedback?reviewed=no").text
     assert "What is CAC payback?" not in unreviewed_view
-    reviewed_view = admin.get("/admin/ask-feedback?reviewed=yes").text
+    reviewed_view = admin.get("/admin/fpa-buddy/feedback?reviewed=yes").text
     assert "What is CAC payback?" in reviewed_view
 
 

@@ -1,6 +1,6 @@
 """Sail, Don't Row rank/mode tuning (linklib.db game_rank_settings).
 
-Backs the /admin/game-settings page, which lets Brian rebalance pace, wind,
+Backs the /admin/thought-leadership/game-settings page, which lets Brian rebalance pace, wind,
 obstacle density, and the collision rule per rank without touching code.
 """
 import pathlib

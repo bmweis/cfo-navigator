@@ -140,7 +140,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   can't reach the 3 native pieces at all — `linklib/original_content_sync.py`'s
   `sync_original_content_article()` mirrors `original_content.body_md`
   directly into `articles` instead, called synchronously right after each
-  admin save (`POST /admin/original-content/new`/`{id}/edit`), same
+  admin save (`POST /admin/thought-leadership/original/new`/`{id}/edit`), same
   "regenerate at the mutation point" convention `write_opml()` established.
   A new `original_content.mirrored_article_id` tracks the mirror; re-syncing
   on edit is a direct overwrite (`Library.update_mirrored_article`), never
@@ -2707,7 +2707,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   table, no admin surface — edited directly by hand each time). Phase 1
   replaces that with a `thought_leadership` table (see `linklib/db.py`'s
   table comment and `ARCHITECTURE.md`'s Thought Leadership section for the
-  schema) and a new admin section, `/admin/thought-leadership` — add/edit/
+  schema) and a new admin section, `/admin/thought-leadership/third-party` — add/edit/
   delete across all four types from one filterable list, same CRUD pattern
   as `/admin/tools/resources` (`/admin/tools/benchmarks` at the time this
   phase shipped — renamed in the admin URL convention PR, see the Phase 1b
@@ -2723,7 +2723,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   the 33rd entry, excluded from the migration and from the admin form — it
   stays hardcoded as `_TL_PHOTO_ENTRY` in `webapp/app.py`, merged into the
   Speaking & Events column at render time so it doesn't disappear from the
-  public page, but it isn't editable via `/admin/thought-leadership`.
+  public page, but it isn't editable via `/admin/thought-leadership/third-party`.
   `webapp/thought_leadership_data.py` itself is **not deleted** — it stays in
   the repo, unimported, as a rollback reference (same non-destructive-
   retirement precedent as `screenshot_is_product`/`field_reviews` above).
@@ -2759,7 +2759,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   out of scope here). Because a typo silently floating an entry to the top
   would be a *worse* version of the exact confusion this fix set out to
   solve, an inline warning appears both on the edit form and as a small
-  icon in the `/admin/thought-leadership` list row whenever a non-blank
+  icon in the `/admin/thought-leadership/third-party` list row whenever a non-blank
   `date_label` fails to parse — distinguishing "this admin meant to leave
   the date blank" from "this admin's date didn't parse." `sort_key` itself
   stays a real column (queries need a plain sortable string, not a
@@ -2771,7 +2771,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   per-type auto-assign (`MAX+1`) — a blank field now correctly parses to
   `None` and flows through to that auto-assign path.
 - **Thought Leadership — click-to-expand descriptions.** `description` has
-  been editable via `/admin/thought-leadership` since Phase 1, with 32+
+  been editable via `/admin/thought-leadership/third-party` since Phase 1, with 32+
   entries carrying real synopsis text, but the public `/thought-leadership`
   page never rendered it — confirmed via git history that no commit, in
   this build or the pre-migration `thought_leadership_data.py` version,
@@ -2868,7 +2868,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   yielding, so every existing test in that file still exercises the
   post-migration state it always assumed. Phase 2 (markdown rendering +
   the `GET /thought-leadership/{slug}` catch-all route) and Phase 3 (admin
-  CRUD at `/admin/original-content`, plus an "Original Content" box beside
+  CRUD at `/admin/thought-leadership/original`, plus an "Original Content" box beside
   the existing Thought Leadership box on the admin index — its tool-count
   badge is just `len(items)`, no new badge mechanism needed) are separate,
   sequential PRs.
@@ -2921,8 +2921,8 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Spot-checked all three bespoke pages still load unaffected before
   merging, per the process brief.
 
-- **Original Content, Phase 3 — admin CRUD at `/admin/original-content`.**
-  Read `/admin/thought-leadership`'s existing list/add/edit/delete routes
+- **Original Content, Phase 3 — admin CRUD at `/admin/thought-leadership/original`.**
+  Read `/admin/thought-leadership/third-party`'s existing list/add/edit/delete routes
   first and matched their pattern (list layout, form styling, auth check) —
   not built from scratch. One real addition beyond that pattern: slug
   validation. A bad slug here is a genuine failure mode (an unreachable
@@ -2961,7 +2961,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   integration too: a piece with a real `body_md`, set `status='live'`, is
   immediately reachable at its own page. The admin index's "Thought
   Leadership" group gained a second item pointing at
-  `/admin/original-content` — `count_label` is `len(items)`, so the badge
+  `/admin/thought-leadership/original` — `count_label` is `len(items)`, so the badge
   auto-updated with no additional wiring, confirming the Phase 0
   investigation's finding. Mobile-verified (Playwright, 390px portrait,
   real `.tap()` interaction) that the list view and the add/edit form both
@@ -3259,7 +3259,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     rows duplicating the flagship pieces.** This session has no access to
     the live `library.db` (same Railway-volume-only limitation as above),
     so the exact row `id` values weren't confirmed directly — Brian can
-    find them at `/admin/thought-leadership?type=writing` by matching the
+    find them at `/admin/thought-leadership/third-party?type=writing` by matching the
     three titles/URLs in the task description. A full codebase search found
     no sitemap generator, RSS/Atom feed, or other producer for the site
     itself (the only "sitemap" code in this repo is the unrelated Archive
@@ -3269,7 +3269,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     `test_migration_script_moves_32_of_33_entries`'s `writing: 6` count
     (mentioned above) is a fresh-temp-DB migration test, unrelated to
     production row counts. The only two live readers beyond
-    `/admin/thought-leadership`'s list/edit views are `/thought-leadership`'s
+    `/admin/thought-leadership/third-party`'s list/edit views are `/thought-leadership`'s
     own Writing column (`list_thought_leadership(type="writing")`) and the
     homepage's "Recent highlights" grid
     (`get_thought_leadership_representative("writing")`) — deleting the 3
@@ -3278,7 +3278,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     `writing` representative, deletion falls back to the most-recent
     remaining entry per that function's existing fallback rule (not a bug,
     just a different pick). **Confirmed safe for Brian to delete via
-    `/admin/thought-leadership` himself — no code change needed for this
+    `/admin/thought-leadership/third-party` himself — no code change needed for this
     item.**
 
 - **Original Content, Phase 4c follow-up — two real rendering bugs found
@@ -3366,11 +3366,11 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   (`test_growth_engine_ratio_table_wrap_has_no_visible_gap`) asserting the
   fixed CSS rule renders in the response.
 
-- **Original Content admin — width fix + Preview link.** `/admin/original-content/{id}/edit`
-  (and `/admin/original-content/new`) rendered in `.page-form` (640px) — the
+- **Original Content admin — width fix + Preview link.** `/admin/thought-leadership/original/{id}/edit`
+  (and `/admin/thought-leadership/original/new`) rendered in `.page-form` (640px) — the
   same tier used for one-column public-facing forms like `/contact` — even
   though every other admin data-management page (`/admin/tools/software`,
-  `/admin/original-content`'s own list view) uses the wider `.page-admin`
+  `/admin/thought-leadership/original`'s own list view) uses the wider `.page-admin`
   (1500px). Investigated first: the list page itself was already correctly on
   `.page-admin` — only the add/edit form was narrow, contrary to this task's
   initial premise that both pages needed the fix. Switched the form page to
@@ -6271,7 +6271,7 @@ never reads as something to tap.
   round.** Investigated first, per the standing gate: `community_gap_
   submissions.reviewed` is a plain `INTEGER NOT NULL DEFAULT 0` boolean
   (not a timestamp), flipped by a bespoke per-row toggle button/route
-  (`toggle_community_gap_reviewed`, `POST /admin/community-gaps/{id}/
+  (`toggle_community_gap_reviewed`, `POST /admin/inbox/community-gaps/{id}/
   toggle-reviewed`) — not a reusable macro/component, just markup local to
   that one page's `_card()` closure, confirmed by reading it rather than
   assumed. `community_gap_counts()["unreviewed"]` and the toggle read/write
@@ -6291,7 +6291,7 @@ never reads as something to tap.
   helper — Phase 0 found it was bespoke to begin with, and two call sites
   isn't a pattern worth abstracting yet; the "Reviewed"/"New" pill styling
   is reused verbatim (same hex-free `--seafoam-wash`/`--alert` tokens) so
-  the two pages read as visually consistent regardless. `/admin/ask-feedback`
+  the two pages read as visually consistent regardless. `/admin/fpa-buddy/feedback`
   gained a second filter select (Reviewed: All/Unreviewed/Reviewed,
   combinable with the existing rating filter in one GET form) and a 4th
   stat tile ("Unreviewed", deliberately all-time not month-scoped — same
@@ -6300,7 +6300,7 @@ never reads as something to tap.
   from a hardcoded `repeat(3,1fr)` to `repeat(auto-fit,minmax(130px,1fr))`
   per the standing CSS-Grid-blowout lesson (Phase P) rather than hand-fixing
   the column count. `webapp.tasks.open_task_counts()` wires in
-  `count_unreviewed_ask_feedback()` for `/admin/ask-feedback` — no longer in
+  `count_unreviewed_ask_feedback()` for `/admin/fpa-buddy/feedback` — no longer in
   the deferred bucket; the comment there was updated to say so. `ask_feedback_
   counts()` itself is untouched and keeps its own caller (the 3 per-rating
   "this month" stat tiles). See `tests/test_ask_feedback.py`'s new Phase-3
@@ -6572,6 +6572,60 @@ never reads as something to tap.
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
+- **Admin URL restructure, group A (2026-09) — nine admin routes moved into
+  three grouped prefixes, no redirects.** The admin hub had accumulated
+  routes at the flat top level with no shared naming convention across
+  related pages — four "things waiting on Brian" pages scattered across
+  the Inbox group with unrelated URL shapes, two thought-leadership admin
+  pages that didn't share a prefix, and FP&A Buddy's two admin reporting
+  pages sitting at generic `/admin/ask-*` names. Renamed, with every
+  sub-route (POST targets, nested CRUD, reviewed toggles) moving with its
+  parent and **no compatibility redirect for any of the nine** — this is
+  admin-only surface with one or two users, and a redirect stub is exactly
+  the kind of accumulating cruft this restructure exists to remove (same
+  "nothing was bookmarked externally" reasoning the Library/Toolbox
+  restructure phases used for their own route removals above).
+
+  | Old | New |
+  |---|---|
+  | `/admin/contacts` (+ `/delete`) | `/admin/inbox/contact-submissions` |
+  | `/admin/tools/software/leads` | `/admin/inbox/toolbox-intros` |
+  | `/admin/community-gaps` (+ `/{id}/toggle-reviewed`) | `/admin/inbox/community-gaps` |
+  | `/admin/email-failures` (+ `/{id}/dismiss`) | `/admin/inbox/email-failures` |
+  | `/admin/thought-leadership` (+ `/new`, `/{id}/edit`, `/{id}/delete`) | `/admin/thought-leadership/third-party` |
+  | `/admin/original-content` (+ `/new`, `/{id}/edit`, `/{id}/delete`) | `/admin/thought-leadership/original` |
+  | `/admin/game-settings` (+ `/{rank}/edit`) | `/admin/thought-leadership/game-settings` |
+  | `/admin/ask-report` (+ `/export.csv`) | `/admin/fpa-buddy/report` |
+  | `/admin/ask-feedback` (+ `/{id}/toggle-reviewed`) | `/admin/fpa-buddy/feedback` |
+
+  **The three group prefixes (`/admin/inbox`, `/admin/thought-leadership`,
+  `/admin/fpa-buddy`) are not pages of their own** — no route was added at
+  any of the three bare prefixes; the admin hub links directly to the leaf
+  pages, same as every other group on the hub. **`/admin/fpa-buddy/*` (new,
+  this PR) is unrelated to the pre-existing public `/tools/fpa-buddy/*`
+  prefix** — the how-it-works explainer stays exactly where it was
+  (`/tools/fpa-buddy/how-it-works`, public, unmoved) and is not nested under
+  the new admin prefix. **Two card moves rode along with the URL changes**:
+  Sail, Don't Row settings moved out of the CFO Toolbox hub-nav group into
+  Thought leadership (its card belongs wherever its URL now lives, and its
+  URL is now under `/admin/thought-leadership/*`), and the page at
+  `/admin/thought-leadership/third-party` — previously titled "Thought
+  leadership," the same name as the hub-nav GROUP that now contains it,
+  reading as a page nested inside itself — was relabeled "Third-party
+  content" on both its own `<h1>`/page title and its hub-nav card; the group
+  itself keeps the name "Thought leadership." **Rider, same workstream**:
+  `POST /tools/submit`'s notification email pointed at a route that never
+  existed, `/admin/tools.` (note the trailing period — almost certainly a
+  sentence-punctuation typo absorbed into the href), fixed in the same PR to
+  point at the new `/admin/inbox/toolbox-intros` path rather than leave a
+  known-dead link in place while the very page it should have pointed near
+  was being renamed anyway. `webapp.hub_nav_orphans()`/`_hub_nav_all_hrefs()`
+  needed no logic change — both are already derived directly from
+  `_ADMIN_GROUPS`/`_LIBRARY_TOOLS`/`_FPA_BUDDY_TOOLS`/`_SOFTWARE_TOOLS`
+  rather than a separately hand-maintained href list, so updating those
+  tuples' hrefs was the whole fix; the detector stayed accurate with no
+  separate edit.
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a
@@ -6610,7 +6664,7 @@ tables, no third-party dependency.
     it — it was never part of the `original_content` system, so there's no slug collision to
     guard against).
   - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
-    `/admin/contacts`, `/change-password` (all member-gated — see the Encourage
+    `/admin/inbox/contact-submissions`, `/change-password` (all member-gated — see the Encourage
     password change note in Key architecture decisions above), and
     `/read`, `/read/{article_id}` (**admin-only**, Phase 1 access level, merged into
     the single Reader in Phase 5 — see the Library access-level note and the Phase 5

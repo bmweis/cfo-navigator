@@ -3,7 +3,7 @@ contact form, tool submissions, new-user welcome emails, and (see
 test_password_reset.py) password resets. Each route sends through
 _send_email_safely, so a failing send is caught, logged to stdout, AND
 persisted to email_failures — this pins that persistence and the admin
-surface built on top of it (/admin/email-failures + its task badge).
+surface built on top of it (/admin/inbox/email-failures + its task badge).
 """
 import pathlib
 import sys
@@ -331,10 +331,10 @@ def test_admin_email_failures_page_lists_and_dismisses(env):
     finally:
         lib.close()
     admin = _admin_client(env)
-    r = admin.get("/admin/email-failures")
+    r = admin.get("/admin/inbox/email-failures")
     assert r.status_code == 200 and "boom" in r.text and "contact" in r.text
 
-    admin.post(f"/admin/email-failures/{fid}/dismiss")
+    admin.post(f"/admin/inbox/email-failures/{fid}/dismiss")
     lib = env._lib()
     try:
         assert lib.count_pending_email_failures() == 0
@@ -344,7 +344,7 @@ def test_admin_email_failures_page_lists_and_dismisses(env):
 
 def test_admin_email_failures_requires_admin(env):
     c = _client(env)
-    r = c.get("/admin/email-failures", follow_redirects=False)
+    r = c.get("/admin/inbox/email-failures", follow_redirects=False)
     assert r.status_code == 303 and "/login" in r.headers["location"]
 
 

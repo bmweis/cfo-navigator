@@ -531,7 +531,7 @@ CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
 -- submissions, welcome emails, password resets, warm intros). Every send
 -- path is best-effort (a broken mailer must never block the underlying DB
 -- write), but "best-effort" must not mean "silent" — this table plus the
--- /admin/email-failures badge is how a broken send actually surfaces instead
+-- /admin/inbox/email-failures badge is how a broken send actually surfaces instead
 -- of only ever appearing in a Railway log line nobody's watching.
 CREATE TABLE IF NOT EXISTS email_failures (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -663,7 +663,7 @@ CREATE INDEX IF NOT EXISTS idx_ask_questions_conversation ON ask_questions(conve
 -- upserted on (question_id, user_id) so a changed rating updates in place
 -- rather than stacking rows. question_id -> ask_questions.id by convention
 -- (no declared FK, like everywhere else in this schema). Captured for three
--- downstream uses: admin triage (/admin/ask-feedback), a retrieval eval set
+-- downstream uses: admin triage (/admin/fpa-buddy/feedback), a retrieval eval set
 -- for the planned semantic-search build (flagged questions plus the
 -- citations_json snapshot on the rated ask_questions row), and prompt
 -- refinement. Feedback never mutates prompts or retrieval automatically —
@@ -8057,7 +8057,7 @@ class Library:
     # the fixed 4300-unit course: avgSpeedNeeded = COURSE_LENGTH/par_time,
     # avgBase = avgSpeedNeeded - gust_coverage_frac*gust_boost, then
     # base_start + ramp*par_time/2 = avgBase. All four ranks land within ~1.3%
-    # of their par time at this math; /admin/game-settings can retune from
+    # of their par time at this math; /admin/thought-leadership/game-settings can retune from
     # actual playtesting.
     #
     # Shark params: Deckhand is 0/inert (the shark never spawns there — gated
@@ -8077,7 +8077,7 @@ class Library:
 
     def seed_game_rank_settings(self) -> None:
         """Insert the four ranks with the tuning defaults if the table is
-        empty. Never overwrites existing rows — once seeded, /admin/game-settings
+        empty. Never overwrites existing rows — once seeded, /admin/thought-leadership/game-settings
         owns the values."""
         if self.conn.execute("SELECT 1 FROM game_rank_settings LIMIT 1").fetchone():
             return

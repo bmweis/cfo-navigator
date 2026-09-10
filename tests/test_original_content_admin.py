@@ -1,4 +1,4 @@
-"""Original Content Phase 3 — admin CRUD at /admin/original-content."""
+"""Original Content Phase 3 — admin CRUD at /admin/thought-leadership/original."""
 import os
 import pathlib
 import sys
@@ -50,24 +50,24 @@ VALID_FORM = {
 # -- Auth ----------------------------------------------------------------
 
 def test_list_requires_admin_session(env):
-    r = _client(env).get("/admin/original-content", follow_redirects=False)
+    r = _client(env).get("/admin/thought-leadership/original", follow_redirects=False)
     assert r.status_code in (302, 303)
     assert "/login" in r.headers["location"]
 
 
 def test_new_form_requires_admin_session(env):
-    r = _client(env).get("/admin/original-content/new", follow_redirects=False)
+    r = _client(env).get("/admin/thought-leadership/original/new", follow_redirects=False)
     assert r.status_code in (302, 303)
     assert "/login" in r.headers["location"]
 
 
 def test_post_new_requires_admin_session(env):
-    r = _client(env).post("/admin/original-content/new", data=VALID_FORM)
+    r = _client(env).post("/admin/thought-leadership/original/new", data=VALID_FORM)
     assert r.status_code == 401
 
 
 def test_admin_session_can_reach_list(env):
-    r = _admin_client(env).get("/admin/original-content")
+    r = _admin_client(env).get("/admin/thought-leadership/original")
     assert r.status_code == 200
     assert "Original content" in r.text
 
@@ -76,9 +76,9 @@ def test_admin_session_can_reach_list(env):
 
 def test_create_persists_and_reads_back(env):
     c = _admin_client(env)
-    r = c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    r = c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/admin/original-content"
+    assert r.headers["location"] == "/admin/thought-leadership/original"
 
     lib = env._lib()
     try:
@@ -95,14 +95,14 @@ def test_create_persists_and_reads_back(env):
     assert row["featured_home"] == 1
     assert row["sort_key"] == "2027-01"
 
-    list_html = c.get("/admin/original-content").text
+    list_html = c.get("/admin/thought-leadership/original").text
     assert "A Test Piece" in list_html
     assert "a-test-piece" in list_html
 
 
 def test_edit_persists_changes(env):
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     lib = env._lib()
     try:
         item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
@@ -113,7 +113,7 @@ def test_edit_persists_changes(env):
     edit_form["title"] = "An Edited Title"
     edit_form["status"] = "draft"
     edit_form["display_order"] = "3"
-    r = c.post(f"/admin/original-content/{item_id}/edit", data=edit_form, follow_redirects=False)
+    r = c.post(f"/admin/thought-leadership/original/{item_id}/edit", data=edit_form, follow_redirects=False)
     assert r.status_code == 303
 
     lib = env._lib()
@@ -128,13 +128,13 @@ def test_edit_persists_changes(env):
 
 def test_edit_form_prefills_existing_values(env):
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     lib = env._lib()
     try:
         item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
     finally:
         lib.close()
-    html = c.get(f"/admin/original-content/{item_id}/edit").text
+    html = c.get(f"/admin/thought-leadership/original/{item_id}/edit").text
     assert 'value="A Test Piece"' in html
     assert 'value="a-test-piece"' in html
     assert "# Hi" in html
@@ -142,13 +142,13 @@ def test_edit_form_prefills_existing_values(env):
 
 def test_delete_removes_row(env):
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     lib = env._lib()
     try:
         item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
     finally:
         lib.close()
-    r = c.post(f"/admin/original-content/{item_id}/delete", follow_redirects=False)
+    r = c.post(f"/admin/thought-leadership/original/{item_id}/delete", follow_redirects=False)
     assert r.status_code == 303
     lib = env._lib()
     try:
@@ -166,20 +166,20 @@ def test_edit_page_title_is_not_double_escaped(env):
     form = dict(VALID_FORM)
     form["title"] = "AI & Finance"
     form["slug"] = "ai-and-finance"
-    c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
     lib = env._lib()
     try:
         item_id = lib.get_original_content_by_slug("ai-and-finance")["id"]
     finally:
         lib.close()
-    html = c.get(f"/admin/original-content/{item_id}/edit").text
+    html = c.get(f"/admin/thought-leadership/original/{item_id}/edit").text
     assert "&amp;amp;" not in html
     assert "<title>BMW CFO · Edit AI &amp; Finance</title>" in html
 
 
 def test_edit_of_unknown_id_404s(env):
     c = _admin_client(env)
-    r = c.post("/admin/original-content/99999/edit", data=VALID_FORM)
+    r = c.post("/admin/thought-leadership/original/99999/edit", data=VALID_FORM)
     assert r.status_code == 404
 
 
@@ -191,7 +191,7 @@ def test_malformed_slug_rejected(env, bad_slug):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["slug"] = bad_slug
-    r = c.post("/admin/original-content/new", data=form)
+    r = c.post("/admin/thought-leadership/original/new", data=form)
     assert r.status_code == 400
     assert "lowercase letters" in r.text
     lib = env._lib()
@@ -205,7 +205,7 @@ def test_double_hyphen_slug_rejected(env):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["slug"] = "double--hyphen"
-    r = c.post("/admin/original-content/new", data=form)
+    r = c.post("/admin/thought-leadership/original/new", data=form)
     assert r.status_code == 400
     assert "lowercase letters" in r.text
 
@@ -235,7 +235,7 @@ def test_growth_engine_calculator_not_reserved(env):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["slug"] = "growth-engine-calculator"
-    r = c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    r = c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
     assert r.status_code == 303
     lib = env._lib()
     try:
@@ -256,7 +256,7 @@ def test_retired_bespoke_slugs_no_longer_reserved(env, freed_slug):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["slug"] = freed_slug
-    r = c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    r = c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
     assert r.status_code == 303
     lib = env._lib()
     try:
@@ -267,10 +267,10 @@ def test_retired_bespoke_slugs_no_longer_reserved(env, freed_slug):
 
 def test_duplicate_slug_rejected(env):
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     form = dict(VALID_FORM)
     form["title"] = "A Different Title"
-    r = c.post("/admin/original-content/new", data=form)
+    r = c.post("/admin/thought-leadership/original/new", data=form)
     assert r.status_code == 400
     assert "already used" in r.text
     lib = env._lib()
@@ -284,23 +284,23 @@ def test_edit_can_keep_its_own_slug(env):
     """Editing a row without changing its slug must not trip the
     duplicate-slug check against itself."""
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     lib = env._lib()
     try:
         item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
     finally:
         lib.close()
-    r = c.post(f"/admin/original-content/{item_id}/edit", data=VALID_FORM, follow_redirects=False)
+    r = c.post(f"/admin/thought-leadership/original/{item_id}/edit", data=VALID_FORM, follow_redirects=False)
     assert r.status_code == 303
 
 
 def test_edit_rejects_slug_colliding_with_another_existing_row(env):
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     second = dict(VALID_FORM)
     second["slug"] = "second-piece"
     second["title"] = "Second Piece"
-    c.post("/admin/original-content/new", data=second, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=second, follow_redirects=False)
 
     lib = env._lib()
     try:
@@ -310,7 +310,7 @@ def test_edit_rejects_slug_colliding_with_another_existing_row(env):
 
     edit_form = dict(second)
     edit_form["slug"] = "a-test-piece"  # collides with the first piece
-    r = c.post(f"/admin/original-content/{second_id}/edit", data=edit_form)
+    r = c.post(f"/admin/thought-leadership/original/{second_id}/edit", data=edit_form)
     assert r.status_code == 400
     assert "already used" in r.text
 
@@ -319,7 +319,7 @@ def test_slug_can_be_changed_on_a_live_piece(env):
     """No restriction beyond uniqueness/collision — slug edits are allowed
     at any time, including on a live piece."""
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     lib = env._lib()
     try:
         item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
@@ -327,7 +327,7 @@ def test_slug_can_be_changed_on_a_live_piece(env):
         lib.close()
     edit_form = dict(VALID_FORM)
     edit_form["slug"] = "a-renamed-piece"
-    r = c.post(f"/admin/original-content/{item_id}/edit", data=edit_form, follow_redirects=False)
+    r = c.post(f"/admin/thought-leadership/original/{item_id}/edit", data=edit_form, follow_redirects=False)
     assert r.status_code == 303
     lib = env._lib()
     try:
@@ -338,7 +338,7 @@ def test_slug_can_be_changed_on_a_live_piece(env):
 
 
 def test_edit_form_warns_about_slug_change_breaking_links(env):
-    html = _admin_client(env).get("/admin/original-content/new").text
+    html = _admin_client(env).get("/admin/thought-leadership/original/new").text
     assert "no redirect system" in html or "there&rsquo;s no" in html
     assert "breaks any link" in html
 
@@ -350,7 +350,7 @@ def test_missing_required_field_rejected(env, missing_field):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form[missing_field] = ""
-    r = c.post("/admin/original-content/new", data=form)
+    r = c.post("/admin/thought-leadership/original/new", data=form)
     assert r.status_code == 400
     lib = env._lib()
     try:
@@ -363,7 +363,7 @@ def test_non_numeric_display_order_rejected(env):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["display_order"] = "not-a-number"
-    r = c.post("/admin/original-content/new", data=form)
+    r = c.post("/admin/thought-leadership/original/new", data=form)
     assert r.status_code == 400
     assert "number" in r.text
 
@@ -374,7 +374,7 @@ def test_sort_key_derived_from_date_label_on_create(env):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["date_label"] = "March 2027"
-    c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
     lib = env._lib()
     try:
         row = lib.get_original_content_by_slug("a-test-piece")
@@ -390,7 +390,7 @@ def test_unparseable_date_label_yields_blank_sort_key_and_warning(env):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["date_label"] = "not a real date"
-    r = c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    r = c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
     assert r.status_code == 303
 
     lib = env._lib()
@@ -400,12 +400,12 @@ def test_unparseable_date_label_yields_blank_sort_key_and_warning(env):
         lib.close()
     assert row["sort_key"] == ""
 
-    edit_html = c.get(f"/admin/original-content/{row['id']}/edit").text
+    edit_html = c.get(f"/admin/thought-leadership/original/{row['id']}/edit").text
     assert "didn&rsquo;t parse" in edit_html
 
 
 def test_sort_key_field_not_exposed_as_form_input(env):
-    html = _admin_client(env).get("/admin/original-content/new").text
+    html = _admin_client(env).get("/admin/thought-leadership/original/new").text
     assert 'name="sort_key"' not in html
 
 
@@ -414,11 +414,11 @@ def test_sort_key_field_not_exposed_as_form_input(env):
 def test_display_order_blank_auto_assigns_next_value(env):
     c = _admin_client(env)
     first = dict(VALID_FORM)
-    c.post("/admin/original-content/new", data=first, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=first, follow_redirects=False)
     second = dict(VALID_FORM)
     second["slug"] = "second-piece"
     second["title"] = "Second Piece"
-    c.post("/admin/original-content/new", data=second, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=second, follow_redirects=False)
 
     lib = env._lib()
     try:
@@ -432,7 +432,7 @@ def test_display_order_explicit_value_respected(env):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["display_order"] = "7"
-    c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
     lib = env._lib()
     try:
         row = lib.get_original_content_by_slug("a-test-piece")
@@ -449,7 +449,7 @@ def test_blank_body_md_stays_card_only_and_renders_on_homepage(env):
     form["slug"] = "card-only-piece"
     form["body_md"] = ""
     form["featured_home"] = "1"
-    c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
 
     lib = env._lib()
     try:
@@ -473,7 +473,7 @@ def test_blank_body_md_stays_card_only_and_renders_on_homepage(env):
 
 def test_body_md_filled_in_and_live_is_reachable_at_its_own_page(env):
     c = _admin_client(env)
-    c.post("/admin/original-content/new", data=VALID_FORM, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
     r = c.get("/thought-leadership/a-test-piece")
     assert r.status_code == 200
     assert "<h1>Hi</h1>" in r.text
@@ -484,7 +484,7 @@ def test_body_md_filled_in_but_draft_404s_for_anonymous_and_200s_for_admin(env):
     c = _admin_client(env)
     form = dict(VALID_FORM)
     form["status"] = "draft"
-    c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
 
     anon_html = _client(env).get("/thought-leadership/a-test-piece")
     assert anon_html.status_code == 404

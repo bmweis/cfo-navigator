@@ -3,7 +3,7 @@
 Covers the one shared helper (webapp.app._render_cited_answer — marker
 linkification against the turn's persisted citations_json snapshot, safe
 truncation, escaping, legacy-'[]' degradation) and its three call sites
-(/ask/history, /tools/fpa-buddy's past-questions section, /admin/ask-feedback),
+(/ask/history, /tools/fpa-buddy's past-questions section, /admin/fpa-buddy/feedback),
 plus the CSV export's deliberately-raw markers with the new plain-text
 citations column.
 """
@@ -146,7 +146,7 @@ def _login(appmod, username, password):
 
 @pytest.mark.parametrize("path,who", [
     ("/ask/history", "member1"),
-    ("/admin/ask-feedback", "admin"),
+    ("/admin/fpa-buddy/feedback", "admin"),
 ])
 def test_surface_renders_linked_markers_and_source_list(env, path, who):
     pw = "adminpass" if who == "admin" else "supersecret"
@@ -162,7 +162,7 @@ def test_surface_renders_linked_markers_and_source_list(env, path, who):
 
 def test_past_questions_section_only_shows_helpful_rated(env):
     # /tools/fpa-buddy's past-questions search filters to helpful-rated
-    # answers only (Phase 2) — unlike /ask/history and /admin/ask-feedback
+    # answers only (Phase 2) — unlike /ask/history and /admin/fpa-buddy/feedback
     # above, which show every turn regardless of rating. This fixture is a
     # genuine mixed-rating case: cited_id is rated 'inaccurate', legacy_id
     # is rated 'helpful' — only legacy_id's content should render here.
@@ -174,7 +174,7 @@ def test_past_questions_section_only_shows_helpful_rated(env):
 
 def test_csv_export_stays_raw_with_citations_column(env):
     admin = _login(env, "admin", "adminpass")
-    body = admin.get("/admin/ask-report/export.csv").text
+    body = admin.get("/admin/fpa-buddy/report/export.csv").text
     rows = list(csv.reader(io.StringIO(body)))
     header = rows[0]
     assert header[-1] == "citations"          # appended LAST, positions stable

@@ -16,7 +16,7 @@ save the record first and treat email as best-effort on top of that. Errors
 from a configured-but-failing send propagate as exceptions — callers should
 route those through webapp.app._send_email_safely rather than a bare
 try/except, so a failure lands in the email_failures table (surfaced on
-/admin/email-failures) and not just a stdout print nobody's watching.
+/admin/inbox/email-failures) and not just a stdout print nobody's watching.
 
 Required env vars to enable sending (same three as the Drive backup):
     GOOGLE_OAUTH_CLIENT_ID       Google Cloud OAuth client ID
@@ -272,7 +272,7 @@ def _send(msg: MIMEMultipart) -> None:
 # the same context string each call site already passes to
 # _send_email_safely (see webapp/app.py) — so a filter rule matching the
 # bracketed tag in the subject lines up with what shows on
-# /admin/email-failures too.
+# /admin/inbox/email-failures too.
 NOTIFICATION_TYPE_LABELS = {
     "contact": "Contact Form",
     "tool_submission": "Tool Submission",

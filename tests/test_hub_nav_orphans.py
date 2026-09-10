@@ -79,8 +79,8 @@ def test_checks_run_all_reports_hub_nav_orphans_fail_when_gap_reintroduced(monke
     "/admin/tools/software/new",                      # .../new under an already-carded parent
     "/admin/tools/communities/new",                    # same
     "/admin/library/feeds/new",                        # same
-    "/admin/original-content/new",                     # same
-    "/admin/thought-leadership/new",                   # same
+    "/admin/thought-leadership/original/new",                     # same
+    "/admin/thought-leadership/third-party/new",                   # same
     "/admin/tools/resources/new",                      # same
     "/admin/overhead-spend/details",                   # named, documented exception
     "/admin/tools/software/name-duplicates",           # named, documented exception (inline-linked only)
@@ -102,8 +102,8 @@ def test_path_param_routes_are_never_flagged():
     # the exclusion is doing real work, not vacuously true
     real_detail_routes = {
         "/admin/library/feeds/{feed_id}/edit",
-        "/admin/original-content/{item_id}/edit",
-        "/admin/thought-leadership/{item_id}/edit",
+        "/admin/thought-leadership/original/{item_id}/edit",
+        "/admin/thought-leadership/third-party/{item_id}/edit",
         "/admin/tools/communities/{community_id}/profile",
         "/admin/tools/resources/{benchmark_id}/edit",
     }

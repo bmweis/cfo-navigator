@@ -28,7 +28,7 @@ import time
 from linklib.db import Library
 from webapp import checks as _checks
 
-DOT_ONLY_HREFS = frozenset({"/admin/contacts", "/admin/tools/software/leads"})
+DOT_ONLY_HREFS = frozenset({"/admin/inbox/contact-submissions", "/admin/inbox/toolbox-intros"})
 
 # _failing_checks_count() badges /admin and /admin/library with the same
 # in-app check results /admin/checks itself computes live — but
@@ -68,7 +68,7 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         # The Archive Queue's own "pending" badge (2026-09, PR 3) and the
         # "Remove content" review-queue badge (2026-09, PR 4) were both
         # retired along with their underlying features — see CLAUDE.md.
-        "/admin/contacts": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
+        "/admin/inbox/contact-submissions": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
         # 2026-09: both Software's and Communities' badges used to be a SUM
         # of two separate counts (pending-approval + needing-review) —
         # Software's own history is a longer chain of fixes (see git
@@ -86,12 +86,12 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         # badges now read a single dedup-safe count apiece, replacing the
         # sum entirely rather than summing alongside it.
         "/admin/tools/software": lib.count_tools_needing_attention(),
-        "/admin/tools/software/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
+        "/admin/inbox/toolbox-intros": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
         "/admin/tools/communities": lib.count_communities_needing_attention(),
-        "/admin/community-gaps": lib.community_gap_counts()["unreviewed"],
+        "/admin/inbox/community-gaps": lib.community_gap_counts()["unreviewed"],
         "/admin/checks": _failing_checks_count(),
         "/admin/users": lib.count_pending_password_resets(),
-        "/admin/email-failures": lib.count_pending_email_failures(),
+        "/admin/inbox/email-failures": lib.count_pending_email_failures(),
         # 2026-09 (Phase 3): ask-feedback is no longer deferred — it has the
         # same manual "mark reviewed" toggle Community gaps already uses
         # (ask_feedback.reviewed, same column name/type/default), not an
@@ -100,7 +100,7 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         # diverging). Every other un-badged queue Phase 0 inventoried is
         # still deliberately left out — logged for a future flow-
         # harmonization decision instead.
-        "/admin/ask-feedback": lib.count_unreviewed_ask_feedback(),
+        "/admin/fpa-buddy/feedback": lib.count_unreviewed_ask_feedback(),
         "/admin/tools/software/feature-review-queue": lib.count_feature_review_queue(status="pending"),
         "/admin/library/backfill-content": lib.count_needs_content_check() + lib.count_articles_needing_manual_review(),
         "/admin/tools/software/name-duplicates": len(lib.find_tool_name_duplicate_candidates()),

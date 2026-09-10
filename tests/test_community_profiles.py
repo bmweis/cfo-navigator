@@ -313,7 +313,7 @@ def test_gap_form_submission_persists_and_records_server_side_viewed_ids(env):
 
 def test_admin_community_gaps_requires_auth(env):
     c = _client(env)
-    r = c.get("/admin/community-gaps", follow_redirects=False)
+    r = c.get("/admin/inbox/community-gaps", follow_redirects=False)
     assert r.status_code == 303
     assert "/login" in r.headers["location"]
 
@@ -330,17 +330,17 @@ def test_admin_community_gaps_triage_and_toggle(env):
     c = _client(env)
     c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
 
-    r = c.get("/admin/community-gaps")
+    r = c.get("/admin/inbox/community-gaps")
     assert r.status_code == 200
     assert "no regional presence" in r.text
     assert "1" in r.text  # unreviewed stat
 
-    r2 = c.get("/admin/community-gaps?reviewed=no")
+    r2 = c.get("/admin/inbox/community-gaps?reviewed=no")
     assert "no regional presence" in r2.text
-    r3 = c.get("/admin/community-gaps?reviewed=yes")
+    r3 = c.get("/admin/inbox/community-gaps?reviewed=yes")
     assert "no regional presence" not in r3.text
 
-    toggle = c.post(f"/admin/community-gaps/{sub_id}/toggle-reviewed", follow_redirects=False)
+    toggle = c.post(f"/admin/inbox/community-gaps/{sub_id}/toggle-reviewed", follow_redirects=False)
     assert toggle.status_code == 303
 
     lib = Library(os.environ["LINKLIB_DB"])
@@ -356,7 +356,7 @@ def test_unreviewed_community_gap_feeds_admin_badge(env):
     lib.add_community_gap_submission(gaps="something missing")
     counts = _tasks.open_task_counts(lib)
     lib.close()
-    assert counts.get("/admin/community-gaps") == 1
+    assert counts.get("/admin/inbox/community-gaps") == 1
 
 
 def test_correction_form_renders_for_known_community(env):
@@ -450,7 +450,7 @@ def test_admin_community_gaps_shows_correction_badge(env):
 
     c = _client(env)
     c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
-    r = c.get("/admin/community-gaps")
+    r = c.get("/admin/inbox/community-gaps")
     assert r.status_code == 200
     assert "Correction" in r.text
     assert "The URL is dead." in r.text
