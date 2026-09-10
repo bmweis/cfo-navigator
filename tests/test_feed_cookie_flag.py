@@ -600,12 +600,14 @@ def test_other_quadrants_still_count_their_real_cards(app_env):
     quadrant (lib-q-backup, 1 tool after the Archive Queue link was removed
     from it in PR 3) is gone from this page entirely as of the Reader route
     moves (PR 6, 2026-09) — its card moved to the System hub-nav group on
-    /admin, so there's nothing left here to assert a count for.
+    /admin, so there's nothing left here to assert a count for. lib-q-tags
+    dropped from 3 to 2 tools when Tag cleanup and Tagging style merged into
+    one page (PR 7, 2026-09).
     """
     with _client(app_env) as client:
         html = client.get("/admin/library").text
     assert "3 tools" in _quadrant(html, "lib-q-existing")
-    assert "3 tools" in _quadrant(html, "lib-q-tags")
+    assert "2 tools" in _quadrant(html, "lib-q-tags")
     assert "lib-q-backup" not in html
 
 
