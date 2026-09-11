@@ -121,6 +121,12 @@ def ai_config_orphan_problems() -> list[str]:
     return app.ai_config_editable_outside_ai_page()
 
 
+# --- coral discipline: at most one coral moment per public page (PR 16) -----
+def coral_moment_problems() -> list[str]:
+    from webapp import app
+    return app.coral_moment_problems()
+
+
 # --- shared <script> blocks parse as valid JS --------------------------------
 # 2026-08 lesson: a fix once validated raw source text via regex and reported
 # success, but every _JS constant below is a plain (non-f-string) Python
@@ -261,6 +267,13 @@ def run_all() -> list[dict]:
         "name": "AI config consolidated", "where": "Live + CI", "ok": not ac,
         "what": "No route reuses one of the three retired AI-settings URL shapes outside /admin/system/ai.",
         "detail": "; ".join(ac) if ac else "AI configuration lives only at /admin/system/ai. (test_admin_ai_settings)"})
+
+    cm = coral_moment_problems()
+    results.append({
+        "name": "Coral discipline (one moment per page)", "where": "Live + CI", "ok": not cm,
+        "what": "No signed-out public page has more than one coral background moment. Best-effort: "
+                "signed-out only, inline styles only, no path-param/admin routes—see coral_moment_problems()'s own docstring.",
+        "detail": "; ".join(cm) if cm else "Every checked page has at most one coral moment. (test_coral_discipline)"})
 
     pf = _pyflakes_problems()
     if pf is None:

@@ -1,13 +1,21 @@
 """Phase 3: CFO Toolbox 2x2 tile grid (Software, Resources, Communities,
-FP&A Buddy) on both /tools and a new homepage teaser section, plus a 5th,
-admin-only, seafoam-bordered tile on /tools linking to /admin/library.
+FP&A Buddy) on both /tools and a new homepage teaser section, plus an
+admin-only, seafoam "Reader access" card on /tools.
 
 Covers the acceptance criteria: the 4-tile grid replaces the old 3-card
-/tools layout, the homepage teaser mirrors it (minus the 5th tile, minus the
-now-redundant standalone "CFO Toolbox" homepage card), and the 5th tile is
-genuinely absent from the response HTML for a non-admin visitor — not just
-CSS-hidden — while never appearing on the homepage regardless of auth state.
-"""
+/tools layout, the homepage teaser mirrors it (minus the Reader card, minus
+the now-redundant standalone "CFO Toolbox" homepage card), and the Reader
+card is genuinely absent from the response HTML for a non-admin visitor —
+not just CSS-hidden — while never appearing on the homepage teaser
+regardless of auth state (it has its own, separate, always-present sidebar
+card there instead — see homepage()).
+
+PR 16 (2026-09) moved this card out of the Toolbox 2x2 grid, where it used
+to be an orphaned 5th tile, into its own standalone card below the grid,
+sharing markup with the homepage's identical sidebar card via
+`_reader_access_card_html()` — see that function's own docstring. It no
+longer opens in a new tab (the homepage's own card never did either, and
+the two are now required to read identically)."""
 import pathlib
 import sys
 import tempfile, os
@@ -64,39 +72,52 @@ def test_tools_landing_has_4_tile_grid_with_fpa_buddy(env):
     assert "still being built out" not in html
 
 
-# The admin-only 5th tile was labelled "Library" and pointed at
+# The admin-only Reader card was labelled "Library" and pointed at
 # /admin/library — the admin management page, not the reading surface it
-# promised. PR 9 (2026-09) renamed it to "Reader" and repointed it at /read,
-# opening in a new tab. Both were confirmed in source before being changed.
+# promised. PR 9 (2026-09) renamed it to "Reader" and repointed it at /read.
+# PR 16 (2026-09) pulled it out of the tile grid into its own standalone
+# card and renamed it "Reader access" (matching the homepage's own card
+# verbatim — see _reader_access_card_html()). Both were confirmed in
+# source before being changed.
 def test_tools_landing_anonymous_has_no_trace_of_admin_tile(env):
     html = _client(env).get("/tools").text
     assert 'href="/read"' not in html
-    assert ">Reader<" not in html
+    assert "Reader access" not in html
 
 
 def test_tools_landing_member_has_no_trace_of_admin_tile(env):
     # A signed-in non-admin member should be treated the same as anonymous.
     html = _member_client(env).get("/tools").text
     assert 'href="/read"' not in html
-    assert ">Reader<" not in html
+    assert "Reader access" not in html
 
 
-def test_tools_landing_admin_sees_5th_seafoam_bordered_tile(env):
+def test_tools_landing_admin_sees_reader_access_card(env):
     html = _admin_client(env).get("/tools").text
     assert 'href="/read"' in html
-    assert ">Reader<" in html
+    assert "Reader access" in html
     assert "var(--seafoam)" in html
     # Never the retired admin page it used to point at.
     assert "/admin/library" not in html
+    # Below the tile grid, not a 5th tile inside it (PR 16).
+    grid_end = html.index('<div class="toolbox-grid">')
+    grid_end = html.index("</div>", grid_end)
+    reader_start = html.index("Reader access")
+    assert reader_start > grid_end
 
 
-def test_admin_reader_tile_opens_in_a_new_tab(env):
-    """The Reader is somewhere you settle in and read, so it opens alongside
-    the Toolbox rather than replacing it."""
-    html = _admin_client(env).get("/tools").text
-    start = html.index('href="/read"')
-    assert 'target="_blank"' in html[start:start + 120]
-    assert 'rel="noopener"' in html[start:start + 120]
+def test_reader_access_card_matches_homepage_verbatim(env):
+    """PR 16: both cards share _reader_access_card_html() — same copy, same
+    markup, no target="_blank" (unlike the old /tools-only 5th tile, which
+    opened in a new tab and had different, less accurate copy)."""
+    import re
+    tools_html = _admin_client(env).get("/tools").text
+    home_html = _admin_client(env).get("/").text
+    pattern = re.compile(r'<a href="/read".*?</a>', re.S)
+    tools_card = pattern.search(tools_html).group(0)
+    home_card = pattern.search(home_html).group(0)
+    assert tools_card == home_card
+    assert 'target="_blank"' not in tools_card
 
 
 def test_homepage_has_toolbox_teaser_section(env):

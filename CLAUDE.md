@@ -7092,6 +7092,179 @@ it supersedes the old "`/save` is token-gated" note.
   comments ("PR 465", "PR 12 (PR 529)") were reverted back to their natural
   `PR #465`/`PR 12 (PR #529)` phrasing.
 
+- **Public page polish + coral discipline (PR 16, 2026-09) — coral dropped from
+  the icon-cycle array entirely, the MCP callout becomes the one deliberate
+  coral moment, `/tools` splits into two columns, Reader moves out of the
+  Toolbox tile grid, and Resources' card-height variance is fixed at the
+  root.** `_CARD_ICON_STYLES` used to cycle seafoam/navy/coral by array
+  index for every card-row/tile grid sitewide — so whichever card landed in
+  the third slot spent the site's one rare accent by array position, not
+  deliberate placement: Communities on `/tools` directly, and (worse) twice
+  over on the homepage (the Toolbox panel's Communities mini-tile AND the
+  Recent Highlights grid's Podcasts tile). Coral is dropped from that cycle
+  outright — every caller now cycles seafoam/navy only (`% 2`, not `% 3`) —
+  freeing coral for the placement `_mcp_callout_html()` always wanted but
+  couldn't have (that function shipped navy specifically because coral was
+  already spent elsewhere; it's coral-wash + navy text now, the same
+  sanctioned pairing every other coral badge on this site already uses,
+  still non-clickable, never a button). **One real, non-obvious side effect
+  of the `%3 -> %2` change, caught by grep sweep before shipping**: FP&A
+  Buddy's homepage mini-tile icon (`_ICON_HALF_CIRCLE`) has a hardcoded
+  `#1F7A66` fill that the pre-existing cycle happened to pair with a
+  seafoam badge ring purely by array-index coincidence (index 3, `3%3==0`);
+  under the new 2-color cycle that same index lands on navy (`3%2==1`),
+  which would have put a navy ring around a seafoam-toned fill — a real
+  color clash, not just an unrequested cosmetic shift. Fixed with a small,
+  explicit `_TOOLBOX_BADGE_INDEX`/`_toolbox_badge_index()` pin (FP&A Buddy's
+  badge index is pinned to 0/seafoam regardless of its position, on both
+  `/tools`' own grid and the homepage mini-tile row, so the same tile
+  reads identically on both surfaces) rather than leaving it to accident a
+  second time. **A second candidate side effect, investigated and
+  deliberately left alone**: the Original Content flagship cards'
+  `_OC_TAG_COLORS` cycle (a separate, three-color `coral-deep`/
+  `seafoam-deep`/`navy-light` rotation for the homepage's/`/thought-leadership`'s
+  featured-piece tag labels) also uses coral, and the Growth Engine Ratio
+  card always lands on it by position — but that's a small coral-DEEP TEXT
+  label, not a coral background fill, and doesn't compete for the same
+  rare-accent budget the icon-cycle bug was about; verified this doesn't
+  double up with the new coral MCP callout via the coral-moment check
+  below (which only counts backgrounds), not merely assumed.
+  - **`coral_moment_problems()`** (`webapp/app.py`, wired into
+    `webapp/checks.py`'s `run_all()` as a live `/admin/checks` row and
+    into CI via `tests/test_coral_discipline.py`) is a new, honestly-scoped
+    best-effort check: it renders every real public (non-`/admin`, no
+    path-param) GET/HTML route signed out and flags any page with more
+    than one coral **background** declaration inside an actual rendered
+    `style="..."` attribute — deliberately never a `<style>` block's own
+    CSS rules (which can declare a class no element on that render
+    actually carries — a matchmaker feedback button's `.sel-neg`, the
+    Reader's `.rr-alert`, both real, already-sanctioned coral uses that
+    only ever paint on user interaction or a real error state) and never a
+    `<script>` block's JS template strings. `<head>` (the shared sitewide
+    stylesheet, including the admin-only pending-count-badge exception)
+    and each response's own `<header>`/`<footer>` are excluded as chrome,
+    per the brief's explicit scope. Admin pages are out of scope entirely —
+    BRAND.md already sanctions more than one coral element there
+    (pending-count badges, review-status pills), so a blanket "at most
+    one" rule doesn't apply to that surface. See BRAND.md §8's own bullet
+    for the full, itemized list of what this can and can't catch — stated
+    there rather than implied, per the brief's own ask. Verified the
+    detector actually catches a regression, not just passes trivially: a
+    test injects a second coral background into the MCP callout and
+    confirms both `/` and `/tools` get flagged.
+  - **`/tools` splits into two columns** (`.toolbox-layout`, 1fr/1fr) —
+    left is heading/intro/bullets/MCP callout, right is the 2x2 tile grid,
+    `position:sticky` so the cards stay visible while the left column's
+    text scrolls. Before this the page stacked heading -> intro -> six
+    bullets -> MCP callout -> 2x2 grid, pushing the tile grid a full
+    screen below the fold on an ordinary viewport. Split chosen by
+    rendering both a 40/60 and a 50/50 layout and reading the actual
+    output, not by formula: at 40/60 the left column narrows to ~480px and
+    the intro's longest bullet ("Which community is actually full of
+    finance executives who've done the job, not just anyone who signed
+    up?") wraps into several short, ragged lines; 50/50 (~600px each side
+    at `.page-standard`'s 1300px) gives the bullets a full, comfortable
+    line length and still leaves the tile grid ~280px per tile, legible
+    side by side. Below 900px both columns stack (DOM order already puts
+    text before cards, so no reordering needed) and sticky turns off.
+  - **Reader pulled out of the Toolbox tile grid into its own standalone
+    card** below it — it was an orphaned 5th tile crammed under a 2x2 grid
+    whose other four ARE the Toolbox's real components (software,
+    communities, benchmarks/books, FP&A Buddy); Reader is Brian's own
+    private reading tool, not a sixth Toolbox component. The card's markup
+    moved into a new shared `_reader_access_card_html()` (used by both
+    `homepage()` and `tools_landing()`) so the two surfaces can't read
+    differently — confirmed byte-for-byte identical between the two pages
+    for a signed-in admin, and confirmed absent from the rendered HTML
+    entirely (not just CSS-hidden) for a signed-out visitor on both pages.
+    The old, less accurate `/tools`-only copy ("Your private reading
+    stash—Feed, Archive, and Read Later, admin only") is gone; the
+    homepage's own copy ("Shown here only when logged in as admin. Feed,
+    Archive, and Read Later in one place.") is what ships on both now, per
+    the build brief's explicit call that the homepage version names all
+    three views and the old `/tools` version didn't. `_ICON_BOOK` (the
+    glyph the old 5th tile used) is now genuinely dead — both cards use
+    `_ICON_NEWSPAPER` via the shared helper — and is deleted rather than
+    left behind unused.
+  - **Resources' book-card height variance, root-caused rather than
+    padded away.** Diagnosis (seeding the real `scripts/
+    seed_book_recommendations.py` copy and the real `_DEFAULT_BENCHMARKS`
+    copy side by side, then measuring real Playwright bounding boxes, not
+    guessing): this was never a missing height constraint specific to
+    Books, and never a different card component — Books and Benchmarking
+    share one `.bench-card`/`.bench-desc` class. `auto-fill` CSS Grid's
+    default `align-items:stretch` only equalizes cards WITHIN their own
+    row; different rows are sized independently by their own tallest
+    card, so a row of short names/descriptions renders visibly shorter
+    than a row that happens to contain a long one. Benchmarking's more
+    consistent, template-driven ("Best for X") copy length happened to
+    keep its rows close enough in height to read as "already uniform" at
+    its current row count and card mix — seeding it with enough rows to
+    span two rows reproduced the identical row-to-row variance Books was
+    showing, proving it's the same underlying mechanism on both sections,
+    not a Books-specific bug. Fixed at the root for both sections at once:
+    `.bench-name` clamped to 2 lines, `.bench-desc` to 3 (`-webkit-line-
+    clamp`, so a short name/description doesn't grow past its own budget)
+    with a matching `.bench-card` `min-height` (so a short one still
+    reserves the same floor a maxed-out one would use — a clamp alone only
+    bounds the ceiling). Verified with real Playwright bounding-box
+    measurements at 1280/1920/390px: every card in both grids renders at
+    an identical height regardless of row composition, at every width.
+  - **The Resources intro-copy question was investigation-only, per the
+    brief's own approval-gate rule** — a page-level paragraph introducing
+    "what the resources are" (Brian's original ask) genuinely doesn't
+    exist; what exists are two separate SECTION-level one-liners
+    ("The benchmarking sources I actually use." / "A personal reading
+    list—not benchmarking data.") with nothing framing the page as a
+    whole before the Benchmarking section starts. No copy was written or
+    shipped for this — any new copy is a stop-for-approval item, reported
+    in the PR description as a draft, not committed. **Approved with edits
+    the same PR** (before merge): "What's here: the benchmarking sources I
+    rely on, and books that shaped how I do this job. Not exhaustive, just
+    what's held up." — the draft's "actually" dropped (already used twice
+    elsewhere on this page/its Toolbox card blurb) and its em dash swapped
+    for a comma. Shipped between the H1 row and "Suggest a resource →",
+    exactly as proposed.
+  - **A real, previously-latent infinite-recursion bug found and fixed
+    before merge, via `coral_moment_problems()` itself, not a code-review
+    guess** — `webapp/checks.py`'s `run_all()` had one existing structural
+    hazard nothing had ever triggered: `webapp/tasks.py`'s
+    `_failing_checks_count()` (which badges the admin nav's own "Admin"
+    link) calls that same `run_all()`, and `_page()` calls it on EVERY
+    page render for a `role=="admin"` visitor. `_is_authed`/`_role` treat
+    *every* visitor as admin when neither `LINKLIB_PASSWORD` nor
+    `LINKLIB_SAVE_TOKEN` is configured — the documented "open, local-dev
+    convenience" mode. Every check in `run_all()` before this PR was pure
+    route/tuple introspection with no HTTP request involved, so this
+    structural cycle was inert. `coral_moment_problems()` is the first
+    check to actually render pages via `TestClient`, which made the cycle
+    real: in open-auth mode, `coral_moment_problems()` renders `/` ->
+    `_page()` (role admin) -> `_has_open_admin_tasks()` ->
+    `_failing_checks_count()` -> `run_all()` -> `coral_moment_problems()`
+    again, without end. Reproduced live to at least depth 3 before being
+    killed — a genuine, not theoretical, infinite recursion, with runaway
+    memory growth (confirmed in this session's own attempted local full-suite
+    runs, which stalled and ballooned to multiple GB before being killed —
+    `tests/test_checks.py` was the one file exercising this path, since it
+    never set a password, unlike every other test file's `env` fixture).
+    Fixed with a plain module-level `_CORAL_CHECK_IN_PROGRESS` guard around
+    `coral_moment_problems()` — deliberately not thread-local, since
+    Starlette's `TestClient` blocks the calling thread for the duration of
+    each request, so there's no genuine concurrency to guard against here,
+    only recursion within one logical call chain; a nested call returns
+    `[]` immediately (see the guard's own comment for the full reasoning).
+    `tests/test_checks.py` also picked up the same `env` fixture
+    (password + secret key + fresh DB, reloaded per test) every other test
+    file already uses, closing the specific gap that let this go
+    undetected — the underlying open-auth-mode "every page render pays for
+    a full `run_all()`" behavior is unchanged and out of scope for this
+    PR, only the recursion is fixed. Verified both ways, not just that the
+    fix works: reverted the guard locally and reproduced the exact hang
+    again before restoring it, so the regression test
+    (`tests/test_coral_discipline.py::test_coral_check_does_not_recurse_in_open_auth_mode`
+    plus a sibling asserting `_has_open_admin_tasks()` itself returns
+    promptly) is pinned against a confirmed-real failure mode, not a guess.
+
 
 ## Authentication & security
 
