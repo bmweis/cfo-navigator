@@ -372,6 +372,57 @@ collapse, making it a pure no-op on this page specifically once nothing
 else needed a bounded card-grid width for the game/calculator use case
 FP&A Buddy doesn't have.
 
+**Same PR, round 2 — live review found ~350px of dead space under the
+left column at desktop width, since three sentences and a Question box
+can't fill the height a full mocked conversation needs.** Per Brian's
+direct feedback: pulled Sources, Depth, and the Ask button into the SAME
+left column, as two more `grid-template-areas` rows (`controls`, `action`)
+with a literal `.` placeholder in the right-hand cell — the empty cell is
+what keeps `example`'s spanning box confined to exactly the intro/usage/
+question rows, rather than stretching down the full left-column height.
+That confinement is also what makes the edge-alignment fix below possible:
+if `example` spanned all five rows, "align its bottom with the Question
+box" wouldn't even be a coherent request, since the Question box would
+just be one of several items inside a taller shared span. Sources (3
+chips) and Depth (3 buttons) share `.ask-controls`' existing 1fr/1fr
+split everywhere else on the site, but at this column's ~600px width that
+leaves each side only ~280px — plenty for Depth's three short buttons on
+one line, tight enough that Sources' longer chip labels ("Web search
+(trusted sites)") wrap to two ragged lines. Measured both ways before
+deciding (a real screenshot comparison, not a guess): stacked (Sources
+above Depth, one column) reads cleaner, so `.fpa-intro-area-controls
+.ask-controls{grid-template-columns:1fr;}` overrides the shared rule
+unconditionally, not inside a media query — this container is narrower
+than `.ask-controls`' own 640px mobile breakpoint regardless of the real
+viewport, so the same override is correct on both the desktop two-column
+layout and the mobile single-column stack. Mobile's own
+`grid-template-areas` gained `controls`/`action` as two more single-column
+rows, in the same position they already occupied in this page's pre-
+redesign source order — no visual change on mobile at all, confirmed via
+`getBoundingClientRect()` y-ordering showing the identical
+`intro → example → usage → question → controls → action` sequence before
+and after this round.
+
+The example-card/Question-box bottom-edge misalignment (~30px, close
+enough to read as a mistake) turned out to be free to fix, not a
+magic-number job: `align-self:stretch` on both the `question` and
+`example` grid items (removing the blanket `align-items:start` the
+container had) makes each item fill its assigned row(s) exactly, and
+`display:flex` + `flex:1` on the actual visible cards inside each wrapper
+(`.ask-card`, `.ask-example`, plus their innermost growable child —
+the `<textarea>` and `.ask-answer` respectively) makes the visible
+borders fill that stretched space rather than stopping at their own
+content height. The mechanism that closes the gap without any hardcoded
+value: `example`'s spanning area is naturally taller than the
+intro/usage/question rows combined (the mocked conversation has more
+content than three lines of prose), and CSS Grid's own auto-sizing
+algorithm grows the LAST row a multi-row item spans — `question` — to
+absorb that difference, which is exactly the row the Question box also
+lives in. Verified with real `getBoundingClientRect()` measurements at
+1280×1400 and 1920×1400, not eyeballed: question-box bottom and
+example-card bottom landed at the identical y-coordinate, **0.0px diff**,
+at both widths.
+
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
 — replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column

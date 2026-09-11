@@ -7310,7 +7310,36 @@ it supersedes the old "`/save` is token-gated" note.
   `grid-template-areas` is what let that order survive the desktop
   restructure with zero DOM reshuffling, verified directly via
   `getBoundingClientRect()` y-ordering at 390px, not just eyeballed.
-  Sources/Depth/Ask stay outside the grid, full width, on both breakpoints.
+  **Round 2, same PR, per a second round of direct feedback**: the
+  first draft's left column (intro/usage/question only) still left ~350px
+  of dead space under it at desktop width next to the taller mocked
+  example — three sentences and a Question box can't fill that height.
+  Sources, Depth, and the Ask button moved INTO the same left column too
+  (two more grid rows, `controls`/`action`, with a `.` placeholder keeping
+  `example` confined to only the intro/usage/question rows above them) so
+  the whole Ask form reads as one continuous shape instead of a form whose
+  own controls span past the column's left edge. Sources (3 chips) and
+  Depth (3 buttons) share `.ask-controls`' own 1fr/1fr split everywhere
+  else on the site, but at this column's ~600px width that's only ~280px
+  per side — fine for Depth's three short buttons, tight enough that
+  Sources' longer labels wrap to two ragged lines; checked both ways with
+  real screenshots before choosing stacked (Sources above Depth) as the
+  cleaner read, via an unconditional override
+  (`.fpa-intro-area-controls .ask-controls{grid-template-columns:1fr}`,
+  not gated behind a media query, since this container is narrower than
+  `.ask-controls`' own 640px breakpoint regardless of the real viewport).
+  Same round also closed the ~30px bottom-edge mismatch between the
+  example card and the Question box — free, not a magic-number height:
+  `align-self:stretch` on both grid items plus `flex:1` on the actual
+  visible cards inside them lets CSS Grid's own auto-sizing algorithm do
+  the work (a multi-row spanning item taller than the rows it spans grows
+  the LAST of those rows to fit, which is the same row the Question box
+  lives in) — verified via real `getBoundingClientRect()` measurements at
+  both 1280px and 1920px: **0.0px difference** between the two cards'
+  bottom edges, not just "close." Mobile gained `controls`/`action` as two
+  more rows in its own single-column `grid-template-areas`, in the exact
+  position they already occupied — zero visual change there, confirmed via
+  the same before/after y-ordering check as round 1.
   **Below the Ask button, order was Ask → Recent conversations (a JS-
   populated, initially-hidden list) with "Search past questions" stranded
   ABOVE the Question box** — not "Recent conversations above Past

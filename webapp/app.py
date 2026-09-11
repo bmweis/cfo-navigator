@@ -20922,26 +20922,28 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
     </div>
   </div>
-</div>
-
-<div class="ask-controls">
-  <div class="ask-control">
-    <div class="ask-section-label">Sources</div>
-    <div class="ask-tags">
-      {source_tags}
+  <div class="fpa-intro-area-controls">
+    <div class="ask-controls">
+      <div class="ask-control">
+        <div class="ask-section-label">Sources</div>
+        <div class="ask-tags">
+          {source_tags}
+        </div>
+      </div>
+      <div class="ask-control">
+        <div class="ask-section-label">Depth</div>
+        <div class="ask-tags" role="radiogroup" aria-label="Depth">
+          {tier_tags}
+        </div>
+      </div>
     </div>
   </div>
-  <div class="ask-control">
-    <div class="ask-section-label">Depth</div>
-    <div class="ask-tags" role="radiogroup" aria-label="Depth">
-      {tier_tags}
+  <div class="fpa-intro-area-action">
+    <div class="ask-action-row">
+      <button class="btn" onclick="doAsk()" id="ask-btn" style="padding:11px 28px;font-size:15px;">Ask</button>
+      {cost_span}
     </div>
   </div>
-</div>
-
-<div class="ask-action-row">
-  <button class="btn" onclick="doAsk()" id="ask-btn" style="padding:11px 28px;font-size:15px;">Ask</button>
-  {cost_span}
 </div>
 
 {past_questions_section}
@@ -20963,23 +20965,59 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 
 /* Top section only, decoupled by grid-template-areas so desktop and mobile
    can place the same DOM children differently without JS or an explicit
-   `order` property. Desktop: description, usage line, and the Question box
-   stack down the left column (filling the vertical space the tall
-   illustrative example creates on the right) so the input sits above the
-   fold; the example spans that whole left-column height on the right.
-   Mobile collapses to one column in reading order (description, example,
-   usage, question) — the same order this page used before the desktop fill
-   was added, kept exactly because it already reads well. Sources/Depth/Ask
-   stay outside this grid, full width, on both breakpoints. */
+   `order` property. Desktop: description, usage line, Question box, and
+   the Ask form controls (Sources/Depth/Ask button) all stack down the left
+   column — one continuous shape, not a form whose own controls span full
+   width past the column's left edge — while the illustrative example
+   spans only the intro/usage/question rows on the right (a literal "."
+   placeholder keeps it out of the controls/action rows, so its own bottom
+   edge lines up with the Question box's rather than running the full
+   height of the left column). Mobile collapses to one column in the exact
+   reading order this page used before the desktop fill was added — kept
+   because it already reads well: description, example, usage, question,
+   controls, action. */
 .fpa-intro-layout{{display:grid;grid-template-columns:1fr 1fr;column-gap:40px;row-gap:16px;
-  grid-template-areas:"intro example" "usage example" "question example";
+  grid-template-areas:"intro example" "usage example" "question example" "controls ." "action .";
   align-items:start;margin-bottom:28px;}}
 .fpa-intro-area-intro{{grid-area:intro;}}
-.fpa-intro-area-example{{grid-area:example;}}
+.fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
 .fpa-intro-area-usage{{grid-area:usage;}}
-.fpa-intro-area-question{{grid-area:question;}}
+.fpa-intro-area-question{{grid-area:question;align-self:stretch;}}
+.fpa-intro-area-controls{{grid-area:controls;}}
+.fpa-intro-area-action{{grid-area:action;}}
 @media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;
-  grid-template-areas:"intro" "example" "usage" "question";}}}}
+  grid-template-areas:"intro" "example" "usage" "question" "controls" "action";}}}}
+
+/* Sources (3 chips) and Depth (3 buttons) reuse .ask-controls' own 1fr/1fr
+   split everywhere else on the site, but at the ~600px left-column width
+   here that leaves each side only ~280px — enough to fit Depth's three
+   short buttons on one line, but Sources' longer chip labels ("Web search
+   (trusted sites)") wrap to two ragged lines. Stacked (Sources above
+   Depth) instead, reusing the same @media(max-width:640px) rule .ask-
+   controls already ships for narrow viewports rather than a new one —
+   this container is narrower than that breakpoint regardless of the real
+   viewport, so applying it unconditionally (not inside a media query) is
+   correct on both the two-column desktop layout and the single-column
+   mobile stack alike. */
+.fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;gap:18px;}}
+
+/* Bottom-edge alignment between the Question box and the illustrative
+   example: `align-self:stretch` on both grid items (above) makes each
+   fill its assigned row(s) exactly, and the two-part rule below makes the
+   visible cards fill that stretched space rather than just their own
+   content height — no hardcoded height anywhere. This works because the
+   "example" grid area spans exactly the intro/usage/question rows (via
+   the "." placeholder above): when its natural content is taller than
+   those three rows combined, CSS Grid's own auto-sizing algorithm grows
+   the LAST row it spans (question) to fit — which is what pulls the
+   Question box's row down to meet the example's real height, rather than
+   a value picked by hand. */
+.fpa-intro-area-question{{display:flex;}}
+.fpa-intro-area-question .ask-card{{flex:1;display:flex;flex-direction:column;}}
+.fpa-intro-area-question .ask-card textarea{{flex:1;}}
+.fpa-intro-area-example{{display:flex;}}
+.fpa-intro-area-example .ask-example{{flex:1;display:flex;flex-direction:column;}}
+.fpa-intro-area-example .ask-answer{{flex:1;}}
 
 .ask-example{{border:1px dashed var(--line-strong);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--surface);}}
 .ask-example-label{{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:3px 10px;margin-bottom:12px;}}
