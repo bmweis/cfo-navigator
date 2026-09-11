@@ -277,6 +277,7 @@ NOTIFICATION_TYPE_LABELS = {
     "contact": "Contact Form",
     "tool_submission": "Tool Submission",
     "community_submission": "Community Submission",
+    "library_submission": "Library Submission",
     "password_reset_no_email": "Password Reset",
 }
 

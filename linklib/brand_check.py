@@ -20,8 +20,16 @@ from __future__ import annotations
 
 import re
 
-# A hex color, excluding HTML numeric entities like &#127942; (preceded by '&').
-_HEX_RE = re.compile(r"(?<!&)#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
+# A hex color, excluding HTML numeric entities like &#127942; (preceded by '&')
+# and an issue/PR reference like "PR #529" or "see issue #318" — a 3-digit
+# GitHub reference number (e.g. #529 -> #552299 once padded) reads as a
+# perfectly valid, off-palette hex color to this regex, and has tripped this
+# exact false positive three times (#465, #318, #529 — see CLAUDE.md/the
+# comments this fix let get reworded back to plain prose). Fixed at the
+# checker rather than by rewording every future comment around it.
+_HEX_RE = re.compile(
+    r"(?<!&)(?<!(?i:PR ))(?<!(?i:issue ))(?<!#)#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b"
+)
 # A font-family / font-shorthand value (CSS or SVG attribute), up to a terminator.
 _FONT_RE = re.compile(r"font(?:-family)?\s*[:=]\s*([^;\"}<]+)", re.IGNORECASE)
 _QUOTED_RE = re.compile(r"['\"]([A-Za-z0-9 ]+)['\"]")

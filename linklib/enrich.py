@@ -215,20 +215,20 @@ def _checked_max_tokens(value: int) -> int:
     silently starve the response out from under adaptive thinking — see the
     floor's docstring above."""
     assert value >= MIN_GENERATE_MAX_TOKENS, (
-        f"max_tokens={value} is below MIN_GENERATE_MAX_TOKENS ({MIN_GENERATE_MAX_TOKENS}) — "
+        f"max_tokens={value} is below MIN_GENERATE_MAX_TOKENS ({MIN_GENERATE_MAX_TOKENS})—"
         "adaptive thinking can consume the whole budget and leave nothing for the response."
     )
     return value
 
 
 _PROMPT = """You are enriching a curated research library for a specific audience:
-finance leaders at high-growth technology companies — people running FP&A or
+finance leaders at high-growth technology companies—people running FP&A or
 strategic finance at a startup or scaleup, and the operators and founders growing
 into that work.
 
 The library powers two things: (1) an AI assistant that ANSWERS finance questions
 by retrieving and synthesizing these articles, and (2) a search box. So the
-summary must be substantive and retrievable — it is the material the assistant
+summary must be substantive and retrievable—it is the material the assistant
 reasons from, not a teaser.
 
 Given an article's title and text, return STRICT JSON only (no prose, no markdown
@@ -322,12 +322,12 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
 _TOOL_DESC_PROMPT = """You are drafting a vendor profile for the CFO Toolbox, a
 directory read by finance leaders at high-growth tech companies. This has two
 surfaces: a full profile-page write-up, and a short summary shown on the
-directory card and in search results — write both.
+directory card and in search results—write both.
 
 Follow these rules exactly:
-1. Say what the tool does — plainly and specifically, not marketing copy.
+1. Say what the tool does—plainly and specifically, not marketing copy.
 2. Cover what it does, who it's built for, and how it differs from
-   competitors or its core strengths — capability-focused, grounded in the
+   competitors or its core strengths—capability-focused, grounded in the
    page content below wherever it supports a claim.
 3. No marketing language: no "powerful," "seamless," "game-changing," "best-in-class,"
    or similar adjective stacking. No exclamation points.
@@ -335,7 +335,7 @@ Follow these rules exactly:
    leave that out entirely, even if you believe you know.
 5. Write directly to the CFO Toolbox reader. Never reference "the provided
    pages," "the page content," "the documents," or your own research
-   process — if a source is thin, ambiguous, or contradictory, simply
+   process—if a source is thin, ambiguous, or contradictory, simply
    write around it (omit the claim, or state plainly what's actually
    known) rather than narrating the gap or the sourcing situation in the
    text itself.
@@ -344,7 +344,7 @@ Follow these rules exactly:
    figures, review counts, named-customer case-study numbers). This is a
    factual account of what the tool does, not a pitch.
 
-Voice guide — write both parts in this voice:
+Voice guide—write both parts in this voice:
 {voice_core}
 
 {structure_guidance}
@@ -352,16 +352,16 @@ Voice guide — write both parts in this voice:
 Write your response as plain prose in exactly three parts, in this order,
 with no JSON and no markdown code fences:
 
-1. The full profile-page write-up — roughly 8-12 sentences (about 150-300
+1. The full profile-page write-up—roughly 8-12 sentences (about 150-300
    words). Budget and depth are not a constraint here; use the page
    content thoroughly rather than settling for a thin summary. Every
    sentence should carry real information, not padding. No markdown
-   syntax (no **bold**, no _italics_, no # headings) — the one exception
+   syntax (no **bold**, no _italics_, no # headings)—the one exception
    is a short "- " bulleted list where the content is genuinely
    list-like, per the structure guidance above.
 2. A blank line, then a line starting exactly with "SUMMARY:" followed on
    the same line by a short, standalone 2-3 sentence version (about 30-60
-   words) for the directory card and search results — a proper condensed
+   words) for the directory card and search results—a proper condensed
    rewrite someone could read on its own and understand what the tool is
    and does, not just the write-up's opening sentences copy-pasted.
    Always a single continuous paragraph on one line, no line breaks or
@@ -370,7 +370,7 @@ with no JSON and no markdown code fences:
    by "true" if the page content below gave you a solid, specific basis
    for both parts, or "false" if you had to draft from thin/ambiguous
    page content or from your own general knowledge rather than the page
-   itself. Say so honestly rather than defaulting to true — a reader
+   itself. Say so honestly rather than defaulting to true—a reader
    relies on this to know whether the write-up is well-grounded.
 
 Tool name: {name}
@@ -466,7 +466,7 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
     doc_blocks: list[dict] = []
     sent_docs: list[dict] = []
     if low_confidence:
-        content_block = ("(Could not fetch page content — draft from your own knowledge of this "
+        content_block = ("(Could not fetch page content—draft from your own knowledge of this "
                           "company/product if you have it, keeping to the rules above.)")
     else:
         content_block = ""
@@ -540,13 +540,13 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
 
 _TOOL_DIFFERENTIATION_PROMPT = """You are drafting the "Bottom line" callout for a vendor's profile page on the
 CFO Toolbox, a directory read by finance leaders deciding between tools. This
-is the single most scannable takeaway on the page — a "best for X, trade-off
+is the single most scannable takeaway on the page—a "best for X, trade-off
 is Y" framing, not a restatement of the description.
 
 Follow these rules exactly:
 1. Name who the tool is genuinely best for (a specific buyer/use case, not
    "finance teams" generically) and the real trade-off or limitation that
-   comes with picking it — every strength implies something it costs you.
+   comes with picking it—every strength implies something it costs you.
 2. Ground the claim in the description and competitor context below; never
    invent a comparison point you can't support.
 3. No marketing language: no "powerful," "seamless," "best-in-class," or
@@ -555,15 +555,15 @@ Follow these rules exactly:
 5. Never mention review scores, star ratings, testimonials, awards, customer
    logos, or a vendor's self-reported/marketing results (revenue figures,
    adoption or automation percentages, named-customer outcomes, review
-   counts, case-study numbers) as the basis for the comparison — even if
+   counts, case-study numbers) as the basis for the comparison—even if
    one appears in the description or competitor context below. This is a
    factual comparison, not a pitch.
 6. Write directly to the reader. Never reference "the description above,"
-   "the competitor context," or your own research process — if there isn't
+   "the competitor context," or your own research process—if there isn't
    enough to compare, say so plainly in the callout itself rather than
    narrating the gap.
 
-Voice guide — write the callout in this voice:
+Voice guide—write the callout in this voice:
 {voice_core}
 
 Vendor: {name} ({url})
@@ -647,7 +647,7 @@ def generate_tool_differentiation(name: str, url: str, description: str,
     low_confidence = not bool(competitor_names)
     competitors_block = (
         f"Curated competitors: {', '.join(competitor_names)}" if competitor_names
-        else "(No competitors curated yet — draft from the description alone.)"
+        else "(No competitors curated yet—draft from the description alone.)"
     )
 
     try:
@@ -690,20 +690,20 @@ def generate_tool_differentiation(name: str, url: str, description: str,
 
 _COMPETITOR_MATCH_PROMPT = """You are curating the "Competitors" section of a directory profile page, read by
 finance leaders comparing options. Below is one entry and a shortlist of candidates
-already pre-filtered by shared category tags — your job is to judge which of THOSE
+already pre-filtered by shared category tags—your job is to judge which of THOSE
 candidates are genuinely close competitors or alternatives, not to invent new ones.
 
 Follow these rules exactly:
 1. A true competitor solves substantially the same problem for a similar buyer —
    shared category tags alone are not enough (the tag taxonomy is broad).
-2. When in doubt, leave a candidate out — a false negative here just means Brian
+2. When in doubt, leave a candidate out—a false negative here just means Brian
    adds it by hand; a false positive misleads a reader comparing options.
 3. Judge only the candidates listed below. Never suggest anything not in the list.
 
 Entry: {name}
 Description: {description}
 
-Candidates (id: name — description):
+Candidates (id: name—description):
 {candidates_block}
 
 Respond with JSON only: {{"competitor_ids": [<id>, <id>, ...]}}"""
@@ -742,7 +742,7 @@ def generate_competitor_matches(name: str, description: str, candidates: list[di
         return None
 
     candidates_block = "\n".join(
-        f"{c['id']}: {c['name']} — {(c.get('description') or '').strip()[:300]}" for c in candidates
+        f"{c['id']}: {c['name']}—{(c.get('description') or '').strip()[:300]}" for c in candidates
     )
 
     try:
@@ -871,23 +871,23 @@ def _fetch_taxonomy_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]
 
 
 _AGENT_TAXONOMY_PROMPT = """You are researching a vendor listed in the CFO Toolbox's Software
-directory. Budget and depth are not a constraint here — read the page
+directory. Budget and depth are not a constraint here—read the page
 content provided (as separate documents, when available) carefully and be
 as thorough and specific as the material supports.
 
 Write a thorough summary (aim for 3-6 sentences, more if there's real
 material to cover) of whether and how AI agents are involved in this
-product. Ground this strictly in the documents provided — every specific
+product. Ground this strictly in the documents provided—every specific
 claim should be traceable to something they actually say. If the vendor
 names ANY specific agents anywhere in the content (e.g. "Aura," "Ember," a
-"Contract Review Agent," a "flux agent") — find and name ALL of them, not
+"Contract Review Agent," a "flux agent")—find and name ALL of them, not
 just the first one you notice; a reader comparing tools needs the complete
 roster of named agents, not a sample. For each named agent, note what it
 actually does if the content says so. Distinguish: a fully independent
 agent that runs a workflow end-to-end, an agent-assisted feature where AI
 helps but a human stays in the loop, or no real agent framing at all
 (generic "AI-powered" marketing language without actual agent behavior
-described doesn't count as agentic — say so plainly rather than
+described doesn't count as agentic—say so plainly rather than
 overstating it). If the documents give no genuine signal either way, say
 that rather than guessing, and end with CONFIDENT: false (see the format
 instructions below).
@@ -895,11 +895,11 @@ instructions below).
 Additional rules:
 - Write directly to the CFO Toolbox reader. Never reference "the provided
   pages," "the page content," "the documents," or your own research
-  process — if a source is thin, contradictory, or missing, simply write
+  process—if a source is thin, contradictory, or missing, simply write
   around it (omit the claim, or say plainly that no agent framing is
   evident) rather than narrating the gap or your sourcing situation in
   the text itself.
-- Plain prose only — no markdown syntax (no **bold**, no _italics_, no #
+- Plain prose only—no markdown syntax (no **bold**, no _italics_, no #
   headings). The one exception is a short "- " bulleted list, one item
   per line, when the content genuinely names several distinct agents or
   capabilities.
@@ -908,12 +908,12 @@ Additional rules:
   figures, review counts, case-study numbers). This is a factual account
   of agent behavior, not a pitch.
 
-Voice guide — write the summary in this voice:
+Voice guide—write the summary in this voice:
 {voice_core}
 
 {structure_guidance}
 
-Write your response as plain prose only — no JSON, no markdown code
+Write your response as plain prose only—no JSON, no markdown code
 fences, no preamble. End your response with exactly one line, after a
 blank line, in this exact form:
 
@@ -1055,7 +1055,7 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     low_confidence = not fetched
     doc_blocks, sent_docs = _build_taxonomy_documents(fetched) if fetched else ([], [])
     content_note = "" if doc_blocks else (
-        f"(Could not fetch any page content for {url} — draft from your own "
+        f"(Could not fetch any page content for {url}—draft from your own "
         f"knowledge of {name} if you have it, keeping to the rules above.)"
     )
 
@@ -1148,29 +1148,29 @@ COMMUNITY_CONFIDENCE_FIELDS = [
 _COMMUNITY_PROFILE_PROMPT = """You are drafting a deep, opinionated profile of a peer community for the
 CFO Toolbox's Communities directory, read by finance leaders deciding whether a
 community is worth their time and money. This is not directory metadata (cost,
-access are handled elsewhere) — it's the qualitative read: who it's
+access are handled elsewhere)—it's the qualitative read: who it's
 actually for, what it's actually like, and whether it delivers.
 
 Write about the community named below. Follow these rules exactly:
 1. Be specific and opinionated, not generic marketing copy. No "powerful,"
    "vibrant," "world-class," or similar adjective stacking. No exclamation points.
 2. Ground every claim in the page content provided below (or your own knowledge,
-   if the page content is unavailable) — never invent specifics you can't support.
+   if the page content is unavailable)—never invent specifics you can't support.
 3. FOUNDED_YEAR must be a four-digit integer, or the literal word "Unclear" —
    only give a year if you're confident of it.
 4. NOTABLE_MEMBERS must be "None publicly reported" unless you know of
-   PUBLICLY reported members or alumni — never guess or infer private
+   PUBLICLY reported members or alumni—never guess or infer private
    membership from indirect signals.
 5. PUBLIC_CRITICISM is a drawback that's actually been reported or is visible
    from the page/your knowledge (e.g. pay-to-play concerns, inconsistent chapter
-   quality) — "None reported" if you don't know of any, never a fabricated nitpick.
+   quality)—"None reported" if you don't know of any, never a fabricated nitpick.
 6. VERDICT_SUMMARY is one short sentence in the shape "Best for X, not for Y."
-7. Every prose field (see below) is 2-5 plain-prose sentences — budget and
+7. Every prose field (see below) is 2-5 plain-prose sentences—budget and
    depth are not a constraint here, so use the page content below thoroughly
    rather than settling for a thin one-liner.
 8. SENIORITY_BAND/PRIMARY_PURPOSE/RESOURCES_INCLUDED/PLATFORM_TYPE/
    MEETING_FORMAT/EVENT_STYLE are short factual/categorical values (a
-   phrase, not a paragraph) — deliberately brief, distinct from the prose
+   phrase, not a paragraph)—deliberately brief, distinct from the prose
    fields above.
 9. CPE_ELIGIBLE must be one of "Yes", "No", or "Unclear", optionally with a
    short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)") —
@@ -1178,12 +1178,12 @@ Write about the community named below. Follow these rules exactly:
 10. In the CONFIDENCE: block at the very end, for EACH of its twelve lines,
     report true only if the page content (or your own knowledge) gave you a
     real, specific basis for that field's answer; false if you had to draft
-    it thin, generic, or largely inferred. Judge each independently — a
+    it thin, generic, or largely inferred. Judge each independently—a
     community's VALUE_PROP can be well-grounded while its NOTABLE_MEMBERS
     is a guess, and the confidence for each should reflect that, not a
     single blanket judgment repeated twelve times.
 11. Write directly to the CFO Toolbox reader. Never reference "the page
-    content," "the provided page," or your own research process — if the
+    content," "the provided page," or your own research process—if the
     page is thin or ambiguous, simply write around it rather than
     narrating that in the text.
 12. Never mention review scores, star ratings, testimonials, awards,
@@ -1191,11 +1191,11 @@ Write about the community named below. Follow these rules exactly:
     results (member counts, revenue figures, named-company case-study
     numbers). This is a factual, opinionated read, not a pitch.
 
-Write your response as plain prose only — no JSON, no markdown syntax (no
+Write your response as plain prose only—no JSON, no markdown syntax (no
 **bold**, no _italics_, no # headings), no quotes, no markdown code fences.
 Structure it as exactly 23 labeled blocks, each starting with the field's
 name in capital letters followed by a colon, on its own line, then the
-field's value on the following line(s) — in this exact order:
+field's value on the following line(s)—in this exact order:
 
 IDEAL_MEMBER: who this community is actually for.
 ANTI_FIT: who should probably skip it.
@@ -1203,7 +1203,7 @@ VALUE_PROP: the primary thing members get out of it.
 FORMAT_REALITY: the actual cadence and mix of in-person vs. virtual.
 ENGAGEMENT_LEVEL: how much active participation membership expects or rewards.
 SPONSOR_RELATIONSHIP_NOTE: whether sponsor presence (if any) reads as
-  value-add or a sales funnel for members — a qualitative read, distinct from
+  value-add or a sales funnel for members—a qualitative read, distinct from
   the factual sponsor name/sponsorship type recorded elsewhere.
 BUSINESS_MODEL: how the community structurally sustains itself, e.g. a
   gated, dues-funded peer group insulated from a sales pitch by design, vs.
@@ -1220,27 +1220,27 @@ FOUNDED_YEAR: four-digit year, per rule 3 above.
 PUBLIC_CRITICISM: any visible/reported drawback, per rule 5 above.
 VERDICT_SUMMARY: one short "best for X, not for Y" line.
 STAGE_FOCUS: whether the community targets growth-stage, late-stage, or
-  public companies, or has no particular stage focus — or "Unclear."
+  public companies, or has no particular stage focus—or "Unclear."
 JOBS_PROGRAM: whether there's a FORMAL job-placement/transition program
   (not just informal networking that happens to help with job searches) —
   or "Unclear."
 TEAM_OR_INDIVIDUAL: whether membership is individual-only, team/company-
-  based, or supports both — or "Unclear."
+  based, or supports both—or "Unclear."
 SENIORITY_BAND: who it targets by seniority (e.g. "CFO and VP Finance
-  only," "open to Controllers and up") — or "Unclear."
+  only," "open to Controllers and up")—or "Unclear."
 PRIMARY_PURPOSE: the community's main purpose in a few words, e.g.
-  "networking," "peer learning," or "both" — or "Unclear."
+  "networking," "peer learning," or "both"—or "Unclear."
 RESOURCES_INCLUDED: templates, benchmarking data, research, job boards,
   etc. actually provided to members, or "No" if none, or "Unclear."
 PLATFORM_TYPE: the technical platform members actually use, e.g. "Slack,"
-  "proprietary app," "in-person only" — or "Unclear."
-MEETING_FORMAT: in-person, virtual, or hybrid cadence — or "Unclear."
+  "proprietary app," "in-person only"—or "Unclear."
+MEETING_FORMAT: in-person, virtual, or hybrid cadence—or "Unclear."
 EVENT_STYLE: the feel of its events, e.g. "large-format conferences,"
-  "intimate small-group," "forum-only, no events" — or "Unclear."
+  "intimate small-group," "forum-only, no events"—or "Unclear."
 CPE_ELIGIBLE: "Yes"/"No"/"Unclear", per rule 9 above.
 CONFIDENCE: exactly twelve lines, one per the long-form/narrative fields
   above that carry real fabrication risk (the short factual/categorical
-  fields above are not included — see rule 10), each in the form
+  fields above are not included—see rule 10), each in the form
   "FIELD_NAME: true" or "FIELD_NAME: false":
   IDEAL_MEMBER: true|false
   ANTI_FIT: true|false
@@ -1255,7 +1255,7 @@ CONFIDENCE: exactly twelve lines, one per the long-form/narrative fields
   PUBLIC_CRITICISM: true|false
   VERDICT_SUMMARY: true|false
 
-Voice guide — write every prose field in this voice:
+Voice guide—write every prose field in this voice:
 {voice_core}
 
 Community name: {name}
@@ -1380,7 +1380,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     doc_blocks: list[dict] = []
     sent_docs: list[dict] = []
     if low_confidence:
-        content_block = ("(Could not fetch page content — draft from your own knowledge of this "
+        content_block = ("(Could not fetch page content—draft from your own knowledge of this "
                           "community if you have it, keeping to the rules above.)")
     else:
         content_block = ""
@@ -1533,15 +1533,15 @@ def _parse_community_confidence(raw) -> dict:
 NEEDS_VERIFICATION = "Needs verification"
 
 _COMMUNITY_LISTING_PROMPT = """You are drafting the basic directory-listing fields for a peer community in
-the CFO Toolbox's Communities directory — factual metadata (cost, access,
+the CFO Toolbox's Communities directory—factual metadata (cost, access,
 categories), distinct from the deeper qualitative profile handled
 elsewhere.
 
 Ground every answer in the page content provided below (or your own knowledge,
-if the page content is unavailable) — never invent a specific you can't
+if the page content is unavailable)—never invent a specific you can't
 support. For any field where the real value genuinely isn't clear from that
 material, use the literal string "{needs_verification}" for that field (or
-leave a list field empty) rather than guessing — a wrong answer in this
+leave a list field empty) rather than guessing—a wrong answer in this
 directory is worse than a flagged gap. Only use "{needs_verification}" when
 the field plausibly applies but the specific value is unclear; if a field
 clearly does not apply at all (e.g. there is no sponsor), use an empty string
@@ -1549,12 +1549,12 @@ instead of the sentinel.
 
 Fields:
   "demographic": who this community is for, e.g. "CFOs & VP Finance at
-     Series B+ SaaS companies" — one short phrase. "{needs_verification}" if unclear.
+     Series B+ SaaS companies"—one short phrase. "{needs_verification}" if unclear.
   "reach": exactly one value from this list, verbatim: {reach_options}.
      "{needs_verification}" if unclear.
   "local_markets": a short comma-separated list of city/region names where
      this community has a specific chapter, hub, or local in-person focus,
-     e.g. "Boston, New York, SF Bay Area" — empty string if it's purely
+     e.g. "Boston, New York, SF Bay Area"—empty string if it's purely
      online/national with no specific local footprint mentioned on the page.
      Never invent a city the page doesn't name.
   "cost_band": exactly one value from this list, verbatim: {cost_band_options}.
@@ -1564,14 +1564,14 @@ Fields:
   "sponsorship_type": exactly one value from this list, verbatim:
      {sponsorship_options}. "{needs_verification}" if unclear.
   "sponsor_name": the sponsor's name, only if sponsorship_type indicates one
-     and it's named on the page — else an empty string.
+     and it's named on the page—else an empty string.
   "access": exactly one value from this list, verbatim: {access_options}.
      "{needs_verification}" if unclear.
   "format": exactly one value from this list, verbatim: {format_options}.
      "{needs_verification}" if unclear.
   "categories": a JSON list of zero or more values from exactly this list,
      verbatim: {category_options}. Only include a category that clearly
-     applies — never a value outside this list.
+     applies—never a value outside this list.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly these
 keys: demographic, reach, local_markets, cost_band, cost_note, sponsorship_type,
@@ -1634,7 +1634,7 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
     low_confidence = not bool(page.content.strip())
     content_block = (
         f"Page content (fetched from the URL):\n{page.content[:15000]}" if not low_confidence
-        else "(Could not fetch page content — draft from your own knowledge of this "
+        else "(Could not fetch page content—draft from your own knowledge of this "
              "community if you have it, keeping to the rules above.)"
     )
 
@@ -1726,7 +1726,7 @@ pass only, not a content edit:
   exactly as given.
 - Do not shorten a field to the point of losing information, and don't pad
   one out with new claims not present in the source.
-- If a field is empty, return it empty — do not invent content for it.
+- If a field is empty, return it empty—do not invent content for it.
 
 Return STRICT JSON only (no prose, no markdown fences), with exactly these
 keys, one rewritten string per field:
@@ -1873,20 +1873,20 @@ one entry may specialize narrowly in something the other treats as one
 capability among many, or the entries may genuinely overlap closely with only
 minor differences, or they may serve different enough use cases that "compare"
 undersells how different they are. Say whichever of these is actually true
-based on the content below — don't force a breadth-vs-depth framing onto
+based on the content below—don't force a breadth-vs-depth framing onto
 entries that don't have one.
 
 Hard rules:
 1. 1-3 sentences total. No headers, no bullets, no bold/italic markdown.
-2. Never recommend one over another ("X is better," "go with X") — describe
+2. Never recommend one over another ("X is better," "go with X")—describe
    the shape of the difference, not a verdict. "X specializes in A; Y bundles
    A within a broader B" is the right register. "X is better for teams that
-   need A" is not — that is you making the call, not describing a fact.
-3. Neutral, factual framing — no marketing language, no editor-facing asides
+   need A" is not—that is you making the call, not describing a fact.
+3. Neutral, factual framing—no marketing language, no editor-facing asides
    ("as shown above," "based on my analysis").
 4. Base this only on the content given below. Do not invent capabilities,
    pricing, or claims not present in it.
-5. Plain prose, no markdown formatting at all — this renders as plain text.
+5. Plain prose, no markdown formatting at all—this renders as plain text.
 {voice_core}
 
 Compared {noun}:
@@ -1938,7 +1938,7 @@ def generate_compare_summary(entity_type: str, entities: list[dict], model: str 
             text = (text or "").strip()
             if not text:
                 continue
-            suffix = " (unverified — human review pending)" if unverified else ""
+            suffix = " (unverified—human review pending)" if unverified else ""
             lines.append(f"{label}{suffix}: {text}")
         blocks.append("\n".join(lines))
     entities_block = "\n\n".join(blocks)

@@ -22,11 +22,13 @@ import pytest
 
 from linklib.voice_review import (
     AMPERSAND_ACRONYMS,
+    AMPERSAND_NAMES,
     BANNED_WORDS,
     FILLER_PHRASES,
     PERFORMATIVE,
     typography_findings,
 )
+from webapp.checks import TYPOGRAPHY_SCANNED_FILES
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 APP_SRC = (ROOT / "webapp" / "app.py").read_text(encoding="utf-8")
@@ -104,6 +106,40 @@ def test_lint_passes_every_allowlisted_acronym(term):
     entity = term.replace("&", "&amp;")
     assert typography_findings(f'COPY = "Ask a real {term} question."') == []
     assert typography_findings(f'COPY = "Ask a real {entity} question."') == []
+
+
+@pytest.mark.parametrize("term", AMPERSAND_NAMES)
+def test_lint_passes_every_allowlisted_name(term):
+    entity = term.replace("&", "&amp;")
+    assert typography_findings(f'COPY = "e.g. {term} at Series B+ SaaS companies."') == []
+    assert typography_findings(f'COPY = "e.g. {entity} at Series B+ SaaS companies."') == []
+
+
+def test_lint_passes_an_allowlisted_name_that_line_wraps_mid_term():
+    """A triple-quoted prompt string can line-wrap between the term's own
+    words (a real PR 15 case: "Flux Analysis\\n  & Summaries" in
+    linklib/feature_scan.py's few-shot excerpt) with no change in rendered
+    meaning — the allowlist match has to tolerate that, not just a single
+    literal space between words."""
+    src = 'COPY = """Worked example: Automated Flux Analysis\n  & Summaries is one feature."""'
+    assert typography_findings(src) == []
+
+
+# --- PR 15: enrich.py and feature_scan.py joined the scanned-file list ------
+# These are LLM prompt-assembly modules, not rendered HTML — but the model
+# reads and imitates this text, so a spaced em dash inside a prompt
+# demonstrates the exact thing the prompt forbids. See webapp/checks.py's
+# own comment on TYPOGRAPHY_SCANNED_FILES for the full reasoning.
+
+@pytest.mark.parametrize("path", TYPOGRAPHY_SCANNED_FILES, ids=lambda p: p.name)
+def test_every_scanned_file_has_no_typography_violations(path):
+    src = path.read_text(encoding="utf-8")
+    findings = typography_findings(src)
+    detail = "\n".join(f"  {rule} (line {line}): {excerpt}" for rule, line, excerpt in findings)
+    assert not findings, (
+        f"{len(findings)} typographic violation(s) in {path}:\n{detail}\n"
+        "Spell out 'and' (FP&A and friends are allowlisted), and never space an em dash."
+    )
 
 
 def test_lint_ignores_comments_embedded_in_a_string_literal():

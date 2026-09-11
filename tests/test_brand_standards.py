@@ -64,3 +64,22 @@ def test_small_coral_text_allows_large_coral():
     """Large coral display text (>=18px) is a sanctioned use (stat call-outs)."""
     ok = '<div style="font-size:24px;color:var(--coral);">42%</div>'
     assert not bc.small_coral_text_spans(ok)
+
+
+# --- PR 15: PR/issue-number false positive (the third occurrence — #465,
+# #318, #529) is fixed at the checker itself, not by rewording every future
+# comment that happens to mention a 3-digit PR/issue number. ---------------
+
+def test_pr_number_reference_does_not_flag_as_a_hex_color():
+    assert bc.colors_in("Fix brand-check false positive from PR #529 comment reference.") == set()
+
+
+def test_issue_number_reference_does_not_flag_as_a_hex_color():
+    assert bc.colors_in("see issue #318 for the full history") == set()
+
+
+def test_a_genuine_bare_three_digit_hex_still_flags():
+    """The fix is scoped to an issue-reference CONTEXT, not every 3-digit hex
+    with no preceding '&' — a real off-palette color like `#529` used as an
+    actual CSS value (not preceded by PR/issue/#) still has to be caught."""
+    assert bc.colors_in('style="color:#529;"') == {"#552299"}

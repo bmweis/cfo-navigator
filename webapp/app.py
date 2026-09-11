@@ -1593,7 +1593,7 @@ details[open] > summary .disclosure-caret{transform:rotate(90deg);}
 """
 
 # Admin table width floors (PR 14, 2026-09) — replaces 22 hand-picked
-# `min-width` values PR 12 (PR 529) chose by eye per table (480/620/640/700/
+# `min-width` values PR 12 (PR #529) chose by eye per table (480/620/640/700/
 # 720/760/780/800/820/880px, no shared logic between them) with four
 # rule-based buckets, keyed to how many columns a table actually renders
 # by default. The point is a rule someone can follow going forward: "does
@@ -11072,7 +11072,7 @@ _ADMIN_BULK_EDIT_JS = """
 // Communities genuinely has more optional columns than Software (11 vs. 7),
 // and that's fine; what has to match is this behavior, not the column
 // count. See CLAUDE.md's admin-list column-defaults follow-up for the
-// full write-up (table-width investigation after PR 465).
+// full write-up (table-width investigation after PR #465).
 var ADMIN_DEFAULT_VISIBLE_COLS = ['review_status'];
 function initColPicker(tableKey, cols, defaultVisible) {
   // defaultVisible (optional, 2026-09 Users-table fix): a per-table override
@@ -11136,7 +11136,16 @@ function updateBulkButton(tableKey) {
   var btn = document.getElementById(tableKey + '-bulk-btn');
   if (btn) { btn.disabled = n === 0; btn.textContent = 'Edit selected (' + n + ')'; }
   var delBtn = document.getElementById(tableKey + '-bulk-delete-btn');
-  if (delBtn) { delBtn.disabled = n === 0; delBtn.textContent = 'Delete selected (' + n + ')'; }
+  if (delBtn) {
+    delBtn.textContent = 'Delete selected (' + n + ')';
+    // Users has no "Edit selected" sibling, so its own Delete-selected
+    // button lives inline in the filter toolbar row and should disappear
+    // entirely (not just gray out) when nothing is checked — see the PR 15
+    // Users-page layout fix. Software/Communities pair it with a visible
+    // "Edit selected" button and keep the existing disabled-but-visible
+    // treatment.
+    if (tableKey === 'users') { delBtn.hidden = n === 0; } else { delBtn.disabled = n === 0; }
+  }
 }
 function selectAllRows(tableKey, checked) {
   // Only touch rows the sort/filter toolbar (applySortFilter) currently
@@ -11295,7 +11304,7 @@ def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]],
     admin list, so they're always visible regardless of this picker; only
     the OPTIONAL columns (this function's `columns` list) are gated by it.
     Same default_visible/mechanism on every admin list table by design (the
-    2026-08 column-defaults follow-up to PR 465) — Communities has more
+    2026-08 column-defaults follow-up to PR #465) — Communities has more
     optional columns than Software, but the behavior is identical."""
     # json.dumps() quotes with ", same as the onclick/onchange attributes
     # themselves — unescaped, that closes the attribute early at the first
@@ -11661,7 +11670,8 @@ def _community_completeness(c: dict, has_empty_narrative_field: bool, n_similar:
 
 def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str, str]],
                                      scalar_filters: list[dict], category_options: list[dict] | None = None,
-                                     category_style: str = "dropdown", search_placeholder: str | None = None) -> str:
+                                     category_style: str = "dropdown", search_placeholder: str | None = None,
+                                     extra_html: str = "") -> str:
     """sort_fields: (field_key, label) pairs, first is the default (Name, matching
     the tables' existing server-side ORDER BY). scalar_filters: [{key, label, options}].
     category_options: if given, adds an OR-matched category filter alongside the
@@ -11675,7 +11685,12 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
 
     search_placeholder: if given, adds a live text-search box (no submit button)
     that AND-filters against each row's data-search attribute (see
-    _admin_row_data_attrs) alongside the category/scalar filters."""
+    _admin_row_data_attrs) alongside the category/scalar filters.
+
+    extra_html: raw markup inserted into the same flex row, just before the
+    match-count span — for a bulk action (e.g. Users' "Delete selected")
+    that should appear alongside the filter controls rather than on its own
+    row. Empty by default; existing callers are unaffected."""
     sort_options = "".join(f'<option value="{k}">{_esc(label)}</option>' for k, label in sort_fields)
     scalar_html = "".join(
         f'<select data-filter-field="{f["key"]}" onchange="applySortFilter(\'{table_key}\')" '
@@ -11744,6 +11759,7 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
   {search_html}
   {category_html}
   <button type="button" onclick="resetSortFilter('{table_key}')" class="btn btn-ghost" style="font-size:13px;padding:5px 12px;">Reset</button>
+  {extra_html}
   <span id="{table_key}-sort-filter-count" style="font-size:13px;color:var(--muted);margin-left:auto;"></span>
 </div>"""
 
@@ -11833,7 +11849,7 @@ def admin_software(request: Request, filter: str = ""):
         # breakpoint, where the table renders normally.
         return f"""<tr class="admin-table-row" {row_attrs}>
           <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
-          <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:220px;">
+          <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:280px;">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
               <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}
             </div>
@@ -11907,18 +11923,17 @@ def admin_software(request: Request, filter: str = ""):
         if filter == "needs_review" else ""
     )
 
-    # The approved-software table's own min-width (820px, below) is a
-    # documented exception to the four PR 14 buckets, not a bucket value —
-    # see BRAND.md §5 "Admin table width floors". Its 4 default-visible
-    # columns (checkbox, sticky Name, Review status, Actions) would
-    # naively suggest the Medium bucket (640px), but the sticky Name
-    # column alone declares its own min-width:220px and the Actions column
-    # is a fixed 3-button grid (100px x 3 + 2x6px gaps = 312px); adding the
-    # checkbox (~40px), the Review status pill+button (~160px), and per-
-    # cell padding/borders (~4 columns x ~24px) lands almost exactly on
-    # 820px — confirmed against the real rendered table, not estimated.
-    # Neither Wide (800, slightly under) nor Xwide (960, ~140px more than
-    # needed) fits as precisely as this table's own real floor.
+    # PR 15: the approved-software table no longer carries its own hand-
+    # computed 820px exception — it now shares the Xwide bucket (960px) and
+    # a 280px sticky Name column with Communities' own approved table
+    # below, per Brian's explicit call that the two tables should be
+    # STRUCTURALLY identical, not merely similar (matching floor values
+    # alone, on two tables with different Name-column widths, still looks
+    # different). Cost: Software now scrolls slightly sooner at tablet
+    # widths than its old precisely-computed 820px floor needed — accepted.
+    # This is the first instance of a larger, separately-scoped job (one
+    # field, one width, everywhere it appears across every admin table) —
+    # see BRAND.md §5 "Admin table width floors".
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -11957,10 +11972,10 @@ def admin_software(request: Request, filter: str = ""):
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
 <div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
 <form id="software-approved-form">
-<table class="admin-table-responsive" style="width:100%;min-width:820px;border-collapse:collapse;">
+<table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
-  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:220px;">Name</th>
+  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:280px;">Name</th>
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
@@ -12519,7 +12534,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
   <div style="overflow-x:auto;">
-  <table style="width:100%;min-width:620px;border-collapse:collapse;">
+  <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Description</th>
@@ -13407,7 +13422,7 @@ def _admin_resource_table(benchmarks: list[dict]) -> str:
 </tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">None yet.</td></tr>'
     colgroup = "".join(f'<col style="width:{w};">' for w in _ADMIN_RESOURCE_TABLE_COL_WIDTHS)
     return f"""<div style="overflow-x:auto;">
-<table style="width:100%;min-width:640px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;table-layout:fixed;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;table-layout:fixed;">
 <colgroup>{colgroup}</colgroup>
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
@@ -15589,18 +15604,12 @@ def admin_communities(request: Request, filter: str = ""):
         if filter == "needs_review" else ""
     )
 
-    # The approved-communities table's own min-width (880px, below) is a
-    # documented exception to the four PR 14 buckets, same reasoning as
-    # Software's own 820px exception above — see BRAND.md §5 "Admin table
-    # width floors". Its 4 default-visible columns (checkbox, sticky Name,
-    # Review status, Actions) would naively suggest the Medium bucket
-    # (640px), but the sticky Name column alone declares its own
-    # min-width:280px (60px wider than Software's, since community names
-    # run longer) and the Actions column is the same fixed 3-button grid
-    # (100px x 3 + 2x6px gaps = 312px); adding the checkbox (~40px), the
-    # Review status pill+button (~160px), and per-cell padding/borders
-    # (~4 columns x ~24px) lands almost exactly on 880px — confirmed
-    # against the real rendered table, not estimated.
+    # PR 15: the approved-communities table's own min-width no longer
+    # carries its own hand-computed 880px exception — it now shares the
+    # Xwide bucket (960px) with Software's own approved table above, same
+    # "structurally identical, not merely similar" call — see BRAND.md §5
+    # "Admin table width floors" and the matching comment on the Software
+    # route above.
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -15644,7 +15653,7 @@ def admin_communities(request: Request, filter: str = ""):
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
 <div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
 <form id="communities-approved-form">
-<table class="admin-table-responsive" style="width:100%;min-width:880px;border-collapse:collapse;">
+<table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
   <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:280px;">Name</th>
@@ -16008,7 +16017,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
   <div style="overflow-x:auto;">
-  <table style="width:100%;min-width:620px;border-collapse:collapse;">
+  <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Description</th>
@@ -27614,7 +27623,9 @@ def admin_users(request: Request, msg: str = ""):
       <div style="display:flex;align-items:flex-end;"><button type="submit" class="btn" style="font-size:14px;padding:9px 22px;">Create account</button></div>
     </form>
   </div>
-  <div style="display:grid;gap:14px;">
+  <div>
+    <h2 style="font-size:16px;margin:0 0 12px;">Default usage caps</h2>
+    <div style="display:grid;gap:14px;">
     <form method="post" action="/admin/users/ask-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:8px;">
       <span style="font-size:13px;color:var(--muted);">FP&amp;A Buddy default monthly cap, per user</span>
       <div style="display:flex;gap:8px;align-items:center;">
@@ -27633,16 +27644,18 @@ def admin_users(request: Request, msg: str = ""):
       </div>
       <span style="font-size:12px;color:var(--muted);">Anonymous visitors (no login) are capped the same way, keyed by session cookie instead of a user row.</span>
     </form>
+    </div>
   </div>
 </div>
 
 <h2 style="font-size:18px;margin:0 0 12px;">Members</h2>
 {_admin_column_picker_html("users", users_cols, default_visible=users_default_visible)}
-{_admin_sort_filter_toolbar_html("users", users_sort_fields, users_scalar_filters, search_placeholder="Search by username, name, or email…")}
-<div style="margin:0 0 16px;display:flex;gap:10px;flex-wrap:wrap;">
-  <button type="button" id="users-bulk-delete-btn" class="btn btn-ghost" disabled
-    style="font-size:13px;padding:6px 16px;color:#b91c1c;border-color:#fca5a5;" onclick="openUsersDeleteSelectedPanel()">Delete selected (0)</button>
-</div>
+{_admin_sort_filter_toolbar_html("users", users_sort_fields, users_scalar_filters, search_placeholder="Search by username, name, or email…",
+  extra_html=(
+    '<button type="button" id="users-bulk-delete-btn" class="btn btn-ghost" hidden '
+    'style="font-size:13px;padding:6px 16px;color:#b91c1c;border-color:#fca5a5;" '
+    'onclick="openUsersDeleteSelectedPanel()">Delete selected (0)</button>'
+  ))}
 <div id="users-delete-panel" style="display:none;border:1px solid #fca5a5;border-radius:12px;padding:16px 18px;margin:0 0 20px;background:var(--surface);max-width:520px;">
   <div id="users-delete-body"></div>
   <div style="margin-top:14px;">
@@ -29783,22 +29796,22 @@ aren't needed&mdash;permanently removes them by URL. Different from the Purge to
 essentially nothing saved for them; this tool has no scan of its own and only acts on URLs you provide. Removing a
 single article one at a time is also available straight from its toolbar in the <a href="/read">Reader</a>.</p>
 {banner}{error_banner}
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 24px;max-width:640px;">
-  <h3 style="font-size:14px;margin:0 0 10px;">1. Get the CSV template</h3>
+<h2 style="font-size:16px;margin:0 0 10px;">1. Get the CSV template</h2>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;">
   <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">A blank template with the two required columns:
   <code>url</code> and <code>confirm_delete</code>. Paste in the URLs you want gone, filling
   <code>confirm_delete</code> with <code>yes</code> for each row to remove&mdash;leave it blank for a URL you're not
   sure about yet.</p>
   <a href="/admin/reader/bulk-delete/template.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Download CSV template</a>
-
-  <h3 style="font-size:14px;margin:22px 0 10px;">2. Upload it back</h3>
-  <form method="post" action="/admin/reader/bulk-delete/preview" enctype="multipart/form-data"
-        style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-    <input type="file" name="file" accept=".csv,text/csv" required>
-    <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Preview deletion</button>
-    <span style="font-size:12px;color:var(--muted);">Nothing is deleted until you confirm on the preview screen. Capped at {MAX_DELETE_PER_RUN} per run.</span>
-  </form>
 </div>
+
+<h2 style="font-size:16px;margin:0 0 10px;">2. Upload it back</h2>
+<form method="post" action="/admin/reader/bulk-delete/preview" enctype="multipart/form-data"
+      style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;">
+  <input type="file" name="file" accept=".csv,text/csv" required>
+  <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Preview deletion</button>
+  <span style="font-size:12px;color:var(--muted);">Nothing is deleted until you confirm on the preview screen. Capped at {MAX_DELETE_PER_RUN} per run.</span>
+</form>
 </div>"""
     return HTMLResponse(_page("Bulk delete articles—Admin", "Admin", body, authed=True))
 
