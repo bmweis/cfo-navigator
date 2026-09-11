@@ -218,10 +218,11 @@ pattern applied to routes instead of tables: on every page load it walks
 `app.routes`, keeps GET routes whose `response_class` is `HTMLResponse`
 (skipping POST-only action routes, redirect stubs, JSON/AJAX APIs, file
 downloads, and other non-page endpoints), and reads each page's width tier
-(`page-full`/`page-grid`/`page-form`/`page-admin`, or "custom
-exception" for `/read` (the merged Reader shell — see the Reader merge
-section below) — see BRAND.md §5 for the tier system itself) straight from
-that route's own source via
+(`page-standard`/`page-content`/`page-form` as of PR 13's three-tier
+collapse, 2026-09 — previously `page-full`/`page-grid`/`page-form`/
+`page-admin`, or "custom exception" for `/read` (the merged Reader shell —
+see the Reader merge section below) — see BRAND.md §5 for the tier system
+itself) straight from that route's own source via
 `inspect.getsource` (following one hop into a directly-called helper function
 when a route builds its body that way, e.g. `/play` via `_sdr_build_body`).
 Any page route whose source carries no recognized tier class is flagged —
@@ -242,19 +243,69 @@ it. `.reader-layout` (the standalone `/read/{article_id}` view's own
 bespoke max-width, which deliberately tracks `.page-full`'s value even
 though that page never uses the `.page`/`.page-full` classes — see the
 `_PAGE_INDEX_CUSTOM_EXCEPTIONS` comment above) moved from 1900px to 1440px
-in the same PR to stay in sync. `.page-full` and `.page-grid` are now only
-140px apart — close enough that a future pass may want to collapse them
-into one tier; left as two in this PR since full-width content (a
-homepage hero/sidebar grid, a long-form article shell) still reads as
-needing a bit more room than a pure card grid. `.tool-prose` (760px),
-`.page-grid` (1300px), and `.page-form` (640px) are all unchanged — none
-were part of Brian's complaint. See BRAND.md §5 for the full tier table
-and the historical-value narrative sections elsewhere in this document
-(e.g. the FP&A Buddy explainer's own width-tier fix, and the Homepage
-Restructure bullets in CLAUDE.md) for context on what each page's width
-was **at the time it was written** — those numbers describe the state as
-of their own PR, not the current value; BRAND.md §5 is the one place that
-always reflects today's actual numbers.
+in the same PR to stay in sync. `.page-full` and `.page-grid` were left
+only 140px apart — close enough that PR 13 (below) went ahead and
+collapsed them into one tier.
+
+**Width-tier collapse, four tiers to three (PR 13, 2026-09)** — the 140px
+gap PR 12 flagged as "close enough to collapse" is exactly what this PR
+did: `.page-full` (1440px) and `.page-admin` (1400px) retire outright into
+one **Standard** tier (`.page-standard`, 1300px — the old `.page-grid`'s
+own value, which Brian had already confirmed felt right), a genuine
+3-into-1 merge of `.page-full`/`.page-grid`/`.page-admin`, not a rename of
+one survivor kept as an alias. `.page-grid` itself is gone too, folded into
+the same `.page-standard` class. A new **Content** tier (`.page-content`,
+900px) splits off from `.page-full`'s old audience for pages that are pure
+long-form reading — About, the three ported thought-leadership articles
+(Growth Engine Ratio, the AI Hackathon Playbook/Sail Don't Row piece,
+Connecting Claude to NetSuite), the FP&A Buddy "how it works" explainer,
+and `/ask/history`. Investigated first, per the PR's own gate: on every one
+of those pages, everything outside the 760px `.tool-prose` reading column
+is a back-link line, an eyebrow, or a diagram/table already capped
+narrower than `.tool-prose` (a diagram lightbox pinned to 680px; a data
+table inside its own `overflow-x:auto` scroll wrapper) — nothing on them
+needs 1300px, so 900px was chosen as a little breathing room over the
+reading column rather than a value anything on those pages actually
+requires. `.page-form` (640px) is untouched — it already matched the
+target "Form" tier by name and value. Every page that used to sit on
+`.tool-inner` (FP&A Buddy chat, the GER calculator, Sail Don't Row + its
+leaderboard, both matchmaker chat pages) moved from `.page-full` onto
+`.page-standard` — a no-op in practice, since `.tool-inner`'s own 1300px
+cap already equals Standard's value and was always the real binding
+constraint on those pages. `/read/{article_id}`'s `.reader-layout` moved
+onto `.page-standard` too, not the new Content tier: its two-column layout
+(a 760px reading column plus a 220px sticky "On this page" TOC, joined by
+a 40px gap) needs ~1020px of real headroom before any side padding —
+Content's 900px would have forced the reading column to shrink below its
+own 760px floor via the flex layout's `min-width:0`, exactly the measure
+this page exists to protect. Admin data tables (the old `.page-admin`
+audience) sit on the same 1300px Standard tier as everything else now, not
+a dedicated wider tier — they already carry their own `min-width` floors
+and `overflow-x:auto` horizontal scroll from PR 12, so a narrower shell
+scrolls a wide table sooner rather than squeezing its columns; verified
+directly against the widest admin tables (Users, with its column picker,
+especially) at both 1300px and a 390px mobile viewport. `.tool-prose`
+(760px) and its 16px body font are both untouched, per the standing
+decision that settled them separately from this pass. **Recommendation,
+not acted on in this PR**: Standard (1300px) and Content (900px) are far
+enough apart that a case remains for collapsing to two tiers rather than
+three — nearly everything Content covers renders entirely inside the 760px
+`.tool-prose` column regardless of the outer shell's width, so the visual
+difference between the two tiers on any current Content page would likely
+be imperceptible. It stays a separate tier for now on the judgment that a
+homepage-style hero/sidebar grid genuinely wants more width than a pure
+reading page does, and conflating the two removes a distinction that might
+matter to a future page — see BRAND.md §5's own "Open question" note.
+`webapp.checks`' page-index (above) had its `_PAGE_TIER_RE`/
+`_PAGE_TIER_LABELS`/`_PAGE_INDEX_CUSTOM_EXCEPTIONS` updated to the new
+three-class set in the same PR, so it correctly recognizes every page's new
+tier rather than flagging the whole site as untiered. See BRAND.md §5 for
+the full tier table and the historical-value narrative sections elsewhere
+in this document (e.g. the FP&A Buddy explainer's own width-tier fix, and
+the Homepage Restructure bullets in CLAUDE.md) for context on what each
+page's width was **at the time it was written** — those numbers describe
+the state as of their own PR, not the current value; BRAND.md §5 is the
+one place that always reflects today's actual numbers.
 
 **`/admin/system/scripts`** (System nav group, Phase N) is the opposite design
 choice from the two pages above — a static, hand-maintained registry
@@ -342,7 +393,10 @@ time; narrowed to ~1400-1500px in the same PR 12) —
 went unnoticed until the page was compared side by side with those. Fixed
 by switching the outer class to `.page-full`, confirmed with a live
 bounding-box measurement showing the `.tool-prose` reading column is now
-identical in width and position to the reference page.
+identical in width and position to the reference page. (Both classes named
+here are retired as of PR 13's width-tier collapse, 2026-09 — this page
+now renders on `.page-content`, 900px, alongside the three articles it was
+matched against.)
 
 **The Exa kill switch** (Phase 7; originally its own `/admin/exa-settings`
 page, merged into `/admin/system/ai`'s Configuration section — PR 10): an
@@ -1590,7 +1644,8 @@ table scrolls inside its own wrapper without ever forcing the page itself to ove
 horizontally. Raw HTML embedded in `body_md` passes through unescaped — deliberate, since the
 field is admin-authored only, never public input, so there's no injection surface to guard
 against here. `_original_content_article_body` is the shared article template, matching the
-three bespoke pieces' own shell exactly (`page page-full article-atlantic`, the same
+three bespoke pieces' own shell exactly (`page page-content article-atlantic` as of PR 13's
+width-tier collapse, 2026-09 — previously `page-full`, the same
 `&larr; Thought Leadership` back-link, `.tool-prose`, the same eyebrow/`<h1>`/byline treatment) —
 only the rendered markdown itself (wrapped in a scoped `.oc-body` div) differs from page to page.
 `.oc-body`'s CSS mirrors the Reader's own `.reader-body` treatment for code/pre/table (the one
@@ -5528,8 +5583,9 @@ flagged as possibly having the same bug — found they were already correctly
 centered (symmetric margins at 1920px, full-width with 0 margin at 1440px);
 no fix was needed there. The homepage and `/thought-leadership` stay
 `.page-full` (1900px at the time this fix shipped; narrowed to 1440px in
-PR 12, 2026-09 — see the width-tier bullet above), unchanged by design at
-the time. A fresh sweep for the same
+PR 12, 2026-09, then retired outright and replaced by `.page-standard`,
+1300px, in PR 13, 2026-09 — see the width-tier bullets above), unchanged by
+design at the time. A fresh sweep for the same
 bare-inline-style anti-pattern elsewhere in `webapp/app.py` found no other
 occurrence — `/read`/`/read/{article_id}` are a documented custom-exception
 layout (see `_page_index_snapshot()`), not an instance of the bug.

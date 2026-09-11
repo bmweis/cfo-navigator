@@ -6953,6 +6953,75 @@ it supersedes the old "`/save` is token-gated" note.
   already exceeds even a 900px viewport, correctly triggering the
   `overflow-x:auto` wrapper's scroll rather than squishing).
 
+- **Width-tier collapse, four tiers to three (PR 13, 2026-09) — the "close
+  enough to collapse" gap PR 12 flagged (`.page-full` 1440px and
+  `.page-admin` 1400px, only 40px apart — a distinction no reader could
+  perceive and no one could maintain deliberately) is now actually
+  collapsed, not just noted.** `.page-full` and `.page-admin` both retire
+  outright into one **Standard** tier, `.page-standard`, at the old
+  `.page-grid`'s own 1300px — a genuine 3-into-1 merge of
+  `.page-full`/`.page-grid`/`.page-admin`, with `.page-grid` itself also
+  gone (not kept alive as an alias for the survivor). A new **Content**
+  tier, `.page-content` (900px), splits off from `.page-full`'s old
+  audience for the handful of pages that are pure long-form reading.
+  **The one real question, answered before picking a value**: on an
+  article page nearly everything already sits inside the 760px
+  `.tool-prose` reading column, so the Content tier's value only affects
+  whatever lives outside it. Enumerated per page before touching any CSS —
+  About (everything is inside `.tool-prose`, nothing outside it at all);
+  the three ported thought-leadership articles via
+  `_original_content_article_body` (a back-link line, a tag label, `<h1>`,
+  a byline — all short, all inside `.tool-prose` or immediately above it,
+  nothing wide); `/tools/fpa-buddy/how-it-works` (a back-link/eyebrow/`<h1>`
+  in `.tool-prose`, a diagram already pinned to its own `max-width:680px`
+  wrapper — narrower than `.tool-prose` itself — and a data table already
+  inside its own `overflow-x:auto` scroll container, so it never needed
+  more room regardless of the outer shell); `/ask/history` (entirely inside
+  `.tool-prose`). **Finding: essentially nothing on any of these pages
+  needs more than the 760px reading column already provides** — 900px was
+  picked as a little breathing room over that column, not because anything
+  measurably needs it. **Recommendation, flagged rather than acted on**:
+  given that finding, there's a real case for collapsing Content into
+  Standard and shipping two tiers instead of three — the visual difference
+  on every current Content page would likely be imperceptible. Built as
+  three tiers per the brief anyway, so this is here for Brian to ask for
+  the two-tier version in a follow-up if he agrees nothing is being lost by
+  it. Every `.tool-inner`-wrapped "functional tool" page (FP&A Buddy chat,
+  the GER calculator, Sail Don't Row + its leaderboard, both matchmaker
+  chat pages) moved from `.page-full` onto `.page-standard` — a no-op in
+  practice, since `.tool-inner`'s own 1300px cap already equalled
+  Standard's value and was always the real binding constraint there, same
+  as PR 12's own note that `/tools/fpa-buddy` was "unaffected in practice."
+  Admin data tables (the old `.page-admin` audience) sit on the same 1300px
+  Standard tier as every other admin page now, not a dedicated wider
+  tier — they already carry their own `min-width` floors and
+  `overflow-x:auto` horizontal scroll from PR 12 (see the "Part 2" bullet
+  directly above), so narrowing their shell from 1400px to 1300px scrolls a
+  wide table sooner, it doesn't squeeze its columns; re-verified directly
+  against Users (the widest, with its column picker) at both the new
+  1300px shell and a 390px mobile viewport — unchanged behavior at either
+  width, since a table's own `min-width` and its `overflow-x:auto` wrapper
+  govern its scroll independent of how wide the ancestor `.page-standard`
+  shell is, as long as the shell doesn't hard-clip (it doesn't; it's a
+  `max-width`, not `overflow:hidden`). `/read/{article_id}`'s
+  `.reader-layout` — the one bespoke, non-`.page`-class exception PR 12's
+  own width pass had to keep in sync by hand — moved onto `.page-standard`
+  too, deliberately NOT the new Content tier: its two-column layout (a
+  760px reading column plus a 220px sticky "On this page" TOC, joined by a
+  40px gap) needs ~1020px of real headroom before any side padding, and
+  Content's 900px would have forced the reading column to shrink below its
+  own 760px floor via the flex layout's `min-width:0` — exactly the measure
+  this page exists to protect. `.page-form` (640px) and `.tool-prose`
+  (760px, 16px body) are both untouched, per the standing decision that
+  settled them separately from this pass. `webapp.app._PAGE_TIER_RE`/
+  `_PAGE_TIER_LABELS`/`_PAGE_INDEX_CUSTOM_EXCEPTIONS` (the machinery behind
+  `/admin/system/page-index`) were updated to the new three-class set in
+  the same PR — omitting this would have flagged every single page route
+  on the site as untiered, since the regex that recognizes a tier class was
+  hardcoded to the old four names. See BRAND.md §5 for the full tier table
+  (now the authoritative, always-current version) and ARCHITECTURE.md's
+  matching bullet for the technical write-up.
+
 
 ## Authentication & security
 
