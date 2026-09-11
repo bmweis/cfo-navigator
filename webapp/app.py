@@ -1390,50 +1390,51 @@ p{margin:0 0 16px;color:var(--ink-soft);}
    it with a tier class for the actual max-width, e.g. class="page
    page-standard" (the later class wins the max-width tie). The original
    .page-narrow/.page-wide two-tier system was retired at the Phase 9 sweep;
-   PR 13 (2026-09) collapsed that system's four tiers down to three — the
-   old .page-full (1440) and .page-admin (1400) were 40px apart, a
-   distinction no reader could perceive and no one could maintain
-   deliberately, so both retire outright in favor of one Standard tier at
-   the old .page-grid's own 1300px (the value Brian confirmed already felt
-   right) — a genuine 3-into-1 merge of .page-full/.page-grid/.page-admin
-   into .page-standard, not a rename of one survivor. A new
-   Content tier splits off from .page-full's old audience for the pages that
+   PR 13 (2026-09) collapsed that system's four tiers down to three (adding
+   a short-lived Content tier at 900px), and PR 14 (2026-09) collapsed that
+   three down to two. The old .page-full (1440) and .page-admin (1400) were
+   40px apart, a distinction no reader could perceive and no one could
+   maintain deliberately, so both retired in PR 13 in favor of one Standard
+   tier at the old .page-grid's own 1300px (the value Brian confirmed
+   already felt right) — a genuine 3-into-1 merge of
+   .page-full/.page-grid/.page-admin into .page-standard, not a rename of
+   one survivor. PR 13 also split off a Content tier (900px) for pages that
    are pure long-form reading (About, the ported thought-leadership
-   articles, the FP&A Buddy explainer): investigated first — on every one of
-   those pages, everything outside the 760px .tool-prose column is a
-   back-link line, an eyebrow, or a diagram/table already capped narrower
-   than .tool-prose itself, so nothing on them actually needs 1300px. 900px
-   gives a little breathing room over the 760px reading column without
-   pretending there's real content to fill more than that — see PR 13's own
-   description for why a future pass might fold this tier into Standard
-   entirely rather than keep three. */
+   articles, the FP&A Buddy explainer) — but PR 13's own investigation
+   already found that on every one of those pages, essentially nothing
+   lives outside the 760px .tool-prose reading column: a back-link line, an
+   eyebrow, or a diagram/table already capped narrower than .tool-prose
+   itself. A tier that changes the width of a few short lines of text and
+   nothing else isn't a tier, so PR 14 removed it outright — every page that
+   used .page-content now uses .page-standard, and .tool-prose (760px,
+   unchanged) is what actually makes a content page read as a content page.
+   Two tiers remain: Standard and Form. */
 .page{width:100%;max-width:780px;margin:0 auto;padding:48px 24px 72px;}
 
-.page-standard{max-width:1300px;} /* the default tier: homepage, Thought
-                                    Leadership landing, every CFO Toolbox
-                                    directory/profile/matchmaker page, every
-                                    admin page (data tables included — they
-                                    already carry their own min-width floors
-                                    and horizontal scroll, so narrowing this
-                                    shell doesn't squeeze a table, it scrolls
-                                    it), and the FP&A Buddy/GER-calculator/
-                                    Sail Don't Row "functional tool" pages,
-                                    whose own .tool-inner already caps at
-                                    this same 1300px regardless of the outer
-                                    shell. Replaces .page-full/.page-grid/
-                                    .page-admin as of PR 13 (2026-09). */
-.page-content{max-width:900px;}   /* pure long-form reading: About, the
-                                    ported thought-leadership articles
-                                    (Growth Engine Ratio, Sail Don't Row, the
-                                    NetSuite MCP piece), the FP&A Buddy
-                                    "how it works" explainer, and your own
-                                    Ask history — every one of these renders
-                                    almost entirely inside the 760px
-                                    .tool-prose column; this tier exists only
-                                    for the few lines (a back-link, an
-                                    eyebrow) that sit outside it. New in
-                                    PR 13 (2026-09), split off from the old
-                                    .page-full. */
+.page-standard{max-width:1300px;} /* the only non-form tier: homepage,
+                                    Thought Leadership landing, every CFO
+                                    Toolbox directory/profile/matchmaker
+                                    page, every admin page (data tables
+                                    included — they already carry their own
+                                    min-width floors and horizontal scroll,
+                                    so narrowing this shell doesn't squeeze
+                                    a table, it scrolls it), the FP&A
+                                    Buddy/GER-calculator/Sail Don't Row
+                                    "functional tool" pages (whose own
+                                    .tool-inner already caps at this same
+                                    1300px regardless of the outer shell),
+                                    and every pure long-form reading page
+                                    (About, the ported thought-leadership
+                                    articles, the FP&A Buddy explainer, Ask
+                                    history) — those last four used to be a
+                                    separate 900px Content tier (PR 13) but
+                                    it changed nothing perceivable, since
+                                    everything on them sits inside the
+                                    760px .tool-prose column regardless of
+                                    the outer shell's width; removed in
+                                    PR 14 (2026-09). Replaces
+                                    .page-full/.page-grid/.page-admin (PR
+                                    13) and .page-content (PR 14). */
 .page-form{max-width:640px;}      /* forms — contact, admin edit forms */
 
 /* Two-column split for Software's Add/Edit forms (2fr wide left column,
@@ -1590,6 +1591,24 @@ details[open] > summary .disclosure-caret{transform:rotate(90deg);}
 @keyframes gen-anim-march{to{stroke-dashoffset:-36px;}}
 @media (prefers-reduced-motion: reduce){.gen-anim-svg rect{animation:none;}}
 """
+
+# Admin table width floors (PR 14, 2026-09) — replaces 22 hand-picked
+# `min-width` values PR 12/#529 chose by eye per table (480/620/640/700/
+# 720/760/780/800/820/880px, no shared logic between them) with four
+# rule-based buckets, keyed to how many columns a table actually renders
+# by default. The point is a rule someone can follow going forward: "does
+# adding a column cross a bucket boundary?" is answerable; "is 760 still
+# right for this table?" wasn't. See BRAND.md §5 ("Admin table width
+# floors") for the full table and the documented per-table exceptions —
+# a handful of tables (the Software/Communities column-picker lists' own
+# sticky Name column + 3-button Actions grid; three Reader-backfill tables
+# built around a fixed 420px Article column) genuinely need a floor above
+# what their column count alone would assign, and keep their PR 12 values
+# rather than being forced into a bucket that would squeeze real content.
+_TABLE_FLOOR_NARROW = 480    # 2-3 columns
+_TABLE_FLOOR_MEDIUM = 640    # 4-5 columns
+_TABLE_FLOOR_WIDE = 800      # 6-7 columns
+_TABLE_FLOOR_XWIDE = 960     # 8+ columns
 
 # Trailing brand suffixes baked into individual page titles over time — now
 # redundant since _page() prepends a consistent "BMW CFO ·" tab-title prefix
@@ -3772,7 +3791,7 @@ def about_page(request: Request):
         about_copy = lib.get_setting("about_page_copy") or _ABOUT_COPY_DEFAULT
     finally:
         lib.close()
-    body = f"""<div class="page page-content">
+    body = f"""<div class="page page-standard">
 <div class="tool-prose">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
   {_avatar(140)}
@@ -9692,7 +9711,7 @@ def admin_compare_summary_feedback(request: Request):
 <h1>Compare summary feedback</h1>
 <p style="color:var(--muted);margin:8px 0 20px;">Flags on the AI-generated Compare-page overlap/contrast summary. No automated action&mdash;review each and mark it reviewed once handled.</p>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:720px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Comparison</th>
@@ -10933,7 +10952,7 @@ def admin_contacts(request: Request):
     onclick="return document.querySelectorAll('.contact-row-cb:checked').length &amp;&amp; confirm('Delete ' + document.querySelectorAll('.contact-row-cb:checked').length + ' selected submission(s)?');">Delete selected</button>
 </div>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:760px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:12px;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:12px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" id="contact-select-all" onchange="document.querySelectorAll('.contact-row-cb').forEach(cb => cb.checked = this.checked);"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
@@ -10948,7 +10967,7 @@ def admin_contacts(request: Request):
 </form>
 <h2 style="font-size:16px;margin:40px 0 12px;">Deletion history</h2>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:720px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
   <th style="padding:8px 12px;text-align:left;font-size:13px;">Admin</th>
@@ -11014,7 +11033,7 @@ def admin_email_failures(request: Request):
 <p style="color:var(--muted);margin:-6px 0 6px;">Every outbound email is best-effort—contact form, tool submissions, welcome emails, password resets, warm intros. The underlying record always saves even if the send fails.</p>
 <p style="color:var(--muted);margin:0 0 18px;">A failure lands here instead of just a server log, so it never goes unnoticed.</p>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:640px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">When</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Flow</th>
@@ -11888,6 +11907,18 @@ def admin_software(request: Request, filter: str = ""):
         if filter == "needs_review" else ""
     )
 
+    # The approved-software table's own min-width (820px, below) is a
+    # documented exception to the four PR 14 buckets, not a bucket value —
+    # see BRAND.md §5 "Admin table width floors". Its 4 default-visible
+    # columns (checkbox, sticky Name, Review status, Actions) would
+    # naively suggest the Medium bucket (640px), but the sticky Name
+    # column alone declares its own min-width:220px and the Actions column
+    # is a fixed 3-button grid (100px x 3 + 2x6px gaps = 312px); adding the
+    # checkbox (~40px), the Review status pill+button (~160px), and per-
+    # cell padding/borders (~4 columns x ~24px) lands almost exactly on
+    # 820px — confirmed against the real rendered table, not estimated.
+    # Neither Wide (800, slightly under) nor Xwide (960, ~140px more than
+    # needed) fits as precisely as this table's own real floor.
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -11906,7 +11937,7 @@ def admin_software(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
 <div style="overflow-x:auto;margin-bottom:40px;">
-<table style="width:100%;min-width:800px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
@@ -12141,7 +12172,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
 
     def _actionable_table(rows: list[dict]) -> str:
         return f"""<div style="overflow-x:auto;">
-<table style="width:100%;min-width:640px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool A</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool B</th>
@@ -12175,7 +12206,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
     if decisions:
         decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Dismissed—not duplicates</h2>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:480px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <tbody>{"".join(_decision_row(d) for d in decisions)}</tbody>
 </table>
 </div>"""
@@ -12388,7 +12419,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 <h1>Toolbox intros{title_suffix}</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm intro requests from readers&mdash;{len(leads)} total.</p>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:760px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool</th>
@@ -12717,7 +12748,7 @@ def _feature_category_group_html(category: dict, features: list[dict], pending_i
   </summary>
   <div style="padding:0 18px 16px;">
     <div style="overflow-x:auto;">
-    <table style="width:100%;min-width:640px;border-collapse:collapse;">
+    <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
       <thead><tr style="background:var(--bg);">
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Definition</th>
@@ -13101,7 +13132,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
   {near_dup_html}
   <label style="display:block;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Feature{' (new)' if is_new_feature else ''}</label>
   {feature_field_html}
-  {f'<div style="overflow-x:auto;margin:12px 0;"><table style="width:100%;min-width:480px;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
+  {f'<div style="overflow-x:auto;margin:12px 0;"><table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
   {f'<p style="font-size:13.5px;line-height:1.6;color:var(--ink);background:var(--bg);border-radius:8px;padding:10px 12px;margin:10px 0 0;">{_esc(item["articulation"])}</p>' if item.get("articulation") else ''}
   {coverage_html}
   {f'<p style="font-size:13px;color:var(--muted);margin:8px 0 0;">From {_esc(item["submitter_name"])} ({_esc(item["submitter_email"])})</p>' if item.get("submitter_name") else ''}
@@ -13959,11 +13990,13 @@ _OC_GER_CSS = (
 
 def _original_content_article_body(row: dict) -> str:
     """The shared article shell for an admin-authored piece — matches the
-    three bespoke pages' own shell exactly (page page-content article-atlantic,
-    on the Content tier as of PR 13's width-tier collapse, 2026-09 — the
-    same back-link, .tool-prose, the same eyebrow/h1/byline treatment),
-    per the Phase 0 investigation. The bespoke pages hand-author everything
-    below the byline; here that's the one rendered .oc-body block instead."""
+    three bespoke pages' own shell exactly (page page-standard article-atlantic
+    as of PR 14's tier collapse, 2026-09 — the old Content tier PR 13 put
+    this on changed nothing here, since everything outside .tool-prose is
+    just a back-link and a byline — the same back-link, .tool-prose, the
+    same eyebrow/h1/byline treatment), per the Phase 0 investigation. The
+    bespoke pages hand-author everything below the byline; here that's the
+    one rendered .oc-body block instead."""
     date_bits = f'By Brian Weisberg &middot; {_esc(row["date_label"])}' if row["date_label"] else "By Brian Weisberg"
     tag_html = (
         f'<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;'
@@ -13971,7 +14004,7 @@ def _original_content_article_body(row: dict) -> str:
         if row["tag_label"] else ""
     )
     body_html = _render_original_content_markdown(row["body_md"] or "")
-    return f"""<div class="page page-content article-atlantic">
+    return f"""<div class="page page-standard article-atlantic">
 <style>{_OC_ARTICLE_CSS}{_OC_NETSUITE_MCP_CSS}{_OC_HACKATHON_CSS}{_OC_GER_CSS}</style>
 <div class="tool-prose">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
@@ -14238,7 +14271,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:800px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Type</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Title</th>
@@ -14675,7 +14708,7 @@ def admin_original_content(request: Request, status: str = ""):
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:800px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Title</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Slug</th>
@@ -15556,6 +15589,18 @@ def admin_communities(request: Request, filter: str = ""):
         if filter == "needs_review" else ""
     )
 
+    # The approved-communities table's own min-width (880px, below) is a
+    # documented exception to the four PR 14 buckets, same reasoning as
+    # Software's own 820px exception above — see BRAND.md §5 "Admin table
+    # width floors". Its 4 default-visible columns (checkbox, sticky Name,
+    # Review status, Actions) would naively suggest the Medium bucket
+    # (640px), but the sticky Name column alone declares its own
+    # min-width:280px (60px wider than Software's, since community names
+    # run longer) and the Actions column is the same fixed 3-button grid
+    # (100px x 3 + 2x6px gaps = 312px); adding the checkbox (~40px), the
+    # Review status pill+button (~160px), and per-cell padding/borders
+    # (~4 columns x ~24px) lands almost exactly on 880px — confirmed
+    # against the real rendered table, not estimated.
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -15579,7 +15624,7 @@ def admin_communities(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
 <div style="overflow-x:auto;margin-bottom:40px;">
-<table style="width:100%;min-width:800px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
@@ -17484,7 +17529,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             )
             all_feature_ids.extend(f["id"] for f in section["features"])
             table_html = (
-                f'<div style="overflow-x:auto;"><table style="width:100%;min-width:760px;border-collapse:collapse;margin-top:6px;">'
+                f'<div style="overflow-x:auto;"><table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;margin-top:6px;">'
                 f'<thead><tr style="background:var(--bg);">'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">On</th>'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Feature</th>'
@@ -19089,10 +19134,11 @@ a:hover{opacity:.8;}
    following the .page-full → .page-standard merge) even though this page is
    built from its own standalone _READER_TMPL/_READER_CSS and never uses the
    .page/.page-standard classes directly — see the _PAGE_INDEX_CUSTOM_EXCEPTIONS
-   comment above naming this route page-standard. Deliberately NOT the new,
-   narrower Content tier (900px): .reader-main (760px) + .reader-toc (220px)
-   + the 40px gap between them need ~1020px just for the two-column layout
-   itself, before any side padding — squeezing the outer shell to 900px would
+   comment above naming this route page-standard. Deliberately never moved
+   onto the Content tier PR 13 briefly introduced and PR 14 later removed
+   (900px, 2026-09): .reader-main (760px) + .reader-toc (220px) + the 40px
+   gap between them need ~1020px just for the two-column layout itself,
+   before any side padding — squeezing the outer shell to 900px would
    force .reader-main (which has min-width:0, so it CAN shrink) below its own
    760px reading-column floor, which is exactly the measure this page exists
    to protect. Standard's 1300px keeps the same generous margin around that
@@ -21470,7 +21516,7 @@ def ask_history(request: Request):
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
          '<a href="/tools/fpa-buddy">Ask a question &rarr;</a></div>')
 
-    body = f"""<div class="page page-content">
+    body = f"""<div class="page page-standard">
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
@@ -22724,9 +22770,8 @@ mermaid.initialize({{
     return HTMLResponse(_page("Database—Admin", "Admin", body, authed=True))
 
 
-_PAGE_TIER_RE = re.compile(r"page-(standard|content|form)\b")
-_PAGE_TIER_LABELS = {"standard": "page-standard", "content": "page-content",
-                      "form": "page-form"}
+_PAGE_TIER_RE = re.compile(r"page-(standard|form)\b")
+_PAGE_TIER_LABELS = {"standard": "page-standard", "form": "page-form"}
 # Routes whose width can't be read off a `.page-*` class name in their own
 # source, so the live-introspection regex below would otherwise flag them as
 # untiered — each maps to the accurate label to show instead of re-deriving it.
@@ -22736,13 +22781,13 @@ _PAGE_TIER_LABELS = {"standard": "page-standard", "content": "page-content",
 # `.page`/`.page-standard` classes, it has its own internal widths, so it's a
 # genuine custom exception, not a false "no tier assigned" flag.
 # `/read/{article_id}` (the single-article standalone view) is different: it
-# genuinely renders at the page-standard width (1300px as of PR 13, 2026-09 —
-# it tracked page-full's own value through PR 12, then moved to Standard
-# rather than the new, narrower Content tier when page-full retired, since
-# its two-column layout — a 760px reading column plus a 220px sticky TOC —
-# needs more headroom than Content's 900px leaves; see the .reader-layout
-# CSS comment for the full reasoning) — it's just built from a fully
-# standalone `_READER_TMPL`/`_READER_CSS` template that never uses the
+# genuinely renders at the page-standard width (1300px, unchanged by PR 14's
+# tier collapse — it tracked page-full's value through PR 12, then Standard
+# when page-full retired in PR 13, since its two-column layout — a 760px
+# reading column plus a 220px sticky TOC — needs more headroom than the old
+# Content tier's 900px left; see the .reader-layout CSS comment for the full
+# reasoning) — it's just built from a fully standalone
+# `_READER_TMPL`/`_READER_CSS` template that never uses the
 # `.page`/`.page-standard` classes, so it gets its real tier name (not
 # "custom exception") rather than a false flag.
 _PAGE_INDEX_CUSTOM_EXCEPTIONS = {
@@ -23098,7 +23143,7 @@ def fpa_buddy_how_it_works(request: Request):
         for tier, s in EFFORT_SETTINGS.items()
     )
 
-    body = f"""<div class="page page-content article-atlantic">
+    body = f"""<div class="page page-standard article-atlantic">
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>How FP&amp;A Buddy works</h1>
@@ -25362,7 +25407,7 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
 {merge_html}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
   <div style="overflow-x:auto;">
-  <table style="width:100%;min-width:640px;border-collapse:collapse;">
+  <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tag</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Articles</th>
@@ -27522,6 +27567,19 @@ def admin_users(request: Request, msg: str = ""):
     rows_html = "".join(_user_row(u) for u in users) or (
         f'<tr><td colspan="{total_cols}" style="padding:20px;color:var(--muted);">No accounts yet. Create one below.</td></tr>')
 
+    # The approved-users table's own min-width (below) was found genuinely
+    # under-provisioned during the PR 14 table-floor sweep, not just left at
+    # its old bucket-free 480px value — unlike Software/Communities' column
+    # pickers (only their `review_status` optional column is default-
+    # visible), `users_default_visible` shows EVERY optional column by
+    # default (`users_default_visible = tuple(k for k, _ in users_cols)`,
+    # above), so this table renders 11 real desktop columns (checkbox,
+    # Username, Name, Email, Password, Last login, Access, Status, FP&A
+    # Buddy cap, Matchmaker cap, Actions) at 480px — badly squeezed. The
+    # compact 3-column Last login/Access/Status mini-grid is a
+    # @media(max-width:700px)-only mobile treatment (see that rule's own
+    # comment below), not a desktop column-count reduction, so it doesn't
+    # change this. Fixed to the Xwide bucket (960px, 8+ columns).
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -27596,7 +27654,7 @@ def admin_users(request: Request, msg: str = ""):
 </div>
 
 <div style="overflow-x:auto;">
-<table class="admin-table-responsive" style="width:100%;min-width:480px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('users',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Username</th>
@@ -28604,6 +28662,17 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     # natural width (the table with the fewest narrow nowrap columns
     # crowding it), per Brian's ask.
     _th_article = _th + "width:420px;"
+    # PR 14 table-floor sweep: this fixed 420px Article column is exactly
+    # the kind of "real content forces a floor above what column count
+    # alone would suggest" case BRAND.md §5 calls out — Recent attempts (4
+    # cols) and Needs manual review (5 cols) both pair it with a genuinely
+    # unbounded free-text column (Detail / Last failure — an HTTP-status
+    # description, a Wayback outcome trace, etc.), so both are assigned the
+    # Wide bucket rather than the Medium bucket a naive column count would
+    # give them. Accepted as final (4 cols) pairs the same 420px Article
+    # column with a short, categorical "Reason it was flagged" value
+    # instead (e.g. "bot-challenge", "too-thin") — the Medium bucket fits
+    # it fine, unchanged from PR 12.
 
     log_html = ""
     if log_rows:
@@ -28612,7 +28681,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:20px;">
   <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;font-size:14px;">Recent attempts</div>
   <div style="overflow-x:auto;">
-  <table style="width:100%;min-width:700px;border-collapse:collapse;">
+  <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
       <th style="{_th_nowrap}">Result</th>
@@ -28754,7 +28823,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <span style="font-size:12px;color:var(--muted);">Re-upload the exported CSV with a <code>corrected_url</code> column filled in. Nothing is saved until you confirm on the preview screen.</span>
   </form>
   <div style="overflow-x:auto;">
-  <table style="width:100%;min-width:780px;border-collapse:collapse;">
+  <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
       <th style="{_th}">Last failure</th>
@@ -28777,7 +28846,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Marked &ldquo;good enough as-is&rdquo; by an admin&mdash;permanently out of automatic retry and out of Needs manual review above, until undone here.</div>
   </div>
   <div style="overflow-x:auto;">
-  <table style="width:100%;min-width:640px;border-collapse:collapse;">
+  <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
       <th style="{_th}">Reason it was flagged</th>
@@ -31046,7 +31115,7 @@ def admin_emails_page(request: Request):
         )
         return f"""\
 <div style="overflow-x:auto;margin:0 0 26px;">
-<table style="width:100%;min-width:720px;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
 <thead><tr style="text-align:left;">
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Email</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Recipient</th>
