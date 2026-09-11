@@ -92,7 +92,17 @@ Coral is the **warm counterweight** to a cool palette. Use it as a graphic/displ
 - Button fills (buttons are navy or ghost-navy — *no* color buttons, ever)
 - Status/error states (that's `--alert`). This includes Warnings callouts (`.article-warn`;
   see "Callout taxonomy" below), which use `--alert`/`--alert-wash`, not coral.
-- More than ~one coral element per viewport — if you see two, remove one
+- More than ~one coral element per viewport — if you see two, remove one. **Mechanically
+  checked as of PR 16 (2026-09)**, on public pages — see §8's own bullet for what the check
+  actually scans and its stated limits.
+
+**Coral is not a color to spend by array position.** Before PR 16, `_CARD_ICON_STYLES`
+cycled seafoam/navy/coral by loop index for every card-row/tile grid sitewide — so
+whichever card happened to land in the third slot "spent" the one rare accent, not by
+anyone's deliberate choice. Coral is dropped from that cycle entirely now (every such
+grid cycles seafoam/navy only); the one deliberate coral use on `/tools` and the homepage
+is the MCP capability callout (`_mcp_callout_html`), a non-clickable statement, never a
+button.
 
 ### 2.4 Data-visualization palette
 
@@ -723,6 +733,29 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
 - **Banned legacy colors** — the specific values purged in the refresh (old greens, the generic
   `#3b82f6`/`#10b981`/`#f4683b` data palette) can never reappear.
 - **Token integrity** — the full token set (all three ramps + neutrals + semantic) must be present.
+- **Coral discipline (PR 16, 2026-09)** — at most one coral *background* moment per public
+  page, checked signed out via `webapp.app.coral_moment_problems()` (`tests/
+  test_coral_discipline.py`, and a live "Coral discipline" row on `/admin/checks`). This is
+  a best-effort, **not** an exhaustive proof, and says so plainly in its own output rather
+  than overclaiming:
+  - Renders every real public (non-`/admin`, no path-param) GET/HTML route, signed out only —
+    a page that shows different content signed in (e.g. `/tools`' admin-only Reader card) is
+    not re-checked in that state.
+  - Counts coral **background** declarations inside actual rendered `style="..."`
+    attributes only — never a `<style>` block's own CSS rules (which can declare a class no
+    element on that particular render actually carries) and never a `<script>` block's JS
+    template strings. A coral moment built purely through a CSS class with no inline style
+    would not be caught.
+  - `<head>` (the shared sitewide stylesheet, including the admin-only pending-count-badge
+    exception below) and each page's own `<header>`/`<footer>` are excluded as chrome — only
+    a page's own `<body>` content is scored.
+  - Small coral-deep **text** (the separately-sanctioned "text-capable coral" use, e.g. the
+    Original Content flagship cards' tag color) is deliberately not counted — it doesn't
+    compete for the same rare-accent budget as a coral fill, and counting it would also flag
+    the ordinary navy-text-on-coral-wash badge pairing this codebase already sanctions
+    throughout.
+  - Admin pages are out of scope entirely — see the sanctioned pending-count-badge exception
+    below, which already puts more than one coral element on an admin screen.
 
 To run locally: `pip install -r requirements-dev.txt && pytest -q`.
 

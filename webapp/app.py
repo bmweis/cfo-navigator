@@ -1802,10 +1802,20 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 # coral base — never on data-dense surfaces (admin tables, forms, chat UI).
 # ---------------------------------------------------------------------------
 
+# Coral discipline (PR 16, 2026-09) — coral is retired from this cycle
+# entirely. It used to be the third slot, so whichever card/tile/highlight
+# happened to land on index 2 by array position "spent" the site's one rare
+# accent — never a deliberate placement (BRAND.md §2.3: "if you see two,
+# remove one"). On /tools that meant Communities; on the homepage it meant
+# the Toolbox panel's Communities mini-tile AND the Recent Highlights grid's
+# Podcasts tile, simultaneously — two accidental coral moments on one
+# screen, worse than the one this was meant to police. The MCP callout
+# (`_mcp_callout_html`) is now the one deliberate coral moment per screen
+# instead — see that function's own docstring. Every caller below now
+# cycles seafoam/navy only (`% 2`, not `% 3`).
 _CARD_ICON_STYLES = (
     ("var(--seafoam-wash)", "var(--seafoam-deep)"),
     ("var(--navy-wash)", "var(--navy)"),
-    ("var(--coral-wash)", "var(--coral-deep)"),
 )
 
 
@@ -3148,11 +3158,12 @@ def _underline_phrase(text: str, phrase: str, stroke: float = 4.0, color: str = 
 
 def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
     """2px-stroke line-icon badge for a card-row grid (2-up, 3-up, or 4-up).
-    Cycles seafoam-wash -> navy-wash -> coral-wash by `index`, the fixed
-    order reused for every card-row grid sitewide (homepage, CFO Toolbox,
+    Cycles seafoam-wash -> navy-wash by `index` (coral dropped from this
+    cycle, PR 16 — see _CARD_ICON_STYLES's own comment), the fixed order
+    reused for every card-row grid sitewide (homepage, CFO Toolbox,
     Library, Thought Leadership). `svg_path` is the inner SVG markup
     (path/rect/etc.) for a 24x24 viewBox icon."""
-    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    bg, stroke = _CARD_ICON_STYLES[index % 2]
     inner = size - 16
     return (
         f'<div style="width:{size}px;height:{size}px;border-radius:8px;background:{bg};'
@@ -3176,14 +3187,39 @@ _ADMIN_ONLY_BG = "var(--seafoam)"
 _ADMIN_ONLY_BORDER = "1.5px solid var(--seafoam-deep)"
 
 
+def _reader_access_card_html() -> str:
+    """The admin-only "Reader access" card — copy and markup shared verbatim
+    between the homepage sidebar and /tools' own standalone card (PR 16,
+    2026-09), so the two can never read differently. Originally the
+    homepage's own inline block; /tools carried a different, less accurate
+    description on its old 5th-tile version of this same affordance before
+    PR 16 pulled Reader out of the Toolbox 2x2 grid into its own card below
+    it — this is that one shared card now, not two copies. The caller
+    decides whether to render it at all (`_is_authed(request)`); this
+    always returns the real markup, never a signed-out empty string."""
+    return (
+        f'<a href="/read" rel="nofollow noreferrer" style="text-decoration:none;background:{_ADMIN_ONLY_BG};'
+        f'border:{_ADMIN_ONLY_BORDER};border-radius:16px;padding:26px;width:100%;box-sizing:border-box;'
+        f'display:flex;flex-direction:column;gap:8px;">'
+        f'<div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only</div>'
+        f'<div style="display:flex;align-items:center;gap:12px;">'
+        f'{_card_icon(3, _ICON_NEWSPAPER)}'
+        f'<div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Reader access</div>'
+        f'</div>'
+        f'<p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Archive, and Read Later in one place.</p>'
+        f'</a>'
+    )
+
+
 def _toolbox_icon_badge(index: int, svg_path: str, *, size: int = 44, icon_size: int = 22,
                          margin_bottom: int = 14) -> str:
     """Icon badge for the CFO Toolbox 2x2 tile grid (Phase 3, "Toolbox Illustration
-    Concepts" design, option 2a) — same seafoam/navy/coral wash cycle as _card_icon(),
-    but sized (44x44 badge / 22x22 icon, stroke-width 2) and rounded (12px) per that
-    spec rather than _card_icon()'s generic card-row proportions. `size`/`icon_size`
-    are overridden smaller for the homepage teaser's compact mini-tiles."""
-    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    Concepts" design, option 2a) — same seafoam/navy wash cycle as _card_icon()
+    (coral dropped, PR 16), but sized (44x44 badge / 22x22 icon, stroke-width 2)
+    and rounded (12px) per that spec rather than _card_icon()'s generic card-row
+    proportions. `size`/`icon_size` are overridden smaller for the homepage
+    teaser's compact mini-tiles."""
+    bg, stroke = _CARD_ICON_STYLES[index % 2]
     return (
         f'<div style="width:{size}px;height:{size}px;border-radius:12px;background:{bg};'
         f'margin-bottom:{margin_bottom}px;display:flex;align-items:center;justify-content:center;'
@@ -3221,17 +3257,22 @@ _TL_COLUMN_ICONS = (_ICON_PENCIL, _ICON_MIC, _ICON_HEADPHONES, _ICON_NEWSPAPER)
 # surfaces showing different glyphs for the same tile is a deliberate,
 # design-file-driven inconsistency, not an oversight). Fill is hardcoded to
 # seafoam-deep rather than threaded dynamically through _card_icon()'s
-# stroke cycle — this icon is only ever used at the homepage Toolbox panel's
-# 4th (index-3) position, which _CARD_ICON_STYLES' 3-cycle already resolves
-# to seafoam regardless, so hardcoding matches the design exactly with no
-# generic-badge plumbing needed.
+# stroke cycle — this icon is only ever used at the FP&A Buddy tile's own
+# fixed badge position (see _TOOLBOX_BADGE_INDEX below), which is pinned to
+# seafoam specifically so the badge ring always matches this hardcoded fill
+# rather than clashing with whatever color the cycle would otherwise land
+# on — so hardcoding matches the design exactly with no generic-badge
+# plumbing needed beyond that one pin.
+#
+# PR 16 (2026-09) note: before coral was dropped from _CARD_ICON_STYLES'
+# cycle, this pin was free — FP&A Buddy's index (3) happened to land on
+# seafoam under the old 3-color cycle (3%3==0) purely by array-index
+# coincidence, the same accident-of-position problem PR 16 fixed for
+# Communities. Dropping to a 2-color cycle broke that coincidence (3%2==1,
+# navy) — which would have put a navy badge ring around this icon's
+# hardcoded seafoam-deep fill, a real color clash, not just an unrequested
+# cosmetic shift. Pinned explicitly now instead of relying on the cycle.
 _ICON_HALF_CIRCLE = '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="#1F7A66" stroke="none"/>'
-# Open-book glyph for the admin-only 5th tile on the /tools 2x2 grid (Phase 3)
-# — no existing icon fit "Library" (admin's Archive/Feed reading stash), so
-# this is drawn fresh in the same flat, two-tone line-icon style as the rest
-# of the set, same as _ICON_BRAIN was for FP&A Buddy.
-_ICON_BOOK = ('<path d="M12 6.2c-1.8-1.3-4-2-6-2v13c2 0 4.2.7 6 2 1.8-1.3 4-2 6-2v-13c-2 0-4.2.7-6 2z"/>'
-              '<path d="M12 6.2v13"/>')
 
 
 # ---------------------------------------------------------------------------
@@ -3630,8 +3671,12 @@ def homepage(request: Request):
 
     # Toolbox panel tile rows — FP&A Buddy uses a homepage-only half-circle
     # icon here (design file), distinct from _ICON_BRAIN on /tools's own grid.
+    # Badge index goes through _toolbox_badge_index(), not the raw loop
+    # index, so FP&A Buddy's badge stays pinned to seafoam — see
+    # _TOOLBOX_BADGE_INDEX's own comment.
     toolbox_rows = "".join(
-        _toolbox_mini_tile(i, title, one_liner, _ICON_HALF_CIRCLE if href == "/tools/fpa-buddy" else icon)
+        _toolbox_mini_tile(_toolbox_badge_index(href, i), title, one_liner,
+                            _ICON_HALF_CIRCLE if href == "/tools/fpa-buddy" else icon)
         for i, (href, title, icon, _desc, one_liner) in enumerate(_TOOLBOX_TILES)
     )
 
@@ -3644,17 +3689,11 @@ def homepage(request: Request):
     # so this is a real link now, not the placeholder text it launched with on
     # this branch — adopted from a since-reconciled parallel session's PR,
     # which built this same box against a slightly later main where /read
-    # already existed.
+    # already existed. Markup itself moved into _reader_access_card_html()
+    # (PR 16, 2026-09) so /tools' own standalone version of this card can't
+    # drift from this one.
     is_admin = _is_authed(request)
-    reader_access_box = (f"""
-      <a href="/read" rel="nofollow noreferrer" style="text-decoration:none;background:{_ADMIN_ONLY_BG};border:{_ADMIN_ONLY_BORDER};border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
-        <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only</div>
-        <div style="display:flex;align-items:center;gap:12px;">
-          {_card_icon(3, _ICON_NEWSPAPER)}
-          <div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Reader access</div>
-        </div>
-        <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Archive, and Read Later in one place.</p>
-      </a>""" if is_admin else "")
+    reader_access_box = _reader_access_card_html() if is_admin else ""
 
     body = f"""<div class="page page-standard">
 {password_nudge_html}
@@ -6598,7 +6637,15 @@ async def library_submit(request: Request):
 # tighten it. A real <ul>, not a manual bullet layout, since these are six
 # genuinely separate questions, not a design-file-specific bullet glyph
 # treatment the way the homepage's .home-tl-bullets is.
-_TOOLS_INTRO_HTML = """<div style="max-width:640px;">
+#
+# No inner max-width any more (PR 16, 2026-09) — this used to cap itself at
+# 640px on its own, back when it ran the full width of `.page-standard`
+# (1300px). Now it lives in the left column of /tools' two-column layout
+# (`.toolbox-left`, ~600px at 1300px viewport — see tools_landing()'s own
+# comment on the split), which already constrains it tighter than 640px
+# ever did, so the extra cap was inert. Left as the column's job, not this
+# block's.
+_TOOLS_INTRO_HTML = """<div>
 <h2 style="margin:0 0 14px;font-family:var(--font-head);font-weight:600;font-size:20px;color:var(--navy);">I built this for you.</h2>
 <p style="color:var(--ink-soft);line-height:1.65;margin:0 0 14px;">Over the years I&rsquo;ve been asked a lot of these questions, and wondered plenty of them myself:</p>
 <ul style="margin:0 0 16px;padding-left:22px;color:var(--ink-soft);line-height:1.65;">
@@ -6616,24 +6663,28 @@ _TOOLS_INTRO_HTML = """<div style="max-width:640px;">
 def _mcp_callout_html(*, compact: bool = False) -> str:
     """Statement of capability, not a CTA — no link, no button, since MCP
     tokens are minted manually (scripts/mint_api_token.py, via `railway
-    ssh`) with no self-serve flow to send anyone to. Navy, not coral:
-    checked against both call sites' actual signed-out accent count before
-    choosing — /tools already spends its one warm accent on the Communities
-    directory icon tile (`_CARD_ICON_STYLES` cycles seafoam/navy/coral by
-    tile index, and Communities lands on coral), and the homepage already
-    spends it twice over (the Toolbox panel's own Communities mini-tile,
-    same cycle, plus the "Recent highlights" grid's Podcasts tile landing
-    on the same coral slot) — so a coral callout on either page would be a
-    second (or third) warm highlight on one screen, breaking BRAND.md's
-    "coral is the rare highlight you notice precisely because it's rare"
-    rule. `compact` tightens padding/font-size for the homepage's Toolbox
+    ssh`) with no self-serve flow to send anyone to.
+
+    Coral, not navy (reversed, PR 16, 2026-09): this was navy at launch
+    specifically because coral was already spent elsewhere on both call
+    sites — `_CARD_ICON_STYLES` cycled seafoam/navy/coral by array index,
+    and Communities always landed on the coral slot (on /tools directly; on
+    the homepage twice over, via both the Toolbox panel's Communities
+    mini-tile and the "Recent highlights" grid's Podcasts tile). That cycle
+    is gone now (coral dropped from it entirely — see _CARD_ICON_STYLES's
+    own comment), which frees coral up for the placement it was always
+    meant to have: this callout is the one deliberate coral moment per
+    screen on both /tools and the homepage. Same sanctioned coral-wash
+    fill + navy text pairing used throughout this codebase (BRAND.md
+    §2.6's "Navy text on seafoam-wash / coral-wash" row) — never coral-deep text under
+    18px. `compact` tightens padding/font-size for the homepage's Toolbox
     panel, where the callout sits inside an already-dense card rather than
     open page whitespace."""
     pad = "10px 14px" if compact else "14px 18px"
     size = "13px" if compact else "14px"
     margin = "margin-top:16px;" if compact else "margin:0 0 24px;"
     return (
-        f'<p style="background:var(--navy-wash);border:1px solid rgba(0,41,117,.15);'
+        f'<p style="background:var(--coral-wash);border:1px solid var(--coral);'
         f'border-radius:10px;padding:{pad};font-size:{size};line-height:1.5;color:var(--navy);'
         f'{margin}">Use it here, or connect it to your own AI assistant. '
         f'The whole toolbox runs over MCP.</p>'
@@ -6668,6 +6719,20 @@ _TOOLBOX_TILES = (
      "Ask a real FP&amp;A question, get a sourced answer."),
 )
 
+# Badge-color index for the four tiles above — separate from their position
+# in _TOOLBOX_TILES (PR 16, 2026-09). Software/Resources/Communities still
+# cycle by plain position (_CARD_ICON_STYLES[i % 2]: seafoam/navy/seafoam);
+# FP&A Buddy is pinned to 0 (seafoam) rather than its own position (3, which
+# would land on navy) because its homepage mini-tile icon
+# (_ICON_HALF_CIRCLE) has a hardcoded seafoam-deep fill that a navy badge
+# ring would visibly clash with — see that icon's own comment for the full
+# story of why this stopped being free once coral left the cycle.
+_TOOLBOX_BADGE_INDEX = {"/tools/fpa-buddy": 0}
+
+
+def _toolbox_badge_index(href: str, position: int) -> int:
+    return _TOOLBOX_BADGE_INDEX.get(href, position)
+
 
 def _toolbox_tile(index: int, href: str, title: str, desc: str, icon_svg: str, *,
                    border: str = "1.5px solid rgba(0,41,117,.15)",
@@ -6700,7 +6765,7 @@ def _toolbox_mini_tile(index: int, title: str, one_liner: str, icon_svg: str) ->
     width are meant for a badge stacked above a title, not this icon-beside-
     text row, and don't match the design file's own 34px/stroke-2/16px-icon
     badge here."""
-    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    bg, stroke = _CARD_ICON_STYLES[index % 2]
     badge = (
         f'<div class="home-toolbox-icon" style="background:{bg};">'
         f'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="{stroke}" '
@@ -6716,43 +6781,67 @@ def _toolbox_mini_tile(index: int, title: str, one_liner: str, icon_svg: str) ->
 
 @app.get("/tools", response_class=HTMLResponse)
 def tools_landing(request: Request):
-    """CFO Toolbox landing page: 2x2 tile grid (Phase 3) — Software, Resources,
-    Communities, FP&A Buddy. Admins additionally see a 5th, seafoam-bordered tile
-    linking to the Reader — rendered only when _is_authed(request), so it's
-    entirely absent from the HTML (not just CSS-hidden) for anyone else. That 5th
-    tile is landing-only; the homepage teaser (see homepage()) never shows it,
-    for any visitor, so it looks identical regardless of auth state.
+    """CFO Toolbox landing page — two columns (PR 16, 2026-09; was a single
+    stacked column): left is the heading/intro/bullets/MCP callout, right is
+    the 2x2 tile grid (Software, Resources, Communities, FP&A Buddy),
+    sticky so the cards stay visible while the left column's text scrolls.
+    Before this, the page stacked heading -> intro -> six bullets -> MCP
+    callout -> 2x2 grid, pushing the tile grid a full screen below the fold
+    on an ordinary viewport — the whole point of this being a *landing*
+    page. Below 900px both columns stack (left/text first, matching the DOM
+    order — cards land below text on mobile, not above it) and the sticky
+    positioning turns off, since there's no separate scroll region left to
+    pin against on a single narrow column.
 
-    That tile carried two bugs until PR 9 (2026-09), both confirmed in source
-    before being fixed: it was labelled "Library" and pointed at
-    /admin/library — the admin management page, not the Reader itself — so the
-    one tile promising a reading stash opened a page of maintenance tools. It
-    now points at /read and opens in a new tab, since the Reader is a place you
-    stay in rather than a step in a browse-the-Toolbox flow."""
+    Split is 1fr/1fr (~600px each side at .page-standard's 1300px), chosen
+    by rendering both a 40/60 and a 50/50 split and reading the actual
+    output, not by formula: at 40/60 the left column narrows to ~480px,
+    and the intro's longest bullet ("Which community is actually full of
+    finance executives who've done the job, not just anyone who signed
+    up?") wraps into several short, ragged lines. 50/50 gives the bullets
+    a full, comfortable line length and still leaves the tile grid enough
+    room (~600px, ~280px per tile) to read clearly side by side — the same
+    balance point the 2x2 grid already struck as a single full-width
+    column pre-PR-16, just halved rather than cramped.
+
+    The Reader card (admin-only, `_is_authed(request)`) used to be an
+    orphaned 5th tile crammed under this page's 2x2 grid — it isn't one of
+    the Toolbox's five real components (software, communities, benchmarks,
+    books, FP&A Buddy), it's Brian's own private reading tool. Pulled out
+    into its own standalone card below the tile grid, sharing
+    `_reader_access_card_html()` with the homepage's identical sidebar card
+    so the two can't read differently — entirely absent from the HTML (not
+    just CSS-hidden) for anyone signed out, exactly as the old 5th tile
+    was."""
     tiles = "".join(
-        _toolbox_tile(i, href, title, desc, icon)
+        _toolbox_tile(_toolbox_badge_index(href, i), href, title, desc, icon)
         for i, (href, title, icon, desc, _one_liner) in enumerate(_TOOLBOX_TILES)
     )
-    if _is_authed(request):
-        tiles += _toolbox_tile(
-            len(_TOOLBOX_TILES), "/read", "Reader",
-            "Your private reading stash&mdash;Feed, Archive, and Read Later, admin only.",
-            _ICON_BOOK, border=_ADMIN_ONLY_BORDER, background=_ADMIN_ONLY_BG,
-            new_tab=True)
+    reader_card = _reader_access_card_html() if _is_authed(request) else ""
 
     body = f"""<div class="page page-standard">
 <style>
+.toolbox-layout{{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:start;}}
+.toolbox-right{{display:flex;flex-direction:column;gap:20px;position:sticky;top:24px;}}
 .toolbox-grid{{display:grid;grid-template-columns:1fr;gap:16px;}}
 @media(min-width:560px){{.toolbox-grid{{grid-template-columns:1fr 1fr;}}}}
+@media(max-width:900px){{.toolbox-layout{{grid-template-columns:1fr;gap:32px;}}.toolbox-right{{position:static;}}}}
 </style>
-<div style="position:relative;display:inline-block;">
-  <h1 style="margin:0 0 6px;">CFO Toolbox</h1>
-  {_sticker("🚧 building", rotate=-4, top="-14px", right="-52px", size=14)}
-</div>
-{_TOOLS_INTRO_HTML}
-{_mcp_callout_html()}
-<div style="background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:28px;">
-  <div class="toolbox-grid">{tiles}</div>
+<div class="toolbox-layout">
+  <div class="toolbox-left">
+    <div style="position:relative;display:inline-block;">
+      <h1 style="margin:0 0 6px;">CFO Toolbox</h1>
+      {_sticker("🚧 building", rotate=-4, top="-14px", right="-52px", size=14)}
+    </div>
+    {_TOOLS_INTRO_HTML}
+    {_mcp_callout_html()}
+  </div>
+  <div class="toolbox-right">
+    <div style="background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:28px;">
+      <div class="toolbox-grid">{tiles}</div>
+    </div>
+    {reader_card}
+  </div>
 </div>
 </div>"""
     return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
@@ -8654,12 +8743,41 @@ def tools_resources(request: Request):
 </div>
 
 <style>
-.bench-card{{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;transition:border-color .15s;}}
+/* Card heights, PR 16 (2026-09): `auto-fill` grid rows only stretch cards to
+   match the TALLEST card in their own row (CSS Grid's default
+   align-items:stretch) — every row is sized independently, so a row of
+   short names/descriptions renders visibly shorter than a row that happens
+   to contain a longer one. Confirmed empirically, not assumed: seeding the
+   real book-recommendations copy (names/descriptions varying widely in
+   length) AND the real Benchmarking copy (a more consistent, template-
+   driven "Best for X" length) side by side, the Benchmarking grid shows
+   the identical row-to-row variance once it has enough rows to have more
+   than one — it just doesn't today, at its current 11-row count and card
+   mix, so it reads as "already uniform" while Books' more varied name/
+   description lengths make the same underlying behavior visible. Not a
+   missing height constraint on Books specifically and not a different
+   card component — both sections share this one class.
+
+   Fixed at the root, for both sections at once, with three pieces working
+   together (a line-clamp alone only bounds the CEILING — a short card
+   still renders shorter unless something also reserves the floor):
+     - .bench-name clamped to 2 lines, .bench-desc to 3 — every card's
+       content now has a known maximum height regardless of how long the
+       underlying text actually is.
+     - .bench-card gets a matching min-height, so a short name/description
+       still reserves the same space a clamped-to-the-max one would use
+       (verified against the tallest real combination in this data set —
+       a 2-line name + a full 3-line description — not picked by eye).
+   Height is now driven by these fixed budgets, not by which row a card's
+   own content happens to land in. */
+.bench-card{{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;transition:border-color .15s;min-height:172px;}}
 .bench-card:hover{{border-color:var(--accent);text-decoration:none;}}
-.bench-name{{font-size:15px;font-weight:600;color:var(--ink);}}
+.bench-name{{font-size:15px;font-weight:600;color:var(--ink);line-height:1.35;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}}
 .bench-card:hover .bench-name{{color:var(--accent);}}
 .bench-badge{{font-size:11px;font-weight:500;border-radius:6px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}}
-.bench-desc{{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}}
+.bench-desc{{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}}
 </style>"""
     return HTMLResponse(_page("Resources—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
@@ -14098,7 +14216,7 @@ def _tl_recent_highlight_item(index: int, icon_svg: str, type_label: str, item: 
     # Badge built inline rather than via _card_icon() — that helper's
     # margin-bottom:14px (meant for a badge stacked above a title) would
     # throw off align-items:center in this icon-beside-label row.
-    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    bg, stroke = _CARD_ICON_STYLES[index % 2]
     badge = (
         f'<div style="width:32px;height:32px;border-radius:8px;background:{bg};'
         f'display:flex;align-items:center;justify-content:center;flex-shrink:0;">'
@@ -23009,6 +23127,119 @@ def ai_config_editable_outside_ai_page() -> list[str]:
             bad.append(path)
     bad.sort()
     return bad
+
+
+# --- Coral discipline: at most one coral "moment" per public page (PR 16) ---
+# BRAND.md §2.3: "if you see two, remove one" — coral is the site's one
+# rare, deliberate accent, not a color to spend by array position (see
+# _CARD_ICON_STYLES's own comment for the incident this closes: Communities
+# landed on coral on /tools, and TWICE on the homepage, purely because it
+# sat in the cycle's third slot).
+#
+# This renders every real public, signed-out page route and counts coral
+# **background** declarations inside actual rendered elements — a
+# background is the fill that reads as "a coral moment" to a visitor; a
+# small coral-deep text label (BRAND.md's separately-sanctioned
+# "text-capable coral" exception, e.g. the Original Content flagship cards'
+# tag color) doesn't compete for the same rare-accent budget and isn't
+# counted, on purpose — counting text color too would also flag the
+# ordinary navy-text-on-coral-wash pairing nearly every badge on this site
+# already uses, which BRAND.md itself sanctions.
+#
+# HONEST LIMITS, stated rather than overclaimed (the brief's own ask):
+#   1. Signed-out snapshot only. A page that renders different content when
+#      signed in (e.g. /tools' admin-only Reader card) is not re-checked in
+#      that state — a coral moment that only appears for an admin could go
+#      undetected, or a coral moment visible only to admins could be
+#      double-counted against a signed-out total that never actually shows
+#      it. Neither happens in the current codebase (checked by hand), but
+#      the check itself can't prove it for a future change.
+#   2. Only counts declarations inside actual `style="..."` attributes on
+#      rendered elements — never a `<style>` block's own CSS rules (which
+#      can declare a class no element on THIS render actually carries — the
+#      Reader's `.rr-alert`/a matchmaker feedback button's `.sel-neg`, for
+#      instance, are both real, legitimate, already-sanctioned coral uses
+#      that only ever paint conditionally, on user interaction or a real
+#      error state a fresh, empty-database render can't reach) and never a
+#      `<script>` block's JS template strings (client-side-generated
+#      markup, not what actually rendered this response). A coral moment
+#      built entirely through a CSS class with no inline style at all would
+#      not be caught by this check.
+#   3. `<head>` (the shared sitewide `_CSS` block, including the admin-only
+#      `.task-badge`/`.task-dot` pending-count coral BRAND.md already
+#      sanctions) and each response's own `<header>`/`<footer>` are
+#      excluded as chrome, per the brief's explicit scope — a page's own
+#      `<body>` content, minus those two tags, is what's actually checked.
+#   4. Only scans real GET/HTMLResponse routes with no path parameter that
+#      aren't under /admin — the same "reuse the live app.routes
+#      introspection, not a hand-maintained list" discipline
+#      hub_nav_orphans()/page-index already use. Admin pages are
+#      deliberately out of scope: BRAND.md already sanctions more than one
+#      coral element there (pending-count badges, review-status pills), so
+#      a blanket "at most one" rule doesn't apply to that surface.
+_CORAL_BG_RE = re.compile(
+    r"background(?:-color)?\s*:\s*var\(--coral(?:-deep|-wash|-light)?\)")
+_CORAL_STYLE_ATTR_RE = re.compile(r'style="([^"]*)"')
+
+
+def _coral_check_routes() -> list[str]:
+    """The same route-enumeration technique as hub_nav_orphans()/
+    _page_index_snapshot() — every real, public (non-admin), no-path-param
+    GET/HTMLResponse route — not a hand-maintained list."""
+    from fastapi.routing import APIRoute
+    routes = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if "GET" not in route.methods:
+            continue
+        path = route.path
+        if path.startswith("/admin"):
+            continue
+        if "{" in path:
+            continue
+        if _page_index_response_class_name(route) != "HTMLResponse":
+            continue
+        routes.append(path)
+    return sorted(set(routes))
+
+
+def _coral_moments_on_page(html: str) -> int:
+    """Count of coral **background** declarations inside inline `style=`
+    attributes, scoped to `<body>` minus `<header>`/`<footer>`/`<script>`/
+    `<style>` — see the module comment above for exactly why each of those
+    is excluded."""
+    m = re.search(r"<body[^>]*>(.*)</body>", html, re.S)
+    scoped = m.group(1) if m else html
+    for tag in ("header", "footer", "script", "style"):
+        scoped = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", "", scoped, flags=re.S)
+    hits = 0
+    for sm in _CORAL_STYLE_ATTR_RE.finditer(scoped):
+        if _CORAL_BG_RE.search(sm.group(1)):
+            hits += 1
+    return hits
+
+
+def coral_moment_problems() -> list[str]:
+    """Every public page route with more than one coral moment, signed
+    out — see the module comment above for what this can and can't catch.
+    Sorted for a stable, diffable result, mirroring hub_nav_orphans()'s own
+    return shape."""
+    from fastapi.testclient import TestClient
+    client = TestClient(app, raise_server_exceptions=False)
+    problems = []
+    for path in _coral_check_routes():
+        try:
+            resp = client.get(path, follow_redirects=False)
+        except Exception:
+            continue
+        if resp.status_code != 200:
+            continue
+        count = _coral_moments_on_page(resp.text)
+        if count > 1:
+            problems.append(f"{path} ({count} coral moments)")
+    problems.sort()
+    return problems
 
 
 @app.get("/admin/system/page-index", response_class=HTMLResponse)
