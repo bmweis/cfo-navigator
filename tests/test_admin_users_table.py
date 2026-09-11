@@ -122,6 +122,51 @@ def test_delete_selected_present_but_no_edit_selected(env):
     assert 'onclick="openBulkPanel(\'users\')"' not in body
 
 
+# --- PR 15: layout fixes from Brian's live-page review -----------------------
+
+def test_add_member_and_cap_defaults_boxes_have_matching_headings(env):
+    """The misalignment's real cause: 'Add a member' had an <h2> above its
+    form while the cap-defaults column had none at all, so the two forms'
+    top edges didn't line up under grid `align-items:start`. Fixed by
+    giving the cap-defaults column its own matching heading."""
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert '<h2 style="font-size:16px;margin:0 0 12px;">Add a member</h2>' in body
+    assert '<h2 style="font-size:16px;margin:0 0 12px;">Default usage caps</h2>' in body
+
+
+def test_delete_selected_lives_in_the_filter_toolbar_row_hidden_until_selected(env):
+    """No more lonely standalone row for a single button — Delete selected
+    now renders inside the same flex row as the sort/filter controls, and
+    is hidden (not just disabled) until at least one row is checked."""
+    _seed_users(env)
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    # The old standalone wrapper div around just this one button is gone.
+    assert '<div style="margin:0 0 16px;display:flex;gap:10px;flex-wrap:wrap;">' not in body
+    # hidden, not disabled, by default (JS flips `.hidden` once a row is
+    # checked — see updateBulkButton's users-specific branch).
+    assert '<button type="button" id="users-bulk-delete-btn" class="btn btn-ghost" hidden' in body
+    # It's inside the sort/filter toolbar's own flex row: the Reset button
+    # (always part of that row) and the Delete-selected button both appear
+    # between the toolbar's opening div and its closing count span.
+    toolbar_start = body.index("Sort by")
+    toolbar_reset = body.index("Reset</button>", toolbar_start)
+    delete_btn = body.index('id="users-bulk-delete-btn"', toolbar_start)
+    count_span = body.index('id="users-sort-filter-count"', toolbar_start)
+    assert toolbar_start < toolbar_reset < delete_btn < count_span
+
+
+def test_update_bulk_button_hides_users_delete_but_only_disables_others(env):
+    """updateBulkButton's shared JS: Users' own Delete-selected button
+    hides entirely at 0 selected (no Edit-selected sibling to pair with);
+    Software/Communities keep their existing disabled-but-visible
+    treatment, unaffected by this change."""
+    admin = _admin_client(env)
+    body = admin.get("/admin/users").text
+    assert "if (tableKey === 'users') { delBtn.hidden = n === 0; } else { delBtn.disabled = n === 0; }" in body
+
+
 def test_column_picker_lists_optional_columns(env):
     _seed_users(env)
     admin = _admin_client(env)

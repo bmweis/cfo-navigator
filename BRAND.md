@@ -503,6 +503,16 @@ otherwise assign (long URLs, a wide date-and-status column, a description
 column with real prose) is a documented exception, not a silent one — see
 the PR 14 build notes for the specific tables this applied to and why.
 
+**PR 15, 2026-09 — the Software and Communities admin tables are no longer
+two of those exceptions.** Both used to compute their own hand-tuned floor
+(820px and 880px respectively) from their real rendered content; per
+Brian's explicit call that the two tables should be **structurally
+identical, not merely similar**, both now share the Extra-wide bucket
+(960px) and a 280px sticky Name column (Software widened from 220px) — the
+first instance of a larger, separately-scoped job (matching one field's
+width everywhere it appears across every admin table), not a general
+license to collapse every documented exception into a bucket.
+
 ### Editorial content system — Atlantic pattern
 
 A long-form register for pages Brian wants to read like a considered piece rather

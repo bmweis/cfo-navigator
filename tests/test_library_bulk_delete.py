@@ -210,6 +210,29 @@ def test_page_lists_the_tool(env):
     assert "Bulk delete articles" in r.text
 
 
+def test_page_matches_sibling_reader_tool_layout_not_a_narrow_card(env):
+    """PR 15: the page used to wrap its whole body in one
+    `max-width:640px` card — a real, non-standard layout compared to
+    every other Reader admin tool (backfill-content, dedupe), which are
+    full-width `.page-standard` with sections/cards sized to their own
+    content, not a hand-picked outer cap. Fixed to match that pattern."""
+    c = _admin_client(env)
+    r = c.get("/admin/reader/bulk-delete")
+    assert r.status_code == 200
+    # The old narrow single-card wrapper is gone (a hand-picked cap on the
+    # WHOLE page body — the sitewide `.page-form` CSS rule at the top of
+    # every page's <style> block, unrelated, still legitimately contains
+    # this same substring, so check the actual page body, not the whole
+    # response).
+    assert 'padding:20px 24px;max-width:640px;' not in r.text
+    assert "1. Get the CSV template" in r.text
+    assert "2. Upload it back" in r.text
+    # The preview-before-commit step (the destructive-action guard) is
+    # untouched by the layout fix — still one upload form, nothing deletes
+    # on this page itself.
+    assert "Preview deletion" in r.text
+
+
 def test_template_download_has_the_two_required_columns(env):
     c = _admin_client(env)
     r = c.get("/admin/reader/bulk-delete/template.csv")

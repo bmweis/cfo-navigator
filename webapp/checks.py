@@ -17,6 +17,8 @@ import tempfile
 _HERE = pathlib.Path(__file__).resolve()
 _APP_PY = _HERE.parent / "app.py"
 _ROOT = _HERE.parents[1]
+_ENRICH_PY = _ROOT / "linklib" / "enrich.py"
+_FEATURE_SCAN_PY = _ROOT / "linklib" / "feature_scan.py"
 
 # Link the dashboard to where these actually gate merges.
 GITHUB_ACTIONS_URL = "https://github.com/bmweis/cfo-navigator/actions/workflows/qa.yml"
@@ -26,22 +28,30 @@ def _app_src() -> str:
     return _APP_PY.read_text(encoding="utf-8")
 
 
-# --- Typography lint file list (PR 10 rider) --------------------------------
+# --- Typography lint file list (PR 10 rider; extended PR 15) ----------------
 # `typography_findings()`'s own scope is UI copy a reader sees rendered in
-# HTML — webapp/app.py is where that copy actually lives. Investigated
-# whether other linklib/ modules (agent.py, matchmaker.py, enrich.py,
-# compare.py, feature_scan.py, dedupe.py, tagstyle.py) belong on this list
-# too: every real hit found there is LLM system-/generation-prompt
-# assembly text — instructions Claude reads, never HTML a person sees — so
-# none were added. VOICE_CORE_DEFAULT/VOICE_FPA_BUDDY_DEFAULT specifically
-# (the DB-backed settings text rendered, and editable, at /admin/voice) were
-# checked directly and confirmed already clean (0 violations each), matching
-# this codebase's own PR #526-adjacent history. See the PR description for
-# the full per-module violation count this investigation found and why each
-# was left out. Kept as a real list, not a single hardcoded path, so a
-# future file that DOES belong here (a second module with real rendered UI
-# copy) is a one-line addition, not a refactor.
-TYPOGRAPHY_SCANNED_FILES = (_APP_PY,)
+# HTML — webapp/app.py is where that copy actually lives. PR 10's
+# investigation checked the other linklib/ modules (agent.py, matchmaker.py,
+# enrich.py, compare.py, feature_scan.py, dedupe.py, tagstyle.py) and found
+# every real hit there was LLM system-/generation-prompt assembly text —
+# instructions Claude reads, never HTML a person sees — so none were added
+# at the time.
+#
+# PR 15 revisits that call for enrich.py and feature_scan.py specifically
+# (69 and 23 violations respectively), on the same reasoning that got
+# VOICE_CORE_DEFAULT/VOICE_FPA_BUDDY_DEFAULT held to this standard: prompt
+# text isn't ordinary code, it's text the model reads and imitates, so a
+# spaced em dash inside a prompt demonstrates the exact thing the prompt
+# forbids. Both files were swept and fixed (mechanical only — spaced em
+# dashes collapsed, no rewording) in the same PR; "CFOs & VP Finance" and
+# "Flux Analysis & Summaries" are real terms, not lazy "and"s, so they're
+# allowlisted in AMPERSAND_NAMES rather than rewritten. The rest of the
+# PR 10 module list (agent.py, matchmaker.py, compare.py, dedupe.py,
+# tagstyle.py) is unchanged — not swept as part of this PR.
+#
+# Kept as a real list, not a single hardcoded path, so a future file that
+# DOES belong here is a one-line addition, not a refactor.
+TYPOGRAPHY_SCANNED_FILES = (_APP_PY, _ENRICH_PY, _FEATURE_SCAN_PY)
 
 
 def _typography_sources() -> list[tuple[pathlib.Path, str]]:

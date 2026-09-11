@@ -104,6 +104,8 @@ AMPERSAND_ACRONYMS = ["FP&A", "R&D", "Q&A", "P&L", "M&A", "S&P", "S&M", "D&A", "
 AMPERSAND_NAMES = [
     "Sales & Marketing",       # the GAAP line item, spelled out on the Growth Engine calculator
     "Research & Development",  # ditto
+    "CFOs & VP Finance",       # linklib/enrich.py community-profile prompt example, per Brian
+    "Flux Analysis & Summaries",  # linklib/feature_scan.py few-shot example, per Brian
 ]
 
 # Code that legitimately contains an ampersand inside a string literal, removed
@@ -173,8 +175,24 @@ def scannable_copy(literal: str) -> str:
     """
     text = strip_embedded_comments(literal)
     text = _mask(text, _AMP_CODE_PATTERNS)
-    allow = [re.compile(re.escape(t).replace(r"\&", r"(?:&amp;|&)"), re.IGNORECASE)
-             for t in AMPERSAND_NAMES + AMPERSAND_ACRONYMS]
+    # Built token-by-token (not a single re.escape + substitute pass) so the
+    # space BETWEEN tokens becomes \s+ rather than a literal single space —
+    # a triple-quoted prompt string can line-wrap mid-term (e.g. "...Flux
+    # Analysis\n  & Summaries...") with no change in rendered meaning, and a
+    # literal-space pattern would miss that.
+    def _term_pattern(term: str) -> re.Pattern:
+        def _tok(tok: str) -> str:
+            if tok == "&":
+                return r"(?:&amp;|&)"
+            # An acronym token can carry the '&' embedded with no surrounding
+            # whitespace (e.g. "FP&A") — re.escape() turns a literal '&' into
+            # '\&', so a straight substring replace still finds it here.
+            return re.escape(tok).replace(r"\&", r"(?:&amp;|&)")
+
+        parts = [_tok(tok) for tok in re.split(r"\s+", term)]
+        return re.compile(r"\s+".join(parts), re.IGNORECASE)
+
+    allow = [_term_pattern(t) for t in AMPERSAND_NAMES + AMPERSAND_ACRONYMS]
     return _mask(text, allow)
 
 

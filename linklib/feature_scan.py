@@ -193,7 +193,7 @@ _RULES_EXCERPT = """- A feature names the job done from the BUYER's perspective,
   vendor's branding or implementation (no product names, no trademarked
   terms).
 - Never use "AI," "AI-powered," "AI-driven," or "agentic" anywhere in a
-  feature NAME — AI-ness is the separate ai_enabled flag below, never part
+  feature NAME—AI-ness is the separate ai_enabled flag below, never part
   of the name.
 - Prefer short names; put a qualifier, comparison point, or scope caveat in
   the definition field, not folded into the name.
@@ -205,7 +205,7 @@ _RULES_EXCERPT = """- A feature names the job done from the BUYER's perspective,
   credible has it, buyers want the baseline verified), or a genuine
   standout (a novel capability). Skip marketing filler and micro-features
   nobody actually decides on.
-- Product features only — never vendor services (onboarding, support
+- Product features only—never vendor services (onboarding, support
   staffing) or commercial terms (pricing model, contract terms).
 - availability is exactly "native" (included in the standard offering) or
   "add_on" (costs more: paid module, upgrade, or higher-tier gating).
@@ -253,12 +253,12 @@ vendor's content maps to one of these, reuse the EXACT SAME name rather
 than inventing a near-duplicate under different wording): {existing_names}
 
 Propose every candidate feature this vendor's content genuinely supports
-that clears the bar above — {roster_note}. Do not cap yourself at any
+that clears the bar above—{roster_note}. Do not cap yourself at any
 particular count; a later human review is the actual curation gate, not
 you.
 
 For each candidate feature, decide availability, ai_enabled, and cite the
-SPECIFIC URL from the content below that supports the claim — copy that
+SPECIFIC URL from the content below that supports the claim—copy that
 URL EXACTLY as it appears in the "--- Section (URL) ---" header above the
 section you're citing, character for character; never paraphrase, shorten,
 or invent a URL. If the content only weakly supports a claim, or you are
@@ -419,7 +419,7 @@ def _call_and_parse_array(prompt: str, model: str, max_tokens: int, retry_max_to
     items, truncated = _parse_json_array(raw, array_key)
     if truncated:
         _logger.warning(
-            "%s: response truncated at max_tokens=%d (salvaged %d item(s)) — retrying once "
+            "%s: response truncated at max_tokens=%d (salvaged %d item(s))—retrying once "
             "at max_tokens=%d.", log_label, max_tokens, len(items), retry_max_tokens,
         )
         raw2, in_tok2, out_tok2, cache_w2, cache_r2 = _call_claude(prompt, model, retry_max_tokens)
@@ -519,18 +519,18 @@ def draft_tool_features_for_category(
         )[:60000]
     else:
         content_block = (
-            "(No vendor-domain content could be found or fetched — draft from your own "
+            "(No vendor-domain content could be found or fetched—draft from your own "
             "knowledge of this vendor if you have it, keeping to the rules above, and set "
             "every feature's \"confident\" to false unless you are genuinely certain.)"
         )
 
     existing_names = ", ".join(existing_feature_names or []) or (
-        "(none yet — this is the first tool researched for this category)"
+        "(none yet—this is the first tool researched for this category)"
     )
     if roster_size and roster_size < 4:
         roster_note = (
             f"this category has only {roster_size} tools in its roster so far, which is too "
-            "few to meaningfully judge whether vendors 'split on' a capability — SKIP the "
+            "few to meaningfully judge whether vendors 'split on' a capability—SKIP the "
             "differentiator criterion and propose only table-stakes-worth-confirming and "
             "standout features"
         )
@@ -636,7 +636,7 @@ _JUDGE_RETRY_MAX_TOKENS = 16000
 
 def _format_candidate_line(i: int, tool_name: str, feature: ProposedFeature) -> str:
     definition = (feature.definition or "")[:200]
-    return f"{i}. [{tool_name}] {feature.name} — {definition}"
+    return f"{i}. [{tool_name}] {feature.name}—{definition}"
 
 
 def _validate_partition(groups: list, n: int) -> list[list[int]]:
@@ -723,8 +723,8 @@ list above):
 
 For each new candidate, decide: does it plausibly describe the SAME job as
 one of the existing capabilities above? If so, give that existing
-capability's index. If it's genuinely new — no existing capability
-plausibly matches — say so. When genuinely uncertain, prefer "new" over
+capability's index. If it's genuinely new—no existing capability
+plausibly matches—say so. When genuinely uncertain, prefer "new" over
 guessing a match: a human reviewing the queue can merge two near-duplicate
 proposals easily; a false match could bury a real distinction inside a
 link note where it's much harder to catch.
@@ -824,7 +824,7 @@ near-duplicate proposals easily; recovering a real distinction that was
 silently merged away is much harder. Only merge candidates you are
 CONFIDENT describe the same job by the test above.
 
-The clustering pass groups loosely — this cluster may actually contain
+The clustering pass groups loosely—this cluster may actually contain
 more than one real distinct feature. You may partition it into as many
 final groups as the candidates actually warrant.
 
@@ -834,7 +834,7 @@ Candidates (0-indexed, within this cluster only):
 For each final group with MORE THAN ONE candidate, propose ONE canonical
 name (sentence case, outcome-oriented, no vendor branding, never the word
 "AI" in any form) and definition synthesizing all its candidates'
-descriptions — do not just copy one vendor's wording verbatim. A group
+descriptions—do not just copy one vendor's wording verbatim. A group
 with exactly one candidate needs no canonical name.
 
 Return STRICT JSON only (no prose, no markdown fences):
@@ -1027,7 +1027,7 @@ def originate_category_features(
             clustering_degraded_tools.append(tool["name"])
             _logger.warning(
                 "originate_category_features(): incremental clustering match failed for "
-                "%s/%s — falling back to treating all %d of its candidates as new (unmerged).",
+                "%s/%s—falling back to treating all %d of its candidates as new (unmerged).",
                 category_name, tool["name"], len(new_candidates),
             )
             matches = [None] * len(new_candidates)
@@ -1073,7 +1073,7 @@ def originate_category_features(
                 if c.tool_id in seen_tools:
                     _logger.warning(
                         "originate_category_features(): dropped duplicate tool_id=%s within "
-                        "one merge group for %s (%s) — that tool proposed more than one "
+                        "one merge group for %s (%s)—that tool proposed more than one "
                         "candidate judged into the same group.",
                         c.tool_id, category_name, c.feature.name,
                     )
@@ -1179,38 +1179,38 @@ class QueueItemCandidate:
 
 
 def _format_bucket_line(b: FrameworkBucket) -> str:
-    hint = f" — {b.hint}" if b.hint else ""
+    hint = f"—{b.hint}" if b.hint else ""
     return f"{b.index}. [{b.group}] {b.name}{hint}"
 
 
 def _format_queue_item_line(i: int, c: QueueItemCandidate) -> str:
     definition = (c.definition or "")[:220]
-    return f"{i}. (queue #{c.item_id}) {c.name} — {definition}"
+    return f"{i}. (queue #{c.item_id}) {c.name}—{definition}"
 
 
 _FRAMEWORK_MATCH_PROMPT = """You are mapping existing draft feature proposals for the CFO Toolbox's "{category}"
 category onto a FIXED, human-approved target feature list. A person has
 already reviewed the raw scan output and decided exactly what buckets this
-category's feature list should have — your only job is deciding which
+category's feature list should have—your only job is deciding which
 bucket (if any) each proposal below actually belongs in, using the same
 same-job test §7 of the Feature Taxonomy rules doc uses for merging:
 
 {unify_test}
 
-Match on what the capability actually DOES, not on surface wording — a
+Match on what the capability actually DOES, not on surface wording—a
 proposal phrased very differently from a bucket's name can still be an
 exact match, and a proposal that echoes a bucket's name in different words
 can still be about a genuinely different job. Some proposals will
 correctly belong to NONE of the buckets below (e.g. a retail/consumer-perk,
 point-of-sale, or BaaS-partner-facing capability that isn't relevant to a
-CFO buyer) — that's an expected, correct outcome, not a failure to find a
+CFO buyer)—that's an expected, correct outcome, not a failure to find a
 match. When genuinely uncertain between two plausible buckets, or between a
 bucket and "none," prefer the interpretation a human reviewer would find
 easiest to correct: a wrong "none" just needs picking up in review; a wrong
 match can bury a real distinction inside a merged feature where it's much
 harder to catch. So when truly torn, prefer "none" over guessing.
 
-Target buckets (fixed — 0-indexed, do not invent new ones):
+Target buckets (fixed—0-indexed, do not invent new ones):
 {bucket_list}
 
 Proposals to map (0-indexed, SEPARATELY from the bucket list above):
@@ -1298,7 +1298,7 @@ earlier matching step. Write ONE synthesized definition for "{bucket_name}"
 that reflects what this capability means across the roster, following
 docs/FEATURE_TAXONOMY.md §3: outcome-oriented, plain language, never the
 word "AI" in any form, no vendor branding or product names. Do not just
-copy one vendor's wording verbatim — genuinely synthesize.
+copy one vendor's wording verbatim—genuinely synthesize.
 
 Candidate definitions being merged into this one bucket:
 {definition_list}

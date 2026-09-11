@@ -7022,6 +7022,76 @@ it supersedes the old "`/save` is token-gated" note.
   (now the authoritative, always-current version) and ARCHITECTURE.md's
   matching bullet for the technical write-up.
 
+- **PR 15 (2026-09) — Users-page layout fixes, Bulk delete's non-standard
+  layout corrected, prompt-text typography joins the mechanical lint, and
+  four riders.** Two live-page review findings, both fixed: the "Add a
+  member"/"Default usage caps" boxes on `/admin/users` weren't vertically
+  aligned because "Add a member" had an `<h2>` above its form while the
+  caps column had none at all (grid `align-items:start` means both columns
+  start at the row top, but the left column's actual form was pushed down
+  by its own heading) — fixed by giving the caps column a matching heading,
+  not by nudging pixel values. "Delete selected" sat alone on its own row
+  with nothing to pair with (Users has no bulk "Edit selected" sibling,
+  unlike Software/Communities) — moved into the sort/filter toolbar's own
+  row via a new `extra_html` parameter on `_admin_sort_filter_toolbar_html`
+  (empty by default, so every other caller is unaffected), and switched
+  from `disabled` to `hidden` so it disappears entirely rather than sitting
+  grayed out — the existing bulk-delete confirm-panel/typed-guard mechanism
+  is untouched. `/admin/reader/bulk-delete` wrapped its whole page body in
+  one hand-picked `max-width:640px` card, unlike every sibling Reader tool
+  (backfill-content, dedupe), which are full-width `.page-standard` with
+  sections/cards sized to their own content — fixed to match; the
+  preview-before-commit step (a separate route/page) was already correctly
+  full-width and untouched.
+  **Typography**: `linklib/enrich.py` (69 violations) and
+  `linklib/feature_scan.py` (23) join `TYPOGRAPHY_SCANNED_FILES` — the
+  PR 10 investigation that left prompt-assembly text out (reasoning it's
+  text Claude reads, not HTML a person sees) is reversed for these two on
+  the same grounds that got `VOICE_CORE_DEFAULT` held to this standard: the
+  model reads and imitates prompt text, so a spaced em dash inside a prompt
+  demonstrates the exact thing the prompt forbids. Mechanical fix only —
+  spaced em dashes collapsed to unspaced, no rewording — applied only
+  inside actual string-literal spans (via the same AST walk
+  `typography_findings` itself uses), never touching `#`-comment prose.
+  `"CFOs & VP Finance"` and `"Flux Analysis & Summaries"` are real terms,
+  not lazy "and"s, so both join `AMPERSAND_NAMES` rather than being
+  rewritten — the latter line-wraps mid-term inside a triple-quoted prompt
+  string (`docs/FEATURE_TAXONOMY.md`'s §7 verbatim few-shot excerpt,
+  `_UNIFY_TEST_EXCERPT`), which needed `scannable_copy`'s allowlist matcher
+  to tolerate `\s+` between a term's words instead of a literal single
+  space — a real, generally-useful checker fix, not a one-off workaround.
+  That excerpt is the one place in `feature_scan.py` genuinely used as
+  few-shot grounding the model is told to reason from; it carries no
+  em-dash violation, only the now-allowlisted ampersand, so nothing about
+  its demonstrated content changed. Every other em-dash fix in both files
+  sits in ordinary instructional prompt prose or in roster-line formatting
+  helpers (`_format_candidate_line`, `_format_queue_item_line` — data
+  separators, not demonstrated output style), not inside a worked example.
+  **Riders**: (1) Software's and Communities' approved-tables admin lists
+  no longer carry their own individually-computed exception floors (820px/
+  880px) — both now share the Xwide bucket (960px) and a 280px sticky Name
+  column (Software widened from 220px), per Brian's explicit call that the
+  two tables should be structurally identical, not merely similar; the
+  first instance of a larger, separately-scoped column-width-standardization
+  job, not that job itself. (2) The three PR-11 tables that shared a
+  hand-picked 620px (Software categories, Community categories) or 640px
+  (Resources) now reference `_TABLE_FLOOR_NARROW`/`_TABLE_FLOOR_MEDIUM` by
+  column count like the other 22 tables. (3) `/admin/emails` 500'd
+  unconditionally (not just on a fresh DB, contrary to this PR's own build
+  brief — confirmed by reproducing it directly) because `NOTIFICATION_TYPE_
+  LABELS` had no `library_submission` entry even though `_INTERNAL_EMAIL_
+  ROWS` and the real `/library/submit` notification call site both use it
+  (added in the Archive Queue retirement, PR 3) — fixed by adding the
+  missing label; every other `notification_type` value already had one.
+  (4) `linklib.brand_check._HEX_RE` mistook a PR/issue reference like
+  `PR #529` for a 3-digit hex color — the third time this exact false
+  positive has hit the repo (#465, #318, #529), each previously worked
+  around by rewording the comment rather than fixing the checker. Fixed
+  with a negative lookbehind excluding a `#\d{3}` match preceded by `PR `,
+  `issue `, or `#` (case-insensitive), and the two previously-reworded
+  comments ("PR 465", "PR 12 (PR 529)") were reverted back to their natural
+  `PR #465`/`PR 12 (PR #529)` phrasing.
+
 
 ## Authentication & security
 
