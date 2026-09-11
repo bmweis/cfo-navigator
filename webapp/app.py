@@ -6727,6 +6727,19 @@ _TOOLBOX_TILES = (
 # (_ICON_HALF_CIRCLE) has a hardcoded seafoam-deep fill that a navy badge
 # ring would visibly clash with — see that icon's own comment for the full
 # story of why this stopped being free once coral left the cycle.
+#
+# This pin closes the one known clash, not the general risk: every OTHER
+# icon in this file's `_ICON_*` set (checked directly — _ICON_BRAIN/
+# _ICON_WRENCH/_ICON_CHART/_ICON_PEOPLE/_ICON_PENCIL/_ICON_MIC/
+# _ICON_HEADPHONES/_ICON_NEWSPAPER) is a plain stroke path with no fill of
+# its own, so it takes on whatever badge color the position-based cycle
+# assigns — array-position cycling is safe for them by construction.
+# _ICON_HALF_CIRCLE is the only icon that opts out of that by hardcoding a
+# fill, and nothing here would catch a second one landing at an unpinned
+# position the same way. Cheap to guard mechanically (a small registry of
+# fixed-fill icon -> required index, checked the same way brand_check.py
+# already scans for hardcoded hex values) if this recurs — not built here
+# since there's exactly one instance to protect today.
 _TOOLBOX_BADGE_INDEX = {"/tools/fpa-buddy": 0}
 
 
@@ -8732,6 +8745,7 @@ def tools_resources(request: Request):
   <h1 style="margin:0;">Resources</h1>
   {'<a href="/admin/tools/resources" style="font-size:14px;font-weight:500;">Manage →</a>' if authed else ''}
 </div>
+<p style="color:var(--ink-soft);font-size:15px;line-height:1.6;margin:14px 0 0;">What&rsquo;s here: the benchmarking sources I rely on, and books that shaped how I do this job. Not exhaustive, just what&rsquo;s held up.</p>
 <p style="font-size:13px;color:var(--muted);margin:8px 0 24px;"><a href="/contact?context=resource-suggestion" style="color:var(--accent);font-weight:500;">Suggest a resource &rarr;</a></p>
 <h2 style="margin:0 0 4px;">Benchmarking</h2>
 <p style="color:var(--muted);font-size:14px;margin:0 0 12px;">The benchmarking sources I actually use.</p>
