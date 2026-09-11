@@ -469,7 +469,7 @@ An admin table's `min-width` — the point below which it scrolls horizontally
 (inside its own `overflow-x:auto` wrapper) rather than squeezing its columns
 unreadably narrow — is picked from **four rule-based buckets, by column
 count**, not chosen by eye per table (PR 14, 2026-09, replacing 23 tables'
-worth of hand-picked values from PR 12/#529):
+worth of hand-picked values from PR 12/PR 529):
 
 | Bucket | Floor | Columns |
 |---|---|---|

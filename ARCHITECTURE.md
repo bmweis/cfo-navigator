@@ -327,7 +327,7 @@ state as of their own PR, not the current value; BRAND.md §5 is the one
 place that always reflects today's actual numbers.
 
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
-— replaces the 22 hand-picked `min-width` values PR 12/#529 chose by eye
+— replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column
 count (`_TABLE_FLOOR_NARROW` 480px for 2-3 columns, `_TABLE_FLOOR_MEDIUM`
 640px for 4-5, `_TABLE_FLOOR_WIDE` 800px for 6-7, `_TABLE_FLOOR_XWIDE`

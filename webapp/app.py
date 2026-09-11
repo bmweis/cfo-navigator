@@ -1593,7 +1593,7 @@ details[open] > summary .disclosure-caret{transform:rotate(90deg);}
 """
 
 # Admin table width floors (PR 14, 2026-09) — replaces 22 hand-picked
-# `min-width` values PR 12/#529 chose by eye per table (480/620/640/700/
+# `min-width` values PR 12 (PR 529) chose by eye per table (480/620/640/700/
 # 720/760/780/800/820/880px, no shared logic between them) with four
 # rule-based buckets, keyed to how many columns a table actually renders
 # by default. The point is a rule someone can follow going forward: "does
