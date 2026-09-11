@@ -1388,30 +1388,53 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 /* Width tiers, keyed to content shape rather than one global reading
    measure — see BRAND.md §5. .page supplies shared margin/padding; combine
    it with a tier class for the actual max-width, e.g. class="page
-   page-full" (the later class wins the max-width tie). The original
-   .page-narrow/.page-wide two-tier system is fully retired as of the
-   Phase 9 sweep — every route now carries one of the five tiers below. */
+   page-standard" (the later class wins the max-width tie). The original
+   .page-narrow/.page-wide two-tier system was retired at the Phase 9 sweep;
+   PR 13 (2026-09) collapsed that system's four tiers down to three — the
+   old .page-full (1440) and .page-admin (1400) were 40px apart, a
+   distinction no reader could perceive and no one could maintain
+   deliberately, so both retire outright in favor of one Standard tier at
+   the old .page-grid's own 1300px (the value Brian confirmed already felt
+   right) — a genuine 3-into-1 merge of .page-full/.page-grid/.page-admin
+   into .page-standard, not a rename of one survivor. A new
+   Content tier splits off from .page-full's old audience for the pages that
+   are pure long-form reading (About, the ported thought-leadership
+   articles, the FP&A Buddy explainer): investigated first — on every one of
+   those pages, everything outside the 760px .tool-prose column is a
+   back-link line, an eyebrow, or a diagram/table already capped narrower
+   than .tool-prose itself, so nothing on them actually needs 1300px. 900px
+   gives a little breathing room over the 760px reading column without
+   pretending there's real content to fill more than that — see PR 13's own
+   description for why a future pass might fold this tier into Standard
+   entirely rather than keep three. */
 .page{width:100%;max-width:780px;margin:0 auto;padding:48px 24px 72px;}
 
-.page-full{max-width:1440px;}   /* full-width content — homepage/about, TL landing, reader.
-                                    Narrowed from 1900px (PR 12, 2026-09): Brian's own read
-                                    of nearly every page on this tier was "too wide" — a
-                                    760px .tool-prose column, or a hero/sidebar grid, floating
-                                    inside a ~1900px shell reads thin and stranded rather than
-                                    generous. The Toolbox directory pages (.page-grid, 1300px)
-                                    were the one width he pointed to as feeling right, so this
-                                    tier moved toward it without merging into it outright —
-                                    see PR 12's own description for the open question on
-                                    whether the two tiers should eventually collapse into one. */
-.page-grid{max-width:1300px;}   /* card grids (CFO Toolbox landing) and the Software
-                                    add/edit forms, which need the extra width for the
-                                    long-form description field. Unchanged in PR 12 — this
-                                    is the width Brian confirmed already feels right. */
-.page-form{max-width:640px;}    /* forms — contact, admin edit forms */
-.page-admin{max-width:1400px;} /* admin data tables — communities list. Narrowed from
-                                    1500px (PR 12, 2026-09) for the same reason as .page-full
-                                    above — still wide enough for a many-column admin table to
-                                    breathe before its own overflow-x:auto scroll kicks in. */
+.page-standard{max-width:1300px;} /* the default tier: homepage, Thought
+                                    Leadership landing, every CFO Toolbox
+                                    directory/profile/matchmaker page, every
+                                    admin page (data tables included — they
+                                    already carry their own min-width floors
+                                    and horizontal scroll, so narrowing this
+                                    shell doesn't squeeze a table, it scrolls
+                                    it), and the FP&A Buddy/GER-calculator/
+                                    Sail Don't Row "functional tool" pages,
+                                    whose own .tool-inner already caps at
+                                    this same 1300px regardless of the outer
+                                    shell. Replaces .page-full/.page-grid/
+                                    .page-admin as of PR 13 (2026-09). */
+.page-content{max-width:900px;}   /* pure long-form reading: About, the
+                                    ported thought-leadership articles
+                                    (Growth Engine Ratio, Sail Don't Row, the
+                                    NetSuite MCP piece), the FP&A Buddy
+                                    "how it works" explainer, and your own
+                                    Ask history — every one of these renders
+                                    almost entirely inside the 760px
+                                    .tool-prose column; this tier exists only
+                                    for the few lines (a back-link, an
+                                    eyebrow) that sit outside it. New in
+                                    PR 13 (2026-09), split off from the old
+                                    .page-full. */
+.page-form{max-width:640px;}      /* forms — contact, admin edit forms */
 
 /* Two-column split for Software's Add/Edit forms (2fr wide left column,
    1fr narrow right column holding a few short fields). Stacks to one
@@ -1423,12 +1446,14 @@ p{margin:0 0 16px;color:var(--ink-soft);}
    used to sit in their own narrow .page-tool tier (960px), which read as
    visibly boxed-in next to every other content page, so a lone 960px card was
    the one thing forcing those pages to stay narrow even on a wide monitor.
-   Phase 9b moved them to .page-full and widened their working width to
-   card-grid scale (1300px, .tool-inner) so the calculator/chat/game card
-   actually gets to use the room. .tool-prose (760px) is for long-form
-   paragraphs — GER's, nested inside .tool-inner — full 1300px is too wide a
-   text measure to read comfortably, but the calculator itself benefits from
-   the extra room. */
+   Phase 9b moved them onto the (now-retired) .page-full and widened their
+   working width to card-grid scale (1300px, .tool-inner) so the
+   calculator/chat/game card actually gets to use the room — as of PR 13
+   they sit on .page-standard instead, at the identical 1300px value, so
+   nothing about this box's own layout changed. .tool-prose (760px) is for
+   long-form paragraphs — GER's, nested inside .tool-inner — full 1300px is
+   too wide a text measure to read comfortably, but the calculator itself
+   benefits from the extra room. */
 .tool-inner{max-width:1300px;margin:0 auto;}
 .tool-prose{max-width:760px;margin:0 auto;}
 
@@ -3612,7 +3637,7 @@ def homepage(request: Request):
         <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Archive, and Read Later in one place.</p>
       </a>""" if is_admin else "")
 
-    body = f"""<div class="page page-full">
+    body = f"""<div class="page page-standard">
 {password_nudge_html}
 <style>
 {_TL_SHARED_CSS}
@@ -3747,7 +3772,7 @@ def about_page(request: Request):
         about_copy = lib.get_setting("about_page_copy") or _ABOUT_COPY_DEFAULT
     finally:
         lib.close()
-    body = f"""<div class="page page-full">
+    body = f"""<div class="page page-content">
 <div class="tool-prose">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
   {_avatar(140)}
@@ -3893,7 +3918,7 @@ def thought_leadership(request: Request):
         lib.close()
 
     body = (
-        '<div class="page page-full">'
+        '<div class="page page-standard">'
         '<style>'
         + _TL_SHARED_CSS + _TL_COLUMN_CSS +
         '</style>'
@@ -3957,7 +3982,7 @@ def growth_engine_ratio_redirect(request: Request):
 # ported copy).
 @app.get("/thought-leadership/growth-engine-calculator", response_class=HTMLResponse)
 def growth_engine_calculator(request: Request):
-    body = """<div class="page page-full article-atlantic">
+    body = """<div class="page page-standard article-atlantic">
 <div class="tool-inner">
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -6056,7 +6081,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
           .replace("__COURSE_LENGTH__", str(_SDR_COURSE_LENGTH))
           .replace("__SIGNED_IN__", "true" if signed_in else "false"))
 
-    return """<div class="page page-full">
+    return """<div class="page page-standard">
 <div class="tool-inner" id="sdrRoot">
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
@@ -6254,7 +6279,7 @@ def play_leaderboard(request: Request, scope: str = "week"):
         rows_html = ('<p style="padding:24px;text-align:center;color:var(--muted);">'
                      'No runs yet—be the first to set a Score.</p>')
 
-    body = """<div class="page page-full">
+    body = """<div class="page page-standard">
 <div class="tool-inner">
 <style>""" + _SDR_PILL_CSS + """
 .sdr-lb-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;}
@@ -6696,7 +6721,7 @@ def tools_landing(request: Request):
             _ICON_BOOK, border=_ADMIN_ONLY_BORDER, background=_ADMIN_ONLY_BG,
             new_tab=True)
 
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 <style>
 .toolbox-grid{{display:grid;grid-template-columns:1fr;gap:16px;}}
 @media(min-width:560px){{.toolbox-grid{{grid-template-columns:1fr 1fr;}}}}
@@ -6789,7 +6814,7 @@ def tools_directory(request: Request, warn: str = ""):
         if warn and authed else ''
     )
 
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 {warn_banner}
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
@@ -7457,7 +7482,7 @@ def tools_software_compare(request: Request, ids: str = ""):
     back_link = '<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>'
 
     if len(tools) < 2:
-        body = f"""<div class="page page-grid">
+        body = f"""<div class="page page-standard">
 {back_link}
 <h1 style="margin:0;">Compare software</h1>
 <p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Pick at least two tools from the directory
@@ -7525,7 +7550,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         + "</tr>"
     )
 
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 {back_link}
 <h1 style="margin:0;">Compare software</h1>
 <p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">A quick read on overlap and contrast across
@@ -7565,7 +7590,7 @@ confirmed yet.</p>
 @app.get("/tools/software/find", response_class=HTMLResponse)
 def tools_software_find(request: Request):
     session_id = _visitor_session_id(request)
-    body = """<div class="page page-full">
+    body = """<div class="page page-standard">
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
@@ -8229,7 +8254,7 @@ function submitIntroForm() {{
         _fs_banner = (f'<p style="background:#fef3c7;color:#92400e;border-radius:10px;padding:10px 16px;'
                       f'font-size:14px;margin:0 0 16px;">{_esc(suggest_error)}</p>')
 
-    body = f"""<div class="page page-full">
+    body = f"""<div class="page page-standard">
 {_fs_banner}
 {main_content}
 </div>
@@ -8593,7 +8618,7 @@ def tools_resources(request: Request):
   {book_cards or '<p style="color:var(--muted);font-size:14px;">Coming soon.</p>'}
 </div>"""
 
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
   <h1 style="margin:0;">Resources</h1>
@@ -8695,7 +8720,7 @@ def tools_communities(request: Request):
         for b in cost_bands
     )
 
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
@@ -9425,7 +9450,7 @@ def tools_communities_compare(request: Request, ids: str = ""):
     back_link = '<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>'
 
     if len(communities) < 2:
-        body = f"""<div class="page page-grid">
+        body = f"""<div class="page page-standard">
 {back_link}
 <h1 style="margin:0;">Compare communities</h1>
 <p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Pick at least two communities from the directory
@@ -9498,7 +9523,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         + "</tr>"
     )
 
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 {back_link}
 <h1 style="margin:0;">Compare communities</h1>
 <p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">A quick read on overlap and contrast across
@@ -9662,7 +9687,7 @@ def admin_compare_summary_feedback(request: Request):
     rows_html = "".join(_row_html(r) for r in rows) or (
         '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No feedback submitted yet.</td></tr>'
     )
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Compare summary feedback</h1>
 <p style="color:var(--muted);margin:8px 0 20px;">Flags on the AI-generated Compare-page overlap/contrast summary. No automated action&mdash;review each and mark it reviewed once handled.</p>
@@ -9705,7 +9730,7 @@ def admin_compare_summary_feedback_mark_reviewed(request: Request, feedback_id: 
 @app.get("/tools/communities/find", response_class=HTMLResponse)
 def tools_communities_find(request: Request):
     session_id = _visitor_session_id(request)
-    body = """<div class="page page-full">
+    body = """<div class="page page-standard">
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
@@ -10303,7 +10328,7 @@ def tools_community_profile(request: Request, slug: str):
 {footnote_block}
 {footer_links}"""
 
-    body = f"""<div class="page page-full">
+    body = f"""<div class="page page-standard">
 {main_content}
 </div>
 <style>
@@ -10898,7 +10923,7 @@ def admin_contacts(request: Request):
         </tr>"""
         for a in audit_rows
     ) or '<tr><td colspan="4" style="padding:16px;color:var(--muted);font-size:13px;">No deletions yet.</td></tr>'
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Contact submissions</h1>
 {email_status}
@@ -10983,7 +11008,7 @@ def admin_email_failures(request: Request):
         </tr>"""
         for f in failures
     ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No failed sends recorded.</td></tr>'
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Email delivery failures</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Every outbound email is best-effort—contact form, tool submissions, welcome emails, password resets, warm intros. The underlying record always saves even if the send fails.</p>
@@ -11864,7 +11889,7 @@ def admin_software(request: Request, filter: str = ""):
     )
 
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
-<div class="page page-admin">
+<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1 style="margin:0 0 4px;">Software vendors</h1>
 <p style="margin:0 0 12px;">
@@ -12155,7 +12180,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
 </table>
 </div>"""
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 <h1 style="margin:0 0 4px;">Name-duplicate check</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">
@@ -12358,7 +12383,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
         for ld in leads
     ) or '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No leads yet.</td></tr>'
     title_suffix = f"—{_esc(tool_name_filter)}" if tool_name_filter else ""
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox intros{title_suffix}</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm intro requests from readers&mdash;{len(leads)} total.</p>
@@ -12452,7 +12477,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
         rows += '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one above.</td></tr>'
     rows = add_row + rows
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Software categories</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">These are the filter pills on <a href="/tools/software">/tools/software</a>.</p>
@@ -12760,7 +12785,7 @@ def admin_tools_features(request: Request, msg: str = "", error: str = "",
     )
 
     body = f"""<script>{_FEATURE_TAXONOMY_JS}</script>
-<div class="page page-admin">
+<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Software features</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">The curated "key features" list for each Toolbox category&mdash;the
@@ -13129,7 +13154,7 @@ def admin_feature_review_queue(request: Request, msg: str = ""):
     if not sections:
         sections = '<p style="color:var(--muted);padding:24px;text-align:center;background:var(--surface);border:1px solid var(--line);border-radius:14px;">Nothing pending review.</p>'
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Feature review queue</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">No proposed change reaches the live feature tables without approval here&mdash;whoever or whatever proposed it (FEATURE_TAXONOMY.md &sect;9).</p>
@@ -13153,7 +13178,7 @@ def _feature_merge_confirm_page(item_id: int, form, existing: dict, vendor_names
         f'<input type="hidden" name="{_esc(k)}" value="{_esc(str(v))}">'
         for k, v in form.multi_items() if k != "confirm_merge"
     )
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/tools/software/feature-review-queue" style="font-size:13px;color:var(--muted);">&larr; Feature review queue</a></p>
 <h1>Confirm merge</h1>
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;max-width:560px;">
@@ -13376,7 +13401,7 @@ def admin_resources(request: Request):
     finally:
         lib.close()
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Resources</h1>
@@ -13934,8 +13959,9 @@ _OC_GER_CSS = (
 
 def _original_content_article_body(row: dict) -> str:
     """The shared article shell for an admin-authored piece — matches the
-    three bespoke pages' own shell exactly (page page-full article-atlantic,
-    the same back-link, .tool-prose, the same eyebrow/h1/byline treatment),
+    three bespoke pages' own shell exactly (page page-content article-atlantic,
+    on the Content tier as of PR 13's width-tier collapse, 2026-09 — the
+    same back-link, .tool-prose, the same eyebrow/h1/byline treatment),
     per the Phase 0 investigation. The bespoke pages hand-author everything
     below the byline; here that's the one rendered .oc-body block instead."""
     date_bits = f'By Brian Weisberg &middot; {_esc(row["date_label"])}' if row["date_label"] else "By Brian Weisberg"
@@ -13945,7 +13971,7 @@ def _original_content_article_body(row: dict) -> str:
         if row["tag_label"] else ""
     )
     body_html = _render_original_content_markdown(row["body_md"] or "")
-    return f"""<div class="page page-full article-atlantic">
+    return f"""<div class="page page-content article-atlantic">
 <style>{_OC_ARTICLE_CSS}{_OC_NETSUITE_MCP_CSS}{_OC_HACKATHON_CSS}{_OC_GER_CSS}</style>
 <div class="tool-prose">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
@@ -14203,7 +14229,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
 
     filters = _filter_link("", "All") + "".join(_filter_link(t, label) for t, label in _TL_TYPES)
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Third-party content</h1>
@@ -14545,7 +14571,7 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
                              'Preview &rarr;</span>')
     else:
         preview_html = ""
-    return f"""<div class="page page-admin">
+    return f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/thought-leadership/original" style="font-size:13px;color:var(--muted);">&larr; Original content</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
@@ -14640,7 +14666,7 @@ def admin_original_content(request: Request, status: str = ""):
 
     filters = _filter_link("", "All") + _filter_link("live", "Live") + _filter_link("draft", "Draft")
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Original content</h1>
@@ -15531,7 +15557,7 @@ def admin_communities(request: Request, filter: str = ""):
     )
 
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
-<div class="page page-admin">
+<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1 style="margin:0 0 4px;">Communities</h1>
 <p style="margin:0 0 12px;">
@@ -15926,7 +15952,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
         rows += '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one above.</td></tr>'
     rows = add_row + rows
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <h1>Community categories</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">These are the filter pills on <a href="/tools/communities">/tools/communities</a>.</p>
@@ -16013,10 +16039,10 @@ def admin_communities_new(request: Request):
     # Admin intake form layout pass: mirrors Edit community's grouping below
     # (Name/URL + Featured/Advisor folded into one "Community Details" block,
     # no separate "Disclosures" label) rather than the old fully-flat field
-    # order, so Add and Edit read the same way. Widened to page-grid to
+    # order, so Add and Edit read the same way. Widened to page-standard to
     # match — see admin_communities_edit's layout comment for why.
     _parts = _community_form_fields_parts(categories=categories)
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 <h1>Add a community</h1>
 <form method="post" action="/admin/tools/communities/new" style="display:grid;gap:20px;">
 {_parts['identity_block']}
@@ -16261,7 +16287,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     _logo_in_form_html, _logo_after_form_html = _logo_admin_section(
         c, c['id'], "communities", logo_refetch_banner_html)
     _parts = _community_form_fields_parts(c, categories, logo_in_form_html=_logo_in_form_html)
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
 <p style="font-size:13px;color:var(--muted);margin:-8px 0 24px;"><a href="/admin/tools/communities/{c['id']}/profile">Edit the 23-field community profile draft &rarr;</a></p>
@@ -16807,7 +16833,7 @@ def admin_community_profile_edit(request: Request, community_id: int):
   {_review_line_html}
 </div>"""
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <h1>Profile: {_esc(c['name'])}</h1>
 {_profile_review_status_html}
@@ -17054,7 +17080,7 @@ def admin_tools_new(request: Request):
         categories = lib.list_tool_categories()
     finally:
         lib.close()
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 <h1>Add software</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
 <form method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
@@ -17654,7 +17680,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     _logo_in_form_html, _logo_after_form_html = _logo_admin_section(
         tool, tool_id, "tools", _logo_refetch_banner_html)
 
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 <h1>Edit software</h1>
 {_CROPPER_CDN_HTML}
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
@@ -19057,13 +19083,21 @@ a:hover{opacity:.8;}
   padding:4px 8px;border-radius:6px;font-size:13px;}
 .reader-controls button:hover{background:var(--line);}
 
-/* Full-width tier (BRAND.md §5) — main column keeps a readable measure, the
+/* Standard tier (BRAND.md §5) — main column keeps a readable measure, the
    "On this page" TOC sits at the true right edge of the wide canvas.
-   Tracks .page-full's own max-width (PR 12, 2026-09: 1900px → 1440px) even
-   though this page is built from its own standalone _READER_TMPL/_READER_CSS
-   and never uses the .page/.page-full classes directly — see the
-   _PAGE_INDEX_CUSTOM_EXCEPTIONS comment above naming this route page-full. */
-.reader-layout{display:flex;justify-content:space-between;gap:40px;max-width:1440px;margin:0 auto;padding:56px 24px 100px;}
+   Tracks .page-standard's own max-width (PR 13, 2026-09: 1440px → 1300px,
+   following the .page-full → .page-standard merge) even though this page is
+   built from its own standalone _READER_TMPL/_READER_CSS and never uses the
+   .page/.page-standard classes directly — see the _PAGE_INDEX_CUSTOM_EXCEPTIONS
+   comment above naming this route page-standard. Deliberately NOT the new,
+   narrower Content tier (900px): .reader-main (760px) + .reader-toc (220px)
+   + the 40px gap between them need ~1020px just for the two-column layout
+   itself, before any side padding — squeezing the outer shell to 900px would
+   force .reader-main (which has min-width:0, so it CAN shrink) below its own
+   760px reading-column floor, which is exactly the measure this page exists
+   to protect. Standard's 1300px keeps the same generous margin around that
+   1020px content this route always had at wider values. */
+.reader-layout{display:flex;justify-content:space-between;gap:40px;max-width:1300px;margin:0 auto;padding:56px 24px 100px;}
 .reader-main{max-width:760px;min-width:0;}
 .reader-toc{width:220px;flex-shrink:0;position:sticky;top:64px;align-self:flex-start;}
 .reader-toc-title{font:600 11.5px 'DM Sans',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
@@ -20673,7 +20707,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         '<li><strong>A human/AI partnership.</strong> I decide what goes into the archive: reading, vetting, and saving what&rsquo;s actually worth keeping. From there, AI handles execution and delivery: a pipeline built on Claude (Anthropic), Exa&rsquo;s search API, and the Internet Archive&rsquo;s Wayback Machine keeps it structured and recoverable even when a source moves or gets blocked, and synthesizes every cited answer you get.</li>'
     )
 
-    body = f"""<div class="page page-full">
+    body = f"""<div class="page page-standard">
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/" style="font-size:13px;color:var(--muted);">&larr; Home</a></p>
 <span class="ask-eyebrow">CFO Navigator</span>
@@ -21436,7 +21470,7 @@ def ask_history(request: Request):
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
          '<a href="/tools/fpa-buddy">Ask a question &rarr;</a></div>')
 
-    body = f"""<div class="page page-full">
+    body = f"""<div class="page page-content">
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
@@ -21895,7 +21929,7 @@ def admin_open_source(request: Request):
             f'</div>')
 
     total = sum(len(items) for _, _, items in _OPEN_SOURCE)
-    body = f"""<div class="page page-grid">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Built with open source</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 6px;font-size:16px;line-height:1.6;">This whole site stands on the shoulders of {total}-plus open-source projects&mdash;maintained by people who gave their work away so the rest of us could build. From the framework that serves every page to the tiny tool that keeps the code tidy and the one that drew the favicon, none of it would exist without them. With gratitude. &#129518;</p>
@@ -22191,7 +22225,7 @@ def admin_system_scripts(request: Request):
             f'</section>'
         )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Scripts</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">The CLI scripts still worth running&mdash;purpose, cadence, required env vars, and exact invocation. Hand-maintained: a small, slow-changing list, kept honest by the standing rule in CLAUDE.md that any PR touching <code>scripts/</code> updates this page in the same PR. One-time migrations and closed-investigation reports that have done their job live in <code>scripts/archive/</code> instead, off this list.</p>
@@ -22662,7 +22696,7 @@ def admin_system_database(request: Request):
 thead .cc-cell{{border-bottom:2px solid var(--line);}}
 </style>"""
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Database</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, and row counts, introspected from the schema on every page load. This schema declares no SQL foreign keys, so relationship lines below come from a small hand-maintained map (see <code>_DB_RELATIONSHIPS</code> in <code>webapp/app.py</code>) rather than the database itself. Summary-level by design&mdash;see <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for full schema detail.</p>
@@ -22690,27 +22724,30 @@ mermaid.initialize({{
     return HTMLResponse(_page("Database—Admin", "Admin", body, authed=True))
 
 
-_PAGE_TIER_RE = re.compile(r"page-(full|grid|form|admin)\b")
-_PAGE_TIER_LABELS = {"full": "page-full", "grid": "page-grid",
-                      "form": "page-form", "admin": "page-admin"}
+_PAGE_TIER_RE = re.compile(r"page-(standard|content|form)\b")
+_PAGE_TIER_LABELS = {"standard": "page-standard", "content": "page-content",
+                      "form": "page-form"}
 # Routes whose width can't be read off a `.page-*` class name in their own
 # source, so the live-introspection regex below would otherwise flag them as
 # untiered — each maps to the accurate label to show instead of re-deriving it.
 # `/read` (Phase 5 — the merged Reader shell) is a bespoke full-bleed
 # three-pane layout, same reasoning the old /library/archive and
 # /library/feed carried before the Phase 5 merge: it never uses the
-# `.page`/`.page-full` classes, it has its own internal widths, so it's a
+# `.page`/`.page-standard` classes, it has its own internal widths, so it's a
 # genuine custom exception, not a false "no tier assigned" flag.
 # `/read/{article_id}` (the single-article standalone view) is different: it
-# genuinely renders at the page-full width (1440px as of PR 12, 2026-09,
-# matching BRAND.md §5's own listing of it under that tier) — it's just
-# built from a fully
+# genuinely renders at the page-standard width (1300px as of PR 13, 2026-09 —
+# it tracked page-full's own value through PR 12, then moved to Standard
+# rather than the new, narrower Content tier when page-full retired, since
+# its two-column layout — a 760px reading column plus a 220px sticky TOC —
+# needs more headroom than Content's 900px leaves; see the .reader-layout
+# CSS comment for the full reasoning) — it's just built from a fully
 # standalone `_READER_TMPL`/`_READER_CSS` template that never uses the
-# `.page`/`.page-full` classes, so it gets its real tier name (not "custom
-# exception") rather than a false flag.
+# `.page`/`.page-standard` classes, so it gets its real tier name (not
+# "custom exception") rather than a false flag.
 _PAGE_INDEX_CUSTOM_EXCEPTIONS = {
     "/read": "custom exception",
-    "/read/{article_id}": "page-full",
+    "/read/{article_id}": "page-standard",
 }
 
 
@@ -22955,7 +22992,7 @@ def admin_system_page_index(request: Request):
         for r in rows
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Page index</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every route and its width tier&mdash;introspected from <code>app.routes</code> on every page load, not a maintained list. Skips non-page endpoints (redirects, JSON/AJAX APIs, file downloads); flags any page route that doesn't carry a recognized width tier, so a newly added page that never got tiered doesn't go unnoticed. See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for the tier system itself.</p>
@@ -23061,7 +23098,7 @@ def fpa_buddy_how_it_works(request: Request):
         for tier, s in EFFORT_SETTINGS.items()
     )
 
-    body = f"""<div class="page page-full article-atlantic">
+    body = f"""<div class="page page-content article-atlantic">
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>How FP&amp;A Buddy works</h1>
@@ -23475,7 +23512,7 @@ def admin_system_ai(request: Request):
                         "Cost tracked in two ledgers by payer: <code>article_embeddings.cost_usd</code> (Brian's overhead) "
                         "and <code>ask_questions.embed_cost_usd</code> (user-cap cost, the query embedding at ask-time).")
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>AI configuration and usage</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Two live settings, plus a read-only map of every Claude, Exa, and OpenAI surface in the app. Everything editable is in Configuration below. For dollar totals, see <a href="/admin/overhead-spend" style="color:var(--accent);">Overhead spend &rarr;</a>.</p>
@@ -23759,7 +23796,7 @@ def admin_checks(request: Request):
             f'<p style="margin:3px 0 0;font-size:12px;color:var(--muted);line-height:1.45;">{_esc(r["detail"])}</p>'
             f'</div>')
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Checks</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. <strong>Every check here runs on each commit</strong> in the <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">GitHub QA workflow</a>; the deterministic ones (<em>Live + CI</em>) also run live on this page so you get an instant read.</p>
@@ -24242,7 +24279,7 @@ def admin_page(request: Request):
         else:
             right_html += html
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 {password_nudge_html}
 <style>
 .admin-group summary:hover{{background:var(--surface);}}
@@ -24682,7 +24719,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
         section_rows = ('<tr class="fs-row"><td colspan="3" class="ff-empty">'
                         'No sections yet.</td></tr>')
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <style>
 /* Cookie health summary. Sits under the header actions, deliberately not in
    the feed table: cookies are keyed by domain while the table is keyed by
@@ -25371,7 +25408,7 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
   </div>
 </form>"""
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Tag cleanup and style</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">This page does two jobs. Tag cleanup fixes tags already on your saved articles. Tagging style controls how new tags get chosen automatically.</p>
@@ -25618,7 +25655,7 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
   </form>
 </div>"""
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Sail, don&rsquo;t row&mdash;rank settings</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Tune pace, wind, obstacle density, and the collision rule per rank. The game reads these live—changes apply to the next run, no redeploy needed.</p>
@@ -25802,7 +25839,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
 </form>"""
             body_inner += verify_banner + bulk + blocks
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Content de-dupe</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Scans one source for articles that are likely duplicates or near-duplicates—most often the same piece republished under a different title, which exact-URL dedup misses.</p>
@@ -26109,7 +26146,7 @@ def admin_ask_report(request: Request, user: str = ""):
         for u in users
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>FP&amp;A Buddy report</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Every question asked, across every user—question, asker, settings used, and cost per question.</p>
@@ -26424,7 +26461,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 
     monthly_chart_html = _overhead_stacked_bar_chart(monthly_chart, width=420, height=200)
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Overhead spend</h1>
 {banner}{error_banner}
@@ -26643,7 +26680,7 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
     if not entries:
         rows_html = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--muted);">No vendor charges recorded yet.</td></tr>'
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/overhead-spend" style="font-size:13px;color:var(--muted);">&larr; Overhead spend</a></p>
 <h1>Overhead spend&mdash;full history</h1>
 {banner}{error_banner}
@@ -26839,7 +26876,7 @@ async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = 
         '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to import</button>'
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/overhead-spend" style="font-size:13px;color:var(--muted);">&larr; Overhead spend</a></p>
 <h1>Preview CSV import</h1>
 <p style="color:var(--muted);margin:0 0 18px;">Nothing has been saved yet. Review the rows below, then confirm to insert them.</p>
@@ -27024,7 +27061,7 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
         for key, label in [("no", "Unreviewed"), ("yes", "Reviewed")]
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>FP&amp;A Buddy feedback</h1>
 <p style="color:var(--muted);margin:-6px 0 20px;">How members rated the answers&mdash;flagged answers stay inspectable with the sources they actually cited. Capture and triage only; nothing here changes prompts or retrieval.</p>
@@ -27206,7 +27243,7 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
         for key, label in [("no", "Unreviewed"), ("yes", "Reviewed")]
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Community gaps</h1>
 <p style="color:var(--muted);margin:-6px 0 20px;">What visitors say the finance community landscape is missing&mdash;capture and triage only, folded in from the retired /community waitlist page.</p>
@@ -27486,7 +27523,7 @@ def admin_users(request: Request, msg: str = ""):
         f'<tr><td colspan="{total_cols}" style="padding:20px;color:var(--muted);">No accounts yet. Create one below.</td></tr>')
 
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
-<div class="page page-admin">
+<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Users</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Member accounts for the gated sections. You create accounts here (no public sign-up yet). You always keep admin access via the host password, so you can&rsquo;t lock yourself out.</p>
@@ -28170,7 +28207,7 @@ def admin_enrich(request: Request):
     model_radios = "".join(_mrow(m, l, d) for m, l, d in models)
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Re-enrich archive</h1>
 <p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what FP&A Buddy reasons from, so depth here pays off there.</p>
@@ -28900,7 +28937,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         if _source_parts else ''
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Reader content backfill</h1>
 {banner}{error_banner}
@@ -29275,7 +29312,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
         '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to apply</button>'
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/reader/backfill-content" style="font-size:13px;color:var(--muted);">&larr; Reader content backfill</a></p>
 <h1>Preview URL corrections</h1>
 <p style="color:var(--muted);margin:0 0 18px;">Nothing has been saved yet. Review the rows below, then confirm to apply them.</p>
@@ -29532,7 +29569,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
         f'</label>' if confirmed else ""
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/reader/backfill-content" style="font-size:13px;color:var(--muted);">&larr; Reader content backfill</a></p>
 <h1>Preview article purge</h1>
 <p style="color:var(--muted);margin:0 0 6px;">Nothing has been deleted yet. Review the rows below carefully&mdash;this is permanent.</p>
@@ -29668,7 +29705,7 @@ def admin_library_bulk_delete(request: Request, msg: str = "", error: str = ""):
     error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
                      f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Bulk delete articles</h1>
 <p style="color:var(--muted);margin:0 0 18px;max-width:70ch;">For a specific list of articles you've already decided
@@ -29816,7 +29853,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
         f'</label>' if confirmed else ""
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/reader/bulk-delete" style="font-size:13px;color:var(--muted);">&larr; Bulk delete articles</a></p>
 <h1>Preview bulk delete</h1>
 <p style="color:var(--muted);margin:0 0 6px;">Nothing has been deleted yet. Review the rows below carefully&mdash;this is permanent.</p>
@@ -30044,7 +30081,7 @@ def admin_backup(request: Request, uploaded: str = ""):
         </tr>"""
         for b in backup_rows
     ) or '<tr><td colspan="5" style="padding:16px;color:var(--muted);font-size:13px;">No off-site backups recorded yet.</td></tr>'
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <style>
 .backup-actions{{display:grid;grid-template-columns:1fr;gap:24px;}}
 .backup-actions .backup-action-divider{{border-left:none;border-top:1px solid var(--line);padding-left:0;padding-top:20px;}}
@@ -30321,7 +30358,7 @@ def admin_brand(request: Request):
         '</div>'
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Brand standards</h1>
 <p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com—a graffiti/street-art accent layer over a
@@ -30494,7 +30531,7 @@ def admin_voice_page(request: Request):
         "Appended after the voice core for the Communities and Software matchmakers (/tools/communities/find, /tools/software/find)&mdash;first person plural, references what the visitor said, no invented experience with any listed community or vendor.",
         custom_matchmaker, VOICE_MATCHMAKER_DEFAULT, 8)
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Verbal identity</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">The voice FP&amp;A Buddy answers in, and your site's tone&mdash;live, editable here, no redeploy.</p>
@@ -30711,7 +30748,7 @@ def admin_copy_page(request: Request):
     prose = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
              "font:14px/1.6 var(--font-body);background:var(--bg);resize:vertical;")
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Site copy</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site&mdash;no redeploy.</p>
@@ -31067,7 +31104,7 @@ def admin_emails_page(request: Request):
         for row in registry
     }).replace("</", "<\\/")
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Email templates</h1>
 <p style="color:var(--muted);margin:4px 0 12px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site&mdash;no redeploy.</p>
@@ -31240,7 +31277,7 @@ def backup_now_route(request: Request, token: str | None = None):
         else:
             msg = f"Backup failed: {e}"
             status_code = 502
-    body = f"""<div class="page page-admin"><h1>Backup</h1><p>{msg}</p>
+    body = f"""<div class="page page-standard"><h1>Backup</h1><p>{msg}</p>
   <p style="margin-top:1rem;"><a href="/read?view=saved">Back to Archive →</a></p></div>"""
     return HTMLResponse(_page("Backup", "", body, authed=True), status_code=status_code)
 

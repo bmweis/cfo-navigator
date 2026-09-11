@@ -370,7 +370,7 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
 
 ### Layout
 
-Four width tiers, keyed to content shape rather than one global reading measure.
+Three width tiers, keyed to content shape rather than one global reading measure.
 Fully migrated as of the Phase 9 route sweep — every page-rendering route carries one
 of the tiers below; the old three-tier system (`.page` 780px / `.page-narrow`
 480px / `.page-wide` 960px) is retired and those two classes no longer exist in the
@@ -378,70 +378,101 @@ CSS. (The old `.page` measure had drifted from its documented values before this
 system landed — the GER calculator was never actually 820px, it used plain 780px;
 860px belonged to `/library/feed`, not the Toolbox grid; both since corrected.)
 
+**Collapsed from four tiers to three (PR 13, 2026-09).** The prior system's
+`.page-full` (1440px) and `.page-admin` (1400px) were 40px apart — a
+distinction no reader could perceive and no one could maintain deliberately —
+so both retire outright into one **Standard** tier at the old `.page-grid`'s
+own 1300px, the width Brian confirmed already felt right. This is a genuine
+3-into-1 merge of `.page-full`/`.page-grid`/`.page-admin` into
+`.page-standard`, not a rename of one survivor. A new, narrower **Content**
+tier splits off from `.page-full`'s old audience for the handful of pages
+that are pure long-form reading. Investigated first, per the PR's own
+mandate: on every one of those pages, everything outside the 760px
+`.tool-prose` reading column is a back-link line, an eyebrow, or a
+diagram/table that's already capped narrower than `.tool-prose` itself (a
+diagram lightbox at 680px; a data table inside its own `overflow-x:auto`
+scroll container) — nothing on them actually needs 1300px of width. 900px
+was chosen for Content as a little breathing room over the 760px column,
+not because anything on those pages measurably needs it.
+
 | Tier | CSS class | Width | Pages |
 |---|---|---|---|
-| Full-width content | `.page-full` | ~1400–1500px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), `/ask/history`, CFO Toolbox community profile pages, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard), `/read/{article_id}` |
-| Card grids | `.page-grid` | ~1200–1400px | CFO Toolbox landing + Software directory, Resources directory, Communities directory (+ compare, find-results), `/admin/open-source` |
-| Forms | `.page-form` | ~600–700px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit), admin single-record add/edit forms |
-| Admin data tables | `.page-admin` | ~1350–1450px | All remaining `/admin/*` list, dashboard, and report pages |
+| Standard | `.page-standard` | 1300px | Homepage, Thought Leadership landing, every CFO Toolbox directory/profile/compare/matchmaker page (Software, Resources, Communities), every remaining `/admin/*` list/dashboard/report page, `/admin/open-source`, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard), `/read/{article_id}` |
+| Content | `.page-content` | 900px | About, Thought Leadership's 3 ported long-form articles (Growth Engine Ratio, Sail Don't Row/AI Hackathon Playbook, Connecting Claude to NetSuite), `/tools/fpa-buddy/how-it-works`, `/ask/history` |
+| Form | `.page-form` | 640px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit), admin single-record add/edit forms |
 
-**Narrowed (PR 12, 2026-09):** `.page-full` moved from 1900px to 1440px and
-`.page-admin` from 1500px to 1400px, in response to Brian's own read that
-nearly every page on those two tiers felt too wide — a 760px `.tool-prose`
-column, or a hero/sidebar grid, floating inside a ~1900px shell reads thin
-and stranded rather than generous. `.page-grid` (1300px, unchanged) was the
-one width he pointed to as feeling right, and both tiers moved toward it
-without merging into it outright. The gap between `.page-full` (1440px) and
-`.page-grid` (1300px) is now only 140px — close enough that a future pass
-may want to collapse the two into one tier; not done in this PR since
-full-width content (a homepage hero/sidebar grid, a long-form article shell)
-still reads as needing a little more room than a pure card grid. `.page-form`
-(640px) is untouched — narrow by deliberate design, not a candidate for this
-pass. `/read/{article_id}` (the standalone single-article Reader view, not
-the merged three-pane `/read` shell below) is built from its own
-`_READER_TMPL`/`_READER_CSS` and never uses the `.page`/`.page-full`
-classes directly, but its `.reader-layout` deliberately tracks `.page-full`'s
-own max-width — narrowed alongside it, from 1900px to 1440px, so the two
-stay in sync.
+**Open question, not resolved by this PR:** Standard (1300px) and Content
+(900px) are far enough apart now that the case for a third tier is genuinely
+thin — nearly everything Content covers renders entirely inside the 760px
+`.tool-prose` column regardless of the outer shell's width, so collapsing
+Content into Standard would very likely look identical on every page that
+uses it today. It stays a separate tier for now because a homepage-style
+hero/sidebar grid reads as wanting real width while a pure reading page
+doesn't, and conflating the two removes a distinction that might matter to
+a future page — but if nothing new ever asks Content for room beyond
+`.tool-prose`, a future pass should seriously consider dropping it to two
+tiers rather than three.
 
-Combine with `.page` for its margin/padding (e.g. `class="page page-full"`). Generous
-page padding (≈48px top). Whitespace before density. Admin/data pages get the width
-bump for scannability, not decoration — they never get any part of the graffiti layer
-(§4). One page (`/read`, the merged Reader) uses a bespoke full-bleed `.rr-shell` app
-layout outside the `.page` system entirely and isn't part of this tier table — it's a
-fixed-height three-pane shell (rail/list/reader), not reading-width content, so no
-single width constraint applies. (Its two predecessor pages, `/library/archive` and
-`/library/feed`, used this same carve-out at 960px and 860px respectively before the
-Phase 5 Reader merge retired both routes and replaced them with `/read`.)
+Admin data tables now sit on the same 1300px Standard tier as everything
+else, not a wider dedicated tier of their own — they already carry their
+own `min-width` floors and `overflow-x:auto` horizontal scroll (PR 12,
+2026-09), so narrowing their shell doesn't squeeze a wide table's columns,
+it just scrolls the table sooner. This was verified directly against the
+widest admin tables (Users, with its column picker, especially) at both the
+new 1300px shell and at a 390px mobile viewport before merging.
+
+Combine with `.page` for its margin/padding (e.g. `class="page page-standard"`).
+Generous page padding (≈48px top). Whitespace before density. Admin/data pages
+get the width bump for scannability, not decoration — they never get any part
+of the graffiti layer (§4). One page (`/read`, the merged Reader) uses a
+bespoke full-bleed `.rr-shell` app layout outside the `.page` system entirely
+and isn't part of this tier table — it's a fixed-height three-pane shell
+(rail/list/reader), not reading-width content, so no single width constraint
+applies. (Its two predecessor pages, `/library/archive` and `/library/feed`,
+used this same carve-out at 960px and 860px respectively before the Phase 5
+Reader merge retired both routes and replaced them with `/read`.)
+`/read/{article_id}` (the standalone single-article Reader view, a different
+route from the merged three-pane `/read` shell) is built from its own
+`_READER_TMPL`/`_READER_CSS` and never uses the `.page`/`.page-standard`
+classes directly, but its `.reader-layout` deliberately tracks
+`.page-standard`'s own max-width — moved to Standard rather than the new,
+narrower Content tier, since its two-column layout (a 760px reading column
+plus a 220px sticky "On this page" TOC, joined by a 40px gap) needs ~1020px
+of real headroom just for the two columns, before any side padding; Content's
+900px would have forced the reading column to shrink below its own 760px
+floor, which is exactly the measure this page exists to protect.
 
 The former `.page-tool` tier (960px, "functional tools") was retired in Phase 9b —
-those pages (FP&A Buddy, GER calculator, Sail, don't row + leaderboard) now sit on
-`.page-full` like every other content page, so they no longer feel visually cramped
+those pages (FP&A Buddy, GER calculator, Sail, don't row + leaderboard) sit on the
+Standard tier like every Toolbox/admin page, so they no longer feel visually cramped
 next to it. Each wraps its actual working content (chat, calculator, game canvas) in
-`.tool-inner` (1300px, centered, card-grid scale) so the widget gets real room instead
-of the old 960px box. The Growth Engine Ratio's long-form paragraphs nest a narrower
-`.tool-prose` (760px) inside that wrapper — 1300px is too wide a text measure to read
-comfortably, but the calculator itself benefits from the extra width.
+`.tool-inner` (1300px, centered, card-grid scale) so the widget gets real room —
+identical to Standard's own 1300px, so the PR 13 tier collapse changed nothing about
+how these pages actually render. The Growth Engine Ratio calculator's long-form
+paragraphs nest a narrower `.tool-prose` (760px) inside that wrapper — 1300px is too
+wide a text measure to read comfortably, but the calculator itself benefits from the
+extra width.
 
 `.tool-prose` isn't limited to `.tool-inner` — it's a general-purpose narrow-reading
 wrapper (max-width 760px, centered) usable inside any wider tier. (An earlier version
 of this passage claimed the three `/admin/system/*` reference pages — Database, Page
-Index, How FP&A Buddy works — all reused it directly inside `.page-admin`. Corrected,
-2026-09: "How FP&A Buddy works" moved off `/admin/*` to the public
-`/tools/fpa-buddy/how-it-works` and renders on `.page-full`, not `.page-admin`; Database
-and Page Index render their intro copy as a bare `<p>` with no `.tool-prose` wrapper at
-all. Neither gained a wrapper as part of this correction — this is a doc fix, not a
-code change.)
+Index, How FP&A Buddy works — all reused it directly inside `.page-admin` (now
+`.page-standard`). Corrected, 2026-09: "How FP&A Buddy works" moved off `/admin/*` to
+the public `/tools/fpa-buddy/how-it-works` and, as of PR 13, renders on the Content
+tier, not Standard; Database and Page Index render their intro copy as a bare `<p>`
+with no `.tool-prose` wrapper at all. Neither gained a wrapper as part of this
+correction — this is a doc fix, not a code change.)
 
 The brand audit's Phase 4 also found four pages with *no* reading-width constraint at
 all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, and the
 since-retired `/library/past-questions` (folded into `/tools/fpa-buddy`'s "Search past
 questions" section in the Phase 2 Library/Toolbox restructure, after this fix already
-landed) — rendering body copy at the full `page-full` measure
-(~1850px). A brief attempt at a new sitewide 1500px prose ceiling was tried and reverted
-(too wide for comfortable reading, outside the usual 60–75-character-per-line
-guidance); the interim fix is the same `.tool-prose` (760px) wrapper already proven on
-GER and the SYSTEM pages, applied to those four as well.
+landed) — rendering body copy at the full `.page-full` measure (~1850px at the time).
+A brief attempt at a new sitewide 1500px prose ceiling was tried and reverted (too wide
+for comfortable reading, outside the usual 60–75-character-per-line guidance); the
+interim fix was the same `.tool-prose` (760px) wrapper already proven on GER and the
+SYSTEM pages, applied to those four as well — all four now additionally sit on the
+narrower Content tier as of PR 13.
 
 ### Editorial content system — Atlantic pattern
 
@@ -451,7 +482,7 @@ piece. (A shorter, scan-built "Axios" pattern — bold ledes, bullet-heavy — i
 separate, not-yet-built register for a different kind of page.)
 
 **The tag:** `.article-atlantic`, applied alongside a page's width tier (e.g.
-`class="page page-full article-atlantic"`). It widens paragraph rhythm inside
+`class="page page-content article-atlantic"`). It widens paragraph rhythm inside
 `.tool-prose` (line-height 1.65 → 1.75, more paragraph spacing). **What it can't
 do:** insert a pull-quote, decide where a callout goes, or write a subhead — those
 are still hand-authored into the page's HTML. The tag is a typographic switch, not
