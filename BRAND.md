@@ -370,7 +370,7 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
 
 ### Layout
 
-Three width tiers, keyed to content shape rather than one global reading measure.
+Two width tiers, keyed to content shape rather than one global reading measure.
 Fully migrated as of the Phase 9 route sweep — every page-rendering route carries one
 of the tiers below; the old three-tier system (`.page` 780px / `.page-narrow`
 480px / `.page-wide` 960px) is retired and those two classes no longer exist in the
@@ -378,48 +378,39 @@ CSS. (The old `.page` measure had drifted from its documented values before this
 system landed — the GER calculator was never actually 820px, it used plain 780px;
 860px belonged to `/library/feed`, not the Toolbox grid; both since corrected.)
 
-**Collapsed from four tiers to three (PR 13, 2026-09).** The prior system's
-`.page-full` (1440px) and `.page-admin` (1400px) were 40px apart — a
-distinction no reader could perceive and no one could maintain deliberately —
-so both retire outright into one **Standard** tier at the old `.page-grid`'s
-own 1300px, the width Brian confirmed already felt right. This is a genuine
-3-into-1 merge of `.page-full`/`.page-grid`/`.page-admin` into
-`.page-standard`, not a rename of one survivor. A new, narrower **Content**
-tier splits off from `.page-full`'s old audience for the handful of pages
-that are pure long-form reading. Investigated first, per the PR's own
-mandate: on every one of those pages, everything outside the 760px
-`.tool-prose` reading column is a back-link line, an eyebrow, or a
-diagram/table that's already capped narrower than `.tool-prose` itself (a
-diagram lightbox at 680px; a data table inside its own `overflow-x:auto`
-scroll container) — nothing on them actually needs 1300px of width. 900px
-was chosen for Content as a little breathing room over the 760px column,
-not because anything on those pages measurably needs it.
+**Collapsed from four tiers to three (PR 13, 2026-09), then three to two
+(PR 14, 2026-09).** PR 13's prior system's `.page-full` (1440px) and
+`.page-admin` (1400px) were 40px apart — a distinction no reader could
+perceive and no one could maintain deliberately — so both retired outright
+into one **Standard** tier at the old `.page-grid`'s own 1300px, the width
+Brian confirmed already felt right (a genuine 3-into-1 merge of
+`.page-full`/`.page-grid`/`.page-admin` into `.page-standard`, not a rename
+of one survivor). PR 13 also split off a narrower **Content** tier (900px)
+for the handful of pages that are pure long-form reading — but its own
+investigation had already found, before shipping, that on every one of
+those pages essentially nothing lives outside the 760px `.tool-prose`
+reading column: a back-link line, an eyebrow, or a diagram/table already
+capped narrower than `.tool-prose` itself. A tier that changes the width of
+a few short lines of text and nothing else isn't a tier, so PR 14 removed
+Content outright — every page that used `.page-content` now uses
+`.page-standard`, confirmed pixel-identical inside `.tool-prose` before and
+after, since `.tool-prose` (unchanged) is what actually makes a content
+page read as a content page, not the outer shell.
 
 | Tier | CSS class | Width | Pages |
 |---|---|---|---|
-| Standard | `.page-standard` | 1300px | Homepage, Thought Leadership landing, every CFO Toolbox directory/profile/compare/matchmaker page (Software, Resources, Communities), every remaining `/admin/*` list/dashboard/report page, `/admin/open-source`, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard), `/read/{article_id}` |
-| Content | `.page-content` | 900px | About, Thought Leadership's 3 ported long-form articles (Growth Engine Ratio, Sail Don't Row/AI Hackathon Playbook, Connecting Claude to NetSuite), `/tools/fpa-buddy/how-it-works`, `/ask/history` |
+| Standard | `.page-standard` | 1300px | Every page except forms — homepage, Thought Leadership landing, every CFO Toolbox directory/profile/compare/matchmaker page (Software, Resources, Communities), every `/admin/*` list/dashboard/report page, `/admin/open-source`, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard), `/read/{article_id}`, About, Thought Leadership's 3 ported long-form articles (Growth Engine Ratio, Sail Don't Row/AI Hackathon Playbook, Connecting Claude to NetSuite), `/tools/fpa-buddy/how-it-works`, `/ask/history` |
 | Form | `.page-form` | 640px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit), admin single-record add/edit forms |
 
-**Open question, not resolved by this PR:** Standard (1300px) and Content
-(900px) are far enough apart now that the case for a third tier is genuinely
-thin — nearly everything Content covers renders entirely inside the 760px
-`.tool-prose` column regardless of the outer shell's width, so collapsing
-Content into Standard would very likely look identical on every page that
-uses it today. It stays a separate tier for now because a homepage-style
-hero/sidebar grid reads as wanting real width while a pure reading page
-doesn't, and conflating the two removes a distinction that might matter to
-a future page — but if nothing new ever asks Content for room beyond
-`.tool-prose`, a future pass should seriously consider dropping it to two
-tiers rather than three.
-
-Admin data tables now sit on the same 1300px Standard tier as everything
+Admin data tables sit on the same 1300px Standard tier as everything
 else, not a wider dedicated tier of their own — they already carry their
 own `min-width` floors and `overflow-x:auto` horizontal scroll (PR 12,
-2026-09), so narrowing their shell doesn't squeeze a wide table's columns,
-it just scrolls the table sooner. This was verified directly against the
-widest admin tables (Users, with its column picker, especially) at both the
-new 1300px shell and at a 390px mobile viewport before merging.
+2026-09; the floors themselves standardized into four rule-based buckets in
+PR 14, 2026-09 — see "Admin table width floors" below), so narrowing their
+shell doesn't squeeze a wide table's columns, it just scrolls the table
+sooner. This was verified directly against the widest admin tables (Users,
+with its column picker, especially) at both the 1300px shell and at a
+390px mobile viewport before merging.
 
 Combine with `.page` for its margin/padding (e.g. `class="page page-standard"`).
 Generous page padding (≈48px top). Whitespace before density. Admin/data pages
@@ -435,33 +426,32 @@ Reader merge retired both routes and replaced them with `/read`.)
 route from the merged three-pane `/read` shell) is built from its own
 `_READER_TMPL`/`_READER_CSS` and never uses the `.page`/`.page-standard`
 classes directly, but its `.reader-layout` deliberately tracks
-`.page-standard`'s own max-width — moved to Standard rather than the new,
-narrower Content tier, since its two-column layout (a 760px reading column
-plus a 220px sticky "On this page" TOC, joined by a 40px gap) needs ~1020px
-of real headroom just for the two columns, before any side padding; Content's
-900px would have forced the reading column to shrink below its own 760px
-floor, which is exactly the measure this page exists to protect.
+`.page-standard`'s own max-width — its two-column layout (a 760px reading
+column plus a 220px sticky "On this page" TOC, joined by a 40px gap) needs
+~1020px of real headroom just for the two columns, before any side
+padding; the old, now-removed Content tier's 900px would have forced the
+reading column to shrink below its own 760px floor, which is exactly the
+measure this page exists to protect.
 
 The former `.page-tool` tier (960px, "functional tools") was retired in Phase 9b —
 those pages (FP&A Buddy, GER calculator, Sail, don't row + leaderboard) sit on the
 Standard tier like every Toolbox/admin page, so they no longer feel visually cramped
 next to it. Each wraps its actual working content (chat, calculator, game canvas) in
 `.tool-inner` (1300px, centered, card-grid scale) so the widget gets real room —
-identical to Standard's own 1300px, so the PR 13 tier collapse changed nothing about
-how these pages actually render. The Growth Engine Ratio calculator's long-form
-paragraphs nest a narrower `.tool-prose` (760px) inside that wrapper — 1300px is too
-wide a text measure to read comfortably, but the calculator itself benefits from the
-extra width.
+identical to Standard's own 1300px, so neither the PR 13 nor the PR 14 tier collapse
+changed anything about how these pages actually render. The Growth Engine Ratio
+calculator's long-form paragraphs nest a narrower `.tool-prose` (760px) inside that
+wrapper — 1300px is too wide a text measure to read comfortably, but the calculator
+itself benefits from the extra width.
 
 `.tool-prose` isn't limited to `.tool-inner` — it's a general-purpose narrow-reading
 wrapper (max-width 760px, centered) usable inside any wider tier. (An earlier version
 of this passage claimed the three `/admin/system/*` reference pages — Database, Page
 Index, How FP&A Buddy works — all reused it directly inside `.page-admin` (now
 `.page-standard`). Corrected, 2026-09: "How FP&A Buddy works" moved off `/admin/*` to
-the public `/tools/fpa-buddy/how-it-works` and, as of PR 13, renders on the Content
-tier, not Standard; Database and Page Index render their intro copy as a bare `<p>`
-with no `.tool-prose` wrapper at all. Neither gained a wrapper as part of this
-correction — this is a doc fix, not a code change.)
+the public `/tools/fpa-buddy/how-it-works`; Database and Page Index render their intro
+copy as a bare `<p>` with no `.tool-prose` wrapper at all. Neither gained a wrapper as
+part of this correction — this is a doc fix, not a code change.)
 
 The brand audit's Phase 4 also found four pages with *no* reading-width constraint at
 all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, and the
@@ -471,8 +461,47 @@ landed) — rendering body copy at the full `.page-full` measure (~1850px at the
 A brief attempt at a new sitewide 1500px prose ceiling was tried and reverted (too wide
 for comfortable reading, outside the usual 60–75-character-per-line guidance); the
 interim fix was the same `.tool-prose` (760px) wrapper already proven on GER and the
-SYSTEM pages, applied to those four as well — all four now additionally sit on the
-narrower Content tier as of PR 13.
+SYSTEM pages, applied to those four as well.
+
+### Admin table width floors
+
+An admin table's `min-width` — the point below which it scrolls horizontally
+(inside its own `overflow-x:auto` wrapper) rather than squeezing its columns
+unreadably narrow — is picked from **four rule-based buckets, by column
+count**, not chosen by eye per table (PR 14, 2026-09, replacing 23 tables'
+worth of hand-picked values from PR 12/PR 529):
+
+| Bucket | Floor | Columns |
+|---|---|---|
+| Narrow | 480px | 2–3 |
+| Medium | 640px | 4–5 |
+| Wide | 800px | 6–7 |
+| Extra wide | 960px | 8+ |
+
+Defined as named constants in `webapp/app.py` (`_TABLE_FLOOR_NARROW` /
+`_TABLE_FLOOR_MEDIUM` / `_TABLE_FLOOR_WIDE` / `_TABLE_FLOOR_XWIDE`), not
+repeated literals. The point of a bucket system is that adding a column to
+an existing table has an obvious answer — "does this cross a bucket
+boundary?" — where "is 760 still right for this table?" didn't. Column
+count means the columns actually rendered by default: for a column-picker
+table (Software/Communities/Users, `.admin-table-responsive`, backed by
+`_admin_column_picker_html`), that's the always-visible columns (Name,
+Actions) plus whatever `ADMIN_DEFAULT_VISIBLE_COLS` shows by default, not
+every optional column a viewer could toggle on.
+
+`.admin-table-responsive` tables carry `min-width:0!important` on their own
+`@media(max-width:700px)` card-stacking rule, keyed off the `.admin-table-
+responsive` class rather than any specific pixel value — a bucket's inline
+`min-width` on the `<table>` itself is otherwise something no plain media
+query can beat, so without this override the mobile card view would stay
+pinned at its desktop floor and force an invisible, pointless horizontal
+scroll on an otherwise correctly stacked card. Preserved as-is by the PR 14
+bucket sweep; re-verified at 390px, not just assumed to still hold.
+
+A table whose real content forces a floor above what its column count would
+otherwise assign (long URLs, a wide date-and-status column, a description
+column with real prose) is a documented exception, not a silent one — see
+the PR 14 build notes for the specific tables this applied to and why.
 
 ### Editorial content system — Atlantic pattern
 
@@ -482,7 +511,7 @@ piece. (A shorter, scan-built "Axios" pattern — bold ledes, bullet-heavy — i
 separate, not-yet-built register for a different kind of page.)
 
 **The tag:** `.article-atlantic`, applied alongside a page's width tier (e.g.
-`class="page page-content article-atlantic"`). It widens paragraph rhythm inside
+`class="page page-standard article-atlantic"`). It widens paragraph rhythm inside
 `.tool-prose` (line-height 1.65 → 1.75, more paragraph spacing). **What it can't
 do:** insert a pull-quote, decide where a callout goes, or write a subhead — those
 are still hand-authored into the page's HTML. The tag is a typographic switch, not

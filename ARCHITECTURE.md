@@ -218,9 +218,10 @@ pattern applied to routes instead of tables: on every page load it walks
 `app.routes`, keeps GET routes whose `response_class` is `HTMLResponse`
 (skipping POST-only action routes, redirect stubs, JSON/AJAX APIs, file
 downloads, and other non-page endpoints), and reads each page's width tier
-(`page-standard`/`page-content`/`page-form` as of PR 13's three-tier
-collapse, 2026-09 — previously `page-full`/`page-grid`/`page-form`/
-`page-admin`, or "custom exception" for `/read` (the merged Reader shell —
+(`page-standard`/`page-form` as of PR 14's two-tier collapse, 2026-09 —
+briefly `page-standard`/`page-content`/`page-form` after PR 13's three-tier
+collapse, and `page-full`/`page-grid`/`page-form`/`page-admin` before
+that), or "custom exception" for `/read` (the merged Reader shell —
 see the Reader merge section below) — see BRAND.md §5 for the tier system
 itself) straight from that route's own source via
 `inspect.getsource` (following one hop into a directly-called helper function
@@ -299,13 +300,64 @@ matter to a future page — see BRAND.md §5's own "Open question" note.
 `webapp.checks`' page-index (above) had its `_PAGE_TIER_RE`/
 `_PAGE_TIER_LABELS`/`_PAGE_INDEX_CUSTOM_EXCEPTIONS` updated to the new
 three-class set in the same PR, so it correctly recognizes every page's new
-tier rather than flagging the whole site as untiered. See BRAND.md §5 for
-the full tier table and the historical-value narrative sections elsewhere
-in this document (e.g. the FP&A Buddy explainer's own width-tier fix, and
-the Homepage Restructure bullets in CLAUDE.md) for context on what each
-page's width was **at the time it was written** — those numbers describe
-the state as of their own PR, not the current value; BRAND.md §5 is the
-one place that always reflects today's actual numbers.
+tier rather than flagging the whole site as untiered.
+
+**Width-tier collapse, three tiers to two (PR 14, 2026-09)** — PR 13's own
+"Recommendation, not acted on" above turned out to be right, and PR 14
+acted on it: Content is retired outright, every page that used
+`.page-content` now uses `.page-standard`, and `.page-content` is deleted
+from the CSS entirely — no alias, no rename kept as a fallback. This isn't
+a judgment call reversed on a whim; it's PR 13's own investigation taken to
+its conclusion. On every Content-tier page (About, the three ported
+thought-leadership articles, the FP&A Buddy explainer, `/ask/history`),
+essentially nothing lives outside the 760px `.tool-prose` reading column —
+a back-link line, an optional tag, a byline, at most a couple of short
+lines. A tier that changes the width of a few short lines of text and
+nothing else isn't a tier. Screenshots at 1280px and 1920px for About and a
+long-form article, before and after, confirmed the reading column
+(`.tool-prose`) is pixel-identical — only the outer shell's unused margin
+changed, exactly as the investigation predicted. `webapp.checks`' page-index
+had `_PAGE_TIER_RE`/`_PAGE_TIER_LABELS`/`_PAGE_INDEX_CUSTOM_EXCEPTIONS`
+updated again, to the final two-class set. See BRAND.md §5 for the full
+tier table and the historical-value narrative sections elsewhere in this
+document (e.g. the FP&A Buddy explainer's own width-tier fix, and the
+Homepage Restructure bullets in CLAUDE.md) for context on what each page's
+width was **at the time it was written** — those numbers describe the
+state as of their own PR, not the current value; BRAND.md §5 is the one
+place that always reflects today's actual numbers.
+
+**Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
+— replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
+per table with four rule-based buckets keyed to default-rendered column
+count (`_TABLE_FLOOR_NARROW` 480px for 2-3 columns, `_TABLE_FLOOR_MEDIUM`
+640px for 4-5, `_TABLE_FLOOR_WIDE` 800px for 6-7, `_TABLE_FLOOR_XWIDE`
+960px for 8+ — named constants in `webapp/app.py`, not repeated literals).
+Most of the 22 tables landed cleanly on a bucket by column count alone; a
+handful of documented exceptions keep a floor above what column count
+alone would assign, because real content — not eyeballing — forces it:
+the Software and Communities approved-list tables (`admin-table-responsive`,
+820px/880px respectively) each carry a sticky Name column with its own
+explicit `min-width` (220px/280px) plus a fixed 3-button Actions grid
+(100px × 3 + gaps = 312px), summing to almost exactly their shipped value —
+confirmed against the real rendered table, not estimated, so both keep
+their precise PR 12 values rather than being forced into Wide or Xwide.
+The Reader content-backfill's "Recent attempts" and "Needs manual review"
+tables both pair a shared, explicitly fixed 420px Article column
+(`_th_article`) with a genuinely unbounded free-text column (Detail / Last
+failure), so both are assigned Wide rather than the Medium a naive column
+count would give them; "Accepted as final" pairs the same 420px Article
+column with a short categorical reason string, so Medium fits it fine,
+unchanged from PR 12. One real bug, not just a re-bucketing, was found and
+fixed in the same sweep: the Users admin list's `admin-table-responsive`
+table was left at PR 12's 480px even though — unlike Software/Communities,
+whose column picker defaults to showing only `review_status` alongside
+the always-visible columns — `users_default_visible` shows **every**
+optional column by default, rendering 11 real desktop columns squeezed
+into a 480px floor. Fixed to the Xwide bucket (960px). The three
+`admin-table-responsive` tables' existing `min-width:0!important` mobile
+card-stacking override (keyed off the class, not any specific pixel value)
+needed no change and was re-verified at 390px after the edits, not just
+assumed to still hold.
 
 **`/admin/system/scripts`** (System nav group, Phase N) is the opposite design
 choice from the two pages above — a static, hand-maintained registry
@@ -394,9 +446,10 @@ went unnoticed until the page was compared side by side with those. Fixed
 by switching the outer class to `.page-full`, confirmed with a live
 bounding-box measurement showing the `.tool-prose` reading column is now
 identical in width and position to the reference page. (Both classes named
-here are retired as of PR 13's width-tier collapse, 2026-09 — this page
-now renders on `.page-content`, 900px, alongside the three articles it was
-matched against.)
+here are retired — `.page-full` and `.page-content` as of PR 13's
+three-tier collapse, then `.page-content` itself as of PR 14's two-tier
+collapse, 2026-09 — this page now renders on `.page-standard`, alongside
+the three articles it was matched against.)
 
 **The Exa kill switch** (Phase 7; originally its own `/admin/exa-settings`
 page, merged into `/admin/system/ai`'s Configuration section — PR 10): an
@@ -1644,8 +1697,9 @@ table scrolls inside its own wrapper without ever forcing the page itself to ove
 horizontally. Raw HTML embedded in `body_md` passes through unescaped — deliberate, since the
 field is admin-authored only, never public input, so there's no injection surface to guard
 against here. `_original_content_article_body` is the shared article template, matching the
-three bespoke pieces' own shell exactly (`page page-content article-atlantic` as of PR 13's
-width-tier collapse, 2026-09 — previously `page-full`, the same
+three bespoke pieces' own shell exactly (`page page-standard article-atlantic` as of PR 14's
+two-tier collapse, 2026-09 — briefly `page-content` after PR 13's three-tier collapse, and
+`page-full` before that — the same
 `&larr; Thought Leadership` back-link, `.tool-prose`, the same eyebrow/`<h1>`/byline treatment) —
 only the rendered markdown itself (wrapped in a scoped `.oc-body` div) differs from page to page.
 `.oc-body`'s CSS mirrors the Reader's own `.reader-body` treatment for code/pre/table (the one

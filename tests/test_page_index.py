@@ -105,12 +105,12 @@ def test_page_index_recognizes_reader_shell_as_custom_exception(env):
 def test_page_index_recognizes_read_article_as_page_standard(env):
     """`/read/{article_id}` is a fully standalone template (_READER_TMPL/
     _READER_CSS) that never uses the `.page`/`.page-standard` classes, so
-    the live-source regex can't detect its tier on its own. As of PR 13's
-    width-tier collapse (2026-09) it tracks the Standard tier (1300px), not
-    the new, narrower Content tier — its two-column layout (a 760px reading
-    column plus a 220px sticky TOC) needs more headroom than Content's
-    900px leaves — so it's mapped to that real tier name (not flagged)
-    rather than surfacing as a false "no tier assigned" flag."""
+    the live-source regex can't detect its tier on its own. It tracks the
+    Standard tier (1300px) — its two-column layout (a 760px reading column
+    plus a 220px sticky TOC) needs more headroom than 900px leaves, which
+    is why it never moved onto the old Content tier PR 13 introduced and
+    PR 14 later removed — so it's mapped to that real tier name (not
+    flagged) rather than surfacing as a false "no tier assigned" flag."""
     rows = {r["path"]: r for r in env._page_index_snapshot()}
     assert rows["/read/{article_id}"]["flagged"] is False
     assert rows["/read/{article_id}"]["tier"] == "page-standard"
@@ -141,7 +141,7 @@ def test_page_index_flags_a_newly_added_untiered_route(env):
 
 
 def test_page_index_recognized_tiers_are_valid(env):
-    valid = {"page-standard", "page-content", "page-form", "custom exception"}
+    valid = {"page-standard", "page-form", "custom exception"}
     for row in env._page_index_snapshot():
         if row["flagged"]:
             continue
