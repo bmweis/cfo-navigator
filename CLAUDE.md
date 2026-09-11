@@ -6844,6 +6844,115 @@ it supersedes the old "`/save` is token-gated" note.
   with a `<details>`-balancing slicer, which is what the shared
   `_disclosure_body` helper in both files does now.
 
+- **Sitewide width pass (PR 12, 2026-09) — `.page-full` and `.page-admin`
+  narrowed; `.page-grid` (1300px) confirmed as the width that already felt
+  right and left untouched.** Brian's own read: nearly every admin page and
+  the two main public landing pages felt too wide — a 760px `.tool-prose`
+  column, or a hero/sidebar grid, floating inside a ~1900px shell reads as a
+  skinny ribbon with a stranded back-link, not generous whitespace (the
+  back-link itself was already fixed, separately, in PR 515 — this PR fixes
+  the shell it was stranded inside). Three things were investigated and
+  settled going in, not reopened by this PR: `.tool-prose` stays at 760px
+  (already measures ~86-95 characters/line at 16px, in range for comfortable
+  reading — widening it was the wrong lever); body font size stays at 16px
+  (a 20px bump was considered as a way to make a wider column readable, and
+  wasn't needed once the measure itself was confirmed fine); and the real
+  cause was always the page shell, not the text column. Fixed by changing
+  the tier token values, not by reassigning any page to a different tier —
+  Brian's complaint covered essentially every page on a given tier, not a
+  scattered subset, so one value change in one place was the right fix over
+  dozens of per-page edits. `.page-full`: 1900px → 1440px. `.page-admin`:
+  1500px → 1400px. `.page-grid` (1300px) is unchanged — it's the width
+  Brian pointed to as already feeling right (the CFO Toolbox directory
+  pages: `/tools`, `/tools/software`, `/tools/resources`, `/tools/communities`),
+  so both other tiers moved toward it without merging into it.
+  `.reader-layout` (the standalone `/read/{article_id}` single-article
+  view's own bespoke max-width — a different route from the merged
+  three-pane `/read` shell, which is a deliberate full-bleed exception this
+  PR does not touch) deliberately tracks `.page-full`'s value even though
+  that page is built from its own `_READER_TMPL`/`_READER_CSS` and never
+  uses the `.page`/`.page-full` classes directly (see the
+  `_PAGE_INDEX_CUSTOM_EXCEPTIONS` comment in `webapp/app.py`) — narrowed
+  alongside it, from 1900px to 1440px, so the two stay in sync rather than
+  silently drifting apart. `.page-form` (640px) and `.tool-prose` (760px)
+  are both untouched — neither was part of Brian's complaint, and
+  `/contact`/`/admin/tools/resources/new` (both `.page-form`) were
+  explicitly out of scope. `/tools/fpa-buddy` (`.page-full` + a 1300px
+  `.tool-inner`) is unaffected in practice — `.tool-inner` was already the
+  narrower, binding constraint, so narrowing its outer `.page-full` shell
+  changes nothing about how that page actually renders; it's genuinely
+  different from its sibling directory pages (which use `.page-grid`
+  directly, no inner wrapper) and stays that way pending its own
+  redesign — reported, not changed, here. **Open question, reported rather
+  than resolved**: `.page-full` (1440px) and `.page-grid` (1300px) are now
+  only 140px apart — close enough that a future pass could reasonably
+  collapse them into three tiers instead of four. Not done in this PR: a
+  homepage hero/sidebar grid and a long-form article shell still read as
+  wanting a little more room than a pure card grid, and collapsing a tier
+  touches every page that uses it, which is a bigger, separately-scoped
+  decision. **Part 2, same PR — admin table `min-width` sweep.** PR 11
+  found and fixed three admin tables (Software categories, Community
+  categories, Resources) with no `min-width` at all, so at narrow
+  viewports the browser squished their columns into unreadably narrow
+  text-wrapped slivers instead of triggering the `overflow-x:auto` scroll
+  already wrapping them — the same bug shape reappears whenever a table has
+  a free-text column (a description, a note, a URL) with nothing else in
+  that column (nowrap content, an explicit per-cell `min-width`, a
+  fixed-width input) to floor its min-content width. A full sweep of every
+  `<table>` in `webapp/app.py` found this bug, in the same shape, on every
+  remaining admin table that lacked a table-level `min-width` — roughly
+  twenty more, across Contact submissions, Toolbox intros, Community gaps,
+  Email failures, Compare-summary feedback, the name-duplicate check pages
+  (both entity types), the Feature Review Queue's per-item link table, the
+  Manage Features pivot table, Third-party content, Original content, the
+  tool edit page's governed Feature Taxonomy checklist, the Reader content
+  backfill's manual-review/accepted-as-final/recent-attempts tables, Tag
+  cleanup, and the internal email-templates reference table on
+  `/admin/emails` — plus the three `admin-table-responsive` column-picker
+  tables (Software, Communities, Users) that PR 11's own table-shape fixes
+  didn't touch. Fixed the same way as PR 11's own remediation: an explicit
+  `min-width` on the `<table>` itself, sized to the table's own default-
+  visible columns, plus an `overflow-x:auto` wrapper `<div>` on the four
+  tables (Contact submissions' two tables, Email delivery failures, Tag
+  cleanup) that had neither a wrapper nor a min-width at all. The
+  three-button `.admin-table-actions-grid` Actions column and any per-cell
+  `min-width`/`white-space:nowrap` already present on individual `<td>`s
+  are untouched — those already floor their own column correctly; the fix
+  only ever adds a table-level floor, never removes or narrows anything
+  that was already protecting a column. `.cc-table`/`.tp-competitor-table`
+  (public Compare/profile pages), `.ff-table`/`.fs-table` (the Reader feeds
+  admin page, which already has its own dedicated 820px stacking
+  breakpoint tuned around its own URL-wrapping content), and
+  `.backup-log-table` (a small, already-narrow fixed-width table with its
+  own 700px mobile-card breakpoint) were checked and are unaffected by this
+  bug — each already has its own protection, so none needed a change.
+  **A real regression this fix introduced into its own three
+  `admin-table-responsive` tables, caught by the mobile-verification pass
+  itself, not by inspection**: an inline `min-width` on a `<table>` element
+  is not something a plain (non-`!important`) media-query rule can ever
+  override, regardless of specificity — so the new desktop-only floor
+  survived unchanged into each table's own existing `@media(max-width:700px)`
+  card-stacking breakpoint, pinning the table box at its full desktop
+  min-width even while every row inside it correctly stacked into a card.
+  Confirmed live via `element.scrollWidth`/`clientWidth` at 390px before
+  the fix (Software: 820/820, Communities: 880/880 — both pinned at their
+  new desktop floor, well past the 390px viewport) and after (all three:
+  scrollWidth equals clientWidth equals the container's real width, no
+  overflow at all) — the on-screen card content looked identical in both
+  states in a screenshot, since nothing visible actually wrapped or spilled
+  off-screen; only the invisible box behind it was pointlessly wide,
+  making the card swipeable-but-empty rather than genuinely full-width.
+  Fixed with `min-width:0!important` added to each table's own existing
+  `.admin-table-responsive{{display:block;width:100%;}}` mobile-card reset
+  rule — the one place `!important` can legitimately beat an inline style.
+  Confirmed at 900px (between the 700px breakpoint and each table's own
+  min-width) that the desktop floor still works correctly post-fix: the
+  table's own `scrollWidth`/`clientWidth` grow to fill the wider container
+  (Software: 850/850, Communities: 880/880 pinned at floor, Users:
+  1316/1317 — its many optional columns' own intrinsic content width
+  already exceeds even a 900px viewport, correctly triggering the
+  `overflow-x:auto` wrapper's scroll rather than squishing).
+
 
 ## Authentication & security
 

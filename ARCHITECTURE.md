@@ -231,6 +231,31 @@ newly added, never-tiered page automatically. `_page_index_snapshot()` in
 `webapp/app.py` is the single source; no maintained list of pages or tiers
 exists elsewhere.
 
+**Sitewide width pass (PR 12, 2026-09)** — `.page-full` narrowed 1900px →
+1440px and `.page-admin` narrowed 1500px → 1400px, changing the two token
+values rather than reassigning any page to a different tier (Brian's
+complaint covered essentially every page on those tiers, not a scattered
+subset, so one value change in one place was the right lever). `.page-grid`
+(1300px) is unchanged — it was the one tier Brian pointed to as already
+feeling right, and both other tiers moved toward it without merging into
+it. `.reader-layout` (the standalone `/read/{article_id}` view's own
+bespoke max-width, which deliberately tracks `.page-full`'s value even
+though that page never uses the `.page`/`.page-full` classes — see the
+`_PAGE_INDEX_CUSTOM_EXCEPTIONS` comment above) moved from 1900px to 1440px
+in the same PR to stay in sync. `.page-full` and `.page-grid` are now only
+140px apart — close enough that a future pass may want to collapse them
+into one tier; left as two in this PR since full-width content (a
+homepage hero/sidebar grid, a long-form article shell) still reads as
+needing a bit more room than a pure card grid. `.tool-prose` (760px),
+`.page-grid` (1300px), and `.page-form` (640px) are all unchanged — none
+were part of Brian's complaint. See BRAND.md §5 for the full tier table
+and the historical-value narrative sections elsewhere in this document
+(e.g. the FP&A Buddy explainer's own width-tier fix, and the Homepage
+Restructure bullets in CLAUDE.md) for context on what each page's width
+was **at the time it was written** — those numbers describe the state as
+of their own PR, not the current value; BRAND.md §5 is the one place that
+always reflects today's actual numbers.
+
 **`/admin/system/scripts`** (System nav group, Phase N) is the opposite design
 choice from the two pages above — a static, hand-maintained registry
 (`_SCRIPT_REGISTRY` in `webapp/app.py`), not a live-introspected one. Phase N's
@@ -307,10 +332,12 @@ instead of an orphan; the diagram frame is also wrapped in a
 `max-width:680px` container so it no longer stretches to the full page
 column regardless of the SVG's actual rendered size. **Width-tier fix
 (follow-up):** the page carried `.page-admin` (~1400-1600px per BRAND.md's
-layout system) verbatim from the `/admin/system/*` template it was
+layout system at the time; the tier itself narrowed to ~1350-1450px in
+PR 12, 2026-09) verbatim from the `/admin/system/*` template it was
 originally built under, while every other `article-atlantic` long-form
 page (Growth Engine Ratio, AI Hackathon Playbook, Connecting Claude to
-NetSuite) pairs `article-atlantic` with `.page-full` (~1800-2000px) —
+NetSuite) pairs `article-atlantic` with `.page-full` (~1800-2000px at the
+time; narrowed to ~1400-1500px in the same PR 12) —
 `article-atlantic` itself carries no width of its own, so the mismatch
 went unnoticed until the page was compared side by side with those. Fixed
 by switching the outer class to `.page-full`, confirmed with a live
@@ -5500,7 +5527,9 @@ switching to `.tool-prose`. A live pixel-measurement check (`getBoundingClientRe
 flagged as possibly having the same bug — found they were already correctly
 centered (symmetric margins at 1920px, full-width with 0 margin at 1440px);
 no fix was needed there. The homepage and `/thought-leadership` stay
-`.page-full` (1900px), unchanged by design. A fresh sweep for the same
+`.page-full` (1900px at the time this fix shipped; narrowed to 1440px in
+PR 12, 2026-09 — see the width-tier bullet above), unchanged by design at
+the time. A fresh sweep for the same
 bare-inline-style anti-pattern elsewhere in `webapp/app.py` found no other
 occurrence — `/read`/`/read/{article_id}` are a documented custom-exception
 layout (see `_page_index_snapshot()`), not an instance of the bug.
