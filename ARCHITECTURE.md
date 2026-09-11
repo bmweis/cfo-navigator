@@ -326,6 +326,52 @@ width was **at the time it was written** — those numbers describe the
 state as of their own PR, not the current value; BRAND.md §5 is the one
 place that always reflects today's actual numbers.
 
+**FP&A Buddy page redesign (PR 17, 2026-09)** — get-to-the-point copy,
+a two-column top section, a reordered post-Ask sequence, and the last
+`.tool-inner` wrapper on this page removed as a dead no-op. The bottom
+"What FP&A Buddy can do" bulleted explainer box is retired outright: three
+of its five bullets restated content already on the public
+`/tools/fpa-buddy/how-it-works` explainer, so keeping both was the kind of
+duplication the standing "less and simpler" rule exists to catch. Its two
+non-duplicated facts (conversation memory, feedback-driven improvement)
+were triaged rather than dropped wholesale, per Brian's own call: memory
+earns a clause in the new top intro, because it changes what question
+someone should even type first; the feedback-driven-improvement claim does
+not, since it's a statement about the product's trajectory rather than
+something the reader can act on right now, and it's already visible
+in-product via the feedback buttons. The intro itself
+(a fixed, Brian-authored 1-3 sentence block — not the tile blurb text the
+build brief mistakenly assumed already existed verbatim on this page) sits
+in a `.fpa-intro-layout` CSS Grid built with `grid-template-areas` rather
+than plain source order — the only way to give desktop and mobile
+genuinely different visual placements of the same DOM children with no JS
+and no `order` property. Desktop stacks description → usage line →
+Question box down the left column (named areas `intro`/`usage`/`question`)
+so the input sits above the fold, while the illustrative example
+(`example`) spans that whole column height on the right — reusing the
+`.ask-example`/`.ask-q-bubble`/`.ask-answer` markup the real, live
+question/answer thread renders with lower on the page, scaled down via
+selectors scoped to `.fpa-intro-area-example` only so the shared classes'
+real live-thread sizing is untouched. Mobile collapses the same grid to a
+single `intro`/`example`/`usage`/`question` column — the exact order this
+page already used before the redesign, kept because it already read well;
+`grid-template-areas` is what let that order survive the desktop
+restructure with zero DOM reshuffling. Below the grid, Sources/Depth/Ask
+stayed exactly where they were; only "Search past questions" moved, from
+above the Question box to below the Ask button — order below the button is
+now Ask → Past questions → Recent conversations, not Ask → Recent
+conversations with Past questions stranded above the form. The page's
+back-link changed from `/` ("← Home") to `/tools` ("← Toolbox"), matching
+every other Toolbox directory/tool page's own back-link convention (it was
+the one holdout). `.tool-inner` itself is untouched as a class — GER
+calculator and Sail, don't row + leaderboard still use it for a real
+reason (see the width-tier passage above and BRAND.md §5) — only this one
+page's own wrapper `<div>` was removed, since `.tool-inner`'s 1300px and
+`.page-standard`'s 1300px have been identical since the PR 13 tier
+collapse, making it a pure no-op on this page specifically once nothing
+else needed a bounded card-grid width for the game/calculator use case
+FP&A Buddy doesn't have.
+
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
 — replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column

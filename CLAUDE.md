@@ -7265,6 +7265,74 @@ it supersedes the old "`/save` is token-gated" note.
     plus a sibling asserting `_has_open_admin_tasks()` itself returns
     promptly) is pinned against a confirmed-real failure mode, not a guess.
 
+- **FP&A Buddy page redesign (PR 17, 2026-09) — get to the point, put the
+  example beside the description instead of below it, fix what's under the
+  Ask button, settle the page's width.** The build brief's own quoted
+  "existing tagline" turned out not to exist anywhere in the codebase —
+  checked directly, not assumed — so the top intro is genuinely new copy,
+  drafted and approved by Brian in-session rather than lifted from an
+  existing string: "Ask a real FP&A question and get an answer with its
+  sources, not half a day of Googling. It pulls from a research archive I
+  curate by hand, and it remembers the thread, so you can follow up."
+  Replaces the old h1-then-paragraph intro and, more importantly, the
+  bottom "What FP&A Buddy can do" bulleted box, which is retired outright —
+  three of its five bullets restated content already on
+  `/tools/fpa-buddy/how-it-works` (citations, hybrid retrieval, the
+  human/AI pipeline), so keeping both was exactly the duplication the
+  standing "less and simpler" rule exists to catch. Brian's own call on the
+  two bullets that weren't duplicated elsewhere: "remembers the thread"
+  (conversation memory) earns a clause in the new intro because it changes
+  what question someone should even type first; "gets sharper" (feedback-
+  driven improvement) doesn't, since it's a claim about the product's
+  trajectory rather than something the reader can act on right now, and
+  it's already visible in-product via the feedback buttons. The `#fpa-
+  features` anchor and its "Scroll down" teaser link are gone with the box
+  they pointed at; the teaser now reads "Curious how this works? Read the
+  full breakdown →", linking straight to the how-it-works page.
+  **Top section is a real two-column layout**, built with CSS Grid
+  `grid-template-areas` rather than plain source order — the only way to
+  give desktop and mobile genuinely different visual placements of the
+  same DOM children with no JS and no `order` property. First draft put
+  the illustrative example in a second, fixed column beside the intro
+  alone; live review found ~350px of dead space under the shorter left
+  column at desktop width, since three sentences can never balance a full
+  mocked conversation. Restructured on Brian's direction: desktop now
+  stacks description → usage line → Question box down the left column
+  (named grid areas `intro`/`usage`/`question`) so the input sits above
+  the fold and the gap fills with real form instead of empty space, while
+  the illustrative example (`example`) spans that whole column's height on
+  the right, scaled down via selectors scoped to `.fpa-intro-area-example`
+  only — `.ask-example`/`.ask-q-bubble`/`.ask-answer` are shared with the
+  real, live-rendered thread lower on the page, so the scale-down can't
+  leak into it. Mobile collapses the same grid to a single `intro`/
+  `example`/`usage`/`question` column — the exact order this page already
+  used before the redesign, confirmed reading well and kept unchanged;
+  `grid-template-areas` is what let that order survive the desktop
+  restructure with zero DOM reshuffling, verified directly via
+  `getBoundingClientRect()` y-ordering at 390px, not just eyeballed.
+  Sources/Depth/Ask stay outside the grid, full width, on both breakpoints.
+  **Below the Ask button, order was Ask → Recent conversations (a JS-
+  populated, initially-hidden list) with "Search past questions" stranded
+  ABOVE the Question box** — not "Recent conversations above Past
+  questions" as the build brief's own premise assumed; checked directly
+  against source before touching anything. Moved to Ask → Past questions →
+  Recent conversations, the requested order. **Back link changed from `/`
+  ("← Home") to `/tools` ("← Toolbox")** — grep confirmed this was the only
+  remaining "← Home" holdout on the whole site; every Toolbox directory/
+  tool page, and `/read`'s own rail back-link, already used "← Toolbox".
+  **`.tool-inner` removed from this page as a dead no-op**: `.tool-inner`
+  and `.page-standard` have both been 1300px since the PR 13 tier collapse,
+  so nesting one inside the other constrained nothing. Confirmed by
+  checking every other `.tool-inner` call site before touching any of
+  them (GER calculator, Sail Don't Row + leaderboard, both matchmaker chat
+  pages) — all four still use it for a real reason (bounding a
+  calculator/game canvas/chat panel to a card-grid width distinct from a
+  possible future wider `.page-standard`), so none of them were swept into
+  this PR; only FP&A Buddy's own wrapper, which had nothing left to do,
+  came out. See ARCHITECTURE.md's "FP&A Buddy page redesign (PR 17,
+  2026-09)" bullet and BRAND.md §5's `.tool-inner` passage for the
+  technical write-up.
+
 
 ## Authentication & security
 

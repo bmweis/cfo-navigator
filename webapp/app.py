@@ -1418,12 +1418,18 @@ p{margin:0 0 16px;color:var(--ink-soft);}
                                     included — they already carry their own
                                     min-width floors and horizontal scroll,
                                     so narrowing this shell doesn't squeeze
-                                    a table, it scrolls it), the FP&A
-                                    Buddy/GER-calculator/Sail Don't Row
+                                    a table, it scrolls it), the
+                                    GER-calculator/Sail Don't Row
                                     "functional tool" pages (whose own
                                     .tool-inner already caps at this same
-                                    1300px regardless of the outer shell),
-                                    and every pure long-form reading page
+                                    1300px regardless of the outer shell —
+                                    FP&A Buddy used to be in this group too,
+                                    until PR 17 removed its own .tool-inner
+                                    wrapper as a dead no-op now that both
+                                    values are identical, and built a real
+                                    two-column top section directly on
+                                    .page-standard instead), and every pure
+                                    long-form reading page
                                     (About, the ported thought-leadership
                                     articles, the FP&A Buddy explainer, Ask
                                     history) — those last four used to be a
@@ -20874,7 +20880,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     usage_html = ""
     if usage_today is not None:
         usage_html = (
-            f'<div id="ask-usage" style="font-size:13px;color:var(--muted);margin:-18px 0 22px;">'
+            f'<div id="ask-usage" style="font-size:13px;color:var(--muted);margin:0;">'
             f'<span id="ask-usage-text">${usage_today["spent"]:.2f} of ${usage_today["cap"]:.2f} used this month</span>'
             f' &middot; <a href="/ask/history" style="color:var(--accent);">Your usage and past questions &rarr;</a>'
             f'</div>'
@@ -20882,49 +20888,40 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 
     pre_q = _esc(q)
 
-    # Rendered twice below: an always-open list for wider screens, and inside
-    # a collapsed-by-default <details> for narrow screens (CSS media query
-    # picks which one is visible — no JS). Built once here so the copy
-    # itself only lives in one place in the source.
-    ask_value_bullets = (
-        '<li><strong>Cited, not guessed.</strong> Every answer traces to a source you can click and read. Verified citations, not self-reported ones.</li>'
-        '<li><strong>Remembers the thread.</strong> Ask a follow-up and it knows what you meant. Come back tomorrow and the conversation&rsquo;s still there.</li>'
-        '<li><strong>Finds by meaning, not just keywords.</strong> Semantic search pairs with keyword search (hybrid retrieval), so it surfaces the right article even when your wording doesn&rsquo;t match the source&rsquo;s.</li>'
-        '<li><strong>Gets sharper.</strong> Every rating feeds a real eval set that improves retrieval and answer quality over time.</li>'
-        '<li><strong>A human/AI partnership.</strong> I decide what goes into the archive: reading, vetting, and saving what&rsquo;s actually worth keeping. From there, AI handles execution and delivery: a pipeline built on Claude (Anthropic), Exa&rsquo;s search API, and the Internet Archive&rsquo;s Wayback Machine keeps it structured and recoverable even when a source moves or gets blocked, and synthesizes every cited answer you get.</li>'
-    )
-
     body = f"""<div class="page page-standard">
-<div class="tool-inner">
-<p style="margin:0 0 12px;"><a href="/" style="font-size:13px;color:var(--muted);">&larr; Home</a></p>
-<span class="ask-eyebrow">CFO Navigator</span>
-<h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
-<p style="color:var(--muted);margin:0 0 12px;">A digital library of finance content I curate by hand, kept structured and current by a content pipeline built on Claude, Exa, and the Internet Archive. Skip the digging, get your answer.</p>
-<p class="ask-teaser">Curious how this works? <a href="#fpa-features">Scroll down</a> or <a href="/tools/fpa-buddy/how-it-works">read the full breakdown &rarr;</a></p>
-<p style="color:var(--muted);font-size:12.5px;margin:-4px 0 12px;">Conversations continue seamlessly whether you ask here on the site or via Claude/MCP.</p>
+<p style="margin:0 0 12px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 
-<div class="ask-example">
-  <div class="ask-example-label">Illustrative example&mdash;not a captured real answer</div>
-  <div class="ask-q-bubble">What FP&amp;A team size do peer SaaS companies run at our stage?</div>
-  <div class="ask-answer">
-    <p>Most peer benchmarks put FP&amp;A headcount around one analyst per 75 to 150 employees, with the ratio tightening as ARR growth accelerates [1]. Companies preparing for a new funding round often add a dedicated FP&amp;A hire ahead of the raise to support board-reporting cadence [2]. Recent hiring trends across sub-$100M-ARR SaaS companies lean toward one generalist analyst before adding a dedicated planning lead [3].</p>
-    <ul class="ask-src-list">
-      <li>&#128218; <span class="ask-src-static">[1] FP&amp;A Team Sizing Benchmarks</span></li>
-      <li>&#128240; <span class="ask-src-static">[2] Board Reporting Cadence at Growth Stage</span></li>
-      <li>&#127760; <span class="ask-src-static">[3] Hiring Trends Across Early-Stage FP&amp;A Teams</span></li>
-    </ul>
+<div class="fpa-intro-layout">
+  <div class="fpa-intro-area-intro">
+    <span class="ask-eyebrow">CFO Navigator</span>
+    <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
+    <p style="color:var(--ink-soft);margin:0 0 12px;font-size:15.5px;line-height:1.6;">Ask a real FP&amp;A question and get an answer with its sources, not half a day of Googling. It pulls from a research archive I curate by hand, and it remembers the thread, so you can follow up.</p>
+    <p class="ask-teaser">Curious how this works? <a href="/tools/fpa-buddy/how-it-works">Read the full breakdown &rarr;</a></p>
+    <p style="color:var(--muted);font-size:12.5px;margin:-4px 0 0;">Conversations continue seamlessly whether you ask here on the site or via Claude/MCP.</p>
   </div>
-  <p class="ask-example-caption">A mocked example built on the real Library/Feed/Web mechanism described below&mdash;no real question history exists yet to pull a genuine one from.</p>
-</div>
-
-{usage_html}
-
-{past_questions_section}
-
-<div class="ask-card">
-  <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
-  <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?"
-    style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
+  <div class="fpa-intro-area-example">
+    <div class="ask-example">
+      <div class="ask-example-label">Illustrative example&mdash;not a captured real answer</div>
+      <div class="ask-q-bubble">What FP&amp;A team size do peer SaaS companies run at our stage?</div>
+      <div class="ask-answer">
+        <p>Most peer benchmarks put FP&amp;A headcount around one analyst per 75 to 150 employees, with the ratio tightening as ARR growth accelerates [1]. Companies preparing for a new funding round often add a dedicated FP&amp;A hire ahead of the raise to support board-reporting cadence [2]. Recent hiring trends across sub-$100M-ARR SaaS companies lean toward one generalist analyst before adding a dedicated planning lead [3].</p>
+        <ul class="ask-src-list">
+          <li>&#128218; <span class="ask-src-static">[1] FP&amp;A Team Sizing Benchmarks</span></li>
+          <li>&#128240; <span class="ask-src-static">[2] Board Reporting Cadence at Growth Stage</span></li>
+          <li>&#127760; <span class="ask-src-static">[3] Hiring Trends Across Early-Stage FP&amp;A Teams</span></li>
+        </ul>
+      </div>
+      <p class="ask-example-caption">A mocked example built on the real Library/Feed/Web mechanism&mdash;no real question history exists yet to pull a genuine one from.</p>
+    </div>
+  </div>
+  <div class="fpa-intro-area-usage">{usage_html}</div>
+  <div class="fpa-intro-area-question">
+    <div class="ask-card">
+      <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
+      <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?"
+        style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
+    </div>
+  </div>
 </div>
 
 <div class="ask-controls">
@@ -20947,17 +20944,13 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   {cost_span}
 </div>
 
+{past_questions_section}
+
 <div id="ask-recent" class="ask-section" style="display:none;"></div>
 
 <div id="ask-thread"></div>
 <div id="ask-capped" style="display:none;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:14px;color:var(--muted);">
   You&rsquo;ve reached the limit for this conversation. <a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.
-</div>
-
-<div class="ask-value" id="fpa-features">
-  <div class="ask-section-label">What FP&amp;A Buddy can do</div>
-  <ul class="ask-value-list">{ask_value_bullets}</ul>
-</div>
 </div>
 </div>
 
@@ -20965,18 +20958,44 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-eyebrow{{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}}
 .ask-card{{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:0;}}
 
-.ask-teaser{{font-size:14px;color:var(--ink-soft);margin:0 0 24px;}}
+.ask-teaser{{font-size:14px;color:var(--ink-soft);margin:0 0 4px;}}
 .ask-teaser a{{color:var(--accent);font-weight:600;}}
+
+/* Top section only, decoupled by grid-template-areas so desktop and mobile
+   can place the same DOM children differently without JS or an explicit
+   `order` property. Desktop: description, usage line, and the Question box
+   stack down the left column (filling the vertical space the tall
+   illustrative example creates on the right) so the input sits above the
+   fold; the example spans that whole left-column height on the right.
+   Mobile collapses to one column in reading order (description, example,
+   usage, question) — the same order this page used before the desktop fill
+   was added, kept exactly because it already reads well. Sources/Depth/Ask
+   stay outside this grid, full width, on both breakpoints. */
+.fpa-intro-layout{{display:grid;grid-template-columns:1fr 1fr;column-gap:40px;row-gap:16px;
+  grid-template-areas:"intro example" "usage example" "question example";
+  align-items:start;margin-bottom:28px;}}
+.fpa-intro-area-intro{{grid-area:intro;}}
+.fpa-intro-area-example{{grid-area:example;}}
+.fpa-intro-area-usage{{grid-area:usage;}}
+.fpa-intro-area-question{{grid-area:question;}}
+@media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;
+  grid-template-areas:"intro" "example" "usage" "question";}}}}
 
 .ask-example{{border:1px dashed var(--line-strong);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--surface);}}
 .ask-example-label{{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:3px 10px;margin-bottom:12px;}}
 .ask-example-caption{{margin:12px 0 0;font-size:12px;color:var(--muted);}}
 
-.ask-value{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:36px 0 0;}}
-.ask-value-list{{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;}}
-.ask-value-list li{{font-size:13.5px;line-height:1.55;color:var(--ink-soft);}}
-.ask-value-list strong{{color:var(--ink);}}
-@media (max-width:640px){{.ask-value{{padding:16px 18px;}}}}
+/* Scoped scale-down for the example inside the intro's right column only —
+   .ask-q-bubble/.ask-answer are shared with the real, live-rendered
+   question/answer thread below, so these overrides must not leak there. */
+.fpa-intro-area-example .ask-example{{margin:0;padding:16px 18px;}}
+.fpa-intro-area-example .ask-example-label{{font-size:10px;padding:2px 8px;margin-bottom:8px;}}
+.fpa-intro-area-example .ask-q-bubble{{font-size:13px;padding:10px 14px;}}
+.fpa-intro-area-example .ask-answer{{padding:14px 16px;font-size:13.5px;line-height:1.6;}}
+.fpa-intro-area-example .ask-answer p{{margin:0 0 10px;}}
+.fpa-intro-area-example .ask-src-list{{margin-top:10px;padding-top:10px;}}
+.fpa-intro-area-example .ask-example-caption{{font-size:11px;margin-top:8px;}}
+
 .ask-section{{margin:20px 0;}}
 .ask-section-label{{font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;}}
 
