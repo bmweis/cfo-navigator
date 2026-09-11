@@ -23234,24 +23234,59 @@ def _coral_moments_on_page(html: str) -> int:
     return hits
 
 
+# Re-entrancy guard for coral_moment_problems() below. This check is the
+# first entry in webapp.checks.run_all() that makes a real HTTP request
+# (every other live check is pure route/tuple introspection) — and
+# _page()'s admin-nav badge computation (`_has_open_admin_tasks()` ->
+# `webapp.tasks._failing_checks_count()`) calls that exact same run_all()
+# on every page render for an admin-role visitor, to badge /admin's own
+# nav link. In the ordinary case (a real LINKLIB_PASSWORD/LINKLIB_SAVE_TOKEN
+# configured) a signed-out TestClient request here renders role="guest",
+# so that badge path never fires and this is a non-issue. But `_is_authed`/
+# `_role` treat EVERY visitor as admin when neither is configured (the
+# documented "open, local-dev convenience" mode) — found live, not
+# theorized: a fresh, password-less `Library`/`TestClient` reproduces an
+# actual infinite recursion (confirmed to at least depth 3 before being
+# killed) via coral_moment_problems() -> renders "/" -> _page() (role=
+# "admin") -> _has_open_admin_tasks() -> checks.run_all() ->
+# coral_moment_problems() again. A plain module-level flag is enough (not
+# thread-local): Starlette's TestClient blocks the calling thread for the
+# duration of each request, so the outer call's flag is still set,
+# GIL-visible, and never concurrently written to while any nested call
+# from inside that same request's rendering runs — there is no genuine
+# parallelism to guard against, only recursion within one logical call
+# chain. A nested call has nothing useful to check anyway — it's asking
+# "does the page currently rendering have a coral problem" from inside
+# that same page's own render — so it returns [] immediately rather than
+# recursing further.
+_CORAL_CHECK_IN_PROGRESS = False
+
+
 def coral_moment_problems() -> list[str]:
     """Every public page route with more than one coral moment, signed
     out — see the module comment above for what this can and can't catch.
     Sorted for a stable, diffable result, mirroring hub_nav_orphans()'s own
     return shape."""
+    global _CORAL_CHECK_IN_PROGRESS
+    if _CORAL_CHECK_IN_PROGRESS:
+        return []
     from fastapi.testclient import TestClient
     client = TestClient(app, raise_server_exceptions=False)
     problems = []
-    for path in _coral_check_routes():
-        try:
-            resp = client.get(path, follow_redirects=False)
-        except Exception:
-            continue
-        if resp.status_code != 200:
-            continue
-        count = _coral_moments_on_page(resp.text)
-        if count > 1:
-            problems.append(f"{path} ({count} coral moments)")
+    _CORAL_CHECK_IN_PROGRESS = True
+    try:
+        for path in _coral_check_routes():
+            try:
+                resp = client.get(path, follow_redirects=False)
+            except Exception:
+                continue
+            if resp.status_code != 200:
+                continue
+            count = _coral_moments_on_page(resp.text)
+            if count > 1:
+                problems.append(f"{path} ({count} coral moments)")
+    finally:
+        _CORAL_CHECK_IN_PROGRESS = False
     problems.sort()
     return problems
 

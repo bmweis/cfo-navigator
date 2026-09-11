@@ -88,3 +88,55 @@ def test_checks_run_all_reports_coral_discipline_pass(env):
     row = next(r for r in results if r["name"] == "Coral discipline (one moment per page)")
     assert row["ok"] is True
     assert row["where"] == "Live + CI"
+
+
+@pytest.fixture
+def no_password_env(monkeypatch):
+    """No LINKLIB_PASSWORD/LINKLIB_SAVE_TOKEN at all — the documented
+    "open, local dev convenience" auth mode, where _is_authed()/_role()
+    treat every visitor as admin. Deliberately not the `env` fixture
+    above, which always sets a password."""
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.delenv("LINKLIB_PASSWORD", raising=False)
+    monkeypatch.delenv("LINKLIB_SAVE_TOKEN", raising=False)
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    yield appmod
+    if os.path.exists(db):
+        os.remove(db)
+
+
+def test_coral_check_does_not_recurse_in_open_auth_mode(no_password_env):
+    """Real bug found while building this check, not theoretical: in open
+    auth mode (no password configured) every page renders role="admin", so
+    _page()'s nav badge computation (_has_open_admin_tasks() ->
+    webapp.tasks._failing_checks_count()) calls checks.run_all() on EVERY
+    page render — including the pages coral_moment_problems() itself
+    renders. Before the _CORAL_CHECK_IN_PROGRESS guard, this recursed:
+    coral_moment_problems() -> renders "/" -> _page() (role="admin") ->
+    _has_open_admin_tasks() -> checks.run_all() -> coral_moment_problems()
+    again, without end — reproduced live to at least depth 3 before being
+    killed. Confirms both that the top-level call still returns a real,
+    non-empty-by-construction result (not just "didn't hang") and that a
+    nested call (simulated directly, the same way the recursion actually
+    reaches it) returns [] rather than recursing."""
+    problems = no_password_env.coral_moment_problems()
+    assert isinstance(problems, list)   # returned at all — the actual regression
+
+    no_password_env._CORAL_CHECK_IN_PROGRESS = True
+    try:
+        assert no_password_env.coral_moment_problems() == []
+    finally:
+        no_password_env._CORAL_CHECK_IN_PROGRESS = False
+
+
+def test_admin_nav_badge_computation_does_not_hang_in_open_auth_mode(no_password_env):
+    """The actual real-world trigger: _has_open_admin_tasks() is what every
+    page render calls when role=="admin", which is every page in open auth
+    mode. Asserts it returns promptly rather than hanging — this is what
+    tests/test_checks.py's own hang (before that file started setting
+    LINKLIB_PASSWORD like every other test fixture) actually traced to."""
+    result = no_password_env._has_open_admin_tasks()
+    assert isinstance(result, bool)

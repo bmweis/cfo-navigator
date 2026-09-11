@@ -7218,7 +7218,52 @@ it supersedes the old "`/save` is token-gated" note.
     list—not benchmarking data.") with nothing framing the page as a
     whole before the Benchmarking section starts. No copy was written or
     shipped for this — any new copy is a stop-for-approval item, reported
-    in the PR description as a draft, not committed.
+    in the PR description as a draft, not committed. **Approved with edits
+    the same PR** (before merge): "What's here: the benchmarking sources I
+    rely on, and books that shaped how I do this job. Not exhaustive, just
+    what's held up." — the draft's "actually" dropped (already used twice
+    elsewhere on this page/its Toolbox card blurb) and its em dash swapped
+    for a comma. Shipped between the H1 row and "Suggest a resource →",
+    exactly as proposed.
+  - **A real, previously-latent infinite-recursion bug found and fixed
+    before merge, via `coral_moment_problems()` itself, not a code-review
+    guess** — `webapp/checks.py`'s `run_all()` had one existing structural
+    hazard nothing had ever triggered: `webapp/tasks.py`'s
+    `_failing_checks_count()` (which badges the admin nav's own "Admin"
+    link) calls that same `run_all()`, and `_page()` calls it on EVERY
+    page render for a `role=="admin"` visitor. `_is_authed`/`_role` treat
+    *every* visitor as admin when neither `LINKLIB_PASSWORD` nor
+    `LINKLIB_SAVE_TOKEN` is configured — the documented "open, local-dev
+    convenience" mode. Every check in `run_all()` before this PR was pure
+    route/tuple introspection with no HTTP request involved, so this
+    structural cycle was inert. `coral_moment_problems()` is the first
+    check to actually render pages via `TestClient`, which made the cycle
+    real: in open-auth mode, `coral_moment_problems()` renders `/` ->
+    `_page()` (role admin) -> `_has_open_admin_tasks()` ->
+    `_failing_checks_count()` -> `run_all()` -> `coral_moment_problems()`
+    again, without end. Reproduced live to at least depth 3 before being
+    killed — a genuine, not theoretical, infinite recursion, with runaway
+    memory growth (confirmed in this session's own attempted local full-suite
+    runs, which stalled and ballooned to multiple GB before being killed —
+    `tests/test_checks.py` was the one file exercising this path, since it
+    never set a password, unlike every other test file's `env` fixture).
+    Fixed with a plain module-level `_CORAL_CHECK_IN_PROGRESS` guard around
+    `coral_moment_problems()` — deliberately not thread-local, since
+    Starlette's `TestClient` blocks the calling thread for the duration of
+    each request, so there's no genuine concurrency to guard against here,
+    only recursion within one logical call chain; a nested call returns
+    `[]` immediately (see the guard's own comment for the full reasoning).
+    `tests/test_checks.py` also picked up the same `env` fixture
+    (password + secret key + fresh DB, reloaded per test) every other test
+    file already uses, closing the specific gap that let this go
+    undetected — the underlying open-auth-mode "every page render pays for
+    a full `run_all()`" behavior is unchanged and out of scope for this
+    PR, only the recursion is fixed. Verified both ways, not just that the
+    fix works: reverted the guard locally and reproduced the exact hang
+    again before restoring it, so the regression test
+    (`tests/test_coral_discipline.py::test_coral_check_does_not_recurse_in_open_auth_mode`
+    plus a sibling asserting `_has_open_admin_tasks()` itself returns
+    promptly) is pinned against a confirmed-real failure mode, not a guess.
 
 
 ## Authentication & security
