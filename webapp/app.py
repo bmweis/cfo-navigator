@@ -1393,12 +1393,25 @@ p{margin:0 0 16px;color:var(--ink-soft);}
    Phase 9 sweep — every route now carries one of the five tiers below. */
 .page{width:100%;max-width:780px;margin:0 auto;padding:48px 24px 72px;}
 
-.page-full{max-width:1900px;}   /* full-width content — homepage/about, TL landing, reader */
+.page-full{max-width:1440px;}   /* full-width content — homepage/about, TL landing, reader.
+                                    Narrowed from 1900px (PR 12, 2026-09): Brian's own read
+                                    of nearly every page on this tier was "too wide" — a
+                                    760px .tool-prose column, or a hero/sidebar grid, floating
+                                    inside a ~1900px shell reads thin and stranded rather than
+                                    generous. The Toolbox directory pages (.page-grid, 1300px)
+                                    were the one width he pointed to as feeling right, so this
+                                    tier moved toward it without merging into it outright —
+                                    see PR 12's own description for the open question on
+                                    whether the two tiers should eventually collapse into one. */
 .page-grid{max-width:1300px;}   /* card grids (CFO Toolbox landing) and the Software
                                     add/edit forms, which need the extra width for the
-                                    long-form description field */
+                                    long-form description field. Unchanged in PR 12 — this
+                                    is the width Brian confirmed already feels right. */
 .page-form{max-width:640px;}    /* forms — contact, admin edit forms */
-.page-admin{max-width:1500px;} /* admin data tables — communities list */
+.page-admin{max-width:1400px;} /* admin data tables — communities list. Narrowed from
+                                    1500px (PR 12, 2026-09) for the same reason as .page-full
+                                    above — still wide enough for a many-column admin table to
+                                    breathe before its own overflow-x:auto scroll kicks in. */
 
 /* Two-column split for Software's Add/Edit forms (2fr wide left column,
    1fr narrow right column holding a few short fields). Stacks to one
@@ -9654,7 +9667,7 @@ def admin_compare_summary_feedback(request: Request):
 <h1>Compare summary feedback</h1>
 <p style="color:var(--muted);margin:8px 0 20px;">Flags on the AI-generated Compare-page overlap/contrast summary. No automated action&mdash;review each and mark it reviewed once handled.</p>
 <div style="overflow-x:auto;">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:720px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Comparison</th>
@@ -10894,7 +10907,8 @@ def admin_contacts(request: Request):
   <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;"
     onclick="return document.querySelectorAll('.contact-row-cb:checked').length &amp;&amp; confirm('Delete ' + document.querySelectorAll('.contact-row-cb:checked').length + ' selected submission(s)?');">Delete selected</button>
 </div>
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:12px;">
+<div style="overflow-x:auto;">
+<table style="width:100%;min-width:760px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:12px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" id="contact-select-all" onchange="document.querySelectorAll('.contact-row-cb').forEach(cb => cb.checked = this.checked);"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
@@ -10905,9 +10919,11 @@ def admin_contacts(request: Request):
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
+</div>
 </form>
 <h2 style="font-size:16px;margin:40px 0 12px;">Deletion history</h2>
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<div style="overflow-x:auto;">
+<table style="width:100%;min-width:720px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
   <th style="padding:8px 12px;text-align:left;font-size:13px;">Admin</th>
@@ -10916,6 +10932,7 @@ def admin_contacts(request: Request):
 </tr></thead>
 <tbody>{audit_html}</tbody>
 </table>
+</div>
 </div>"""
     return HTMLResponse(_page("Contacts—Admin", "Admin", body, authed=True))
 
@@ -10971,7 +10988,8 @@ def admin_email_failures(request: Request):
 <h1>Email delivery failures</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Every outbound email is best-effort—contact form, tool submissions, welcome emails, password resets, warm intros. The underlying record always saves even if the send fails.</p>
 <p style="color:var(--muted);margin:0 0 18px;">A failure lands here instead of just a server log, so it never goes unnoticed.</p>
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<div style="overflow-x:auto;">
+<table style="width:100%;min-width:640px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">When</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Flow</th>
@@ -10980,6 +10998,7 @@ def admin_email_failures(request: Request):
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
+</div>
 </div>"""
     return HTMLResponse(_page("Email failures—Admin", "Admin", body, authed=True))
 
@@ -11862,7 +11881,7 @@ def admin_software(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
 <div style="overflow-x:auto;margin-bottom:40px;">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:800px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
@@ -11882,7 +11901,7 @@ def admin_software(request: Request, filter: str = ""):
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
 <div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
 <form id="software-approved-form">
-<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;">
+<table class="admin-table-responsive" style="width:100%;min-width:820px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
   <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:220px;">Name</th>
@@ -11959,8 +11978,15 @@ applySortFilter('software');
 .admin-table-actions-grid form button{{width:100%;}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
+  /* min-width:0!important cancels the desktop-only floor (PR 12, 2026-09 —
+     an inline min-width on the <table> itself, added so the desktop table
+     view scrolls instead of squishing, otherwise survives into card mode
+     here unchanged: a non-!important media-query rule can never beat an
+     inline style, so without this the table box stayed pinned at its
+     desktop min-width even while stacking into cards, forcing an invisible,
+     pointless horizontal scroll on an otherwise correctly stacked card). */
   .admin-table-responsive, .admin-table-responsive tbody,
-  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;}}
+  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;min-width:0!important;}}
   .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
   .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
@@ -12090,7 +12116,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
 
     def _actionable_table(rows: list[dict]) -> str:
         return f"""<div style="overflow-x:auto;">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:640px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool A</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool B</th>
@@ -12124,7 +12150,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
     if decisions:
         decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Dismissed—not duplicates</h2>
 <div style="overflow-x:auto;">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:480px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <tbody>{"".join(_decision_row(d) for d in decisions)}</tbody>
 </table>
 </div>"""
@@ -12337,7 +12363,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 <h1>Toolbox intros{title_suffix}</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm intro requests from readers&mdash;{len(leads)} total.</p>
 <div style="overflow-x:auto;">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:760px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool</th>
@@ -12666,7 +12692,7 @@ def _feature_category_group_html(category: dict, features: list[dict], pending_i
   </summary>
   <div style="padding:0 18px 16px;">
     <div style="overflow-x:auto;">
-    <table style="width:100%;border-collapse:collapse;">
+    <table style="width:100%;min-width:640px;border-collapse:collapse;">
       <thead><tr style="background:var(--bg);">
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Definition</th>
@@ -13050,7 +13076,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
   {near_dup_html}
   <label style="display:block;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Feature{' (new)' if is_new_feature else ''}</label>
   {feature_field_html}
-  {f'<div style="overflow-x:auto;margin:12px 0;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
+  {f'<div style="overflow-x:auto;margin:12px 0;"><table style="width:100%;min-width:480px;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
   {f'<p style="font-size:13.5px;line-height:1.6;color:var(--ink);background:var(--bg);border-radius:8px;padding:10px 12px;margin:10px 0 0;">{_esc(item["articulation"])}</p>' if item.get("articulation") else ''}
   {coverage_html}
   {f'<p style="font-size:13px;color:var(--muted);margin:8px 0 0;">From {_esc(item["submitter_name"])} ({_esc(item["submitter_email"])})</p>' if item.get("submitter_name") else ''}
@@ -14186,7 +14212,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
 <div style="overflow-x:auto;">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:800px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Type</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Title</th>
@@ -14623,7 +14649,7 @@ def admin_original_content(request: Request, status: str = ""):
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
 <div style="overflow-x:auto;">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:800px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Title</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Slug</th>
@@ -15527,7 +15553,7 @@ def admin_communities(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
 <div style="overflow-x:auto;margin-bottom:40px;">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:800px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
@@ -15547,7 +15573,7 @@ def admin_communities(request: Request, filter: str = ""):
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
 <div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
 <form id="communities-approved-form">
-<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;">
+<table class="admin-table-responsive" style="width:100%;min-width:880px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
   <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:280px;">Name</th>
@@ -15624,8 +15650,15 @@ applySortFilter('communities');
 .admin-table-actions-grid form button{{width:100%;}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
+  /* min-width:0!important cancels the desktop-only floor (PR 12, 2026-09 —
+     an inline min-width on the <table> itself, added so the desktop table
+     view scrolls instead of squishing, otherwise survives into card mode
+     here unchanged: a non-!important media-query rule can never beat an
+     inline style, so without this the table box stayed pinned at its
+     desktop min-width even while stacking into cards, forcing an invisible,
+     pointless horizontal scroll on an otherwise correctly stacked card). */
   .admin-table-responsive, .admin-table-responsive tbody,
-  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;}}
+  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;min-width:0!important;}}
   .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
   .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
@@ -17425,7 +17458,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             )
             all_feature_ids.extend(f["id"] for f in section["features"])
             table_html = (
-                f'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;margin-top:6px;">'
+                f'<div style="overflow-x:auto;"><table style="width:100%;min-width:760px;border-collapse:collapse;margin-top:6px;">'
                 f'<thead><tr style="background:var(--bg);">'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">On</th>'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Feature</th>'
@@ -19025,8 +19058,12 @@ a:hover{opacity:.8;}
 .reader-controls button:hover{background:var(--line);}
 
 /* Full-width tier (BRAND.md §5) — main column keeps a readable measure, the
-   "On this page" TOC sits at the true right edge of the wide canvas. */
-.reader-layout{display:flex;justify-content:space-between;gap:40px;max-width:1900px;margin:0 auto;padding:56px 24px 100px;}
+   "On this page" TOC sits at the true right edge of the wide canvas.
+   Tracks .page-full's own max-width (PR 12, 2026-09: 1900px → 1440px) even
+   though this page is built from its own standalone _READER_TMPL/_READER_CSS
+   and never uses the .page/.page-full classes directly — see the
+   _PAGE_INDEX_CUSTOM_EXCEPTIONS comment above naming this route page-full. */
+.reader-layout{display:flex;justify-content:space-between;gap:40px;max-width:1440px;margin:0 auto;padding:56px 24px 100px;}
 .reader-main{max-width:760px;min-width:0;}
 .reader-toc{width:220px;flex-shrink:0;position:sticky;top:64px;align-self:flex-start;}
 .reader-toc-title{font:600 11.5px 'DM Sans',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
@@ -22665,8 +22702,9 @@ _PAGE_TIER_LABELS = {"full": "page-full", "grid": "page-grid",
 # `.page`/`.page-full` classes, it has its own internal widths, so it's a
 # genuine custom exception, not a false "no tier assigned" flag.
 # `/read/{article_id}` (the single-article standalone view) is different: it
-# genuinely renders at the page-full width (1900px, matching BRAND.md §5's
-# own listing of it under that tier) — it's just built from a fully
+# genuinely renders at the page-full width (1440px as of PR 12, 2026-09,
+# matching BRAND.md §5's own listing of it under that tier) — it's just
+# built from a fully
 # standalone `_READER_TMPL`/`_READER_CSS` template that never uses the
 # `.page`/`.page-full` classes, so it gets its real tier name (not "custom
 # exception") rather than a false flag.
@@ -25286,7 +25324,8 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
 </div>
 {merge_html}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
-  <table style="width:100%;border-collapse:collapse;">
+  <div style="overflow-x:auto;">
+  <table style="width:100%;min-width:640px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tag</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Articles</th>
@@ -25295,6 +25334,7 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  </div>
 </div>"""
 
     section2_html = f"""{_section_header(f"Tagging style{state_badge}")}
@@ -27519,7 +27559,7 @@ def admin_users(request: Request, msg: str = ""):
 </div>
 
 <div style="overflow-x:auto;">
-<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;min-width:480px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('users',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Username</th>
@@ -27555,8 +27595,13 @@ def admin_users(request: Request, msg: str = ""):
 @media(max-width:900px){{.users-top-grid{{grid-template-columns:1fr!important;}}}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
+  /* min-width:0!important cancels the desktop-only floor — see the
+     matching comment on the Software/Communities admin lists' own
+     @media(max-width:700px) block above (PR 12, 2026-09) for the full
+     explanation of why a plain media-query rule can't do this without
+     !important. */
   .admin-table-responsive, .admin-table-responsive tbody,
-  .admin-table-responsive td{{display:block;width:100%;}}
+  .admin-table-responsive td{{display:block;width:100%;min-width:0!important;}}
   /* Last login / Access level / Status form a compact 3-column mini-table
      right under the username (Brian's explicit ask, matching how a real
      table lines values up across rows) — the <tr> itself becomes a grid so
@@ -28530,7 +28575,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:20px;">
   <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;font-size:14px;">Recent attempts</div>
   <div style="overflow-x:auto;">
-  <table style="width:100%;border-collapse:collapse;">
+  <table style="width:100%;min-width:700px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
       <th style="{_th_nowrap}">Result</th>
@@ -28672,7 +28717,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <span style="font-size:12px;color:var(--muted);">Re-upload the exported CSV with a <code>corrected_url</code> column filled in. Nothing is saved until you confirm on the preview screen.</span>
   </form>
   <div style="overflow-x:auto;">
-  <table style="width:100%;border-collapse:collapse;">
+  <table style="width:100%;min-width:780px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
       <th style="{_th}">Last failure</th>
@@ -28695,7 +28740,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Marked &ldquo;good enough as-is&rdquo; by an admin&mdash;permanently out of automatic retry and out of Needs manual review above, until undone here.</div>
   </div>
   <div style="overflow-x:auto;">
-  <table style="width:100%;border-collapse:collapse;">
+  <table style="width:100%;min-width:640px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
       <th style="{_th}">Reason it was flagged</th>
@@ -30964,7 +31009,7 @@ def admin_emails_page(request: Request):
         )
         return f"""\
 <div style="overflow-x:auto;margin:0 0 26px;">
-<table style="width:100%;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
+<table style="width:100%;min-width:720px;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
 <thead><tr style="text-align:left;">
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Email</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Recipient</th>

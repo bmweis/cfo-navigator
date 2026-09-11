@@ -380,10 +380,29 @@ system landed — the GER calculator was never actually 820px, it used plain 780
 
 | Tier | CSS class | Width | Pages |
 |---|---|---|---|
-| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), `/ask/history`, CFO Toolbox community profile pages, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard) |
+| Full-width content | `.page-full` | ~1400–1500px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), `/ask/history`, CFO Toolbox community profile pages, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard), `/read/{article_id}` |
 | Card grids | `.page-grid` | ~1200–1400px | CFO Toolbox landing + Software directory, Resources directory, Communities directory (+ compare, find-results), `/admin/open-source` |
 | Forms | `.page-form` | ~600–700px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit), admin single-record add/edit forms |
-| Admin data tables | `.page-admin` | ~1400–1600px | All remaining `/admin/*` list, dashboard, and report pages |
+| Admin data tables | `.page-admin` | ~1350–1450px | All remaining `/admin/*` list, dashboard, and report pages |
+
+**Narrowed (PR 12, 2026-09):** `.page-full` moved from 1900px to 1440px and
+`.page-admin` from 1500px to 1400px, in response to Brian's own read that
+nearly every page on those two tiers felt too wide — a 760px `.tool-prose`
+column, or a hero/sidebar grid, floating inside a ~1900px shell reads thin
+and stranded rather than generous. `.page-grid` (1300px, unchanged) was the
+one width he pointed to as feeling right, and both tiers moved toward it
+without merging into it outright. The gap between `.page-full` (1440px) and
+`.page-grid` (1300px) is now only 140px — close enough that a future pass
+may want to collapse the two into one tier; not done in this PR since
+full-width content (a homepage hero/sidebar grid, a long-form article shell)
+still reads as needing a little more room than a pure card grid. `.page-form`
+(640px) is untouched — narrow by deliberate design, not a candidate for this
+pass. `/read/{article_id}` (the standalone single-article Reader view, not
+the merged three-pane `/read` shell below) is built from its own
+`_READER_TMPL`/`_READER_CSS` and never uses the `.page`/`.page-full`
+classes directly, but its `.reader-layout` deliberately tracks `.page-full`'s
+own max-width — narrowed alongside it, from 1900px to 1440px, so the two
+stay in sync.
 
 Combine with `.page` for its margin/padding (e.g. `class="page page-full"`). Generous
 page padding (≈48px top). Whitespace before density. Admin/data pages get the width
