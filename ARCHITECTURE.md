@@ -423,6 +423,56 @@ lives in. Verified with real `getBoundingClientRect()` measurements at
 example-card bottom landed at the identical y-coordinate, **0.0px diff**,
 at both widths.
 
+**Same PR, round 3 — round 2's stacked-and-narrowed Sources/Depth/Ask
+traded one problem for another: the dead space moved from under the left
+column to beside it.** Confining the whole Ask form to the ~600px left
+column (round 2's fix for the earlier ~350px gap) meant Sources/Depth/Ask
+never used the ~450px the example card's own wider column left unclaimed
+under it — full width was never the actual problem; the mismatched left
+edge round 2 was originally fixing was. Reverted the controls/action rows
+back to spanning both grid columns (`"controls controls"`/`"action action"`
+in `grid-template-areas`, replacing round 2's `"controls ."`/`"action ."`)
+— `example`'s own spanning area is set by which rows it's *listed against*
+in the template, not by what the controls/action rows do, so widening those
+two rows to the full grid doesn't reopen the round-1 dead-space problem or
+disturb the edge-alignment fix directly above; both keep working unchanged.
+Because column 1 of the two-column grid starts at the same x-coordinate
+regardless of how many columns a given row spans, `.fpa-intro-area-controls`
+and `.fpa-intro-area-action` still open flush with the Question box's own
+left edge above them — confirmed via `getBoundingClientRect()`, `0.00px`
+left-edge diff at both 1280px and 1920px — while now running the form's own
+full natural width instead of being squeezed into a ~280px-per-column
+sub-split. The round-2 override forcing Sources/Depth into one stacked
+column (`.fpa-intro-area-controls .ask-controls{grid-template-columns:1fr}`)
+is removed outright, letting `.ask-controls`' own shared 1fr/1fr split
+render exactly as it does everywhere else this component is used — at
+1920px the three Sources chips fit one line and sit genuinely side by side
+with Depth; at 1280px Sources wraps to two lines while Depth's shorter
+column still renders one, an asymmetry confirmed identical against
+`origin/main`'s pre-PR-17 markup for this exact shared component (`.ask-
+controls`/`.ask-tags` CSS byte-for-byte unchanged there), not something
+this PR introduced or is scoped to redesign.
+
+The second ask — tightening the ~60px gap between the Depth row and the
+Ask button — was genuinely a round-2 artifact, not a property of this
+component: round 2's stacked layout summed `.ask-controls`' own 20px
+bottom margin, the grid's 16px row-gap, and `.ask-action-row`'s own 22px
+top margin into one visually continuous ~58px gap. `.fpa-intro-area-
+controls .ask-controls{margin:0;}` and `.fpa-intro-area-action .ask-
+action-row{margin:0;}` (both components have exactly one call site each,
+confirmed by grep before zeroing their margins) leave only the grid's own
+16px row-gap between every row in this section — verified directly: at
+1920px, where Sources renders on one line, the measured gap from Depth's
+row to the Ask button is 16.5px, matching every other row-gap on the page.
+At 1280px the same gap measures ~57.5px, but that's the pre-existing
+Sources-wraps-to-two-lines asymmetry from the paragraph above showing back
+through (Depth's column finishes a full "wrapped line" earlier than
+Sources' does, and the shared grid row's height is set by the taller
+column) — not unresolved margin stacking, and not something a per-row gap
+value can fix without either reflowing Sources' own chip labels or
+un-pairing Sources/Depth from a shared grid row, neither of which was
+asked for or in scope here.
+
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
 — replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column

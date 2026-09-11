@@ -20965,19 +20965,19 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 
 /* Top section only, decoupled by grid-template-areas so desktop and mobile
    can place the same DOM children differently without JS or an explicit
-   `order` property. Desktop: description, usage line, Question box, and
-   the Ask form controls (Sources/Depth/Ask button) all stack down the left
-   column — one continuous shape, not a form whose own controls span full
-   width past the column's left edge — while the illustrative example
-   spans only the intro/usage/question rows on the right (a literal "."
-   placeholder keeps it out of the controls/action rows, so its own bottom
-   edge lines up with the Question box's rather than running the full
-   height of the left column). Mobile collapses to one column in the exact
-   reading order this page used before the desktop fill was added — kept
-   because it already reads well: description, example, usage, question,
-   controls, action. */
+   `order` property. Desktop: description, usage line, and the Question box
+   stack down the left column — sharing its left edge with the illustrative
+   example's own column start — while the example spans only those three
+   rows on the right (so its bottom edge lines up with the Question box's
+   rather than running the full height of the left column). Sources/Depth/
+   Ask then drop back to full width below both, sharing the Question box's
+   left edge without being squeezed into its ~600px column — full width was
+   never the problem, only the mismatched left edge was. Mobile collapses to
+   one column in the exact reading order this page used before the desktop
+   fill was added — kept because it already reads well: description,
+   example, usage, question, controls, action. */
 .fpa-intro-layout{{display:grid;grid-template-columns:1fr 1fr;column-gap:40px;row-gap:16px;
-  grid-template-areas:"intro example" "usage example" "question example" "controls ." "action .";
+  grid-template-areas:"intro example" "usage example" "question example" "controls controls" "action action";
   align-items:start;margin-bottom:28px;}}
 .fpa-intro-area-intro{{grid-area:intro;}}
 .fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
@@ -20988,18 +20988,14 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 @media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;
   grid-template-areas:"intro" "example" "usage" "question" "controls" "action";}}}}
 
-/* Sources (3 chips) and Depth (3 buttons) reuse .ask-controls' own 1fr/1fr
-   split everywhere else on the site, but at the ~600px left-column width
-   here that leaves each side only ~280px — enough to fit Depth's three
-   short buttons on one line, but Sources' longer chip labels ("Web search
-   (trusted sites)") wrap to two ragged lines. Stacked (Sources above
-   Depth) instead, reusing the same @media(max-width:640px) rule .ask-
-   controls already ships for narrow viewports rather than a new one —
-   this container is narrower than that breakpoint regardless of the real
-   viewport, so applying it unconditionally (not inside a media query) is
-   correct on both the two-column desktop layout and the single-column
-   mobile stack alike. */
-.fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;gap:18px;}}
+/* Sources/Depth and the Ask button keep .ask-controls'/.ask-action-row's own
+   default margins everywhere else they're used (nowhere else, as of this
+   PR) — zeroed here only, so the grid's own 16px row-gap is the entire
+   space between the Question box, the controls row, and the Ask button,
+   instead of stacking on top of ~40px of margin the two shared components
+   already carry for their own (unrelated) contexts. */
+.fpa-intro-area-controls .ask-controls{{margin:0;}}
+.fpa-intro-area-action .ask-action-row{{margin:0;}}
 
 /* Bottom-edge alignment between the Question box and the illustrative
    example: `align-self:stretch` on both grid items (above) makes each

@@ -7361,6 +7361,38 @@ it supersedes the old "`/save` is token-gated" note.
   came out. See ARCHITECTURE.md's "FP&A Buddy page redesign (PR 17,
   2026-09)" bullet and BRAND.md §5's `.tool-inner` passage for the
   technical write-up.
+  **Round 3, same PR, per a third round of direct feedback**: round 2's fix
+  traded one dead-space problem for another — confining Sources/Depth/Ask
+  to the ~600px left column left ~450px empty to their right, under the
+  wider example card. Full width was never the problem; the mismatched
+  left edge round 2 originally fixed was. Reverted `controls`/`action` back
+  to spanning both grid columns (`"controls controls"`/`"action action"`
+  in `grid-template-areas`, not `"controls ."`/`"action ."`) — since
+  `example`'s own row-span is set by which rows *it's* listed against, not
+  by how wide the controls/action rows are, this doesn't reopen round 1's
+  dead-space bug or disturb the bottom-edge alignment fix; both keep
+  working. Column 1 still starts at the same x regardless of how many
+  columns a row spans, so Sources/Depth/Ask still open flush with the
+  Question box's left edge (0.00px diff at both 1280px and 1920px) while
+  running full width. Round 2's forced single-column stacking override on
+  Sources/Depth is removed — the shared `.ask-controls` 1fr/1fr split
+  renders as-is, same as everywhere else it's used: at 1920px Sources fits
+  one line and sits genuinely side by side with Depth; at 1280px Sources
+  wraps to two lines while Depth doesn't, confirmed identical against
+  `origin/main`'s pre-PR-17 markup for this exact component (byte-for-byte
+  unchanged CSS) — a pre-existing asymmetry, not something this PR
+  introduced or is scoped to fix. The ~60px Depth-to-Ask gap was a genuine
+  round-2 artifact (stacked layout summed `.ask-controls`' 20px bottom
+  margin + the grid's 16px row-gap + `.ask-action-row`'s 22px top margin);
+  zeroing both components' margins (each has exactly one call site,
+  confirmed by grep) leaves only the grid's 16px row-gap everywhere in this
+  section — verified at 16.5px at 1920px, matching every other gap on the
+  page. At 1280px the same gap still measures ~57.5px, but that's the
+  Sources-wraps-to-two-lines asymmetry above showing through (the shared
+  grid row's height is set by the taller column), not unresolved margin
+  stacking — reported rather than chased further, since fixing it would
+  mean reflowing Sources' chip labels or un-pairing Sources/Depth from a
+  shared row, neither of which was asked for.
 
 
 ## Authentication & security
