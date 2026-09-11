@@ -20997,6 +20997,22 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fpa-intro-area-controls .ask-controls{{margin:0;}}
 .fpa-intro-area-action .ask-action-row{{margin:0;}}
 
+/* Sources and Depth read as one sequence down the page, not a left/right
+   split — both are the same kind of setting (a source-list choice, a depth
+   choice), so they stack: Sources full width, Depth full width beneath it,
+   both sharing the Question box's left edge, then Ask below. Overrides
+   .ask-controls' own 1fr/1fr side-by-side split (used nowhere else on the
+   site, confirmed by grep) rather than editing the shared rule itself, in
+   case a future page reuses the side-by-side default. Full width also
+   incidentally fixes the chip-wrapping problem the ~600px-column version of
+   this layout had: at the page's full ~1300px width, all three Source
+   chips — including "Web search (trusted sites)", deliberately NOT
+   shortened, since the trusted-sites qualifier is doing real work — fit on
+   one line. The row-gap this produces (20px, .ask-controls' own default)
+   already matches the ~20px spacing used elsewhere in this control stack —
+   no override needed beyond the column count. */
+.fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;}}
+
 /* Bottom-edge alignment between the Question box and the illustrative
    example: `align-self:stretch` on both grid items (above) makes each
    fill its assigned row(s) exactly, and the two-part rule below makes the

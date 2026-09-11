@@ -473,6 +473,42 @@ value can fix without either reflowing Sources' own chip labels or
 un-pairing Sources/Depth from a shared grid row, neither of which was
 asked for or in scope here.
 
+**Same PR, round 4 — Sources and Depth stop sitting side by side; they now
+stack, per Brian's direct feedback that a left/right split reads as two
+separate decisions rather than one sequence.** Both are the same *kind* of
+setting (a source-list choice, a depth choice), so splitting them across the
+row made the eye travel left, then right, then back left for Ask — three
+direction changes for what should read as one continuous list: Sources,
+Depth, Ask. Fixed with a second scoped override on the same selector round 3
+already used to zero `.ask-controls`' own margin —
+`.fpa-intro-area-controls .ask-controls{grid-template-columns:1fr}` — rather
+than editing `.ask-controls`' own shared 1fr/1fr rule, since that component
+has exactly one live call site on the whole site (confirmed by grep) but a
+future page could still reuse its side-by-side default. This single-column
+override also happens to be what closes the chip-wrapping problem round 3
+reported and left unresolved: at the page's full ~1300px width (vs. round
+2's ~600px half-column), all three Source chips — including "Web search
+(trusted sites)", deliberately kept un-shortened since the trusted-sites
+qualifier does real work — fit on one line; confirmed live via
+`getBoundingClientRect()` on every chip: one distinct `y` value at both
+1280px and 1920px, where round 2's narrower column produced two.
+`.ask-controls`' own default row-gap (20px, from its `gap:20px 28px` shared
+rule) already matches "the ~20px spacing used elsewhere in this control
+stack" once the column count drops to one, so no additional gap override
+was needed — confirmed at exactly 20.0px between Sources and Depth at both
+widths. Depth-to-Ask stayed at the grid's own 16.5px row-gap (round 3's
+fix, unchanged by this round) rather than also being forced to 20px, since
+that gap belongs to a different rule (the outer `.fpa-intro-layout` grid's
+row-gap, not `.ask-controls`' internal gap) and the ask only named the
+Sources-to-Depth spacing specifically. Left-edge alignment with the Question
+box (0.00px diff) and full-width sizing were unaffected, both already
+established by round 3's `"controls controls"` full-span change. Verified
+at 1280px/1920px (stacked, full width, aligned, one-line chips) and 390px
+(mobile's own single-column `grid-template-areas` stack was already
+unaffected by anything inside `.fpa-intro-area-controls`, confirmed via the
+same y-ordering check as every prior round — `intro → example → usage →
+question → controls → action`, no horizontal overflow).
+
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
 — replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column

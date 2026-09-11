@@ -7393,6 +7393,27 @@ it supersedes the old "`/save` is token-gated" note.
   stacking — reported rather than chased further, since fixing it would
   mean reflowing Sources' chip labels or un-pairing Sources/Depth from a
   shared row, neither of which was asked for.
+  **Round 4, same PR, per a fourth round of direct feedback**: Sources and
+  Depth stop sitting side by side — they're the same kind of setting (a
+  source-list choice, a depth choice), so a left/right split made the eye
+  travel left, then right, then back left for Ask, instead of reading as one
+  sequence. Fixed with a second override on the same selector round 3 used
+  for the margin zero-out — `.fpa-intro-area-controls .ask-controls{grid-
+  template-columns:1fr}` — rather than touching `.ask-controls`' own shared
+  1fr/1fr rule (still exactly one live call site, confirmed by grep). This
+  also closes the chip-wrapping problem round 3 left unresolved: at the
+  page's full ~1300px width, all three Source chips — including "Web search
+  (trusted sites)", deliberately not shortened, since the trusted-sites
+  qualifier does real work — fit on one line; confirmed via
+  `getBoundingClientRect()` on every chip, one distinct y-value at both
+  1280px and 1920px. `.ask-controls`' own default 20px row-gap already
+  matches "the same ~20px gap as the rest of the control spacing" once the
+  column count drops to one — confirmed at exactly 20.0px between Sources
+  and Depth at both widths; Depth-to-Ask stayed at the outer grid's own
+  16.5px row-gap, a separate rule the ask didn't name. Left-edge alignment
+  (0.00px) and full width were unaffected — both already established by
+  round 3. Mobile (390px) confirmed unaffected via the same y-ordering
+  check as every prior round.
 
 
 ## Authentication & security
