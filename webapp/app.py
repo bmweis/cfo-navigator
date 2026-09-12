@@ -22183,7 +22183,7 @@ _ADMIN_GROUPS = [
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
         ("/admin/system/page-index", "Page index",        "A live, self-updating map of every route and its width tier."),
         ("/admin/system/scripts",   "Scripts",             "The recurring CLI scripts still worth running&mdash;purpose, cadence, env vars, and how to invoke each."),
-        ("/admin/library-backup",  "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily on a schedule (a Railway Cron Service syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
+        ("/admin/library-backup",  "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily to Google Drive; reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
     ]),
 ]
 
@@ -22580,7 +22580,7 @@ def admin_system_scripts(request: Request):
 
     buckets = [
         ("Recurring and actively useful",
-         "Run by hand, on their own cadence—not part of any automatic boot hook or CI job."),
+         "Run by hand, on their own cadence—not automatic."),
         ("Reusable diagnostic",
          "Built for one investigation, but reusable—the question they answer can come up again."),
     ]
@@ -22624,7 +22624,7 @@ def admin_system_scripts(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Scripts</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">The CLI scripts still worth running&mdash;purpose, cadence, required env vars, and exact invocation. Hand-maintained: a small, slow-changing list, kept honest by the standing rule in CLAUDE.md that any PR touching <code>scripts/</code> updates this page in the same PR. One-time migrations and closed-investigation reports that have done their job live in <code>scripts/archive/</code> instead, off this list.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">The CLI scripts still worth running&mdash;purpose, cadence, required env vars, and exact invocation. Scripts that already did their one-time job move to <code>scripts/archive/</code> and aren't listed here.</p>
 {sections_html}
 </div>"""
     return HTMLResponse(_page("Scripts—Admin", "Admin", body, authed=True))
@@ -23095,7 +23095,7 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Database</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, and row counts, introspected from the schema on every page load. This schema declares no SQL foreign keys, so relationship lines below come from a small hand-maintained map (see <code>_DB_RELATIONSHIPS</code> in <code>webapp/app.py</code>) rather than the database itself. Summary-level by design&mdash;see <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for full schema detail.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, row counts, and how the tables relate. The schema declares no foreign keys, so the relationship lines are a hand-maintained map rather than something the database enforces.</p>
 <p style="color:var(--muted);margin:0 0 20px;font-size:13px;">Looking for dollar totals on <code>enrichment_cost</code>/<code>manual_overhead</code>? That lives on <a href="/admin/overhead-spend" style="color:var(--accent);">Overhead spend</a>&mdash;this page shows every table's row count only.</p>
 
 {stat_table}
@@ -23538,7 +23538,7 @@ def admin_system_page_index(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Page index</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every route and its width tier&mdash;introspected from <code>app.routes</code> on every page load, not a maintained list. Skips non-page endpoints (redirects, JSON/AJAX APIs, file downloads); flags any page route that doesn't carry a recognized width tier, so a newly added page that never got tiered doesn't go unnoticed. See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for the tier system itself.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every page on the site and which width tier it renders at&mdash;so a page that never got one doesn't go unnoticed. Skips things that aren't really pages (redirects, JSON/AJAX endpoints, file downloads). Two tiers: <strong>Standard</strong> (1300px&mdash;most pages) and <strong>Form</strong> (640px&mdash;single-column forms). See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for more.</p>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
 {stat_cards}
@@ -23800,7 +23800,7 @@ def _ai_model_config_html(current: str) -> str:
 {option_html}
 </select>
 <span id="model-select-status" style="font-size:13px;color:var(--muted);margin-top:8px;display:inline-block;"></span>
-<p style="font-size:12px;color:var(--muted);margin:12px 0 0;">Curated from a fixed list (`linklib/models.py`), not auto-surfaced&mdash;check Anthropic's own current model lineup and recommendations before assuming this list is up to date: <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic model overview &#8599;</a></p>
+<p style="font-size:12px;color:var(--muted);margin:12px 0 0;">This list is curated by hand, not automatically updated&mdash;check Anthropic's current model lineup before assuming it's current: <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic model overview &#8599;</a></p>
 <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Test connection</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Fires one real, minimal call against the currently selected model to confirm it actually works. Manual and on-demand only&mdash;never runs automatically.</p>
@@ -24010,12 +24010,11 @@ def admin_system_ai(request: Request):
                           [EFFORT_SETTINGS["quick"], EFFORT_SETTINGS["standard"], EFFORT_SETTINGS["deep"]]),
                f'Quick / Standard / Deep, one model per tier ({_esc(EFFORT_SETTINGS["quick"]["model"])} / '
                f'{_esc(EFFORT_SETTINGS["standard"]["model"])} / {_esc(EFFORT_SETTINGS["deep"]["model"])}). '
-               f'{code_badge}&mdash;hardcoded in <code>linklib.agent.EFFORT_SETTINGS</code>, no admin picker. '
+               f'{code_badge}&mdash;there&rsquo;s no admin picker for this yet. '
                f'<a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works &rarr;</a>')
         + _row("Matchmaker", _esc(_enrich_model_label(DEFAULT_CHAT_MODEL)),
                f'Software and Community matchmaker chat, one shared default. {code_badge}&mdash;'
-               f'<code>linklib.matchmaker.DEFAULT_MODEL</code>, resolved from <code>LINKLIB_CHAT_MODEL</code> / '
-               f'<code>linklib.models.DEFAULT_CHAT_MODEL</code>, independent of the enrichment setting above.')
+               f'set via the <code>LINKLIB_CHAT_MODEL</code> environment variable, independent of the enrichment setting above.')
     )
     claude_freshness = (
         _ai_usage_freshness_dot("Pricing", pricing_last_verified,
@@ -24028,21 +24027,20 @@ def admin_system_ai(request: Request):
     exa_toggle_html = (
         f'<div style="padding:10px 0;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-soft);">'
         f'Toggle: <strong style="color:var(--navy);">{"On" if exa_enabled else "Off"}</strong>'
-        f'{"&mdash;but EXA_API_KEY is unset, so every call site below is on its fallback regardless" if not has_exa_key and exa_enabled else ""}'
+        f'{"&mdash;but EXA_API_KEY is unset, so every row below is using its fallback regardless" if not has_exa_key and exa_enabled else ""}'
         f'&mdash;set in Configuration above.</div>'
     )
     exa_rows = (
         _row("FP&amp;A Buddy web tier", "Tracked in <code>ask_questions</code>",
-             "Has a fallback&mdash;Claude's native web_search_20250305 tool, same trusted-sites allowlist either way.")
+             "Has a fallback&mdash;Claude's own built-in web search, same trusted-sites allowlist either way.")
         + _row("Reader backfill: domain migration", "Tracked in <code>content_refetch_log</code>",
                "No fallback (other than the existing Wayback tier)&mdash;a real hit is simply not tried when Exa is off.")
         + _row("Reader backfill: Medium-platform", "Tracked in <code>content_refetch_log</code>",
                "No fallback (other than the existing Wayback tier)&mdash;same as domain migration above.")
         + _row("Feature Taxonomy vendor research", "Per-run script output only",
-               "<strong>Not a persistent ledger like the three above</strong>&mdash;<code>linklib.feature_scan."
-               "research_vendor_domain</code> computes and prints its own cost for that one script run "
-               "(<code>scripts/enrich_agent_taxonomy.py</code> / feature-drafting tools); nothing writes it to a "
-               "database table, so it doesn't show up in any of the ledgers the other three call sites use.")
+               "<strong>Not tracked in a database table like the three above</strong>&mdash;cost prints to the "
+               "console each time <code>scripts/enrich_agent_taxonomy.py</code> (or a feature-drafting tool) runs, "
+               "but isn't saved anywhere afterward.")
         + exa_toggle_html
     )
     exa_freshness = _ai_usage_freshness_dot("Exa pricing", exa_pricing_last_verified,
@@ -24052,7 +24050,7 @@ def admin_system_ai(request: Request):
     # --- OpenAI (footnote) ------------------------------------------------
     openai_rows = _row("Embeddings", "text-embedding-3-small",
                         "Embed-on-save, <code>embed_backfill</code>, and the vector half of hybrid Library retrieval. "
-                        "Cost tracked in two ledgers by payer: <code>article_embeddings.cost_usd</code> (Brian's overhead) "
+                        "Cost tracked in two places by payer: <code>article_embeddings.cost_usd</code> (Brian's overhead) "
                         "and <code>ask_questions.embed_cost_usd</code> (user-cap cost, the query embedding at ask-time).")
 
     body = f"""<div class="page page-standard">
@@ -24342,7 +24340,7 @@ def admin_checks(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Checks</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. <strong>Every check here runs on each commit</strong> in the <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">GitHub QA workflow</a>; the deterministic ones (<em>Live + CI</em>) also run live on this page so you get an instant read.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. Every check runs automatically on every code change; the ones marked <em>Live + CI</em> also run right here, so you don't have to wait to see the result.</p>
 {summary}
 {rows}
 <p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
@@ -30914,13 +30912,13 @@ def admin_brand(request: Request):
         '<tr style="border-top:1px solid var(--line);">'
         '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Brand check</td>'
         '<td style="padding:10px 12px;">Colors, fonts, and the voice <em>mechanics</em>&mdash;banned buzzwords, filler, performative phrases.</td>'
-        '<td style="padding:10px 12px;"><strong>Automatic.</strong> Every push and pull request via GitHub Actions (<code>.github/workflows/qa.yml</code>); blocks merge on failure. Locally: <code>pytest -q</code>.</td>'
+        '<td style="padding:10px 12px;"><strong>Automatic.</strong> Runs on every code change and blocks anything from merging if it fails. To run it yourself: <code>pytest -q</code>.</td>'
         '<td style="padding:10px 12px;white-space:nowrap;">Free &middot; deterministic</td>'
         '</tr>'
         '<tr style="border-top:1px solid var(--line);background:var(--surface-2);">'
         '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Tone review</td>'
         '<td style="padding:10px 12px;">The holistic read: &ldquo;does this sound like me,&rdquo; judged by Claude against the voice guide.</td>'
-        '<td style="padding:10px 12px;"><strong>On demand only.</strong> The <em>Check content against your voice</em> box below, or the CLI <code>python -m scripts.voice_review</code>. <strong>Never in CI.</strong></td>'
+        '<td style="padding:10px 12px;"><strong>On demand only.</strong> The <em>Check content against your voice</em> box below, or <code>python -m scripts.voice_review</code> from the command line. Never runs automatically.</td>'
         '<td style="padding:10px 12px;white-space:nowrap;">API key, per run</td>'
         '</tr>'
         '</tbody></table></div>'
@@ -30933,8 +30931,7 @@ def admin_brand(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Brand standards</h1>
 <p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com—a graffiti/street-art accent layer over a
-navy/seafoam/coral finance-tool base. The full written reference is <code>BRAND.md</code> in the repo; an automated check
-(<code>tests/test_brand_standards.py</code>) keeps new content on-palette.</p>
+navy/seafoam/coral finance-tool base. <code>BRAND.md</code> has the full written reference.</p>
 
 {avatar_section}
 

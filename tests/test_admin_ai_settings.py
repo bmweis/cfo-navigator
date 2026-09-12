@@ -351,10 +351,10 @@ def test_exa_section_lists_all_four_call_sites(env):
     assert "Feature Taxonomy vendor research" in body
 
 
-def test_exa_feature_scan_call_site_is_explicitly_not_a_persistent_ledger(env):
+def test_exa_feature_scan_call_site_is_explicitly_not_tracked_in_a_table(env):
     body = _admin_client(env).get("/admin/system/ai").text
-    assert "Not a persistent ledger like the three above" in body
-    assert "research_vendor_domain" in body
+    assert "Not tracked in a database table like the three above" in body
+    assert "enrich_agent_taxonomy.py" in body
     assert "ask_questions" in body
     assert "content_refetch_log" in body
 
