@@ -7560,6 +7560,39 @@ it supersedes the old "`/save` is token-gated" note.
   after asserting the flag — see `tests/test_brand_standards.py`'s three new tests.
   The one real instance today (`_ICON_HALF_CIRCLE` → `/tools/fpa-buddy` @ index 0)
   is registered and clean.
+- **Admin table column widths, by field type (PR 19, 2026-09) — the natural
+  next step after PR 14's floor buckets: a column is now sized by what it
+  HOLDS, not by whatever a given page happened to pick.** Five constants
+  (`_COL_WIDTH_NAME`=280, `_COL_WIDTH_EMAIL`=220, `_COL_WIDTH_DATE`=140,
+  `_COL_WIDTH_STATUS`=110, `_COL_WIDTH_COUNT`=80 — 280 matches the
+  Software/Communities sticky Name column PR 12/15 already established)
+  are plain `width:` hints on ordinary (non `table-layout:fixed`) tables,
+  applied wherever a column's own header literally names that field type;
+  a free-text/URL/description/reason column stays unwidthed and absorbs
+  the remaining space, same as before. Since these tables aren't
+  fixed-layout, a hint is never a hard cap — real content wider than the
+  hint still grows the column rather than getting clipped, so there's no
+  truncation risk in applying one sitewide value everywhere. Documented
+  exceptions, each kept for a stated reason (see BRAND.md §5 for the full
+  list): Resources' fixed-layout percentage table (PR 11); the Reader
+  content-backfill's three tables, whose 420px `_th_article` column and
+  shared `_th`/`_th_nowrap` helpers already solve this for their own
+  content and aren't safely splittable without a larger rework; the three
+  `.cc-table`-styled diagnostic pages (Database, Page index, the FP&A
+  Buddy explainer's tier table) — technical reference tables, not entity
+  lists; Overhead spend's two narrow flex-column summary tables; the
+  Software name-duplicate check's rich-cell Tool A/B tables; the admin
+  brand-showcase page's two illustrative component tables; the Users
+  table's Username column (its Name/Email/Last login/Status columns do
+  use the shared constants); and two more fixed-layout tables found during
+  a full-inventory sweep and folded into this same PR — `/admin/reader/feeds`'s
+  `.ff-table`/`.fs-table` (own percentage widths, same reasoning as
+  Resources) and `/admin/library-backup`'s `.backup-log-table` (own
+  named-class pixel widths tuned to its 700px mobile-card breakpoint). The
+  Software/Communities approved-tables' own sticky Name column
+  (`admin-sticky-col-2`) — the precedent 280px is drawn from — was also
+  switched to read `min-width:{_COL_WIDTH_NAME}px` from the same constant,
+  since it's the origin case, not a further exception.
 
 
 ## Authentication & security

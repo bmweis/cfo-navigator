@@ -653,6 +653,64 @@ card-stacking override (keyed off the class, not any specific pixel value)
 needed no change and was re-verified at 390px after the edits, not just
 assumed to still hold.
 
+**Admin table column widths, standardized by field type (PR 19, 2026-09)**
+— the natural next step after the floor-bucket work above: a floor keeps a
+whole table from squeezing itself too narrow, but says nothing about
+whether an individual "Name"/"Date"/"Email" column is the same width from
+one admin table to the next. Five named constants in `webapp/app.py`,
+alongside `_TABLE_FLOOR_*` (`_COL_WIDTH_NAME`=280px, `_COL_WIDTH_EMAIL`=220px,
+`_COL_WIDTH_DATE`=140px, `_COL_WIDTH_STATUS`=110px, `_COL_WIDTH_COUNT`=80px)
+are applied as plain `width:` hints on `<th>` elements whose own header text
+literally names that field type, across roughly 30 admin tables (Contact
+submissions, Toolbox intros, the Software/Communities pending-submission
+tables, Third-party/Original content, Tag cleanup, the FP&A Buddy report,
+Overhead spend's vendor-charge and CSV-preview tables, the Users table's
+Email/Last login/Status columns, the email-templates reference table, and
+the several near-identical CSV import/purge preview tables that all share a
+"Line"/"Article"/"Why" shape). `_COL_WIDTH_NAME` reuses the exact 280px
+value the Software/Communities sticky Name column already established
+(PR 12/15); `_COL_WIDTH_DATE` is sized to a full "YYYY-MM-DD HH:MM"
+timestamp, not just a bare date, since several of these tables render the
+longer form. None of these tables use `table-layout:fixed` (the one that
+does — Resources — is a documented exception below), so a `width:` here is
+a starting hint, not a hard cap: real content wider than the hint still
+grows the column instead of getting clipped, which is what makes it safe to
+apply one shared value across tables with very different real content
+without a truncation risk. A column holding a description, reason, URL, or
+any other free-text value is deliberately left unwidthed, same as before —
+every table still needs at least one flexible column to absorb the rest of
+the row.
+
+Eight documented exceptions keep their own values rather than being forced
+onto these constants, each for a stated reason (see BRAND.md §5 for the
+itemized list and code comments at each site): Resources' fixed-layout
+percentage-width table (PR 11) can't sensibly mix percentage and pixel
+widths; the Reader content-backfill's three tables already have a
+deliberately wider, already-tuned 420px `_th_article` Article column and
+reuse shared `_th`/`_th_nowrap` style strings across genuinely different
+field types per column, so splitting them out isn't a small change; the
+three pages reusing the Compare page's `.cc-table` class for a schema
+table, a route, or a model tier are diagnostic/reference tables, not entity
+lists; Overhead spend's two narrow "By source"/"By month" summary tables
+sit inside a `flex:1 1 460px` column whose own tight `min-width` a 280px
+Name column would blow past; the Software name-duplicate check's Tool
+A/Tool B tables hold rich multi-line cell content, not a plain name
+string; the admin brand-showcase page's two example tables are
+illustrative specimens, not real data; and — found during a full-inventory
+sweep for this PR, not part of the original hypothesis — two more
+fixed-layout tables with their own existing width schemes:
+`/admin/reader/feeds`'s `.ff-table`/`.fs-table` (own percentage widths,
+same reasoning as Resources) and `/admin/library-backup`'s
+`.backup-log-table` (own small named-class pixel widths tuned to its
+700px mobile-card breakpoint, which the shared constants would widen
+past). The Users table's Username column (no clean field-type match, and
+always visible with no `data-col`) is left unwidthed; its Name/Email/Last
+login/Status columns do use the shared constants. The Software/Communities
+approved-tables' own sticky Name column (`admin-sticky-col-2`) — the
+precedent 280px is drawn from — now reads `min-width:{_COL_WIDTH_NAME}px`
+from the same constant rather than its own literal, since it's the origin
+case for the value, not a further exception.
+
 **`/admin/system/scripts`** (System nav group, Phase N) is the opposite design
 choice from the two pages above — a static, hand-maintained registry
 (`_SCRIPT_REGISTRY` in `webapp/app.py`), not a live-introspected one. Phase N's

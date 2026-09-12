@@ -527,6 +527,85 @@ first instance of a larger, separately-scoped job (matching one field's
 width everywhere it appears across every admin table), not a general
 license to collapse every documented exception into a bucket.
 
+### Admin table column widths, by field type
+
+The job PR 15 named above: a column is now sized by what FIELD TYPE it holds,
+not by whatever a given page happened to pick — so "Name" is the same width
+everywhere, not 220px on one admin table and a bare, unspecified width on
+another. Five named constants in `webapp/app.py`, next to the floor buckets
+above:
+
+| Constant | Width | Field type |
+|---|---|---|
+| `_COL_WIDTH_NAME` | 280px | Name / Title (matches the Software/Communities sticky Name column, PR 12/15) |
+| `_COL_WIDTH_EMAIL` | 220px | Email address |
+| `_COL_WIDTH_DATE` | 140px | Date / timestamp (sized for a full "YYYY-MM-DD HH:MM" value) |
+| `_COL_WIDTH_STATUS` | 110px | A short status/state badge or label |
+| `_COL_WIDTH_COUNT` | 80px | A small count/number column |
+
+These are plain `width:` hints on ordinary (non `table-layout:fixed`) tables,
+not a hard cap — real content wider than the hint still grows the column
+instead of getting clipped. A column holding a description, a reason, a URL,
+or any other free-text field stays unwidthed and absorbs the remaining
+space; every table needs at least one such column, same as it always has.
+Applied wherever a column's own header literally names one of these field
+types — a column that merely resembles one (e.g. a CSV-preview "Article"
+column holding just `#123`, not a real title) is left alone.
+
+A handful of tables keep their own values rather than being forced onto
+these, each for a stated reason:
+
+- **Resources** (`/admin/tools/resources`) uses a fixed `table-layout` with
+  percentage-based column widths (`_ADMIN_RESOURCE_TABLE_COL_WIDTHS`,
+  PR 11) so two tables sharing the same markup still line up regardless of
+  content length — a `table-layout:fixed` table can't mix percentage and
+  pixel widths meaningfully, so this one is exempt outright.
+- **The Reader content-backfill's three tables** (Recent attempts, Needs
+  manual review, Accepted as final) already use a deliberately wider,
+  already-tuned 420px `_th_article` column for Article (real titles, not
+  IDs) — narrower than that would squeeze real content; their shared
+  `_th`/`_th_nowrap` helpers are also reused across genuinely different
+  field types per column (Result, Attempts, When), so they aren't safely
+  splittable into the constants above without a larger rework of that
+  page's own markup.
+- **`/admin/system/database`, `/admin/system/page-index`, and the FP&A Buddy
+  explainer's tier table** reuse the Compare page's `.cc-table` CSS class
+  for convenience — they're technical/diagnostic reference tables (a schema
+  table name, a route path, a model tier), not entity lists, so the
+  Name/Date/Status vocabulary doesn't really apply to their columns.
+- **Overhead spend's "By source" and "By month" summary tables** sit inside
+  a `flex:1 1 460px` column with its own tight `min-width:400px`/`320px` —
+  applying `_COL_WIDTH_NAME` to their label column would force them wider
+  than the layout they're built to fit inside.
+- **The Software name-duplicate check's Tool A/Tool B/decision tables** hold
+  rich, multi-line cell content (`_tool_cell()`), not a plain name string,
+  so a fixed Name width doesn't describe what's actually in the cell.
+- **The admin brand-showcase page's two example tables** (the GER tier
+  table, the Checks reference table) are illustrative component specimens,
+  not real data-entry tables.
+- **The Users admin table**'s Username column is left unwidthed — it's a
+  primary identifier without a real analog among these five field types,
+  and it's always visible (no `data-col`), unlike every other column on
+  that table. Its Name/Email/Last login/Status columns do use the shared
+  constants.
+- **`/admin/reader/feeds`'s `.ff-table`/`.fs-table`** (the Reader's feed and
+  feed-section admin lists) use `table-layout:fixed` with their own
+  percentage-based column widths, same reasoning as Resources above — a
+  fixed-layout table can't mix percentage and pixel widths meaningfully.
+- **`/admin/library-backup`'s `.backup-log-table`** is also
+  `table-layout:fixed`, with its own small named-class pixel widths
+  (`.col-when` 150px, `.col-filename` 200px, `.col-location` 120px,
+  `.col-status` 90px) tuned to fit its own 700px mobile-card breakpoint —
+  changing them to the shared constants would widen the table past what
+  that breakpoint was built around.
+
+The Software and Communities approved-tables' own sticky Name column
+(`admin-sticky-col-2`, PR 12/15 — the precedent `_COL_WIDTH_NAME`'s value
+is drawn from) now reads its width from the same constant too
+(`min-width:{_COL_WIDTH_NAME}px`, not `width:`, since a sticky column needs
+`min-width` to stay pinned correctly) — it was the origin case for 280px,
+not a further exception.
+
 ### Editorial content system — Atlantic pattern
 
 A long-form register for pages Brian wants to read like a considered piece rather
