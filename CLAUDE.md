@@ -7436,6 +7436,74 @@ it supersedes the old "`/save` is token-gated" note.
   the mobile stacking order is unaffected, but it's a real behavior change
   from the prior single-line flex-wrap layout, reported rather than
   assumed fine.
+  **Round 6, same PR — chips go back to natural width (round 5's
+  stretch-to-fill was a misread of the ask), the ~110px gap above the
+  Question box is closed to 20px, and Ask-before-Past-questions is
+  confirmed correct as-is.** Round 5's `grid-template-columns:repeat(3,1fr)`
+  + `width:100%` stretched every chip to fill its row — not what was asked;
+  the real ask was "equal width within a group, sized to that group's own
+  widest label, left-aligned, not full-width." Reverted to `.ask-tags`' own
+  default `flex-wrap` row (natural per-chip width with zero override) and
+  added `fpaEqualizeChipWidths()`, a small page-load JS function
+  (`getBoundingClientRect()` per chip, apply the group max as a fixed
+  `width` to every chip in that `.ask-tags`) — there is no CSS-only way to
+  size N flex/grid siblings to the widest one's *natural* content width
+  without either stretching to fill the container (round 5's approach,
+  reverted) or duplicating the widest label's text into every cell; a JS
+  measurement also sidesteps a hardcoded pixel value potentially not
+  matching a real browser's font metrics, since this sandbox can't load the
+  sitewide Google Fonts (see the standing `capture_homepage()` limitation
+  note above). Verified: Source chips 149.2px each (all three, sized to
+  "Saved archive"), Depth chips 113.4px each (sized to "Standard"), at
+  1280px, 1920px, and 390px alike — widths are font/text-driven, not
+  viewport-driven, so one run on load is enough.
+  **The gap fix took real debugging, not a CSS one-liner, and surfaced a
+  genuine CSS Grid subtlety worth keeping**: the `example` card spans
+  multiple rows (`intro`/`usage`/`question`) via `grid-template-areas`, and
+  when its own content exceeds those rows' combined natural height, the
+  leftover growth doesn't confine itself to the last-spanned row by
+  default — every plain `auto` row it spans shares the excess. An initial
+  fix attempt, `grid-template-rows:max-content max-content auto auto auto`
+  (intended to cap `intro`/`usage` at their own content size and force all
+  overflow onto `question`), measured **zero effect** live — confirmed
+  independently in an isolated standalone test file
+  (`grid_test.html`/`pw_gridtest.py`) reproducing the same structure, which
+  showed the same failure (`186px 132px 150px`, `intro`/`usage` still
+  inflated). Root cause: per the CSS Grid spec's own "distribute space
+  beyond growth limits" fallback step, once every spanned track has hit its
+  growth limit and space still remains, ALL of them — even ones capped at
+  `max-content` — grow further to absorb the remainder; `max-content` only
+  bounds the earlier "resolve intrinsic sizes" pass, not this later
+  fallback. The fix that actually works, confirmed in the same isolated
+  test before touching the real page: make `question`'s row `1fr`
+  (`grid-template-rows:auto auto 1fr auto auto`) — a flexible track is
+  sized in a separate, later distribution pass that exclusively absorbs
+  leftover space, so `1fr` (not `max-content`) is the correct tool whenever
+  one specific track, and only that track, needs to swallow a spanning
+  item's overflow. This alone dropped the gap from ~93px to 32px — the
+  remaining 32px being two genuine 16px structural row-gaps bracketing the
+  `usage` row, which is completely empty for a fresh/admin session with no
+  cap tracked. Closed the rest by treating that emptiness as a fact to act
+  on, not a gap to paper over: `usage_html`'s own div/grid-area/row is now
+  omitted entirely from both the HTML and every `grid-template-areas`/
+  `grid-template-rows` string (desktop and mobile) whenever it's empty,
+  computed via new `usage_div`/`_intro_areas_desktop`/`_intro_rows_desktop`/
+  `_intro_areas_mobile` Python variables — and `.fpa-intro-layout`'s
+  `row-gap` moved from 16px to 20px, deliberately reusing round 4's own
+  already-established Sources→Depth spacing value (the ask's own "the same
+  spacing used elsewhere in the form" pointed at that value, not an
+  arbitrary pick) rather than inventing a new number. Landed the gap at
+  exactly 20.0px at both 1280px and 1920px — bottom-edge alignment between
+  the example card and the Question box stayed at 0.00px throughout, since
+  the `1fr`/`align-self:stretch` mechanism from round 2 is untouched.
+  **Ask-before-Past-questions needed no code change** — the DOM already
+  rendered Ask first; verified by reading the render order and confirming
+  live it matches on all three widths. Mobile (390px) re-verified after
+  every change: visual order `intro → example → question → controls →
+  action` (`usage` genuinely absent from the DOM, confirmed via a direct
+  element-presence check, not just inferred from the CSS), `scrollWidth`
+  exactly 390 (no overflow), and Source chip widths still 149.2px/equal —
+  font-driven sizing, so mobile matches desktop exactly.
 
 
 ## Authentication & security

@@ -20888,6 +20888,25 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 
     pre_q = _esc(q)
 
+    # The usage line is genuinely absent (not just visually blank) for
+    # anonymous visitors and for any admin with no cap tracked — dropping
+    # its grid row entirely in that case (rather than rendering an empty
+    # div that still occupies a row-gap on both sides) is what actually
+    # closes the intro-to-Question-box dead space; see the CSS comment
+    # below for why a spaced-out `usage` row happens at all otherwise.
+    usage_div = f'<div class="fpa-intro-area-usage">{usage_html}</div>' if usage_html else ""
+    _intro_areas_desktop = (
+        '"intro example" "usage example" "question example" "controls controls" "action action"'
+        if usage_html else
+        '"intro example" "question example" "controls controls" "action action"'
+    )
+    _intro_rows_desktop = "auto auto 1fr auto auto" if usage_html else "auto 1fr auto auto"
+    _intro_areas_mobile = (
+        '"intro" "example" "usage" "question" "controls" "action"'
+        if usage_html else
+        '"intro" "example" "question" "controls" "action"'
+    )
+
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 12px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 
@@ -20914,7 +20933,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
       <p class="ask-example-caption">A mocked example built on the real Library/Feed/Web mechanism&mdash;no real question history exists yet to pull a genuine one from.</p>
     </div>
   </div>
-  <div class="fpa-intro-area-usage">{usage_html}</div>
+  {usage_div}
   <div class="fpa-intro-area-question">
     <div class="ask-card">
       <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
@@ -20975,9 +20994,59 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
    never the problem, only the mismatched left edge was. Mobile collapses to
    one column in the exact reading order this page used before the desktop
    fill was added — kept because it already reads well: description,
-   example, usage, question, controls, action. */
-.fpa-intro-layout{{display:grid;grid-template-columns:1fr 1fr;column-gap:40px;row-gap:16px;
-  grid-template-areas:"intro example" "usage example" "question example" "controls controls" "action action";
+   example, usage, question, controls, action.
+
+   `grid-template-rows:auto auto 1fr auto auto` (question is the one `1fr`
+   row) fixes a real dead-space bug: when the example card is taller than
+   intro+usage+question combined, plain `auto` rows don't confine that
+   leftover to the last-spanned row the way the bottom-edge-alignment
+   comment below originally assumed — confirmed live (the empty `usage`
+   row, and intro's own row, were each padded out by ~30px they had no
+   content to justify, opening a ~93px gap between the intro text and the
+   Question box with no line of CSS ever asking for it) and confirmed
+   again in an isolated minimal test page, ruling out interference from
+   this page's other rules: even pinning intro/usage to `grid-template-
+   rows:max-content` (the first fix tried) had zero effect — browsers
+   still redistribute leftover space beyond a track's declared max-content
+   growth limit once every spanned track has been maxed out and space
+   still remains, per the Grid spec's own "distribute space beyond growth
+   limits" fallback step. A `1fr` track is different: it's sized via a
+   separate, later pass (flexible-track distribution) that only ever
+   grows to absorb genuine leftover space, never competes for it against
+   plain content-sized tracks — so making `question` the one `1fr` row
+   (intro/usage stay plain `auto`, sized to their own content only) routes
+   100% of the leftover there by construction, not as a side effect of a
+   limit some other mechanism can still override. Reset to `none` on
+   mobile, where the layout is a single column with no spanning item to
+   redistribute space from — an explicit 5-row sizing declared for the
+   desktop's 5 rows would otherwise misapply to mobile's differently-
+   ordered 6 rows (`example` is its own
+   row there, not a 3-row-spanning column).
+
+   The `1fr` fix alone still leaves two structural `row-gap`s (one above
+   the empty `usage` row, one below it) between the intro text and the
+   Question box whenever there's no usage line to show — genuinely no
+   longer unexplained dead space, but still more than the ~20-24px this
+   form uses elsewhere. Rather than shrink the shared row-gap (which
+   would also touch the question-to-controls and controls-to-action
+   gaps) or fake it with a negative margin (`row-gap` reserves real space
+   between tracks regardless of an item's own margin, so a margin trick
+   wouldn't actually close it), `usage`'s grid area and its own `<div>`
+   are both omitted entirely from Python when `usage_html` is empty
+   (`_intro_areas_desktop`/`_intro_rows_desktop`/`_intro_areas_mobile`,
+   computed once above) — a row that isn't there needs no row-gap around
+   it, and it's a fact-driven omission (there's genuinely nothing to
+   show), not a magic-number one. `row-gap` itself moved from 16px to
+   20px — the exact Sources-to-Depth spacing round 4 already established
+   as this page's own reference value for "the same spacing used
+   elsewhere in the form" — so the remaining single gap (intro's own
+   bottom to the Question box, once `usage` drops out) lands at exactly
+   20px, and the question-to-controls/controls-to-action gaps below tick
+   up from ~16.5px to the same 20px for a genuinely more consistent
+   result, not a regression. */
+.fpa-intro-layout{{display:grid;grid-template-columns:1fr 1fr;column-gap:40px;row-gap:20px;
+  grid-template-areas:{_intro_areas_desktop};
+  grid-template-rows:{_intro_rows_desktop};
   align-items:start;margin-bottom:28px;}}
 .fpa-intro-area-intro{{grid-area:intro;}}
 .fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
@@ -20985,8 +21054,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fpa-intro-area-question{{grid-area:question;align-self:stretch;}}
 .fpa-intro-area-controls{{grid-area:controls;}}
 .fpa-intro-area-action{{grid-area:action;}}
-@media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;
-  grid-template-areas:"intro" "example" "usage" "question" "controls" "action";}}}}
+@media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;grid-template-rows:none;
+  grid-template-areas:{_intro_areas_mobile};}}}}
 
 /* Sources/Depth and the Ask button keep .ask-controls'/.ask-action-row's own
    default margins everywhere else they're used (nowhere else, as of this
@@ -21013,30 +21082,35 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
    no override needed beyond the column count. */
 .fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;}}
 
-/* Equal-width chips within each row (Sources' three chips match each
-   other; Depth's three buttons match each other) — the two rows don't
-   need to match each other, and don't: each is sized independently by its
-   own 3-column grid at the same full page width, so they end up the same
-   in practice here, but that's incidental, not required. Overrides
-   .ask-tags' shared flex-wrap row (used nowhere else, confirmed by grep)
-   rather than editing it, same reasoning as every other scoped override
-   on this page. `width:100%` is needed because a flex/inline-flex item
-   (.ask-tag) doesn't stretch to fill its grid cell by default the way a
-   block-level item would. */
-.fpa-intro-area-controls .ask-tags{{display:grid;grid-template-columns:repeat(3,1fr);}}
-.fpa-intro-area-controls .ask-tag{{width:100%;justify-content:center;}}
+/* Chips are natural width, left-aligned, NOT stretched to fill the row —
+   .ask-tags' own default flex-wrap row already does this with zero
+   override needed (each .ask-tag sizes to its own label by default).
+   Equal width WITHIN each group (Sources' three match each other, sized
+   to "Saved archive"; Depth's three match each other, sized to
+   "Standard") is set by fpaEqualizeChipWidths() below, not CSS — there is
+   no CSS-only way to size every sibling in a row to the widest one's
+   *natural* content width without either stretching to fill the
+   container (rejected — that's exactly what round 5 did and got reverted)
+   or duplicating the widest label's text into every cell. Measuring the
+   real rendered width in the browser also sidesteps the font-mismatch
+   risk a hardcoded pixel value would carry (this sandbox can't load the
+   sitewide Google Fonts — see the standing testing-standard note on
+   `capture_homepage()` — so a width measured here might not match a real
+   browser's actual DM Sans metrics; measuring live in whichever browser
+   is actually rendering the page doesn't have that problem). */
 
 /* Bottom-edge alignment between the Question box and the illustrative
    example: `align-self:stretch` on both grid items (above) makes each
    fill its assigned row(s) exactly, and the two-part rule below makes the
    visible cards fill that stretched space rather than just their own
    content height — no hardcoded height anywhere. This works because the
-   "example" grid area spans exactly the intro/usage/question rows (via
-   the "." placeholder above): when its natural content is taller than
-   those three rows combined, CSS Grid's own auto-sizing algorithm grows
-   the LAST row it spans (question) to fit — which is what pulls the
-   Question box's row down to meet the example's real height, rather than
-   a value picked by hand. */
+   "example" grid area spans exactly the intro/usage/question rows (it
+   never appears in the "controls controls"/"action action" rows below):
+   when its natural content is taller than those three rows combined,
+   `grid-template-rows`'s `1fr` track for `question` (intro/usage stay
+   plain `auto`, above) absorbs 100% of that leftover height by
+   construction — which is what pulls the Question box's row down to meet
+   the example's real height, rather than a value picked by hand. */
 .fpa-intro-area-question{{display:flex;}}
 .fpa-intro-area-question .ask-card{{flex:1;display:flex;flex-direction:column;}}
 .fpa-intro-area-question .ask-card textarea{{flex:1;}}
@@ -21156,6 +21230,30 @@ function updateEstimate() {{
   if (!num) return;
   var c = COST[selectedTier];
   num.textContent = c != null ? '~$' + c.toFixed(3) : '';
+}}
+
+// Sources' three chips match each other (sized to "Saved archive"), and
+// Depth's three match each other (sized to "Standard") — independently
+// per group, natural width, not stretched full-width. There's no CSS-only
+// way to size every sibling in a row to the widest one's real content
+// width without either duplicating that label into every cell or
+// stretching to fill the container (the round-5 approach, reverted) — so
+// this measures the ACTUAL rendered width of each chip in whichever
+// browser is running the page (sidesteps a hardcoded pixel value
+// potentially not matching a real browser's font metrics) and applies the
+// max as a fixed width to every chip in that same .ask-tags group. Widths
+// are text/font-driven, not viewport-driven — .ask-tag's font-size has no
+// media-query override anywhere on this page — so a one-time run on load
+// is enough; no resize listener needed.
+function fpaEqualizeChipWidths() {{
+  document.querySelectorAll('.fpa-intro-area-controls .ask-tags').forEach(function(group) {{
+    var chips = group.querySelectorAll('.ask-tag');
+    if (!chips.length) return;
+    chips.forEach(function(c) {{ c.style.width = ''; }});
+    var max = 0;
+    chips.forEach(function(c) {{ max = Math.max(max, c.getBoundingClientRect().width); }});
+    chips.forEach(function(c) {{ c.style.width = max + 'px'; }});
+  }});
 }}
 
 var asked = false;
@@ -21493,6 +21591,7 @@ document.addEventListener('keydown', function(e) {{
 
 updateEstimate();
 loadRecent();
+fpaEqualizeChipWidths();
 </script>"""
 
     return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))

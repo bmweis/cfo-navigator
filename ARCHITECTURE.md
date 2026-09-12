@@ -538,6 +538,88 @@ controls → action`) is unaffected — but it's a real change from the
 previous single-line flex-wrap layout, reported per the standing "flag
 what equal widths cost" instruction rather than assumed acceptable.
 
+**Same PR, round 6 — chips revert to natural width (round 5's stretch-to-
+fill was a misread of the actual ask), the ~110px gap above the Question
+box closes to 20px, and Ask-before-Past-questions is confirmed correct with
+no change.** The real ask all along was equal width *within* a group, sized
+to that group's own widest label, left-aligned — not full-width. Round 5's
+`grid-template-columns:repeat(3,1fr)` + `width:100%` on `.ask-tag` is
+reverted; `.ask-tags`' own default `display:flex;flex-wrap:wrap` (zero
+override) already gives each chip its natural content width. A new
+`fpaEqualizeChipWidths()` (called once on page load, alongside
+`updateEstimate()`/`loadRecent()`) then measures every chip's real
+`getBoundingClientRect().width` within each `.ask-tags` group and applies
+the group's max as a fixed `width` to all its siblings. This is a genuine
+JS-only requirement, not a missed CSS trick: there is no pure-CSS way to
+size N flex/grid siblings to the widest one's *natural* content width
+without either stretching every sibling to fill the container (round 5's
+approach) or duplicating the widest label's text into every cell just to
+force a matching intrinsic size. Measuring in the browser also sidesteps a
+hardcoded-pixel-value risk this repo has hit before (see the standing
+`capture_homepage()`/Google-Fonts sandbox limitation note elsewhere in this
+doc) — a value measured in this sandbox's font-loading-impaired headless
+Chromium might not match a real browser's DM Sans metrics; measuring live
+in whichever browser actually renders the page has no such gap. Verified:
+Source chips 149.2px each (all three, matching "Saved archive"'s own
+natural width), Depth chips 113.4px each (matching "Standard"'s), identical
+at 1280px, 1920px, and 390px — since chip width is font/text-driven, not
+viewport-driven, one run on load covers every breakpoint.
+
+The ~93-110px gap fix needed real debugging, not a one-line CSS change, and
+surfaced a genuine CSS Grid subtlety: `example` spans three rows
+(`intro`/`usage`/`question`) via `grid-template-areas`, and when its own
+content (a full mocked conversation) is taller than those three rows'
+combined natural height, the leftover growth is NOT confined to the
+last-spanned row by default the way round 2's own explanation above assumed
+— every plain `auto` row the item spans shares the excess. A first fix
+attempt, `grid-template-rows:max-content max-content auto auto auto`
+(intended to cap `intro`/`usage` at their own content height and force all
+overflow onto the `1fr`-free `question` row), measured **zero effect**
+live — confirmed independently in an isolated standalone test file
+(`grid_test.html`, loaded directly via `file://`, no app code involved)
+reproducing the same three-row-span structure: the same failure
+(`186px 132px 150px` — rows 1 and 2 still inflated) reproduced there too,
+ruling out any interaction with this page's other CSS. Root cause, per the
+CSS Grid spec's own "distribute space beyond growth limits" fallback step:
+once every spanned track has hit its growth limit and space still remains
+unaccounted for, ALL of them — even ones capped at `max-content` — grow
+further to absorb the remainder; `max-content` only bounds the earlier
+"resolve intrinsic sizes" pass, not this later fallback pass. The fix that
+actually works, confirmed in the same isolated test before touching the
+real page: make `question`'s own row `1fr`
+(`grid-template-rows:auto auto 1fr auto auto`) rather than `auto` or
+`max-content` — a flexible (`fr`) track is sized in a separate, later
+distribution pass reserved for absorbing leftover space, so it's the
+correct mechanism whenever one specific spanned track (and only that one)
+needs to swallow an oversized item's overflow. Alone, this dropped the
+gap from ~93px to 32px — the residual being two genuine 16px structural
+row-gaps bracketing the `usage` row, which renders completely empty for a
+signed-in admin session with no cap tracked (`usage_html == ""`). Closed
+the rest by treating that emptiness as a fact to act on rather than a
+number to fudge: `usage_html`'s div, its `grid-template-areas` entry, and
+its `grid-template-rows` slot are now all omitted together (new
+`usage_div`/`_intro_areas_desktop`/`_intro_rows_desktop`/
+`_intro_areas_mobile` Python variables, computed once right after
+`usage_html` itself) whenever `usage_html` is empty, on both the desktop
+and mobile area strings — and `.fpa-intro-layout`'s own `row-gap` moved
+from 16px to 20px, deliberately reusing round 4's own already-established
+Sources→Depth spacing value (the ask's phrase "the same spacing used
+elsewhere in the form" pointed straight at that number, not a fresh pick).
+Net result: the gap measures exactly 20.0px at both 1280px and 1920px.
+Bottom-edge alignment between `example` and `question` (round 2's fix)
+stayed at 0.00px throughout this round — the `align-self:stretch`/`flex:1`
+mechanism was untouched by any of this. Ask-before-Past-questions needed no
+code change at all — the render order already put Ask first; confirmed
+directly by reading the template and re-verified live at all three widths.
+Mobile (390px) re-verified end to end after every change in this round:
+visual order `intro → example → question → controls → action` (`usage`
+confirmed genuinely absent from the DOM via a direct element-presence
+check — `document.querySelector('.fpa-intro-area-usage') === null` — not
+just inferred from the CSS change), `document.body.scrollWidth` exactly
+390 (no horizontal overflow), and Source chip widths still 149.2px/equal
+across all three, since the JS-measured sizing is font-driven and therefore
+identical regardless of viewport.
+
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
 — replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column
