@@ -1,8 +1,12 @@
 """Original Content Phase 2 — markdown rendering + the shared article
 template at GET /thought-leadership/{slug}.
 """
+import json
 import os
 import pathlib
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -324,3 +328,91 @@ def test_growth_engine_calculator_page_loads(env):
     assert "function calcTimeline" in r.text
     assert "function contributionSVG" in r.text
     assert "function buildChart" in r.text
+
+
+def test_growth_engine_calculator_tier_copy_matches_the_new_bands(env):
+    """PR 18 — the F Suite whitepaper standardized the tier boundaries;
+    this pins the corrected copy sitewide so a future edit can't silently
+    reintroduce the old $0.70/$0.50 cutoffs or the retired 'Typical' label/
+    'Efficiency Ratio' name for the metric."""
+    r = _client(env).get("/thought-leadership/growth-engine-calculator")
+    assert r.status_code == 200
+    body = r.text
+    # New thresholds present.
+    assert "ratio >= 0.80" in body
+    assert "ratio >= 0.60" in body
+    assert "band(1.20, 0.80" in body
+    assert "band(0.80, 0.60" in body
+    assert "band(0.60, ymin" in body
+    assert "[0.6, 0.8, 1.0, 1.2]" in body
+    # 'Average' replaces 'Typical'; the metric is never called 'Efficiency Ratio'.
+    assert "Average (near median)" in body
+    assert "Typical" not in body
+    assert "Efficiency Ratio" not in body
+    assert "Growth Engine Ratio = $" in body
+    # Old cutoffs are gone outright, not just superseded.
+    assert "ratio >= 0.70" not in body
+    assert "ratio >= 0.50" not in body
+
+
+def _extract_js_function(source: str, name: str) -> str:
+    """Pull a top-level `function name(...) { ... }` block out of embedded
+    page JS by brace-matching — the functions here are simple enough (no
+    braces inside string literals) for this to be exact rather than a
+    regex guess."""
+    m = re.search(r"function\s+" + re.escape(name) + r"\s*\([^)]*\)\s*\{", source)
+    assert m, f"could not find function {name}"
+    start = m.end() - 1
+    depth = 0
+    for i in range(start, len(source)):
+        if source[i] == "{":
+            depth += 1
+        elif source[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[m.start():i + 1]
+    raise AssertionError(f"unbalanced braces extracting {name}")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not on PATH")
+def test_growth_engine_calculator_tier_boundaries_and_breakeven(env):
+    """PR 18 — executes the real embedded gerTier() function (extracted
+    verbatim from the rendered page, not reimplemented) against the exact
+    boundary ratios from the corrected tier table, plus the break-even
+    formula (Years to Break Even = 1 / Growth Engine Ratio) at its three
+    named boundary years. A reimplementation could pass while the real
+    on-page function still has the old cutoffs; running the actual
+    extracted source is what makes this a genuine regression guard."""
+    r = _client(env).get("/thought-leadership/growth-engine-calculator")
+    ger_tier_js = _extract_js_function(r.text, "gerTier")
+
+    script = ger_tier_js + r"""
+var cases = [1.20, 0.80, 0.60, 0.59];
+var out = cases.map(function(r) {
+  var t = gerTier(r);
+  return t.tier.replace(/&#\d+;|&#x[0-9a-f]+;/gi, '').trim();
+});
+console.log(JSON.stringify(out));
+"""
+    proc = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    tiers = json.loads(proc.stdout)
+    assert "Elite" in tiers[0]
+    assert "Strong" in tiers[1]
+    assert "Average" in tiers[2]
+    assert "Below target" in tiers[3]
+
+    # Break-even: Years to Break Even = 1 / Growth Engine Ratio, exercised at
+    # the table's three named boundary years (0.8, 1.25, 1.7).
+    breakeven_script = """
+function breakeven(ratio) { return (1 / ratio).toFixed(1); }
+console.log(JSON.stringify([
+  breakeven(1.20),
+  breakeven(0.80),
+  breakeven(0.60)
+]));
+"""
+    proc2 = subprocess.run(["node", "-e", breakeven_script], capture_output=True, text=True)
+    assert proc2.returncode == 0, proc2.stderr
+    years = json.loads(proc2.stdout)
+    assert years == ["0.8", "1.3", "1.7"]  # 1/0.80 = 1.25, toFixed(1) rounds to "1.3"
