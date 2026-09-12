@@ -507,7 +507,7 @@ def test_edit_page_shows_no_citations_recorded_note(env):
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/software/{tool_slug}/edit")
-    assert "No citations recorded for this draft" in r.text
+    assert "No sources recorded for this draft" in r.text
 
 
 def test_edit_page_shows_full_uncapped_citation_list_next_to_verify_action(env):

@@ -4,9 +4,9 @@ note on the tool edit view, near the Competitive differentiation field,
 telling the editor the field is generated from the Description and
 competitor list already on the page — not independently researched or
 citation-grounded — so a Description edit/regenerate needs a fresh
-Differentiation "Generate summary" pass too, since it won't update on its
-own. No prompt or generation logic touched; this only covers the rendered
-edit page.
+Differentiation "Generate summary" pass too, since it won't update
+automatically. No prompt or generation logic touched; this only covers the
+rendered edit page.
 """
 import os
 import tempfile
@@ -57,4 +57,4 @@ def test_differentiation_field_has_source_note_on_edit_page(env):
     diff_block = body[diff_block_start:diff_block_end]
 
     assert "Description and competitor list" in diff_block
-    assert "won't update on its own" in diff_block
+    assert "won't update this automatically" in diff_block
