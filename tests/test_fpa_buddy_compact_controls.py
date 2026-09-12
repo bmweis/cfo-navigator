@@ -100,8 +100,11 @@ def test_anonymous_member_still_defaults_to_quick(env):
 def test_tier_detail_and_recommended_move_from_persistent_ui_to_hover(env):
     appmod, _ = env
     html = _admin_html(appmod)
-    # No persistent subtext or badge left in the controls block.
-    controls = html.split('class="ask-controls"', 1)[1].split("</div>\n\n<div class=\"ask-action-row\"", 1)[0]
+    # No persistent subtext or badge left in the controls block. Delimited by
+    # the ask-action-row's own class (not a hardcoded whitespace gap between
+    # the two blocks) since PR 17 nested both inside the FP&A Buddy page's
+    # two-column intro grid, adding wrapper divs between them.
+    controls = html.split('class="ask-controls"', 1)[1].split('class="ask-action-row"', 1)[0]
     assert "tokens out" not in controls.replace('title="', "\x00").split("\x00")[0]
     assert "ask-tier-badge" not in html
     assert ">Recommended<" not in html

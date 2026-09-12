@@ -1418,12 +1418,18 @@ p{margin:0 0 16px;color:var(--ink-soft);}
                                     included — they already carry their own
                                     min-width floors and horizontal scroll,
                                     so narrowing this shell doesn't squeeze
-                                    a table, it scrolls it), the FP&A
-                                    Buddy/GER-calculator/Sail Don't Row
+                                    a table, it scrolls it), the
+                                    GER-calculator/Sail Don't Row
                                     "functional tool" pages (whose own
                                     .tool-inner already caps at this same
-                                    1300px regardless of the outer shell),
-                                    and every pure long-form reading page
+                                    1300px regardless of the outer shell —
+                                    FP&A Buddy used to be in this group too,
+                                    until PR 17 removed its own .tool-inner
+                                    wrapper as a dead no-op now that both
+                                    values are identical, and built a real
+                                    two-column top section directly on
+                                    .page-standard instead), and every pure
+                                    long-form reading page
                                     (About, the ported thought-leadership
                                     articles, the FP&A Buddy explainer, Ask
                                     history) — those last four used to be a
@@ -20828,9 +20834,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     # Sources — the same seafoam-fill/navy-text tag component used elsewhere on
     # the site (BRAND.md §5), toggled on/off by tap instead of a checkbox list.
     source_defs = [
-        ("library", "My saved archive", True),
-        ("feed", "Current RSS feed", False),
-        ("web", "Web search (trusted sites)", True),
+        ("library", "Saved archive", True),
+        ("feed", "RSS feed", False),
+        ("web", "Trusted web", True),
     ]
     _CHECK_SVG = ('<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">'
                   '<path d="M1 5L4 8L9 2" stroke="#001B4F" stroke-width="1.6" fill="none" '
@@ -20874,7 +20880,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     usage_html = ""
     if usage_today is not None:
         usage_html = (
-            f'<div id="ask-usage" style="font-size:13px;color:var(--muted);margin:-18px 0 22px;">'
+            f'<div id="ask-usage" style="font-size:13px;color:var(--muted);margin:0;">'
             f'<span id="ask-usage-text">${usage_today["spent"]:.2f} of ${usage_today["cap"]:.2f} used this month</span>'
             f' &middot; <a href="/ask/history" style="color:var(--accent);">Your usage and past questions &rarr;</a>'
             f'</div>'
@@ -20882,70 +20888,84 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 
     pre_q = _esc(q)
 
-    # Rendered twice below: an always-open list for wider screens, and inside
-    # a collapsed-by-default <details> for narrow screens (CSS media query
-    # picks which one is visible — no JS). Built once here so the copy
-    # itself only lives in one place in the source.
-    ask_value_bullets = (
-        '<li><strong>Cited, not guessed.</strong> Every answer traces to a source you can click and read. Verified citations, not self-reported ones.</li>'
-        '<li><strong>Remembers the thread.</strong> Ask a follow-up and it knows what you meant. Come back tomorrow and the conversation&rsquo;s still there.</li>'
-        '<li><strong>Finds by meaning, not just keywords.</strong> Semantic search pairs with keyword search (hybrid retrieval), so it surfaces the right article even when your wording doesn&rsquo;t match the source&rsquo;s.</li>'
-        '<li><strong>Gets sharper.</strong> Every rating feeds a real eval set that improves retrieval and answer quality over time.</li>'
-        '<li><strong>A human/AI partnership.</strong> I decide what goes into the archive: reading, vetting, and saving what&rsquo;s actually worth keeping. From there, AI handles execution and delivery: a pipeline built on Claude (Anthropic), Exa&rsquo;s search API, and the Internet Archive&rsquo;s Wayback Machine keeps it structured and recoverable even when a source moves or gets blocked, and synthesizes every cited answer you get.</li>'
+    # The usage line is genuinely absent (not just visually blank) for
+    # anonymous visitors and for any admin with no cap tracked — dropping
+    # its grid row entirely in that case (rather than rendering an empty
+    # div that still occupies a row-gap on both sides) is what actually
+    # closes the intro-to-Question-box dead space; see the CSS comment
+    # below for why a spaced-out `usage` row happens at all otherwise.
+    usage_div = f'<div class="fpa-intro-area-usage">{usage_html}</div>' if usage_html else ""
+    _intro_areas_desktop = (
+        '"intro example" "usage example" "question example" "controls controls" "action action"'
+        if usage_html else
+        '"intro example" "question example" "controls controls" "action action"'
+    )
+    _intro_rows_desktop = "auto auto 1fr auto auto" if usage_html else "auto 1fr auto auto"
+    _intro_areas_mobile = (
+        '"intro" "example" "usage" "question" "controls" "action"'
+        if usage_html else
+        '"intro" "example" "question" "controls" "action"'
     )
 
     body = f"""<div class="page page-standard">
-<div class="tool-inner">
-<p style="margin:0 0 12px;"><a href="/" style="font-size:13px;color:var(--muted);">&larr; Home</a></p>
-<span class="ask-eyebrow">CFO Navigator</span>
-<h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
-<p style="color:var(--muted);margin:0 0 12px;">A digital library of finance content I curate by hand, kept structured and current by a content pipeline built on Claude, Exa, and the Internet Archive. Skip the digging, get your answer.</p>
-<p class="ask-teaser">Curious how this works? <a href="#fpa-features">Scroll down</a> or <a href="/tools/fpa-buddy/how-it-works">read the full breakdown &rarr;</a></p>
-<p style="color:var(--muted);font-size:12.5px;margin:-4px 0 12px;">Conversations continue seamlessly whether you ask here on the site or via Claude/MCP.</p>
+<p style="margin:0 0 12px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 
-<div class="ask-example">
-  <div class="ask-example-label">Illustrative example&mdash;not a captured real answer</div>
-  <div class="ask-q-bubble">What FP&amp;A team size do peer SaaS companies run at our stage?</div>
-  <div class="ask-answer">
-    <p>Most peer benchmarks put FP&amp;A headcount around one analyst per 75 to 150 employees, with the ratio tightening as ARR growth accelerates [1]. Companies preparing for a new funding round often add a dedicated FP&amp;A hire ahead of the raise to support board-reporting cadence [2]. Recent hiring trends across sub-$100M-ARR SaaS companies lean toward one generalist analyst before adding a dedicated planning lead [3].</p>
-    <ul class="ask-src-list">
-      <li>&#128218; <span class="ask-src-static">[1] FP&amp;A Team Sizing Benchmarks</span></li>
-      <li>&#128240; <span class="ask-src-static">[2] Board Reporting Cadence at Growth Stage</span></li>
-      <li>&#127760; <span class="ask-src-static">[3] Hiring Trends Across Early-Stage FP&amp;A Teams</span></li>
-    </ul>
+<div class="fpa-intro-layout">
+  <div class="fpa-intro-area-intro">
+    <span class="ask-eyebrow">CFO Navigator</span>
+    <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
+    <p style="color:var(--ink-soft);margin:0 0 12px;font-size:15.5px;line-height:1.6;">Ask a real FP&amp;A question and get an answer with its sources, not half a day of Googling. It pulls from a research archive I curate by hand, and it remembers the thread, so you can follow up.</p>
+    <p class="ask-teaser">Curious how this works? <a href="/tools/fpa-buddy/how-it-works">Read the full breakdown &rarr;</a></p>
+    <p style="color:var(--muted);font-size:12.5px;margin:-4px 0 0;">Conversations continue seamlessly whether you ask here on the site or via Claude/MCP.</p>
   </div>
-  <p class="ask-example-caption">A mocked example built on the real Library/Feed/Web mechanism described below&mdash;no real question history exists yet to pull a genuine one from.</p>
+  <div class="fpa-intro-area-example">
+    <div class="ask-example">
+      <div class="ask-example-label">Illustrative example&mdash;not a captured real answer</div>
+      <div class="ask-q-bubble">What FP&amp;A team size do peer SaaS companies run at our stage?</div>
+      <div class="ask-answer">
+        <p>Most peer benchmarks put FP&amp;A headcount around one analyst per 75 to 150 employees, with the ratio tightening as ARR growth accelerates [1]. Companies preparing for a new funding round often add a dedicated FP&amp;A hire ahead of the raise to support board-reporting cadence [2]. Recent hiring trends across sub-$100M-ARR SaaS companies lean toward one generalist analyst before adding a dedicated planning lead [3].</p>
+        <ul class="ask-src-list">
+          <li>&#128218; <span class="ask-src-static">[1] FP&amp;A Team Sizing Benchmarks</span></li>
+          <li>&#128240; <span class="ask-src-static">[2] Board Reporting Cadence at Growth Stage</span></li>
+          <li>&#127760; <span class="ask-src-static">[3] Hiring Trends Across Early-Stage FP&amp;A Teams</span></li>
+        </ul>
+      </div>
+      <p class="ask-example-caption">A mocked example built on the real Library/Feed/Web mechanism&mdash;no real question history exists yet to pull a genuine one from.</p>
+    </div>
+  </div>
+  {usage_div}
+  <div class="fpa-intro-area-question">
+    <div class="ask-card">
+      <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
+      <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?"
+        style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
+    </div>
+  </div>
+  <div class="fpa-intro-area-controls">
+    <div class="ask-controls">
+      <div class="ask-control">
+        <div class="ask-section-label">Sources</div>
+        <div class="ask-tags">
+          {source_tags}
+        </div>
+      </div>
+      <div class="ask-control">
+        <div class="ask-section-label">Depth</div>
+        <div class="ask-tags" role="radiogroup" aria-label="Depth">
+          {tier_tags}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="fpa-intro-area-action">
+    <div class="ask-action-row">
+      <button class="btn" onclick="doAsk()" id="ask-btn" style="padding:11px 28px;font-size:15px;">Ask</button>
+      {cost_span}
+    </div>
+  </div>
 </div>
-
-{usage_html}
 
 {past_questions_section}
-
-<div class="ask-card">
-  <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
-  <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?"
-    style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
-</div>
-
-<div class="ask-controls">
-  <div class="ask-control">
-    <div class="ask-section-label">Sources</div>
-    <div class="ask-tags">
-      {source_tags}
-    </div>
-  </div>
-  <div class="ask-control">
-    <div class="ask-section-label">Depth</div>
-    <div class="ask-tags" role="radiogroup" aria-label="Depth">
-      {tier_tags}
-    </div>
-  </div>
-</div>
-
-<div class="ask-action-row">
-  <button class="btn" onclick="doAsk()" id="ask-btn" style="padding:11px 28px;font-size:15px;">Ask</button>
-  {cost_span}
-</div>
 
 <div id="ask-recent" class="ask-section" style="display:none;"></div>
 
@@ -20953,30 +20973,166 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 <div id="ask-capped" style="display:none;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:14px;color:var(--muted);">
   You&rsquo;ve reached the limit for this conversation. <a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.
 </div>
-
-<div class="ask-value" id="fpa-features">
-  <div class="ask-section-label">What FP&amp;A Buddy can do</div>
-  <ul class="ask-value-list">{ask_value_bullets}</ul>
-</div>
-</div>
 </div>
 
 <style>
 .ask-eyebrow{{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}}
 .ask-card{{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:0;}}
 
-.ask-teaser{{font-size:14px;color:var(--ink-soft);margin:0 0 24px;}}
+.ask-teaser{{font-size:14px;color:var(--ink-soft);margin:0 0 4px;}}
 .ask-teaser a{{color:var(--accent);font-weight:600;}}
+
+/* Top section only, decoupled by grid-template-areas so desktop and mobile
+   can place the same DOM children differently without JS or an explicit
+   `order` property. Desktop: description, usage line, and the Question box
+   stack down the left column — sharing its left edge with the illustrative
+   example's own column start — while the example spans only those three
+   rows on the right (so its bottom edge lines up with the Question box's
+   rather than running the full height of the left column). Sources/Depth/
+   Ask then drop back to full width below both, sharing the Question box's
+   left edge without being squeezed into its ~600px column — full width was
+   never the problem, only the mismatched left edge was. Mobile collapses to
+   one column in the exact reading order this page used before the desktop
+   fill was added — kept because it already reads well: description,
+   example, usage, question, controls, action.
+
+   `grid-template-rows:auto auto 1fr auto auto` (question is the one `1fr`
+   row) fixes a real dead-space bug: when the example card is taller than
+   intro+usage+question combined, plain `auto` rows don't confine that
+   leftover to the last-spanned row the way the bottom-edge-alignment
+   comment below originally assumed — confirmed live (the empty `usage`
+   row, and intro's own row, were each padded out by ~30px they had no
+   content to justify, opening a ~93px gap between the intro text and the
+   Question box with no line of CSS ever asking for it) and confirmed
+   again in an isolated minimal test page, ruling out interference from
+   this page's other rules: even pinning intro/usage to `grid-template-
+   rows:max-content` (the first fix tried) had zero effect — browsers
+   still redistribute leftover space beyond a track's declared max-content
+   growth limit once every spanned track has been maxed out and space
+   still remains, per the Grid spec's own "distribute space beyond growth
+   limits" fallback step. A `1fr` track is different: it's sized via a
+   separate, later pass (flexible-track distribution) that only ever
+   grows to absorb genuine leftover space, never competes for it against
+   plain content-sized tracks — so making `question` the one `1fr` row
+   (intro/usage stay plain `auto`, sized to their own content only) routes
+   100% of the leftover there by construction, not as a side effect of a
+   limit some other mechanism can still override. Reset to `none` on
+   mobile, where the layout is a single column with no spanning item to
+   redistribute space from — an explicit 5-row sizing declared for the
+   desktop's 5 rows would otherwise misapply to mobile's differently-
+   ordered 6 rows (`example` is its own
+   row there, not a 3-row-spanning column).
+
+   The `1fr` fix alone still leaves two structural `row-gap`s (one above
+   the empty `usage` row, one below it) between the intro text and the
+   Question box whenever there's no usage line to show — genuinely no
+   longer unexplained dead space, but still more than the ~20-24px this
+   form uses elsewhere. Rather than shrink the shared row-gap (which
+   would also touch the question-to-controls and controls-to-action
+   gaps) or fake it with a negative margin (`row-gap` reserves real space
+   between tracks regardless of an item's own margin, so a margin trick
+   wouldn't actually close it), `usage`'s grid area and its own `<div>`
+   are both omitted entirely from Python when `usage_html` is empty
+   (`_intro_areas_desktop`/`_intro_rows_desktop`/`_intro_areas_mobile`,
+   computed once above) — a row that isn't there needs no row-gap around
+   it, and it's a fact-driven omission (there's genuinely nothing to
+   show), not a magic-number one. `row-gap` itself moved from 16px to
+   20px — the exact Sources-to-Depth spacing round 4 already established
+   as this page's own reference value for "the same spacing used
+   elsewhere in the form" — so the remaining single gap (intro's own
+   bottom to the Question box, once `usage` drops out) lands at exactly
+   20px, and the question-to-controls/controls-to-action gaps below tick
+   up from ~16.5px to the same 20px for a genuinely more consistent
+   result, not a regression. */
+.fpa-intro-layout{{display:grid;grid-template-columns:1fr 1fr;column-gap:40px;row-gap:20px;
+  grid-template-areas:{_intro_areas_desktop};
+  grid-template-rows:{_intro_rows_desktop};
+  align-items:start;margin-bottom:28px;}}
+.fpa-intro-area-intro{{grid-area:intro;}}
+.fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
+.fpa-intro-area-usage{{grid-area:usage;}}
+.fpa-intro-area-question{{grid-area:question;align-self:stretch;}}
+.fpa-intro-area-controls{{grid-area:controls;}}
+.fpa-intro-area-action{{grid-area:action;}}
+@media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;grid-template-rows:none;
+  grid-template-areas:{_intro_areas_mobile};}}}}
+
+/* Sources/Depth and the Ask button keep .ask-controls'/.ask-action-row's own
+   default margins everywhere else they're used (nowhere else, as of this
+   PR) — zeroed here only, so the grid's own 16px row-gap is the entire
+   space between the Question box, the controls row, and the Ask button,
+   instead of stacking on top of ~40px of margin the two shared components
+   already carry for their own (unrelated) contexts. */
+.fpa-intro-area-controls .ask-controls{{margin:0;}}
+.fpa-intro-area-action .ask-action-row{{margin:0;}}
+
+/* Sources and Depth read as one sequence down the page, not a left/right
+   split — both are the same kind of setting (a source-list choice, a depth
+   choice), so they stack: Sources full width, Depth full width beneath it,
+   both sharing the Question box's left edge, then Ask below. Overrides
+   .ask-controls' own 1fr/1fr side-by-side split (used nowhere else on the
+   site, confirmed by grep) rather than editing the shared rule itself, in
+   case a future page reuses the side-by-side default. Full width also
+   incidentally fixes the chip-wrapping problem the ~600px-column version of
+   this layout had: at the page's full ~1300px width, all three Source
+   chips — including "Web search (trusted sites)", deliberately NOT
+   shortened, since the trusted-sites qualifier is doing real work — fit on
+   one line. The row-gap this produces (20px, .ask-controls' own default)
+   already matches the ~20px spacing used elsewhere in this control stack —
+   no override needed beyond the column count. */
+.fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;}}
+
+/* Chips are natural width, left-aligned, NOT stretched to fill the row —
+   .ask-tags' own default flex-wrap row already does this with zero
+   override needed (each .ask-tag sizes to its own label by default).
+   Equal width WITHIN each group (Sources' three match each other, sized
+   to "Saved archive"; Depth's three match each other, sized to
+   "Standard") is set by fpaEqualizeChipWidths() below, not CSS — there is
+   no CSS-only way to size every sibling in a row to the widest one's
+   *natural* content width without either stretching to fill the
+   container (rejected — that's exactly what round 5 did and got reverted)
+   or duplicating the widest label's text into every cell. Measuring the
+   real rendered width in the browser also sidesteps the font-mismatch
+   risk a hardcoded pixel value would carry (this sandbox can't load the
+   sitewide Google Fonts — see the standing testing-standard note on
+   `capture_homepage()` — so a width measured here might not match a real
+   browser's actual DM Sans metrics; measuring live in whichever browser
+   is actually rendering the page doesn't have that problem). */
+
+/* Bottom-edge alignment between the Question box and the illustrative
+   example: `align-self:stretch` on both grid items (above) makes each
+   fill its assigned row(s) exactly, and the two-part rule below makes the
+   visible cards fill that stretched space rather than just their own
+   content height — no hardcoded height anywhere. This works because the
+   "example" grid area spans exactly the intro/usage/question rows (it
+   never appears in the "controls controls"/"action action" rows below):
+   when its natural content is taller than those three rows combined,
+   `grid-template-rows`'s `1fr` track for `question` (intro/usage stay
+   plain `auto`, above) absorbs 100% of that leftover height by
+   construction — which is what pulls the Question box's row down to meet
+   the example's real height, rather than a value picked by hand. */
+.fpa-intro-area-question{{display:flex;}}
+.fpa-intro-area-question .ask-card{{flex:1;display:flex;flex-direction:column;}}
+.fpa-intro-area-question .ask-card textarea{{flex:1;}}
+.fpa-intro-area-example{{display:flex;}}
+.fpa-intro-area-example .ask-example{{flex:1;display:flex;flex-direction:column;}}
+.fpa-intro-area-example .ask-answer{{flex:1;}}
 
 .ask-example{{border:1px dashed var(--line-strong);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--surface);}}
 .ask-example-label{{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:3px 10px;margin-bottom:12px;}}
 .ask-example-caption{{margin:12px 0 0;font-size:12px;color:var(--muted);}}
 
-.ask-value{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:36px 0 0;}}
-.ask-value-list{{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;}}
-.ask-value-list li{{font-size:13.5px;line-height:1.55;color:var(--ink-soft);}}
-.ask-value-list strong{{color:var(--ink);}}
-@media (max-width:640px){{.ask-value{{padding:16px 18px;}}}}
+/* Scoped scale-down for the example inside the intro's right column only —
+   .ask-q-bubble/.ask-answer are shared with the real, live-rendered
+   question/answer thread below, so these overrides must not leak there. */
+.fpa-intro-area-example .ask-example{{margin:0;padding:16px 18px;}}
+.fpa-intro-area-example .ask-example-label{{font-size:10px;padding:2px 8px;margin-bottom:8px;}}
+.fpa-intro-area-example .ask-q-bubble{{font-size:13px;padding:10px 14px;}}
+.fpa-intro-area-example .ask-answer{{padding:14px 16px;font-size:13.5px;line-height:1.6;}}
+.fpa-intro-area-example .ask-answer p{{margin:0 0 10px;}}
+.fpa-intro-area-example .ask-src-list{{margin-top:10px;padding-top:10px;}}
+.fpa-intro-area-example .ask-example-caption{{font-size:11px;margin-top:8px;}}
+
 .ask-section{{margin:20px 0;}}
 .ask-section-label{{font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;}}
 
@@ -21074,6 +21230,30 @@ function updateEstimate() {{
   if (!num) return;
   var c = COST[selectedTier];
   num.textContent = c != null ? '~$' + c.toFixed(3) : '';
+}}
+
+// Sources' three chips match each other (sized to "Saved archive"), and
+// Depth's three match each other (sized to "Standard") — independently
+// per group, natural width, not stretched full-width. There's no CSS-only
+// way to size every sibling in a row to the widest one's real content
+// width without either duplicating that label into every cell or
+// stretching to fill the container (the round-5 approach, reverted) — so
+// this measures the ACTUAL rendered width of each chip in whichever
+// browser is running the page (sidesteps a hardcoded pixel value
+// potentially not matching a real browser's font metrics) and applies the
+// max as a fixed width to every chip in that same .ask-tags group. Widths
+// are text/font-driven, not viewport-driven — .ask-tag's font-size has no
+// media-query override anywhere on this page — so a one-time run on load
+// is enough; no resize listener needed.
+function fpaEqualizeChipWidths() {{
+  document.querySelectorAll('.fpa-intro-area-controls .ask-tags').forEach(function(group) {{
+    var chips = group.querySelectorAll('.ask-tag');
+    if (!chips.length) return;
+    chips.forEach(function(c) {{ c.style.width = ''; }});
+    var max = 0;
+    chips.forEach(function(c) {{ max = Math.max(max, c.getBoundingClientRect().width); }});
+    chips.forEach(function(c) {{ c.style.width = max + 'px'; }});
+  }});
 }}
 
 var asked = false;
@@ -21411,6 +21591,7 @@ document.addEventListener('keydown', function(e) {{
 
 updateEstimate();
 loadRecent();
+fpaEqualizeChipWidths();
 </script>"""
 
     return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))

@@ -446,13 +446,17 @@ measure this page exists to protect.
 The former `.page-tool` tier (960px, "functional tools") was retired in Phase 9b —
 those pages (FP&A Buddy, GER calculator, Sail, don't row + leaderboard) sit on the
 Standard tier like every Toolbox/admin page, so they no longer feel visually cramped
-next to it. Each wraps its actual working content (chat, calculator, game canvas) in
-`.tool-inner` (1300px, centered, card-grid scale) so the widget gets real room —
-identical to Standard's own 1300px, so neither the PR 13 nor the PR 14 tier collapse
-changed anything about how these pages actually render. The Growth Engine Ratio
-calculator's long-form paragraphs nest a narrower `.tool-prose` (760px) inside that
-wrapper — 1300px is too wide a text measure to read comfortably, but the calculator
-itself benefits from the extra width.
+next to it. GER calculator and Sail, don't row + leaderboard each still wrap their
+actual working content (calculator, game canvas) in `.tool-inner` (1300px, centered,
+card-grid scale) so the widget gets real room — identical to Standard's own 1300px,
+so neither the PR 13 nor the PR 14 tier collapse changed anything about how these two
+pages actually render. FP&A Buddy dropped its own `.tool-inner` wrapper in PR 17
+(2026-09) — it was a pure no-op there (both values were already 1300px) once its top
+section was rebuilt as a real two-column grid (description/example side by side,
+filling to a single column on mobile) sitting directly on `.page-standard`. The
+Growth Engine Ratio calculator's long-form paragraphs nest a narrower `.tool-prose`
+(760px) inside its wrapper — 1300px is too wide a text measure to read comfortably,
+but the calculator itself benefits from the extra width.
 
 `.tool-prose` isn't limited to `.tool-inner` — it's a general-purpose narrow-reading
 wrapper (max-width 760px, centered) usable inside any wider tier. (An earlier version

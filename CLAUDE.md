@@ -7265,6 +7265,246 @@ it supersedes the old "`/save` is token-gated" note.
     plus a sibling asserting `_has_open_admin_tasks()` itself returns
     promptly) is pinned against a confirmed-real failure mode, not a guess.
 
+- **FP&A Buddy page redesign (PR 17, 2026-09) — get to the point, put the
+  example beside the description instead of below it, fix what's under the
+  Ask button, settle the page's width.** The build brief's own quoted
+  "existing tagline" turned out not to exist anywhere in the codebase —
+  checked directly, not assumed — so the top intro is genuinely new copy,
+  drafted and approved by Brian in-session rather than lifted from an
+  existing string: "Ask a real FP&A question and get an answer with its
+  sources, not half a day of Googling. It pulls from a research archive I
+  curate by hand, and it remembers the thread, so you can follow up."
+  Replaces the old h1-then-paragraph intro and, more importantly, the
+  bottom "What FP&A Buddy can do" bulleted box, which is retired outright —
+  three of its five bullets restated content already on
+  `/tools/fpa-buddy/how-it-works` (citations, hybrid retrieval, the
+  human/AI pipeline), so keeping both was exactly the duplication the
+  standing "less and simpler" rule exists to catch. Brian's own call on the
+  two bullets that weren't duplicated elsewhere: "remembers the thread"
+  (conversation memory) earns a clause in the new intro because it changes
+  what question someone should even type first; "gets sharper" (feedback-
+  driven improvement) doesn't, since it's a claim about the product's
+  trajectory rather than something the reader can act on right now, and
+  it's already visible in-product via the feedback buttons. The `#fpa-
+  features` anchor and its "Scroll down" teaser link are gone with the box
+  they pointed at; the teaser now reads "Curious how this works? Read the
+  full breakdown →", linking straight to the how-it-works page.
+  **Top section is a real two-column layout**, built with CSS Grid
+  `grid-template-areas` rather than plain source order — the only way to
+  give desktop and mobile genuinely different visual placements of the
+  same DOM children with no JS and no `order` property. First draft put
+  the illustrative example in a second, fixed column beside the intro
+  alone; live review found ~350px of dead space under the shorter left
+  column at desktop width, since three sentences can never balance a full
+  mocked conversation. Restructured on Brian's direction: desktop now
+  stacks description → usage line → Question box down the left column
+  (named grid areas `intro`/`usage`/`question`) so the input sits above
+  the fold and the gap fills with real form instead of empty space, while
+  the illustrative example (`example`) spans that whole column's height on
+  the right, scaled down via selectors scoped to `.fpa-intro-area-example`
+  only — `.ask-example`/`.ask-q-bubble`/`.ask-answer` are shared with the
+  real, live-rendered thread lower on the page, so the scale-down can't
+  leak into it. Mobile collapses the same grid to a single `intro`/
+  `example`/`usage`/`question` column — the exact order this page already
+  used before the redesign, confirmed reading well and kept unchanged;
+  `grid-template-areas` is what let that order survive the desktop
+  restructure with zero DOM reshuffling, verified directly via
+  `getBoundingClientRect()` y-ordering at 390px, not just eyeballed.
+  **Round 2, same PR, per a second round of direct feedback**: the
+  first draft's left column (intro/usage/question only) still left ~350px
+  of dead space under it at desktop width next to the taller mocked
+  example — three sentences and a Question box can't fill that height.
+  Sources, Depth, and the Ask button moved INTO the same left column too
+  (two more grid rows, `controls`/`action`, with a `.` placeholder keeping
+  `example` confined to only the intro/usage/question rows above them) so
+  the whole Ask form reads as one continuous shape instead of a form whose
+  own controls span past the column's left edge. Sources (3 chips) and
+  Depth (3 buttons) share `.ask-controls`' own 1fr/1fr split everywhere
+  else on the site, but at this column's ~600px width that's only ~280px
+  per side — fine for Depth's three short buttons, tight enough that
+  Sources' longer labels wrap to two ragged lines; checked both ways with
+  real screenshots before choosing stacked (Sources above Depth) as the
+  cleaner read, via an unconditional override
+  (`.fpa-intro-area-controls .ask-controls{grid-template-columns:1fr}`,
+  not gated behind a media query, since this container is narrower than
+  `.ask-controls`' own 640px breakpoint regardless of the real viewport).
+  Same round also closed the ~30px bottom-edge mismatch between the
+  example card and the Question box — free, not a magic-number height:
+  `align-self:stretch` on both grid items plus `flex:1` on the actual
+  visible cards inside them lets CSS Grid's own auto-sizing algorithm do
+  the work (a multi-row spanning item taller than the rows it spans grows
+  the LAST of those rows to fit, which is the same row the Question box
+  lives in) — verified via real `getBoundingClientRect()` measurements at
+  both 1280px and 1920px: **0.0px difference** between the two cards'
+  bottom edges, not just "close." Mobile gained `controls`/`action` as two
+  more rows in its own single-column `grid-template-areas`, in the exact
+  position they already occupied — zero visual change there, confirmed via
+  the same before/after y-ordering check as round 1.
+  **Below the Ask button, order was Ask → Recent conversations (a JS-
+  populated, initially-hidden list) with "Search past questions" stranded
+  ABOVE the Question box** — not "Recent conversations above Past
+  questions" as the build brief's own premise assumed; checked directly
+  against source before touching anything. Moved to Ask → Past questions →
+  Recent conversations, the requested order. **Back link changed from `/`
+  ("← Home") to `/tools` ("← Toolbox")** — grep confirmed this was the only
+  remaining "← Home" holdout on the whole site; every Toolbox directory/
+  tool page, and `/read`'s own rail back-link, already used "← Toolbox".
+  **`.tool-inner` removed from this page as a dead no-op**: `.tool-inner`
+  and `.page-standard` have both been 1300px since the PR 13 tier collapse,
+  so nesting one inside the other constrained nothing. Confirmed by
+  checking every other `.tool-inner` call site before touching any of
+  them (GER calculator, Sail Don't Row + leaderboard, both matchmaker chat
+  pages) — all four still use it for a real reason (bounding a
+  calculator/game canvas/chat panel to a card-grid width distinct from a
+  possible future wider `.page-standard`), so none of them were swept into
+  this PR; only FP&A Buddy's own wrapper, which had nothing left to do,
+  came out. See ARCHITECTURE.md's "FP&A Buddy page redesign (PR 17,
+  2026-09)" bullet and BRAND.md §5's `.tool-inner` passage for the
+  technical write-up.
+  **Round 3, same PR, per a third round of direct feedback**: round 2's fix
+  traded one dead-space problem for another — confining Sources/Depth/Ask
+  to the ~600px left column left ~450px empty to their right, under the
+  wider example card. Full width was never the problem; the mismatched
+  left edge round 2 originally fixed was. Reverted `controls`/`action` back
+  to spanning both grid columns (`"controls controls"`/`"action action"`
+  in `grid-template-areas`, not `"controls ."`/`"action ."`) — since
+  `example`'s own row-span is set by which rows *it's* listed against, not
+  by how wide the controls/action rows are, this doesn't reopen round 1's
+  dead-space bug or disturb the bottom-edge alignment fix; both keep
+  working. Column 1 still starts at the same x regardless of how many
+  columns a row spans, so Sources/Depth/Ask still open flush with the
+  Question box's left edge (0.00px diff at both 1280px and 1920px) while
+  running full width. Round 2's forced single-column stacking override on
+  Sources/Depth is removed — the shared `.ask-controls` 1fr/1fr split
+  renders as-is, same as everywhere else it's used: at 1920px Sources fits
+  one line and sits genuinely side by side with Depth; at 1280px Sources
+  wraps to two lines while Depth doesn't, confirmed identical against
+  `origin/main`'s pre-PR-17 markup for this exact component (byte-for-byte
+  unchanged CSS) — a pre-existing asymmetry, not something this PR
+  introduced or is scoped to fix. The ~60px Depth-to-Ask gap was a genuine
+  round-2 artifact (stacked layout summed `.ask-controls`' 20px bottom
+  margin + the grid's 16px row-gap + `.ask-action-row`'s 22px top margin);
+  zeroing both components' margins (each has exactly one call site,
+  confirmed by grep) leaves only the grid's 16px row-gap everywhere in this
+  section — verified at 16.5px at 1920px, matching every other gap on the
+  page. At 1280px the same gap still measures ~57.5px, but that's the
+  Sources-wraps-to-two-lines asymmetry above showing through (the shared
+  grid row's height is set by the taller column), not unresolved margin
+  stacking — reported rather than chased further, since fixing it would
+  mean reflowing Sources' chip labels or un-pairing Sources/Depth from a
+  shared row, neither of which was asked for.
+  **Round 4, same PR, per a fourth round of direct feedback**: Sources and
+  Depth stop sitting side by side — they're the same kind of setting (a
+  source-list choice, a depth choice), so a left/right split made the eye
+  travel left, then right, then back left for Ask, instead of reading as one
+  sequence. Fixed with a second override on the same selector round 3 used
+  for the margin zero-out — `.fpa-intro-area-controls .ask-controls{grid-
+  template-columns:1fr}` — rather than touching `.ask-controls`' own shared
+  1fr/1fr rule (still exactly one live call site, confirmed by grep). This
+  also closes the chip-wrapping problem round 3 left unresolved: at the
+  page's full ~1300px width, all three Source chips — including "Web search
+  (trusted sites)", deliberately not shortened, since the trusted-sites
+  qualifier does real work — fit on one line; confirmed via
+  `getBoundingClientRect()` on every chip, one distinct y-value at both
+  1280px and 1920px. `.ask-controls`' own default 20px row-gap already
+  matches "the same ~20px gap as the rest of the control spacing" once the
+  column count drops to one — confirmed at exactly 20.0px between Sources
+  and Depth at both widths; Depth-to-Ask stayed at the outer grid's own
+  16.5px row-gap, a separate rule the ask didn't name. Left-edge alignment
+  (0.00px) and full width were unaffected — both already established by
+  round 3. Mobile (390px) confirmed unaffected via the same y-ordering
+  check as every prior round.
+  **Round 5, same PR — chip labels shortened, chips within each row made
+  equal width.** Source labels: "My saved archive"/"Current RSS feed"/"Web
+  search (trusted sites)" → "Saved archive"/"RSS feed"/"Trusted web" — the
+  top intro already establishes these are Brian's own sources, so the
+  chips drop "My"/"Current"; "Trusted web" deliberately keeps the
+  trusted-sites qualifier rather than shortening to a bare "Web," since it
+  does real work. No test asserted the old strings (confirmed by grep).
+  Equal widths within each row (Sources' three match each other, Depth's
+  three match each other, rows independent) via `.fpa-intro-area-controls
+  .ask-tags{grid-template-columns:repeat(3,1fr)}` + `width:100%` on
+  `.ask-tag` — `.ask-tags` has exactly two live call sites, both on this
+  page, confirmed by grep, so this scopes the same way every other override
+  on this page does rather than editing the shared flex-wrap rule. Verified
+  equal at 1280px/1920px (405.3px/412px per chip, exact match) with no
+  wrapping at either width. **Flagged per the explicit ask, not silently
+  fixed**: at 390px, equal-width sizing wraps the two-word Source labels
+  ("Saved archive," "Trusted web") to a second line — Depth's single-word
+  labels stay single-line. Confirmed via screenshot it reads cleanly
+  (uniform chip height, no overflow, `scrollWidth` still exactly 390) and
+  the mobile stacking order is unaffected, but it's a real behavior change
+  from the prior single-line flex-wrap layout, reported rather than
+  assumed fine.
+  **Round 6, same PR — chips go back to natural width (round 5's
+  stretch-to-fill was a misread of the ask), the ~110px gap above the
+  Question box is closed to 20px, and Ask-before-Past-questions is
+  confirmed correct as-is.** Round 5's `grid-template-columns:repeat(3,1fr)`
+  + `width:100%` stretched every chip to fill its row — not what was asked;
+  the real ask was "equal width within a group, sized to that group's own
+  widest label, left-aligned, not full-width." Reverted to `.ask-tags`' own
+  default `flex-wrap` row (natural per-chip width with zero override) and
+  added `fpaEqualizeChipWidths()`, a small page-load JS function
+  (`getBoundingClientRect()` per chip, apply the group max as a fixed
+  `width` to every chip in that `.ask-tags`) — there is no CSS-only way to
+  size N flex/grid siblings to the widest one's *natural* content width
+  without either stretching to fill the container (round 5's approach,
+  reverted) or duplicating the widest label's text into every cell; a JS
+  measurement also sidesteps a hardcoded pixel value potentially not
+  matching a real browser's font metrics, since this sandbox can't load the
+  sitewide Google Fonts (see the standing `capture_homepage()` limitation
+  note above). Verified: Source chips 149.2px each (all three, sized to
+  "Saved archive"), Depth chips 113.4px each (sized to "Standard"), at
+  1280px, 1920px, and 390px alike — widths are font/text-driven, not
+  viewport-driven, so one run on load is enough.
+  **The gap fix took real debugging, not a CSS one-liner, and surfaced a
+  genuine CSS Grid subtlety worth keeping**: the `example` card spans
+  multiple rows (`intro`/`usage`/`question`) via `grid-template-areas`, and
+  when its own content exceeds those rows' combined natural height, the
+  leftover growth doesn't confine itself to the last-spanned row by
+  default — every plain `auto` row it spans shares the excess. An initial
+  fix attempt, `grid-template-rows:max-content max-content auto auto auto`
+  (intended to cap `intro`/`usage` at their own content size and force all
+  overflow onto `question`), measured **zero effect** live — confirmed
+  independently in an isolated standalone test file
+  (`grid_test.html`/`pw_gridtest.py`) reproducing the same structure, which
+  showed the same failure (`186px 132px 150px`, `intro`/`usage` still
+  inflated). Root cause: per the CSS Grid spec's own "distribute space
+  beyond growth limits" fallback step, once every spanned track has hit its
+  growth limit and space still remains, ALL of them — even ones capped at
+  `max-content` — grow further to absorb the remainder; `max-content` only
+  bounds the earlier "resolve intrinsic sizes" pass, not this later
+  fallback. The fix that actually works, confirmed in the same isolated
+  test before touching the real page: make `question`'s row `1fr`
+  (`grid-template-rows:auto auto 1fr auto auto`) — a flexible track is
+  sized in a separate, later distribution pass that exclusively absorbs
+  leftover space, so `1fr` (not `max-content`) is the correct tool whenever
+  one specific track, and only that track, needs to swallow a spanning
+  item's overflow. This alone dropped the gap from ~93px to 32px — the
+  remaining 32px being two genuine 16px structural row-gaps bracketing the
+  `usage` row, which is completely empty for a fresh/admin session with no
+  cap tracked. Closed the rest by treating that emptiness as a fact to act
+  on, not a gap to paper over: `usage_html`'s own div/grid-area/row is now
+  omitted entirely from both the HTML and every `grid-template-areas`/
+  `grid-template-rows` string (desktop and mobile) whenever it's empty,
+  computed via new `usage_div`/`_intro_areas_desktop`/`_intro_rows_desktop`/
+  `_intro_areas_mobile` Python variables — and `.fpa-intro-layout`'s
+  `row-gap` moved from 16px to 20px, deliberately reusing round 4's own
+  already-established Sources→Depth spacing value (the ask's own "the same
+  spacing used elsewhere in the form" pointed at that value, not an
+  arbitrary pick) rather than inventing a new number. Landed the gap at
+  exactly 20.0px at both 1280px and 1920px — bottom-edge alignment between
+  the example card and the Question box stayed at 0.00px throughout, since
+  the `1fr`/`align-self:stretch` mechanism from round 2 is untouched.
+  **Ask-before-Past-questions needed no code change** — the DOM already
+  rendered Ask first; verified by reading the render order and confirming
+  live it matches on all three widths. Mobile (390px) re-verified after
+  every change: visual order `intro → example → question → controls →
+  action` (`usage` genuinely absent from the DOM, confirmed via a direct
+  element-presence check, not just inferred from the CSS), `scrollWidth`
+  exactly 390 (no overflow), and Source chip widths still 149.2px/equal —
+  font-driven sizing, so mobile matches desktop exactly.
+
 
 ## Authentication & security
 
