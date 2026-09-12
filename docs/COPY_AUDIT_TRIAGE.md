@@ -4,6 +4,14 @@
 deliverable — a sorted inventory so Brian can spot-check the size and shape of the job
 before any rewriting starts.
 
+**Approved 2026-09-12, with five corrections** (folded into this document; see §7 and
+the batching order in §5 for the substance): the audience test for the System/
+judgment-call pages, one false-positive worst offender pulled, `/tools/fpa-buddy/how-it-works`
+re-scoped as a deliberate exception rather than a Tier-1 pass, the admin add/edit forms
+moved from "sampled clean" to unsorted (real audit deferred to the rewrite phase), and
+the batching reordered by surface priority (public → member → admin) rather than by
+area. The rewrite phase has not started — batch 1's build prompt is separate.
+
 Audited at commit `fce674b` (PR #536 merged, "Standardize admin table column widths by
 field type"). Six Step-0 markers verified present on this HEAD before starting: the
 `_COL_WIDTH_*` constants (#536), BRAND.md's column-width scope note (#536 follow-up),
@@ -47,7 +55,7 @@ rewrite doesn't churn what already works.
 | `/tools/submit`, `/library/submit` | 1 | clean |
 | `/contact`, `/privacy` | 1 | clean |
 | `/tools/fpa-buddy` top intro/example/usage/controls | 1 | clean — confirmed matches PR 17 |
-| `/tools/fpa-buddy/how-it-works` | 1 | clean — page states its own technical audience up front, so retrieval-mechanics language is in scope here |
+| `/tools/fpa-buddy/how-it-works` | 1 | exception, not a pass — a deliberate technical showcase for both technical and non-technical readers; mechanism IS the content here, so the plain-language standard doesn't apply |
 | Default email templates (`linklib/email_utils.py`) | 1 | clean, warm, plain across all 7 templates |
 | Destructive-action `confirm()` dialogs (sitewide) | 1 | clean, consistently states consequence |
 
@@ -91,9 +99,9 @@ rewrite doesn't churn what already works.
 | Manage Features | **3** | "controlled vocabulary tools get mapped against," raw GitHub link as the explanation |
 | Feature review queue | **3** | "live feature tables," a doc-section citation |
 | Resources (admin list) | **3** | tells the admin to edit `_DEFAULT_BENCHMARKS` in `webapp/app.py` to change page content |
-| Add/Edit resource, Add/Edit software, Add/Edit community | 1 | clean (sampled; not exhaustively field-by-field — see gap note) |
-| Communities list + "How this works" reference block | 1–2 | header/intro clean; long reference-block body not fully audited (gap noted) |
-| Community profile edit | not fully sampled | gap noted |
+| Add/Edit resource, Add/Edit software, Add/Edit community | **unsorted** | sampling isn't a tier — Brian doesn't believe these are clean; needs a real audit, deferred to the rewrite phase (batch 5) |
+| Communities list + "How this works" reference block | 1 (intro) / **unsorted** (reference block) | header/intro clean; the reference block's full body needs a real audit, deferred to batch 5 |
+| Community profile edit | **unsorted** | not audited; deferred to batch 5 |
 
 ### Admin — Thought Leadership
 
@@ -108,7 +116,7 @@ rewrite doesn't churn what already works.
 | Scripts | **3** | entire page is written as developer documentation |
 | Database | **3** | raw table/variable/file references throughout |
 | Page index | **3** | "route," "width tier," `app.routes`, doc-section citation |
-| AI configuration and usage | **3** | unexplained vendor name ("Exa"), file/variable names in the usage index |
+| AI configuration and usage | **3** | its own top intro is Tier 1 (see §8 correction); Tier 3 comes from mechanism-describing prose elsewhere on the page (e.g. naming `linklib/pricing.py`'s `MODEL_PRICING` to explain what a freshness banner checks) |
 | Checks | **3** | "commit," "GitHub QA workflow," code citations throughout |
 | Overhead spend | 1 | clean, front-loaded |
 | Archive backup (hub card) | 2 | "Railway Cron Service" — a specific infra product name with no explanation |
@@ -139,11 +147,16 @@ Of ~55 distinct pages/sections inspected:
 Tier 3 is concentrated almost entirely in **System** (Scripts, Database, Page index,
 Checks, AI configuration and usage, Brand standards) plus two **Toolbox admin** pages
 (Manage Features, Resources) and two **Reader-tools** sections (Manage feeds, Tagging
-style) — not spread evenly across ordinary CRUD forms. ~150 additional per-item
-admin add/edit sub-routes (Software/Communities/Resources/Thought-Leadership) were
-sampled representatively rather than read exhaustively; the field-label pattern in
-every sample was Tier 1, and there's no reason to expect the unsampled remainder to
-differ materially — flagged as a residual gap, not asserted with full confidence.
+style) — not spread evenly across ordinary CRUD forms.
+
+**Correction (2026-09-12):** ~150 additional per-item admin add/edit sub-routes
+(Software/Communities/Resources/Thought-Leadership), plus the Communities "How this
+works" reference block's full body and the Community profile edit page, were sampled
+representatively rather than read exhaustively, and were originally reported here as
+"presumed Tier 1." Brian doesn't believe that's accurate. These are now marked
+**unsorted**, not Tier 1 — they need a real audit, not a sample-based inference, and
+that audit is deferred to the rewrite phase (batch 5, see §5) rather than assumed clean
+in this document.
 
 ## 3. Worst offenders (verbatim, spot-checked against source)
 
@@ -180,10 +193,12 @@ differ materially — flagged as a residual gap, not asserted with full confiden
    > `app.routes` on every page load, not a maintained list. Skips non-page endpoints
    > (redirects, JSON/AJAX APIs, file downloads)…"
 
-7. **AI configuration and usage intro** — short but jargon-substituting-for-explanation,
-   the worse of the two failure modes named in the brief:
-   > "Two live settings, plus a read-only map of every Claude, Exa, and OpenAI surface
-   > in the app."
+~~7. **AI configuration and usage intro**~~ — **withdrawn (2026-09-12 correction).**
+   This line was written to the plain-language standard and approved in PR #527. It
+   front-loads what's editable and names the vendors, which is the point of a page
+   about which products power what — "Exa" unexpanded is a product name, not jargon
+   substituting for explanation. Left in the audit only to record the correction; the
+   intro itself is Tier 1 and shouldn't be touched in the rewrite phase.
 
 8. **Manage Features** — controlled vocabulary + a raw GitHub link as the explanation:
    > "The curated 'key features' list for each Toolbox category—the controlled
@@ -221,26 +236,35 @@ differ materially — flagged as a residual gap, not asserted with full confiden
 
 ## 5. Proposed batching for the rewrite phase
 
-Grouped by area (clearer diffs than by tier, since each area shares one voice problem):
+**Rebatched 2026-09-12, by surface priority (public → member → admin), per Brian's
+correction — supersedes the by-area ordering originally proposed here.**
 
-1. **Public "Agent taxonomy" label + empty-state copy** (`linklib/gates.py` + 2-3
+1. **Public — "Agent taxonomy" label + empty-state copy** (`linklib/gates.py` + 2-3
    render sites) — small, high-visibility, single PR.
-2. **System / Health & Maintenance rewrite** (Scripts, Database, Page index, Checks,
-   AI configuration and usage, Brand standards, Archive backup card) — the concentrated
-   Tier 3 cluster. One PR, but see §7 — this batch carries a real audience judgment
-   call worth putting to Brian before drafting, not just before shipping.
-3. **Toolbox admin — Manage Features, Feature review queue, Resources admin list** —
-   one PR; all three share the "cites an internal doc/variable as the explanation"
-   failure.
-4. **Reader tools — Manage feeds, Tagging style section** — one PR; both are dense,
-   mechanism-heavy explainer text inside otherwise well-organized pages.
-5. **"No redeploy" sweep** — mechanical, low-risk, ~10 pages, one sentence each. Can
-   ride with PR 2 or ship standalone.
-6. **Small Tier 2 cleanups** (Name-duplicate check, Community gaps, FP&A Buddy
-   feedback, Archive backup card, MCP-setup disclosure header, Reader subscriber-access
-   alert, Enrich archive) — one PR.
+2. **Member-facing — Reader subscriber-access alert** ("Re-run the subscriber cookie
+   refresh flow" → plain terms).
+3. **"No redeploy" sweep** — mechanical, low-risk, ~10 pages, one sentence each.
+4. **System / Health & Maintenance rewrite** (Scripts, Database, Page index, Checks,
+   AI configuration and usage — minus the withdrawn intro line, see §3 — Brand
+   standards, Archive backup card). Judged against the standard set in §7: keep file
+   paths/commands/variable names where the page's own job is a reference (Scripts'
+   exact invocations, e.g.), cut prose that explains itself in codebase terms instead
+   of telling three-months-later Brian how to use the page.
+5. **Toolbox admin, plus the unsorted forms** — Manage Features, Feature review queue,
+   Resources admin list, **and** the real audit of the ~150 add/edit forms + the
+   Communities reference block + the Community profile edit page that §2 moved out of
+   "presumed Tier 1." Likely more than one PR once that audit actually runs; treat this
+   line as a placeholder pending that count, not a single fixed-size batch.
+6. **Reader tools — Manage feeds, Tagging style section.**
+7. **Remaining Tier 2** (Name-duplicate check, Community gaps, FP&A Buddy feedback,
+   MCP-setup disclosure header, Enrich archive — Archive backup card and Reader
+   subscriber-access alert already covered above).
 
-**Estimate: 5–6 PRs.**
+**Estimate: 6–7+ PRs** — up from the original 5–6, since batch 5 is no longer a single
+known-sized PR once the unsorted forms are folded in.
+
+Per Brian's direction: **no rewrite batch starts from this document** — the build
+prompt for batch 1 is separate and comes on its own.
 
 ## 6. Settings-stored copy (reported, not tiered — edited via `/admin/copy` / `/admin/voice`)
 
@@ -266,26 +290,34 @@ Grouped by area (clearer diffs than by tier, since each area shares one voice pr
 (Excluded as non-copy state: `avatar_json`, `pricing_last_verified`, `models_last_reviewed`,
 `exa_pricing_last_verified`, `tag_guide_status`, `tag_merge_status`, `tag_merge_suggestions`.)
 
-## 7. Read on the proposed approval split
+## 7. Approval split — resolved 2026-09-12
 
-Mostly holds, one real correction:
+**The audience question is answered, correcting this section's original framing.** It
+was originally posed as "Brian-as-developer" vs. "Brian-as-site-owner" — a false
+choice. Brian's actual answer: the test is **Brian in three months, having not opened
+that page in a while.** He's a CFO, somewhat technical, not a developer.
 
-- **Tier 3 → approval before shipping**: agree. Several Tier 3 items are audience
-  judgment calls, not pure wording fixes — most centrally, should the System/Health &
-  Maintenance group stay written for Brian-as-developer (he built this; he may
-  genuinely want the file paths and env-var names as a quick reference) or get rewritten
-  for Brian-as-site-owner? That's a product decision, not a copy fix, and belongs in
-  front of Brian before batch 2 is even drafted, not just before it ships.
-- **Tier 1 untouched**: agree.
-- **Tier 2 "ships with a before/after report, no approval gate" — push back here.**
-  A few Tier 2 items carry the same audience-judgment question as Tier 3, just in
-  smaller doses: the "Users → MCP setup" disclosure and the "Railway Cron Service" card
-  both raise "who is this actually for," and "FP&A Buddy feedback"'s "retrieval"/
-  "Capture and triage only" and "Enrich archive"'s "server-side" could resolve as a
-  clean one-word drop or could need a rethought sentence, depending on how far the fix
-  goes. Recommendation: keep Tier 2 as non-blocking, but send batch 6's before/after
-  report *before* merging rather than strictly after, since it's a mixed bag rather
-  than uniformly mechanical.
+That means file paths, commands, and variable names stay wherever they're genuinely
+what the page is for — the Scripts page listing exact invocations is doing its job,
+that's not a violation. What goes is prose that explains itself in codebase terms:
+"introspected from `app.routes` on every page load," "kept honest by the standing rule
+in `CLAUDE.md`," "the controlled vocabulary tools get mapped against."
+
+**The per-string test**: would three-months-from-now Brian need this to use the page,
+or is it explaining how the page was built? The former stays (even if technical); the
+latter goes (even if short). This is the standard batch 4 (System / Health &
+Maintenance) applies, and it's why the "AI configuration and usage" intro's vendor
+names survive (§3 correction) while its mechanism-describing prose elsewhere doesn't.
+
+- **Tier 3 → approval before shipping**: unchanged, confirmed.
+- **Tier 1 untouched**: unchanged, confirmed.
+- **Tier 2 "ships with a before/after report, no approval gate"** — the pushback in
+  the original draft of this section is **accepted**: send the before/after report
+  *before* merging, not after, for the mixed Tier 2 batch (batch 7). A few of those
+  items (the "Users → MCP setup" disclosure, the retired "Railway Cron Service" card
+  wording, FP&A Buddy feedback's "retrieval"/"Capture and triage only") could resolve
+  as a clean mechanical drop or could need a rethought sentence — the pre-merge review
+  is what tells the difference before it ships either way.
 
 ## 8. Grep-sweep / fact-check results
 
@@ -314,11 +346,21 @@ Mostly holds, one real correction:
   remove existing tags, and edit the guide that steers how new ones get chosen.") — the
   finding is specifically in the unrewritten section body below it, as PR #524's own
   note flags.
+- **"AI configuration and usage" intro (2026-09-12 correction)**: this line was
+  originally listed as worst-offender #7. Brian confirmed it was written to the
+  plain-language standard and approved in PR #527 — front-loads what's editable, names
+  the vendors, which is the page's whole point. Withdrawn; see §3.
+- **`/tools/fpa-buddy/how-it-works` (2026-09-12 correction)**: originally tiered clean
+  on the reasoning that the page states its own technical audience up front. Brian's
+  correction: it's Tier 1 for a different reason — it's a deliberate technical
+  showcase written for both technical and non-technical readers, where mechanism is
+  content, not a lapse. The plain-language standard doesn't apply to it at all, rather
+  than applying and passing.
 
-## Known audit gaps
+## Known audit gaps (unsorted — resolved into batch 5, not assumed Tier 1)
 
 - ~150 per-item admin add/edit forms across Software/Communities/Resources/
-  Thought-Leadership were sampled, not read exhaustively (see §2).
+  Thought-Leadership were sampled, not read exhaustively (see §2). Brian doesn't
+  believe these are clean; a real audit is deferred to batch 5.
 - The Communities "How this works" reference block's full body, and the Community
-  profile edit page, were not fully audited — flagged for a closer pass before batch 3
-  is drafted, not assumed clean.
+  profile edit page, were not fully audited — deferred to batch 5 for the same reason.
