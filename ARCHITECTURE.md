@@ -681,35 +681,46 @@ any other free-text value is deliberately left unwidthed, same as before —
 every table still needs at least one flexible column to absorb the rest of
 the row.
 
-Eight documented exceptions keep their own values rather than being forced
-onto these constants, each for a stated reason (see BRAND.md §5 for the
-itemized list and code comments at each site): Resources' fixed-layout
-percentage-width table (PR 11) can't sensibly mix percentage and pixel
-widths; the Reader content-backfill's three tables already have a
-deliberately wider, already-tuned 420px `_th_article` Article column and
-reuse shared `_th`/`_th_nowrap` style strings across genuinely different
-field types per column, so splitting them out isn't a small change; the
-three pages reusing the Compare page's `.cc-table` class for a schema
-table, a route, or a model tier are diagnostic/reference tables, not entity
-lists; Overhead spend's two narrow "By source"/"By month" summary tables
-sit inside a `flex:1 1 460px` column whose own tight `min-width` a 280px
-Name column would blow past; the Software name-duplicate check's Tool
-A/Tool B tables hold rich multi-line cell content, not a plain name
-string; the admin brand-showcase page's two example tables are
-illustrative specimens, not real data; and — found during a full-inventory
-sweep for this PR, not part of the original hypothesis — two more
-fixed-layout tables with their own existing width schemes:
-`/admin/reader/feeds`'s `.ff-table`/`.fs-table` (own percentage widths,
-same reasoning as Resources) and `/admin/library-backup`'s
-`.backup-log-table` (own small named-class pixel widths tuned to its
-700px mobile-card breakpoint, which the shared constants would widen
-past). The Users table's Username column (no clean field-type match, and
-always visible with no `data-col`) is left unwidthed; its Name/Email/Last
-login/Status columns do use the shared constants. The Software/Communities
-approved-tables' own sticky Name column (`admin-sticky-col-2`) — the
-precedent 280px is drawn from — now reads `min-width:{_COL_WIDTH_NAME}px`
-from the same constant rather than its own literal, since it's the origin
-case for the value, not a further exception.
+**Scope, corrected**: this standard applies to auto-layout ENTITY-LIST
+tables — tables whose rows are named database entities rendered with plain
+typed columns. A first pass at this documentation over-counted by treating
+every table that doesn't use these constants as an "exception"; most of
+them were never in scope to begin with, for one of two structural reasons
+(see BRAND.md §5 for the full itemized list and code comments at each
+site):
+
+- **Fixed-layout tables use a different sizing mechanism entirely** — a
+  `table-layout:fixed` table's columns are set by percentage or by its own
+  named-class pixel widths, and can't sensibly mix either with these
+  constants: Resources' percentage-width table (PR 11);
+  `/admin/reader/feeds`'s `.ff-table`/`.fs-table` (own percentage widths,
+  same reasoning); `/admin/library-backup`'s `.backup-log-table` (own
+  small named-class pixel widths tuned to its 700px mobile-card
+  breakpoint, found during a full-inventory sweep, not part of the
+  original hypothesis).
+- **Diagnostic and reference tables aren't entity lists** — the three pages
+  reusing the Compare page's `.cc-table` class for a schema table name, a
+  route path, or a model tier; the admin brand-showcase page's two
+  illustrative component tables; the Reader content-backfill's three
+  tables (a diagnostic worklist of fetch attempts, with an already-tuned
+  420px `_th_article` Article column and shared `_th`/`_th_nowrap` style
+  strings reused across genuinely different field types per column, not
+  the simple per-field-type shape this standard covers); and the Software
+  name-duplicate check's Tool A/Tool B tables (a diagnostic comparison
+  report holding rich multi-line cell content, not a plain name string).
+
+That leaves **two real exceptions**, both genuine entity-list tables this
+standard does cover: Overhead spend's two narrow "By source"/"By month"
+summary tables sit inside a `flex:1 1 460px` column whose own tight
+`min-width` a 280px Name column would blow past; and the Users table's
+Username column (no clean field-type match, always visible with no
+`data-col`) is left unwidthed, while its Name/Email/Last login/Status
+columns do use the shared constants — within the handful this standard's
+own PR anticipated. The Software/Communities approved-tables' own sticky
+Name column (`admin-sticky-col-2`) — the precedent 280px is drawn from —
+now reads `min-width:{_COL_WIDTH_NAME}px` from the same constant rather
+than its own literal, since it's the origin case for the value, not an
+exception.
 
 **`/admin/system/scripts`** (System nav group, Phase N) is the opposite design
 choice from the two pages above — a static, hand-maintained registry

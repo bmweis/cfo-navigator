@@ -552,52 +552,66 @@ Applied wherever a column's own header literally names one of these field
 types — a column that merely resembles one (e.g. a CSV-preview "Article"
 column holding just `#123`, not a real title) is left alone.
 
-A handful of tables keep their own values rather than being forced onto
-these, each for a stated reason:
+**Scope: this standard applies to auto-layout ENTITY-LIST tables** — tables
+whose rows are named database entities (a vendor, a community, a contact, a
+user, a log entry) rendered with plain typed columns. It was never meant to
+reach every `<table>` in the admin surface, and a first pass at this
+documentation over-counted by treating "doesn't use these constants" as
+"exception" — most of the tables below were never in scope to begin with,
+not deviations from a rule that applies to them. Two genuinely different
+reasons put a table outside that scope:
 
-- **Resources** (`/admin/tools/resources`) uses a fixed `table-layout` with
-  percentage-based column widths (`_ADMIN_RESOURCE_TABLE_COL_WIDTHS`,
-  PR 11) so two tables sharing the same markup still line up regardless of
-  content length — a `table-layout:fixed` table can't mix percentage and
-  pixel widths meaningfully, so this one is exempt outright.
-- **The Reader content-backfill's three tables** (Recent attempts, Needs
-  manual review, Accepted as final) already use a deliberately wider,
-  already-tuned 420px `_th_article` column for Article (real titles, not
-  IDs) — narrower than that would squeeze real content; their shared
-  `_th`/`_th_nowrap` helpers are also reused across genuinely different
-  field types per column (Result, Attempts, When), so they aren't safely
-  splittable into the constants above without a larger rework of that
-  page's own markup.
+**Fixed-layout tables use a different sizing mechanism entirely**, so the
+question "should this column be `_COL_WIDTH_NAME`?" doesn't apply — a
+`table-layout:fixed` table's columns are set by percentage or by its own
+named-class pixel widths, and can't sensibly mix either with these
+constants:
+
+- **Resources** (`/admin/tools/resources`) — percentage-based
+  (`_ADMIN_RESOURCE_TABLE_COL_WIDTHS`, PR 11) so two tables sharing the same
+  markup line up regardless of content length.
+- **`/admin/reader/feeds`'s `.ff-table`/`.fs-table`** — same
+  percentage-based reasoning, tuned to that page's own content.
+- **`/admin/library-backup`'s `.backup-log-table`** — its own small
+  named-class pixel widths (`.col-when` 150px, `.col-filename` 200px,
+  `.col-location` 120px, `.col-status` 90px), tuned to fit its own 700px
+  mobile-card breakpoint.
+
+**Diagnostic and reference tables aren't entity lists**, so the
+Name/Email/Date/Status/Count vocabulary doesn't describe what their columns
+actually hold:
+
 - **`/admin/system/database`, `/admin/system/page-index`, and the FP&A Buddy
   explainer's tier table** reuse the Compare page's `.cc-table` CSS class
-  for convenience — they're technical/diagnostic reference tables (a schema
-  table name, a route path, a model tier), not entity lists, so the
-  Name/Date/Status vocabulary doesn't really apply to their columns.
+  for convenience — their rows are a schema table name, a route path, a
+  model tier, not a directory of named entities.
+- **The admin brand-showcase page's two example tables** (the GER tier
+  table, the Checks reference table) are illustrative component specimens,
+  not real data.
+- **The Reader content-backfill's three tables** (Recent attempts, Needs
+  manual review, Accepted as final) are a diagnostic worklist of fetch
+  attempts, not a directory of named entities — built from shared
+  `_th`/`_th_nowrap` helpers reused across genuinely different field types
+  per column (Article, Result, Attempts, When), including an already-tuned
+  420px Article column, rather than the simple per-field-type shape this
+  standard covers.
+- **The Software name-duplicate check's Tool A/Tool B/decision tables**
+  are a diagnostic comparison report, not an entity list — each cell holds
+  rich, multi-line content (`_tool_cell()`), not a plain name string.
+
+That leaves **two real exceptions**, both genuine entity-list tables this
+standard does cover, each kept at its own value for a stated reason — the
+handful this standard's own PR anticipated:
+
 - **Overhead spend's "By source" and "By month" summary tables** sit inside
   a `flex:1 1 460px` column with its own tight `min-width:400px`/`320px` —
   applying `_COL_WIDTH_NAME` to their label column would force them wider
   than the layout they're built to fit inside.
-- **The Software name-duplicate check's Tool A/Tool B/decision tables** hold
-  rich, multi-line cell content (`_tool_cell()`), not a plain name string,
-  so a fixed Name width doesn't describe what's actually in the cell.
-- **The admin brand-showcase page's two example tables** (the GER tier
-  table, the Checks reference table) are illustrative component specimens,
-  not real data-entry tables.
 - **The Users admin table**'s Username column is left unwidthed — it's a
   primary identifier without a real analog among these five field types,
   and it's always visible (no `data-col`), unlike every other column on
   that table. Its Name/Email/Last login/Status columns do use the shared
   constants.
-- **`/admin/reader/feeds`'s `.ff-table`/`.fs-table`** (the Reader's feed and
-  feed-section admin lists) use `table-layout:fixed` with their own
-  percentage-based column widths, same reasoning as Resources above — a
-  fixed-layout table can't mix percentage and pixel widths meaningfully.
-- **`/admin/library-backup`'s `.backup-log-table`** is also
-  `table-layout:fixed`, with its own small named-class pixel widths
-  (`.col-when` 150px, `.col-filename` 200px, `.col-location` 120px,
-  `.col-status` 90px) tuned to fit its own 700px mobile-card breakpoint —
-  changing them to the shared constants would widen the table past what
-  that breakpoint was built around.
 
 The Software and Communities approved-tables' own sticky Name column
 (`admin-sticky-col-2`, PR 12/15 — the precedent `_COL_WIDTH_NAME`'s value
