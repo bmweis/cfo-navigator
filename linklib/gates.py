@@ -112,7 +112,8 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
     "tool_description": EmptyCopy(
         "Description coming soon.", "Add one from the edit page."),
     "tool_agent_taxonomy": EmptyCopy(
-        "Agent taxonomy not yet available.", "Generate a draft from the edit page."),
+        "How autonomous this tool's AI is hasn't been documented yet.",
+        "Generate a draft from the edit page."),
     "tool_differentiation": EmptyCopy(
         "Bottom line not yet available.",
         "This field is written by hand, not auto-drafted. Add one from the edit page."),

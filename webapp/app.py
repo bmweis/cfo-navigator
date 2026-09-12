@@ -8082,13 +8082,13 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     if _at_note:
         _at_badge = _review_state_badge(_at_unverified, authed, "tp-verify")
         agent_taxonomy_block = f"""<div class="tp-card">
-  <h2 class="tp-card-h"><small>AI and Agent Capabilities</small>Agent taxonomy{_at_badge}</h2>
+  <h2 class="tp-card-h"><small>AI agent capabilities</small>How autonomous is it?{_at_badge}</h2>
   <div class="narrative-md">{render_narrative_markdown(tool['agent_taxonomy_note'])}</div>
   {_at_citations_html}
 </div>"""
     else:
         _at_copy = gates.EMPTY_COPY["tool_agent_taxonomy"]
-        agent_taxonomy_block = _empty_state_card("Agent taxonomy", _empty_state_text(
+        agent_taxonomy_block = _empty_state_card("AI agent capabilities", _empty_state_text(
             _at_copy.visitor_text, _at_copy.admin_suffix, authed))
 
     # Key features card (Feature Taxonomy Phase 2) — replaces the legacy
