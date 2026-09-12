@@ -509,6 +509,35 @@ unaffected by anything inside `.fpa-intro-area-controls`, confirmed via the
 same y-ordering check as every prior round — `intro → example → usage →
 question → controls → action`, no horizontal overflow).
 
+**Same PR, round 5 — chip labels shortened, and chips within each row made
+equal width.** Source labels changed from "My saved archive"/"Current RSS
+feed"/"Web search (trusted sites)" to "Saved archive"/"RSS feed"/"Trusted
+web" — the top intro copy already establishes these are Brian's own
+sources, so the chips no longer need to repeat "My"/"Current," and
+"Trusted web" keeps the trusted-sites qualifier (deliberately not shortened
+to a bare "Web") while dropping the parenthetical. No test asserted the old
+label strings (confirmed by grep before renaming). Equal widths within each
+row — Sources' three chips match each other, Depth's three match each
+other, the two rows independent — via `.fpa-intro-area-controls .ask-
+tags{display:grid;grid-template-columns:repeat(3,1fr)}` plus `width:100%`
+on `.ask-tag` (a flex/inline-flex item doesn't stretch to its grid cell by
+default the way a block element would). Scoped the same way every other
+round-4-and-earlier override on this page is scoped — `.ask-tags` has
+exactly two live call sites, both on this page (Sources, Depth), confirmed
+by grep — rather than editing the shared flex-wrap rule other pages might
+one day reuse. Verified equal at both 1280px and 1920px (405.3px/412px per
+chip, exact match within each row) with no wrapping at either width.
+**Flagged, not silently fixed**: at 390px mobile, equal-width sizing forces
+the two-word Source labels ("Saved archive," "Trusted web") to wrap to a
+second line (chip height doubles, 15px → 30px) — Depth's single-word labels
+(Quick/Standard/Deep) stay single-line at that width. Confirmed this reads
+cleanly in a real screenshot (uniform chip height, no overflow,
+`document.body.scrollWidth` still exactly 390) rather than looking broken,
+and the mobile stacking order (`intro → example → usage → question →
+controls → action`) is unaffected — but it's a real change from the
+previous single-line flex-wrap layout, reported per the standing "flag
+what equal widths cost" instruction rather than assumed acceptable.
+
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
 — replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column

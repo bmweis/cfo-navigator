@@ -20834,9 +20834,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     # Sources — the same seafoam-fill/navy-text tag component used elsewhere on
     # the site (BRAND.md §5), toggled on/off by tap instead of a checkbox list.
     source_defs = [
-        ("library", "My saved archive", True),
-        ("feed", "Current RSS feed", False),
-        ("web", "Web search (trusted sites)", True),
+        ("library", "Saved archive", True),
+        ("feed", "RSS feed", False),
+        ("web", "Trusted web", True),
     ]
     _CHECK_SVG = ('<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">'
                   '<path d="M1 5L4 8L9 2" stroke="#001B4F" stroke-width="1.6" fill="none" '
@@ -21012,6 +21012,19 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
    already matches the ~20px spacing used elsewhere in this control stack —
    no override needed beyond the column count. */
 .fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;}}
+
+/* Equal-width chips within each row (Sources' three chips match each
+   other; Depth's three buttons match each other) — the two rows don't
+   need to match each other, and don't: each is sized independently by its
+   own 3-column grid at the same full page width, so they end up the same
+   in practice here, but that's incidental, not required. Overrides
+   .ask-tags' shared flex-wrap row (used nowhere else, confirmed by grep)
+   rather than editing it, same reasoning as every other scoped override
+   on this page. `width:100%` is needed because a flex/inline-flex item
+   (.ask-tag) doesn't stretch to fill its grid cell by default the way a
+   block-level item would. */
+.fpa-intro-area-controls .ask-tags{{display:grid;grid-template-columns:repeat(3,1fr);}}
+.fpa-intro-area-controls .ask-tag{{width:100%;justify-content:center;}}
 
 /* Bottom-edge alignment between the Question box and the illustrative
    example: `align-self:stretch` on both grid items (above) makes each

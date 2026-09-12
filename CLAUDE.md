@@ -7414,6 +7414,28 @@ it supersedes the old "`/save` is token-gated" note.
   (0.00px) and full width were unaffected — both already established by
   round 3. Mobile (390px) confirmed unaffected via the same y-ordering
   check as every prior round.
+  **Round 5, same PR — chip labels shortened, chips within each row made
+  equal width.** Source labels: "My saved archive"/"Current RSS feed"/"Web
+  search (trusted sites)" → "Saved archive"/"RSS feed"/"Trusted web" — the
+  top intro already establishes these are Brian's own sources, so the
+  chips drop "My"/"Current"; "Trusted web" deliberately keeps the
+  trusted-sites qualifier rather than shortening to a bare "Web," since it
+  does real work. No test asserted the old strings (confirmed by grep).
+  Equal widths within each row (Sources' three match each other, Depth's
+  three match each other, rows independent) via `.fpa-intro-area-controls
+  .ask-tags{grid-template-columns:repeat(3,1fr)}` + `width:100%` on
+  `.ask-tag` — `.ask-tags` has exactly two live call sites, both on this
+  page, confirmed by grep, so this scopes the same way every other override
+  on this page does rather than editing the shared flex-wrap rule. Verified
+  equal at 1280px/1920px (405.3px/412px per chip, exact match) with no
+  wrapping at either width. **Flagged per the explicit ask, not silently
+  fixed**: at 390px, equal-width sizing wraps the two-word Source labels
+  ("Saved archive," "Trusted web") to a second line — Depth's single-word
+  labels stay single-line. Confirmed via screenshot it reads cleanly
+  (uniform chip height, no overflow, `scrollWidth` still exactly 390) and
+  the mobile stacking order is unaffected, but it's a real behavior change
+  from the prior single-line flex-wrap layout, reported rather than
+  assumed fine.
 
 
 ## Authentication & security
