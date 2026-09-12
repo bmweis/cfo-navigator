@@ -19982,7 +19982,7 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
             '<span style="flex-shrink:0;width:18px;height:18px;border-radius:50%;background:var(--coral);'
             'color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;">!</span>'
             f'<span style="flex:1;">Subscriber access looks stale for <strong>{_esc(dom)}</strong>{extra}&mdash;'
-            f'the cookie may have expired. Re-run the subscriber cookie refresh flow for {_esc(dom)}, then '
+            f'the cookie may have expired. Grab a fresh cookie from {_esc(dom)} and update it in Railway, then '
             f'<a href="#" onclick="rrRecheckAuth(event)">re-check subscriber access</a>.</span>'
             '</div>'
         )
@@ -22161,9 +22161,9 @@ _ADMIN_GROUPS = [
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Brand, voice, and content", "How the site looks and sounds.", [
-        ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy—changes go live immediately, no redeploy."),
+        ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy—changes go live immediately."),
         ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
-        ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email (warm intro, welcome, password reset, and submission confirmations)—changes go live immediately, no redeploy."),
+        ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email (warm intro, welcome, password reset, and submission confirmations)—changes go live immediately."),
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
     ]),
     # System split into two groups (PR 11, 2026-09) — it had grown into a
@@ -25356,7 +25356,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   </div>
 </div>
 {auth_panel}
-<p style="color:var(--muted);margin:8px 0 6px;">The RSS subscriptions behind the Reader's Feed view. This same list is the domain allowlist FP&amp;A Buddy's web search is restricted to, so a source added here becomes citable there too. Changes take effect on the next page load, with no restart or deploy needed.</p>
+<p style="color:var(--muted);margin:8px 0 6px;">The RSS subscriptions behind the Reader's Feed view. This same list is the domain allowlist FP&amp;A Buddy's web search is restricted to, so a source added here becomes citable there too. Changes take effect on the next page load.</p>
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
 <li><strong>Cookie</strong> shows whether this feed's domain currently has a subscriber cookie configured&mdash;computed live from the host environment, not something you set here. Each domain's cookie lives in its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable, and <code>extract.fetch_page</code> applies it automatically wherever the domain matches (see <code>RUNBOOK.md</code> &sect;5 for finding and setting one). <strong>No cookie value is ever stored in this database</strong>&mdash;only the domain names checked are baked into the code.</li>
@@ -26201,7 +26201,7 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Sail, don&rsquo;t row&mdash;rank settings</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Tune pace, wind, obstacle density, and the collision rule per rank. The game reads these live—changes apply to the next run, no redeploy needed.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Tune pace, wind, obstacle density, and the collision rule per rank. The game reads these live—changes apply to the next run.</p>
 <p style="color:var(--muted);margin:0 0 20px;">Course length is a fixed 4300 world-units. Par time is what a full finish at that rank is calibrated against for the pace score.</p>
 {banner}{error_banner}
 {cards}
@@ -30704,7 +30704,7 @@ def admin_backup(request: Request, uploaded: str = ""):
 
 <h2 style="font-size:16px;margin:0 0 4px;">Off-site backup (Google Drive)</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">{folder_line}</p>
-<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Setting <code>GOOGLE_DRIVE_FOLDER_ID</code> in Railway overrides this and points backups at that folder instead, starting with the next attempt&mdash;no redeploy needed. Leave it unset to keep using the folder above.</p>
+<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Setting <code>GOOGLE_DRIVE_FOLDER_ID</code> in Railway overrides this and points backups at that folder instead, starting with the next attempt. Leave it unset to keep using the folder above.</p>
 {_backup_status_banner(backup_rows)}
 <h2 style="font-size:16px;margin:24px 0 4px;">Pre-backup integrity check</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Runs automatically against the live database right before every backup attempt&mdash;<code>PRAGMA integrity_check</code> plus an FTS5 self-check. A failure blocks that night&rsquo;s upload so corruption is never captured into a retained snapshot.</p>
@@ -31105,7 +31105,7 @@ def admin_voice_page(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Verbal identity</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">The voice FP&amp;A Buddy answers in, and your site's tone&mdash;live, editable here, no redeploy.</p>
+<p style="color:var(--muted);margin:4px 0 26px;">The voice FP&amp;A Buddy answers in, and your site's tone&mdash;editable here, and changes apply immediately.</p>
 
 {blocked_banner}
 {core_block}
@@ -31322,7 +31322,7 @@ def admin_copy_page(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Site copy</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site&mdash;no redeploy.</p>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage&mdash;hero headline and subhead</div>
@@ -31678,7 +31678,7 @@ def admin_emails_page(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Email templates</h1>
-<p style="color:var(--muted);margin:4px 0 12px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site&mdash;no redeploy.</p>
+<p style="color:var(--muted);margin:4px 0 12px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 20px;font-size:13px;color:var(--ink-soft);line-height:1.6;">
 <p style="margin:0 0 10px;"><strong style="color:var(--navy);">How this works:</strong> each email has a built-in default. You can save your own version below&mdash;whichever is saved is what actually sends.</p>
 <ul style="margin:0 0 10px;padding-left:20px;">
