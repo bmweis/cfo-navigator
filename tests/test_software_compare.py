@@ -67,7 +67,8 @@ def test_agent_taxonomy_shown_on_profile_and_searchable_on_card(env):
     client = _client(env)
     r = client.get("/tools/software/runway")
     assert r.status_code == 200
-    assert "Agent taxonomy" in r.text
+    assert "How autonomous is it?" in r.text
+    assert "AI agent capabilities" in r.text
     assert "Agent-assisted, not fully autonomous." in r.text
 
     r = client.get("/tools/software")
@@ -86,7 +87,7 @@ def test_agent_taxonomy_shows_placeholder_when_empty(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
-    assert "Agent taxonomy not yet available." in r.text
+    assert "How autonomous this tool's AI is hasn't been documented yet." in r.text
 
 
 # -- compare route ------------------------------------------------------------

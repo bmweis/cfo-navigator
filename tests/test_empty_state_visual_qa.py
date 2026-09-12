@@ -124,7 +124,7 @@ def test_tool_empty_sections_render_as_card_with_header(env):
     for title, text in [
         ("Competitors", "Competitors not yet available."),
         ("Bottom line", "Bottom line not yet available."),
-        ("Agent taxonomy", "Agent taxonomy not yet available."),
+        ("AI agent capabilities", "How autonomous this tool's AI is hasn't been documented yet."),
         ("Description", "Description coming soon."),
     ]:
         idx = r.text.index(text)

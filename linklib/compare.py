@@ -246,7 +246,7 @@ def build_software_compare(
             desc_field.citations = citations.get((tid, "description"), [])
 
         agent_field = _narrative_field(
-            "agent_taxonomy", "Agent taxonomy", t.get("agent_taxonomy_note"),
+            "agent_taxonomy", "How autonomous is it?", t.get("agent_taxonomy_note"),
             bool(t.get("agent_taxonomy_needs_verification")))
         if agent_field.text:
             agent_field.citations = citations.get((tid, "agent_taxonomy"), [])
