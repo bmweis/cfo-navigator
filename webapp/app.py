@@ -2580,10 +2580,9 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
 
     in_form_html = f"""<div id="gen-host-logo-{idsfx}">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Logo{source_badge}</label>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos auto-fetch from Logo.dev via a monthly batch script.
-      A manual override set here always wins, and that batch never touches it. "Revert and re-fetch" clears the override and calls
-      Logo.dev live right now instead of waiting for the batch. If nothing usable turns up, it still reverts to automatic so the
-      batch can retry later.</p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos update automatically once a month. A logo you set here overrides
+      that and stays put. Use &quot;Revert and re-fetch&quot; to pull a fresh logo right now instead of waiting for the next update&mdash;if
+      nothing usable turns up, it reverts to automatic so next month's update can try again.</p>
     {banner_html}
     {stale_banner_html}
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
@@ -12996,8 +12995,8 @@ def admin_tools_features(request: Request, msg: str = "", error: str = "",
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Software features</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">The curated "key features" list for each Toolbox category&mdash;the
-controlled vocabulary tools get mapped against. See <a href="https://github.com/bmweis/cfo-navigator/blob/main/docs/FEATURE_TAXONOMY.md" target="_blank" rel="noopener">docs/FEATURE_TAXONOMY.md</a> for the naming/curation rules.</p>
+<p style="color:var(--muted);margin:-6px 0 18px;">The list of named features each category can check off against. Add or edit one below;
+a tool gets tagged with it from its own edit page. For naming guidance, see <a href="https://github.com/bmweis/cfo-navigator/blob/main/docs/FEATURE_TAXONOMY.md" target="_blank" rel="noopener">docs/FEATURE_TAXONOMY.md</a>.</p>
 {banner}{error_banner}{pending_banner}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 18px;margin-bottom:24px;">
@@ -13278,8 +13277,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
         near_dup_html = (
             f'<p style="font-size:12.5px;color:#92400e;background:#fef3c7;border-radius:8px;'
             f'padding:6px 10px;margin:0 0 10px;">Possible near-duplicate of {names}—worth '
-            f'checking these describe genuinely different jobs (FEATURE_TAXONOMY.md &sect;7) '
-            f'before approving both.</p>'
+            f'checking these describe genuinely different features before approving both.</p>'
         )
 
     coverage_html = ""
@@ -13365,7 +13363,7 @@ def admin_feature_review_queue(request: Request, msg: str = ""):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Feature review queue</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">No proposed change reaches the live feature tables without approval here&mdash;whoever or whatever proposed it (FEATURE_TAXONOMY.md &sect;9).</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Nothing here goes live until you approve it&mdash;whether it was proposed by an AI scan, a visitor, or your own edit.</p>
 {banner}
 {sections}
 </div>"""
@@ -13628,10 +13626,9 @@ def admin_resources(request: Request):
 {_admin_resource_table(books)}
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
-  Editing <code>_DEFAULT_BENCHMARKS</code> in <code>webapp/app.py</code> updates a Benchmarking resource&rsquo;s
-  <strong>name</strong> and <strong>description</strong> here automatically on the next deploy.
-  No manual re-seed needed. <strong>Coverage and Pricing are database-only</strong>: edit them here
-  (Edit above), and this sync will never touch them.
+  Editing a built-in resource&rsquo;s <strong>name</strong> or <strong>description</strong> here won&rsquo;t
+  stick&mdash;the next restart overwrites both from <code>_DEFAULT_BENCHMARKS</code> in <code>webapp/app.py</code>.
+  Change it there instead. <strong>Coverage and Pricing</strong> aren&rsquo;t synced, so edits to those are safe.
 </p>
 </div>"""
     return HTMLResponse(_page("Resources—CFO Toolbox Admin", "", body, authed=True))
@@ -14465,8 +14462,9 @@ def admin_thought_leadership(request: Request, type: str = ""):
 </table>
 </div>
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
-  The Abacum AI Summit entry (Speaking and Events) isn&rsquo;t listed here&mdash;it&rsquo;s a one-off with photos,
-  hardcoded on the public page rather than migrated. See CLAUDE.md.
+  The Abacum AI Summit entry (Speaking and Events) isn&rsquo;t listed here&mdash;it&rsquo;s a one-off page with
+  photos, built by hand rather than added through this table. It won&rsquo;t show up if you edit or delete
+  anything here.
 </p>
 </div>"""
     return HTMLResponse(_page("Third-party content—Admin", "", body, authed=True))
@@ -14731,7 +14729,7 @@ def _oc_form_fields(values: dict) -> str:
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Body (Markdown)</label>
     <textarea name="body_md" rows="14"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;font-family:ui-monospace,monospace;background:#fff;resize:vertical;"
-      placeholder="Leave blank to keep this as a card-metadata-only entry (like the 3 flagship pieces) with no page of its own.">{_esc(values.get('body_md', ''))}</textarea>
+      placeholder="Leave blank if this should only appear as a card, with no page behind it to click into.">{_esc(values.get('body_md', ''))}</textarea>
     <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
       Headings, fenced code blocks, and tables render through the site&rsquo;s own styling. Raw HTML
       is passed through as-is&mdash;this field is admin-only, never public input. Images must already
@@ -14781,7 +14779,7 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
         else:
             preview_html = ('<span class="btn btn-ghost" style="margin-left:10px;color:var(--muted);'
                              'border-color:var(--line);cursor:not-allowed;" '
-                             'title="Add body content first—a card-metadata-only piece has no page of its own to preview.">'
+                             'title="Add body content first—there\'s no page to preview until this has one.">'
                              'Preview &rarr;</span>')
     else:
         preview_html = ""
@@ -15272,13 +15270,14 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     </div>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Notes</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short description</label>
     <textarea name="notes" maxlength="500" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(c.get('notes', ''))}</textarea>
+    <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Shown on the public directory card and in search results.</p>
   </div>"""
 
     categories_html = f"""  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:8px;">Categories</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:8px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/communities/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;">
       {_community_category_checkboxes(categories, c.get('categories') or [])}
     </div>
@@ -15289,12 +15288,14 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
       <input type="checkbox" name="featured" value="1"{' checked' if c.get('featured') else ''}>
       <span>&#10024; Featured</span>
     </label>
+    <p style="font-size:12px;color:var(--muted);margin:2px 0 0 30px;">Adds a &quot;Featured&quot; sticker to this community's directory card.</p>
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="advisor" value="1"{' checked' if c.get('advisor') else ''}>
       <span>&#129305; Formal advisor</span>
     </label>
+    <p style="font-size:12px;color:var(--muted);margin:2px 0 0 30px;">Discloses publicly that Brian formally advises this community.</p>
   </div>"""
 
     # Fix 2 (follow-up round after the admin form layout pass's live review): Featured/Advisor
@@ -15476,8 +15477,8 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 {_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards', confidence_key='engagement_level')}
 {_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label', confidence_key='application_friction')}
 {_section_header('Business and sponsorship')}
-{_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.", confidence_key='business_model')}
-{_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.", confidence_key='sponsor_relationship_note')}
+{_field('business_model', 'Business model', "How it makes money—e.g. paid membership vs. free to join with revenue from sponsors/events.", confidence_key='business_model')}
+{_field('sponsor_relationship_note', 'Sponsor relationship', "Do sponsors mainly add value for members, or is this really a sales channel for them?", confidence_key='sponsor_relationship_note')}
 {_field('cost_value_verdict', 'Cost vs. value', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
 {_section_header('Reputation and verdict')}
 {_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.', confidence_key='notable_members')}
@@ -15492,7 +15493,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 {_short_field('platform_type', 'Platform', 'Slack, proprietary app, in-person only, …')}
 {_short_field('meeting_format', 'Programming', 'In-person / virtual / hybrid')}
 {_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
-{_short_field('seniority_band', 'Who it targets', 'Who it targets by seniority')}
+{_short_field('seniority_band', 'Who it targets', 'e.g. C-suite, VP-level, first-time managers')}
 {_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus.')}
 {_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any.')}
 {_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both.')}
@@ -16264,6 +16265,7 @@ def admin_communities_new(request: Request):
     _parts = _community_form_fields_parts(categories=categories)
     body = f"""<div class="page page-standard">
 <h1>Add a community</h1>
+<p style="color:var(--muted);margin:4px 0 32px;">Adds this community straight to the public directory.</p>
 <form method="post" action="/admin/tools/communities/new" style="display:grid;gap:20px;">
 {_parts['identity_block']}
   <div id="gen-host-community-listing" style="display:grid;gap:20px;">
@@ -16360,7 +16362,7 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
             '<div style="margin-top:20px;">'
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
-            'letter-spacing:.07em;">Suggested—shares a tag</div>'
+            'letter-spacing:.07em;">Suggested—same category</div>'
             f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\', \'community-competitor-gen-err\', \'gen-host-community-competitors\')">Suggest similar communities</button>'
             '</div>'
             '<p id="community-competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
@@ -16377,7 +16379,7 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
     _competitors_card_html = f"""
 <div id="gen-host-community-competitors" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Similar communities</h2>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Similar communities" on {_esc(c['name'])}'s profile page. Curating from either community's edit page links both directions.</p>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Similar communities" on {_esc(c['name'])}'s profile page. Add it from either community's edit page&mdash;it'll show as similar on both.</p>
 
   {_competitors_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No similar communities curated yet.</p>'}
 
@@ -16429,7 +16431,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     elif screenshot_captured == "0":
         screenshot_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                                    'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture a screenshot—'
-                                   'the site may block headless browsers or timed out. Try again, or paste a URL manually above.</p>')
+                                   'the site may be blocking automated visits, or it took too long. Try again, or paste a screenshot link yourself above.</p>')
 
     screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (c.get("screenshot_url") or "").strip():
@@ -16449,7 +16451,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     elif app_screenshot_captured == "0":
         app_screenshot_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                                       'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture that URL—'
-                                      'the site may block headless browsers or timed out. Try again, or upload an image instead.</p>')
+                                      'the site may be blocking automated visits, or it took too long. Try again, or upload an image instead.</p>')
     app_screenshot_in_form_html, app_screenshot_after_form_html = _app_screenshot_admin_section(
         c, c["id"], "communities", app_screenshot_banner_html, standalone_form_id="comm-edit-form")
 
@@ -16510,7 +16512,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     body = f"""<div class="page page-standard">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
-<p style="font-size:13px;color:var(--muted);margin:-8px 0 24px;"><a href="/admin/tools/communities/{c['id']}/profile">Edit the 23-field community profile draft &rarr;</a></p>
+<p style="font-size:13px;color:var(--muted);margin:-8px 0 24px;"><a href="/admin/tools/communities/{c['id']}/profile">Write the full community profile &rarr;</a></p>
 <form id="comm-edit-form" method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
 
@@ -16539,7 +16541,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     <input name="screenshot_url" form="comm-edit-form" type="text" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
-    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture pulls a fresh homepage screenshot at a fixed size. Paste a different URL above (then Save changes) to override with something else entirely.</p>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture takes a fresh screenshot of the homepage at a standard size. To use a different image entirely, paste its URL above and click Save changes.</p>
     {screenshot_banner_html}
     {screenshot_preview_html}
     <form method="post" action="/admin/tools/communities/{c['id']}/screenshot/recapture" style="margin-top:12px;">
@@ -17049,7 +17051,7 @@ def admin_community_profile_edit(request: Request, community_id: int):
         _profile_review_status_html = f"""<div style="margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
   <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
   {_rs_block}
-  <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Flags this profile for a full read-through&mdash;set automatically whenever the profile is drafted or refreshed via Generate, or manually anytime here.</p>
+  <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Turns on automatically any time this profile is AI-drafted or refreshed, or you can flag it yourself anytime.</p>
   {_review_line_html}
 </div>"""
 
@@ -17327,10 +17329,12 @@ def admin_tools_new(request: Request):
         <input type="checkbox" name="advisor" value="1">
         <span>&#129305; Formal advisor</span>
       </label>
+      <p style="font-size:12px;color:var(--muted);margin:-8px 0 0 30px;">Discloses publicly that Brian formally advises this vendor.</p>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
         <input type="checkbox" name="promoted" value="1">
         <span>&#10024; Featured</span>
       </label>
+      <p style="font-size:12px;color:var(--muted);margin:-8px 0 0 30px;">Adds a &quot;Featured&quot; sticker to this tool's directory card.</p>
     </div>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
       <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
@@ -17629,7 +17633,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             '<div style="margin-top:20px;">'
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
-            'letter-spacing:.07em;">Suggested—shares a tag</div>'
+            'letter-spacing:.07em;">Suggested—same category</div>'
             f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\', \'competitor-gen-err\', \'gen-host-tool-competitors\')">Suggest competitors</button>'
             '</div>'
             '<p id="competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
@@ -17745,7 +17749,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     elif screenshot_captured == "0":
         _screenshot_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                                    'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture a screenshot—'
-                                   'the site may block headless browsers or timed out. Try again, or paste a URL manually above.</p>')
+                                   'the site may be blocking automated visits, or it took too long. Try again, or paste a screenshot link yourself above.</p>')
 
     _research_banner_html = ""
     if research_refreshed == "1":
@@ -17886,7 +17890,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     elif app_screenshot_captured == "0":
         _app_screenshot_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                                        'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture that URL—'
-                                       'the site may block headless browsers or timed out. Try again, or upload an image instead.</p>')
+                                       'the site may be blocking automated visits, or it took too long. Try again, or upload an image instead.</p>')
     _app_screenshot_in_form_html, _app_screenshot_after_form_html = _app_screenshot_admin_section(
         tool, tool_id, "tools", _app_screenshot_banner_html, standalone_form_id="tool-edit-form")
 
@@ -17932,10 +17936,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
             <span>&#129305; Formal advisor</span>
           </label>
+          <p style="font-size:12px;color:var(--muted);margin:-6px 0 0 30px;">Discloses publicly that Brian formally advises this vendor.</p>
           <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
             <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
             <span>&#10024; Featured</span>
           </label>
+          <p style="font-size:12px;color:var(--muted);margin:-6px 0 0 30px;">Adds a &quot;Featured&quot; sticker to this tool's directory card.</p>
         </div>
       </div>
     </div>
@@ -17943,7 +17949,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;">
         <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
         {_review_status_top_html}
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Flags this profile for a full read-through&mdash;set automatically when a new tool is added or any tracked field is refreshed, or manually anytime here.</p>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Marks this profile as needing a full review. Turns on automatically whenever a new tool is added or any AI-drafted field is refreshed, or you can set/clear it by hand here.</p>
         {_profile_review_line_html}
       </div>
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
@@ -17991,7 +17997,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           <textarea id="tool-summary" name="summary" required{_summary_maxlength_attr} rows="4"
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
-          <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—shares its verification status, not tracked separately.</p>
+          <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—reviewing or verifying that field covers this one too.</p>
         </div>
         <div>
           <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description *{_description_verify_badge}</label>
@@ -18000,8 +18006,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
           {_description_verify_action}
           {_citations_list_html(description_citations,
-                                empty_note="No citations recorded for this draft (hand-written, "
-                                           "or drafted with no page content to ground on).")}
+                                empty_note="No sources recorded for this draft—it was either written by hand, "
+                                           "or the AI had no page content available to cite.")}
           {_description_confidence_html}
           {_description_review_line_html}
           <button type="submit" form="tool-edit-form" name="save_action" value="continue"
@@ -18016,15 +18022,15 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
               onclick="return confirmDiscardsUnsavedEdits(this, 'tool-edit-form') && startGenAnim('gen-host-tool-taxonomy')">Generate summary</button>
           </span>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Crawls the vendor's site to draft this note and the Feature rows below—runs automatically when a tool is added; use this button to re-run it after a vendor redesign.</p>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">AI-drafted note on how this tool uses AI/agents, shown on its public profile. Drafted automatically when a tool is added; click Generate summary to refresh it after the vendor changes their product.</p>
         {_research_banner_html}
         <textarea name="agent_taxonomy_note" maxlength="1200" rows="8"
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
           placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
         {_taxonomy_verify_action}
         {_citations_list_html(agent_taxonomy_citations,
-                               empty_note="No citations recorded for this draft (hand-written, "
-                                          "or drafted with no page content to ground on).")}
+                               empty_note="No sources recorded for this draft—it was either written by hand, "
+                                          "or the AI had no page content available to cite.")}
         {_taxonomy_confidence_html}
         {_taxonomy_review_line_html}
       </div>
@@ -18074,7 +18080,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" maxlength="600" rows="5"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('competitive_differentiation') or '')}</textarea>
-    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Generated from the Description and competitor list already on this page&mdash;it doesn't fetch or research anything new. If you edit or regenerate the Description, this won't update on its own; run Generate summary again to pick up the change.</p>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Generated from the Description and competitor list above. Editing either one afterward won't update this automatically&mdash;click Generate summary again to refresh it.</p>
     {_differentiation_verify_action}
     {_differentiation_confidence_html}
     {_differentiation_review_line_html}
@@ -18100,7 +18106,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <input name="screenshot_url" form="tool-edit-form" type="text" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
-    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture pulls a fresh homepage screenshot at a fixed size, same as the bulk backfill script—use this for a one-off refresh. Paste a different URL above (then Save changes) to override with something else entirely.</p>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture takes a fresh screenshot of the homepage at a standard size. To use a different image entirely, paste its URL above and click Save changes.</p>
     {_screenshot_banner_html}
     <div style="margin-top:8px;">{_screenshot_preview_html}</div>
   </div>
@@ -22081,8 +22087,8 @@ _LIBRARY_TOOLS = [
 _SOFTWARE_TOOLS = [
     ("/admin/tools/software",   "Software vendors",       "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
     ("/admin/tools/software/categories", "Software categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
-    ("/admin/tools/software/features",   "Software features",      "The curated \"key features\" list per category&mdash;the governed vocabulary tools get mapped against (docs/FEATURE_TAXONOMY.md)."),
-    ("/admin/tools/software/feature-review-queue", "Feature review queue", "Proposed feature-taxonomy changes&mdash;from admin edits, the AI scan, or public suggestions&mdash;awaiting approval before they reach the live tables."),
+    ("/admin/tools/software/features",   "Software features",      "The list of named features each category can check off against."),
+    ("/admin/tools/software/feature-review-queue", "Feature review queue", "Proposed feature changes&mdash;from an AI scan, a visitor, or your own edit&mdash;waiting for approval."),
 ]
 
 # Communities admin, nested as its own sub-group inside CFO Toolbox (PR 11,

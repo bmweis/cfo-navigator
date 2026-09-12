@@ -436,7 +436,7 @@ def test_admin_edit_page_shows_empty_note_when_no_citations(app_module):
     _login(client)
     r = client.get(f"/tools/software/{slug}/edit")
     assert r.status_code == 200
-    assert "No citations recorded for this draft" in r.text
+    assert "No sources recorded for this draft" in r.text
 
 
 def test_description_shown_under_review_to_public_when_unverified(app_module):
