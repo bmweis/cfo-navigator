@@ -61,7 +61,10 @@ def test_page_index_loads_for_admin(env):
     r = c.get("/admin/system/page-index")
     assert r.status_code == 200
     assert "Page index" in r.text
-    assert "app.routes" in r.text
+    # Copy batch 4: states the two width tiers directly rather than only
+    # linking out to BRAND.md — see the edge-call answer in CLAUDE.md.
+    assert "1300px" in r.text
+    assert "640px" in r.text
 
 
 def test_page_index_excludes_non_page_endpoints(env):
