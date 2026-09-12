@@ -4237,9 +4237,9 @@ function fmtRatio(r) { return r >= 0 ? '$' + r.toFixed(2) : '-$' + Math.abs(r).t
 function gerTier(ratio) {
   if (ratio >= 1.20) return {tier:'&#127942; Elite (top 10%)', color:'#002975',
     interp:"You've earned the right to invest aggressively. Every new customer is profitable on acquisition—consider TAM expansion, adjacent markets, or accelerating hiring."};
-  if (ratio >= 0.70) return {tier:'&#11088; Strong (above median)', color:'#002975',
+  if (ratio >= 0.80) return {tier:'&#11088; Strong (above median)', color:'#002975',
     interp:"Solid performance. Focus on maintaining efficiency as you scale. You're close to the $1.00 break-even—small improvements in NRR or cost discipline can get you there."};
-  if (ratio >= 0.50) return {tier:'&#10003; Typical (near median)', color:'#9A6B12',
+  if (ratio >= 0.60) return {tier:'&#10003; Average (near median)', color:'#9A6B12',
     interp:"You're in the pack. Diagnose: is growth too slow, or investment too high? Pick one to improve first. Retention is critical."};
   if (ratio > 0) return {tier:'&#9888;&#65039; Below target (bottom 25%)', color:'#9E3B30',
     interp:"Urgent strategic review needed. Growth likely decelerated while spending stayed elevated. Fix retention and expansion economics before scaling acquisition further."};
@@ -4346,7 +4346,7 @@ function contributionSVG(strip, cur, labels) {
     '</defs>';
 
   s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#1a1a1a">How ' + labels[cur] + ' is built&#8212;Time-Distributed Contribution</text>';
-  s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Efficiency Ratio = $' + ratio.toFixed(2) + '</text>';
+  s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Growth Engine Ratio = $' + ratio.toFixed(2) + '</text>';
 
   s += '<text x="20" y="186" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
   s += '<text x="20" y="320" font-size="13" font-weight="700" fill="' + GREEN_TX + '">Revenue</text>';
@@ -4546,7 +4546,7 @@ function buildChart(labels, series, n) {
   var W = 660, H = 330, mL = 44, mR = 64, mT = 16, mB = 42;
   var pw = W - mL - mR, ph = H - mT - mB;
 
-  var ys = [0.5, 0.7, 1.0, 1.2];
+  var ys = [0.6, 0.8, 1.0, 1.2];
   series.forEach(function(s) { s.pts.forEach(function(p) { ys.push(p.y); }); });
   var ymin = Math.min.apply(null, ys), ymax = Math.max.apply(null, ys);
   var pad = (ymax - ymin) * 0.12 || 0.1; ymin -= pad; ymax += pad;
@@ -4569,11 +4569,11 @@ function buildChart(labels, series, n) {
   }
 
   var s = '<svg class="ger-chart" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
-  s += band(ymax, 1.20, '#E3F2EC') + band(1.20, 0.70, '#EDF5F1') + band(0.70, 0.50, '#FAF1E1') + band(0.50, ymin, '#F9E8E3');
+  s += band(ymax, 1.20, '#E3F2EC') + band(1.20, 0.80, '#EDF5F1') + band(0.80, 0.60, '#FAF1E1') + band(0.60, ymin, '#F9E8E3');
   s += tlab((Math.min(ymax, 1.7) + 1.20) / 2, 'Elite', '#002975');
-  s += tlab(0.95, 'Strong', '#002975');
-  s += tlab(0.60, 'Typical', '#9A6B12');
-  s += tlab((0.50 + Math.max(ymin, -0.5)) / 2, 'Below', '#9E3B30');
+  s += tlab(1.00, 'Strong', '#002975');
+  s += tlab(0.70, 'Average', '#9A6B12');
+  s += tlab((0.60 + Math.max(ymin, -0.5)) / 2, 'Below', '#9E3B30');
 
   // break-even reference + axis baseline
   var yb = Y(1.0);
@@ -30799,7 +30799,7 @@ def admin_brand(request: Request):
 
     semantic_row = grid(
         swatch("#002975", "good", "GER 'Elite/Strong' tiers.")
-        + swatch("#9A6B12", "caution", "GER 'Typical' tier.")
+        + swatch("#9A6B12", "caution", "GER 'Average' tier.")
         + swatch("#9E3B30", "alert", "Errors, GER 'Below target'. Status only—never decorative.")
     )
 
@@ -30851,7 +30851,7 @@ def admin_brand(request: Request):
         '<table style="width:100%;max-width:380px;border-collapse:collapse;font-size:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;">'
         '<thead><tr style="background:var(--navy);"><th style="padding:8px 12px;text-align:left;color:#fff;">Tier</th><th style="padding:8px 12px;text-align:left;color:#fff;">Ratio</th></tr></thead>'
         '<tbody><tr style="border-top:1px solid var(--line);"><td style="padding:8px 12px;">Elite</td><td style="padding:8px 12px;">&gt; $1.20</td></tr>'
-        '<tr style="border-top:1px solid var(--line);background:var(--surface-2);"><td style="padding:8px 12px;">Strong</td><td style="padding:8px 12px;">$0.70–1.20</td></tr></tbody></table></div>'
+        '<tr style="border-top:1px solid var(--line);background:var(--surface-2);"><td style="padding:8px 12px;">Strong</td><td style="padding:8px 12px;">$0.80–1.20</td></tr></tbody></table></div>'
         # coral in action
         '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Coral in action—rare, decorative, never status</div>'
         f'<span style="font:600 11px var(--font-body);letter-spacing:.06em;text-transform:uppercase;color:#fff;background:{CORAL};border-radius:6px;padding:3px 10px;">New</span>'

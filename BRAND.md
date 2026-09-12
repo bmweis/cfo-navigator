@@ -760,6 +760,18 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
     throughout.
   - Admin pages are out of scope entirely — see the sanctioned pending-count-badge exception
     below, which already puts more than one coral element on an admin screen.
+- **Icon fill contract (PR 18, 2026-09)** — a plain stroke-path `_ICON_*` icon inherits its
+  color from whatever badge the position-based seafoam/navy cycle (`_CARD_ICON_STYLES`)
+  assigns it, so cycling the array is safe by construction. An icon with its own hardcoded
+  `fill="#..."` (e.g. `_ICON_HALF_CIRCLE`) opts out of that and is only safe when its badge
+  index is pinned to the position whose cycle color actually matches the hardcoded fill —
+  the exact near-miss PR 16 fixed by hand (dropping coral from a 3-color to a 2-color cycle
+  silently moved that icon's badge from seafoam to navy). `linklib.brand_check.
+  icon_fill_contract_problems()` (folded into `findings()`, so it's part of the same "Brand
+  standards" check/test) now catches this mechanically: any `_ICON_*` constant with a
+  hardcoded fill must have an entry in `ICON_FILL_CONTRACTS` (icon name -> required href +
+  badge index), and that pin must actually match what `_TOOLBOX_BADGE_INDEX` resolves for
+  that href — a stale/mistuned pin is flagged the same as a missing one.
 
 To run locally: `pip install -r requirements-dev.txt && pytest -q`.
 

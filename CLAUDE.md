@@ -7505,6 +7505,62 @@ it supersedes the old "`/save` is token-gated" note.
   exactly 390 (no overflow), and Source chip widths still 149.2px/equal —
   font-driven sizing, so mobile matches desktop exactly.
 
+- **Growth Engine Ratio tier correction, sitewide (PR 18, 2026-09) — the F Suite's
+  final whitepaper standardized the performance tiers; this PR found and fixed every
+  place besides the article itself still carrying the old $0.70/$0.50 cutoffs.**
+  New bands: Elite > $1.20 (unchanged), Strong $0.80–$1.20 (was $0.70–$1.20), Average
+  $0.60–$0.80 (was "Typical" $0.50–$0.70), Below target < $0.60 (was < $0.50) — with
+  matching break-even-year ranges (< 0.8 / 0.8–1.25 / 1.25–1.7 / > 1.7 years).
+  **Verified first, not assumed stale**: the `articles` mirror for
+  `https://bmweis.com/thought-leadership/growth-engine-ratio` (id 4760,
+  `original_content.mirrored_article_id`) already carried the corrected tier table,
+  break-even wording ("Years to Break Even = 1 ÷ Growth Engine Ratio"), and the
+  "Contraction stretches it, and severe contraction means it never pays back" rewrite
+  — `sync_original_content_article()` had already fired correctly when Brian edited
+  the article through the admin UI, so no resync was needed. What was actually stale
+  was the standalone `growth_engine_calculator()` route
+  (`/thought-leadership/growth-engine-calculator`), a genuinely separate bespoke
+  route the article's own admin edit can't touch: `gerTier()`'s threshold checks
+  (`ratio >= 0.70`/`ratio >= 0.50` → `0.80`/`0.60`), the retired "Typical" label
+  (now "Average"), the timeline chart's benchmark bands/y-axis seed domain
+  (`band(1.20,0.70,...)`/`[0.5,0.7,1.0,1.2]` → `0.80`/`0.60` and `[0.6,0.8,1.0,1.2]`),
+  its tier-label chart positions (recomputed to the new bands' midpoints), and one
+  wrong metric name ("Efficiency Ratio" → "Growth Engine Ratio") inside the
+  contribution-diagram SVG caption. Also fixed: the admin brand-showcase page's own
+  GER swatch/table copy (`GER 'Typical' tier.` → `'Average'`, `$0.70–1.20` →
+  `$0.80–1.20`) and two `linklib/brand_check.py` comments naming the retired tier.
+  **Deliberately left untouched**: `scripts/migrate_growth_engine_ratio_content.py`'s
+  own `BODY_MD` constant — a one-time migration script whose job already ran (its
+  content was superseded by Brian's later direct admin edit, confirmed live), so its
+  frozen old-tier copy is historical record, not live-rendering content; updating it
+  would change nothing about what's on the site. `_TL_FEATURED_CARDS` (the dead,
+  unimported rollback-reference tuple) has no tier numbers in its GER card copy, so
+  it needed no change either. New tests
+  (`tests/test_original_content_article.py`) pin the corrected copy and — via a
+  Node subprocess that extracts and executes the real `gerTier()` function verbatim
+  from the rendered page, not a Python reimplementation — the exact boundary ratios
+  ($1.20/$0.80/$0.60/$0.59) and the break-even formula (`1 / ratio`) at its three
+  named boundary years.
+- **Icon fill contract check (PR 18, 2026-09) — closes the latent gap PR 16's own
+  investigation flagged but didn't build a guard for.** A plain stroke-path `_ICON_*`
+  constant inherits its color from whichever badge the position-based seafoam/navy
+  cycle (`_CARD_ICON_STYLES`) assigns it, so cycling the array is safe by
+  construction — but an icon with its own hardcoded `fill="#..."` (the only instance
+  today, `_ICON_HALF_CIRCLE`) opts out of that, and was only ever safe by coincidence
+  until PR 16 pinned it explicitly (`_TOOLBOX_BADGE_INDEX`). Nothing mechanically
+  enforced that pin actually holding. `linklib.brand_check.icon_fill_contract_
+  problems()` (folded into `findings()`, so it rides the same "Brand standards"
+  check/test and `/admin/checks` row every other palette rule already does) now
+  flags two things: an `_ICON_*` constant with a hardcoded fill that has no entry in
+  a new `ICON_FILL_CONTRACTS` registry (icon name → required href + badge index), and
+  a registered icon whose href doesn't actually resolve to its required index in
+  `_TOOLBOX_BADGE_INDEX` — a stale/mistuned pin, not just a missing one. Verified
+  against both failure shapes with a planted decoy (an unregistered fixed-fill icon,
+  and a registered one repointed to the wrong index), each torn down immediately
+  after asserting the flag — see `tests/test_brand_standards.py`'s three new tests.
+  The one real instance today (`_ICON_HALF_CIRCLE` → `/tools/fpa-buddy` @ index 0)
+  is registered and clean.
+
 
 ## Authentication & security
 

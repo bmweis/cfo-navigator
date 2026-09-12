@@ -83,3 +83,43 @@ def test_a_genuine_bare_three_digit_hex_still_flags():
     with no preceding '&' — a real off-palette color like `#529` used as an
     actual CSS value (not preceded by PR/issue/#) still has to be caught."""
     assert bc.colors_in('style="color:#529;"') == {"#552299"}
+
+
+# --- PR 18: icon fill contract — a hardcoded `fill="#..."` icon opts out of
+# the position-based badge color cycle and is only safe when its badge index
+# is pinned to match. This is prevention, not a fix for a live bug (the one
+# known instance, _ICON_HALF_CIRCLE, is already correctly registered and
+# pinned — see the clean-source assertion below). --------------------------
+
+def test_the_real_icon_registry_is_clean():
+    """The live registry (_ICON_HALF_CIRCLE -> /tools/fpa-buddy @ index 0) is
+    correctly pinned in the actual site source today."""
+    assert bc.icon_fill_contract_problems(APP_SRC) == []
+
+
+def test_unregistered_fixed_fill_icon_is_flagged():
+    """A decoy `_ICON_*` constant with a hardcoded fill and no registry entry
+    must be caught — this is the exact shape PR #533 found latent in
+    _ICON_HALF_CIRCLE before it was pinned."""
+    decoy_src = (
+        '_ICON_DECOY = \'<circle cx="12" cy="12" r="9"/>'
+        '<path fill="#1F7A66" stroke="none"/>\'\n'
+    )
+    problems = bc.icon_fill_contract_problems(decoy_src)
+    assert any("_ICON_DECOY" in p and "Unregistered" in p for p in problems)
+    # Torn down: the decoy source is local to this test and never touches
+    # the real registry or webapp/app.py.
+    assert bc.icon_fill_contract_problems(APP_SRC) == []
+
+
+def test_registered_icon_with_mistuned_badge_index_is_flagged():
+    """A registered icon whose caller resolves to the wrong badge index (a
+    color-cycle change silently repointing it, PR #533's actual near-miss)
+    must be caught even though the icon itself is registered."""
+    mistuned_src = (
+        '_ICON_HALF_CIRCLE = \'<circle cx="12" cy="12" r="9"/>'
+        '<path fill="#1F7A66" stroke="none"/>\'\n'
+        '_TOOLBOX_BADGE_INDEX = {"/tools/fpa-buddy": 1}\n'
+    )
+    problems = bc.icon_fill_contract_problems(mistuned_src)
+    assert any("_ICON_HALF_CIRCLE" in p and "requires badge index 0" in p for p in problems)

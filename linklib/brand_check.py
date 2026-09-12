@@ -60,7 +60,7 @@ _CORAL_TEXT_MIN_PX = 18
 #     the seafoam/coral tokens but softened for use as an area fill rather than a
 #     line/text color. E.g. #D6EFE8, the GER contribution diagram's prior-revenue
 #     bar (webapp/app.py:1777); #E3F2EC/#EDF5F1/#FAF1E1/#F9E8E3, the GER line
-#     chart's Elite/Strong/Typical/Below-target tier bands (webapp/app.py:1964).
+#     chart's Elite/Strong/Average/Below-target tier bands (webapp/app.py:1964).
 #   - Status / feedback — semantic UI state, not brand: success green, error red,
 #     advisory amber. E.g. #d1fae5/#065f46, the "Saved"/"Done" success banner
 #     (webapp/app.py:5809); #b91c1c/#fca5a5, the "Delete"/"Reject" button and its
@@ -102,7 +102,7 @@ AUX_COLORS = {
     "#d8d3c8",  # line chart: projection uncertainty band
     "#e3f2ec",  # line chart: Elite tier band
     "#edf5f1",  # line chart: Strong tier band
-    "#faf1e1",  # line chart: Typical tier band
+    "#faf1e1",  # line chart: Average tier band
     "#f9e8e3",  # line chart: Below-target tier band
     # Status / feedback — semantic UI, not brand
     "#d1fae5", "#065f46",            # success toast (bg / text)
@@ -290,6 +290,50 @@ def small_coral_text_spans(src: str) -> list[str]:
     return hits
 
 
+# Icons with a hardcoded `fill="#...` opt out of the position-based
+# seafoam/navy badge-color cycle (_CARD_ICON_STYLES) every plain stroke icon
+# gets for free — safe only when that icon's badge index is pinned to
+# whichever cycle position actually produces the matching color (see
+# _ICON_HALF_CIRCLE's own comment in webapp/app.py, and PR #533's near-miss:
+# dropping coral from a 3-color cycle to a 2-color one silently moved this
+# icon's badge from seafoam to navy, clashing with its hardcoded seafoam
+# fill). This registry is the one place that pin is declared —
+# {icon constant name: (href it renders at, required _TOOLBOX_BADGE_INDEX value)}.
+ICON_FILL_CONTRACTS = {
+    "_ICON_HALF_CIRCLE": ("/tools/fpa-buddy", 0),
+}
+
+_ICON_DEF_RE = re.compile(r"^(_ICON_[A-Z_]+)\s*=", re.MULTILINE)
+_BADGE_INDEX_ENTRY_RE = re.compile(r'"([^"]+)"\s*:\s*(\d+)')
+
+
+def icon_fill_contract_problems(src: str) -> list[str]:
+    """Flags (a) an `_ICON_*` constant with a hardcoded `fill="#...` that
+    has no entry in ICON_FILL_CONTRACTS, and (b) a registered icon whose
+    href doesn't resolve to its required index in `_TOOLBOX_BADGE_INDEX` —
+    a stale/mistuned pin, not just a missing one."""
+    problems: list[str] = []
+    starts = list(_ICON_DEF_RE.finditer(src))
+    for i, m in enumerate(starts):
+        name = m.group(1)
+        end = starts[i + 1].start() if i + 1 < len(starts) else min(len(src), m.end() + 2000)
+        block = src[m.end():end]
+        if 'fill="#' not in block:
+            continue
+        if name not in ICON_FILL_CONTRACTS:
+            problems.append(f"Unregistered fixed-fill icon {name} — add it to ICON_FILL_CONTRACTS")
+            continue
+        href, required_index = ICON_FILL_CONTRACTS[name]
+        badge_map_m = re.search(r"_TOOLBOX_BADGE_INDEX\s*=\s*\{([^}]*)\}", src)
+        actual = dict((k, int(v)) for k, v in _BADGE_INDEX_ENTRY_RE.findall(badge_map_m.group(1))) if badge_map_m else {}
+        if actual.get(href) != required_index:
+            problems.append(
+                f"{name} requires badge index {required_index} at {href!r}, "
+                f"but _TOOLBOX_BADGE_INDEX has {actual.get(href)!r}"
+            )
+    return problems
+
+
 def findings(src: str) -> list[str]:
     """All brand-standards violations in `src`, as human-readable strings. Empty = clean."""
     problems: list[str] = []
@@ -321,4 +365,7 @@ def findings(src: str) -> list[str]:
         miss = [c for c in members if c not in tokens]
         if miss:
             problems.append(f"{family} ramp missing shades: " + ", ".join(miss))
+    icon_fill = icon_fill_contract_problems(src)
+    if icon_fill:
+        problems.append("Icon fill contract violation(s): " + "; ".join(icon_fill))
     return problems
