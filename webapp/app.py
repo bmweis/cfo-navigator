@@ -1616,6 +1616,30 @@ _TABLE_FLOOR_MEDIUM = 640    # 4-5 columns
 _TABLE_FLOOR_WIDE = 800      # 6-7 columns
 _TABLE_FLOOR_XWIDE = 960     # 8+ columns
 
+# Per-column widths by FIELD TYPE (not by table) — the natural next step
+# after the floors above: a floor keeps a whole table from squeezing itself
+# too narrow, but said nothing about whether a "Name" column was 220px on
+# one admin page and 340px on another for no reason but who wrote it. These
+# are plain `width:` hints on ordinary (non `table-layout:fixed`) tables, so
+# real content that's genuinely wider than the hint still grows the column
+# instead of being clipped — they're a shared starting point, not a hard
+# cap. Applied wherever a column's header literally names one of these
+# field types; a column holding something else (a description, a reason, a
+# URL, a free-text note) stays unwidthed and absorbs the remaining space —
+# every table needs at least one such column. See BRAND.md §5 for the full
+# table, including the handful of documented per-table exceptions (a
+# fixed-layout percentage table, a deliberately wider Article column
+# already tuned to real content, an ID reference that isn't actually a
+# name) that keep their own values rather than being forced onto these.
+_COL_WIDTH_NAME = 280        # Name / Title / vendor or tool name — matches
+                              # the Software/Communities approved-tables'
+                              # own sticky Name column precedent (PR 12/15)
+_COL_WIDTH_EMAIL = 220        # Email address
+_COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
+                              # "YYYY-MM-DD HH:MM" value, not just "YYYY-MM-DD"
+_COL_WIDTH_STATUS = 110       # A short status/state badge or label
+_COL_WIDTH_COUNT = 80         # A small count/number column
+
 # Trailing brand suffixes baked into individual page titles over time — now
 # redundant since _page() prepends a consistent "BMW CFO ·" tab-title prefix
 # instead. Stripped so a tab reads e.g. "BMW CFO · Archive" instead of the
@@ -9851,7 +9875,7 @@ def admin_compare_summary_feedback(request: Request):
 <div style="overflow-x:auto;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Comparison</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Summary flagged</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Note</th>
@@ -11093,9 +11117,9 @@ def admin_contacts(request: Request):
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:12px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" id="contact-select-all" onchange="document.querySelectorAll('.contact-row-cb').forEach(cb => cb.checked = this.checked);"></th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_EMAIL}px;">Email</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Message</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
 </tr></thead>
@@ -11107,7 +11131,7 @@ def admin_contacts(request: Request):
 <div style="overflow-x:auto;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
+  <th style="padding:8px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">When</th>
   <th style="padding:8px 12px;text-align:left;font-size:13px;">Admin</th>
   <th style="padding:8px 12px;text-align:left;font-size:13px;">Action</th>
   <th style="padding:8px 12px;text-align:left;font-size:13px;">What was deleted</th>
@@ -11173,7 +11197,7 @@ def admin_email_failures(request: Request):
 <div style="overflow-x:auto;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">When</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">When</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Flow</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Error</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
@@ -11987,7 +12011,7 @@ def admin_software(request: Request, filter: str = ""):
         # breakpoint, where the table renders normally.
         return f"""<tr class="admin-table-row" {row_attrs}>
           <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
-          <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:280px;">
+          <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:{_COL_WIDTH_NAME}px;">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
               <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}
             </div>
@@ -12092,8 +12116,8 @@ def admin_software(request: Request, filter: str = ""):
 <div style="overflow-x:auto;margin-bottom:40px;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Description</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Submitted by</th>
@@ -12113,7 +12137,7 @@ def admin_software(request: Request, filter: str = ""):
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
-  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:280px;">Name</th>
+  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_NAME}px;">Name</th>
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
@@ -12574,10 +12598,10 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 <div style="overflow-x:auto;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Tool</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_EMAIL}px;">Email</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Company</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Size</th>
 </tr></thead>
@@ -12674,7 +12698,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
   <div style="overflow-x:auto;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Description</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tools</th>
     </tr></thead>
@@ -12903,10 +12927,10 @@ def _feature_category_group_html(category: dict, features: list[dict], pending_i
     <div style="overflow-x:auto;">
     <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
       <thead><tr style="background:var(--bg);">
-        <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Definition</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Pointer note</th>
-        <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Order</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Order</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"></th>
       </tr></thead>
       <tbody>{rows}</tbody>
@@ -13540,7 +13564,11 @@ def _benchmark_form_fields(b: dict | None = None) -> str:
 # so two tables sharing this exact markup/CSS can still land on visibly
 # different column proportions purely because one has longer names/URLs
 # than the other. Explicit column widths (PR 11, 2026-09) make both
-# instances line up regardless of content.
+# instances line up regardless of content. Deliberately NOT switched to the
+# _COL_WIDTH_* field-type constants below (PR 16, 2026-09) — this table's
+# own table-layout:fixed percentage scheme already solves the same problem
+# for this specific table, and a fixed-layout table can't sensibly mix
+# percentage and pixel column widths.
 _ADMIN_RESOURCE_TABLE_COL_WIDTHS = ("20%", "30%", "18%", "17%", "15%")
 
 
@@ -14427,9 +14455,9 @@ def admin_thought_leadership(request: Request, type: str = ""):
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Type</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Title</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Source / venue</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
@@ -14863,12 +14891,12 @@ def admin_original_content(request: Request, status: str = ""):
 <div style="overflow-x:auto;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Title</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Slug</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Featured home</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Display order</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Updated</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_STATUS}px;">Status</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_STATUS}px;">Featured home</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_COUNT}px;">Display order</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Updated</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
 <tbody>{rows}</tbody>
@@ -15659,7 +15687,7 @@ def admin_communities(request: Request, filter: str = ""):
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
   <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
-  <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;font-weight:600;min-width:280px;">
+  <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;font-weight:600;min-width:{_COL_WIDTH_NAME}px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
       <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{low_conf_badge}
     </div>
@@ -15773,8 +15801,8 @@ def admin_communities(request: Request, filter: str = ""):
 <div style="overflow-x:auto;margin-bottom:40px;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Description</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Submitted by</th>
@@ -15794,7 +15822,7 @@ def admin_communities(request: Request, filter: str = ""):
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
-  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:280px;">Name</th>
+  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_NAME}px;">Name</th>
   <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;min-width:320px;">Short description</th>
   <th data-col="communities:cost_band" style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th data-col="communities:access" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
@@ -16157,7 +16185,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
   <div style="overflow-x:auto;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Description</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Communities</th>
     </tr></thead>
@@ -25879,8 +25907,8 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
   <div style="overflow-x:auto;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tag</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Articles</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Tag</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Articles</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Rename / merge</th>
       <th style="padding:9px 12px;"></th>
     </tr></thead>
@@ -26694,8 +26722,8 @@ def admin_ask_report(request: Request, user: str = ""):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:760px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Date</th>
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Asker</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Asker</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Question</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Settings</th>
       <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Cost</th>
@@ -27211,8 +27239,8 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:720px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Vendor</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Date</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Vendor</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Category</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Note</th>
       <th style="padding:9px 12px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Amount</th>
@@ -27376,7 +27404,7 @@ async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Raw row</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why it was skipped</th>
     </tr></thead>
@@ -27400,8 +27428,8 @@ async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Vendor</th>
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Date</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Vendor</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date</th>
       <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Amount</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Category</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Note</th>
@@ -28132,12 +28160,12 @@ def admin_users(request: Request, msg: str = ""):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('users',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Username</th>
-  <th data-col="users:realname" style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th data-col="users:email" style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
+  <th data-col="users:realname" style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
+  <th data-col="users:email" style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_EMAIL}px;">Email</th>
   <th data-col="users:password" style="padding:10px 12px;text-align:left;font-size:13px;">Password</th>
-  <th data-col="users:last_login" style="padding:10px 12px;text-align:left;font-size:13px;">Last login</th>
+  <th data-col="users:last_login" style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Last login</th>
   <th data-col="users:access_level" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
-  <th data-col="users:status" style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
+  <th data-col="users:status" style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_STATUS}px;">Status</th>
   <th data-col="users:ask" style="padding:10px 12px;text-align:left;font-size:13px;">FP&amp;A Buddy cap</th>
   <th data-col="users:matchmaker" style="padding:10px 12px;text-align:left;font-size:13px;">Matchmaker cap</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
@@ -29819,7 +29847,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:400px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why</th>
     </tr></thead>
@@ -29840,7 +29868,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Raw row</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why it was skipped</th>
     </tr></thead>
@@ -30068,7 +30096,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:400px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why</th>
     </tr></thead>
@@ -30089,7 +30117,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Raw row</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why it was skipped</th>
     </tr></thead>
@@ -30122,9 +30150,9 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Article</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">URL</th>
-      <th style="padding:8px 10px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Words</th>
+      <th style="padding:8px 10px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Words</th>
     </tr></thead>
     <tbody>{confirmed_table_rows}</tbody>
   </table>
@@ -30352,7 +30380,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:400px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">URL</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why</th>
     </tr></thead>
@@ -30373,7 +30401,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Raw row</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why it was skipped</th>
     </tr></thead>
@@ -30406,9 +30434,9 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Article</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">URL</th>
-      <th style="padding:8px 10px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Words</th>
+      <th style="padding:8px 10px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Words</th>
     </tr></thead>
     <tbody>{confirmed_table_rows}</tbody>
   </table>
@@ -31591,11 +31619,11 @@ def admin_emails_page(request: Request):
 <div style="overflow-x:auto;margin:0 0 26px;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
 <thead><tr style="text-align:left;">
-<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Email</th>
+<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;width:{_COL_WIDTH_NAME}px;">Email</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Recipient</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Sent when</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Filter on</th>
-<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Editable?</th>
+<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;width:{_COL_WIDTH_STATUS}px;">Editable?</th>
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>

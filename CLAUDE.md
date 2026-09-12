@@ -7560,6 +7560,43 @@ it supersedes the old "`/save` is token-gated" note.
   after asserting the flag — see `tests/test_brand_standards.py`'s three new tests.
   The one real instance today (`_ICON_HALF_CIRCLE` → `/tools/fpa-buddy` @ index 0)
   is registered and clean.
+- **Admin table column widths, by field type (PR 19, 2026-09) — the natural
+  next step after PR 14's floor buckets: a column is now sized by what it
+  HOLDS, not by whatever a given page happened to pick.** Five constants
+  (`_COL_WIDTH_NAME`=280, `_COL_WIDTH_EMAIL`=220, `_COL_WIDTH_DATE`=140,
+  `_COL_WIDTH_STATUS`=110, `_COL_WIDTH_COUNT`=80 — 280 matches the
+  Software/Communities sticky Name column PR 12/15 already established)
+  are plain `width:` hints on ordinary (non `table-layout:fixed`) tables,
+  applied wherever a column's own header literally names that field type;
+  a free-text/URL/description/reason column stays unwidthed and absorbs
+  the remaining space, same as before. Since these tables aren't
+  fixed-layout, a hint is never a hard cap — real content wider than the
+  hint still grows the column rather than getting clipped, so there's no
+  truncation risk in applying one sitewide value everywhere. **Scoped to
+  auto-layout ENTITY-LIST tables, not every `<table>` on the admin
+  surface** — a first documentation pass over-counted by treating every
+  table that doesn't use these constants as an "exception," when most were
+  never in scope: `table-layout:fixed` tables use a different sizing
+  mechanism entirely (Resources' percentage table, PR 11; `/admin/reader/feeds`'s
+  `.ff-table`/`.fs-table`; `/admin/library-backup`'s `.backup-log-table`,
+  each with its own tuned percentage or named-class pixel widths), and
+  diagnostic/reference tables aren't entity lists at all (the three
+  `.cc-table`-styled pages — Database, Page index, the FP&A Buddy
+  explainer's tier table; the admin brand-showcase page's two illustrative
+  component tables; the Reader content-backfill's three fetch-attempt
+  worklists, with their own already-tuned 420px Article column and shared
+  `_th`/`_th_nowrap` helpers; the Software name-duplicate check's rich-cell
+  Tool A/B comparison tables). That leaves **two real exceptions**, both
+  genuine entity-list tables this standard does cover: Overhead spend's two
+  narrow flex-column summary tables (a tighter `min-width` than 280px
+  allows), and the Users table's Username column (no clean field-type
+  match, always visible — its Name/Email/Last login/Status columns do use
+  the shared constants) — within the handful this standard's own PR
+  anticipated. See BRAND.md §5 for the full scope statement. The
+  Software/Communities approved-tables' own sticky Name column
+  (`admin-sticky-col-2`) — the precedent 280px is drawn from — was also
+  switched to read `min-width:{_COL_WIDTH_NAME}px` from the same constant,
+  since it's the origin case, not an exception.
 
 
 ## Authentication & security

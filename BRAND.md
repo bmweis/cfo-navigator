@@ -527,6 +527,99 @@ first instance of a larger, separately-scoped job (matching one field's
 width everywhere it appears across every admin table), not a general
 license to collapse every documented exception into a bucket.
 
+### Admin table column widths, by field type
+
+The job PR 15 named above: a column is now sized by what FIELD TYPE it holds,
+not by whatever a given page happened to pick — so "Name" is the same width
+everywhere, not 220px on one admin table and a bare, unspecified width on
+another. Five named constants in `webapp/app.py`, next to the floor buckets
+above:
+
+| Constant | Width | Field type |
+|---|---|---|
+| `_COL_WIDTH_NAME` | 280px | Name / Title (matches the Software/Communities sticky Name column, PR 12/15) |
+| `_COL_WIDTH_EMAIL` | 220px | Email address |
+| `_COL_WIDTH_DATE` | 140px | Date / timestamp (sized for a full "YYYY-MM-DD HH:MM" value) |
+| `_COL_WIDTH_STATUS` | 110px | A short status/state badge or label |
+| `_COL_WIDTH_COUNT` | 80px | A small count/number column |
+
+These are plain `width:` hints on ordinary (non `table-layout:fixed`) tables,
+not a hard cap — real content wider than the hint still grows the column
+instead of getting clipped. A column holding a description, a reason, a URL,
+or any other free-text field stays unwidthed and absorbs the remaining
+space; every table needs at least one such column, same as it always has.
+Applied wherever a column's own header literally names one of these field
+types — a column that merely resembles one (e.g. a CSV-preview "Article"
+column holding just `#123`, not a real title) is left alone.
+
+**Scope: this standard applies to auto-layout ENTITY-LIST tables** — tables
+whose rows are named database entities (a vendor, a community, a contact, a
+user, a log entry) rendered with plain typed columns. It was never meant to
+reach every `<table>` in the admin surface, and a first pass at this
+documentation over-counted by treating "doesn't use these constants" as
+"exception" — most of the tables below were never in scope to begin with,
+not deviations from a rule that applies to them. Two genuinely different
+reasons put a table outside that scope:
+
+**Fixed-layout tables use a different sizing mechanism entirely**, so the
+question "should this column be `_COL_WIDTH_NAME`?" doesn't apply — a
+`table-layout:fixed` table's columns are set by percentage or by its own
+named-class pixel widths, and can't sensibly mix either with these
+constants:
+
+- **Resources** (`/admin/tools/resources`) — percentage-based
+  (`_ADMIN_RESOURCE_TABLE_COL_WIDTHS`, PR 11) so two tables sharing the same
+  markup line up regardless of content length.
+- **`/admin/reader/feeds`'s `.ff-table`/`.fs-table`** — same
+  percentage-based reasoning, tuned to that page's own content.
+- **`/admin/library-backup`'s `.backup-log-table`** — its own small
+  named-class pixel widths (`.col-when` 150px, `.col-filename` 200px,
+  `.col-location` 120px, `.col-status` 90px), tuned to fit its own 700px
+  mobile-card breakpoint.
+
+**Diagnostic and reference tables aren't entity lists**, so the
+Name/Email/Date/Status/Count vocabulary doesn't describe what their columns
+actually hold:
+
+- **`/admin/system/database`, `/admin/system/page-index`, and the FP&A Buddy
+  explainer's tier table** reuse the Compare page's `.cc-table` CSS class
+  for convenience — their rows are a schema table name, a route path, a
+  model tier, not a directory of named entities.
+- **The admin brand-showcase page's two example tables** (the GER tier
+  table, the Checks reference table) are illustrative component specimens,
+  not real data.
+- **The Reader content-backfill's three tables** (Recent attempts, Needs
+  manual review, Accepted as final) are a diagnostic worklist of fetch
+  attempts, not a directory of named entities — built from shared
+  `_th`/`_th_nowrap` helpers reused across genuinely different field types
+  per column (Article, Result, Attempts, When), including an already-tuned
+  420px Article column, rather than the simple per-field-type shape this
+  standard covers.
+- **The Software name-duplicate check's Tool A/Tool B/decision tables**
+  are a diagnostic comparison report, not an entity list — each cell holds
+  rich, multi-line content (`_tool_cell()`), not a plain name string.
+
+That leaves **two real exceptions**, both genuine entity-list tables this
+standard does cover, each kept at its own value for a stated reason — the
+handful this standard's own PR anticipated:
+
+- **Overhead spend's "By source" and "By month" summary tables** sit inside
+  a `flex:1 1 460px` column with its own tight `min-width:400px`/`320px` —
+  applying `_COL_WIDTH_NAME` to their label column would force them wider
+  than the layout they're built to fit inside.
+- **The Users admin table**'s Username column is left unwidthed — it's a
+  primary identifier without a real analog among these five field types,
+  and it's always visible (no `data-col`), unlike every other column on
+  that table. Its Name/Email/Last login/Status columns do use the shared
+  constants.
+
+The Software and Communities approved-tables' own sticky Name column
+(`admin-sticky-col-2`, PR 12/15 — the precedent `_COL_WIDTH_NAME`'s value
+is drawn from) now reads its width from the same constant too
+(`min-width:{_COL_WIDTH_NAME}px`, not `width:`, since a sticky column needs
+`min-width` to stay pinned correctly) — it was the origin case for 280px,
+not a further exception.
+
 ### Editorial content system — Atlantic pattern
 
 A long-form register for pages Brian wants to read like a considered piece rather
