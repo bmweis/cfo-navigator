@@ -226,13 +226,13 @@ def run_all() -> list[dict]:
     results.append({
         "name": "Brand standards", "where": "Live + CI", "ok": not bf,
         "what": "Every color is a brand token or a documented exception; only on-brand fonts.",
-        "detail": "; ".join(bf) if bf else "All colors and fonts on palette. (test_brand_standards)"})
+        "detail": "; ".join(bf) if bf else "All colors and fonts on palette."})
 
     vf = voice_review.mechanical_findings(src)
     results.append({
         "name": "Voice standards", "where": "Live + CI", "ok": not vf,
         "what": "No banned buzzwords, filler, or performative phrases in the site copy.",
-        "detail": ", ".join(f"{rule}: “{phrase}”" for rule, phrase in vf) if vf else "Copy is on-voice. (test_voice_standards)"})
+        "detail": ", ".join(f"{rule}: “{phrase}”" for rule, phrase in vf) if vf else "Copy is on-voice."})
 
     tf = []
     for _path, _src in _typography_sources():
@@ -242,71 +242,71 @@ def run_all() -> list[dict]:
         "name": "Typography (ampersands, em dashes)", "where": "Live + CI", "ok": not tf,
         "what": "UI copy spells out \"and\" (except FP&A and friends) and never spaces an em dash.",
         "detail": "; ".join(f"{fname} {rule} (line {line}): {excerpt}" for fname, rule, line, excerpt in tf[:6])
-                  if tf else "Copy follows both typographic rules. (test_voice_standards)"})
+                  if tf else "Copy follows both typographic rules."})
 
     op = open_source_problems()
     results.append({
         "name": "Open-source showcase in sync", "where": "Live + CI", "ok": not op,
-        "what": "Every dependency is celebrated, and nothing showcased is no longer a dependency.",
-        "detail": "; ".join(op) if op else "Showcase matches requirements. (test_open_source)"})
+        "what": "Every code library the site uses is credited on Open source, and nothing credited there has actually been removed.",
+        "detail": "; ".join(op) if op else "Showcase matches requirements."})
 
     bd = brand_docs_problems()
     results.append({
         "name": "BRAND.md §7 in sync", "where": "Live + CI", "ok": not bd,
-        "what": "BRAND.md's token table is generated from the live :root block, not hand-copied.",
-        "detail": "; ".join(bd) if bd else "BRAND.md matches the live CSS. (test_brand_docs_sync)"})
+        "what": "The color table in BRAND.md always matches the site's real CSS—never hand-copied out of sync.",
+        "detail": "; ".join(bd) if bd else "BRAND.md matches the live CSS."})
 
     hn = hub_nav_orphan_problems()
     results.append({
         "name": "Hub-nav orphans", "where": "Live + CI", "ok": not hn,
         "what": "Every real /admin route has a corresponding hub-nav card—nothing reachable only by guessing the URL.",
-        "detail": "; ".join(hn) if hn else "Every admin route has a hub-nav card. (test_hub_nav_orphans)"})
+        "detail": "; ".join(hn) if hn else "Every admin route has a hub-nav card."})
 
     ac = ai_config_orphan_problems()
     results.append({
         "name": "AI config consolidated", "where": "Live + CI", "ok": not ac,
-        "what": "No route reuses one of the three retired AI-settings URL shapes outside /admin/system/ai.",
-        "detail": "; ".join(ac) if ac else "AI configuration lives only at /admin/system/ai. (test_admin_ai_settings)"})
+        "what": "AI settings only live in one place (/admin/system/ai)—nothing left over from the pages that used to hold them.",
+        "detail": "; ".join(ac) if ac else "AI configuration lives only at /admin/system/ai."})
 
     cm = coral_moment_problems()
     results.append({
         "name": "Coral discipline (one moment per page)", "where": "Live + CI", "ok": not cm,
-        "what": "No signed-out public page has more than one coral background moment. Best-effort: "
-                "signed-out only, inline styles only, no path-param/admin routes—see coral_moment_problems()'s own docstring.",
-        "detail": "; ".join(cm) if cm else "Every checked page has at most one coral moment. (test_coral_discipline)"})
+        "what": "No public page overuses the coral accent color—at most one coral moment per page. "
+                "Best-effort: only checks signed-out pages, and only inline styles—a coral moment set through a CSS class wouldn't be caught.",
+        "detail": "; ".join(cm) if cm else "Every checked page has at most one coral moment."})
 
     pf = _pyflakes_problems()
     if pf is None:
         results.append({
-            "name": "Dead code / unused imports (pyflakes)", "where": "CI", "ok": None,
-            "what": "No unused imports or dead code in linklib / webapp / scripts.",
-            "detail": "Lint step in the QA workflow."})
+            "name": "Dead code / unused imports", "where": "CI", "ok": None,
+            "what": "No leftover, unused code anywhere in the codebase.",
+            "detail": "Runs automatically as part of every code check."})
     else:
         results.append({
-            "name": "Dead code / unused imports (pyflakes)", "where": "Live + CI", "ok": not pf,
-            "what": "No unused imports or dead code in linklib / webapp / scripts.",
-            "detail": "; ".join(pf[:6]) if pf else "No unused imports or dead code. (pyflakes lint step)"})
+            "name": "Dead code / unused imports", "where": "Live + CI", "ok": not pf,
+            "what": "No leftover, unused code anywhere in the codebase.",
+            "detail": "; ".join(pf[:6]) if pf else "No unused imports or dead code."})
 
     sp = script_syntax_problems()
     if sp is None:
         results.append({
-            "name": "Shared <script> blocks parse (node --check)", "where": "CI", "ok": None,
-            "what": "Every shared inline <script> block in webapp/app.py is valid JS.",
-            "detail": "Runs wherever Node is available; GitHub-hosted CI runners ship it by default."})
+            "name": "Script blocks are valid JavaScript", "where": "CI", "ok": None,
+            "what": "Every reusable bit of JavaScript on the site is syntactically valid.",
+            "detail": "Runs automatically as part of every code check."})
     else:
         results.append({
-            "name": "Shared <script> blocks parse (node --check)", "where": "Live + CI", "ok": not sp,
-            "what": "Every shared inline <script> block in webapp/app.py is valid JS.",
-            "detail": "; ".join(sp) if sp else "Every shared script block parses clean. (test_admin_js_syntax)"})
+            "name": "Script blocks are valid JavaScript", "where": "Live + CI", "ok": not sp,
+            "what": "Every reusable bit of JavaScript on the site is syntactically valid.",
+            "detail": "; ".join(sp) if sp else "Every shared script block parses clean."})
 
     results.append({
-        "name": "Rest of the test suite (pytest)", "where": "CI", "ok": None,
+        "name": "Everything else", "where": "CI", "ok": None,
         "what": "Everything else the suite covers—access tiers, auth, dedupe, publish dates, tagging, users.",
-        "detail": "Runs the whole suite (including the three above) on every commit."})
+        "detail": "Runs the whole suite (including the three above) on every code change."})
 
     results.append({
-        "name": "Secret scan (TruffleHog)", "where": "CI", "ok": None,
+        "name": "Secret scan", "where": "CI", "ok": None,
         "what": "No verified, live secrets committed anywhere in the repo.",
-        "detail": "Separate secret-scan job on every commit."})
+        "detail": "Runs separately, on every code change."})
 
     return results
