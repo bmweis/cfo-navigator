@@ -26737,11 +26737,11 @@ def admin_ask_report(request: Request, user: str = ""):
         split = (f'<div style="font-size:11px;font-weight:400;color:var(--muted);white-space:nowrap;">'
                  f'${r["cost_usd"] - rw:.4f} + ${rw:.4f} rewrite</div>') if rw > 0 else ""
         return f"""<tr class="turn-row"{attrs}>
-  <td style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])}</td>
-  <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(r))}</td>
-  <td style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}</td>
-  <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
-  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}{split}</td>
+  <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])}</td>
+  <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(r))}</td>
+  <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}</td>
+  <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
+  <td class="admin-table-cell" data-label="Cost" style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}{split}</td>
 </tr>"""
 
     def _rollup_row(turns: list[dict], gid: str) -> str:
@@ -26757,12 +26757,12 @@ def admin_ask_report(request: Request, user: str = ""):
                          for t in turns if t.get("model")})
         q = (first.get("question") or "")[:160]
         return f"""<tr onclick="toggleConvo('{_esc(gid)}')" style="cursor:pointer;">
-  <td style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])}</td>
-  <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(first))}</td>
-  <td style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(first.get("question") or "") > 160 else ''}
+  <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])}</td>
+  <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(first))}</td>
+  <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(first.get("question") or "") > 160 else ''}
     <span id="chip-{_esc(gid)}" style="margin-left:8px;font-size:11px;font-weight:700;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:2px 10px;white-space:nowrap;"><span class="disclosure-caret" style="font-size:10px;">&#9654;</span> {len(turns)} turns</span></td>
-  <td style="padding:8px 10px;font-size:12px;white-space:nowrap;color:var(--muted);">{_esc(", ".join(models))}</td>
-  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${total:.4f}{rw_note}</td>
+  <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;color:var(--muted);">{_esc(", ".join(models))}</td>
+  <td class="admin-table-cell" data-label="Cost" style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${total:.4f}{rw_note}</td>
 </tr>"""
 
     parts: list[str] = []
@@ -26811,8 +26811,8 @@ def admin_ask_report(request: Request, user: str = ""):
   <a href="/admin/fpa-buddy/report/export.csv{('?user=' + quote(user)) if user else ''}" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;margin-left:auto;">Download CSV &darr;</a>
 </form>
 
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
-  <table style="width:100%;border-collapse:collapse;min-width:760px;">
+<div style="overflow-x:auto;">
+  <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Asker</th>
@@ -26827,6 +26827,30 @@ def admin_ask_report(request: Request, user: str = ""):
 <style>
 tbody tr{{border-top:1px solid var(--line);}}
 tr[data-convo]{{background:var(--bg);}}
+/* PR 31 (layout fix batch 4) — a per-question record (Date/Asker/Question/
+   Settings/Cost) squeezed the Question column to ~95-105px at 390px, since
+   Settings' own nowrap badge and the Date/Asker columns' suggested widths
+   ate most of the table's 760px min-width before Question ever got a
+   share — measured live: row heights varied from 38px to 274px purely from
+   how unevenly that squeeze forced Question to wrap. Fixed with the same
+   .admin-table-responsive card-stacking treatment Software/Communities/
+   Users already use — each question is a self-contained record, so a
+   stacked card lets Question render at the card's full width instead of
+   fighting Settings/Date/Asker/Cost for a narrow slice. min-width dropped
+   from a bespoke 760 to the standard _TABLE_FLOOR_MEDIUM (640, the
+   documented 4-5-column bucket) — safe, since a table's real content
+   still grows past a smaller min-width when it needs to; the floor only
+   guards the narrow gap right below where cards take over. */
+@media(max-width:700px){{
+  .admin-table-responsive thead{{display:none;}}
+  .admin-table-responsive, .admin-table-responsive tbody,
+  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;min-width:0!important;}}
+  .admin-table-responsive tr{{border-top:none!important;border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-cell{{padding:6px 12px!important;}}
+  .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
+    font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin-bottom:3px;}}
+}}
 </style>
 <script>
 function toggleConvo(g) {{
