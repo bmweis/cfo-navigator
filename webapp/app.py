@@ -14716,13 +14716,13 @@ def _oc_form_fields(values: dict) -> str:
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
       <input name="date_label" maxlength="50" value="{_esc(values.get('date_label', ''))}"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="Mon YYYY, e.g. Jun 2026—optional">
+        placeholder="e.g. Jun 2026">
     </div>
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (tiebreaker)</label>
       <input name="display_order" type="number" value="{_esc(str(values.get('display_order')) if values.get('display_order') not in (None, '') else '')}"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="Leave blank—auto-assigned">
+        placeholder="Auto-assigned">
     </div>
   </div>
   {_oc_parse_warning(values)}
@@ -15279,7 +15279,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
 
     categories_html = f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:8px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/communities/categories">manage categories</a>)</span></label>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;">
+    <div style="display:flex;flex-wrap:wrap;gap:8px 16px;">
       {_community_category_checkboxes(categories, c.get('categories') or [])}
     </div>
   </div>"""
@@ -17376,7 +17376,7 @@ def admin_tools_new(request: Request):
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
+    <div style="display:flex;flex-wrap:wrap;gap:8px 16px;">
       {_tool_category_checkboxes(categories)}
     </div>
   </div>
@@ -17974,7 +17974,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
+    <div style="display:flex;flex-wrap:wrap;gap:8px 16px;">
       {_tool_category_checkboxes(categories, tool['categories'])}
     </div>
   </div>
@@ -23544,7 +23544,7 @@ def admin_system_page_index(request: Request):
 <h1>Page index</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every page on the site and which width tier it renders at&mdash;so a page that never got one doesn't go unnoticed. Skips things that aren't really pages (redirects, JSON/AJAX endpoints, file downloads). Two tiers: <strong>Standard</strong> (1300px&mdash;most pages) and <strong>Form</strong> (640px&mdash;single-column forms). See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for more.</p>
 
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
 {stat_cards}
 </div>
 {summary}
@@ -26215,7 +26215,20 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
             _game_settings_num_field("Base speed", "drift_speed", r["drift_speed"], suffix="u/sec at start"),
             _game_settings_num_field("Speed ramp", "speed_ramp_per_sec", r["speed_ramp_per_sec"], step="0.01", suffix="u/sec per sec elapsed"),
             _game_settings_num_field("Gust boost", "sail_speed", r["sail_speed"], suffix="u/sec bonus in a gust"),
-        ]) + shark_fields
+        ])
+        # Shark fields get their own grid, not appended onto `fields`' own —
+        # `auto-fit` only collapses a track with ZERO items across the WHOLE
+        # grid, not a track that's merely empty on one row. With 7 base
+        # fields + 4 shark fields sharing one grid, the browser fits 8
+        # columns (driven by the fuller row), so row 2 (the 3 leftover shark
+        # fields) still reserves the other 5 tracks — none of them are
+        # globally empty, since row 1 uses all 8. Splitting into two
+        # independent single-row grids means each one only ever has to fit
+        # its own item count, so auto-fit's collapse actually applies.
+        shark_grid = (
+            f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-top:12px;">{shark_fields}</div>'
+            if shark_fields else ""
+        )
         cards += f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:16px;">
   <form method="post" action="/admin/thought-leadership/game-settings/{r['rank']}/edit">
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
@@ -26227,6 +26240,7 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
       <span style="font-size:11px;color:var(--muted);margin-left:auto;">rank id: {_esc(r['rank'])}</span>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">{fields}</div>
+    {shark_grid}
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);margin-top:14px;">
       <input type="checkbox" name="grace_window" value="1" {grace_checked}>
       Brief invincibility window after a hit

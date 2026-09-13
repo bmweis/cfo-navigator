@@ -7688,6 +7688,97 @@ it supersedes the old "`/save` is token-gated" note.
      sentences were written for this one — both texts already existed in
      `linklib.models._REGISTRY`, just re-arranged onto two surfaces
      instead of one.
+- **Layout fix batch 2, PR 29 (2026-09) — the `auto-fill`/`auto-fit`
+  failure class swept further, sparse category-checkbox grids stop
+  stretching, and the Original Content form's look-alike placeholder pair
+  (flagged and deliberately left out of scope by PR 28/#545) gets the same
+  treatment.**
+  1. **`/admin/system/page-index`'s stat-tile row** — a real `auto-fill`
+     instance: `repeat(auto-fill,minmax(160px,1fr))` reserved 7 tracks for
+     only 2 real tiles (Pages, Flagged), leaving ~837px blank. One-value
+     fix, `auto-fill` -> `auto-fit`: confirmed live, the two tiles now
+     stretch to fill the row (resolved columns collapse the 5 phantom
+     tracks to `0px`) at 1280px, 1920px, and 390px alike, with zero
+     horizontal overflow at any width.
+  2. **`/admin/thought-leadership/game-settings`'s rank-detail field grid —
+     already `auto-fit`, not `auto-fill` as `docs/LAYOUT_AUDIT_TRIAGE.md`'s
+     own characterization had it (confirmed by `git blame`: unchanged since
+     2026-08-29, predating both #544 and #545), so switching to `auto-fit`
+     would have been a no-op.** The real mechanism: `auto-fit` only
+     collapses a track that has ZERO items across the WHOLE grid, not one
+     that's merely unfilled on a single row. With 7 base fields + 4
+     shark-only fields (Mate/First Mate/Skipper) sharing one grid, the
+     browser fits 8 columns (driven by row 1's fuller count), so row 2's 3
+     shark fields still reserve the other 5 tracks — none of the 8 tracks
+     are ever globally empty, since row 1 uses all of them. Fixed per the
+     audit's own named alternative: shark fields render in their OWN
+     `auto-fit` grid, appended after the base-fields grid rather than
+     concatenated into the same `fields` string — each grid now only ever
+     has to fit its own item count (7, or 4), so `auto-fit`'s collapse
+     actually applies in both. Deckhand (no shark fields) renders exactly
+     one grid, unchanged. Verified live at 1280px (base grid: 7×159.1px
+     columns, 8th collapsed to 0; shark grid, on the 3 ranks that have one:
+     4×287.5px columns, remaining 4 collapsed to 0 — no more shared
+     8-column row), 1920px (same shape, wider columns), and 390px (both
+     grids wrap to 2×142px columns, `body.scrollWidth` exactly 390 at every
+     rank) — the ~689px blank second row is gone.
+  3. **Category checkboxes on the tool/community add and edit forms**
+     (`_tool_category_checkboxes`/`_community_category_checkboxes`, both
+     called from three admin-form wrapper `<div>`s using
+     `repeat(auto-fit,minmax(150px,1fr))`) **switched to a plain
+     `display:flex;flex-wrap:wrap` row instead of an `auto-fill`/`1fr`
+     grid-strategy fix** — this is a tag list, not a grid: with only a
+     handful of categories, `auto-fit`'s `1fr` tracks stretched each
+     checkbox to fill its row, measuring ~400-410px gaps between 3
+     checkboxes at 1280px in the pre-fix version. The flex row lets each
+     checkbox size to its own label's natural width and cluster left, the
+     same as any other tag list on the site. Verified at both a sparse
+     count (3 categories: natural ~105px widths, clustered flush left, no
+     stretch) and a realistic one (18 categories: two full flex-wrapped
+     rows, still natural widths, no overflow at 1280px) — the fix holds at
+     both scales, not just the seeded-test case. The `1fr 1fr` grid on the
+     PUBLIC `/tools/submit` category picker (a different, unrelated
+     mechanism — a fixed always-2-column layout, not this sparse-`auto-fit`
+     bug shape) is untouched, and so is the `grid-column:1/-1` fallback
+     paragraph in each function's "no categories yet" branch — still
+     functional there (harmless in the new flex context, still needed for
+     the one surviving grid-based call site).
+  4. **The Original Content admin form's placeholder pair — real overflow,
+     not just a look-alike risk.** `/admin/thought-leadership/original/*`'s
+     Date label/Display order fields (`Mon YYYY, e.g. Jun 2026—optional`/
+     `Leave blank—auto-assigned`) sit on a 4-column
+     `repeat(auto-fit,minmax(190px,1fr))` grid inside the form's own
+     `max-width:900px` wrapper — 4 columns resolve to ~214.5px each.
+     Measured (not assumed) before changing anything: at that width the
+     Date label placeholder needed ~238px of text and Display order's
+     needed ~190px, both past the ~186.5px of actual room inside the
+     input's padding — genuine overflow, confirmed with a real headless
+     rendering, not merely "could overflow" per PR 28/#545's own deferral
+     note. Shortened to the exact same strings #545 used for the
+     third-party form's equivalents — `e.g. Jun 2026` / `Auto-assigned` —
+     since the help paragraph below the field already carries the fuller
+     guidance (unlike the third-party form, this page has no such
+     paragraph directly under these two fields specifically, but the
+     shortened placeholder itself no longer needs one to avoid overflowing).
+     Re-measured post-fix: both placeholders now need under 96px, clear of
+     the ~186.5px available room.
+  **Auto-fill sweep, full accounting (per this batch's own instruction to
+  report every instance, not just the two named ones)** — 7 real
+  `grid-template-columns:repeat(auto-fill,...)` declarations exist in
+  `webapp/app.py`; the rest of the `auto-fill` grep hits are prose in
+  comments, not CSS. Software's (`/tools/software`) and Communities'
+  (`/tools/communities`) own directory-listing grids, and the Resources
+  page's Benchmarking/Book-recommendation card grids, are genuine listing
+  grids with real, usually-plentiful content (matching the shape the audit
+  itself confirmed is fine for `/admin/open-source`'s card grid) — left
+  unchanged, though the Resources grids weren't independently checked
+  against a realistic sparse count (a handful of books/benchmarks) the way
+  page-index/game-settings were, so a future pass finding a sparse-row
+  version of this same bug there wouldn't be surprising. The brand-showcase
+  page's color-swatch grids (`/admin/brand`) are a large, always-fully-
+  populated fixed palette — no sparse-row risk. `/admin/open-source`'s own
+  card grid is the audit's own confirmed-fine baseline case (fixed card
+  width, no stretch). None of these were touched in this batch.
 
 
 ## Authentication & security
