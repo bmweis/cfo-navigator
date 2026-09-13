@@ -250,8 +250,8 @@ def test_cookie_indicator_has_its_own_aria_label_shape(app_env):
 def test_footnote_explains_the_column_once(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert "<strong>Cookie</strong> shows whether this feed's domain currently has a subscriber cookie configured" in html
-    assert "No cookie value is ever stored in this database" in html
+    assert "<strong>Cookie</strong> shows whether this feed's domain has a subscriber cookie set up right now" in html
+    assert "The cookie value itself is never stored in this database" in html
 
 
 def test_cookie_route_is_gone(app_env):

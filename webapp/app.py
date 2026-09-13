@@ -15511,55 +15511,60 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 
 
 # Reference content for the "How this works" block on /admin/tools/communities
-# (added after Brian noticed the Communities feature's prompts/CTAs and its
-# anonymous-tracking mechanism were scattered across build history with no
-# durable, in-app record). Static — this documents what the code does rather
-# than an editable setting, so unlike /admin/voice it's plain HTML, not
-# DB-backed. See the "Documentation" section of CLAUDE.md for the update rule:
-# any PR that changes Communities-feature copy or tracking mechanics must
-# update this block in the same PR.
+# (added after Brian noticed the Communities feature's prompts/CTAs were
+# scattered across build history with no durable, in-app record). Static —
+# this documents what the code does rather than an editable setting, so
+# unlike /admin/voice it's plain HTML, not DB-backed.
+#
+# Copy audit batch 6 (2026-09) cut this from a full mechanism/schema writeup
+# to a plain-language copy inventory — the mechanism half (cfo_visitor
+# cookie internals, community_gap_submissions/community_profile_views
+# columns, gapFormHref()/_build_communities_context()) was a near-duplicate
+# of what ARCHITECTURE.md's Communities section already documents in the
+# same developer register, just repeated at a lower altitude on a page
+# Brian actually reads three months later. This block's only job now is
+# recalling exact copy across the ~8 pages/forms that make up the feature,
+# without having to click through all of them — everything else points at
+# ARCHITECTURE.md instead of restating it. See the "Documentation" section
+# of CLAUDE.md for the update rule: any PR that changes Communities-feature
+# copy must update this block in the same PR (a tracking-mechanic change is
+# a flow change, covered by that section's rule 1 against ARCHITECTURE.md).
 _COMMUNITIES_REFERENCE_HTML = """
 <div style="display:grid;gap:20px;">
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Quiz mention</strong> (inline at the end of the subtitle paragraph, top of page): &ldquo;...Slack channels. Not sure which community's for you? Take the quiz &rarr;&rdquo;&mdash;links to the recommender. Plain inline text link, not a separate CTA block.</li>
-<li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;, the link inline in the message itself rather than pointing the visitor to a separate CTA elsewhere on the page. Its href (and the bottom-of-page gap link's href) still carries the live search/filter state plus <code>?zero=1</code>, computed client-side by <code>gapFormHref()</code>, so the gap form can tailor its transparency note (see below).</li>
+<li><strong>Quiz mention</strong> (end of the subtitle, top of page): &ldquo;...Slack channels. Not sure which community's for you? Take the quiz &rarr;&rdquo;</li>
+<li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;&mdash;goes straight to the gap form, carrying along what was searched for.</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#129305; Formal advisor to these communities.&rdquo;</li>
-<li><strong>Footer</strong> (bottom of page, no box/button chrome): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members, &ldquo;Sign in to submit &rarr;&rdquo; for everyone else (submission is member-gated, not public), directly followed by &ldquo;Can't find the right one, or the one you're in isn't quite enough? I'd love to know what's missing &rarr;&rdquo; (links to the gap form, public, no login required). The seafoam CTA card that used to carry both prompts plus a &ldquo;Suggest a community&rdquo; button was removed; these two lines used to sit together below the filters as a separate top-of-page block before moving to the footer.</li>
+<li><strong>Footer:</strong> &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members, &ldquo;Sign in to submit &rarr;&rdquo; otherwise (submitting needs an account; flagging a gap doesn't), followed by &ldquo;Can't find the right one, or the one you're in isn't quite enough? I'd love to know what's missing &rarr;&rdquo; (public, no login).</li>
 </ul>
 </section>
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Profile pages (/tools/communities/&lt;slug&gt;)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Per-profile mini-CTA:</strong> &ldquo;Not quite the right fit? Tell us why &rarr;&rdquo;&mdash;links to the gap form pre-filled with <code>closest_community_id</code>; the &ldquo;Re: [Name] wasn't quite the right fit&hellip;&rdquo; line itself renders on the gap form, not here (see below).</li>
-<li><strong>Empty-profile fallback:</strong> when a community has no <code>community_profiles</code> row, only the directory-card fields render (name, cost, region, access, sponsor, &ldquo;Visit website&rdquo; button)&mdash;no verdict/deep-profile sections.</li>
-<li><strong>Suggest-a-correction</strong> (<code>/tools/communities/correct?community_id=&lt;id&gt;</code>): &ldquo;Something here out of date? Suggest a correction &rarr;&rdquo;&mdash;a public, no-login, single free-text field ("What's incorrect or out of date?") plus optional email, distinct from the gap form's fit-feedback purpose. Requires a known <code>community_id</code> (404s otherwise, since a correction is always about one specific listing, unlike the gap form's "none in particular" option). Lands in the same <code>community_gap_submissions</code> table as gap/recommender rows, tagged <code>submission_type='correction'</code>, and is reviewed alongside them at <code>/admin/inbox/community-gaps</code>&mdash;it lands in a review queue and is never auto-applied to the listing.</li>
+<li><strong>Mini-CTA:</strong> &ldquo;Not quite the right fit? Tell us why &rarr;&rdquo;&mdash;opens the gap form, already noting which community it came from.</li>
+<li><strong>No write-up yet:</strong> just the basics show (cost, region, access, sponsor, a &ldquo;Visit website&rdquo; button)&mdash;no verdict or deep-dive sections.</li>
+<li><strong>Suggest a correction:</strong> &ldquo;Something here out of date? Suggest a correction &rarr;&rdquo;&mdash;public, no login. Goes to the same review queue as gap submissions (<a href="/admin/inbox/community-gaps">/admin/inbox/community-gaps</a>) and is never applied automatically.</li>
 </ul>
 </section>
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Gap form (/tools/communities/gap)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Always-shown heading:</strong> &ldquo;Tell us where communities fall short&rdquo; / &ldquo;Every field here is optional. We just want to know what's missing from the finance community landscape, so this directory (and maybe a future community) can actually close the gap.&rdquo;</li>
-<li><strong>Transparency note</strong> (seafoam box), built from whatever session state is detected:
-  <ul style="margin:4px 0 0;padding-left:18px;">
-    <li><em>Zero-result search:</em> &ldquo;That search came up empty. You were {search summary}. [You also {viewed profiles} before landing here.] Tell us what you were hoping to find instead, so we don't have to ask you to repeat it below.&rdquo;</li>
-    <li><em>Non-zero search and/or viewed profiles:</em> &ldquo;We noticed you {were {search summary} on the directory} and/or {viewed profiles} before landing here. We'll use that context, so feel free to skip repeating it below.&rdquo;</li>
-    <li><em>No session detected:</em> no note block at all&mdash;only the always-shown heading.</li>
-  </ul>
-</li>
-<li><strong>Per-profile-only intro</strong> (renders independently of, and alongside, the note block above when arrived via a profile's mini-CTA): &ldquo;Re: <strong>[Community Name]</strong> wasn't quite the right fit. What would have made it work, or what else should we know?&rdquo;</li>
-<li><strong>Success/confirmation page:</strong> &ldquo;Thanks, that's genuinely useful.&rdquo; / &ldquo;I read every one of these. If you left an email and there's something worth following up on, I'll be in touch.&rdquo;</li>
+<li><strong>Heading:</strong> &ldquo;Tell us where communities fall short&rdquo; / &ldquo;Every field here is optional. We just want to know what's missing from the finance community landscape, so this directory (and maybe a future community) can actually close the gap.&rdquo;</li>
+<li><strong>Context note:</strong> shown when we can tell what brought you here (a recent search, profiles you looked at)&mdash;so you don't have to repeat yourself below. Shows nothing extra when we can't tell.</li>
+<li><strong>Arriving from one community's page:</strong> adds &ldquo;Re: <strong>[Community Name]</strong> wasn't quite the right fit. What would have made it work, or what else should we know?&rdquo;</li>
+<li><strong>After submitting:</strong> &ldquo;Thanks, that's genuinely useful.&rdquo; / &ldquo;I read every one of these. If you left an email and there's something worth following up on, I'll be in touch.&rdquo;</li>
 </ul>
 </section>
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Suggest-a-community (/tools/communities/submit)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Member-gated</strong> (redirects to <code>/login</code> if signed out)&mdash;not a public form. Three required fields: community name, URL, submitter email.</li>
-<li>Confirmation email via <code>COMMUNITY_SUBMISSION_*</code> templates, admin-editable at <a href="/admin/emails">/admin/emails</a>, plus an internal notification email to Brian on each submission.</li>
+<li>Requires being signed in (bounces to login otherwise). Asks for the community's name, URL, and your email.</li>
+<li>Sends a confirmation email (editable at <a href="/admin/emails">/admin/emails</a>) and notifies you of every submission.</li>
 </ul>
 </section>
 
@@ -15567,40 +15572,32 @@ _COMMUNITIES_REFERENCE_HTML = """
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Compare view (/tools/communities/compare)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Fewer than 2 selected:</strong> &ldquo;Pick at least two communities from the directory to compare them side by side. Check the box on any card, then use the compare bar at the bottom of the page.&rdquo;</li>
-<li><strong>Cap-reached message</strong> (max 3 communities, shown inline in the sticky compare bar when a 4th selection is attempted): &ldquo;You can compare up to 3 communities at once. Remove one to add another.&rdquo;</li>
+<li><strong>At the 3-community cap:</strong> &ldquo;You can compare up to 3 communities at once. Remove one to add another.&rdquo;</li>
 </ul>
 </section>
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Matchmaker (/tools/communities/find)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li>Replaced the old 4-question quiz outright, same URL. Free-type chat: the visitor describes what they're looking for, Claude asks a small number of clarifying questions (one or two per turn), then narrows to 2&ndash;3 best-fit suggestions with links to their profile pages, drawn from a text block covering every approved community's directory listing plus its Community Profile (<code>linklib/matchmaker.py::_build_communities_context</code>)&mdash;sent as full context on every turn rather than retrieved, since the ~38-community dataset is small enough that this is cheap and simpler than a retrieval layer.</li>
-<li>Thumbs up/down per suggestion, UI-only&mdash;never persisted (no server call, no DB row), unlike FP&amp;A Buddy's <code>ask_feedback</code> table.</li>
-<li>Multi-turn, server-rebuilt history (mirroring <code>/tools/fpa-buddy</code>'s <code>conversation_id</code> pattern) capped at <code>linklib.matchmaker.MAX_FOLLOWUPS</code> turns&mdash;higher than FP&amp;A Buddy's cap, since narrowing down through clarifying questions naturally takes more turns even though each turn is individually cheaper (no retrieval, no web search).</li>
-<li><strong>Public, no login required</strong> (same as the quiz it replaces)&mdash;so unlike FP&amp;A Buddy's user-keyed dollar cap, rate limiting here keys off the anonymous <code>cfo_visitor</code> session cookie for the common signed-out case, falling back to a per-user cap only when the visitor happens to be signed in. See <code>matchmaker_questions</code> in ARCHITECTURE.md for the schema and <code>/admin/users</code>' "Matchmaker" cap fields for the admin controls.</li>
+<li>Chat that replaced the old quiz: describe what you're looking for, answer a couple of follow-up questions, get 2&ndash;3 best-fit suggestions with links to their profiles.</li>
+<li>Thumbs up/down per suggestion isn't saved anywhere&mdash;it's just there to react in the moment.</li>
+<li>Public, no login required; rate-limited per anonymous visitor unless you're signed in. Full mechanism and schema: ARCHITECTURE.md's Communities section.</li>
 </ul>
 </section>
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Auto-fill from URL (/admin/tools/communities/new and /{id}/edit)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, next to Name/URL on the Add/Edit Community form&mdash;drafts the basic directory-listing fields (demographic, reach, local markets, cost band, cost note, sponsorship, sponsor name, access, format, categories) from one Claude call grounded in a fetch of the entered URL. Distinct from the &ldquo;Generate&rdquo; button on the Community Profile edit page, which drafts the deeper qualitative fields instead.</li>
-<li><strong>Status line while running:</strong> &ldquo;Generating&hellip;&rdquo;, then either &ldquo;Drafted. Review before saving&mdash;anything marked &lsquo;Needs verification&rsquo; needs a manual check.&rdquo; or, if the page fetch failed, &ldquo;Drafted. Could not fetch the page, so verify facts before saving.&rdquo; On failure: the request's own error message, or &ldquo;Generation failed. Fill in the form by hand.&rdquo;</li>
-<li><strong>&ldquo;Needs verification&rdquo; sentinel:</strong> when the model can't confidently determine a field, it drafts the literal string &ldquo;Needs verification&rdquo; into that field rather than guessing&mdash;a selectable option on the Reach/Cost band/Sponsorship selects, or the field's literal text otherwise. Deliberately a different label from the &ldquo;Needs review&rdquo; badge below (that one is Brian's own manual sign-off on the whole Community Profile; this one is a machine-set, per-field gap on the basic listing) so the two never get confused in the same admin table.</li>
-<li><strong>&ldquo;N fields need verification&rdquo; badge</strong> on the admin communities table: a passive count, not a save blocker&mdash;a nudge toward Edit for any community still carrying the sentinel on one or more fields. The sentinel is stripped back out to blank on every public-facing page (directory, profile, compare, recommender results) before a visitor ever sees it.</li>
+<li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, on the Add/Edit Community form&mdash;drafts the basic listing fields (demographic, reach, local markets, cost band, cost note, sponsorship, sponsor name, access, format, categories) from Claude reading the community's own site. Different from &ldquo;Generate&rdquo; on the Community Profile edit page, which drafts the deeper write-up instead.</li>
+<li><strong>While running:</strong> &ldquo;Generating&hellip;&rdquo;, then &ldquo;Drafted. Review before saving&mdash;anything marked &lsquo;Needs verification&rsquo; needs a manual check.&rdquo; (or, if the page couldn't be fetched, a note saying so).</li>
+<li><strong>&ldquo;Needs verification&rdquo;:</strong> shown on any field the draft couldn't confidently fill in, instead of guessing. Different from the &ldquo;Needs review&rdquo; badge elsewhere, which is your own manual sign-off on the whole profile, not a per-field gap.</li>
+<li><strong>Table badge:</strong> &ldquo;N fields need verification&rdquo;&mdash;a nudge to go check that community's Edit page; nothing is blocked. Never shown to a visitor.</li>
 </ul>
 </section>
 
 <section style="padding-top:6px;border-top:1px solid var(--line);">
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:14px 0 8px;">How the anonymous tracking works</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong><code>cfo_visitor</code> cookie:</strong> unsigned, <code>httponly</code>, <code>samesite=lax</code>, 30-day TTL, value is <code>secrets.token_urlsafe(16)</code>&mdash;a random token with no IP, user agent, or fingerprint embedded. Set only once per visitor (never re-set on an existing cookie), so it never resets its own TTL on every page view.</li>
-<li><strong><code>community_profile_views</code> table:</strong> records <code>(session_id, community_id, viewed_at)</code>&mdash;which profile pages a session viewed, and when. Composite primary key on <code>(session_id, community_id)</code> dedups repeat views; a re-view just refreshes <code>viewed_at</code>.</li>
-<li><strong><code>community_gap_submissions</code> table:</strong> stores the free-text fields (current communities, gaps, looking-for), <code>search_context_json</code> (the search/filter state, quiz answers, or the quiz's optional weighting-step choices, at submission time), <code>viewed_community_ids_json</code> (computed server-side from <code>community_profile_views</code>, never trusted from the client), <code>closest_community_id</code>, optional email, a <code>reviewed</code> flag for admin triage, and <code>submission_type</code> (<code>'gap'</code>, <code>'recommender'</code>, <code>'weight_preferences'</code>, or <code>'correction'</code>) distinguishing gap-form submissions, logged recommender-quiz completions, a visitor's own weighting choices (logged only when they set at least one, never on a skip), and per-profile correction reports (which reuse just <code>gaps</code> for the free text and <code>closest_community_id</code> for the listing being corrected) from each other.</li>
-<li><strong>No PII is collected</strong>&mdash;nothing reads or stores IP address, user agent, or <code>X-Forwarded-For</code>. The only header touched is <code>x-forwarded-proto</code>, used once to set the cookie's <code>secure</code> flag, never persisted.</li>
-<li><strong>Retention:</strong> everything is kept indefinitely, no automatic deletion&mdash;documented publicly at <a href="/privacy">/privacy</a>.</li>
-<li><strong>Admin visibility:</strong> submissions are triaged at <a href="/admin/inbox/community-gaps">/admin/inbox/community-gaps</a>, mirroring the <code>/admin/fpa-buddy/feedback</code> layout, and feed a badge in the CFO Toolbox admin nav group via <code>community_gap_counts()</code>.</li>
-</ul>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:14px 0 8px;">Anonymous tracking</h3>
+<p style="margin:0;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">Visitors who aren't signed in are tracked with an anonymous cookie (no name, email, IP, or device info) so the gap form and the matchmaker's rate limiting work without requiring a login. It remembers which profile pages a session viewed and any gap-form/correction submissions, kept indefinitely&mdash;see <a href="/privacy">/privacy</a> for what's disclosed publicly. Submissions are triaged at <a href="/admin/inbox/community-gaps">/admin/inbox/community-gaps</a>. Full schema: ARCHITECTURE.md's Communities section.</p>
 </section>
 </div>
 """
@@ -25363,7 +25360,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <p style="color:var(--muted);margin:8px 0 6px;">The RSS subscriptions behind the Reader's Feed view. This same list is the domain allowlist FP&amp;A Buddy's web search is restricted to, so a source added here becomes citable there too. Changes take effect on the next page load.</p>
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
-<li><strong>Cookie</strong> shows whether this feed's domain currently has a subscriber cookie configured&mdash;computed live from the host environment, not something you set here. Each domain's cookie lives in its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable, and <code>extract.fetch_page</code> applies it automatically wherever the domain matches (see <code>RUNBOOK.md</code> &sect;5 for finding and setting one). <strong>No cookie value is ever stored in this database</strong>&mdash;only the domain names checked are baked into the code.</li>
+<li><strong>Cookie</strong> shows whether this feed's domain has a subscriber cookie set up right now. Each domain gets its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable in Railway; set one there and it's picked up automatically the next time that feed is fetched. <strong>The cookie value itself is never stored in this database</strong>&mdash;only which domains to check is baked into the code. See <code>RUNBOOK.md</code> &sect;5 to refresh an expired one.</li>
 <li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
 </ul>
 {banner}{error_banner}
@@ -25922,13 +25919,13 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
 </div>"""
 
     section2_html = f"""{_section_header(f"Tagging style{state_badge}")}
-<p style="color:var(--muted);margin:-6px 0 6px;">Auto-tagging already reuses your vocabulary. This goes further—it studies <strong>how</strong> you tagged your {n_tags} tags:</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Auto-tagging already reuses your existing vocabulary. This studies <strong>how</strong> you tagged your {n_tags} tags:</p>
 <ul style="color:var(--muted);margin:0 0 8px;padding-left:20px;">
 <li>What each tag means.</li>
 <li>How granular you go.</li>
 <li>What you leave untagged.</li>
 </ul>
-<p style="color:var(--muted);margin:0 0 6px;">From that, it distills soft rules injected into enrichment, so new tags match your judgment.</p>
+<p style="color:var(--muted);margin:0 0 6px;">From that, it writes a guide that steers future tagging toward your judgment, not just your existing words.</p>
 <p style="color:var(--muted);margin:0 0 18px;">Review and edit anything below&mdash;your edits are what the tagger follows.</p>
 {style_notice}
 

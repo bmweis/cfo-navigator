@@ -8222,15 +8222,18 @@ docs honest, **in the same PR as the change** (never a follow-up):
 4. **The Communities feature reference** — a collapsible "How this works"
    block at the top of `/admin/tools/communities` (`_COMMUNITIES_REFERENCE_HTML`
    in `webapp/app.py`) documents every user-facing prompt/CTA/copy block
-   across the Communities feature plus how the `cfo_visitor` anonymous
-   tracking mechanism works. It's static reference content, not a DB-backed
-   editable field, same reasoning as why BRAND.md §9 stays hand-edited prose.
-   **Any PR that changes Communities-feature copy** (new CTA wording, new
-   form states) **or tracking mechanics** (new cookie fields, new tables,
-   retention changes) **must update this block in the same PR** — this is
-   the same discipline as rules 1-3 above, so a forgotten prompt or a
-   drifted tracking description doesn't become the next thing this rule set
-   has to fix retroactively.
+   across the Communities feature, in plain language, for Brian's own recall.
+   It's static reference content, not a DB-backed editable field, same
+   reasoning as why BRAND.md §9 stays hand-edited prose. **Any PR that
+   changes Communities-feature copy** (new CTA wording, new form states)
+   **must update this block in the same PR** — the same discipline as rules
+   1-3 above, so a forgotten prompt doesn't become the next thing this rule
+   set has to fix retroactively. (Copy audit batch 6, 2026-09, narrowed this
+   block's scope to copy only — the tracking-mechanism/schema half it used
+   to also carry was a near-duplicate of ARCHITECTURE.md's own Communities
+   section, so that half was cut in favor of a pointer there; a
+   tracking-mechanics change is a flow change, already covered by rule 1's
+   "alters a flow documented in ARCHITECTURE.md," not this rule.)
 5. **The scripts registry** — `/admin/system/scripts` (`_SCRIPT_REGISTRY` in
    `webapp/app.py`, Phase N) is a static, hand-maintained inventory of every
    still-relevant script in `scripts/`: purpose, cadence, required env vars, and
