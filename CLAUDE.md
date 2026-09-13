@@ -7597,6 +7597,97 @@ it supersedes the old "`/save` is token-gated" note.
   (`admin-sticky-col-2`) — the precedent 280px is drawn from — was also
   switched to read `min-width:{_COL_WIDTH_NAME}px` from the same constant,
   since it's the origin case, not an exception.
+- **Layout fix batch 1, PR 28 (2026-09) — a real CSS scoping bug that
+  silently hid a collapsed child group's badge, plus a mobile truncation
+  bug on the Communities forms that hid real saved data on a phone.**
+  Findings from `docs/LAYOUT_AUDIT_TRIAGE.md` (PR 544), fixed in order of
+  how much information they cost.
+  1. **`.admin-group[open] .group-badge{display:none;}` was a descendant
+     selector, not a child selector** — it matched every `.group-badge`
+     nested anywhere under an open `.admin-group`, not just that group's
+     own summary. Since CFO Toolbox nests Software/Community/FP&A Buddy/
+     Reader as sub-groups that stay individually collapsed, opening CFO
+     Toolbox hid every one of those still-collapsed children's own badges
+     too — the exact "a real pending item silently disappears" failure the
+     whole collapsed-badge mechanism (see the 2026-09 "Admin menu
+     default-state" bullet above) exists to prevent. Fixed by scoping to
+     `> summary`: a child combinator that can only ever reach the group's
+     own `<summary>`, never a nested sub-group's own (which lives in the
+     sibling `<div>` after `<summary>`, not inside it). Verified the
+     aggregation itself was never broken — every nested sub-group
+     (`software_subgroup_html`, `communities_subgroup_html`, etc.) already
+     computed its own `_group_badge` over its own `badge_hrefs`, so fixing
+     the CSS didn't need a second fix to restore per-child counts.
+  2. **`DOT_ONLY_HREFS` retired — the admin page always shows a real count
+     now, even for an "all-or-none" source (Contact submissions, Toolbox
+     intros).** Confirmed by inventory before changing anything: the
+     mechanism was consumed in exactly two places, both admin-page-only
+     (`webapp.app._badge_for_href`/`_group_badge`, used only by
+     `admin_page()`'s card and group-aggregate rendering) — it never
+     touched the top nav bar's own dot (`.task-dot`,
+     `_has_open_admin_tasks()`), which was already a pure "is anything
+     pending at all" boolean unrelated to DOT_ONLY_HREFS, so Brian's
+     "nav bar: dot only, admin page: always show counts" split was already
+     true for the nav bar and only needed fixing on the admin page.
+     `_task_badge_dot()`/`.task-badge-dot` are deleted as genuinely dead
+     code once nothing calls them. The dedup-safe counting rule (one
+     `COUNT(DISTINCT id)` per entity, conditions OR'd, from the "Badge
+     dedup safety" bullet above) is untouched — `_group_badge` still just
+     sums whatever `webapp.tasks.open_task_counts()` already computed
+     per href, it never re-derives a count of its own.
+  3. **Mobile truncation on the Communities forms — real saved data,
+     unreadable at 390px without clicking into the field.** Two hardcoded
+     `grid-template-columns:1fr 1fr` grids (the Reach/Demographic pair in
+     `_community_form_fields_parts`'s `details_html`, and the 10-field
+     "Quick facts" block in `_community_profile_form_fields`) squeezed
+     each column to ~170px at phone width — enough to truncate a real
+     value like "VPs and directors in SaaS finance" to "VPs and
+     directors." Fixed by switching both to
+     `repeat(auto-fit,minmax(200px,1fr))`, the exact responsive pattern
+     already used two sections lower in the same function (the Cost/
+     Sponsor sub-columns) — not a new pattern. Both fragments are shared
+     by all three call sites that render a community's Reach/Demographic
+     or Quick facts fields: `/admin/tools/communities/new`, the public
+     `/tools/communities/{slug}/edit` (both via
+     `_community_form_fields_parts`), and
+     `/admin/tools/communities/{community_id}/profile` (via
+     `_community_profile_form_fields`) — fixing the two shared functions
+     once fixed all three, confirmed by rendering each route directly
+     rather than assumed from the shared-function relationship alone.
+     Deliberately untouched: `stage_focus`/`jobs_program`/
+     `team_or_individual`'s own collected-but-never-publicly-rendered
+     status (see the "Surface Hidden Community Profile Fields" bullet
+     above for two of these three, and the standing note that
+     `team_or_individual` is still unaddressed) — this PR is layout only,
+     not a content-scope change.
+  4. **Three copy-length fixes, approved before shipping** (per the
+     standing em-dash/new-copy review discipline): the third-party content
+     admin form's (`/admin/thought-leadership/third-party/new` and its edit
+     twin) Title/Date label/Display order placeholders were shortened from
+     full explanatory sentences to bare examples (`e.g. "Cash Cycle Demo
+     Day—Co-Chair"`, `e.g. Jun 2026`, `Auto-assigned`) — the fuller
+     guidance already lives in the help paragraph directly below the
+     fields, so the placeholder no longer has to double as documentation.
+     The visually similar Original Content admin form (`_oc_form_fields`,
+     a different page — `/admin/thought-leadership/original/*`) has a
+     `Mon YYYY, e.g. Jun 2026—optional`/`Leave blank—auto-assigned` pair
+     with the same shape but sits inside its own responsive
+     `repeat(auto-fit,minmax(190px,1fr))` grid, not a fixed `1fr 1fr` —
+     out of this PR's named scope, flagged rather than silently swept in.
+     `/admin/system/ai`'s enrichment-model `<select>` used to render each
+     option as `{label}—{the long "enrich" blurb}` (e.g. "Opus 5—Deepest
+     summaries. The one to standardize the archi…"), which truncated
+     mid-word inside the select's own `max-width:520px` — a `<select>`
+     can't be widened past its container the way a paragraph can. Fixed by
+     switching option text to the short qualifier every other picker on
+     the site already uses (`{label}—{the "short" blurb}`, e.g. "Opus
+     5—Best quality"), and moving the fuller per-model "enrich" description
+     to a new `<p id="model-select-desc">` beside the dropdown, updated
+     live via JS (`saveModel()` reads the selected `<option>`'s own
+     `data-desc` attribute) as a different model is picked. No new
+     sentences were written for this one — both texts already existed in
+     `linklib.models._REGISTRY`, just re-arranged onto two surfaces
+     instead of one.
 
 
 ## Authentication & security

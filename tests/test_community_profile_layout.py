@@ -140,17 +140,27 @@ def test_narrative_fields_are_textareas_not_in_the_paired_grid(html):
         assert f'<textarea id="cp-{field}"' in html
 
 
+_SHORT_GRID_SELECTOR = "grid-template-columns:repeat(auto-fit,minmax(200px,1fr))"
+
+
 def test_short_factual_fields_are_paired_inputs_inside_one_grid(html):
     """All 10 short/categorical fields (Founded year included) now live in
-    one shared 2-column grid, not split across two separate grids with
-    Founded year standalone outside either (the pre-layout-pass shape)."""
-    grid_start = html.index('grid-template-columns:1fr 1fr')
+    one shared responsive grid, not split across two separate grids with
+    Founded year standalone outside either (the pre-layout-pass shape).
+
+    PR 28 (2026-09) switched this grid from a hardcoded `1fr 1fr` (which
+    truncated real saved values on a phone-width viewport — two ~170px
+    columns can't fit a value like "VPs and directors in SaaS finance") to
+    `repeat(auto-fit,minmax(200px,1fr))`, the same responsive pattern
+    already used two sections lower on this same page — so this still finds
+    exactly one grid, just via the new selector."""
+    grid_start = html.index(_SHORT_GRID_SELECTOR)
     grid_end = html.index("</div>", html.rindex(f'name="{SHORT_GRID_FIELDS[-1]}"'))
     for field in SHORT_GRID_FIELDS:
         idx = html.index(f'name="{field}"')
         assert grid_start < idx < grid_end, f"{field} should be inside the paired grid"
     # Only one such grid on the page (the old layout had two).
-    assert html.count("grid-template-columns:1fr 1fr") == 1
+    assert html.count(_SHORT_GRID_SELECTOR) == 1
 
 
 def test_resources_included_is_full_width_textarea_not_in_grid(html):
@@ -158,7 +168,7 @@ def test_resources_included_is_full_width_textarea_not_in_grid(html):
     it stays a full-width textarea (Quick facts' intro field) rather than
     being squeezed into the paired grid alongside truly short fields."""
     assert '<textarea id="cp-resources_included"' in html
-    grid_start = html.index('grid-template-columns:1fr 1fr')
+    grid_start = html.index(_SHORT_GRID_SELECTOR)
     resources_idx = html.index('name="resources_included"')
     assert resources_idx < grid_start
 
