@@ -620,6 +620,87 @@ is drawn from) now reads its width from the same constant too
 `min-width` to stay pinned correctly) — it was the origin case for 280px,
 not a further exception.
 
+### Card widths
+
+**Cards keep their width; containers distribute them** (Brian's own
+framing, PR 33, 2026-09). A card stretching wider on a sparse row than on a
+full one is the specific thing that reads wrong — not a card family
+existing at more than one width across the site, but the SAME family
+rendering at a different width depending on how many other cards happen to
+share its row.
+
+The mechanism is always the same one-word fix: **`auto-fill`, never
+`auto-fit`**, on a `grid-template-columns:repeat(_, minmax(_,1fr))`
+listing grid. `auto-fill` reserves whatever phantom tracks a row can't
+populate, so a card renders at the same width whether its row has 1 real
+item or 20; `auto-fit` collapses those phantom tracks and lets the leftover
+space stretch the populated cards instead — the exact bug shape.
+
+| Constant | Width | Card family |
+|---|---|---|
+| `_CARD_WIDTH_DIRECTORY_MIN` | 320px | Software + Communities directory cards (`.tool-card`/`.comm-card`) — already identical by coincidence before this pass; now a shared constant on purpose |
+| `_CARD_WIDTH_RESOURCE_MIN` | 260px | Benchmarking + Books cards (`.bench-card`, both sections — there is no separate `.book-card` class) |
+
+Both were already `auto-fill` and already correct (measured live: a lone
+card stays at its natural width, 401px/297.5px at 1280px, with visible
+blank track space to its right rather than stretching) — the fix here was
+extracting the duplicated literal into one named constant per family, the
+same "stop two call sites from drifting apart by accident" reasoning as
+the table floors and column widths above, not a behavior change.
+
+**Two real bugs, found and fixed in the same pass**, both `auto-fit` with
+a fixed low item count:
+
+- **The Original Content flagship cards** (`.tl-featured`/`.tl-card`,
+  shared verbatim by `/` and `/thought-leadership` via `_tl_fcard()`) —
+  always exactly 3 cards. On `/thought-leadership`'s full-width column
+  (where 5 tracks fit at the 220px floor), a lone populated card stretched
+  to **1252px** — the full container width. Switched to `auto-fill`;
+  verified live before and after (1252px → 235px for the same single-card
+  case, matching the 3-card populated width exactly).
+- **`/admin/system/page-index`'s two stat tiles** (Pages, Flagged) — `auto-
+  fit` was chosen in PR 29 specifically to kill phantom tracks on a
+  *different* page (game-settings' sparse field grid); applied here it
+  stretched two numbers to 611px each with an enormous gap between them,
+  which reads as two numbers with acres of dead space, not a metrics
+  strip. Switched to `auto-fill`; the two tiles now sit at their natural
+  160px floor, left-aligned.
+
+**Deliberately out of scope, and why — so a future pass doesn't
+"standardize" these for consistency's sake and reintroduce the exact
+complexity this rule exists to prevent:**
+
+- **Toolbox landing tiles** (`/tools`, the 2×2 `.toolbox-grid`) — a fixed
+  `1fr`→`1fr 1fr` grid with always exactly 4 tiles. Item count matches
+  grid shape exactly; there is no sparse case for `auto-fill`/`auto-fit`
+  to matter for.
+- **Admin hub group cards** (`.admin-cols`, top-level and nested) — a
+  fixed `1fr`→`1fr 1fr` grid of always-6 top-level groups, and a
+  single-column `display:grid;gap:14px` list for nested items with no
+  `grid-template-columns` at all. These are `<details>` accordion
+  sections, not a multi-card row grid — catalog size only changes a
+  badge number, never the layout. Not the pattern this rule addresses.
+- **Homepage sidebar panel and Recent highlights** — the Toolbox panel is
+  a single fixed-360px card (nothing to distribute); Recent highlights is
+  a fixed `1fr`→`1fr 1fr` grid sized to at most 4 thought-leadership
+  types, and collapses entirely (not a stretched empty grid) when there's
+  nothing to show.
+
+**On the PR #533 `line-clamp`+`min-height` height treatment**: investigated
+whether it should extend from Resources to the Software/Communities
+directory cards, since both already had `line-clamp` but seemingly no
+matching floor. Live measurement showed this was already solved by a
+different, earlier mechanism — `.tool-name`/`.comm-name` (title,
+clamp-2 + `min-height:44px`), `.tool-desc`/`.comm-demo` (description,
+clamp-3 + `min-height:63px`), `.comm-meta` (clamp-2 + `min-height:39px`),
+and `.tool-cats`/`.comm-cats` (the category-tag row, `min-height:24px`) —
+a per-element floor on every variable-length piece, rather than one
+whole-card floor. A card with 6 category tags and a long description
+measured identically (320.86px) to a card with 1 tag and a two-word
+description, in the same row and in a different row alike. Adding a
+redundant whole-card `min-height` on top would be complexity with no bug
+left to fix — left as-is.
+
 ### Editorial content system — Atlantic pattern
 
 A long-form register for pages Brian wants to read like a considered piece rather

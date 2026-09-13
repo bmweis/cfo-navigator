@@ -1643,6 +1643,30 @@ _COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
 _COL_WIDTH_STATUS = 110       # A short status/state badge or label
 _COL_WIDTH_COUNT = 80         # A small count/number column
 
+# Card-listing width floors (PR 33, 2026-09) — "cards keep their width;
+# containers distribute them." A card stretching wider on a sparse row than
+# on a full one reads wrong (Brian's own framing) — the fix is always
+# `auto-fill`, never `auto-fit`: `auto-fill` reserves whatever phantom
+# tracks a row can't fill, so a populated card stays at the same width
+# whether its row has 1 real card or 20; `auto-fit` collapses those phantom
+# tracks and stretches the populated ones to fill the leftover space, which
+# is the actual bug shape (see the flagship-card note below). These two
+# constants replace duplicated `minmax(320px,1fr)`/`minmax(260px,1fr)`
+# literals that had already drifted to matching values in two/three call
+# sites apiece without anything enforcing it — extracted here specifically
+# so Software/Communities directory cards (already identical by
+# coincidence) and Resources' Benchmarking/Books cards (already identical,
+# same class even) stay that way on purpose. See BRAND.md §5 ("Card
+# widths") for the full write-up, including the families that were
+# investigated and deliberately left OUT of this standard (Toolbox landing
+# tiles, Admin hub group cards, Homepage sidebar/highlights) because their
+# item counts are fixed and always exactly match their grid shape — there
+# is no sparse case for `auto-fill`/`auto-fit` to matter for, so forcing
+# them onto named constants here would just be complexity with no bug to
+# prevent.
+_CARD_WIDTH_DIRECTORY_MIN = 320   # Software + Communities directory cards
+_CARD_WIDTH_RESOURCE_MIN = 260    # Benchmarking + Books cards
+
 # Trailing brand suffixes baked into individual page titles over time — now
 # redundant since _page() prepends a consistent "BMW CFO ·" tab-title prefix
 # instead. Stripped so a tab reads e.g. "BMW CFO · Archive" instead of the
@@ -7063,7 +7087,7 @@ Not sure which tool's for you? {(
 
 <div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
+<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax({_CARD_WIDTH_DIRECTORY_MIN}px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="tool-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -8843,7 +8867,7 @@ def tools_resources(request: Request):
     book_cards = "".join(_book_card(b) for b in books)
     books_section = f"""<h2 style="margin:32px 0 4px;">Book recommendations</h2>
 <p style="color:var(--muted);font-size:14px;margin:0 0 16px;">A personal reading list&mdash;not benchmarking data.</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax({_CARD_WIDTH_RESOURCE_MIN}px,1fr));gap:14px;">
   {book_cards or '<p style="color:var(--muted);font-size:14px;">Coming soon.</p>'}
 </div>"""
 
@@ -8858,7 +8882,7 @@ def tools_resources(request: Request):
 <h2 style="margin:0 0 4px;">Benchmarking</h2>
 <p style="color:var(--muted);font-size:14px;margin:0 0 12px;">The benchmarking sources I actually use.</p>
 <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a>&mdash;it&rsquo;s not always what you think it is.</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax({_CARD_WIDTH_RESOURCE_MIN}px,1fr));gap:14px;">
   {bench_cards}
 </div>
 {books_section}
@@ -9019,7 +9043,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 
 <div id="comm-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;">
+<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax({_CARD_WIDTH_DIRECTORY_MIN}px,1fr));gap:14px;align-items:stretch;">
 </div>
 
 <div id="comm-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
@@ -14324,8 +14348,18 @@ def _original_content_article_body(row: dict) -> str:
 # Flagship-card CSS (.tl-featured/.tl-card*) — shared by /thought-leadership's
 # featured row and the homepage's flagship cards, same as their content
 # (_TL_FEATURED_CARDS above via _tl_fcard()).
+#
+# `auto-fit` -> `auto-fill` (PR 33, 2026-09) — this is a fixed count of
+# exactly 3 cards (_TL_FEATURED_CARDS), so on any container wide enough to
+# fit 4+ tracks at the 220px floor (the homepage's narrower two-column
+# layout can't, but /thought-leadership's full-width column can, at
+# ~5 tracks), `auto-fit` collapsed the unused tracks and stretched the 3
+# real cards to fill the whole row — measured at a worst case of 1252px
+# for a single populated card. `auto-fill` leaves the phantom tracks
+# empty instead, so a card never renders wider than its populated peers
+# regardless of how much row is left over. See BRAND.md §5 ("Card widths").
 _TL_SHARED_CSS = (
-    '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
+    '.tl-featured{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
     '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'
     'border-radius:14px;padding:22px 22px 18px;text-decoration:none;transition:border-color .15s,box-shadow .15s,transform .15s;}'
     '.tl-card:hover{border-color:var(--navy-light);box-shadow:0 6px 20px rgba(0,41,117,.08);transform:translateY(-2px);text-decoration:none;}'
@@ -23695,7 +23729,14 @@ def admin_system_page_index(request: Request):
 <h1>Page index</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every page on the site and which width tier it renders at&mdash;so a page that never got one doesn't go unnoticed. Skips things that aren't really pages (redirects, JSON/AJAX endpoints, file downloads). Two tiers: <strong>Standard</strong> (1300px&mdash;most pages) and <strong>Form</strong> (640px&mdash;single-column forms). See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for more.</p>
 
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
+<!-- `auto-fit` -> `auto-fill` (PR 33, 2026-09): this is only ever 2 tiles
+     (Pages, Flagged) — `auto-fit` was picked in PR 29 specifically to kill
+     phantom tracks elsewhere, but here it stretched both tiles to 611px
+     each at 1280px, all the leftover row space going into font-size-13px
+     numbers with an enormous gap between them. `auto-fill` leaves the
+     phantom tracks empty instead, so the two tiles sit at their natural
+     160px floor, left-aligned, the way a two-stat strip should read. -->
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
 {stat_cards}
 </div>
 {summary}

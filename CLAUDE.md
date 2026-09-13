@@ -7990,6 +7990,72 @@ it supersedes the old "`/save` is token-gated" note.
   discarding one row's form, not the browser's column-width algorithm —
   the actual fix (two deleted `<form>` tags plus one new overflow-gated
   hint) is smaller than any of the three candidates the brief proposed.
+- **Card width standardization (PR 33, 2026-09) — "cards keep their width;
+  containers distribute them," the same rule-based-constant precedent as
+  the admin table floors/column widths, applied to every card-listing
+  family sitewide.** Investigated-then-proposed, same shape as those two —
+  a full inventory of every card family (grep sweep for every `repeat(auto-
+  fi*...)` grid, plus every family the brief named by hand) measured live
+  via Playwright at 1280px/1920px and at both a sparse and a realistic item
+  count, before any code changed. Two named constants
+  (`_CARD_WIDTH_DIRECTORY_MIN`=320, `_CARD_WIDTH_RESOURCE_MIN`=260) replace
+  duplicated literals that had already drifted to matching values by
+  coincidence: Software's and Communities' directory cards (`.tool-card`/
+  `.comm-card`) measured byte-identical (401.3px/408px) before this PR,
+  confirming they could share one constant at zero cost; Resources'
+  Benchmarking and Books cards already share one literal CSS class
+  (`.bench-card` — there is no separate `.book-card`). Both families were
+  already `auto-fill`, already correct, no stretch either way — the fix
+  here is purely "stop two call sites from drifting apart by accident,"
+  not a behavior change.
+  **Two real bugs found by the same inventory, both `auto-fit` with a
+  fixed low item count — the exact shape that stretches a sparse row's
+  populated cards to fill the leftover space instead of leaving it
+  blank**: (1) the Original Content flagship cards (`.tl-featured`/
+  `.tl-card`, shared verbatim by `/` and `/thought-leadership`) — always
+  exactly 3 cards; on `/thought-leadership`'s full-width column (where 5
+  tracks fit at the 220px floor), a lone populated card measured **1252px**
+  wide, the full container — worse than either of us had on the list going
+  in. (2) `/admin/system/page-index`'s two stat tiles (Pages, Flagged) —
+  `auto-fit` was chosen in PR 29 to kill phantom tracks on a *different*
+  page (game-settings' sparse field grid) and got applied here too; two
+  numbers stretched to 611px each read as "two numbers with enormous gaps,"
+  not a metrics strip, per Brian's own call overriding the initial
+  recommendation to leave it alone as a possibly-intentional KPI-strip
+  exception. Both switched `auto-fit`→`auto-fill`; verified live before and
+  after (flagship: 1252px→235px for the same single-card case, matching
+  the 3-card populated width exactly; page-index: 611px→167px, left-aligned
+  at its natural floor).
+  **A live correction caught mid-implementation, flagged rather than
+  silently applied**: the original proposal claimed Software/Communities
+  directory cards had `-webkit-line-clamp` but no matching `min-height`
+  floor (the PR #533 Resources treatment) and needed the same fix — Brian
+  approved it as part of the batch. Building it, a live Playwright
+  measurement (a 6-category/long-description card vs. a 1-category/short-
+  description card, same row and different rows) showed both rendering at
+  an identical 320.86px — already solved, just via a different, earlier
+  mechanism: `.tool-name`/`.comm-name` (clamp-2 + `min-height:44px`),
+  `.tool-desc`/`.comm-demo` (clamp-3 + `min-height:63px`), `.comm-meta`
+  (clamp-2 + `min-height:39px`), and `.tool-cats`/`.comm-cats`
+  (`min-height:24px` on the tag row) — a per-element floor on every
+  variable-length piece rather than one whole-card floor, confirmed by a
+  comment on `.comm-name` itself stating it was built to match the
+  Software directory's own earlier fix. Skipped rather than added
+  redundantly — no bug was left to fix, and a second, unneeded floor is
+  exactly the complexity this whole pass exists to avoid.
+  **Deliberately out of scope, with reasons documented in BRAND.md §5 so a
+  future pass doesn't "standardize" them for consistency's sake and
+  reintroduce the complexity this rule is meant to prevent**: Toolbox
+  landing tiles (`/tools`, always exactly 4, fixed `1fr`/`1fr 1fr` grid),
+  Admin hub group cards (`.admin-cols`, always exactly 6 top-level groups,
+  plus a single-column nested-item list with no `grid-template-columns` at
+  all — these are `<details>` accordion sections, not a multi-card row
+  grid), and the Homepage sidebar panel (a single fixed-360px card) +
+  Recent highlights (a fixed 2-column grid of at most 4 thought-leadership
+  types, which collapses entirely rather than stretching when empty). None
+  of these has a sparse-vs-full-row case for `auto-fill`/`auto-fit` to
+  matter for — their item counts always exactly match their grid shape.
+  See BRAND.md §5's new "Card widths" section for the full write-up.
 
 
 ## Authentication & security
