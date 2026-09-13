@@ -7856,6 +7856,58 @@ it supersedes the old "`/save` is token-gated" note.
   `hub_nav_orphans()` all confirmed clean; the full suite (3,000 tests)
   passes unmodified — none of these five findings had any prior test
   coverage to update.
+- **Layout fix batch 4, PR 31 (2026-09) — `/admin/fpa-buddy/report` joins
+  `.admin-table-responsive`, closing the layout audit's fix phase.** The
+  table already had `overflow-x:auto` + a hardcoded `min-width:760px` (from
+  an earlier pass, not this arc), so the audit's "no responsive treatment
+  at all" framing didn't fully hold — checked directly rather than taken on
+  faith, per this batch's own grep-sweep instruction. What was real: the
+  page never overflowed horizontally (`body.scrollWidth` always equalled
+  the viewport), but *within* that scrollable 760px table, Date/Asker/
+  Settings/Cost ate most of the width before Question ever got a share —
+  measured live at 390px: Question column 103.9px, Settings 204.2px
+  (matching the audit's own "~95px"/"~198px" almost exactly), and row
+  heights of 38.4px/81.3px/273.8px depending purely on how unevenly that
+  squeeze forced Question to wrap. Fixed with the same
+  `.admin-table-responsive` card-stacking treatment Software/Communities/
+  Users already use, not the scroll pattern — this is a Q&A report where
+  each row (question/asker/when/cost/settings) is a self-contained record,
+  not a table where reading across many rows at once matters, so stacking
+  labeled fields (`data-label` + the shared `::before` pseudo, mirroring
+  Software's simpler variant — no sticky column, no column picker, since
+  this page has neither a bulk-select nor an optional-column concept to
+  begin with) lets Question render at the card's full width instead of
+  fighting four other columns for a narrow slice. Verified at 390px
+  post-fix: `container.scrollWidth` now equals its width exactly (no
+  horizontal scroll needed at all), and row heights are all in the
+  ~290-335px range — no longer swinging between 38px and 274px purely from
+  wrap unevenness. Floor dropped from the bespoke 760 to
+  `_TABLE_FLOOR_MEDIUM` (640, the documented 4-5-column bucket — Date,
+  Asker, Question, Settings, Cost) — safe, since a table's real content
+  still grows past a smaller declared min-width when it needs to; the
+  floor only guards the narrow strip just below where cards take over.
+  Confirmed at 1280px/1920px the table renders unchanged (Question column
+  actually measured marginally wider — 466.8px/486.8px vs the pre-fix
+  466.3px/486.3px, a rounding-level difference from float-formatted cost
+  text, not a real layout change) — desktop was never the problem and
+  isn't touched by the fix. **One thing this batch's own measurement pass
+  surfaced and deliberately left alone, since it's a pre-existing browser
+  auto-table-layout quirk, not something this fix introduced or made
+  worse**: at intermediate widths between the 700px card breakpoint and
+  roughly 1000px, the Question column stays pinned at ~104px regardless of
+  how much extra room the viewport actually has, then jumps sharply wider
+  above ~1000px — reproduced identically against the pre-fix code at the
+  same widths, so it's an inherent characteristic of this un-fixed-layout
+  table's width-distribution algorithm (Date/Asker's own suggested `width`
+  attributes apparently claim available space ahead of Question in that
+  range), not a regression. Out of scope for a card-stacking fix — a real
+  fix would mean `table-layout:fixed` with percentage widths, a bigger
+  change than this batch's remit. **This closes the layout audit's fix
+  phase** (`docs/LAYOUT_AUDIT_TRIAGE.md`, PRs 28-31) — no further findings
+  from that audit remain unaddressed. `brand_check.findings()`,
+  `coral_moment_problems()`, `hub_nav_orphans()`, and
+  `/admin/system/page-index` all confirmed clean; the full suite
+  (3,000 tests) passes unmodified — no test pinned the table's old markup.
 
 
 ## Authentication & security
