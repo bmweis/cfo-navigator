@@ -7780,6 +7780,83 @@ it supersedes the old "`/save` is token-gated" note.
   card grid is the audit's own confirmed-fine baseline case (fixed card
   width, no stretch). None of these were touched in this batch.
 
+- **Layout fix batch 3, PR 30 (2026-09) — mobile wrap-grouping (three
+  findings) and centering a narrower column inside a wider, otherwise-empty
+  container (two findings).** Continues the same layout-audit-triage arc as
+  batches 1 and 2 above.
+  1. **Profile action row's stranded divider, both entity types.**
+     `/tools/software/{slug}` and `/tools/communities/{slug}`'s Visit →
+     Compare → [divider] → Edit action row (`.tp-hero-actions{display:flex;
+     flex-wrap:wrap;gap:10px}`) had the divider (`.tp-admin-divider`, no
+     `flex-basis` of its own) as a separate flex item from Edit — at 390px,
+     Visit + Compare alone left too little room for the divider AND Edit as
+     two independent items, so Edit wrapped alone while the divider was
+     left stranded at the end of the first line with nothing beside it.
+     Fixed by pairing, not hiding: the divider and Edit are now wrapped in
+     one `<span style="display:inline-flex;...">` so they're a single flex
+     item that always wraps as a unit — the divider can never land alone.
+     Same fix, same markup shape, on both pages (they share identical
+     `.tp-hero-actions`/`.tp-admin-divider`/`.tp-admin-btn` CSS).
+  2. **FP&A Buddy feedback page, two defects at 390px.**
+     `/admin/fpa-buddy/feedback`: (a) the filter form's "Reviewed:" label
+     and its `<select>` rendered on different lines — each label/select
+     pair is now wrapped in its own `<span>` so a pair can never split
+     across a wrap point, only the whole form can wrap between pairs.
+     (b) The "View in ask report →" / "Mark reviewed" action pair
+     (previously `<a style="margin-left:auto">` immediately followed by
+     the reviewed-action form) rendered differently depending on the
+     preceding rating badge's text length — stacked/misaligned after a
+     long badge ("Inaccurate"), side by side after a short one ("Helpful").
+     Fixed by wrapping the pair in its own `flex-basis:100%` span
+     (`justify-content:flex-end`), which forces it onto its own row
+     unconditionally — it now wraps the same way regardless of what
+     precedes it, verified against both a long-badge and a short-badge
+     card.
+  3. **Uncarded failure-reason pill row.**
+     `/admin/reader/backfill-content`'s failure-reason pills (e.g. "1 Bot
+     challenge") rendered as bare markup with no card border/background/
+     heading, sandwiched between the bordered, headed Purge and Recent
+     attempts cards. Wrapped in the same `background:var(--surface);
+     border:1px solid var(--line);border-radius:14px` treatment with a
+     "Failure reasons" heading, matching its neighbors. The adjacent
+     domain-clustering banner directly below it was checked and did NOT
+     need the same fix — it already had its own card treatment (an amber
+     alert box, matching this page's other banner conventions) — only its
+     top margin was harmonized (14px → 20px) so the two sit in the same
+     visual rhythm now that the pill row above it is a full card too.
+  4. **`/play` pregame setup, left-anchored inside a much wider container.**
+     `#sdrIntro`/`.sdr-pregame` are capped at `max-width:720px` but had no
+     centering of their own, so at 1920px (root ~1252px wide) they sat
+     flush left with ~532px of dead space to their right. Added
+     `margin:0 auto` to both. Both are hidden outright (`display:none`) the
+     instant play starts, so this has zero effect on the in-game canvas,
+     which fills `#sdrStage` separately — confirmed live: the game still
+     starts and plays correctly after the change.
+  5. **`/read/{article_id}` when the article has no `<h2>`s.**
+     `.reader-layout{justify-content:space-between}` between `.reader-main`
+     (760px) and `.reader-toc` (220px) assumed both columns are always
+     present — but the page's own JS sets `.reader-toc{display:none}`
+     inline whenever an article has no headings to build a TOC from,
+     leaving `.reader-main` as the sole flex item, which `space-between`
+     just left-anchors (measured ~496px of dead space at both 1280px and
+     1920px). The brief described the JS as already toggling a "TOC-hidden
+     class" — checked against source and that wasn't quite right: it set
+     `toc.style.display='none'` directly, no class involved. Added one: the
+     JS now also adds `.no-toc` to `.reader-layout` in that branch, and a
+     new `.reader-layout.no-toc{justify-content:center}` /
+     `.reader-layout.no-toc .reader-main{margin:0 auto}` rule (mirroring
+     the existing `@media(max-width:1100px)` narrow-viewport rule exactly)
+     centers the reading column. Verified on both a headingless article
+     (now centered) and one with real `<h2>`s (unchanged, TOC still renders
+     at its usual right-hand position).
+  Every fix confirmed with real `getBoundingClientRect()` measurements at
+  390px/1280px/1920px (or 1280px/1920px where a finding was desktop-only),
+  not a screenshot glance — same standing discipline as every prior batch
+  in this arc. `brand_check.findings()`, `coral_moment_problems()`, and
+  `hub_nav_orphans()` all confirmed clean; the full suite (3,000 tests)
+  passes unmodified — none of these five findings had any prior test
+  coverage to update.
+
 
 ## Authentication & security
 

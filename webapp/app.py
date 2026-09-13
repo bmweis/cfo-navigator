@@ -4779,7 +4779,14 @@ _SDR_CSS = """
   --sdr-gold:#C9A24B;
 }
 .sdr-sub{color:var(--muted);font-size:15px;margin:0 0 22px;max-width:720px;}
-.sdr-pregame{max-width:720px;}
+/* Layout fix batch 3 (PR 30): #sdrIntro/.sdr-pregame are narrower reading-
+   column content (720px) sitting left-anchored inside #sdrRoot's full
+   .tool-inner width (~1252px at 1920px viewport) — measured ~532px of dead
+   space to their right on the pregame setup screen. Both are hidden
+   outright (display:none) the moment play starts, so centering them here
+   has no effect on the in-game canvas, which fills #sdrStage separately. */
+#sdrIntro{max-width:720px;margin:0 auto;}
+.sdr-pregame{max-width:720px;margin:0 auto;}
 .sdr-rank-row{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 24px;align-items:stretch;}
 .sdr-rank-pill{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:10px 16px;
   border-radius:12px;border:1.5px solid var(--line);background:#fff;cursor:pointer;font:inherit;
@@ -8261,8 +8268,19 @@ function submitIntroForm() {{
         action_row_parts.append(intro_btn)
     action_row_parts.append('<a class="btn btn-ghost" href="#">&#8644; Compare</a>')
     if authed:
-        action_row_parts.append('<span class="tp-admin-divider"></span>')
-        action_row_parts.append(f'<a class="tp-admin-btn" href="/tools/software/{tool["slug"]}/edit">&#9998; Edit</a>')
+        # Divider + Edit are wrapped as one flex item (layout fix batch 3,
+        # PR 30) so flex-wrap can never strand the divider alone on the
+        # first line while Edit wraps to the next — at 390px, Visit +
+        # Compare alone left too little room for "divider + Edit" as two
+        # separate items, so the divider (no flex-basis of its own) landed
+        # at the end of row one with nothing beside it. Pairing them means
+        # the whole unit wraps together, never split.
+        action_row_parts.append(
+            '<span style="display:inline-flex;align-items:center;gap:10px;">'
+            '<span class="tp-admin-divider"></span>'
+            f'<a class="tp-admin-btn" href="/tools/software/{tool["slug"]}/edit">&#9998; Edit</a>'
+            '</span>'
+        )
     action_row = "".join(action_row_parts)
 
     # Radical-transparency review standard (supersedes the old Abacum-
@@ -10227,8 +10245,15 @@ def tools_community_profile(request: Request, slug: str):
         action_row_parts.append(f'<a class="btn" href="{_esc(community["url"])}" target="_blank" rel="noopener">Visit &#8599;</a>')
     action_row_parts.append('<a class="btn btn-ghost" href="#">&#8644; Compare</a>')
     if authed:
-        action_row_parts.append('<span class="tp-admin-divider"></span>')
-        action_row_parts.append(f'<a class="tp-admin-btn" href="/tools/communities/{community["slug"]}/edit">&#9998; Edit</a>')
+        # Divider + Edit wrapped as one flex item — same fix, same reasoning
+        # as the Software profile page's own action row (layout fix batch 3,
+        # PR 30). See that comment for the full explanation.
+        action_row_parts.append(
+            '<span style="display:inline-flex;align-items:center;gap:10px;">'
+            '<span class="tp-admin-divider"></span>'
+            f'<a class="tp-admin-btn" href="/tools/communities/{community["slug"]}/edit">&#9998; Edit</a>'
+            '</span>'
+        )
     action_row = "".join(action_row_parts)
 
     demographic_html = _verify_html(community["demographic"], "tp-verify-inline")
@@ -19333,6 +19358,17 @@ a:hover{opacity:.8;}
   .reader-layout{justify-content:center;}
   .reader-main{margin:0 auto;}
 }
+/* Layout fix batch 3 (PR 30): an article with no <h2>s hides the TOC via
+   JS at ANY viewport width, not just the narrow breakpoint above — with
+   .reader-toc removed from the flex layout entirely, .reader-main became
+   the sole flex item and justify-content:space-between just left-anchored
+   it, leaving real dead space where the TOC would have sat (measured
+   ~496px at 1280px, same absolute gap at 1920px). The TOC-visibility JS
+   below adds .no-toc to .reader-layout in that case; this mirrors the
+   narrow-viewport rule above so a headingless article centers the same
+   way a narrow viewport already does. */
+.reader-layout.no-toc{justify-content:center;}
+.reader-layout.no-toc .reader-main{margin:0 auto;}
 
 .reader-meta{margin-bottom:40px;padding-bottom:32px;border-bottom:1px solid var(--line);}
 .reader-meta h1{font-family:'Outfit',sans-serif;font-size:clamp(22px,4vw,32px);font-weight:600;line-height:1.25;letter-spacing:-.02em;
@@ -19412,7 +19448,12 @@ function adj(d) {{
   var headings = Array.prototype.filter.call(document.querySelectorAll('.reader-body h2'), function(h) {{
     return !h.closest('.reader-empty');
   }});
-  if (!toc || !headings.length) {{ if (toc) toc.style.display = 'none'; return; }}
+  if (!toc || !headings.length) {{
+    if (toc) toc.style.display = 'none';
+    var layout = document.querySelector('.reader-layout');
+    if (layout) layout.classList.add('no-toc');
+    return;
+  }}
   var list = document.getElementById('reader-toc-list');
   var used = {{}};
   headings.forEach(function(h, i) {{
@@ -27614,8 +27655,10 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     <span style="font-size:12px;font-weight:700;color:{fg};background:{bg};border-radius:999px;padding:3px 12px;white-space:nowrap;">{label}</span>
     {reviewed_badge}
     <span style="font-size:12.5px;color:var(--muted);">{_esc(_rater(r))} &middot; {_esc((r["created_at"] or "")[:10])}{' &middot; edited' if r.get("updated_at") else ''}</span>
-    <a href="{report_link}" style="margin-left:auto;font-size:12px;color:var(--accent);white-space:nowrap;">View in ask report &rarr;</a>
-    {reviewed_action}
+    <span style="flex-basis:100%;display:flex;justify-content:flex-end;align-items:center;gap:14px;">
+      <a href="{report_link}" style="font-size:12px;color:var(--accent);white-space:nowrap;">View in ask report &rarr;</a>
+      {reviewed_action}
+    </span>
   </div>
   {comment}
   <div style="font-weight:600;color:var(--navy);font-size:14.5px;margin-top:10px;">{_esc(r.get("question") or "")}</div>
@@ -27664,17 +27707,21 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
   {stat_cards}
 </div>
 
-<form method="get" action="/admin/fpa-buddy/feedback" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-  <label style="font-size:13px;color:var(--muted);">Filter by rating:</label>
-  <select name="rating" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
-    <option value="">All ratings</option>
-    {filter_options}
-  </select>
-  <label style="font-size:13px;color:var(--muted);">Reviewed:</label>
-  <select name="reviewed" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
-    <option value="">All</option>
-    {reviewed_filter_options}
-  </select>
+<form method="get" action="/admin/fpa-buddy/feedback" style="display:flex;gap:16px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+  <span style="display:flex;gap:10px;align-items:center;white-space:nowrap;">
+    <label style="font-size:13px;color:var(--muted);">Filter by rating:</label>
+    <select name="rating" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
+      <option value="">All ratings</option>
+      {filter_options}
+    </select>
+  </span>
+  <span style="display:flex;gap:10px;align-items:center;white-space:nowrap;">
+    <label style="font-size:13px;color:var(--muted);">Reviewed:</label>
+    <select name="reviewed" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
+      <option value="">All</option>
+      {reviewed_filter_options}
+    </select>
+  </span>
 </form>
 
 {cards}
@@ -29141,10 +29188,23 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
                 f'border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:12.5px;">'
                 f'<strong>{count}</strong> {_esc(labels.get(reason, reason))}</span>')
 
+    # Layout fix batch 3 (PR 30): this used to render as bare markup — no
+    # card border, no heading — sandwiched between the Purge card above and
+    # the Recent attempts heading below, both of which ARE bordered
+    # 14px-radius cards with their own headings. Wrapped in the same
+    # treatment so it reads as one more section of the page, not a stray
+    # fragment. (The domain-clustering banner directly below already had
+    # its own card treatment — an amber alert box, matching this page's
+    # other banner/alert conventions — so it didn't need the same fix,
+    # just a matching top margin so the two sit in visual lockstep.)
     failures_html = ""
     if failure_counts:
         pills = "".join(_failure_pill(r, c) for r, c in sorted(failure_counts.items(), key=lambda x: -x[1]))
-        failures_html = f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0;">{pills}</div>'
+        failures_html = f"""
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:20px 0 0;">
+  <div style="font-weight:600;font-size:14px;margin-bottom:10px;">Failure reasons</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;">{pills}</div>
+</div>"""
 
     domains_html = ""
     # Only worth calling out a domain once it's clustering — a single failure
@@ -29158,7 +29218,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
             for d in clustered_domains
         )
         domains_html = f"""
-<div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin:14px 0 0;">
+<div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin:20px 0 0;">
   <div style="font-size:13px;color:#92400e;font-weight:600;margin-bottom:8px;">Failures clustering on one source&mdash;may be a systematic issue with how that site responds to this tool, not independent dead links:</div>
   <div style="display:flex;flex-wrap:wrap;gap:8px;">{domain_pills}</div>
 </div>"""
