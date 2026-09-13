@@ -231,51 +231,42 @@ def test_open_task_counts_reflects_email_failure(lib):
     assert counts["/admin/inbox/email-failures"] == 1
 
 
-# --- dot-vs-count rendering ---------------------------------------------------
-# All-or-none sources (viewed as one full list, no per-item action) get a plain
-# dot instead of a misleading count; individually-actionable sources keep theirs.
+# --- badge rendering: always a real count (PR 28, 2026-09) -------------------
+# DOT_ONLY_HREFS (an "all-or-none sources get a dot, not a count" rule) is
+# retired from webapp.tasks entirely — the admin page always shows a real
+# count now, even for a source with no per-item drill-down, per Brian's
+# explicit call. The nav bar's own presence-only dot is a separate mechanism
+# (see test_contacts_badge_clears_after_viewing_at_every_level below) and is
+# unaffected.
 
-def test_dot_only_hrefs_are_all_or_none_sources():
+def test_dot_only_hrefs_is_retired():
     from webapp import tasks
-    assert tasks.DOT_ONLY_HREFS == {"/admin/inbox/contact-submissions", "/admin/inbox/toolbox-intros"}
+    assert not hasattr(tasks, "DOT_ONLY_HREFS")
 
 
-def test_badge_for_href_renders_dot_for_all_or_none(monkeypatch):
+def test_badge_for_href_always_renders_a_count(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
-    assert appmod._badge_for_href("/admin/inbox/contact-submissions", 3) == '<span class="task-badge-dot" aria-label="Unread"></span>'
-    assert appmod._badge_for_href("/admin/inbox/toolbox-intros", 1) == '<span class="task-badge-dot" aria-label="Unread"></span>'
+    assert appmod._badge_for_href("/admin/inbox/contact-submissions", 3) == '<span class="task-badge">3</span>'
+    assert appmod._badge_for_href("/admin/inbox/toolbox-intros", 1) == '<span class="task-badge">1</span>'
     assert appmod._badge_for_href("/admin/inbox/contact-submissions", 0) == ""
-
-
-def test_badge_for_href_renders_count_for_individually_actionable(monkeypatch):
-    monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
-    import importlib, webapp.app as appmod
-    importlib.reload(appmod)
     assert appmod._badge_for_href("/admin/tools/software", 2) == '<span class="task-badge">2</span>'
     assert appmod._badge_for_href("/admin/inbox/email-failures", 1) == '<span class="task-badge">1</span>'
     assert appmod._badge_for_href("/admin/tools/software", 0) == ""
 
 
-def test_group_badge_dot_when_only_all_or_none_pending(monkeypatch):
+def test_group_badge_sums_every_href_into_one_count(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     counts = {"/admin/inbox/contact-submissions": 2, "/admin/inbox/toolbox-intros": 1, "/admin/inbox/email-failures": 0}
     hrefs = ["/admin/inbox/contact-submissions", "/admin/inbox/toolbox-intros", "/admin/inbox/email-failures"]
-    assert appmod._group_badge(counts, hrefs) == '<span class="task-badge-dot" aria-label="Unread"></span>'
+    assert appmod._group_badge(counts, hrefs) == '<span class="task-badge">3</span>'
 
-
-def test_group_badge_counts_when_individually_actionable_pending(monkeypatch):
-    monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
-    import importlib, webapp.app as appmod
-    importlib.reload(appmod)
-    # A real per-item task (an email failure) dominates the section total —
-    # the all-or-none contact isn't double-counted as if it were 1 more task.
-    counts = {"/admin/inbox/contact-submissions": 1, "/admin/inbox/email-failures": 2}
-    hrefs = ["/admin/inbox/contact-submissions", "/admin/inbox/email-failures"]
-    assert appmod._group_badge(counts, hrefs) == '<span class="task-badge">2</span>'
+    counts2 = {"/admin/inbox/contact-submissions": 1, "/admin/inbox/email-failures": 2}
+    hrefs2 = ["/admin/inbox/contact-submissions", "/admin/inbox/email-failures"]
+    assert appmod._group_badge(counts2, hrefs2) == '<span class="task-badge">3</span>'
 
 
 def test_group_badge_empty_when_nothing_pending(monkeypatch):
@@ -322,14 +313,14 @@ def test_contacts_badge_clears_after_viewing_at_every_level(admin_client):
     lib.close()
 
     r1 = client.get("/admin")
-    assert '<span class="task-dot"' in r1.text                      # nav dot
-    assert '<span class="task-badge-dot" aria-label="Unread"></span>' in r1.text  # card dot, not a count
+    assert '<span class="task-dot"' in r1.text                      # nav dot (presence only, unaffected)
+    assert '<span class="task-badge">1</span>' in r1.text           # card shows a real count now (PR 28)
 
     client.get("/admin/inbox/contact-submissions")   # visiting clears the read-state
 
     r2 = client.get("/admin")
     assert '<span class="task-dot"' not in r2.text
-    assert '<span class="task-badge-dot"' not in r2.text
+    assert '<span class="task-badge">1</span>' not in r2.text
 
 
 def test_tool_leads_badge_clears_after_viewing(admin_client):
@@ -346,7 +337,7 @@ def test_tool_leads_badge_clears_after_viewing(admin_client):
     lib.close()
 
     r1 = client.get("/admin")
-    assert '<span class="task-badge-dot" aria-label="Unread"></span>' in r1.text
+    assert '<span class="task-badge">1</span>' in r1.text
 
     client.get("/admin/inbox/toolbox-intros")   # unfiltered view clears it
 
@@ -492,9 +483,14 @@ def _group_label_index(text: str, label: str) -> int:
 # levels deep, with only a small number on its summary row to hint at it —
 # is still guarded against here, just by a different mechanism: the group's
 # own badge only ever hides once its <details> is OPENED
-# (`.admin-group[open] .group-badge{display:none;}`), so a collapsed-by-
-# default group with something pending still shows its badge number,
-# unhidden, right on the summary row. See CLAUDE.md.)
+# (`.admin-group[open] > summary .group-badge{display:none;}`), so a
+# collapsed-by-default group with something pending still shows its badge
+# number, unhidden, right on the summary row. See CLAUDE.md. (PR 28, 2026-09:
+# the selector itself was a real bug until this point — the descendant form
+# `.admin-group[open] .group-badge` matched every badge nested under an
+# open group, including a still-collapsed CHILD group's own badge; scoped
+# to `> summary` so opening a parent can only ever hide its own badge. See
+# test_opening_a_group_does_not_hide_a_collapsed_child_groups_badge below.)
 
 def test_all_groups_start_collapsed_even_with_a_nonzero_badge(admin_client):
     client, appmod, db = admin_client
@@ -531,8 +527,9 @@ def test_group_badge_still_visible_while_collapsed(admin_client):
     """The real regression guard replacing the old auto-expand fix: a
     collapsed group carrying a real pending item still shows its badge
     number on the summary row (`.group-badge` only hides once the group is
-    OPENED — see the CSS rule `.admin-group[open] .group-badge{display:
-    none;}` — so collapsed-by-default never hides a pending badge)."""
+    OPENED — see the CSS rule `.admin-group[open] > summary .group-badge
+    {display:none;}` — so collapsed-by-default never hides a pending
+    badge)."""
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
@@ -594,3 +591,55 @@ def test_nested_group_badge_shows_through_collapsed_parent(admin_client):
     m = re.search(r'<span class="task-badge">(\d+)</span>', toolbox_summary)
     assert m is not None
     assert int(m.group(1)) >= 1  # the pending tool (deduped to 1, see the badge-dedup tests)
+
+
+# --- PR 28 (2026-09): the badge-hiding CSS scoping bug ----------------------
+# `.admin-group[open] .group-badge{display:none;}` was a descendant selector
+# that matched every `.group-badge` nested under an open `.admin-group`, at
+# any depth — not just that group's own summary. Opening CFO Toolbox (which
+# nests Software/Community/FP&A Buddy/Reader as still-collapsed sub-groups)
+# hid every one of THEIR badges too, even though none of them were open.
+# Fixed by scoping the rule to `> summary` — a child combinator that can
+# only ever reach the group's own <summary>, never a nested sub-group's
+# (which lives in the sibling <div> after <summary>, not inside it).
+
+def test_group_badge_css_rule_is_scoped_to_its_own_summary(admin_client):
+    """The literal CSS rule shipped on the page must be the scoped
+    `> summary` form, not the old bare-descendant form that caused the bug."""
+    client, appmod, db = admin_client
+    r = client.get("/admin")
+    assert ".admin-group[open] > summary .group-badge{display:none;}" in r.text
+    assert ".admin-group[open] .group-badge{display:none;}" not in r.text
+
+
+def test_opening_a_group_does_not_hide_a_collapsed_child_groups_badge(admin_client):
+    """Direct regression test for the scoping bug itself: CFO Toolbox and its
+    nested Software sub-group both carry real, nonzero badges. Rendering the
+    page with CFO Toolbox's own `open` attribute forced on (simulating what
+    the browser does the instant a visitor expands it) must still leave
+    Software's own badge markup intact and visible in the response — the old
+    descendant selector would have hidden it via CSS the moment CFO Toolbox
+    was open, even though Software itself stays collapsed. TestClient can't
+    evaluate CSS, so this asserts on the one thing that actually decides the
+    bug in either direction: the shipped selector text (covered by the test
+    above) plus proof that Software's badge markup is still there,
+    independent of CFO Toolbox's own open/closed state, for the CSS rule to
+    correctly leave alone."""
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.add_tool("A", "desc", "https://a.example", [], approved=0)  # gives Software a real badge
+    lib.close()
+
+    r = client.get("/admin")
+    idx = _group_label_index(r.text, ">Software<")
+    details_start = r.text.rfind("<details", 0, idx)
+    details_end = r.text.index("</details>", idx)
+    summary_end = r.text.index("</summary>", details_start)
+    # Software's own badge lives inside ITS OWN summary — the scoped CSS rule
+    # (`.admin-group[open] > summary .group-badge`) can only ever match a
+    # badge inside the summary of the SAME <details> that carries [open], so
+    # this markup being present and unconditional (not swapped out depending
+    # on CFO Toolbox's state) is what the fix guarantees.
+    assert "task-badge" in r.text[details_start:summary_end]
+    assert details_end > summary_end

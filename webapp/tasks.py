@@ -11,14 +11,22 @@ the one addition is a pair of `settings` timestamps (`admin_viewed_contacts`,
 `admin_viewed_tool_leads`) so append-only logs with no other state can still
 answer "is there something new since Brian last looked."
 
-`DOT_ONLY_HREFS` marks sources that are reviewed as one full list at once,
-with no per-item view or action (e.g. Contact Submissions — you see every
-message at once, there's nothing to open or resolve individually). A number
-on a badge like that implies a granularity that doesn't exist ("3 things to
-look at" when it's really just "the list has something new"), so the webapp
-renders these as a plain dot instead of a count. Sources with a real
-per-item action (approve a tool, dismiss an email failure, resolve a
-password reset) keep their numeric count.
+`DOT_ONLY_HREFS` used to mark sources reviewed as one full list at once,
+with no per-item view or action (Contact submissions, Toolbox intros) —
+webapp.app's admin-page badge helpers rendered those as a plain dot instead
+of a count, on the theory that "3 things to look at" implies a per-item
+granularity those two sources don't have. **Retired (PR 28, 2026-09), per
+Brian's explicit call**: the admin page (`/admin`) is where he decides what
+to work on next, and a real count there is strictly more useful than a dot
+even for an all-or-none source — "4 new messages" and "1 new message" are a
+different decision to make, whatever the drill-down looks like once you get
+there. Every admin-page badge (`webapp.app._badge_for_href`/`_group_badge`)
+is a plain numeric count now, with no exceptions. The top NAV BAR's own
+presence dot (`.task-dot`, `_has_open_admin_tasks()`) is unaffected — it was
+never driven by DOT_ONLY_HREFS in the first place: it's a pure "is anything
+at all pending" boolean (`bool(open_task_counts(lib))`), so "dot only, no
+count" was already its whole design for every source, not something this
+reversal changes. See CLAUDE.md's PR 28 note for the full write-up.
 """
 from __future__ import annotations
 
@@ -27,8 +35,6 @@ import time
 
 from linklib.db import Library
 from webapp import checks as _checks
-
-DOT_ONLY_HREFS = frozenset({"/admin/inbox/contact-submissions", "/admin/inbox/toolbox-intros"})
 
 # _failing_checks_count() badges /admin and /admin/library with the same
 # in-app check results /admin/checks itself computes live — but

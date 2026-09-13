@@ -1371,12 +1371,15 @@ a:hover{text-decoration:underline;}
 /* iOS-style presence dot — no count, just "something needs you" */
 .task-dot{position:absolute;top:-3px;right:-9px;width:8px;height:8px;border-radius:50%;background:var(--coral);border:1.5px solid var(--bg);}
 
-/* Admin hub: coral count badges, white text on coral fill */
+/* Admin hub: coral count badges, white text on coral fill. (PR 28, 2026-09:
+   the admin page always shows a real count now, even for an "all-or-none"
+   source like Contact Submissions — Brian's explicit call. The nav bar's
+   own presence-only .task-dot above is unrelated and unchanged: it never
+   read DOT_ONLY_HREFS, since it's already a pure "is anything pending at
+   all" boolean, not a per-source count. .task-badge-dot is retired with
+   DOT_ONLY_HREFS itself — see webapp/tasks.py.) */
 .task-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;
   padding:0 5px;border-radius:9px;background:var(--coral);color:#fff;font-size:11px;font-weight:700;line-height:1;}
-/* All-or-none sources (e.g. Contact Submissions) get a plain dot, not a count —
-   there's no per-item granularity for a number to honestly represent. */
-.task-badge-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--coral);flex-shrink:0;}
 .nav-toggle{display:none;background:none;border:1px solid var(--line-strong);border-radius:9px;width:40px;height:40px;color:var(--navy);font-size:18px;cursor:pointer;align-items:center;justify-content:center;}
 
 /* Headings */
@@ -1658,18 +1661,15 @@ def _task_badge(n: int) -> str:
     return f'<span class="task-badge">{n}</span>' if n else ""
 
 
-def _task_badge_dot() -> str:
-    return '<span class="task-badge-dot" aria-label="Unread"></span>'
-
-
 def _badge_for_href(href: str, n: int) -> str:
-    """Badge for a single admin href's card. All-or-none sources (see
-    webapp.tasks.DOT_ONLY_HREFS) render a plain dot instead of a count —
-    there's no per-item granularity for a number to honestly represent."""
-    if not n:
-        return ""
-    from webapp import tasks as _tasks
-    return _task_badge_dot() if href in _tasks.DOT_ONLY_HREFS else _task_badge(n)
+    """Badge for a single admin href's card. Always a real count (PR 28,
+    2026-09) — see webapp.tasks' own DOT_ONLY_HREFS-retirement note for why
+    the admin page no longer renders a dot-only badge for anything. `href`
+    is unused now that every source gets the same treatment, but kept in
+    the signature so every call site (and every other admin-page badge
+    helper) still passes it — a single choke point if a source-specific
+    exception is ever wanted again."""
+    return _task_badge(n)
 
 
 def _disclosure_group(name: str, body_html: str, *, count_label: str = "",
@@ -1714,15 +1714,16 @@ def _disclosure_group(name: str, body_html: str, *, count_label: str = "",
 
 
 def _group_badge(task_counts: dict[str, int], hrefs) -> str:
-    """Badge for a collapsed section aggregating several hrefs. Sums the
-    individually-actionable ones into a real count; if only all-or-none
-    sources have anything pending, shows a dot instead of a misleading sum."""
-    from webapp import tasks as _tasks
-    numeric_total = sum(task_counts.get(h, 0) for h in hrefs if h not in _tasks.DOT_ONLY_HREFS)
-    if numeric_total:
-        return _task_badge(numeric_total)
-    dot_pending = any(task_counts.get(h, 0) for h in hrefs if h in _tasks.DOT_ONLY_HREFS)
-    return _task_badge_dot() if dot_pending else ""
+    """Badge for a collapsed section aggregating several hrefs — a plain sum
+    across all of them. Used to render every "all-or-none" source (Contact
+    submissions, Toolbox intros) as a dot instead of counting it (PR 28,
+    2026-09 reverses that): the admin hub is where Brian decides what to
+    work on next, and "4 things pending" is a different decision from "1
+    thing pending" even for a source with no per-item drill-down — so it
+    always sums to a real number now, same as every other source. The nav
+    bar's own presence-only dot (`.task-dot`, `_has_open_admin_tasks()`) is
+    a completely separate, still-dot-only mechanism, untouched by this."""
+    return _task_badge(sum(task_counts.get(h, 0) for h in hrefs))
 
 
 def _password_change_nudge_html(lib: Library, request: Request) -> str:
@@ -14335,7 +14336,7 @@ def _tl_form_fields(item: dict | None = None) -> str:
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Title *</label>
     <input name="title" required maxlength="300" value="{_esc(item.get('title', ''))}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-      placeholder="Role/capacity (Host, Co-Chair, Guest, …) goes inline here, e.g. &quot;Cash Cycle Demo Day—Co-Chair&quot;">
+      placeholder="e.g. &quot;Cash Cycle Demo Day—Co-Chair&quot;">
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL</label>
@@ -14354,7 +14355,7 @@ def _tl_form_fields(item: dict | None = None) -> str:
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
       <input name="date_label" maxlength="50" value="{_esc(item.get('date_label', ''))}"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="Mon YYYY, e.g. Jun 2026—leave blank for a standing, undated link">
+        placeholder="e.g. Jun 2026">
     </div>
   </div>
   {_tl_parse_warning(item)}
@@ -14362,7 +14363,7 @@ def _tl_form_fields(item: dict | None = None) -> str:
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (tiebreaker)</label>
     <input name="display_order" type="number" value="{item.get('display_order', '') if item else ''}"
       style="width:180px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-      placeholder="Leave blank—auto-assigned">
+      placeholder="Auto-assigned">
   </div>
   <p style="margin:-8px 0 0;font-size:12px;color:var(--muted);">
     Date label decides order (newest first)—it's parsed into the render order automatically, so you
@@ -15196,7 +15197,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     <p id="comm-gen-err" style="display:none;"></p>
   </div>"""
 
-    details_html = f"""  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    details_html = f"""  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Reach *</label>
       <select name="reach" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
@@ -15486,7 +15487,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 {_field('verdict_summary', 'Bottom line', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
 {_section_header('Quick facts')}
 {_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc.—or "No".', rows=2)}
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
 {_num_field('founded_year', 'Founded', 1800, 2100)}
 {_short_field('primary_purpose', 'Primary purpose', 'e.g. networking, learning, both')}
 {_short_field('cpe_eligible', 'CPE eligible', 'Yes / No / Unclear, with any qualifier')}
@@ -23781,27 +23782,44 @@ def _ai_model_config_html(current: str) -> str:
     cards on the merged /admin/system/ai page (PR 10, admin AI-page
     consolidation). Unchanged logic from the retired standalone
     /admin/system/model page — only the action URLs moved, to
-    /admin/system/ai/model/*."""
+    /admin/system/ai/model/*.
+
+    PR 28 (2026-09): the <select>'s option text used to be the LONG "enrich"
+    blurb ("Opus 5—Deepest summaries. The one to standardize the archive
+    on."), which truncated mid-word inside the select's own max-width —
+    a <select> can't be widened past its container the way a block of text
+    can. Options now show the model name plus the SHORT qualifier already
+    in the registry (the same one every other picker on the site uses,
+    e.g. "Opus 5—Best quality"); the fuller per-model "enrich" description
+    moves to a paragraph beside the dropdown (#model-select-desc), updated
+    live via JS as a different model is picked — no new sentences, both
+    texts already exist in linklib.models._REGISTRY, just re-arranged."""
     from linklib.models import models_for
-    options = models_for(blurb="enrich", allow_new=False)
-    known_ids = {m["id"] for m in options}
+    short_options = models_for(blurb="short", allow_new=False)
+    enrich_by_id = {m["id"]: m["blurb"] for m in models_for(blurb="enrich", allow_new=False)}
+    known_ids = {m["id"] for m in short_options}
     if current not in known_ids:
         # A previously-selected model retired from the live registry (or a
         # stale LINKLIB_ENRICH_MODEL env-var fallback) — surface it anyway,
         # labeled plainly, so the dropdown reflects what's actually running
         # rather than silently defaulting the select to the first option.
-        options = options + [{"id": current, "label": current, "blurb": "Currently selected—no longer in the curated list"}]
+        fallback_desc = "Currently selected—no longer in the curated list"
+        short_options = short_options + [{"id": current, "label": current, "blurb": fallback_desc}]
+        enrich_by_id[current] = fallback_desc
 
     option_html = "".join(
-        f'<option value="{_esc(m["id"])}"{" selected" if m["id"] == current else ""}>{_esc(m["label"])}&mdash;{_esc(m["blurb"])}</option>'
-        for m in options
+        f'<option value="{_esc(m["id"])}"{" selected" if m["id"] == current else ""} '
+        f'data-desc="{_esc(enrich_by_id.get(m["id"], m["blurb"]))}">{_esc(m["label"])}&mdash;{_esc(m["blurb"])}</option>'
+        for m in short_options
     )
+    current_desc = enrich_by_id.get(current, "")
 
     return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrichment model</div>
 <select id="model-select" onchange="saveModel()" style="width:100%;max-width:520px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
 {option_html}
 </select>
+<p id="model-select-desc" style="font-size:13px;color:var(--muted);margin:8px 0 0;">{_esc(current_desc)}</p>
 <span id="model-select-status" style="font-size:13px;color:var(--muted);margin-top:8px;display:inline-block;"></span>
 <p style="font-size:12px;color:var(--muted);margin:12px 0 0;">This list is curated by hand, not automatically updated&mdash;check Anthropic's current model lineup before assuming it's current: <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic model overview &#8599;</a></p>
 <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
@@ -23820,6 +23838,8 @@ async function saveModel() {{
   var sel = document.getElementById('model-select');
   var status = document.getElementById('model-select-status');
   var model = sel.value;
+  var desc = document.getElementById('model-select-desc');
+  if (desc) {{ desc.textContent = sel.options[sel.selectedIndex].getAttribute('data-desc') || ''; }}
   sel.disabled = true;
   status.textContent = 'Saving…';
   try {{
@@ -24703,14 +24723,30 @@ def admin_page(request: Request):
         # went unnoticed inside a collapsed sub-group, with nothing but a
         # small aggregate number on the parent's summary to hint at it —
         # see CLAUDE.md's LiveFlow/Runway note. Reversing it does NOT bring
-        # that failure mode back: `.admin-group[open] .group-badge{display:
-        # none;}` only ever hides a group's badge once it's opened, so a
-        # collapsed-by-default group with a real pending item still shows
-        # its badge number on the summary row, unhidden, exactly where the
-        # incident's own root cause (a badge sitting collapsed) says to
-        # look. Brian's explicit call: badges are the review-inbox signal;
-        # auto-expanding on top of that duplicated the same information as
-        # an intrusive default rather than a genuinely different safeguard.
+        # that failure mode back: `.admin-group[open] > summary .group-badge
+        # {display:none;}` only ever hides a GROUP'S OWN badge once THAT
+        # group is opened, so a collapsed-by-default group with a real
+        # pending item still shows its badge number on the summary row,
+        # unhidden, exactly where the incident's own root cause (a badge
+        # sitting collapsed) says to look. Brian's explicit call: badges are
+        # the review-inbox signal; auto-expanding on top of that duplicated
+        # the same information as an intrusive default rather than a
+        # genuinely different safeguard.
+        #
+        # PR 28 (2026-09) fixed a real scoping bug in that CSS rule: it used
+        # to be the descendant selector `.admin-group[open] .group-badge`,
+        # which matches every `.group-badge` nested anywhere under an open
+        # `.admin-group` — not just that group's own. Opening CFO Toolbox
+        # (which nests Software/Community/FP&A Buddy/Reader as sub-groups,
+        # each still individually collapsed) hid every one of those child
+        # groups' own badges too, even though they were still closed —
+        # exactly the "a real pending item silently disappears" failure this
+        # whole mechanism exists to prevent. `> summary` scopes the rule to
+        # the group's own summary row: a nested sub-group's `<details>` (and
+        # its own `<summary>`) lives inside the `<div>` *after* this
+        # `<summary>`, never inside it, so the child combinator can't reach
+        # past it. Verified in a minimal reproduction and covered by
+        # test_opening_a_group_does_not_hide_a_collapsed_child_groups_badge.
         return _disclosure_group(
             gname,
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
@@ -24827,7 +24863,7 @@ def admin_page(request: Request):
 {password_nudge_html}
 <style>
 .admin-group summary:hover{{background:var(--surface);}}
-.admin-group[open] .group-badge{{display:none;}}
+.admin-group[open] > summary .group-badge{{display:none;}}
 .admin-cols{{display:grid;grid-template-columns:1fr;}}
 @media(min-width:1024px){{.admin-cols{{grid-template-columns:1fr 1fr;gap:20px;align-items:start;}}}}
 </style>
