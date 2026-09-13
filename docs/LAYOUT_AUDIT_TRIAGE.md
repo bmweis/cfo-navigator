@@ -559,10 +559,30 @@ instead of a misleading number — this is exactly `_badge_for_href`'s and `weba
 tasks.py`'s own module docstring describing the intended design, not an accident.
 Whatever state Brian saw (a bare dot, no number) is consistent with: Inbox currently
 has a pending contact submission or toolbox intro, and zero pending community-gap or
-email-failure rows. If Brian's actual objection is to the *design* itself (e.g., he'd
-rather Inbox's own aggregate never collapse to a bare dot, or wants the two dot-only
-sources broken out of the aggregate entirely) that's a product decision to make
-explicitly, not a bug this investigation found evidence of.
+email-failure rows.
+
+**Design decision (Brian, 2026-09-13): `DOT_ONLY_HREFS`'s dot-vs-count logic is correct
+behavior in the wrong place.** A dot with no number is the right signal for the top nav
+bar — a glance-level "something needs you," with no room for detail there anyway. On
+`/admin` itself, the badges are where Brian actually decides what to work on next, and
+"4 things pending" is a materially different decision to make than "1 thing pending" —
+collapsing that distinction to a dot is a real information loss on the one page whose
+job is showing him what's queued.
+
+**Checked, not assumed: the top nav bar already carries exactly this coarse signal,
+independent of `DOT_ONLY_HREFS` entirely — nothing new needs building there.** The
+"Admin" link in `_page()`'s own nav (`webapp/app.py`, ~line 1789) already renders a
+plain `.task-dot` span whenever `_has_open_admin_tasks()` is true, which resolves to
+`bool(open_task_counts(lib))` — true the moment *any* href has a nonzero count, whether
+or not it's in `DOT_ONLY_HREFS`. So the nav-bar dot already fires correctly for
+Contact-submissions/Toolbox-intros pending items today, alongside every other pending
+source, with no special-casing needed. **Resolution: the fix is narrower than initially
+scoped — retire `DOT_ONLY_HREFS`'s special-casing from `/admin`-hub badge rendering
+only (every badge there shows its real numeric count, always, including Contact
+submissions and Toolbox intros); the nav-bar dot needs no change at all.** Still folded
+into the same fix PR as the CSS-scoping fix per Brian's direction, since both touch the
+same badge-rendering code path — just a smaller change than "build a new home for the
+dot" would have been.
 
 ### What a fix would touch (not built in this PR, per instructions)
 
@@ -579,9 +599,20 @@ explicitly, not a bug this investigation found evidence of.
   currently used anywhere in `tests/`), so whoever picks this up should decide whether
   to add a real browser-rendered visibility check or a narrower assertion against the
   CSS selector text itself (weaker, but consistent with the rest of the suite's style).
-- No change needed to `webapp/tasks.py`, `_group_badge()`, or `open_task_counts()` —
-  the underlying counts and aggregation are correct.
-- Symptom 2 needs no fix unless Brian decides the *design* (not a bug) should change.
+- **Per the design decision above:** `_badge_for_href()`/`_group_badge()` (both in
+  `webapp/app.py`) need to stop consulting `DOT_ONLY_HREFS` for `/admin`-hub rendering
+  — every badge there always shows its numeric count, including Contact submissions and
+  Toolbox intros. `DOT_ONLY_HREFS` itself likely goes away entirely once nothing reads
+  it (confirm no other caller exists before deleting it, per this repo's "no dead
+  code" discipline) — it isn't needed elsewhere, since the nav-bar dot
+  (`_has_open_admin_tasks()`, `webapp/app.py` ~line 1789) is already driven by the
+  simpler, DOT_ONLY_HREFS-agnostic `has_open_tasks()`/`bool(open_task_counts(lib))` and
+  needs no change. `webapp/tasks.py`'s own module docstring (which currently explains
+  `DOT_ONLY_HREFS`'s purpose) needs updating or removing to match whatever the fix PR
+  actually does with the constant.
+- No change needed to `webapp/tasks.py`'s `open_task_counts()` itself, `has_open_tasks()`,
+  or how counts are computed/aggregated — only where the dot-vs-number rendering
+  decision applies on the hub page.
 
 ## Two notes carried forward for the record (not acted on, per the brief)
 
