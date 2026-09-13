@@ -2260,6 +2260,12 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 @media (max-width:700px){{
   .cmp-swipe-hint{{display:flex;}}
 }}
+/* Admin table scroll hint (PR 32, 2026-09) — see _ADMIN_SCROLL_HINT_HTML/_JS
+   for why this is overflow-gated by JS rather than a breakpoint like
+   .cmp-swipe-hint above; the base display:none here is the pre-JS/no-JS
+   fallback (a visible hint that never disappears is worse than none). */
+.admin-scroll-hint{{align-items:center;gap:6px;color:var(--muted);font-size:12.5px;margin:0 0 8px;}}
+.admin-scroll-hint svg{{flex-shrink:0;}}
 /* AI comparison summary (Compare Redesign Phase 2) — a light seafoam card
    above the table, same register as this page's own intro paragraph, not a
    loud callout: this is a heads-up, not the page's main content. */
@@ -2305,6 +2311,60 @@ _CMP_SWIPE_HINT_JS = """
   }
   wrap.addEventListener('scroll', dismiss, {passive: true});
 })();
+"""
+
+# Admin table scroll hint (PR 32, 2026-09) — the Software/Communities admin
+# tables' own #cmp-scroll-wrap reused Compare's sticky-column mechanism but
+# deliberately NOT its swipe hint: _CMP_SWIPE_HINT_JS is @media(max-width:700px)
+# only, tuned for Compare (a real table that always scrolls at mobile widths).
+# Below 700px these two admin tables card-stack (.admin-table-responsive)
+# instead — there's no horizontal scroll to hint at there — so a
+# breakpoint-tied hint would show at exactly the wrong width. The actual gap
+# these tables have is real overflow at ordinary desktop widths in the
+# ~900-1000px range (more optional columns than Compare's own table ever
+# carries), so this hint is gated on ACTUAL overflow
+# (wrap.scrollWidth > wrap.clientWidth), not a breakpoint — shown whenever
+# there's really more to see, at any width, and re-checked on resize since a
+# column-picker toggle or a browser resize can change whether the table
+# overflows without a page reload. Same visual language and
+# once-then-localStorage-dismissed convention as _CMP_SWIPE_HINT_HTML/_JS
+# (a different icon-plus-muted-text pairing was considered and rejected for
+# the same reason as Compare's own: it must read as "FYI," never as
+# something to tap). initAdminScrollHint() is a named function (not an
+# IIFE) because it has to run AFTER the table exists in the DOM — it's
+# defined in the shared top-of-body <script> tag (before any table markup)
+# but not CALLED until the later per-page <script> block that also calls
+# initColPicker/applySortFilter, the same point in both admin table routes.
+_ADMIN_SCROLL_HINT_HTML = (
+    '<div class="admin-scroll-hint" id="admin-scroll-hint" style="display:none;">'
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round"><polyline points="18 8 22 12 18 16"/>'
+    '<polyline points="6 8 2 12 6 16"/><line x1="2" y1="12" x2="22" y2="12"/></svg>'
+    '<span>Scroll to see more columns</span></div>'
+)
+
+_ADMIN_SCROLL_HINT_JS = """
+function initAdminScrollHint(){
+  var hint = document.getElementById('admin-scroll-hint');
+  var wrap = document.getElementById('cmp-scroll-wrap');
+  if (!hint || !wrap) return;
+  var KEY = 'admin_scroll_hint_seen';
+  var seen = false;
+  try { seen = !!localStorage.getItem(KEY); } catch (e) {}
+  function check(){
+    if (seen) { hint.style.display = 'none'; return; }
+    hint.style.display = (wrap.scrollWidth > wrap.clientWidth + 1) ? 'flex' : 'none';
+  }
+  function dismiss(){
+    if (seen) return;
+    seen = true;
+    hint.style.display = 'none';
+    try { localStorage.setItem(KEY, '1'); } catch (e) {}
+  }
+  wrap.addEventListener('scroll', dismiss, {passive: true});
+  window.addEventListener('resize', check);
+  check();
+}
 """
 
 
@@ -11304,6 +11364,12 @@ function toggleColumn(tableKey, col, checked) {
   document.querySelectorAll('[data-col="' + tableKey + ':' + col + '"]').forEach(function(el) {
     el.style.display = checked ? '' : 'none';
   });
+  // A column toggle can change whether the table overflows, same as a
+  // browser resize — dispatch a real resize event rather than a bespoke
+  // hook so initAdminScrollHint's own listener (see _ADMIN_SCROLL_HINT_JS)
+  // re-checks for free; a no-op everywhere else (e.g. /admin/users, which
+  // has no scroll hint to re-check) since nothing else listens for it.
+  window.dispatchEvent(new Event('resize'));
 }
 function saveColumnView(tableKey, allCols) {
   var active = allCols.filter(function(col) {
@@ -12121,7 +12187,7 @@ def admin_software(request: Request, filter: str = ""):
     # This is the first instance of a larger, separately-scoped job (one
     # field, one width, everywhere it appears across every admin table) —
     # see BRAND.md §5 "Admin table width floors".
-    body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
+    body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}{_ADMIN_SCROLL_HINT_JS}</script>
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1 style="margin:0 0 4px;">Software vendors</h1>
@@ -12157,8 +12223,8 @@ def admin_software(request: Request, filter: str = ""):
 {_admin_sort_filter_toolbar_html("software", software_sort_fields, software_scalar_filters, category_options=tool_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
+{_ADMIN_SCROLL_HINT_HTML}
 <div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
-<form id="software-approved-form">
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
@@ -12171,11 +12237,11 @@ def admin_software(request: Request, filter: str = ""):
 </tr></thead>
 <tbody id="software-approved-tbody">{approved_rows}</tbody>
 </table>
-</form>
 </div>
 <script>
 initColPicker('software', {json.dumps([k for k, _ in software_cols])});
 applySortFilter('software');
+initAdminScrollHint();
 </script>
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
@@ -12231,6 +12297,36 @@ applySortFilter('software');
    (113px->100px) — confirmed by measuring the unpadded text's own
    natural width first, not by trial and error, so the new value has a
    real margin (~3px) rather than being tuned to fit exactly. */
+/* PR 32 (2026-09) — a real, more serious bug this CSS rule alone could
+   never fully explain: for exactly one row per table (whichever has the
+   FIRST Delete/Mark-reviewed <form> in server-rendered order), the Delete
+   button rendered narrower than every other row's, with no onsubmit
+   confirm dialog and NO SUBMIT TARGET AT ALL — clicking it did nothing.
+   Root cause: this table's <tbody> used to be wrapped in an outer
+   <form id="software-approved-form">/<form id="communities-approved-form">
+   (added for bulk-select, apparently) that NEITHER JS NOR ANY ROUTE EVER
+   REFERENCED BY ID — grepped webapp/, tests/, linklib/, docs/, zero hits
+   beyond the two definitions; every bulk-select/bulk-edit/bulk-delete
+   function reads checked boxes via a plain class selector
+   (document.querySelectorAll('.software-row-cb:checked')), completely
+   independent of any wrapping <form>. That outer form was pure dead
+   markup, and it made every row's own Delete/Mark-reviewed <form> a
+   NESTED <form> — invalid HTML. Per the HTML5 parsing algorithm, a
+   browser drops the first nested <form> open tag it encounters entirely
+   (no element created), and that same form's closing </form> tag then
+   pops the OUTER form off the parser's stack instead — which resets
+   parser state so every subsequent nested form in the row/table parses
+   normally (if still, confusingly, DOM-nested inside the outer form).
+   Net effect, confirmed live by seeding test data and inspecting the
+   parsed DOM directly: exactly one row — the one whose form happened to
+   be first in server-render order, independent of any visible sort or
+   column value — lost its <form> wrapper outright. Fixed by deleting the
+   two vestigial outer <form> tags (see the route below — #cmp-scroll-wrap
+   now wraps <table> directly, matching how /admin/users already does
+   this with no wrapping form at all). With the invalid nesting gone,
+   every row's own Delete/Mark-reviewed <form> parses correctly and this
+   CSS rule's 100px width applies uniformly, for real — see
+   tests/test_admin_table_form_nesting.py for the regression guard. */
 .admin-table-actions-grid a,
 .admin-table-actions-grid form{{width:100px;}}
 .admin-table-actions-grid form button{{width:100%;}}
@@ -12292,10 +12388,15 @@ applySortFilter('software');
    Copy of the exact mechanism built for /admin/tools/communities (see
    that page's own comment for the full write-up, including the real
    `overflow:hidden`-on-<table> sticky-positioning gotcha this already
-   works around, and why neither table carries a swipe-hint affordance)
-   — same class names, same #cmp-scroll-wrap id, so both admin tables
-   behave identically rather than drifting into two near-duplicate
-   implementations. */
+   works around) — same class names, same #cmp-scroll-wrap id, so both
+   admin tables behave identically rather than drifting into two
+   near-duplicate implementations. (PR 32, 2026-09: both tables now DO
+   carry a scroll affordance after all — see _ADMIN_SCROLL_HINT_HTML/_JS —
+   reversing the "why neither table carries a swipe-hint affordance" this
+   comment used to claim; that was true when written, but at ~900-1000px
+   (well above the 700px card-stacking breakpoint) these tables really do
+   overflow with no visible cue, so a real hint was built, gated on actual
+   overflow rather than a breakpoint.) */
 .admin-sticky-col{{position:sticky;background:#fff;z-index:2;}}
 thead .admin-sticky-col{{background:var(--accent-light);z-index:3;}}
 .admin-sticky-col-1{{left:0;width:40px;}}
@@ -15800,7 +15901,7 @@ def admin_communities(request: Request, filter: str = ""):
     # "structurally identical, not merely similar" call — see BRAND.md §5
     # "Admin table width floors" and the matching comment on the Software
     # route above.
-    body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
+    body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}{_ADMIN_SCROLL_HINT_JS}</script>
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1 style="margin:0 0 4px;">Communities</h1>
@@ -15841,8 +15942,8 @@ def admin_communities(request: Request, filter: str = ""):
 {_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
+{_ADMIN_SCROLL_HINT_HTML}
 <div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
-<form id="communities-approved-form">
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
@@ -15859,11 +15960,11 @@ def admin_communities(request: Request, filter: str = ""):
 </tr></thead>
 <tbody id="communities-approved-tbody">{approved_rows}</tbody>
 </table>
-</form>
 </div>
 <script>
 initColPicker('communities', {json.dumps([k for k, _ in communities_cols])});
 applySortFilter('communities');
+initAdminScrollHint();
 </script>
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
@@ -15915,6 +16016,9 @@ applySortFilter('communities');
    (113px->100px) — confirmed by measuring the unpadded text's own
    natural width first, not by trial and error, so the new value has a
    real margin (~3px) rather than being tuned to fit exactly. */
+/* PR 32 (2026-09) — same nested-<form> bug and same fix as the Software
+   list's own identical comment above this exact CSS rule; see that one
+   for the full write-up. */
 .admin-table-actions-grid a,
 .admin-table-actions-grid form{{width:100px;}}
 .admin-table-actions-grid form button{{width:100%;}}
@@ -15986,14 +16090,20 @@ applySortFilter('communities');
    given its own 10px/12px padding) so the Name column's left offset is
    fixed and predictable rather than depending on the checkbox's natural
    width. id="cmp-scroll-wrap" is reused verbatim from the Compare page's
-   own scroll-container id, but NOT its swipe-hint affordance — Compare's
-   table stays a real table and scrolls at every width, so "Swipe to
-   compare" is always accurate there; this table instead falls back to
-   admin-table-responsive's stacked-card layout below 700px (no
-   horizontal scroll at all once that happens), so a swipe hint tied to
-   the same breakpoint would show the wrong affordance for the exact
-   width range it targets — dropped rather than shown incorrectly, after
-   catching this live in a real mobile-viewport screenshot.
+   own scroll-container id, but originally NOT its swipe-hint affordance
+   (superseded, see below) — Compare's table stays a real table and
+   scrolls at every width, so "Swipe to compare" is always accurate
+   there; this table instead falls back to admin-table-responsive's
+   stacked-card layout below 700px (no horizontal scroll at all once
+   that happens), so a swipe hint tied to the same breakpoint would show
+   the wrong affordance for the exact width range it targets — dropped
+   rather than shown incorrectly, after catching this live in a real
+   mobile-viewport screenshot. (PR 32, 2026-09: a real gap this left
+   behind — this table genuinely overflows with no visible cue at
+   ~900-1000px, well above the 700px card-stacking breakpoint — is now
+   closed by _ADMIN_SCROLL_HINT_HTML/_JS, gated on actual overflow
+   detection rather than a breakpoint, so it can never show the wrong
+   affordance for a width where the table stacks into cards instead.)
    Real gotcha found live, not assumed: the table itself used to carry
    its own background/border/border-radius/overflow:hidden (for the
    rounded-card look) — but `overflow:hidden` on the <table> registers

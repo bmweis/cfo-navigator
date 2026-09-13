@@ -7908,6 +7908,88 @@ it supersedes the old "`/save` is token-gated" note.
   `coral_moment_problems()`, `hub_nav_orphans()`, and
   `/admin/system/page-index` all confirmed clean; the full suite
   (3,000 tests) passes unmodified — no test pinned the table's old markup.
+- **PR 32 (2026-09) — Software/Communities admin tables at half-desktop
+  width (900-1000px): three reported symptoms, two genuinely different root
+  causes, and one of them a functionally broken control, not a layout
+  polish item.** Investigated before touching anything, per the standing
+  approval-gate discipline for a behavior change on pages Brian uses daily
+  — the brief's own hypothesis (one shared cause, "auto table layout
+  letting column widths depend on content") did not hold.
+  1. **No scroll affordance at ~900-1000px** — real and isolated. Both
+     tables reuse Compare's `#cmp-scroll-wrap`/sticky-column mechanism but
+     deliberately never reused Compare's own swipe hint
+     (`_CMP_SWIPE_HINT_HTML`/`_JS`), which is `@media(max-width:700px)`-only
+     — tuned for Compare, whose table always scrolls at mobile widths.
+     Below 700px these two admin tables card-stack instead
+     (`.admin-table-responsive`), so a hint gated on that breakpoint would
+     show at exactly the wrong width; nobody had built the width-independent
+     version. Fixed with `_ADMIN_SCROLL_HINT_HTML`/`_ADMIN_SCROLL_HINT_JS` —
+     same icon/copy/localStorage-dismiss convention as Compare's hint, but
+     gated on actual overflow (`wrap.scrollWidth > wrap.clientWidth`,
+     re-checked on resize) rather than a media query, so it shows whenever
+     there's really more to see, at any width, and never shows once the
+     table genuinely fits.
+  2. **Inconsistent Delete-button width — NOT a CSS/table-layout issue at
+     all, and a real functional bug, more serious than "narrower button."**
+     Both tables wrapped their entire approved-rows `<table>` in
+     `<form id="software-approved-form">`/`<form id="communities-approved-form">`
+     (added for bulk-select, apparently) — grepped `webapp/`, `tests/`,
+     `linklib/`, `docs/` and found **zero references to either id anywhere
+     else**; every bulk-select/bulk-edit/bulk-delete function reads checked
+     boxes via a plain class selector
+     (`document.querySelectorAll('.software-row-cb:checked')`), completely
+     independent of any wrapping `<form>`. The wrapping form was pure dead
+     markup, and it made every row's own Delete/Mark-reviewed `<form>` a
+     NESTED `<form>` — invalid HTML. Per the HTML5 parsing algorithm, a
+     browser drops the first nested `<form>` open tag it encounters
+     entirely (no element created), and that same form's own closing
+     `</form>` tag then pops the OUTER form off the parser's stack instead
+     — resetting parser state so every later nested form in the row/table
+     parses normally (if still, confusingly, DOM-nested inside the outer
+     form). Net effect, confirmed live by seeding test data and inspecting
+     the parsed DOM directly (not assumed from the CSS): **exactly one row
+     per table — whichever has the first Delete/Mark-reviewed form in
+     server-render order, independent of any visible sort or column value
+     — lost its `<form>` wrapper outright.** Its Delete button rendered
+     narrower (the existing `.admin-table-actions-grid form{width:100px}`
+     rule no longer matched a bare `<button>`), had no `onsubmit` confirm
+     dialog, and **had no submit target at all — clicking it did nothing.**
+     This is the finding worth stating plainly: it was never a cosmetic
+     width inconsistency, it was a silently broken Delete control. Fixed by
+     deleting the two vestigial outer `<form>` tags outright — `#cmp-scroll-wrap`
+     now wraps `<table>` directly, matching how `/admin/users` already does
+     this with no wrapping form at all. No CSS change was needed for the
+     button width itself: once the invalid nesting is gone, every row's own
+     form parses correctly and the existing 100px rule applies uniformly,
+     for real. `tests/test_admin_table_form_nesting.py` guards this with a
+     stack-depth scan of the raw source HTML (a real HTML5-recovery-aware
+     parser would silently "fix" the defect before the test ever saw it,
+     making it useless as a regression guard — see that file's own
+     docstring) — confirmed, by reverting the fix and rerunning, that the
+     test suite actually fails against the pre-fix code, not just passes
+     trivially against the post-fix one.
+  3. **The "ion" text fragment — investigated, root cause NOT confirmed,
+     left open rather than closed.** Tested the sticky-column-occlusion
+     angle directly (rows with wrapped multi-line content, real
+     `getBoundingClientRect()` measurements of sticky cells vs. row height
+     at several scroll positions) and found sticky cells always covered
+     the full row height correctly in every synthetic reproduction — no
+     bleed. Could not reproduce a stray "ion" fragment with seeded test
+     data despite several attempts at plausible triggers (long/wrapping
+     Format values, a row needing review, varying row order). The fix
+     above (removing the invalid nested forms) may resolve this as a side
+     effect — nested-form DOM corruption is exactly the kind of thing that
+     can produce secondary rendering artifacts a synthetic reproduction
+     might not hit the same way real production content does — but this is
+     a hypothesis, not a confirmed finding. **Flagged as unresolved,
+     pending Brian rechecking the live page after this PR deploys**, not
+     silently assumed fixed.
+  Neither of the brief's `table-layout:fixed`-with-percentages nor
+  fixed-width-button candidates was needed: buttons were already
+  fixed-width via CSS, and the real defect was invalid HTML silently
+  discarding one row's form, not the browser's column-width algorithm —
+  the actual fix (two deleted `<form>` tags plus one new overflow-gated
+  hint) is smaller than any of the three candidates the brief proposed.
 
 
 ## Authentication & security
