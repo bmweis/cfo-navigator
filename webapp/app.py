@@ -12391,10 +12391,10 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
 <p style="margin:0 0 4px;"><a href="/admin/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 <h1 style="margin:0 0 4px;">Name-duplicate check</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">
-  Exact-match scan of every tool's name (case, parenthetical text, and entity suffixes like Inc/LLC ignored)—catches
-  a same-vendor duplicate saved under a different URL, which the URL-based check can't see. Not fuzzy matching:
-  spelling or spacing differences won't be flagged here. Confirming a duplicate deletes one right away—pick which
-  to keep; nothing lingers half-resolved in the directory.
+  Finds tools that look like duplicates by name, even when they were saved under different URLs, which the
+  URL-based check can't catch. It matches names exactly (ignoring case, parentheticals, and suffixes like
+  Inc/LLC)&mdash;spelling or spacing differences won't be flagged. Confirming a duplicate deletes one right away,
+  so pick which copy to keep before you confirm.
 </p>
 {banner}
 {pending_html}
@@ -27608,7 +27608,7 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>FP&amp;A Buddy feedback</h1>
-<p style="color:var(--muted);margin:-6px 0 20px;">How members rated the answers&mdash;flagged answers stay inspectable with the sources they actually cited. Capture and triage only; nothing here changes prompts or retrieval.</p>
+<p style="color:var(--muted);margin:-6px 0 20px;">How members rated the answers&mdash;flagged answers stay inspectable with the sources they actually cited. This page is for review only: nothing here automatically changes how FP&A Buddy answers or searches for sources.</p>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px;margin-bottom:20px;">
   {stat_cards}
@@ -27790,7 +27790,7 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Community gaps</h1>
-<p style="color:var(--muted);margin:-6px 0 20px;">What visitors say the finance community landscape is missing&mdash;capture and triage only, folded in from the retired /community waitlist page.</p>
+<p style="color:var(--muted);margin:-6px 0 20px;">What visitors say the finance community landscape is missing. Nothing here happens automatically&mdash;review each one and mark it reviewed once you've looked.</p>
 
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
   {stat_cards}
@@ -28087,7 +28087,7 @@ def admin_users(request: Request, msg: str = ""):
 {banner}
 
 <details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
-  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>How to set up a new MCP user</summary>
+  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>How to set up a new MCP user (someone connecting their own Claude to this site)</summary>
   <div style="margin-top:16px;">
     {_MCP_USER_SETUP_HTML}
   </div>
@@ -28771,7 +28771,7 @@ def admin_enrich(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Re-enrich archive</h1>
-<p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what FP&A Buddy reasons from, so depth here pays off there.</p>
+<p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles. The summary is what FP&A Buddy reasons from, so depth here pays off there.</p>
 
 {_job_run_banner("enrich")}
 <div id="poll-container">{status_html}</div>
