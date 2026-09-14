@@ -8057,6 +8057,28 @@ it supersedes the old "`/save` is token-gated" note.
   matter for — their item counts always exactly match their grid shape.
   See BRAND.md §5's new "Card widths" section for the full write-up.
 
+- **"How this is built" (`GET /how-this-is-built`, 2026-09) — the evidence
+  behind `/about`'s "I was AI-native before AI-native was a thing" claim, a
+  public page naming where AI does real work on the site and where a human
+  still signs off.** Reachable three ways (the phrase itself in `/about`'s
+  copy via a new `_link_phrase` helper, a fourth `/about` button, a
+  homepage link under the hero subhead) — deliberately never the top nav.
+  Lists four surfaces (FP&A Buddy, Exa's four call sites, profile/
+  description generation, matchmakers and compare summaries) but links only
+  the one that already has an explainer page
+  (`/tools/fpa-buddy/how-it-works`) — the other three show a title,
+  description, and "Explainer coming soon." rather than a placeholder link,
+  per the standing rule that a visitor who clicks and finds nothing learns
+  less than one who clicks and finds something real. No diagram: the four
+  surfaces are independent mechanisms a list already represents, not one
+  branching/parallel flow a picture would show better than prose — the one
+  diagram that does earn its place (FP&A Buddy's retrieval-tier flowchart)
+  already lives on that linked page. `docs/AI_SURFACES_BRIEF.md` is the
+  underlying research brief (mechanism, cost tracking, rejected decisions
+  for all four surfaces) the eventual per-surface explainer pages will
+  draft from — raw material for Brian to write from, not shipped copy.
+  See ARCHITECTURE.md's matching section for the full write-up.
+
 
 ## Authentication & security
 
