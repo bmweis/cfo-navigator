@@ -3270,6 +3270,24 @@ def _underline_phrase(text: str, phrase: str, stroke: float = 4.0, color: str = 
     return f"{_esc(before)}{underlined}{_esc(after)}"
 
 
+def _link_phrase(text: str, phrase: str, href: str) -> str:
+    """Wrap the first case-insensitive occurrence of `phrase` (raw,
+    unescaped) inside `text` in a plain inline link — same phrase-matching
+    approach as `_underline_phrase` above, applied to a link instead of an
+    accent (the About page: "I was AI-native before AI-native was a thing"
+    is the entry point into /how-this-is-built). Falls back to the plain
+    escaped text when `phrase` isn't found (e.g. the admin-editable
+    about-page copy is rewritten without it) — the phrase still renders,
+    it just stops being a link, rather than the page breaking."""
+    lower_text, lower_phrase = text.lower(), phrase.lower()
+    idx = lower_text.find(lower_phrase)
+    if idx == -1:
+        return _esc(text)
+    before, match, after = text[:idx], text[idx:idx + len(phrase)], text[idx + len(phrase):]
+    linked = (f'<a href="{_esc(href)}" style="color:var(--navy);">{_esc(match)}</a>')
+    return f"{_esc(before)}{linked}{_esc(after)}"
+
+
 def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
     """2px-stroke line-icon badge for a card-row grid (2-up, 3-up, or 4-up).
     Cycles seafoam-wash -> navy-wash by `index` (coral dropped from this
@@ -3762,6 +3780,32 @@ def _copy_paragraphs_html(text: str, style: str = "") -> str:
     return "".join(f"<p{attr}>{_esc(p)}</p>" for p in paras)
 
 
+# The phrase this links, verbatim, out of the admin-editable about-page copy
+# — see _link_phrase's own docstring and CLAUDE.md's "How this is built"
+# entry. Kept as a named constant rather than a literal buried inside
+# _about_copy_html so the one place that has to stay in sync with the
+# default copy above is easy to find.
+_ABOUT_AI_NATIVE_PHRASE = "AI-native before AI-native was a thing"
+
+
+def _about_copy_html(text: str) -> str:
+    """Same paragraph split as `_copy_paragraphs_html`, except whichever
+    paragraph contains `_ABOUT_AI_NATIVE_PHRASE` gets that phrase linked to
+    /how-this-is-built — the claim and its evidence in one sentence. Falls
+    back to `_copy_paragraphs_html`'s own plain rendering, paragraph by
+    paragraph, whenever the phrase isn't present (an admin rewrite of the
+    about-page copy) — the page never breaks, the phrase just stops being
+    a link."""
+    paras = [p.strip() for p in text.strip().split("\n\n") if p.strip()]
+    out = []
+    for p in paras:
+        if _ABOUT_AI_NATIVE_PHRASE.lower() in p.lower():
+            out.append(f"<p>{_link_phrase(p, _ABOUT_AI_NATIVE_PHRASE, '/how-this-is-built')}</p>")
+        else:
+            out.append(f"<p>{_esc(p)}</p>")
+    return "".join(out)
+
+
 @app.get("/", response_class=HTMLResponse)
 def homepage(request: Request):
     lib = _lib()
@@ -3883,6 +3927,7 @@ def homepage(request: Request):
     <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:18px;">A CFO, for CFOs</div>
     <h1 style="margin:0 0 22px;font-family:var(--font-head);font-weight:700;font-size:clamp(32px,3.6vw,46px);line-height:1.1;">{_underline_phrase(homepage_headline, "strategic partner")}</h1>
     {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;")}
+    <a href="/how-this-is-built" style="display:inline-block;margin-top:4px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See how AI powers this site &rarr;</a>
   </div>
 
   <div class="home-photo-wrap">
@@ -3954,7 +3999,7 @@ def about_page(request: Request):
   </div>
 </div>
 
-{_copy_paragraphs_html(about_copy)}
+{_about_copy_html(about_copy)}
 
 <div style="display:grid;grid-template-columns:2fr 3fr;gap:10px;margin-top:32px;">
   <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking on stage"
@@ -3967,11 +4012,98 @@ def about_page(request: Request):
 <div style="display:flex;gap:12px;flex-wrap:wrap;">
   <a href="/thought-leadership" class="btn">Thought leadership</a>
   <a href="/contact" class="btn btn-ghost">Get in touch</a>
+  <a href="/how-this-is-built" class="btn btn-ghost">How this is built</a>
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
 </div>
 </div>
 </div>"""
     return HTMLResponse(_page("About—Brian Weisberg", "About", body, role=_role(request)))
+
+
+# Surfaces shown on /how-this-is-built below — (title, one-line description,
+# href or "" for a not-yet-written explainer). Kept as one module-level
+# tuple, not inline in the route, so a future explainer page just needs its
+# href filled in here rather than the route itself edited. Order follows the
+# build brief's own table: the one live page first, then the three not yet
+# written, in the order they were investigated for the research brief
+# (docs/AI_SURFACES_BRIEF.md).
+_AI_SURFACES = (
+    ("FP&A Buddy",
+     "Answers finance questions from the curated research archive, RSS feeds, and trusted-site "
+     "web search, with every claim tied to a real, numbered citation.",
+     "/tools/fpa-buddy/how-it-works"),
+    ("Web search, restricted to sites I trust",
+     "The same search engine (Exa) doing four different jobs: FP&A Buddy's own web tier, two "
+     "quiet recovery paths that find an archived article again when its original link goes dead "
+     "or gets blocked, and one that researches a software vendor before its Toolbox profile is drafted.",
+     ""),
+    ("Profile and description generation",
+     "Every CFO Toolbox vendor and community profile starts as an AI first draft, reviewed "
+     "before it's marked verified. A description, an agent-autonomy note, and a competitive "
+     "read, drafted from what a vendor actually publishes, not a generic template.",
+     ""),
+    ("Matchmakers and compare summaries",
+     "A conversational assistant that narrows a directory of software or communities down to a "
+     "real fit, plus a short AI-written orientation note above every side-by-side comparison.",
+     ""),
+)
+
+
+def _ai_surface_card_html(title: str, desc: str, href: str) -> str:
+    if href:
+        action = f'<a href="{_esc(href)}" style="color:var(--navy);font-weight:600;font-size:14px;text-decoration:none;">See the full mechanism &rarr;</a>'
+    else:
+        action = '<span style="color:var(--muted);font-size:13px;font-style:italic;">Explainer coming soon.</span>'
+    return (
+        '<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px 22px;">'
+        f'<h3 style="margin:0 0 6px;font-size:17px;">{_esc(title)}</h3>'
+        f'<p style="margin:0 0 12px;color:var(--ink-soft);font-size:15px;line-height:1.6;">{_esc(desc)}</p>'
+        f'{action}</div>'
+    )
+
+
+@app.get("/how-this-is-built", response_class=HTMLResponse)
+def how_this_is_built(request: Request):
+    """The evidence behind /about's "I was AI-native before AI-native was a
+    thing" — a plain map of where AI actually does real work on this site,
+    not a marketing page. Reachable from that phrase (see _link_phrase),
+    the About page's own button row, and a homepage link — deliberately not
+    the top nav (see CLAUDE.md's "How this is built" entry). Written for a
+    curious CFO or finance leader, the same audience every public page on
+    this site is written for — not a hiring manager or an engineer, though
+    both may read it.
+
+    Only FP&A Buddy is linked to its own explainer today
+    (/tools/fpa-buddy/how-it-works); the other three surfaces are listed,
+    not linked, per the standing rule that a visitor who finds three
+    placeholders learns less than one who finds one real page — each gets
+    its own explainer as it's written, at which point _AI_SURFACES just
+    gains an href, no other code change. No diagram on this page —
+    considered and deliberately skipped, since the four surfaces are
+    independent mechanisms, not one branching/parallel flow a picture
+    would show better than this list does; the one diagram that earns its
+    place (the retrieval-tier flowchart) already lives on FP&A Buddy's own
+    page, linked from here."""
+    cards_html = "".join(_ai_surface_card_html(t, d, h) for t, d, h in _AI_SURFACES)
+    body = f"""<div class="page page-standard article-atlantic">
+<div class="tool-prose">
+<p style="margin:0 0 4px;"><a href="/about" style="font-size:13px;color:var(--muted);">&larr; About</a></p>
+<h1>How this is built</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 28px;font-size:16px;line-height:1.65;">I was AI-native before AI-native was a thing. This is what that actually means on this site&mdash;where Claude, embeddings, and search actually do real work, and where a human still has to sign off.</p>
+
+<h2>Why it's built this way</h2>
+<p>Curation stays human. The archive behind FP&amp;A Buddy only grows because I read something and decided it was worth keeping&mdash;AI drafts the summary and tags after that, never the decision to save it.</p>
+<p>Every claim FP&amp;A Buddy makes traces to a real citation, not a paraphrase the model swears it remembers correctly. That's an actual API guarantee, not a prompt asking it to behave.</p>
+<p>A draft is a draft until it's reviewed. Every AI-written vendor and community profile carries a visible review state, so a reader can tell what's been checked from what hasn't&mdash;on the page itself, not buried in an admin tool.</p>
+<p>The tools are picked for what each is actually good at. Claude drafts and reasons. A separate embedding model finds what a keyword search would miss. Search is restricted to a list of sites I trust, not the open web.</p>
+
+<h2 style="margin-top:8px;">Where AI shows up</h2>
+</div>
+<div style="display:grid;gap:14px;margin-top:8px;">
+{cards_html}
+</div>
+</div>"""
+    return HTMLResponse(_page("How this is built—Brian Weisberg", "About", body, role=_role(request)))
 
 
 # The one Speaking & Events entry with photos (Abacum AI Summit). Excluded

@@ -2042,6 +2042,46 @@ back if they set any, "Ranked using Brian's default priorities" otherwise —
 by design, no separate methodology explanation beyond stating the weights in
 effect.
 
+### How this is built — `GET /how-this-is-built` (2026-09)
+
+The evidence behind `/about`'s "I was AI-native before AI-native was a
+thing" claim — a plain public page naming where AI actually does real work
+on the site, for a curious CFO or finance leader, not a hiring manager or an
+engineer. No schema, no DB read — a static route built from one module-level
+tuple, `_AI_SURFACES` (title, one-line description, href-or-empty), rendered
+by `_ai_surface_card_html`.
+
+Reachable three ways, deliberately never from the top nav: (1) the phrase
+itself in `/about`'s own copy, linked via a new `_link_phrase(text, phrase,
+href)` helper (mirrors `_underline_phrase`'s phrase-matching-with-fallback
+shape, but wraps an `<a>` instead of an accent — falls back to plain escaped
+text if an admin rewrites the about-page copy without the phrase); (2) a
+fourth button in `/about`'s existing button row, between "Get in touch" and
+"LinkedIn" so the three internal links stay together and the one external
+link (LinkedIn) stays last; (3) a plain text link on the homepage, directly
+under the hero subhead.
+
+Lists four AI surfaces (FP&A Buddy, Exa's four call sites, profile/
+description generation, matchmakers and compare summaries) but links only
+the one with an existing explainer (`/tools/fpa-buddy/how-it-works`) — the
+other three render a title + description + "Explainer coming soon." rather
+than a placeholder link, so a visitor who clicks learns something every
+time. Adding an explainer for one of the other three is a one-line change
+(fill in its `href` in `_AI_SURFACES`), not a route or template change.
+
+No diagram — considered and deliberately skipped: the four surfaces are
+independent mechanisms rendered as a list, not one branching/parallel flow
+a picture would show better than prose. The one diagram that does earn its
+place for this material (the FP&A Buddy retrieval-tier flowchart) already
+lives on `/tools/fpa-buddy/how-it-works`, linked from here. Zero coral
+moments on this page (the site's per-page coral budget is already spent by
+`/`'s and `/tools`' own `_mcp_callout_html`) — `coral_moment_problems()`
+still passes with none used, since it flags more than one, not fewer.
+
+See `docs/AI_SURFACES_BRIEF.md` for the underlying research (mechanism,
+cost tracking, and rejected-decisions history for all four surfaces) that
+the eventual per-surface explainer pages will draft from.
+
 ### Thought Leadership
 
 | Table | Purpose | Columns that carry meaning |

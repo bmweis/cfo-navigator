@@ -105,7 +105,7 @@ def _admin_client(appmod):
     return c
 
 
-PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
+PUBLIC = ["/", "/about", "/how-this-is-built", "/thought-leadership", "/contact",
           # CFO Toolbox browsing and everything linked from the thought-leadership
           # page are fully public; only the account tools below stay gated.
           "/tools", "/tools/software", "/tools/resources", "/tools/communities",
