@@ -4057,10 +4057,10 @@ _AI_SURFACES = (
      ""),
 )
 
-# The four prose sections of /how-this-is-built, as markdown. Brian's own copy,
-# shipped verbatim (PR 35) — run against his write-like-brian voice rules before
-# it landed here, so treat any edit as a copy change needing his sign-off, not a
-# wording tidy-up.
+# The prose of /how-this-is-built, as markdown: four sections plus the closing
+# footnote. Brian's own copy, shipped verbatim (PR 35) — run against his
+# write-like-brian voice rules before it landed here, so treat any edit as a
+# copy change needing his sign-off, not a wording tidy-up.
 #
 # Markdown rather than hand-built HTML because the copy carries nine inline
 # credit links; _render_original_content_markdown (the admin-authored-and-
