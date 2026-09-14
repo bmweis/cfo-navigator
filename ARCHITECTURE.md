@@ -2049,7 +2049,42 @@ thing" claim — a plain public page naming where AI actually does real work
 on the site, for a curious CFO or finance leader, not a hiring manager or an
 engineer. No schema, no DB read — a static route built from one module-level
 tuple, `_AI_SURFACES` (title, one-line description, href-or-empty), rendered
-by `_ai_surface_card_html`.
+by `_ai_surface_card_html`, plus five module-level markdown constants for
+the prose.
+
+**PR 35 replaced the page's copy wholesale with Brian's own** (run against
+his `write-like-brian` voice rules before it landed, and it passes
+`typography_findings` untouched — no allowlist entry needed). Structurally
+that added two sections and changed how the prose is stored:
+
+- **Prose lives in five markdown constants** — `_HTIB_INTRO`,
+  `_HTIB_WHY_I_BUILT_THIS`, `_HTIB_HOW_I_DECIDED`, `_HTIB_WHAT_ELSE`,
+  `_HTIB_FOOTNOTE` — each rendered through
+  `_render_original_content_markdown`, the **admin-authored-and-trusted**
+  renderer the three `original_content` long-form pieces already use.
+  That choice is load-bearing, not incidental: the copy carries nine inline
+  links crediting other people's blogs, and `webapp/markdown_render.py`'s
+  restricted renderer deliberately escapes links (it serves AI-drafted
+  fields — a different trust model, see its own docstring). Markdown rather
+  than hand-built HTML because nine `<a>` tags plus manual escaping is more
+  code and more drift surface than the same text as prose.
+- Named plainly, **not** `*_DEFAULT`: in this file that suffix means
+  "hardcoded fallback behind a live `lib.get_setting(...)` lookup"
+  (`_ABOUT_COPY_DEFAULT`, `_HOMEPAGE_HEADLINE_DEFAULT`). Nothing overrides
+  these yet, so the suffix would be a false signal about the code's state.
+- **New "Why I built this"** (the origin story — deliberately long) and
+  **"What else I've built with AI"** (a closer naming work beyond this
+  site), plus a footnote recording Fred Wilson's 2024 AVC.com → avc.xyz
+  move.
+- **A skip link under the intro**, "Skip to how the tooling works →",
+  anchored to `#where-ai-shows-up` — the heading that actually holds the
+  four surface cards, so a reader who came for the mechanism rather than
+  the story can jump straight to it.
+- The four surface cards stay in `_AI_SURFACES` with edited copy (the Web
+  search card now says *four* jobs, not three). They are deliberately **not**
+  markdown/admin-editable alongside the prose: each is structured (title,
+  description, link, coming-soon state) and its href points at a real route,
+  so it belongs in code next to the routes it links to.
 
 Reachable three ways, deliberately never from the top nav: (1) the phrase
 itself in `/about`'s own copy, linked via a new `_link_phrase(text, phrase,
@@ -2081,6 +2116,97 @@ still passes with none used, since it flags more than one, not fewer.
 See `docs/AI_SURFACES_BRIEF.md` for the underlying research (mechanism,
 cost tracking, and rejected-decisions history for all four surfaces) that
 the eventual per-surface explainer pages will draft from.
+
+**Admin-editable prose (PR 35, 2026-09).** The four prose sections and the
+closing footnote are editable at `/admin/copy`, so a copy change doesn't
+need a deploy. No schema change — five rows in the existing `settings`
+table (`htib_intro_copy`, `htib_why_copy`, `htib_how_copy`,
+`htib_what_else_copy`, `htib_footnote_copy`), each resolved by
+`_htib_copy(lib)` as `get_setting(key) or _HTIB_*_DEFAULT`, the same
+convention the About/homepage copy already uses. `_HTIB_COPY_SECTIONS` is
+the single registry behind the settings keys, the `/admin/copy` sections,
+and the save route — add a section there and all three pick it up
+(`_email_template_registry()`'s precedent).
+
+`POST /admin/copy/how-this-is-built` is **one** route for all five sections
+rather than five near-identical ones: the section is named in the JSON
+payload and validated against `_HTIB_COPY_KEYS`, so an unknown key is
+rejected (400) instead of writing an arbitrary settings row. Blank text is
+rejected too — a blank save would silently fall back to the hardcoded
+default, which reads on the page as "my edit vanished" rather than as an
+error.
+
+**Rendering is unchanged, and that was the point of the investigation that
+gated this.** The prose already went through
+`_render_original_content_markdown` — the admin-authored-and-trusted
+renderer the `original_content` long-form pieces use, which passes raw HTML
+through — so making the copy editable needed no renderer work at all. Two
+alternatives were rejected: extending `webapp/markdown_render.py`'s
+restricted renderer to allow links would weaken link-escaping across every
+AI-drafted tool/community field site-wide to serve one admin page; a new
+trusted-admin-copy renderer would duplicate the one that already exists.
+
+The trade this makes, stated in each section's own `/admin/copy`
+description rather than left to be discovered: these five fields accept raw
+HTML, unlike the About-page bio beside them on the same page, which is
+plain text through `_about_copy_html`. That is correct here (admin-only,
+`_is_authed`-gated, and the copy is mostly credit links) but it is a real
+asymmetry between two fields on one screen.
+
+`_AI_SURFACES` — the four surface cards — stays in code deliberately. Each
+entry is a 3-tuple whose href points at a real route and whose empty string
+selects the "Explainer coming soon." state; neither survives a textarea
+intact (a typo'd href silently 404s, and the coming-soon state has no
+sensible text form).
+
+### Outbound links open in a new tab (PR 35, 2026-09)
+
+A standing site-wide rule: every anchor whose destination is not on
+bmweis.com carries `target="_blank" rel="noopener"`. Internal links — a
+relative path, an anchor, or an absolute `bmweis.com` URL — stay same-tab.
+BRAND.md §3.3 states the rule and the reasoning (a reader part-way through
+an article or a half-filled admin form shouldn't lose their place following
+a citation).
+
+`linklib.brand_check.outbound_link_problems(src)` enforces it, with its own
+`/admin/checks` row ("Outbound links open in a new tab") and
+`tests/test_outbound_links.py`. `INTERNAL_LINK_HOSTS` is the "still on the
+site" set; a relative href never matches the http(s) test at all, so
+internal links are same-tab for free.
+
+**A source scan, not a rendered-page scan** — deliberately different from
+`coral_moment_problems()`, which renders every public route. The failure
+mode here is a hand-typed anchor in `webapp/app.py`, and a source scan also
+covers admin pages (a signed-out rendered scan can't reach them), costs no
+render time, and carries none of the re-entrancy hazard PR 16 had to build
+`_CORAL_CHECK_IN_PROGRESS` for.
+
+It reads **raw source spans**, not evaluated string values, because an
+anchor is routinely split across adjacent Python string literals
+(`'<a href="…"' ' target="_blank">'`). The Python syntax between the
+fragments contains no `>`, so the raw scan still sees one whole tag, while
+a value-based scan would see two fragments and flag the half without the
+attribute. That is not hypothetical: the naive same-line `grep` that
+preceded this checker reported five offenders, four of which were exactly
+this shape. The real count was **one** — the Logo.dev footer attribution in
+the shared `_page()` footer, fixed in the same PR.
+
+Scope limits, stated in the function's own docstring and BRAND.md §8 rather
+than left implied — a clean result is not a claim that every rendered
+anchor site-wide complies:
+
+* **Links built in JavaScript** have no literal href in the source to
+  classify, so they're invisible here (and to a rendered-DOM scan too,
+  unless that JS had run).
+* **Links in stored database content** — an admin's saved `/how-this-is-built`
+  copy, `original_content.body_md`, AI-drafted fields, user-submitted text —
+  are data, not source, edited through the admin UI rather than in a PR. The
+  five `_HTIB_*_DEFAULT` constants are scanned; an override saved over one
+  is not.
+* **Markdown links** (`[text](https://…)`) cannot carry `target` at all, so
+  they are a latent violation by construction — which is why the
+  `/how-this-is-built` copy writes its 12 outbound links as raw `<a>` tags
+  and leaves its 2 internal links as plain markdown.
 
 ### Thought Leadership
 
@@ -6292,6 +6418,35 @@ changed. (The exact tool count named here — 9 at the time of this phase — ha
 since drifted with later additions/retirements; see `_LIBRARY_TOOLS` in
 `webapp/app.py` for the live, authoritative list rather than this number.)
 
+**Superseded again (PR 35, 2026-09) — Manage feeds leaves the quadrant, and
+"New content" is renamed "Add content."** Reaching Manage feeds from `/admin`
+took four expansions (CFO Toolbox → Reader → New content → the card) and
+Brian couldn't find it. `_reader_admin_quadrants` now returns **four** items,
+not three: the Manage feeds `_lib_card` first, then the three quadrants as
+its siblings — so it's two expansions from `/admin`, confirmed live. The
+quadrant keeps both capture-path accordion pairs and nothing else, its
+`count_override` drops 5 → 4, and its `hrefs` is now empty, so it carries no
+task badge of its own (the badge moved out with the card — `count_override`
+is deliberately badge-independent, so a badge can never be orphaned from the
+page it aggregates). Renamed "Add content" because a verb says what you do
+there.
+
+**A quadrant of its own was the alternative, and was rejected**: a
+collapsible box holding exactly one card adds the click back without
+grouping anything, which is the cost the move exists to remove. The result
+reads as three disclosure boxes plus one plain card, which sounds irregular
+but isn't — CFO Toolbox, the group this box sits inside, already mixes
+plain cards (Resources, Compare summary feedback) with nested disclosure
+sub-groups (Software, Community, FP&A Buddy, Reader). The Reader box now
+mirrors its own parent's established shape.
+
+Manage feeds leads rather than trails the three quadrants: feeds are where
+material enters the Reader at all, and the most-findable slot is the point
+of the move. `_LIBRARY_TOOLS` is untouched, so the Reader group's own
+aggregate badge and its "6 tools" count are unaffected, and
+`hub_nav_orphans()` stays clean with no edit — both derive from that tuple,
+not from the quadrant arrangement.
+
 **Mobile** collapses to one column at the same 900px breakpoint. DOM order is
 column-major (new, tags, existing, backup) but the required reading order is
 new, existing, tags, backup, so the two `.lib-col` wrappers get
@@ -6639,19 +6794,26 @@ contents are now a collapsible **Reader** group on `/admin`, nested inside
 CFO Toolbox alongside the Software sub-group and the Communities card.
 
 **Structure: two levels of nesting, everything collapsed on load.** Reader
-group → three quadrants (New content, Existing archive management, Tag
+group → three quadrants (Add content, Existing archive management, Tag
 management) → the tool cards inside each. `webapp/app.py`'s
 `_reader_admin_quadrants(task_counts)` is what used to be the
-`admin_library()` route body, minus the page shell: it returns the three
+`admin_library()` route body, minus the page shell: it returns those
 quadrants as pre-rendered HTML strings, which `admin_page()` drops straight
 into `_group_html`'s item list (that list already accepted a pre-rendered
 string alongside plain card tuples — the same mechanism the FP&A Buddy and
 Software sub-groups use, so no new plumbing). Each quadrant now renders with
 `nested=True` rather than the retired page's `extra_class="lib-quad"`. Every
 `<details>` in the chain — CFO Toolbox, Reader, each quadrant, and each
-capture-method accordion inside New content — loads closed;
+capture-method accordion inside Add content — loads closed;
 `tests/test_admin_reader_box.py::test_every_disclosure_level_loads_collapsed`
 walks all three levels in one assertion.
+
+**As of PR 35 that same function returns four items, not three** — the
+Manage feeds card ahead of the three quadrants, as their sibling rather than
+buried inside the first one, and "New content" is renamed "Add content." See
+the "Superseded again (PR 35)" note in the Phase 6 section above for the
+full reasoning, including why a fourth quadrant was rejected in favour of a
+plain card.
 
 **Deliberately not carried over: the page's own two-column layout.** The
 `.lib-cols`/`.lib-col` flex columns, the `.lib-q-*` order wrappers, and the

@@ -334,6 +334,78 @@ def icon_fill_contract_problems(src: str) -> list[str]:
     return problems
 
 
+# Every link that leaves bmweis.com opens in a new tab (BRAND.md §3.3). These
+# are the hosts that count as "still on the site" — everything else with an
+# http(s) href is outbound and needs target="_blank" rel="noopener". A
+# relative href (/tools, #anchor) never matches the http(s) test at all, so
+# internal links are same-tab for free.
+INTERNAL_LINK_HOSTS = {"bmweis.com", "www.bmweis.com", "mcp.bmweis.com"}
+
+# Matches an <a> tag from `<a` to its closing `>`. Deliberately run over raw
+# source rather than evaluated string values: an anchor is routinely split
+# across adjacent Python string literals (`'<a href="…"' ' target="_blank">'`),
+# and since the Python syntax between the fragments contains no `>`, the raw
+# scan still sees one whole tag. An AST/value-based scan would see two
+# fragments and report a false positive on the half without the attribute.
+_ANCHOR_TAG_RE = re.compile(r"<a\s[^>]*>", re.S)
+_ANCHOR_HREF_RE = re.compile(r'href="(https?://[^"]*)"')
+
+
+def _outbound_host(href: str) -> str:
+    """Host of an absolute href, lowercased, port stripped. '' if not http(s)."""
+    m = re.match(r"https?://([^/?#]+)", href)
+    if not m:
+        return ""
+    return m.group(1).split("@")[-1].split(":")[0].lower()
+
+
+def outbound_link_problems(src: str) -> list[str]:
+    """Anchors in `src` that leave bmweis.com without `target="_blank"`.
+
+    The mechanical half of BRAND.md §3.3's "outbound links open in a new
+    tab" rule, in the same spirit as voice_review.typography_findings():
+    a deterministic scan over hand-written source, not a judgment call.
+
+    **Scanned:** `<a>` tags written literally into Python source (which is
+    where every hand-authored anchor on this site lives, since all HTML is
+    inline in webapp/app.py).
+
+    **Deliberately NOT scanned, and each for a real reason — a clean result
+    here is not a claim that every rendered anchor site-wide complies:**
+
+    * **Links built dynamically in JavaScript** (`'<a href="' + url + '">'`).
+      The href isn't a literal in the source at all, so there's nothing for
+      a static scan to classify as outbound; a rendered-DOM scan couldn't
+      see them either unless the JS had actually run.
+    * **Links inside stored database content** — `original_content.body_md`,
+      AI-drafted tool/community fields, user-submitted text. These aren't
+      source, they're data, and they're edited through the admin UI rather
+      than in a PR, so a source lint can't reach them and shouldn't try to
+      rewrite them. (The /how-this-is-built copy is the one body of prose
+      that is BOTH source-resident and admin-editable: the defaults here are
+      scanned, but an admin's saved override is not.)
+    * **Markdown links in that same prose** (`[text](https://…)`). Markdown
+      has no syntax for `target`, so a markdown link is a latent violation
+      by construction — which is exactly why the /how-this-is-built copy
+      writes its outbound links as raw `<a>` tags instead.
+    """
+    problems: list[str] = []
+    for m in _ANCHOR_TAG_RE.finditer(src):
+        tag = m.group(0)
+        href_m = _ANCHOR_HREF_RE.search(tag)
+        if not href_m:
+            continue
+        href = href_m.group(1)
+        host = _outbound_host(href)
+        if not host or host in INTERNAL_LINK_HOSTS:
+            continue
+        if 'target="_blank"' in tag:
+            continue
+        line = src.count("\n", 0, m.start()) + 1
+        problems.append(f"line {line}: {href} (missing target=\"_blank\")")
+    return problems
+
+
 def findings(src: str) -> list[str]:
     """All brand-standards violations in `src`, as human-readable strings. Empty = clean."""
     problems: list[str] = []
@@ -368,4 +440,8 @@ def findings(src: str) -> list[str]:
     icon_fill = icon_fill_contract_problems(src)
     if icon_fill:
         problems.append("Icon fill contract violation(s): " + "; ".join(icon_fill))
+    # outbound_link_problems() is deliberately NOT folded in here, unlike
+    # icon_fill_contract_problems() above: findings() is the palette/typeface
+    # check, and its /admin/checks row describes itself that way. The outbound
+    # rule is its own standing rule with its own row (see webapp.checks.run_all).
     return problems

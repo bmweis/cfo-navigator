@@ -261,6 +261,36 @@ The sitewide sentence-case sweep is complete as of Aug 2026 (Phases A–E); in-a
 subheadings were hand-edited via admin rather than swept mechanically, per the
 case-by-case note above.
 
+### 3.3 Outbound links open in a new tab
+
+**Every link whose destination is not on bmweis.com carries `target="_blank"
+rel="noopener"`. No exceptions.** Internal links — a relative path, an anchor, or an
+absolute `bmweis.com` URL — stay in the same tab, unchanged.
+
+The reasoning is the reader's place on the page: a visitor part-way through an article,
+a comparison, or a half-filled admin form shouldn't lose it by following a citation. It
+matters most exactly where links are most useful — a credit list, a sources list, a
+vendor's own site — which is where they're densest.
+
+Two practical consequences worth knowing before writing copy:
+
+- **Markdown can't express this.** `[text](https://example.com)` renders a bare anchor
+  with no `target`, and markdown has no syntax to add one. So any outbound link in
+  prose that renders through a markdown renderer has to be written as a raw
+  `<a href="…" target="_blank" rel="noopener">` tag instead. That's why
+  `/how-this-is-built`'s credit links are raw HTML rather than markdown, and why
+  `original_content.body_md` already writes its outbound links the same way.
+- **`rel="noopener"` travels with `target="_blank"`**, always — a new-tab link without
+  it hands the opened page a live reference back to this one.
+
+Enforced mechanically by `linklib.brand_check.outbound_link_problems()` — its own
+`/admin/checks` row ("Outbound links open in a new tab") and a CI test
+(`tests/test_outbound_links.py`). It scans hand-written `<a>` tags in
+`webapp/app.py`; it deliberately cannot see links built dynamically in JavaScript or
+links stored in database content (an admin's saved copy, AI-drafted fields,
+user-submitted text). See that function's own docstring for why each of those is out of
+scope, and §8.
+
 ---
 
 ## 4. The graffiti/street-art accent layer (restrained — accents only)
@@ -908,6 +938,27 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
     throughout.
   - Admin pages are out of scope entirely — see the sanctioned pending-count-badge exception
     below, which already puts more than one coral element on an admin screen.
+- **Outbound links open in a new tab (PR 35, 2026-09)** — §3.3's rule, enforced by
+  `linklib.brand_check.outbound_link_problems()`, with its own `/admin/checks` row and
+  `tests/test_outbound_links.py`. Deliberately a **source** scan rather than a rendered-page
+  one, unlike coral discipline above: the failure mode is a hand-typed anchor in
+  `webapp/app.py`, and scanning source covers admin pages too (which a signed-out
+  rendered scan can't reach) at no render cost and with no re-entrancy hazard. It reads raw
+  source rather than evaluated string values on purpose — an anchor is routinely split
+  across adjacent Python string literals, and a value-based scan would see two fragments
+  and flag the half without the `target` attribute. Like the coral check, it says what it
+  can't see rather than overclaiming:
+  - **Links built in JavaScript** (`'<a href="' + url + '">'`) have no literal href to
+    classify, so they're invisible to this check — and to a rendered-DOM scan too, unless
+    that JS had actually run.
+  - **Links inside stored database content** — an admin's saved `/how-this-is-built` copy,
+    `original_content.body_md`, AI-drafted tool/community fields, user-submitted text — are
+    data, not source. They're edited through the admin UI rather than in a PR, so a source
+    lint can't reach them. The five `_HTIB_*_DEFAULT` constants **are** scanned; an override
+    saved over one of them is not.
+  - **Markdown links** (`[text](https://…)`) can't carry `target` at all, so they're a
+    latent violation by construction — which is why §3.3 says to write outbound links in
+    prose as raw `<a>` tags.
 - **Icon fill contract (PR 18, 2026-09)** — a plain stroke-path `_ICON_*` icon inherits its
   color from whatever badge the position-based seafoam/navy cycle (`_CARD_ICON_STYLES`)
   assigns it, so cycling the array is safe by construction. An icon with its own hardcoded

@@ -8079,6 +8079,117 @@ it supersedes the old "`/save` is token-gated" note.
   draft from — raw material for Brian to write from, not shipped copy.
   See ARCHITECTURE.md's matching section for the full write-up.
 
+- **"How this is built" gets Brian's own copy, and Manage feeds comes up one
+  level (PR 35, 2026-09).** Two unrelated pieces in one PR.
+  **The page copy** is replaced wholesale with Brian's own writing, shipped
+  verbatim — already run against his `write-like-brian` voice rules, and it
+  passes `typography_findings` with no allowlist entry needed (confirmed, not
+  assumed). Two new sections: **"Why I built this"** (the origin story —
+  Feedly's renewal notice as the hinge, deliberately long) and **"What else
+  I've built with AI"**, plus a footnote on Fred Wilson's 2024 AVC.com to
+  avc.xyz move and a skip link under the intro for a reader who came for the
+  mechanism rather than the story. The four surface cards stay, with edited
+  copy (Web search now says *four* jobs, not three).
+  **The prose is stored as five module-level markdown constants**
+  (`_HTIB_INTRO`, `_HTIB_WHY_I_BUILT_THIS`, `_HTIB_HOW_I_DECIDED`,
+  `_HTIB_WHAT_ELSE`, `_HTIB_FOOTNOTE`) rendered through
+  `_render_original_content_markdown` — **the admin-authored-and-trusted
+  renderer, deliberately not `webapp/markdown_render.py`'s restricted one**,
+  which escapes links by design because it serves AI-drafted fields. That
+  distinction is the whole reason the choice matters here: this copy carries
+  nine inline links crediting other people's blogs, and credit is the point
+  of that section. Named plainly rather than `*_DEFAULT` — in this codebase
+  that suffix means "fallback behind a live `get_setting` lookup," and
+  nothing overrides these yet, so the suffix would misdescribe the code.
+  **All eleven external URLs were confirmed to resolve to the right target**
+  (the agent proxy blocks direct CONNECT, so this went through the Exa fetch
+  tool instead) — and `avc.com`'s own last post, "I've Moved Onchain" dated
+  May 2024, independently confirms the footnote's factual claim.
+  **Part 3, unrelated: Manage feeds took four expansions to reach from
+  `/admin`** (CFO Toolbox to Reader to New content to the card) and Brian
+  couldn't find it. It's now a sibling of the three quadrants rather than
+  inside one — two expansions, confirmed live — and "New content" is renamed
+  "Add content" (a verb says what you do there). A fourth quadrant was the
+  alternative and was rejected: a collapsible box holding exactly one card
+  adds the click straight back without grouping anything. The resulting
+  "three disclosure boxes plus one plain card" shape reads as irregular
+  described in the abstract but isn't in practice — **CFO Toolbox, the group
+  this box sits inside, already mixes plain cards (Resources, Compare summary
+  feedback) with nested disclosure sub-groups**, so the Reader box now
+  mirrors its own parent's established pattern. `_LIBRARY_TOOLS` is
+  untouched, so the Reader group's aggregate badge, its "6 tools" count, and
+  `hub_nav_orphans()` all needed no edit — every one of them derives from
+  that tuple, not from the quadrant arrangement.
+  **Part 2, approved and shipped in the same PR: the copy is admin-editable
+  at `/admin/copy`, with no new renderer and no change to the restricted
+  one.** The investigation that gated this corrected a standing assumption
+  worth keeping: `original_content.body_md` **is** an existing precedent for
+  admin-editable prose carrying arbitrary links (a DB column, edited at
+  `/admin/thought-leadership/original`, rendered with links intact), so the
+  brief's premise that "the markdown renderer excludes links, so something
+  has to change" didn't hold — nothing had to change. That made Part 2 a
+  pure **storage** change: the five constants become `_HTIB_*_DEFAULT`
+  behind a live `lib.get_setting(...)` lookup (`_htib_copy()`), five
+  `settings` rows, five `/admin/copy` sections, and **one** save route
+  (`POST /admin/copy/how-this-is-built`) that takes the section name in its
+  payload and validates it against `_HTIB_COPY_KEYS` — rather than five
+  near-identical routes. `_HTIB_COPY_SECTIONS` is the single registry
+  behind the keys, the admin sections, and the save route, the same
+  precedent `_email_template_registry()` set. No schema change: `settings`
+  is already `key`/`value`.
+  **Two alternatives were considered and rejected.** Extending
+  `webapp/markdown_render.py`'s restricted renderer to allow links would
+  weaken link-escaping across every AI-drafted tool/community field on the
+  site to serve one admin-authored page — the largest blast radius of the
+  three options, for something a second renderer already provides. A new
+  trusted-admin-copy renderer would be a near-duplicate of
+  `_render_original_content_markdown`, which already *is* that renderer —
+  two renderers sharing one trust model is exactly the drift risk this
+  codebase keeps documenting.
+  **The real asymmetry this introduces, named rather than left to be
+  discovered**: these five fields inherit `body_md`'s trust model, so raw
+  HTML passes through unescaped. Correct here (admin-only, `_is_authed`-
+  gated, and the copy is nine-tenths credit links) but genuinely different
+  from the About-page bio sitting beside them on the same page, which is
+  plain text through `_about_copy_html`. Each section's own description on
+  `/admin/copy` says so.
+  **The four surface cards stay in code, deliberately.** Each is a 3-tuple
+  (title, description, href-or-empty) where the href points at a real route
+  and the empty string is load-bearing — it's what selects "Explainer coming
+  soon." over a link. A textarea introduces two failure modes prose doesn't
+  have: a typo'd href silently 404s, and there's no sensible text form of
+  the coming-soon state that can't be got wrong. The reasoning is a comment
+  above `_AI_SURFACES` so it doesn't get re-litigated.
+
+- **Standing rule: every outbound link opens in a new tab (PR 35, 2026-09).**
+  Any anchor whose destination is not on bmweis.com carries
+  `target="_blank" rel="noopener"`; internal links (relative paths,
+  anchors, absolute bmweis.com URLs) stay same-tab. BRAND.md §3.3 is the
+  rule; `linklib.brand_check.outbound_link_problems()` enforces it, with
+  its own `/admin/checks` row and `tests/test_outbound_links.py`.
+  **The sweep found one offender, not five** — the Logo.dev footer
+  attribution (`webapp/app.py`, the shared `_page()` footer). An earlier
+  same-line `grep` had reported five; four of those were multi-line anchors
+  that carry `target` on a later source line (e.g. `doc_link` on
+  `/admin/checks`), which is exactly why the checker reads raw source
+  spans rather than per-line or per-string-literal values — an anchor is
+  routinely split across adjacent Python string literals, and a
+  value-based scan would flag the half without the attribute.
+  **Source scan, not a rendered-page scan**, unlike `coral_moment_problems()`:
+  the failure mode is a hand-typed anchor in `webapp/app.py`, and scanning
+  source also covers admin pages (which a signed-out rendered scan can't
+  reach) at no render cost and with no re-entrancy hazard — the recursion
+  trap PR 16 had to build a guard for. It deliberately cannot see links
+  built in JavaScript, or links in stored DB content (an admin's saved
+  override of the copy above, `original_content.body_md`, AI-drafted
+  fields, user-submitted text); the function's own docstring and BRAND.md
+  §8 both say so rather than overclaiming. **Markdown can't express the
+  rule at all** (no `target` syntax), so outbound links in prose that
+  renders through a markdown renderer must be written as raw `<a>` tags —
+  which is why `/how-this-is-built`'s credit links are raw HTML. See
+  ARCHITECTURE.md's matching bullets for the full technical write-up and
+  `tests/test_how_this_is_built.py` for the coverage.
+
 
 ## Authentication & security
 
