@@ -477,6 +477,13 @@ for comfortable reading, outside the usual 60–75-character-per-line guidance);
 interim fix was the same `.tool-prose` (760px) wrapper already proven on GER and the
 SYSTEM pages, applied to those four as well.
 
+**Layout sizing, as one family.** The two page tiers above, the table
+width floors, the per-column widths, and the card widths below are four
+instances of the same discipline: pick a value once, by rule, from what a
+thing actually holds (a page's content shape, a table's column count, a
+column's field type, a listing's item count) — not by eye, per instance.
+Read them as one family, not four separate systems.
+
 ### Admin table width floors
 
 An admin table's `min-width` — the point below which it scrolls horizontally
@@ -619,6 +626,54 @@ is drawn from) now reads its width from the same constant too
 (`min-width:{_COL_WIDTH_NAME}px`, not `width:`, since a sticky column needs
 `min-width` to stay pinned correctly) — it was the origin case for 280px,
 not a further exception.
+
+### Card widths
+
+**Cards keep their width; containers distribute them.** A card stretching
+to fill its row reads wrong — the same family should render at the same
+width whether its row holds 1 card or 20.
+
+**The mechanism**: on a `grid-template-columns:repeat(_, minmax(_,1fr))`
+listing grid, use `auto-fill`, never `auto-fit`. `auto-fit` stretches
+populated tracks to fill the row — it collapses whatever tracks a sparse
+row doesn't need and hands that space to the cards that are there.
+`auto-fill` keeps every card at its floor width and leaves the leftover
+space empty beside it. For a card listing, `auto-fill` is correct: the
+phantom tracks are a feature, not a bug — they're what preserves a card's
+width when the list is short.
+
+| Constant | Width | Card family |
+|---|---|---|
+| `_CARD_WIDTH_DIRECTORY_MIN` | 320px | Software + Communities directory cards (`.tool-card`/`.comm-card`) |
+| `_CARD_WIDTH_RESOURCE_MIN` | 260px | Benchmarking + Books cards (`.bench-card` — one shared class, no separate `.book-card`) |
+
+**When the distinction doesn't matter**: a grid with a fixed item count
+that always matches its own shape exactly has no sparse case, so
+`auto-fill` and `auto-fit` render identically — there's nothing left for
+the rule to protect. Three families are out of scope for exactly this
+reason, named here so a later pass doesn't "standardize" them onto these
+constants for consistency's sake and reintroduce the complexity this rule
+exists to prevent:
+
+- **Toolbox landing tiles** (`/tools`, `.toolbox-grid`) — a fixed
+  `1fr`→`1fr 1fr` grid, always exactly 4 tiles.
+- **Admin hub group cards** (`.admin-cols`, top-level and nested) — a
+  fixed `1fr`→`1fr 1fr` grid of always-6 top-level groups, and a
+  single-column list for nested items with no `grid-template-columns` at
+  all. These are `<details>` accordion sections, not a card-row grid to
+  begin with — catalog size changes a badge number, never the layout.
+- **Homepage sidebar panel and Recent highlights** — the Toolbox panel is
+  one fixed-360px card, nothing to distribute; Recent highlights is a
+  fixed 2-column grid capped at 4 thought-leadership types, and collapses
+  entirely rather than stretching when there's nothing to show.
+
+**The height companion**: `-webkit-line-clamp` alone only bounds a
+field's ceiling. CSS Grid still sizes each ROW by its own tallest card, so
+without a matching `min-height` on the same element, a row of short
+content still renders shorter than a row of long content, even though
+every individual field is clamped to the same max. Clamp and min-height are
+a pair — apply both together, on every variable-length field in a card, or
+neither; one without the other still leaves rows uneven.
 
 ### Editorial content system — Atlantic pattern
 
