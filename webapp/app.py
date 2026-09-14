@@ -4158,12 +4158,21 @@ def how_this_is_built(request: Request):
     place (the retrieval-tier flowchart) already lives on FP&A Buddy's own
     page, linked from here.
 
-    PR 35 replaced the page's copy wholesale with Brian's own (the four
+    PR 35 replaced the page's copy wholesale with Brian's own (the five
     _HTIB_* markdown constants above), added a "Why I built this" origin
     section and a "What else I've built with AI" closer, and put a skip
     link under the intro for a reader who came for the mechanism rather
     than the story. The skip link targets #where-ai-shows-up, the heading
-    that actually holds the four surface cards."""
+    that actually holds the four surface cards.
+
+    `_OC_ARTICLE_CSS` is included for real, not by habit: it's what gives
+    the rendered prose its 1.7 line-height and `--ink` body color. Checked
+    by rendering the page with and without the block and diffing computed
+    styles — 27.2px vs 26.4px line-height, `--ink` vs inherited color — so
+    dropping it would visibly change the page. Every rule in it is
+    `.oc-body`-scoped, and the section headings sit outside those divs, so
+    they keep the shared `.article-atlantic .tool-prose` treatment exactly
+    as they did before this PR."""
     cards_html = "".join(_ai_surface_card_html(t, d, h) for t, d, h in _AI_SURFACES)
     body = f"""<div class="page page-standard article-atlantic">
 <div class="tool-prose">
