@@ -2049,7 +2049,42 @@ thing" claim — a plain public page naming where AI actually does real work
 on the site, for a curious CFO or finance leader, not a hiring manager or an
 engineer. No schema, no DB read — a static route built from one module-level
 tuple, `_AI_SURFACES` (title, one-line description, href-or-empty), rendered
-by `_ai_surface_card_html`.
+by `_ai_surface_card_html`, plus five module-level markdown constants for
+the prose.
+
+**PR 35 replaced the page's copy wholesale with Brian's own** (run against
+his `write-like-brian` voice rules before it landed, and it passes
+`typography_findings` untouched — no allowlist entry needed). Structurally
+that added two sections and changed how the prose is stored:
+
+- **Prose lives in five markdown constants** — `_HTIB_INTRO`,
+  `_HTIB_WHY_I_BUILT_THIS`, `_HTIB_HOW_I_DECIDED`, `_HTIB_WHAT_ELSE`,
+  `_HTIB_FOOTNOTE` — each rendered through
+  `_render_original_content_markdown`, the **admin-authored-and-trusted**
+  renderer the three `original_content` long-form pieces already use.
+  That choice is load-bearing, not incidental: the copy carries nine inline
+  links crediting other people's blogs, and `webapp/markdown_render.py`'s
+  restricted renderer deliberately escapes links (it serves AI-drafted
+  fields — a different trust model, see its own docstring). Markdown rather
+  than hand-built HTML because nine `<a>` tags plus manual escaping is more
+  code and more drift surface than the same text as prose.
+- Named plainly, **not** `*_DEFAULT`: in this file that suffix means
+  "hardcoded fallback behind a live `lib.get_setting(...)` lookup"
+  (`_ABOUT_COPY_DEFAULT`, `_HOMEPAGE_HEADLINE_DEFAULT`). Nothing overrides
+  these yet, so the suffix would be a false signal about the code's state.
+- **New "Why I built this"** (the origin story — deliberately long) and
+  **"What else I've built with AI"** (a closer naming work beyond this
+  site), plus a footnote recording Fred Wilson's 2024 AVC.com → avc.xyz
+  move.
+- **A skip link under the intro**, "Skip to how the tooling works →",
+  anchored to `#where-ai-shows-up` — the heading that actually holds the
+  four surface cards, so a reader who came for the mechanism rather than
+  the story can jump straight to it.
+- The four surface cards stay in `_AI_SURFACES` with edited copy (the Web
+  search card now says *four* jobs, not three). They are deliberately **not**
+  markdown/admin-editable alongside the prose: each is structured (title,
+  description, link, coming-soon state) and its href points at a real route,
+  so it belongs in code next to the routes it links to.
 
 Reachable three ways, deliberately never from the top nav: (1) the phrase
 itself in `/about`'s own copy, linked via a new `_link_phrase(text, phrase,
@@ -6292,6 +6327,35 @@ changed. (The exact tool count named here — 9 at the time of this phase — ha
 since drifted with later additions/retirements; see `_LIBRARY_TOOLS` in
 `webapp/app.py` for the live, authoritative list rather than this number.)
 
+**Superseded again (PR 35, 2026-09) — Manage feeds leaves the quadrant, and
+"New content" is renamed "Add content."** Reaching Manage feeds from `/admin`
+took four expansions (CFO Toolbox → Reader → New content → the card) and
+Brian couldn't find it. `_reader_admin_quadrants` now returns **four** items,
+not three: the Manage feeds `_lib_card` first, then the three quadrants as
+its siblings — so it's two expansions from `/admin`, confirmed live. The
+quadrant keeps both capture-path accordion pairs and nothing else, its
+`count_override` drops 5 → 4, and its `hrefs` is now empty, so it carries no
+task badge of its own (the badge moved out with the card — `count_override`
+is deliberately badge-independent, so a badge can never be orphaned from the
+page it aggregates). Renamed "Add content" because a verb says what you do
+there.
+
+**A quadrant of its own was the alternative, and was rejected**: a
+collapsible box holding exactly one card adds the click back without
+grouping anything, which is the cost the move exists to remove. The result
+reads as three disclosure boxes plus one plain card, which sounds irregular
+but isn't — CFO Toolbox, the group this box sits inside, already mixes
+plain cards (Resources, Compare summary feedback) with nested disclosure
+sub-groups (Software, Community, FP&A Buddy, Reader). The Reader box now
+mirrors its own parent's established shape.
+
+Manage feeds leads rather than trails the three quadrants: feeds are where
+material enters the Reader at all, and the most-findable slot is the point
+of the move. `_LIBRARY_TOOLS` is untouched, so the Reader group's own
+aggregate badge and its "6 tools" count are unaffected, and
+`hub_nav_orphans()` stays clean with no edit — both derive from that tuple,
+not from the quadrant arrangement.
+
 **Mobile** collapses to one column at the same 900px breakpoint. DOM order is
 column-major (new, tags, existing, backup) but the required reading order is
 new, existing, tags, backup, so the two `.lib-col` wrappers get
@@ -6639,19 +6703,26 @@ contents are now a collapsible **Reader** group on `/admin`, nested inside
 CFO Toolbox alongside the Software sub-group and the Communities card.
 
 **Structure: two levels of nesting, everything collapsed on load.** Reader
-group → three quadrants (New content, Existing archive management, Tag
+group → three quadrants (Add content, Existing archive management, Tag
 management) → the tool cards inside each. `webapp/app.py`'s
 `_reader_admin_quadrants(task_counts)` is what used to be the
-`admin_library()` route body, minus the page shell: it returns the three
+`admin_library()` route body, minus the page shell: it returns those
 quadrants as pre-rendered HTML strings, which `admin_page()` drops straight
 into `_group_html`'s item list (that list already accepted a pre-rendered
 string alongside plain card tuples — the same mechanism the FP&A Buddy and
 Software sub-groups use, so no new plumbing). Each quadrant now renders with
 `nested=True` rather than the retired page's `extra_class="lib-quad"`. Every
 `<details>` in the chain — CFO Toolbox, Reader, each quadrant, and each
-capture-method accordion inside New content — loads closed;
+capture-method accordion inside Add content — loads closed;
 `tests/test_admin_reader_box.py::test_every_disclosure_level_loads_collapsed`
 walks all three levels in one assertion.
+
+**As of PR 35 that same function returns four items, not three** — the
+Manage feeds card ahead of the three quadrants, as their sibling rather than
+buried inside the first one, and "New content" is renamed "Add content." See
+the "Superseded again (PR 35)" note in the Phase 6 section above for the
+full reasoning, including why a fourth quadrant was rejected in favour of a
+plain card.
 
 **Deliberately not carried over: the page's own two-column layout.** The
 `.lib-cols`/`.lib-col` flex columns, the `.lib-q-*` order wrappers, and the

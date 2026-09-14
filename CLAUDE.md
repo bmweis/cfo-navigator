@@ -8079,6 +8079,58 @@ it supersedes the old "`/save` is token-gated" note.
   draft from — raw material for Brian to write from, not shipped copy.
   See ARCHITECTURE.md's matching section for the full write-up.
 
+- **"How this is built" gets Brian's own copy, and Manage feeds comes up one
+  level (PR 35, 2026-09).** Two unrelated pieces in one PR.
+  **The page copy** is replaced wholesale with Brian's own writing, shipped
+  verbatim — already run against his `write-like-brian` voice rules, and it
+  passes `typography_findings` with no allowlist entry needed (confirmed, not
+  assumed). Two new sections: **"Why I built this"** (the origin story —
+  Feedly's renewal notice as the hinge, deliberately long) and **"What else
+  I've built with AI"**, plus a footnote on Fred Wilson's 2024 AVC.com to
+  avc.xyz move and a skip link under the intro for a reader who came for the
+  mechanism rather than the story. The four surface cards stay, with edited
+  copy (Web search now says *four* jobs, not three).
+  **The prose is stored as five module-level markdown constants**
+  (`_HTIB_INTRO`, `_HTIB_WHY_I_BUILT_THIS`, `_HTIB_HOW_I_DECIDED`,
+  `_HTIB_WHAT_ELSE`, `_HTIB_FOOTNOTE`) rendered through
+  `_render_original_content_markdown` — **the admin-authored-and-trusted
+  renderer, deliberately not `webapp/markdown_render.py`'s restricted one**,
+  which escapes links by design because it serves AI-drafted fields. That
+  distinction is the whole reason the choice matters here: this copy carries
+  nine inline links crediting other people's blogs, and credit is the point
+  of that section. Named plainly rather than `*_DEFAULT` — in this codebase
+  that suffix means "fallback behind a live `get_setting` lookup," and
+  nothing overrides these yet, so the suffix would misdescribe the code.
+  **All eleven external URLs were confirmed to resolve to the right target**
+  (the agent proxy blocks direct CONNECT, so this went through the Exa fetch
+  tool instead) — and `avc.com`'s own last post, "I've Moved Onchain" dated
+  May 2024, independently confirms the footnote's factual claim.
+  **Part 3, unrelated: Manage feeds took four expansions to reach from
+  `/admin`** (CFO Toolbox to Reader to New content to the card) and Brian
+  couldn't find it. It's now a sibling of the three quadrants rather than
+  inside one — two expansions, confirmed live — and "New content" is renamed
+  "Add content" (a verb says what you do there). A fourth quadrant was the
+  alternative and was rejected: a collapsible box holding exactly one card
+  adds the click straight back without grouping anything. The resulting
+  "three disclosure boxes plus one plain card" shape reads as irregular
+  described in the abstract but isn't in practice — **CFO Toolbox, the group
+  this box sits inside, already mixes plain cards (Resources, Compare summary
+  feedback) with nested disclosure sub-groups**, so the Reader box now
+  mirrors its own parent's established pattern. `_LIBRARY_TOOLS` is
+  untouched, so the Reader group's aggregate badge, its "6 tools" count, and
+  `hub_nav_orphans()` all needed no edit — every one of them derives from
+  that tuple, not from the quadrant arrangement.
+  **Deliberately NOT built: making the copy admin-editable.** That was
+  investigated in the same PR but gated on approval, so only the
+  investigation shipped — see the PR description for the findings and the
+  proposed approach. The short version, since it corrects a standing
+  assumption: `original_content.body_md` **is** an existing precedent for
+  admin-editable prose carrying arbitrary links (it's a DB column, edited at
+  `/admin/thought-leadership/original`, rendered with links intact), so no
+  new renderer and no loosening of the restricted one is needed. See
+  ARCHITECTURE.md's matching bullets for the full technical write-up and
+  `tests/test_how_this_is_built.py` for the coverage.
+
 
 ## Authentication & security
 

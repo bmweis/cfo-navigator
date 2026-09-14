@@ -4027,25 +4027,98 @@ def about_page(request: Request):
 # build brief's own table: the one live page first, then the three not yet
 # written, in the order they were investigated for the research brief
 # (docs/AI_SURFACES_BRIEF.md).
+#
+# Deliberately NOT admin-editable copy, unlike the four prose sections below
+# (see _HTIB_INTRO and friends): each card is structured — title, description,
+# link, coming-soon state — and its href points at a real route, so it belongs
+# in code alongside the routes it links to rather than in a settings row an
+# edit could silently break.
 _AI_SURFACES = (
     ("FP&A Buddy",
-     "Answers finance questions from the curated research archive, RSS feeds, and trusted-site "
-     "web search, with every claim tied to a real, numbered citation.",
+     "An interactive chatbot that answers your burning strategic finance questions from my "
+     "curated archive, my current feed, and trusted-site web search, with every claim tied to "
+     "a real, numbered citation.",
      "/tools/fpa-buddy/how-it-works"),
-    ("Web search, restricted to sites I trust",
-     "The same search engine (Exa) doing four different jobs: FP&A Buddy's own web tier, two "
-     "quiet recovery paths that find an archived article again when its original link goes dead "
-     "or gets blocked, and one that researches a software vendor before its Toolbox profile is drafted.",
+    ("Web search",
+     "One search engine doing four different jobs behind the scenes. It's FP&A Buddy's web "
+     "tier. It provides two separate recovery paths that find a previously archived article "
+     "when its original link goes dead or gets blocked. And it researches a software vendor "
+     "before its Toolbox profile gets drafted.",
      ""),
     ("Profile and description generation",
      "Every CFO Toolbox vendor and community profile starts as an AI first draft, reviewed "
-     "before it's marked verified. A description, an agent-autonomy note, and a competitive "
-     "read, drafted from what a vendor actually publishes, not a generic template.",
+     "before a human marks it verified. The description fields, agent taxonomy, and "
+     "competitive read are all drafted from what the vendor publishes, with the jargon removed.",
      ""),
     ("Matchmakers and compare summaries",
-     "A conversational assistant that narrows a directory of software or communities down to a "
-     "real fit, plus a short AI-written orientation note above every side-by-side comparison.",
+     "A conversational assistant that helps narrow a search for a software vendor or a "
+     "community down to a real fit based on your situation. It also generates a short "
+     "comparison note above every side-by-side comparison.",
      ""),
+)
+
+# The four prose sections of /how-this-is-built, as markdown. Brian's own copy,
+# shipped verbatim (PR 35) — run against his write-like-brian voice rules before
+# it landed here, so treat any edit as a copy change needing his sign-off, not a
+# wording tidy-up.
+#
+# Markdown rather than hand-built HTML because the copy carries nine inline
+# credit links; _render_original_content_markdown (the admin-authored-and-
+# trusted renderer the three original_content long-form pieces already use)
+# handles those, while webapp/markdown_render.py's restricted renderer
+# deliberately escapes them (it serves AI-drafted fields, a different trust
+# model — see that module's own docstring).
+#
+# Named plainly, NOT `*_DEFAULT`: the `_DEFAULT` suffix in this file means
+# "hardcoded fallback behind a live `lib.get_setting(...)` lookup"
+# (_ABOUT_COPY_DEFAULT, _HOMEPAGE_HEADLINE_DEFAULT). Nothing overrides these
+# yet, so claiming that shape would be a false signal about the code's state.
+# Making them admin-editable is scoped separately.
+_HTIB_INTRO = (
+    "The short version: Feedly sent me a renewal notice and I decided to build it myself instead."
+)
+
+_HTIB_WHY_I_BUILT_THIS = """Those who know me know I'm innately curious and don't sit still well. And I love to talk. It's how I find my way. When it comes to my brain, the best way I can describe it is a Roomba. You know, one of those robot vacuums roaming the room, scanning, looking for something to suck up. Or in my case, something to fix, tinker with, or learn more about.
+
+It was spring 2026. Flowers were blooming. AI hype was surging. At work I was leading finance and biz ops at Mux, and like many teams, they had questions about planning norms, accounting automation, process design. Things I knew well, but more often, things where I knew *where the answers were*.
+
+You see, over the years I've amassed a small treasure trove of digital content. Reading voraciously is one of the things that accelerated my career. This was the same time blogging was exploding. You had investors like [Brad Feld](https://feld.com) from Foundry, [Fred Wilson](https://avc.xyz) at USV, [Mark Suster](https://bothsidesofthetable.com) at Upfront. Seasoned operators like [Dave Kellogg](https://kellblog.com), [David Skok](https://forentrepreneurs.com), and [Gordon Daugherty](https://shockwaveinnovations.com). And then my finance brethren [CJ Gustafson](https://mostlymetrics.com) and [OnlyCFO](https://onlycfo.io). And many more.
+
+For the first 10 to 15 years of my startup career I read everything I could get my hands on. My Google Reader was on fire. Saving anything I thought might be beneficial down the road, either for myself or someone close to me. Posts about comp plan design, sales pipeline analyses, popular KPIs for high-growth. When Google killed Reader, I moved everything to [Feedly](https://feedly.com), another really good product.
+
+Trying to more efficiently tap into that digital archive became one of my early AI experiments, the original FP&A Buddy. One lunch, I went ham trying to export as much of that saved content as possible and connect it to a Claude project as context. Not only was that incredibly time consuming, it didn't work. So I tried a lighter approach, listing some of my favorite blogs as qualified sources in the project instructions. It worked okay. I was mostly satisfied.
+
+Then Feedly emailed me about my annual renewal.
+
+Why pay another hundred or so dollars when I could rebuild the features I cared about from scratch? And so it began. It started with a personal reader and searchable library, all accessible through a chat interface. And given my desire to give back any way I can, a chat interface I could share with others.
+
+Today you can ask FP&A Buddy a question and tell it where to look: my archive, the feeds I read, or the open web within some guardrails.
+
+Once that mostly worked, I built the rest of the [CFO Toolbox](/tools). As an early adopter, I often get asked what I think about this vendor or that one, or how they compare. As much as I'd like to keep tabs on everyone, the vendors selling into the office of the CFO have gotten crowded. And since I believe in working smart, not hard, I asked Claude to help me build tooling that scans vendor sites and turns marketing copy into consistent descriptions and feature comparisons. Still a work in progress, but it's something.
+
+No toolbox would be complete without a place to find finance communities, benchmarking resources, books, and soon a calendar of upcoming events. Yes, I'm showing my hand a bit there.
+
+I built it for myself, and for my friends to use."""
+
+_HTIB_HOW_I_DECIDED = """FP&A Buddy is required to trace everything to a real citation. No paraphrasing, no invented content.
+
+All AI-generated content stays in a draft state until a human reviews it, and carries a badge showing which state it's in.
+
+The tools are picked based on what each is good at. Claude drafts and reasons. A separate embedding model finds what a keyword search would miss. Search is restricted to a list of sites I trust, not the open web."""
+
+_HTIB_WHAT_ELSE = """This site isn't where the experimenting stops.
+
+I organized [an AI hackathon offsite](/thought-leadership/ai-hackathon-playbook) for my finance team, then wrote up the format, the facilitation mechanics, and how to make it stick.
+
+At Mux I built a skill to review our revenue recognition rules, checking a revision against what the system produced rather than reading it line by line and hoping.
+
+With a teammate, a procurement flow where Claude reads new contracts and renewal paperwork, parses the terms into a warehouse, and surfaces them where people will see them. Renewal reminders. A prompt to ask whether we still need the thing before it auto-renews.
+
+And more recently, a [Model Builder](https://www.cfopilot.com/p/how-to-build-and-review-financial), an attempt at getting AI to construct and review financial models properly rather than confidently producing something that doesn't tie."""
+
+_HTIB_FOOTNOTE = (
+    "Fred Wilson moved his writing from AVC.com to [avc.xyz](https://avc.xyz) in 2024. "
+    "The [original archive](https://avc.com) is still up, and it's most of what I read."
 )
 
 
@@ -4083,26 +4156,41 @@ def how_this_is_built(request: Request):
     independent mechanisms, not one branching/parallel flow a picture
     would show better than this list does; the one diagram that earns its
     place (the retrieval-tier flowchart) already lives on FP&A Buddy's own
-    page, linked from here."""
+    page, linked from here.
+
+    PR 35 replaced the page's copy wholesale with Brian's own (the four
+    _HTIB_* markdown constants above), added a "Why I built this" origin
+    section and a "What else I've built with AI" closer, and put a skip
+    link under the intro for a reader who came for the mechanism rather
+    than the story. The skip link targets #where-ai-shows-up, the heading
+    that actually holds the four surface cards."""
     cards_html = "".join(_ai_surface_card_html(t, d, h) for t, d, h in _AI_SURFACES)
     body = f"""<div class="page page-standard article-atlantic">
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/about" style="font-size:13px;color:var(--muted);">&larr; About</a></p>
 <h1>How this is built</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 28px;font-size:16px;line-height:1.65;">I was AI-native before AI-native was a thing. This is what that actually means on this site&mdash;where Claude, embeddings, and search actually do real work, and where a human still has to sign off.</p>
+<div class="oc-body" style="color:var(--ink-soft);margin:-4px 0 10px;font-size:16px;line-height:1.65;">{_render_original_content_markdown(_HTIB_INTRO)}</div>
+<p style="margin:0 0 28px;"><a href="#where-ai-shows-up" style="font-size:14px;font-weight:600;color:var(--navy);">Skip to how the tooling works &rarr;</a></p>
 
-<h2>Why it's built this way</h2>
-<p>Curation stays human. The archive behind FP&amp;A Buddy only grows because I read something and decided it was worth keeping&mdash;AI drafts the summary and tags after that, never the decision to save it.</p>
-<p>Every claim FP&amp;A Buddy makes traces to a real citation, not a paraphrase the model swears it remembers correctly. That's an actual API guarantee, not a prompt asking it to behave.</p>
-<p>A draft is a draft until it's reviewed. Every AI-written vendor and community profile carries a visible review state, so a reader can tell what's been checked from what hasn't&mdash;on the page itself, not buried in an admin tool.</p>
-<p>The tools are picked for what each is actually good at. Claude drafts and reasons. A separate embedding model finds what a keyword search would miss. Search is restricted to a list of sites I trust, not the open web.</p>
+<h2>Why I built this</h2>
+<div class="oc-body">{_render_original_content_markdown(_HTIB_WHY_I_BUILT_THIS)}</div>
 
-<h2 style="margin-top:8px;">Where AI shows up</h2>
+<h2 id="where-ai-shows-up" style="margin-top:8px;">Where AI shows up</h2>
 </div>
-<div style="display:grid;gap:14px;margin-top:8px;">
+<div style="display:grid;gap:14px;margin:8px 0 34px;">
 {cards_html}
 </div>
-</div>"""
+<div class="tool-prose">
+<h2>How I decided what AI should do</h2>
+<div class="oc-body">{_render_original_content_markdown(_HTIB_HOW_I_DECIDED)}</div>
+
+<h2>What else I've built with AI</h2>
+<div class="oc-body">{_render_original_content_markdown(_HTIB_WHAT_ELSE)}</div>
+
+<div class="oc-body" style="border-top:1px solid var(--line);margin-top:34px;padding-top:18px;font-size:14px;color:var(--muted);">{_render_original_content_markdown(_HTIB_FOOTNOTE)}</div>
+</div>
+</div>
+<style>{_OC_ARTICLE_CSS}</style>"""
     return HTMLResponse(_page("How this is built—Brian Weisberg", "About", body, role=_role(request)))
 
 
@@ -25312,17 +25400,12 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
     # System hub-nav group, so there's nothing left in that quadrant to
     # render. This page is three quadrants now, not four.)
 
-    # Upper-left quadrant, "New content": the Manage feeds card over the two
-    # capture-path accordions. Both halves keep their own shape — a _lib_card
-    # and the existing accordion group — under one quadrant heading, rather
-    # than being blended into a single undifferentiated block.
-    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
-<div style="margin-bottom:22px;">{_lib_card(
-    "/admin/reader/feeds", "Manage feeds",
-    "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into "
-    "sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
-    "web search is restricted to.",
-    _badge_for_href("/admin/reader/feeds", task_counts.get("/admin/reader/feeds", 0)))}</div>
+    # "Add content" (renamed from "New content" in PR 35 — a verb says what you
+    # do there): the two capture-path accordion pairs. Manage feeds used to sit
+    # here as a _lib_card above them, which buried it four expansions deep from
+    # /admin (CFO Toolbox -> Reader -> New content -> the card). It's now a
+    # sibling of the three quadrants instead — see the return statement below.
+    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
 <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving to the archive</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 
@@ -25402,12 +25485,16 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
 
 <p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, all four snippets above stop working at once&mdash;they share the same token, and the old copies embed the old values. Set them up again from the instructions above.</p>"""
 
-    # 5, not the literal 1 card: Manage feeds plus the archive bookmarklet/
-    # Share-Sheet accordions and the Read Later bookmarklet/Share-Sheet
-    # accordions. See _lib_quadrant's count_override note.
-    saving_articles_html = _lib_quadrant("New content", saving_articles_body,
-                                         ["/admin/reader/feeds"],
-                                         count_override=5)
+    # 4, not the literal 0 cards: the archive bookmarklet/Share-Sheet
+    # accordions and the Read Later bookmarklet/Share-Sheet accordions. Each is
+    # a real tool a person uses, even though none is a _lib_card. Was 5 before
+    # PR 35 moved Manage feeds out to its own sibling card. `hrefs` is empty
+    # now, so this quadrant carries no task badge of its own — Manage feeds'
+    # badge moved out with the card, and _lib_quadrant's count_override is
+    # deliberately badge-independent, so that stays correct rather than
+    # orphaning a badge from the page it aggregates.
+    saving_articles_html = _lib_quadrant("Add content", saving_articles_body,
+                                         [], count_override=4)
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -25420,10 +25507,26 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
         ["/admin/reader/tag-management", "/admin/reader/enrich"],
         "How tags get created, taught, and kept tidy&mdash;and the summaries that ride along with them.")
 
+    # Manage feeds, as a plain card beside the three quadrants rather than
+    # inside one (PR 35). It took four expansions to reach from /admin before
+    # this — CFO Toolbox -> Reader -> New content -> the card — and Brian
+    # couldn't find it. A quadrant of its own was the alternative and was
+    # rejected: a collapsible box holding exactly one card adds a click back
+    # without grouping anything, which is the same cost this move exists to
+    # remove. It leads rather than trails the three quadrants because feeds are
+    # where material enters the Reader at all, and because the most-findable
+    # slot is the point of the move.
+    feeds_card_html = _lib_card(
+        "/admin/reader/feeds", "Manage feeds",
+        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them "
+        "into sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is "
+        "restricted to.",
+        _badge_for_href("/admin/reader/feeds", task_counts.get("/admin/reader/feeds", 0)))
+
     # Archive backup is deliberately absent: its card moved to the System
     # hub-nav group in the Reader route moves (PR 6, 2026-09), since a whole-DB
     # snapshot is accounts/health/plumbing, not archive-specific.
-    return [saving_articles_html, existing_mgmt_html, tag_mgmt_html]
+    return [feeds_card_html, saving_articles_html, existing_mgmt_html, tag_mgmt_html]
 
 
 # ---------------------------------------------------------------------------

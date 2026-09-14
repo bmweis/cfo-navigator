@@ -85,7 +85,7 @@ def _disclosure_body(html, label):
     raise AssertionError(f"unbalanced <details> around {label!r}")
 
 
-QUADRANTS = ["New content", "Existing archive management", "Tag management"]
+QUADRANTS = ["Add content", "Existing archive management", "Tag management"]
 
 
 # --- the page is gone ------------------------------------------------------
@@ -150,7 +150,10 @@ def test_open_reader_is_a_link_inside_the_box(env):
     reader = _disclosure_body(html, "Reader")
     assert 'href="/read" class="btn btn-ghost"' in reader
     assert "Open Reader" in reader
-    assert reader.index("Open Reader") < reader.index(">New content</span>")
+    # Manage feeds is the first item in the box as of PR 35, ahead of the
+    # three quadrants — Open Reader still precedes all of it.
+    assert reader.index("Open Reader") < reader.index(">Manage feeds</span>")
+    assert reader.index("Open Reader") < reader.index(">Add content</span>")
 
 
 def test_open_reader_is_a_stock_navy_ghost_button(env):
@@ -199,7 +202,9 @@ def test_every_reader_tool_is_reachable_from_the_box(env):
 def test_each_quadrant_holds_its_specified_tools(env):
     html = _admin_html(env)
     expected = {
-        "New content": ["/admin/reader/feeds"],
+        # "Add content" holds no cards — only the capture accordions. Manage
+        # feeds moved out to its own sibling card in PR 35; see
+        # test_manage_feeds_is_a_sibling_card_not_inside_a_quadrant.
         "Existing archive management": ["/admin/reader/backfill-content",
                                         "/admin/reader/dedupe",
                                         "/admin/reader/bulk-delete"],
@@ -211,25 +216,42 @@ def test_each_quadrant_holds_its_specified_tools(env):
             assert f'href="{href}"' in body, (label, href)
 
 
-def test_new_content_quadrant_holds_feeds_card_and_both_capture_pairs(env):
-    """Merged, but the two halves stay distinct: a _lib_card over the existing
-    accordion pattern, not one blended block. Both capture pairs (Archive and
-    Read Later) live here."""
+def test_add_content_quadrant_holds_both_capture_pairs(env):
+    """Both capture pairs (Archive and Read Later) live here. Manage feeds
+    does NOT any more — it's a sibling card as of PR 35."""
     html = _admin_html(env)
-    quadrant = _disclosure_body(html, "New content")
-    assert 'href="/admin/reader/feeds"' in quadrant
+    quadrant = _disclosure_body(html, "Add content")
+    assert 'href="/admin/reader/feeds"' not in quadrant
     assert "Saving to the archive" in quadrant
     assert "Saving to Read Later instead" in quadrant
     # Matched with the closing tag so the intro prose naming both capture
     # methods doesn't count as an extra accordion.
     assert quadrant.count("the bookmarklet</summary>") == 2
     assert quadrant.count("Share-Sheet shortcut</summary>") == 2
-    assert "border-radius:14px" in quadrant                   # the _lib_card box
+
+
+def test_manage_feeds_is_a_sibling_card_not_inside_a_quadrant(env):
+    """PR 35: it took four expansions to reach from /admin, and Brian couldn't
+    find it. Now it sits at the same level as the three quadrants — inside the
+    Reader group, but inside none of them."""
+    html = _admin_html(env)
+    reader = _disclosure_body(html, "Reader")
+    assert 'href="/admin/reader/feeds"' in reader
+    for label in QUADRANTS:
+        assert 'href="/admin/reader/feeds"' not in _disclosure_body(html, label), label
+
+
+def test_manage_feeds_card_leads_the_three_quadrants(env):
+    html = _admin_html(env)
+    reader = _disclosure_body(html, "Reader")
+    feeds_at = reader.index('href="/admin/reader/feeds"')
+    for label in QUADRANTS:
+        assert feeds_at < reader.index(f">{label}</span>"), label
 
 
 def test_capture_accordions_stay_expandable_and_closed(env):
     html = _admin_html(env)
-    quadrant = _disclosure_body(html, "New content")
+    quadrant = _disclosure_body(html, "Add content")
     for label in ("Desktop&mdash;the bookmarklet",
                   "iPhone / iPad&mdash;Share-Sheet shortcut"):
         at = quadrant.index(label)
@@ -241,7 +263,7 @@ def test_nested_capture_accordions_keep_the_item_level_variant(env):
     """Only the quadrant headers use the group-level component; the nested
     toggles keep their caret-before-label box. See BRAND.md UI components."""
     html = _admin_html(env)
-    quadrant = _disclosure_body(html, "New content")
+    quadrant = _disclosure_body(html, "Add content")
     nested = quadrant[quadrant.index("Desktop&mdash;the bookmarklet") - 700:]
     assert "disclosure-caret" in nested
     assert nested.index("disclosure-caret") < nested.index("Desktop&mdash;the bookmarklet")
@@ -251,7 +273,7 @@ def test_saving_articles_is_a_muted_label_not_a_competing_heading(env):
     """A small muted eyebrow rather than a bold navy h3 competing with the
     card headings above it. Checked for both capture pairs' labels."""
     html = _admin_html(env)
-    quadrant = _disclosure_body(html, "New content")
+    quadrant = _disclosure_body(html, "Add content")
     assert "<h3" not in quadrant
     for label_text in ("Saving to the archive", "Saving to Read Later instead"):
         label_at = quadrant.index(label_text)
@@ -265,7 +287,7 @@ def test_token_warning_is_a_footnote_below_the_accordions(env):
     """Label, intro, accordions, then the warning as caption-weight text —
     below all four accordions (Archive pair + Read Later pair)."""
     html = _admin_html(env)
-    quadrant = _disclosure_body(html, "New content")
+    quadrant = _disclosure_body(html, "Add content")
     label = quadrant.index("Saving to the archive")
     first_accordion = quadrant.index("<details", quadrant.index("<details") + 1)
     warning = quadrant.index("If you ever rotate")

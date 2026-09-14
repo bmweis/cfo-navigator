@@ -49,9 +49,16 @@ def test_fpa_buddy_is_the_only_linked_surface(env):
 
 def test_all_four_surfaces_named(env):
     html = _client(env).get("/how-this-is-built").text
-    for title in ("FP&amp;A Buddy", "Web search, restricted to sites I trust",
+    for title in ("FP&amp;A Buddy", "Web search",
                   "Profile and description generation", "Matchmakers and compare summaries"):
         assert title in html
+
+
+def test_web_search_card_says_four_jobs(env):
+    """PR 35's copy counts Exa's jobs as four, not three — the number is the
+    whole point of that card, so pin it rather than leaving it to prose drift."""
+    html = _client(env).get("/how-this-is-built").text
+    assert "One search engine doing four different jobs behind the scenes." in html
 
 
 def test_page_carries_recognized_width_tier(env):
@@ -115,3 +122,91 @@ def test_homepage_links_to_the_page(env):
     html = _client(env).get("/").text
     assert 'href="/how-this-is-built"' in html
     assert "See how AI powers this site" in html
+
+
+# --- PR 35: Brian's own copy, the credit links, and the skip link -----------
+
+# The nine blog credits in "Why I built this", in the order the copy names
+# them. Credit is the whole reason that section exists, so a wrong or dropped
+# URL is a real defect, not a typo — pinned here rather than left to prose.
+_CREDIT_LINKS = [
+    ("Brad Feld", "https://feld.com"),
+    ("Fred Wilson", "https://avc.xyz"),
+    ("Mark Suster", "https://bothsidesofthetable.com"),
+    ("Dave Kellogg", "https://kellblog.com"),
+    ("David Skok", "https://forentrepreneurs.com"),
+    ("Gordon Daugherty", "https://shockwaveinnovations.com"),
+    ("CJ Gustafson", "https://mostlymetrics.com"),
+    ("OnlyCFO", "https://onlycfo.io"),
+    ("Feedly", "https://feedly.com"),
+]
+
+
+def _article_body(appmod) -> str:
+    """Just the article, with the shared nav/footer chrome stripped off."""
+    html = _client(appmod).get("/how-this-is-built").text
+    return html.split("<h1>How this is built</h1>")[1].split("<footer")[0]
+
+
+def test_every_credit_link_renders_with_the_right_url(env):
+    body = _article_body(env)
+    for name, url in _CREDIT_LINKS:
+        assert f'<a href="{url}">{name}</a>' in body, f"{name} -> {url}"
+
+
+def test_credit_links_appear_in_the_order_the_copy_names_them(env):
+    body = _article_body(env)
+    positions = [body.index(url) for _, url in _CREDIT_LINKS]
+    assert positions == sorted(positions)
+
+
+def test_footnote_records_the_avc_move(env):
+    body = _article_body(env)
+    assert 'href="https://avc.com"' in body      # the original archive
+    assert "in 2024" in body
+
+
+def test_section_headings_in_order(env):
+    body = _article_body(env)
+    headings = ["Why I built this", "Where AI shows up",
+                "How I decided what AI should do", "What else I've built with AI"]
+    positions = []
+    for h in headings:
+        assert h in body, h
+        positions.append(body.index(h))
+    assert positions == sorted(positions)
+
+
+def test_skip_link_targets_the_surface_cards_section(env):
+    """The skip link has to land on the heading that actually holds the four
+    cards — an anchor pointing at nothing is worse than no skip link."""
+    body = _article_body(env)
+    assert 'href="#where-ai-shows-up"' in body
+    assert 'id="where-ai-shows-up"' in body
+    # The anchor precedes the cards it's skipping to.
+    assert body.index('id="where-ai-shows-up"') < body.index("Explainer coming soon.")
+
+
+def test_intro_is_the_feedly_renewal_line(env):
+    body = _article_body(env)
+    assert "Feedly sent me a renewal notice and I decided to build it myself instead." in body
+    # The pre-PR-35 intro is gone, not merely pushed down the page.
+    assert "I was AI-native before AI-native was a thing" not in body
+
+
+def test_markdown_renders_as_real_html_not_literal_syntax(env):
+    """The prose goes through the admin-trusted markdown renderer, so a
+    [text](url) must become an anchor — if it ever regressed to the restricted
+    renderer (webapp/markdown_render.py) the raw syntax would show instead."""
+    body = _article_body(env)
+    assert "[Brad Feld](https://feld.com)" not in body
+    assert "<em>where the answers were</em>" in body
+
+
+def test_copy_passes_the_typography_lint(env):
+    """Brian's copy shipped verbatim; this pins that it needs no exception."""
+    import pathlib
+    from linklib.voice_review import typography_findings
+    src = pathlib.Path(env.__file__).read_text(encoding="utf-8")
+    offenders = [f for f in typography_findings(src) if "_HTIB_" in str(f)]
+    assert offenders == []

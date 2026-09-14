@@ -1,4 +1,4 @@
-"""The feeds table's descriptive "Cookie" note, and the New content
+"""The feeds table's descriptive "Cookie" note, and the Add content
 quadrant's count override.
 
 The property worth protecting here is that this column is DESCRIPTIVE ONLY.
@@ -585,7 +585,7 @@ def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
 # landing under the wrong heading), and it survives adding or removing a
 # sibling tool without an edit.
 
-_QUADRANTS = ["New content", "Existing archive management", "Tag management"]
+_QUADRANTS = ["Add content", "Existing archive management", "Tag management"]
 
 
 def _disclosure_body(html, label):
@@ -620,29 +620,41 @@ def _quadrant(html, label):
     return _disclosure_body(html, label)
 
 
-def test_every_reader_tool_renders_in_exactly_one_quadrant(app_env):
-    """No tool goes missing, and none is duplicated across quadrants.
+def test_every_reader_tool_renders_exactly_once_in_the_reader_box(app_env):
+    """No tool goes missing, and none is duplicated.
 
     The real risk this guards: a card quietly dropping out of the admin
     surface (its page still routed, but no longer reachable by clicking) —
     exactly the class of gap the hub-nav orphan detector exists for, checked
     here from the other direction.
+
+    Scoped to the whole Reader box rather than the quadrants alone since
+    PR 35: Manage feeds is a sibling of the three quadrants, not inside one,
+    so a quadrants-only sweep would now read a correctly-placed card as
+    missing.
     """
     import webapp.app as appmod
     with _client(app_env) as client:
         html = client.get("/admin").text
-    quadrants = {label: _quadrant(html, label) for label in _QUADRANTS}
+    reader = _disclosure_body(html, "Reader")
     for href, _title, _desc in appmod._LIBRARY_TOOLS:
-        holding = [label for label, body in quadrants.items() if f'href="{href}"' in body]
-        assert len(holding) == 1, f"{href} appears in {holding or 'no quadrant'}"
+        assert reader.count(f'href="{href}"') == 1, href
+
+
+def test_manage_feeds_sits_beside_the_quadrants_not_inside_one(app_env):
+    """PR 35 pulled it out of "New content" (now "Add content") so it's one
+    expansion shallower from /admin."""
+    with _client(app_env) as client:
+        html = client.get("/admin").text
+    assert 'href="/admin/reader/feeds"' in _disclosure_body(html, "Reader")
+    for label in _QUADRANTS:
+        assert 'href="/admin/reader/feeds"' not in _quadrant(html, label), label
 
 
 def test_quadrants_hold_the_tools_they_are_named_for(app_env):
     """Placement, not count — a tool under the wrong heading is the bug."""
     with _client(app_env) as client:
         html = client.get("/admin").text
-    assert 'href="/admin/reader/feeds"' in _quadrant(html, "New content")
-
     existing = _quadrant(html, "Existing archive management")
     assert 'href="/admin/reader/backfill-content"' in existing
     assert 'href="/admin/reader/dedupe"' in existing
@@ -653,12 +665,12 @@ def test_quadrants_hold_the_tools_they_are_named_for(app_env):
     assert 'href="/admin/reader/enrich"' in tags
 
 
-def test_new_content_quadrant_carries_the_capture_instructions(app_env):
+def test_add_content_quadrant_carries_the_capture_instructions(app_env):
     """The bookmarklet and Share-Sheet accordions live with the tool that
     brings new material in, and stay expandable rather than always-open."""
     quadrant = None
     with _client(app_env) as client:
-        quadrant = _quadrant(client.get("/admin").text, "New content")
+        quadrant = _quadrant(client.get("/admin").text, "Add content")
     assert "Saving to the archive" in quadrant
     assert "Saving to Read Later instead" in quadrant
     # Matched with the closing tag so the intro prose ("a bookmarklet and a
