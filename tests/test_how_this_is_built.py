@@ -203,10 +203,29 @@ def test_markdown_renders_as_real_html_not_literal_syntax(env):
     assert "<em>where the answers were</em>" in body
 
 
+_HTIB_CONSTANTS = ("_HTIB_INTRO", "_HTIB_WHY_I_BUILT_THIS", "_HTIB_HOW_I_DECIDED",
+                   "_HTIB_WHAT_ELSE", "_HTIB_FOOTNOTE")
+
+
 def test_copy_passes_the_typography_lint(env):
-    """Brian's copy shipped verbatim; this pins that it needs no exception."""
-    import pathlib
+    """Brian's copy shipped verbatim; this pins that it needs no exception.
+
+    Lints each constant's own text rather than filtering whole-file findings
+    by constant name: a finding is (kind, line, excerpt) and carries no name,
+    so a name filter would match nothing and this test could never fail.
+    See the negative control below.
+    """
     from linklib.voice_review import typography_findings
-    src = pathlib.Path(env.__file__).read_text(encoding="utf-8")
-    offenders = [f for f in typography_findings(src) if "_HTIB_" in str(f)]
-    assert offenders == []
+    for name in _HTIB_CONSTANTS:
+        src = f"X = {getattr(env, name)!r}"
+        assert typography_findings(src) == [], name
+
+
+def test_the_typography_check_above_can_actually_fail(env):
+    """Negative control for the test directly above — same construction, on
+    copy that really does violate both rules. Without this, a lint that
+    silently stopped finding anything would look like a pass."""
+    from linklib.voice_review import typography_findings
+    bad = "Feeds & sources — the ones I read."
+    kinds = {kind for kind, _line, _excerpt in typography_findings(f"X = {bad!r}")}
+    assert kinds == {"bare-ampersand", "spaced-em-dash"}
