@@ -8120,14 +8120,73 @@ it supersedes the old "`/save` is token-gated" note.
   untouched, so the Reader group's aggregate badge, its "6 tools" count, and
   `hub_nav_orphans()` all needed no edit — every one of them derives from
   that tuple, not from the quadrant arrangement.
-  **Deliberately NOT built: making the copy admin-editable.** That was
-  investigated in the same PR but gated on approval, so only the
-  investigation shipped — see the PR description for the findings and the
-  proposed approach. The short version, since it corrects a standing
-  assumption: `original_content.body_md` **is** an existing precedent for
-  admin-editable prose carrying arbitrary links (it's a DB column, edited at
-  `/admin/thought-leadership/original`, rendered with links intact), so no
-  new renderer and no loosening of the restricted one is needed. See
+  **Part 2, approved and shipped in the same PR: the copy is admin-editable
+  at `/admin/copy`, with no new renderer and no change to the restricted
+  one.** The investigation that gated this corrected a standing assumption
+  worth keeping: `original_content.body_md` **is** an existing precedent for
+  admin-editable prose carrying arbitrary links (a DB column, edited at
+  `/admin/thought-leadership/original`, rendered with links intact), so the
+  brief's premise that "the markdown renderer excludes links, so something
+  has to change" didn't hold — nothing had to change. That made Part 2 a
+  pure **storage** change: the five constants become `_HTIB_*_DEFAULT`
+  behind a live `lib.get_setting(...)` lookup (`_htib_copy()`), five
+  `settings` rows, five `/admin/copy` sections, and **one** save route
+  (`POST /admin/copy/how-this-is-built`) that takes the section name in its
+  payload and validates it against `_HTIB_COPY_KEYS` — rather than five
+  near-identical routes. `_HTIB_COPY_SECTIONS` is the single registry
+  behind the keys, the admin sections, and the save route, the same
+  precedent `_email_template_registry()` set. No schema change: `settings`
+  is already `key`/`value`.
+  **Two alternatives were considered and rejected.** Extending
+  `webapp/markdown_render.py`'s restricted renderer to allow links would
+  weaken link-escaping across every AI-drafted tool/community field on the
+  site to serve one admin-authored page — the largest blast radius of the
+  three options, for something a second renderer already provides. A new
+  trusted-admin-copy renderer would be a near-duplicate of
+  `_render_original_content_markdown`, which already *is* that renderer —
+  two renderers sharing one trust model is exactly the drift risk this
+  codebase keeps documenting.
+  **The real asymmetry this introduces, named rather than left to be
+  discovered**: these five fields inherit `body_md`'s trust model, so raw
+  HTML passes through unescaped. Correct here (admin-only, `_is_authed`-
+  gated, and the copy is nine-tenths credit links) but genuinely different
+  from the About-page bio sitting beside them on the same page, which is
+  plain text through `_about_copy_html`. Each section's own description on
+  `/admin/copy` says so.
+  **The four surface cards stay in code, deliberately.** Each is a 3-tuple
+  (title, description, href-or-empty) where the href points at a real route
+  and the empty string is load-bearing — it's what selects "Explainer coming
+  soon." over a link. A textarea introduces two failure modes prose doesn't
+  have: a typo'd href silently 404s, and there's no sensible text form of
+  the coming-soon state that can't be got wrong. The reasoning is a comment
+  above `_AI_SURFACES` so it doesn't get re-litigated.
+
+- **Standing rule: every outbound link opens in a new tab (PR 35, 2026-09).**
+  Any anchor whose destination is not on bmweis.com carries
+  `target="_blank" rel="noopener"`; internal links (relative paths,
+  anchors, absolute bmweis.com URLs) stay same-tab. BRAND.md §3.3 is the
+  rule; `linklib.brand_check.outbound_link_problems()` enforces it, with
+  its own `/admin/checks` row and `tests/test_outbound_links.py`.
+  **The sweep found one offender, not five** — the Logo.dev footer
+  attribution (`webapp/app.py`, the shared `_page()` footer). An earlier
+  same-line `grep` had reported five; four of those were multi-line anchors
+  that carry `target` on a later source line (e.g. `doc_link` on
+  `/admin/checks`), which is exactly why the checker reads raw source
+  spans rather than per-line or per-string-literal values — an anchor is
+  routinely split across adjacent Python string literals, and a
+  value-based scan would flag the half without the attribute.
+  **Source scan, not a rendered-page scan**, unlike `coral_moment_problems()`:
+  the failure mode is a hand-typed anchor in `webapp/app.py`, and scanning
+  source also covers admin pages (which a signed-out rendered scan can't
+  reach) at no render cost and with no re-entrancy hazard — the recursion
+  trap PR 16 had to build a guard for. It deliberately cannot see links
+  built in JavaScript, or links in stored DB content (an admin's saved
+  override of the copy above, `original_content.body_md`, AI-drafted
+  fields, user-submitted text); the function's own docstring and BRAND.md
+  §8 both say so rather than overclaiming. **Markdown can't express the
+  rule at all** (no `target` syntax), so outbound links in prose that
+  renders through a markdown renderer must be written as raw `<a>` tags —
+  which is why `/how-this-is-built`'s credit links are raw HTML. See
   ARCHITECTURE.md's matching bullets for the full technical write-up and
   `tests/test_how_this_is_built.py` for the coverage.
 

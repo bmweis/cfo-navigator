@@ -2117,6 +2117,97 @@ See `docs/AI_SURFACES_BRIEF.md` for the underlying research (mechanism,
 cost tracking, and rejected-decisions history for all four surfaces) that
 the eventual per-surface explainer pages will draft from.
 
+**Admin-editable prose (PR 35, 2026-09).** The four prose sections and the
+closing footnote are editable at `/admin/copy`, so a copy change doesn't
+need a deploy. No schema change — five rows in the existing `settings`
+table (`htib_intro_copy`, `htib_why_copy`, `htib_how_copy`,
+`htib_what_else_copy`, `htib_footnote_copy`), each resolved by
+`_htib_copy(lib)` as `get_setting(key) or _HTIB_*_DEFAULT`, the same
+convention the About/homepage copy already uses. `_HTIB_COPY_SECTIONS` is
+the single registry behind the settings keys, the `/admin/copy` sections,
+and the save route — add a section there and all three pick it up
+(`_email_template_registry()`'s precedent).
+
+`POST /admin/copy/how-this-is-built` is **one** route for all five sections
+rather than five near-identical ones: the section is named in the JSON
+payload and validated against `_HTIB_COPY_KEYS`, so an unknown key is
+rejected (400) instead of writing an arbitrary settings row. Blank text is
+rejected too — a blank save would silently fall back to the hardcoded
+default, which reads on the page as "my edit vanished" rather than as an
+error.
+
+**Rendering is unchanged, and that was the point of the investigation that
+gated this.** The prose already went through
+`_render_original_content_markdown` — the admin-authored-and-trusted
+renderer the `original_content` long-form pieces use, which passes raw HTML
+through — so making the copy editable needed no renderer work at all. Two
+alternatives were rejected: extending `webapp/markdown_render.py`'s
+restricted renderer to allow links would weaken link-escaping across every
+AI-drafted tool/community field site-wide to serve one admin page; a new
+trusted-admin-copy renderer would duplicate the one that already exists.
+
+The trade this makes, stated in each section's own `/admin/copy`
+description rather than left to be discovered: these five fields accept raw
+HTML, unlike the About-page bio beside them on the same page, which is
+plain text through `_about_copy_html`. That is correct here (admin-only,
+`_is_authed`-gated, and the copy is mostly credit links) but it is a real
+asymmetry between two fields on one screen.
+
+`_AI_SURFACES` — the four surface cards — stays in code deliberately. Each
+entry is a 3-tuple whose href points at a real route and whose empty string
+selects the "Explainer coming soon." state; neither survives a textarea
+intact (a typo'd href silently 404s, and the coming-soon state has no
+sensible text form).
+
+### Outbound links open in a new tab (PR 35, 2026-09)
+
+A standing site-wide rule: every anchor whose destination is not on
+bmweis.com carries `target="_blank" rel="noopener"`. Internal links — a
+relative path, an anchor, or an absolute `bmweis.com` URL — stay same-tab.
+BRAND.md §3.3 states the rule and the reasoning (a reader part-way through
+an article or a half-filled admin form shouldn't lose their place following
+a citation).
+
+`linklib.brand_check.outbound_link_problems(src)` enforces it, with its own
+`/admin/checks` row ("Outbound links open in a new tab") and
+`tests/test_outbound_links.py`. `INTERNAL_LINK_HOSTS` is the "still on the
+site" set; a relative href never matches the http(s) test at all, so
+internal links are same-tab for free.
+
+**A source scan, not a rendered-page scan** — deliberately different from
+`coral_moment_problems()`, which renders every public route. The failure
+mode here is a hand-typed anchor in `webapp/app.py`, and a source scan also
+covers admin pages (a signed-out rendered scan can't reach them), costs no
+render time, and carries none of the re-entrancy hazard PR 16 had to build
+`_CORAL_CHECK_IN_PROGRESS` for.
+
+It reads **raw source spans**, not evaluated string values, because an
+anchor is routinely split across adjacent Python string literals
+(`'<a href="…"' ' target="_blank">'`). The Python syntax between the
+fragments contains no `>`, so the raw scan still sees one whole tag, while
+a value-based scan would see two fragments and flag the half without the
+attribute. That is not hypothetical: the naive same-line `grep` that
+preceded this checker reported five offenders, four of which were exactly
+this shape. The real count was **one** — the Logo.dev footer attribution in
+the shared `_page()` footer, fixed in the same PR.
+
+Scope limits, stated in the function's own docstring and BRAND.md §8 rather
+than left implied — a clean result is not a claim that every rendered
+anchor site-wide complies:
+
+* **Links built in JavaScript** have no literal href in the source to
+  classify, so they're invisible here (and to a rendered-DOM scan too,
+  unless that JS had run).
+* **Links in stored database content** — an admin's saved `/how-this-is-built`
+  copy, `original_content.body_md`, AI-drafted fields, user-submitted text —
+  are data, not source, edited through the admin UI rather than in a PR. The
+  five `_HTIB_*_DEFAULT` constants are scanned; an override saved over one
+  is not.
+* **Markdown links** (`[text](https://…)`) cannot carry `target` at all, so
+  they are a latent violation by construction — which is why the
+  `/how-this-is-built` copy writes its 12 outbound links as raw `<a>` tags
+  and leaves its 2 internal links as plain markdown.
+
 ### Thought Leadership
 
 | Table | Purpose | Columns that carry meaning |

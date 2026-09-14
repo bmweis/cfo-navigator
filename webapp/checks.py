@@ -244,6 +244,13 @@ def run_all() -> list[dict]:
         "detail": "; ".join(f"{fname} {rule} (line {line}): {excerpt}" for fname, rule, line, excerpt in tf[:6])
                   if tf else "Copy follows both typographic rules."})
 
+    ol = brand_check.outbound_link_problems(src)
+    results.append({
+        "name": "Outbound links open in a new tab", "where": "Live + CI", "ok": not ol,
+        "what": "Every link leaving bmweis.com carries target=\"_blank\" rel=\"noopener\"; internal links stay same-tab.",
+        "detail": "; ".join(ol[:6]) if ol
+                  else "Every hand-written outbound link opens in a new tab."})
+
     op = open_source_problems()
     results.append({
         "name": "Open-source showcase in sync", "where": "Live + CI", "ok": not op,

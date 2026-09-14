@@ -149,9 +149,12 @@ def _article_body(appmod) -> str:
 
 
 def test_every_credit_link_renders_with_the_right_url(env):
+    """Credit matters on this page, so every name must point at that person's
+    own site. Also pins the new-tab attributes (BRAND.md §3.3): these are
+    written as raw <a> tags precisely because markdown can't carry them."""
     body = _article_body(env)
     for name, url in _CREDIT_LINKS:
-        assert f'<a href="{url}">{name}</a>' in body, f"{name} -> {url}"
+        assert f'<a href="{url}" target="_blank" rel="noopener">{name}</a>' in body, f"{name} -> {url}"
 
 
 def test_credit_links_appear_in_the_order_the_copy_names_them(env):
@@ -203,8 +206,9 @@ def test_markdown_renders_as_real_html_not_literal_syntax(env):
     assert "<em>where the answers were</em>" in body
 
 
-_HTIB_CONSTANTS = ("_HTIB_INTRO", "_HTIB_WHY_I_BUILT_THIS", "_HTIB_HOW_I_DECIDED",
-                   "_HTIB_WHAT_ELSE", "_HTIB_FOOTNOTE")
+_HTIB_CONSTANTS = ("_HTIB_INTRO_DEFAULT", "_HTIB_WHY_I_BUILT_THIS_DEFAULT",
+                   "_HTIB_HOW_I_DECIDED_DEFAULT", "_HTIB_WHAT_ELSE_DEFAULT",
+                   "_HTIB_FOOTNOTE_DEFAULT")
 
 
 def test_copy_passes_the_typography_lint(env):
@@ -229,3 +233,94 @@ def test_the_typography_check_above_can_actually_fail(env):
     bad = "Feeds & sources — the ones I read."
     kinds = {kind for kind, _line, _excerpt in typography_findings(f"X = {bad!r}")}
     assert kinds == {"bare-ampersand", "spaced-em-dash"}
+
+
+# --- admin-editable copy (PR 35, Part 2) ------------------------------------
+#
+# NOTE on auth: this file's `env` fixture deliberately sets no
+# LINKLIB_PASSWORD, so the app runs in its documented "open, local-dev
+# convenience" mode and `_is_authed` is True for every request. That's what
+# makes the admin routes below reachable without a login step here.
+
+_SECTION_KEYS = ("htib_intro_copy", "htib_why_copy", "htib_how_copy",
+                 "htib_what_else_copy", "htib_footnote_copy")
+
+
+def test_every_section_has_a_settings_key_and_a_default(env):
+    keys = [s["key"] for s in env._HTIB_COPY_SECTIONS]
+    assert keys == list(_SECTION_KEYS)
+    for s in env._HTIB_COPY_SECTIONS:
+        assert s["default"].strip(), s["key"]
+
+
+def test_admin_copy_page_renders_a_textarea_per_section(env):
+    html = _client(env).get("/admin/copy").text
+    for key in _SECTION_KEYS:
+        assert f'id="copy-{key}"' in html, key
+        assert f"saveHtib(&apos;{key}&apos;)" in html, key
+
+
+def test_each_section_description_says_raw_html_is_allowed(env):
+    """The asymmetry worth naming: these five take raw HTML (they're
+    nine-tenths links), while the About bio on the same page is plain text."""
+    html = _client(env).get("/admin/copy").text
+    panel = html.split("How this is built")[1]
+    assert "raw HTML" in panel
+
+
+def test_saving_a_section_changes_the_public_page(env):
+    c = _client(env)
+    r = c.post("/admin/copy/how-this-is-built",
+               json={"key": "htib_intro_copy", "text": "A brand new opener."})
+    assert r.status_code == 200
+    assert "A brand new opener." in c.get("/how-this-is-built").text
+
+
+def test_an_unsaved_section_still_renders_its_default(env):
+    body = _article_body(env)
+    assert "Feedly sent me a renewal notice" in body
+
+
+def test_saving_one_section_leaves_the_others_on_their_defaults(env):
+    c = _client(env)
+    c.post("/admin/copy/how-this-is-built",
+           json={"key": "htib_intro_copy", "text": "Changed."})
+    body = _article_body(env)
+    assert "Changed." in body
+    # The origin story is a different section and must be untouched.
+    assert "Feedly emailed me about my annual renewal" in body
+
+
+def test_an_unknown_section_key_is_rejected(env):
+    """A bad key must not write an arbitrary settings row."""
+    r = _client(env).post("/admin/copy/how-this-is-built",
+                          json={"key": "htib_evil_copy", "text": "x"})
+    assert r.status_code == 400
+
+
+def test_a_blank_save_is_rejected(env):
+    """Blank would silently fall back to the hardcoded default, which reads
+    on the page as "my edit vanished" rather than as an error."""
+    r = _client(env).post("/admin/copy/how-this-is-built",
+                          json={"key": "htib_intro_copy", "text": "   "})
+    assert r.status_code == 400
+
+
+def test_saved_copy_can_carry_a_working_outbound_link(env):
+    """The whole reason this page uses the trusted renderer: an admin has to
+    be able to credit someone with a real link."""
+    c = _client(env)
+    c.post("/admin/copy/how-this-is-built", json={
+        "key": "htib_footnote_copy",
+        "text": 'See <a href="https://example.com" target="_blank" rel="noopener">Example</a>.'})
+    assert '<a href="https://example.com" target="_blank" rel="noopener">Example</a>' \
+        in c.get("/how-this-is-built").text
+
+
+def test_the_surface_cards_are_not_admin_editable(env):
+    """Deliberate: each card's href points at a real route and its empty
+    string selects the coming-soon state, neither of which survives a
+    textarea. Confirmed by there being no settings key for them."""
+    html = _client(env).get("/admin/copy").text
+    assert "Explainer coming soon" not in html
+    assert not any("surface" in s["key"] for s in env._HTIB_COPY_SECTIONS)

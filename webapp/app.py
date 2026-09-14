@@ -1845,7 +1845,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
-  <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a><span>&middot;</span><a href="https://logo.dev">Logos provided by Logo.dev</a></span>
+  <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a><span>&middot;</span><a href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a></span>
 </footer>
 </body></html>"""
 
@@ -4069,22 +4069,26 @@ _AI_SURFACES = (
 # deliberately escapes them (it serves AI-drafted fields, a different trust
 # model — see that module's own docstring).
 #
-# Named plainly, NOT `*_DEFAULT`: the `_DEFAULT` suffix in this file means
-# "hardcoded fallback behind a live `lib.get_setting(...)` lookup"
-# (_ABOUT_COPY_DEFAULT, _HOMEPAGE_HEADLINE_DEFAULT). Nothing overrides these
-# yet, so claiming that shape would be a false signal about the code's state.
-# Making them admin-editable is scoped separately.
-_HTIB_INTRO = (
+# Named `*_DEFAULT` because each one now really is a fallback behind a live
+# `lib.get_setting(...)` lookup — the same shape as _ABOUT_COPY_DEFAULT /
+# _HOMEPAGE_HEADLINE_DEFAULT. Editable at /admin/copy; see _HTIB_COPY_SECTIONS.
+#
+# Outbound links are written as raw `<a href … target="_blank" rel="noopener">`
+# rather than markdown `[text](url)`, because markdown has no syntax for
+# target/rel — the standing rule is that every link leaving bmweis.com opens in
+# a new tab (BRAND.md §3.3, enforced by brand_check.outbound_link_problems()).
+# Internal links stay plain markdown, so they stay same-tab.
+_HTIB_INTRO_DEFAULT = (
     "The short version: Feedly sent me a renewal notice and I decided to build it myself instead."
 )
 
-_HTIB_WHY_I_BUILT_THIS = """Those who know me know I'm innately curious and don't sit still well. And I love to talk. It's how I find my way. When it comes to my brain, the best way I can describe it is a Roomba. You know, one of those robot vacuums roaming the room, scanning, looking for something to suck up. Or in my case, something to fix, tinker with, or learn more about.
+_HTIB_WHY_I_BUILT_THIS_DEFAULT = """Those who know me know I'm innately curious and don't sit still well. And I love to talk. It's how I find my way. When it comes to my brain, the best way I can describe it is a Roomba. You know, one of those robot vacuums roaming the room, scanning, looking for something to suck up. Or in my case, something to fix, tinker with, or learn more about.
 
 It was spring 2026. Flowers were blooming. AI hype was surging. At work I was leading finance and biz ops at Mux, and like many teams, they had questions about planning norms, accounting automation, process design. Things I knew well, but more often, things where I knew *where the answers were*.
 
-You see, over the years I've amassed a small treasure trove of digital content. Reading voraciously is one of the things that accelerated my career. This was the same time blogging was exploding. You had investors like [Brad Feld](https://feld.com) from Foundry, [Fred Wilson](https://avc.xyz) at USV, [Mark Suster](https://bothsidesofthetable.com) at Upfront. Seasoned operators like [Dave Kellogg](https://kellblog.com), [David Skok](https://forentrepreneurs.com), and [Gordon Daugherty](https://shockwaveinnovations.com). And then my finance brethren [CJ Gustafson](https://mostlymetrics.com) and [OnlyCFO](https://onlycfo.io). And many more.
+You see, over the years I've amassed a small treasure trove of digital content. Reading voraciously is one of the things that accelerated my career. This was the same time blogging was exploding. You had investors like <a href="https://feld.com" target="_blank" rel="noopener">Brad Feld</a> from Foundry, <a href="https://avc.xyz" target="_blank" rel="noopener">Fred Wilson</a> at USV, <a href="https://bothsidesofthetable.com" target="_blank" rel="noopener">Mark Suster</a> at Upfront. Seasoned operators like <a href="https://kellblog.com" target="_blank" rel="noopener">Dave Kellogg</a>, <a href="https://forentrepreneurs.com" target="_blank" rel="noopener">David Skok</a>, and <a href="https://shockwaveinnovations.com" target="_blank" rel="noopener">Gordon Daugherty</a>. And then my finance brethren <a href="https://mostlymetrics.com" target="_blank" rel="noopener">CJ Gustafson</a> and <a href="https://onlycfo.io" target="_blank" rel="noopener">OnlyCFO</a>. And many more.
 
-For the first 10 to 15 years of my startup career I read everything I could get my hands on. My Google Reader was on fire. Saving anything I thought might be beneficial down the road, either for myself or someone close to me. Posts about comp plan design, sales pipeline analyses, popular KPIs for high-growth. When Google killed Reader, I moved everything to [Feedly](https://feedly.com), another really good product.
+For the first 10 to 15 years of my startup career I read everything I could get my hands on. My Google Reader was on fire. Saving anything I thought might be beneficial down the road, either for myself or someone close to me. Posts about comp plan design, sales pipeline analyses, popular KPIs for high-growth. When Google killed Reader, I moved everything to <a href="https://feedly.com" target="_blank" rel="noopener">Feedly</a>, another really good product.
 
 Trying to more efficiently tap into that digital archive became one of my early AI experiments, the original FP&A Buddy. One lunch, I went ham trying to export as much of that saved content as possible and connect it to a Claude project as context. Not only was that incredibly time consuming, it didn't work. So I tried a lighter approach, listing some of my favorite blogs as qualified sources in the project instructions. It worked okay. I was mostly satisfied.
 
@@ -4100,13 +4104,13 @@ No toolbox would be complete without a place to find finance communities, benchm
 
 I built it for myself, and for my friends to use."""
 
-_HTIB_HOW_I_DECIDED = """FP&A Buddy is required to trace everything to a real citation. No paraphrasing, no invented content.
+_HTIB_HOW_I_DECIDED_DEFAULT = """FP&A Buddy is required to trace everything to a real citation. No paraphrasing, no invented content.
 
 All AI-generated content stays in a draft state until a human reviews it, and carries a badge showing which state it's in.
 
 The tools are picked based on what each is good at. Claude drafts and reasons. A separate embedding model finds what a keyword search would miss. Search is restricted to a list of sites I trust, not the open web."""
 
-_HTIB_WHAT_ELSE = """This site isn't where the experimenting stops.
+_HTIB_WHAT_ELSE_DEFAULT = """This site isn't where the experimenting stops.
 
 I organized [an AI hackathon offsite](/thought-leadership/ai-hackathon-playbook) for my finance team, then wrote up the format, the facilitation mechanics, and how to make it stick.
 
@@ -4114,12 +4118,80 @@ At Mux I built a skill to review our revenue recognition rules, checking a revis
 
 With a teammate, a procurement flow where Claude reads new contracts and renewal paperwork, parses the terms into a warehouse, and surfaces them where people will see them. Renewal reminders. A prompt to ask whether we still need the thing before it auto-renews.
 
-And more recently, a [Model Builder](https://www.cfopilot.com/p/how-to-build-and-review-financial), an attempt at getting AI to construct and review financial models properly rather than confidently producing something that doesn't tie."""
+And more recently, a <a href="https://www.cfopilot.com/p/how-to-build-and-review-financial" target="_blank" rel="noopener">Model Builder</a>, an attempt at getting AI to construct and review financial models properly rather than confidently producing something that doesn't tie."""
 
-_HTIB_FOOTNOTE = (
-    "Fred Wilson moved his writing from AVC.com to [avc.xyz](https://avc.xyz) in 2024. "
-    "The [original archive](https://avc.com) is still up, and it's most of what I read."
+_HTIB_FOOTNOTE_DEFAULT = (
+    'Fred Wilson moved his writing from AVC.com to '
+    '<a href="https://avc.xyz" target="_blank" rel="noopener">avc.xyz</a> in 2024. '
+    'The <a href="https://avc.com" target="_blank" rel="noopener">original archive</a> '
+    "is still up, and it's most of what I read."
 )
+
+
+# One row per admin-editable section of /how-this-is-built. Single source of
+# truth for the settings keys, the /admin/copy sections, and the save routes —
+# add a section here and all three pick it up (same registry precedent as
+# _email_template_registry()).
+#
+# `html_ok` is True for every row because all five render through
+# _render_original_content_markdown, which passes raw HTML straight through.
+# That is the point (the copy is nine-tenths credit links), but it is also a
+# real difference from the About-page bio field sitting beside these on
+# /admin/copy, which is plain text — so each section's own description says so
+# rather than leaving an admin to discover it.
+_HTIB_COPY_SECTIONS = (
+    {
+        "key": "htib_intro_copy",
+        "label": "How this is built—intro",
+        "default": _HTIB_INTRO_DEFAULT,
+        "rows": 3,
+        "desc": ("The one-line opener under the title. Markdown, and raw HTML "
+                 "including links is allowed here (unlike the About bio below)."),
+    },
+    {
+        "key": "htib_why_copy",
+        "label": "How this is built—why I built this",
+        "default": _HTIB_WHY_I_BUILT_THIS_DEFAULT,
+        "rows": 18,
+        "desc": ("The origin story. Markdown, plus raw HTML for links. An outbound "
+                 "link needs target=\"_blank\" rel=\"noopener\" written into the tag; "
+                 "an internal one can stay plain markdown."),
+    },
+    {
+        "key": "htib_how_copy",
+        "label": "How this is built—how I decided what AI should do",
+        "default": _HTIB_HOW_I_DECIDED_DEFAULT,
+        "rows": 8,
+        "desc": ("The rules section, above the four surface cards. Markdown plus raw "
+                 "HTML. The cards themselves aren't editable here—they live in code "
+                 "beside the routes they link to."),
+    },
+    {
+        "key": "htib_what_else_copy",
+        "label": "How this is built—what else I've built with AI",
+        "default": _HTIB_WHAT_ELSE_DEFAULT,
+        "rows": 10,
+        "desc": "The closing section. Markdown plus raw HTML for links.",
+    },
+    {
+        "key": "htib_footnote_copy",
+        "label": "How this is built—footnote",
+        "default": _HTIB_FOOTNOTE_DEFAULT,
+        "rows": 3,
+        "desc": "The small print under the divider. Markdown plus raw HTML for links.",
+    },
+)
+
+_HTIB_COPY_KEYS = frozenset(s["key"] for s in _HTIB_COPY_SECTIONS)
+
+
+def _htib_copy(lib) -> dict:
+    """Resolve every /how-this-is-built section to its live text.
+
+    A saved override wins; otherwise the hardcoded default. Same
+    `get_setting(key) or DEFAULT` convention as the About/homepage copy.
+    """
+    return {s["key"]: (lib.get_setting(s["key"]) or s["default"]) for s in _HTIB_COPY_SECTIONS}
 
 
 def _ai_surface_card_html(title: str, desc: str, href: str) -> str:
@@ -4159,11 +4231,13 @@ def how_this_is_built(request: Request):
     page, linked from here.
 
     PR 35 replaced the page's copy wholesale with Brian's own (the five
-    _HTIB_* markdown constants above), added a "Why I built this" origin
-    section and a "What else I've built with AI" closer, and put a skip
-    link under the intro for a reader who came for the mechanism rather
-    than the story. The skip link targets #where-ai-shows-up, the heading
-    that actually holds the four surface cards.
+    _HTIB_*_DEFAULT markdown constants above), added a "Why I built this"
+    origin section and a "What else I've built with AI" closer, and put a
+    skip link under the intro for a reader who came for the mechanism
+    rather than the story. The skip link targets #where-ai-shows-up, the
+    heading that actually holds the four surface cards. Every prose
+    section is admin-editable at /admin/copy; the four surface cards are
+    deliberately not (see _AI_SURFACES' own comment).
 
     `_OC_ARTICLE_CSS` is included for real, not by habit: it's what gives
     the rendered prose its 1.7 line-height and `--ink` body color. Checked
@@ -4174,15 +4248,20 @@ def how_this_is_built(request: Request):
     they keep the shared `.article-atlantic .tool-prose` treatment exactly
     as they did before this PR."""
     cards_html = "".join(_ai_surface_card_html(t, d, h) for t, d, h in _AI_SURFACES)
+    lib = _lib()
+    try:
+        copy = _htib_copy(lib)
+    finally:
+        lib.close()
     body = f"""<div class="page page-standard article-atlantic">
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/about" style="font-size:13px;color:var(--muted);">&larr; About</a></p>
 <h1>How this is built</h1>
-<div class="oc-body" style="color:var(--ink-soft);margin:-4px 0 10px;font-size:16px;line-height:1.65;">{_render_original_content_markdown(_HTIB_INTRO)}</div>
+<div class="oc-body" style="color:var(--ink-soft);margin:-4px 0 10px;font-size:16px;line-height:1.65;">{_render_original_content_markdown(copy["htib_intro_copy"])}</div>
 <p style="margin:0 0 28px;"><a href="#where-ai-shows-up" style="font-size:14px;font-weight:600;color:var(--navy);">Skip to how the tooling works &rarr;</a></p>
 
 <h2>Why I built this</h2>
-<div class="oc-body">{_render_original_content_markdown(_HTIB_WHY_I_BUILT_THIS)}</div>
+<div class="oc-body">{_render_original_content_markdown(copy["htib_why_copy"])}</div>
 
 <h2 id="where-ai-shows-up" style="margin-top:8px;">Where AI shows up</h2>
 </div>
@@ -4191,12 +4270,12 @@ def how_this_is_built(request: Request):
 </div>
 <div class="tool-prose">
 <h2>How I decided what AI should do</h2>
-<div class="oc-body">{_render_original_content_markdown(_HTIB_HOW_I_DECIDED)}</div>
+<div class="oc-body">{_render_original_content_markdown(copy["htib_how_copy"])}</div>
 
 <h2>What else I've built with AI</h2>
-<div class="oc-body">{_render_original_content_markdown(_HTIB_WHAT_ELSE)}</div>
+<div class="oc-body">{_render_original_content_markdown(copy["htib_what_else_copy"])}</div>
 
-<div class="oc-body" style="border-top:1px solid var(--line);margin-top:34px;padding-top:18px;font-size:14px;color:var(--muted);">{_render_original_content_markdown(_HTIB_FOOTNOTE)}</div>
+<div class="oc-body" style="border-top:1px solid var(--line);margin-top:34px;padding-top:18px;font-size:14px;color:var(--muted);">{_render_original_content_markdown(copy["htib_footnote_copy"])}</div>
 </div>
 </div>
 <style>{_OC_ARTICLE_CSS}</style>"""
@@ -31842,11 +31921,23 @@ def admin_copy_page(request: Request):
         homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
         homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
+        htib = _htib_copy(lib)
     finally:
         lib.close()
 
     prose = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
              "font:14px/1.6 var(--font-body);background:var(--bg);resize:vertical;")
+
+    htib_cards = "".join(
+        f'''<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">{_esc(sec["label"])}</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">{_esc(sec["desc"])} Shown on <a href="/how-this-is-built">/how-this-is-built</a>.</p>
+<textarea id="copy-{sec["key"]}" rows="{sec["rows"]}" style="{prose}">{_esc(htib[sec["key"]])}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="btn-{sec["key"]}" onclick="saveHtib(&apos;{sec["key"]}&apos;)" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<span id="status-{sec["key"]}" style="font-size:13px;color:var(--muted);"></span></div></div>'''
+        for sec in _HTIB_COPY_SECTIONS
+    )
 
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -31882,6 +31973,7 @@ def admin_copy_page(request: Request):
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="about-save-btn" onclick="saveAbout()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
 <span id="about-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+{htib_cards}
 </div>
 
 <script>
@@ -31924,6 +32016,21 @@ async function saveHomepage() {{
   btn.disabled = true; btn.textContent = 'Saving…';
   try {{
     var r = await fetch('/admin/copy/homepage', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{homepage_teaser_copy: teaser, homepage_expanded_copy: expanded}})}});
+    if (!r.ok) throw new Error();
+    status.textContent = 'Saved.'; status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+  }} catch(e) {{
+    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
+}}
+
+async function saveHtib(key) {{
+  var text = document.getElementById('copy-' + key).value.trim();
+  var btn = document.getElementById('btn-' + key), status = document.getElementById('status-' + key);
+  if (!text) {{ status.textContent = "Can't save empty copy."; status.style.color = '#b91c1c'; return; }}
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/copy/how-this-is-built', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{key: key, text: text}})}});
     if (!r.ok) throw new Error();
     status.textContent = 'Saved.'; status.style.color = '#065f46';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
@@ -31988,6 +32095,34 @@ async def admin_copy_save_homepage(request: Request):
     try:
         lib.set_setting("homepage_teaser_copy", teaser)
         lib.set_setting("homepage_expanded_copy", expanded)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/admin/copy/how-this-is-built")
+async def admin_copy_save_how_this_is_built(request: Request):
+    """Save one /how-this-is-built prose section.
+
+    One route for all five sections rather than five near-identical ones —
+    the section is named in the payload and validated against
+    _HTIB_COPY_KEYS, so an unknown key is rejected outright rather than
+    writing an arbitrary settings row. Rejects blank content, same as every
+    other copy save here: a mistaken empty save would otherwise silently
+    fall back to the hardcoded default with no way to tell from the page.
+    """
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    key = (payload.get("key") or "").strip()
+    text = (payload.get("text") or "").strip()
+    if key not in _HTIB_COPY_KEYS:
+        raise HTTPException(status_code=400, detail="unknown section")
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    lib = _lib()
+    try:
+        lib.set_setting(key, text)
     finally:
         lib.close()
     return JSONResponse({"ok": True})
