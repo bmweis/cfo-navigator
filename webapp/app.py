@@ -1642,6 +1642,12 @@ _COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
                               # "YYYY-MM-DD HH:MM" value, not just "YYYY-MM-DD"
 _COL_WIDTH_STATUS = 110       # A short status/state badge or label
 _COL_WIDTH_COUNT = 80         # A small count/number column
+_COL_WIDTH_VENDOR = 160       # A short vendor/company label (Railway,
+                              # Anthropic) — deliberately narrower than
+                              # _COL_WIDTH_NAME, which is calibrated for a
+                              # full software/community name, not a one-
+                              # or two-word vendor label (overhead spend
+                              # fixes, 2026-09)
 
 # Card-listing width floors (PR 33, 2026-09) — "cards keep their width;
 # containers distribute them." A card stretching wider on a sparse row than
@@ -2364,7 +2370,7 @@ _ADMIN_SCROLL_HINT_HTML = (
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
     'stroke-linecap="round" stroke-linejoin="round"><polyline points="18 8 22 12 18 16"/>'
     '<polyline points="6 8 2 12 6 16"/><line x1="2" y1="12" x2="22" y2="12"/></svg>'
-    '<span>Scroll to see more columns</span></div>'
+    '<span>Scroll for more</span></div>'
 )
 
 _ADMIN_SCROLL_HINT_JS = """
@@ -27629,20 +27635,29 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
       </div>
       <!-- auto-fit/minmax, not a hardcoded 1fr 1fr (CSS Grid blowout — see
            CLAUDE.md's Phase P note): a native <input type="date"> has a
-           fixed intrinsic rendering minimum (~160px in Chromium) that
-           doesn't shrink below that regardless of width:100%, so a rigid
-           1fr/1fr track forced this whole card — and therefore the page —
-           to overflow horizontally on real phone widths (measured: 320px
-           through 414px). minmax(140px,1fr) lets the pair collapse to one
-           stacked column instead of squeezing below each input's own
-           floor. -->
+           fixed intrinsic rendering minimum that doesn't shrink below that
+           regardless of width:100%, so a rigid 1fr/1fr track forced this
+           whole card — and therefore the page — to overflow horizontally
+           on real phone widths (measured: 320px through 414px in
+           Chromium). minmax(140px,1fr) alone was not enough, and this is
+           the regression this codebase hit twice (2026-09): a grid item
+           defaults to min-width:auto, so its track still can't shrink
+           below the item's own content minimum even inside a minmax
+           track — and WebKit's native date input has a substantially
+           larger content-minimum than Chromium's, which the original fix
+           (verified in Chromium only) never accounted for. min-width:0 on
+           both grid-item divs below is required so the track can actually
+           shrink to the minmax floor in every engine, not just the one
+           this was tested in. See CLAUDE.md's overhead-spend-fixes entry
+           for the full history and the WebKit-install limitation of this
+           dev sandbox. -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;">
-        <div>
+        <div style="min-width:0;">
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
             style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
         </div>
-        <div>
+        <div style="min-width:0;">
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
           <input type="number" step="0.01" name="amount" required placeholder="0.00"
             style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
@@ -27681,8 +27696,8 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 
 <h2 style="font-size:16px;margin:0 0 4px;">Toolbox usage</h2>
 <p style="color:var(--muted);margin:0 0 4px;">Internal cost attribution for enrichment, embeddings, and FP&amp;A Buddy queries&mdash;computed from token counts and model pricing, not billed amounts.</p>
-<p style="color:var(--muted);margin:0 0 8px;font-style:italic;">Estimate only, for understanding usage patterns&mdash;this won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
-<p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong>&mdash;model choice directly affects the Enrichment row below. <a href="/admin/system/ai" style="color:var(--accent);">Change it &rarr;</a></p>
+<p style="color:var(--muted);margin:0 0 8px;font-style:italic;">Estimate only, for understanding usage patterns. This won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
+<p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong>. Model choice directly affects the Enrichment row below. <a href="/admin/system/ai" style="color:var(--accent);">Change it &rarr;</a></p>
 
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
   <!-- min-width:0 on both flex items below (same pattern as .tp-band>div
@@ -27772,10 +27787,10 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
         eid = e["id"]
         rows_html += f"""<tr id="oh-row-{eid}" style="border-top:1px solid var(--line);">
   <td style="padding:9px 12px;font-size:13px;font-weight:500;">{_esc(e['vendor'])}</td>
-  <td style="padding:9px 12px;font-size:13px;">{_esc(e['date'])}</td>
-  <td style="padding:9px 12px;font-size:13px;">{_esc(e['category']) or '&mdash;'}</td>
+  <td style="padding:9px 12px;font-size:13px;white-space:nowrap;">{_esc(e['date'])}</td>
+  <td style="padding:9px 12px;font-size:13px;white-space:nowrap;">{_esc(e['category']) or '&mdash;'}</td>
   <td style="padding:9px 12px;font-size:13px;color:var(--muted);">{_esc(e['note']) or '&mdash;'}</td>
-  <td style="padding:9px 12px;font-size:13px;font-weight:600;text-align:right;">${e['amount']:.2f}</td>
+  <td style="padding:9px 12px;font-size:13px;font-weight:600;text-align:right;white-space:nowrap;">${e['amount']:.2f}</td>
   <td style="padding:9px 12px;text-align:right;">
     <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;" onclick="toggleOverheadEdit({eid})">Edit</button>
   </td>
@@ -27784,17 +27799,17 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
   <td colspan="6" style="padding:12px;background:var(--bg);">
     <form method="post" action="/admin/overhead-spend/{eid}/edit" style="display:grid;gap:6px;margin:0 0 8px;max-width:640px;">
       <input type="hidden" name="back" value="details">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;">
         <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;">
+          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;">
         <input type="date" name="date" value="{_esc(e['date'])}" required
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;">
         <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
         <input type="text" name="category" value="{_esc(e['category'])}" maxlength="60" placeholder="Category" list="overhead-categories-details"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
       </div>
       <input type="text" name="note" value="{_esc(e['note'])}" maxlength="300" placeholder="Note (optional)"
         style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:#fff;">
@@ -27826,21 +27841,22 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
 
 <h2 style="font-size:16px;margin:0 0 4px;">All vendor charges</h2>
 <p style="color:var(--muted);margin:0 0 14px;">Click Edit on any row to make changes in place.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
-  <table style="width:100%;border-collapse:collapse;min-width:720px;">
+{_ADMIN_SCROLL_HINT_HTML}
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;" id="cmp-scroll-wrap">
+  <table style="width:100%;border-collapse:collapse;min-width:{_TABLE_FLOOR_WIDE}px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Vendor</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_VENDOR}px;">Vendor</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Category</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;">Category</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Note</th>
-      <th style="padding:9px 12px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Amount</th>
-      <th style="padding:9px 12px;"></th>
+      <th style="padding:9px 12px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;">Amount</th>
+      <th style="padding:9px 12px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Actions</th>
     </tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
 </div>
 {datalist}
-<script>
+<script>{_ADMIN_SCROLL_HINT_JS}
 function toggleOverheadEdit(id) {{
   var row = document.getElementById('oh-row-' + id);
   var edit = document.getElementById('oh-edit-' + id);
@@ -27848,6 +27864,7 @@ function toggleOverheadEdit(id) {{
   row.style.display = showEdit ? 'none' : '';
   edit.style.display = showEdit ? 'table-row' : 'none';
 }}
+initAdminScrollHint();
 </script>
 </div>"""
     return HTMLResponse(_page("Overhead spend—full history—Admin", "Admin", body, authed=True))
