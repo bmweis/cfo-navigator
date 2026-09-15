@@ -18183,7 +18183,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </td>
   <td style="padding:8px 8px;text-align:center;"><input type="checkbox" name="feature_{f['id']}_ai_enabled" value="1" {ai_checked}></td>
   <td style="padding:8px 8px;"><input type="date" name="feature_{f['id']}_verified_as_of" value="{_esc(verified)}"
-    style="width:130px;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;"></td>
+    style="width:130px;max-width:100%;min-width:0;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;box-sizing:border-box;"></td>
   <td style="padding:8px 8px;min-width:120px;"><input type="text" name="feature_{f['id']}_note" value="{_esc(note)}" maxlength="500" placeholder="Note"
     style="width:100%;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;"></td>
   <td style="padding:8px 8px;min-width:120px;"><input type="url" name="feature_{f['id']}_source_url" value="{_esc(source_url)}" maxlength="500" placeholder="Source URL"
@@ -27650,26 +27650,35 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
            overlap failure mode to get wrong, unlike an auto-fit/minmax
            track (2026-09-01) or min-width:0 on the grid items (2026-09,
            PR 553), both of which looked correct and both of which a real
-           iPhone 16 Pro (WebKit) still overlapped: a native
-           <input type="date"> has a larger intrinsic content-minimum in
+           iPhone 16 Pro (WebKit) still overlapped: a native date input
+           has a larger intrinsic content-minimum in
            WebKit than in Chromium, and every prior fix here was verified
            in Chromium only. 640px is comfortably above any width WebKit's
            date-input minimum is likely to demand, and matches this
            codebase's own .page-form width tier — not tuned to a measured
            WebKit number, since this dev sandbox cannot install/run
            Playwright's WebKit browser (confirmed 403 policy denial on the
-           download hosts, not a transient failure). See CLAUDE.md's
-           overhead-spend-fixes entry for the full history. -->
+           download hosts, not a transient failure).
+           Stacking alone wasn't the whole fix either (PR 554): the Date
+           <input> itself was still wider than its own container even on
+           its own row — WebKit's native picker UI won't shrink below its
+           own intrinsic content width, so `width:100%` alone is not
+           enough (100% of a narrow container is still narrower than the
+           control's intrinsic demand). `max-width:100%` (a hard clamp,
+           always wins over intrinsic content per CSS2.1 10.3.3) plus
+           `min-width:0` directly on the <input> (not just the grid item)
+           is the actual containment fix (2026-09, PR round 3). See
+           CLAUDE.md's overhead-spend-fixes entry for the full history. -->
       <div class="oh-grid-2">
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
-            style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+            style="width:100%;max-width:100%;min-width:0;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
         </div>
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
           <input type="number" step="0.01" name="amount" required placeholder="0.00"
-            style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+            style="width:100%;max-width:100%;min-width:0;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
         </div>
       </div>
       <div>
@@ -27812,15 +27821,15 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
       <input type="hidden" name="back" value="details">
       <div class="oh-grid-2">
         <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;">
+          style="width:100%;max-width:100%;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;box-sizing:border-box;">
         <input type="date" name="date" value="{_esc(e['date'])}" required
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="width:100%;max-width:100%;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;box-sizing:border-box;">
       </div>
       <div class="oh-grid-2">
         <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="width:100%;max-width:100%;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;box-sizing:border-box;">
         <input type="text" name="category" value="{_esc(e['category'])}" maxlength="60" placeholder="Category" list="overhead-categories-details"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="width:100%;max-width:100%;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;box-sizing:border-box;">
       </div>
       <input type="text" name="note" value="{_esc(e['note'])}" maxlength="300" placeholder="Note (optional)"
         style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:#fff;">
