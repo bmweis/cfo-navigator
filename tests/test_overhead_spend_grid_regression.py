@@ -77,15 +77,67 @@ a track-level fix protects every child, forever, with one declaration.
 Round 4's input-level `max-width:100%`/`min-width:0`/`box-sizing:border-box`
 fix is kept — it's still correct as a second, defense-in-depth layer (an
 input that COULD still exceed its track for some other reason should
-still be clamped), but it is not, on its own, sufficient: the track-level
-containment checked below is the layer that actually stops the bug.
+still be clamped).
+
+Round 6 (2026-09) found Round 5's track fix, while genuinely correct, was
+NOT the cause of the overlap either — a follow-up real-device screenshot
+still showed Date overflowing by ~110px after Round 5 shipped. The tell:
+Amount sits in the exact same collapsed single-column track as Date (both
+are children of the same `.oh-grid-2` at ≤640px), and Amount rendered at
+the CORRECT width, lined up with Vendor/Category/Note. If the track itself
+were oversized, Amount would be oversized too — it wasn't, so the track was
+never the bug. Only the `<input type="date">` itself was exceeding its own
+box despite `max-width:100%`, confirming the Round 3 hypothesis (WebKit
+does not honor `max-width` against a native date input's own intrinsic
+picker-chrome width) that was set aside at the time in favor of stacking.
+Fixed with `-webkit-appearance:none;appearance:none` alongside the existing
+`width:100%;max-width:100%;min-width:0` on all three real `type="date"`
+inputs sitewide — this strips the native picker chrome (and the intrinsic
+width it demands) rather than trying to constrain a box the browser won't
+constrain. iOS still opens the native date picker on tap regardless of
+`appearance:none` — that's platform tap behavior, not CSS-controlled — so
+this only changes the field's own visual chrome, not the picker itself.
+**Every fix from Rounds 3 through 6 is kept, deliberately, none reverted**:
+stacking (Round 3), track-level containment (Round 5), and input-level
+`max-width`/`min-width` (Round 4) are all real, legitimate fixes for real
+defects — they simply weren't the one causing this particular symptom.
+`appearance:none` (Round 6) is the layer that actually stops it. If a
+`type="date"` input somehow still overflows after this, the documented
+fallback is a `overflow:hidden` wrapper around the input — real
+containment rather than sizing, which cannot fail regardless of what the
+control wants — not yet needed, not yet built.
+
+Round 7 (2026-09) — width is fixed (Date now aligns with every other
+field on a real device), but `appearance:none` also strips WebKit's own
+vertical padding around the picker segments along with the chrome it was
+meant to remove, so the date input renders roughly half the height of its
+siblings. Chromium in this sandbox never reproduced the collapse — every
+before-fix measurement here showed Date already at or above its sibling
+text input's height (e.g. 45.09px vs. Vendor/Amount's 43.09px on the
+Add-a-charge form) — so this is presumed WebKit-only, same as the original
+width bug, and verified the same way: by measuring the sibling to know
+what to target, not by guessing a number. Fixed with an explicit
+`min-height` on all three real `type="date"` inputs sitewide, each set to
+that context's own sibling text input's measured rendered height (43px
+Add-a-charge, 37px overhead-details, 27px Feature Taxonomy) — a floor, not
+a resize: it changes nothing in an engine where the box is already tall
+enough (confirmed no visible change in this sandbox's own Chromium
+before/after measurements) and only takes effect where an engine's
+`appearance:none` handling collapses the box below that floor.
 
 Per this repo's own testing convention (see tests/test_screenshot_capture.py
 and tests/test_app_screenshot.py, both of which MOCK Playwright rather than
-launch a real browser in CI), this guard is a static, rendered-HTML/CSS-level
-check, not a live browser render — consistent with how this suite already
-verifies Playwright-adjacent behavior without depending on a real browser
-being available in every environment that runs it.
+launch a real browser in CI), most of this guard is a static, rendered-HTML/
+CSS-level check, not a live browser render — consistent with how this suite
+already verifies Playwright-adjacent behavior without depending on a real
+browser being available in every environment that runs it. Round 7 adds one
+exception: a real Chromium-rendered height comparison, since a height
+regression genuinely can't be caught by regexing a `style="..."` attribute
+the way a missing CSS property can. It launches Chromium if available and
+`pytest.skip`s cleanly if not (this repo's CI installs `requirements-dev.txt`
+only, no browser binary — see `.github/workflows/qa.yml`) — real coverage in
+any environment that does have a browser (this dev sandbox included), a
+no-op everywhere else, never a CI failure either way.
 """
 import inspect
 import os
@@ -346,20 +398,43 @@ def _style_of(tag: str) -> str:
 
 
 def _input_cannot_exceed_container(style: str) -> bool:
-    """The real invariant from Round 4: a native `<input type="date">`'s own
-    intrinsic content width (WebKit's picker-segment UI) can exceed a plain
-    `width:100%` declaration, since `width` doesn't clamp against intrinsic
-    content the way `max-width` does (CSS2.1 10.3.3 — when the computed
-    width would exceed max-width, max-width wins, unconditionally). A
-    declared `min-width:0` on the input itself (not just a wrapping grid
-    item) is what removes the UA-default `min-width:auto` floor.
-    `box-sizing:border-box` isn't itself the containment mechanism, but its
-    absence would mean padding adds to the box beyond `max-width`, so it's
-    required too for the containment to actually hold in practice."""
+    """Round 4's own invariant — `max-width:100%`/`min-width:0`/
+    `box-sizing:border-box` — kept as a defense-in-depth layer, but PROVEN
+    IN ROUND 6 TO BE INSUFFICIENT ON ITS OWN: a real post-Round-5-deploy
+    screenshot showed Date still overflowing by ~110px with exactly this
+    shape present and correct. WebKit does not honor `max-width` against a
+    native `<input type="date">`'s own intrinsic picker-chrome width — no
+    CSS constraint on the box wins against that, only removing the chrome
+    itself does. See `_input_has_no_native_chrome` below for the real,
+    sufficient invariant this checker's own name now undersells."""
     has_max_width_100 = bool(re.search(r"max-width\s*:\s*100%", style))
     has_min_width_0 = bool(re.search(r"min-width\s*:\s*0\b", style))
     has_border_box = bool(re.search(r"box-sizing\s*:\s*border-box", style))
     return has_max_width_100 and has_min_width_0 and has_border_box
+
+
+def _input_has_no_native_chrome(style: str) -> bool:
+    """Round 6's real invariant: `-webkit-appearance:none` (Safari/WebKit,
+    still required — `appearance:none` alone is not enough in every WebKit
+    version) plus the standard `appearance:none`, together stripping the
+    native date-input's own picker-segment chrome and the intrinsic width
+    it demands. This is what actually stops the overflow — `_input_
+    cannot_exceed_container`'s own max-width/min-width/box-sizing shape
+    (Round 4) is necessary as defense-in-depth but was proven, live, not
+    sufficient on its own (see Round 6 in the module docstring)."""
+    has_webkit_appearance_none = bool(re.search(r"-webkit-appearance\s*:\s*none", style))
+    has_appearance_none = bool(re.search(r"(?<!-webkit-)\bappearance\s*:\s*none", style))
+    return has_webkit_appearance_none and has_appearance_none
+
+
+def _declared_min_height(style: str) -> int | None:
+    """Round 7's invariant: a numeric `min-height:Npx` on the date input
+    itself — the floor that keeps `appearance:none`'s WebKit side effect
+    (stripping the picker segments' own vertical padding along with their
+    chrome) from collapsing the box below its sibling text input's height.
+    Returns the declared pixel value, or None if no min-height is set."""
+    m = re.search(r"min-height\s*:\s*(\d+(?:\.\d+)?)px", style)
+    return int(float(m.group(1))) if m else None
 
 
 def test_checker_catches_a_date_input_with_only_width_100_percent():
@@ -379,6 +454,47 @@ def test_checker_passes_a_real_containment_shape():
     )
     style = _style_of(_date_input_tags(good)[0])
     assert _input_cannot_exceed_container(style)
+
+
+def test_native_chrome_checker_catches_the_round_4_5_shape_that_still_overflowed():
+    """Prove the Round 6 checker FAILS on exactly the shape that shipped in
+    Rounds 4 and 5 (max-width/min-width/box-sizing, no appearance:none) —
+    the shape a real post-deploy iPhone screenshot showed still overflowing
+    by ~110px, since `_input_cannot_exceed_container` alone would wrongly
+    call this shape safe."""
+    round4_5_shape = (
+        'width:100%;max-width:100%;min-width:0;padding:9px;box-sizing:border-box;'
+    )
+    assert _input_cannot_exceed_container(round4_5_shape)
+    assert not _input_has_no_native_chrome(round4_5_shape)
+
+
+def test_native_chrome_checker_requires_both_webkit_and_standard_appearance():
+    """Either property alone is not the real fix — both must be present,
+    since -webkit-appearance:none is still required in some WebKit versions
+    and the standard appearance:none isn't a substitute for it."""
+    webkit_only = "width:100%;-webkit-appearance:none;"
+    standard_only = "width:100%;appearance:none;"
+    both = "width:100%;-webkit-appearance:none;appearance:none;"
+    assert not _input_has_no_native_chrome(webkit_only)
+    assert not _input_has_no_native_chrome(standard_only)
+    assert _input_has_no_native_chrome(both)
+
+
+def test_declared_min_height_extracts_the_pixel_value():
+    assert _declared_min_height("width:100%;min-height:43px;padding:9px;") == 43
+    assert _declared_min_height("width:100%;min-height:37.5px;padding:6px;") == 37
+
+
+def test_declared_min_height_is_none_without_the_round_6_shape():
+    """Prove the checker fails on exactly the Round 6 shape (appearance:none
+    present, no min-height yet) — the shape that shipped with the correct
+    width fix but the still-unaddressed height collapse."""
+    round6_shape = (
+        "width:100%;max-width:100%;min-width:0;-webkit-appearance:none;"
+        "appearance:none;padding:9px;box-sizing:border-box;"
+    )
+    assert _declared_min_height(round6_shape) is None
 
 
 @pytest.fixture
@@ -432,6 +548,16 @@ def test_add_a_charge_form_stacks_date_and_amount_below_640px(admin_client):
     # minmax(0,1fr) fix is genuinely present.
     assert "minmax(0,1fr)" in html
     assert _grid_track_cannot_exceed_container(html, "oh-grid-2")
+    # Round 6: the actual bug — WebKit ignoring max-width against the
+    # native date-input's own intrinsic chrome width. Every real
+    # type="date" input on this page must strip that chrome outright.
+    for tag in _date_input_tags(html):
+        assert _input_has_no_native_chrome(_style_of(tag)), tag
+    # Round 7: appearance:none also strips the vertical padding that gave
+    # the box its height — a min-height floor, matching Vendor/Amount's own
+    # measured rendered height on this form (43px), must be declared too.
+    for tag in _date_input_tags(html):
+        assert _declared_min_height(_style_of(tag)) == 43, tag
 
 
 def test_overhead_details_inline_edit_form_stacks_vendor_date_and_amount_category(admin_client):
@@ -457,6 +583,15 @@ def test_overhead_details_inline_edit_form_stacks_vendor_date_and_amount_categor
     # Round 5: same track-level fix on this page's own .oh-grid-2 rules.
     assert "minmax(0,1fr)" in html
     assert _grid_track_cannot_exceed_container(html, "oh-grid-2")
+    # Round 6: same native-chrome-stripping fix on this page's own Date input.
+    for tag in _date_input_tags(html):
+        assert _input_has_no_native_chrome(_style_of(tag)), tag
+    # Round 7: same min-height floor, matching Vendor's own measured
+    # rendered height in this row (37px) — Amount/Category's own row
+    # measures 2px shorter (no font-weight:500), so Date's floor targets
+    # its real sibling in the Vendor+Date pairing, not the other row.
+    for tag in _date_input_tags(html):
+        assert _declared_min_height(_style_of(tag)) == 37, tag
 
 
 def test_every_type_date_input_sitewide_has_containment():
@@ -479,9 +614,24 @@ def test_every_type_date_input_sitewide_has_containment():
     # if this count ever drops, either a site was removed (update this
     # test) or the regex stopped matching (a real regression in coverage).
     assert len(tags) == 3, tags
+    min_heights = []
     for tag in tags:
         style = _style_of(tag)
         assert _input_cannot_exceed_container(style), tag
+        # Round 6: max-width/min-width/box-sizing alone was proven
+        # insufficient on a real device — every sitewide date input must
+        # also strip native picker chrome.
+        assert _input_has_no_native_chrome(style), tag
+        # Round 7: every sitewide date input must also declare a
+        # min-height floor — a real numeric value, not just present.
+        mh = _declared_min_height(style)
+        assert mh is not None, tag
+        min_heights.append(mh)
+    # The three known sites' own measured sibling-text-input heights
+    # (43px Add-a-charge, 37px overhead-details, 27px Feature Taxonomy) —
+    # pinned here so this test still catches a value silently drifting
+    # even though it can't distinguish which tag is which by name alone.
+    assert sorted(min_heights) == [27, 37, 43]
 
 
 def test_scroll_hint_has_a_real_gap_and_breathing_room(admin_client):
@@ -502,3 +652,83 @@ def test_scroll_hint_has_a_real_gap_and_breathing_room(admin_client):
     margin_m = re.search(r"margin\s*:\s*[\d.]+px\s+[\d.]+(?:px)?\s+(\d+)px", rule)
     assert margin_m is not None
     assert int(margin_m.group(1)) >= 12, "space below the hint (above the table) should be more than the old 8px"
+
+
+def _launch_chromium():
+    """Round 7's one live-render exception (see the module docstring):
+    returns a (playwright, browser) pair if a real Chromium binary is
+    available, or None if not — never raises, so a caller can skip
+    cleanly. This repo's CI (.github/workflows/qa.yml) installs only
+    requirements-dev.txt, no browser binary, so this always returns None
+    there; a dev sandbox with Chromium pre-installed (this one included)
+    gets real coverage."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+    try:
+        pw = sync_playwright().start()
+        browser = pw.chromium.launch()
+    except Exception:
+        return None
+    return pw, browser
+
+
+def _height(page, selector: str) -> float:
+    el = page.query_selector(selector)
+    assert el is not None, selector
+    box = el.bounding_box()
+    assert box is not None, selector
+    return box["height"]
+
+
+def test_add_a_charge_date_height_matches_sibling_within_tolerance(admin_client, tmp_path):
+    """Round 7's real invariant, live: Date must render within a few
+    pixels of its sibling text inputs' height, not just declare a
+    min-height in source. Skips (never fails) where Chromium isn't
+    installed — see _launch_chromium's own docstring."""
+    launched = _launch_chromium()
+    if launched is None:
+        pytest.skip("Chromium not installed in this environment — see _launch_chromium docstring")
+    pw, browser = launched
+    try:
+        client, appmod, db = admin_client
+        resp = client.get("/admin/overhead-spend")
+        html_path = tmp_path / "add_a_charge.html"
+        html_path.write_text(resp.text, encoding="utf-8")
+        page = browser.new_page(viewport={"width": 390, "height": 900})
+        page.goto(html_path.as_uri())
+        vendor_h = _height(page, 'input[name="vendor"]')
+        date_h = _height(page, 'input[name="date"]')
+        amount_h = _height(page, 'input[name="amount"]')
+        page.close()
+        assert abs(date_h - vendor_h) <= 3, (date_h, vendor_h)
+        assert abs(date_h - amount_h) <= 3, (date_h, amount_h)
+    finally:
+        browser.close()
+        pw.stop()
+
+
+def test_overhead_details_date_height_matches_sibling_within_tolerance(admin_client, tmp_path):
+    launched = _launch_chromium()
+    if launched is None:
+        pytest.skip("Chromium not installed in this environment — see _launch_chromium docstring")
+    pw, browser = launched
+    try:
+        client, appmod, db = admin_client
+        lib = appmod.Library(db)
+        lib.add_manual_overhead("Railway", "2026-09-01", 20.0, category="Infrastructure", note="Hosting")
+        lib.close()
+        resp = client.get("/admin/overhead-spend/details")
+        html_path = tmp_path / "details.html"
+        html_path.write_text(resp.text, encoding="utf-8")
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        page.goto(html_path.as_uri())
+        page.eval_on_selector('tr[id^="oh-edit-"]', 'el => el.style.display="table-row"')
+        vendor_h = _height(page, 'input[name="vendor"]')
+        date_h = _height(page, 'input[name="date"]')
+        page.close()
+        assert abs(date_h - vendor_h) <= 3, (date_h, vendor_h)
+    finally:
+        browser.close()
+        pw.stop()

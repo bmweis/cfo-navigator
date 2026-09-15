@@ -8494,6 +8494,114 @@ it supersedes the old "`/save` is token-gated" note.
   not single-form-control cells). **Not fixed in this PR** — reported per
   instruction, pending a decision on scope before touching anything beyond
   `.oh-grid-2`.
+- **Overhead spend fixes, round 5 (2026-09, PR 557 merged) — the round-4
+  track fix was real and correct, but it was not the cause of the overlap
+  either; a follow-up real-device screenshot proved it via a control the
+  earlier rounds hadn't looked at.** Brian's own diagnostic, confirmed
+  correct: Amount sits in the exact same collapsed single-column track as
+  Date (both children of the same `.oh-grid-2` at ≤640px), and Amount
+  rendered at the CORRECT width, lined up with Vendor/Category/Note. If the
+  track itself were oversized, Amount would be oversized too — it wasn't,
+  which rules the track out categorically, no further measurement needed.
+  Only the `<input>` itself was exceeding its own box by ~110px despite
+  `max-width:100%` being present and correctly applied — which points at
+  exactly the Round 3 hypothesis (WebKit does not honor `max-width` against
+  a native date input's own intrinsic picker-chrome width) that was set
+  aside at the time in favor of stacking, and correctly so at the time —
+  stacking WAS a real, necessary fix for the two-column collision it
+  targeted, it just wasn't sufficient for this deeper one underneath it.
+  **Fix: `-webkit-appearance:none;appearance:none`**, added alongside the
+  existing `width:100%;max-width:100%;min-width:0;box-sizing:border-box`
+  on all three real `type="date"` inputs sitewide (Add-a-charge, the
+  overhead-details inline edit form, and the Feature Taxonomy table's
+  `verified_as_of` field). This strips the native picker-segment chrome —
+  and the intrinsic width that chrome demands — outright, rather than
+  trying to constrain a box the browser was never going to constrain no
+  matter what sizing property was thrown at it. **On the usability
+  question this session flagged in round 3 and was talked out of
+  pursuing**: on iOS, tapping a date input opens the native picker
+  regardless of `appearance:none` — that's platform tap behavior tied to
+  the input's `type`, not something CSS `appearance` controls — so the
+  realistic downside is the field's own chrome looking plainer, not losing
+  the picker. **Every fix from rounds 3 through 5 is kept, none reverted**:
+  stacking, track-level `minmax(0,1fr)` containment, and input-level
+  `max-width`/`min-width`/`box-sizing` are all real, correct fixes for
+  real defects they each targeted — they simply weren't the one causing
+  this particular symptom. `appearance:none` is the layer that actually
+  stops it. `tests/test_overhead_spend_grid_regression.py` gained a new
+  `_input_has_no_native_chrome` checker (requiring both
+  `-webkit-appearance:none` and the standard `appearance:none` — WebKit
+  still needs the prefixed form in some versions, and neither alone is
+  proven sufficient) alongside the existing `_input_cannot_exceed_container`
+  checker (renamed in spirit, not in code, to "necessary but proven
+  insufficient" — its docstring says so explicitly now), proven to
+  correctly FAIL against the exact round-3/4 shape that shipped and still
+  overflowed on a real device before being trusted. **Five rounds, five
+  real fixes, only the last one was the actual cause of the reported
+  symptom** — worth remembering as the reference case for why "the CSS
+  looks correct" is never sufficient evidence on its own for a native
+  form-control sizing bug in an engine this sandbox cannot run
+  (`playwright install webkit` remains a confirmed 403 policy denial, not
+  transient) — only a real device, and a control (a sibling field that
+  didn't fail), can rule a hypothesis in or out with confidence. If a
+  `type="date"` input somehow still overflows after this, the documented
+  fallback is a real `overflow:hidden` wrapper around the input —
+  containment rather than sizing, which cannot fail regardless of what the
+  control wants — not yet needed, not yet built.
+- **Overhead spend fixes, round 6 (2026-09, PR 559 merged) — `appearance:none`
+  fixed the width, but stripped WebKit's own vertical padding around the
+  picker segments along with the chrome, leaving the date input roughly
+  half the height of its siblings.** Brian's own diagnostic again pointed
+  at the exact right layer before any code was written: measure a sibling
+  text input's rendered height first and target that number, rather than
+  guessing at a fix. Confirmed in this sandbox's Chromium that the collapse
+  itself doesn't reproduce here — every before-fix measurement on all
+  three real `type="date"` inputs showed Date already at or above its
+  sibling's rendered height (e.g. 45.09px vs. Vendor/Amount's 43.09px on
+  the Add-a-charge form, 37.4375px matching Vendor exactly on the
+  overhead-details form, 29px vs. Note's 27px on the Feature Taxonomy
+  table) — consistent with the standing pattern in this investigation:
+  Chromium has never reproduced a single one of the real symptoms Brian's
+  iPhone 16 Pro (WebKit) has shown across all six rounds. **Fix: an
+  explicit `min-height` on all three inputs, sized to that context's own
+  sibling text input's measured Chromium height** — 43px (Add-a-charge,
+  matching Vendor/Amount), 37px (overhead-details, matching Vendor in the
+  Vendor+Date row — Amount/Category's own row measures 2px shorter, no
+  `font-weight:500`, so Date's floor targets its real row-mate, not the
+  other row), 27px (Feature Taxonomy, matching Note in the same row). This
+  is a floor, not a resize: verified live before/after that it changes
+  nothing in this sandbox (Date was already taller everywhere), and it can
+  only ever raise a collapsed box up to the sibling height, never push a
+  correctly-sized one down — the mechanism this investigation needed from
+  the start of round 6, since `min-height` composes safely with whatever
+  `appearance:none` does to an engine's internal height calculation without
+  having to know what that calculation actually produces. `tests/
+  test_overhead_spend_grid_regression.py` gained `_declared_min_height`
+  (extracts the numeric px value, proven to fail against the exact round-5
+  shape with `appearance:none` present but no `min-height` yet) — wired
+  into both page-render tests (asserting the exact 43px/37px value on that
+  page's own Date input) and the sitewide source-sweep test (asserting all
+  three sitewide values, sorted, since the regex-based sweep can't
+  distinguish the three inputs by name alone). It also gained a genuinely
+  new kind of check for this file — two tests that launch a real Chromium
+  browser (`_launch_chromium`, `pytest.skip`ping cleanly wherever a browser
+  isn't resolvable, per this repo's own testing-convention precedent for
+  Playwright-adjacent coverage that can't assume a browser exists in every
+  environment) and compare the Date input's real rendered height against
+  its sibling's, within a small pixel tolerance — real coverage in any
+  environment with a working Chromium, a no-op (never a CI failure)
+  everywhere else, since `.github/workflows/qa.yml` installs only
+  `requirements-dev.txt`, no browser binary. **Still no live WebKit
+  confirmation possible from this sandbox** (`playwright install webkit`
+  remains a confirmed 403 policy denial, not transient) — the fix is
+  justified by the mechanical fact that `min-height` is a hard floor in
+  every standards-compliant engine, the same category of justification
+  every prior round in this investigation has had to fall back on for
+  exactly this reason. Six rounds, six real, kept fixes — stacking,
+  track-level containment, input-level `max-width`/`min-width`, native-
+  chrome stripping, and now a height floor — each fixing a real defect
+  along the way, only the accumulation of all six actually closing the bug
+  end to end on the one engine that ever showed it.
 
 - **`/admin/copy` split into three pages, one per public page it edits
   (2026-09).** The single "Site copy" page had grown to eight sections
