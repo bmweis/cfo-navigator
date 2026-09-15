@@ -8191,14 +8191,15 @@ it supersedes the old "`/save` is token-gated" note.
   `tests/test_how_this_is_built.py` for the coverage.
 
 - **Overhead spend fixes (2026-09) — column-width rebalancing on the
-  details table, the missing scroll hint, and an em-dash frequency fix;
-  one reported bug didn't reproduce.** `/admin/overhead-spend/details`'s
+  details table, the missing scroll hint, an em-dash frequency fix, and a
+  real cross-engine regression in the Date/Amount grid that a first pass
+  wrongly reported as "did not reproduce."** `/admin/overhead-spend/details`'s
   "All vendor charges" table had `_COL_WIDTH_NAME` (280px, calibrated for
   a full software/community name) on its Vendor column, starving the
   genuinely free-text Note column of room — a real note ("Claude Max
   monthly subscription (personal account)") wrapped to 5 lines at a
   scrolled mobile width, confirmed by direct measurement (row height
-  126px → 83px → 46px across 390/960/1280px). Fixed with a new
+  126px → 83px → 46px across 390/960/1280px, Chromium). Fixed with a new
   `_COL_WIDTH_VENDOR` (160px) constant plus `white-space:nowrap` on
   Category (which was wrapping "AI Subscription" even though there was
   room, since it was unwidthed and competing with Note) and Amount; Note
@@ -8209,28 +8210,90 @@ it supersedes the old "`/save` is token-gated" note.
   visible "Actions" header — every other column already had one. The
   table joins Software/Communities in carrying `_ADMIN_SCROLL_HINT_HTML`/
   `_ADMIN_SCROLL_HINT_JS` (overflow-gated, not a breakpoint), confirmed
-  live to show at 390px and stay hidden at 1920px. **The "Add a charge"
-  form's Date/Amount overlap did not reproduce** — that grid already used
-  `repeat(auto-fit,minmax(140px,1fr))` (fixed 2026-09-01, predating this
-  PR, for a different symptom — page-level mobile overflow), and direct
-  measurement at 320–1920px found no overlap in Chromium at any width.
-  Left as-is rather than guessing at a fix for a bug that can't be
-  reproduced in this environment; flagged for Brian to re-check against
-  the live site, since this sandbox's Chromium may not reproduce an
-  iOS-Safari-specific native-date-input rendering quirk. A sweep of every
-  other admin form using a fixed (non-auto-fit) two-column grid — the
-  overhead-details inline edit form, the Resources add/edit form, the
-  Third-party content admin form, the `/admin/users` "Add a member" form,
-  and the bulk-edit multi-checkbox picker — found none of them pair a
-  native `<input type="date">` with a sibling field, the one field type
-  with a demonstrated cross-browser minimum-width risk; none showed
-  overlap at any tested width. The "Toolbox usage" block's three
-  consecutive paragraphs each carried their own unspaced em dash — passing
-  the mechanical typography lint (unspaced) but violating the frequency
-  half of the em-dash policy (sparingly). Reworded two of the three to a
-  period; the typography lint remains clean (0 findings) since it was
-  never about spacing here. See `BRAND.md`'s "Admin table column widths"
-  section for the `_COL_WIDTH_VENDOR` write-up.
+  live to show at 390px and stay hidden at 1920px — Chromium only (see
+  below). The "Toolbox usage" block's three consecutive paragraphs each
+  carried their own unspaced em dash — passing the mechanical typography
+  lint (unspaced) but violating the frequency half of the em-dash policy
+  (sparingly). Reworded two of the three to a period; the typography lint
+  remains clean (0 findings) since it was never about spacing here.
+  **A first pass at the "Add a charge" form's Date/Amount overlap wrongly
+  reported it as not reproducing, because it was only ever tested in
+  Chromium at a narrow viewport — testing a different engine than the one
+  Brian's report came from.** Brian's screenshot is Chrome on an iPhone 16
+  Pro; every iOS browser (Apple's own platform requirement) runs on
+  WebKit, not Chromium, regardless of which browser's UI wraps it — so a
+  desktop-Chromium test at a phone-width viewport is not a test of the
+  engine that actually rendered the bug. **This bug shipped once already
+  and regressed, in the sense that it was never actually fixed for every
+  engine, just verified against one.** Git archaeology (complicated by
+  this repo's history containing several disconnected root/orphan
+  commits with no parent — `40b5bd2` among them — which makes `git log -S`
+  and `git blame` unreliable across those boundaries, since a commit with
+  no parent shows its whole file as "added" regardless of what was already
+  there; verification instead came from diffing file CONTENT directly
+  against current `HEAD`, not trusting pickaxe search alone) found the
+  original fix (2026-08-28, content-identical in every ancestor of `HEAD`
+  since, byte-for-byte, right up to this PR) switched the grid from a
+  rigid `1fr 1fr` to `repeat(auto-fit,minmax(140px,1fr))` to stop the
+  whole PAGE from overflowing at phone widths — but never added
+  `min-width:0` to the grid's own two item `<div>`s, and its own code
+  comment explicitly cited "~160px in Chromium" as the native
+  `<input type="date">` minimum that drove the 140px floor — Chromium-only
+  evidence for a genuinely cross-engine problem. A grid item defaults to
+  `min-width:auto`, so its track can't shrink below the item's own content
+  minimum even inside a `minmax()` track; WebKit's native date-input
+  content minimum is larger than Chromium's, so the same 140px floor that
+  satisfies Chromium can still be narrower than WebKit's minimum —
+  producing exactly the overlap Brian saw on a real iPhone even though a
+  Chromium sweep at seven widths came back clean. Fixed by adding
+  `min-width:0` to both grid-item `<div>`s — the standard, engine-
+  independent remedy for this exact CSS Grid blowout failure class (see
+  the Phase P entry above). **The sweep re-run under this corrected
+  understanding found a second, real instance of the same gap that the
+  first pass's sweep had wrongly cleared**: the overhead-details table's
+  own inline edit form (Vendor+Date, Amount+Category, two rigid `1fr 1fr`
+  grids with the `<input>` elements themselves as the grid items, no
+  wrapping `<div>`) has the identical native-date/native-number-inside-a-
+  grid shape. Fixed the same way — `min-width:0` directly on each input
+  (since there's no wrapping div here) — and switched both grids from
+  `1fr 1fr` to `repeat(auto-fit,minmax(120px,1fr))` for the same page-
+  level-overflow protection the Add-a-charge grid already has. Every other
+  admin form checked in the re-run (Users' "Add a member" form, the
+  Resources add/edit form, the Third-party content admin form) still has
+  no native date/time/number input inside any grid, so none of them are in
+  scope for this defect. **This sandbox cannot install or run Playwright's
+  WebKit browser** — `playwright install webkit` fails with a `403` policy
+  denial against `playwright.download.prss.microsoft.com` and
+  `cdn.playwright.dev`, confirmed via the agent network proxy's own status
+  endpoint as a genuine organizational policy block, not a transient
+  failure — so neither fix could be visually confirmed in the engine that
+  actually needs it; the fix is justified by documented CSS Grid spec
+  behavior (the same reasoning already established for this failure class
+  elsewhere in this doc) rather than a live WebKit screenshot. In place of
+  that screenshot, `tests/test_overhead_spend_grid_regression.py` adds a
+  generic, rendered-HTML-level regression guard: it scans every
+  `display:grid` region on both affected pages and asserts `min-width:0`
+  is present wherever the region contains a native date/time/number
+  input, in whichever of the two fix shapes (wrapping div, or directly on
+  the input) applies — proven to actually fail against the pre-fix markup
+  shape before being trusted, per this repo's own "a guard that can never
+  fail is worse than none" standard. **The scroll hint's copy was also
+  shortened** ("Scroll to see more columns" → "Scroll for more") as a
+  defensive width-safety measure per Brian's report that it may be too
+  wide on his device — Chromium measurement at 320/375/390/402/430px found
+  the hint's text content comfortably fits its container at every width
+  tested (no wrap), but this is Chromium-only and this sandbox's font
+  rendering cannot be fully trusted to match Brian's real device (see the
+  standing Google Fonts sandbox-networking caveat elsewhere in this doc),
+  so the shorter copy ships as a safety margin rather than a confirmed
+  fix. **Standing lesson, restated because it bears repeating**: every
+  mobile-width measurement in this PR is Chromium-only unless stated
+  otherwise, and Chromium results are not evidence for WebKit — Brian
+  uses Chrome on desktop (Chromium) and Chrome on an iPhone 16 Pro
+  (WebKit, per Apple's platform requirement), and any future mobile
+  verification in this codebase should say which engine actually produced
+  it. See `BRAND.md`'s "Admin table column widths" section for the
+  `_COL_WIDTH_VENDOR` write-up.
 
 
 ## Authentication & security

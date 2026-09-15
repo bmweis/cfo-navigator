@@ -2370,7 +2370,7 @@ _ADMIN_SCROLL_HINT_HTML = (
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
     'stroke-linecap="round" stroke-linejoin="round"><polyline points="18 8 22 12 18 16"/>'
     '<polyline points="6 8 2 12 6 16"/><line x1="2" y1="12" x2="22" y2="12"/></svg>'
-    '<span>Scroll to see more columns</span></div>'
+    '<span>Scroll for more</span></div>'
 )
 
 _ADMIN_SCROLL_HINT_JS = """
@@ -27635,20 +27635,29 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
       </div>
       <!-- auto-fit/minmax, not a hardcoded 1fr 1fr (CSS Grid blowout — see
            CLAUDE.md's Phase P note): a native <input type="date"> has a
-           fixed intrinsic rendering minimum (~160px in Chromium) that
-           doesn't shrink below that regardless of width:100%, so a rigid
-           1fr/1fr track forced this whole card — and therefore the page —
-           to overflow horizontally on real phone widths (measured: 320px
-           through 414px). minmax(140px,1fr) lets the pair collapse to one
-           stacked column instead of squeezing below each input's own
-           floor. -->
+           fixed intrinsic rendering minimum that doesn't shrink below that
+           regardless of width:100%, so a rigid 1fr/1fr track forced this
+           whole card — and therefore the page — to overflow horizontally
+           on real phone widths (measured: 320px through 414px in
+           Chromium). minmax(140px,1fr) alone was not enough, and this is
+           the regression this codebase hit twice (2026-09): a grid item
+           defaults to min-width:auto, so its track still can't shrink
+           below the item's own content minimum even inside a minmax
+           track — and WebKit's native date input has a substantially
+           larger content-minimum than Chromium's, which the original fix
+           (verified in Chromium only) never accounted for. min-width:0 on
+           both grid-item divs below is required so the track can actually
+           shrink to the minmax floor in every engine, not just the one
+           this was tested in. See CLAUDE.md's overhead-spend-fixes entry
+           for the full history and the WebKit-install limitation of this
+           dev sandbox. -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;">
-        <div>
+        <div style="min-width:0;">
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
             style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
         </div>
-        <div>
+        <div style="min-width:0;">
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
           <input type="number" step="0.01" name="amount" required placeholder="0.00"
             style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
@@ -27790,17 +27799,17 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
   <td colspan="6" style="padding:12px;background:var(--bg);">
     <form method="post" action="/admin/overhead-spend/{eid}/edit" style="display:grid;gap:6px;margin:0 0 8px;max-width:640px;">
       <input type="hidden" name="back" value="details">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;">
         <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;">
+          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;">
         <input type="date" name="date" value="{_esc(e['date'])}" required
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;">
         <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
         <input type="text" name="category" value="{_esc(e['category'])}" maxlength="60" placeholder="Category" list="overhead-categories-details"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
       </div>
       <input type="text" name="note" value="{_esc(e['note'])}" maxlength="300" placeholder="Note (optional)"
         style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:#fff;">
