@@ -77,8 +77,35 @@ a track-level fix protects every child, forever, with one declaration.
 Round 4's input-level `max-width:100%`/`min-width:0`/`box-sizing:border-box`
 fix is kept — it's still correct as a second, defense-in-depth layer (an
 input that COULD still exceed its track for some other reason should
-still be clamped), but it is not, on its own, sufficient: the track-level
-containment checked below is the layer that actually stops the bug.
+still be clamped).
+
+Round 6 (2026-09) found Round 5's track fix, while genuinely correct, was
+NOT the cause of the overlap either — a follow-up real-device screenshot
+still showed Date overflowing by ~110px after Round 5 shipped. The tell:
+Amount sits in the exact same collapsed single-column track as Date (both
+are children of the same `.oh-grid-2` at ≤640px), and Amount rendered at
+the CORRECT width, lined up with Vendor/Category/Note. If the track itself
+were oversized, Amount would be oversized too — it wasn't, so the track was
+never the bug. Only the `<input type="date">` itself was exceeding its own
+box despite `max-width:100%`, confirming the Round 3 hypothesis (WebKit
+does not honor `max-width` against a native date input's own intrinsic
+picker-chrome width) that was set aside at the time in favor of stacking.
+Fixed with `-webkit-appearance:none;appearance:none` alongside the existing
+`width:100%;max-width:100%;min-width:0` on all three real `type="date"`
+inputs sitewide — this strips the native picker chrome (and the intrinsic
+width it demands) rather than trying to constrain a box the browser won't
+constrain. iOS still opens the native date picker on tap regardless of
+`appearance:none` — that's platform tap behavior, not CSS-controlled — so
+this only changes the field's own visual chrome, not the picker itself.
+**Every fix from Rounds 3 through 6 is kept, deliberately, none reverted**:
+stacking (Round 3), track-level containment (Round 5), and input-level
+`max-width`/`min-width` (Round 4) are all real, legitimate fixes for real
+defects — they simply weren't the one causing this particular symptom.
+`appearance:none` (Round 6) is the layer that actually stops it. If a
+`type="date"` input somehow still overflows after this, the documented
+fallback is a `overflow:hidden` wrapper around the input — real
+containment rather than sizing, which cannot fail regardless of what the
+control wants — not yet needed, not yet built.
 
 Per this repo's own testing convention (see tests/test_screenshot_capture.py
 and tests/test_app_screenshot.py, both of which MOCK Playwright rather than
@@ -346,20 +373,33 @@ def _style_of(tag: str) -> str:
 
 
 def _input_cannot_exceed_container(style: str) -> bool:
-    """The real invariant from Round 4: a native `<input type="date">`'s own
-    intrinsic content width (WebKit's picker-segment UI) can exceed a plain
-    `width:100%` declaration, since `width` doesn't clamp against intrinsic
-    content the way `max-width` does (CSS2.1 10.3.3 — when the computed
-    width would exceed max-width, max-width wins, unconditionally). A
-    declared `min-width:0` on the input itself (not just a wrapping grid
-    item) is what removes the UA-default `min-width:auto` floor.
-    `box-sizing:border-box` isn't itself the containment mechanism, but its
-    absence would mean padding adds to the box beyond `max-width`, so it's
-    required too for the containment to actually hold in practice."""
+    """Round 4's own invariant — `max-width:100%`/`min-width:0`/
+    `box-sizing:border-box` — kept as a defense-in-depth layer, but PROVEN
+    IN ROUND 6 TO BE INSUFFICIENT ON ITS OWN: a real post-Round-5-deploy
+    screenshot showed Date still overflowing by ~110px with exactly this
+    shape present and correct. WebKit does not honor `max-width` against a
+    native `<input type="date">`'s own intrinsic picker-chrome width — no
+    CSS constraint on the box wins against that, only removing the chrome
+    itself does. See `_input_has_no_native_chrome` below for the real,
+    sufficient invariant this checker's own name now undersells."""
     has_max_width_100 = bool(re.search(r"max-width\s*:\s*100%", style))
     has_min_width_0 = bool(re.search(r"min-width\s*:\s*0\b", style))
     has_border_box = bool(re.search(r"box-sizing\s*:\s*border-box", style))
     return has_max_width_100 and has_min_width_0 and has_border_box
+
+
+def _input_has_no_native_chrome(style: str) -> bool:
+    """Round 6's real invariant: `-webkit-appearance:none` (Safari/WebKit,
+    still required — `appearance:none` alone is not enough in every WebKit
+    version) plus the standard `appearance:none`, together stripping the
+    native date-input's own picker-segment chrome and the intrinsic width
+    it demands. This is what actually stops the overflow — `_input_
+    cannot_exceed_container`'s own max-width/min-width/box-sizing shape
+    (Round 4) is necessary as defense-in-depth but was proven, live, not
+    sufficient on its own (see Round 6 in the module docstring)."""
+    has_webkit_appearance_none = bool(re.search(r"-webkit-appearance\s*:\s*none", style))
+    has_appearance_none = bool(re.search(r"(?<!-webkit-)\bappearance\s*:\s*none", style))
+    return has_webkit_appearance_none and has_appearance_none
 
 
 def test_checker_catches_a_date_input_with_only_width_100_percent():
@@ -379,6 +419,31 @@ def test_checker_passes_a_real_containment_shape():
     )
     style = _style_of(_date_input_tags(good)[0])
     assert _input_cannot_exceed_container(style)
+
+
+def test_native_chrome_checker_catches_the_round_4_5_shape_that_still_overflowed():
+    """Prove the Round 6 checker FAILS on exactly the shape that shipped in
+    Rounds 4 and 5 (max-width/min-width/box-sizing, no appearance:none) —
+    the shape a real post-deploy iPhone screenshot showed still overflowing
+    by ~110px, since `_input_cannot_exceed_container` alone would wrongly
+    call this shape safe."""
+    round4_5_shape = (
+        'width:100%;max-width:100%;min-width:0;padding:9px;box-sizing:border-box;'
+    )
+    assert _input_cannot_exceed_container(round4_5_shape)
+    assert not _input_has_no_native_chrome(round4_5_shape)
+
+
+def test_native_chrome_checker_requires_both_webkit_and_standard_appearance():
+    """Either property alone is not the real fix — both must be present,
+    since -webkit-appearance:none is still required in some WebKit versions
+    and the standard appearance:none isn't a substitute for it."""
+    webkit_only = "width:100%;-webkit-appearance:none;"
+    standard_only = "width:100%;appearance:none;"
+    both = "width:100%;-webkit-appearance:none;appearance:none;"
+    assert not _input_has_no_native_chrome(webkit_only)
+    assert not _input_has_no_native_chrome(standard_only)
+    assert _input_has_no_native_chrome(both)
 
 
 @pytest.fixture
@@ -432,6 +497,11 @@ def test_add_a_charge_form_stacks_date_and_amount_below_640px(admin_client):
     # minmax(0,1fr) fix is genuinely present.
     assert "minmax(0,1fr)" in html
     assert _grid_track_cannot_exceed_container(html, "oh-grid-2")
+    # Round 6: the actual bug — WebKit ignoring max-width against the
+    # native date-input's own intrinsic chrome width. Every real
+    # type="date" input on this page must strip that chrome outright.
+    for tag in _date_input_tags(html):
+        assert _input_has_no_native_chrome(_style_of(tag)), tag
 
 
 def test_overhead_details_inline_edit_form_stacks_vendor_date_and_amount_category(admin_client):
@@ -457,6 +527,9 @@ def test_overhead_details_inline_edit_form_stacks_vendor_date_and_amount_categor
     # Round 5: same track-level fix on this page's own .oh-grid-2 rules.
     assert "minmax(0,1fr)" in html
     assert _grid_track_cannot_exceed_container(html, "oh-grid-2")
+    # Round 6: same native-chrome-stripping fix on this page's own Date input.
+    for tag in _date_input_tags(html):
+        assert _input_has_no_native_chrome(_style_of(tag)), tag
 
 
 def test_every_type_date_input_sitewide_has_containment():
@@ -482,6 +555,10 @@ def test_every_type_date_input_sitewide_has_containment():
     for tag in tags:
         style = _style_of(tag)
         assert _input_cannot_exceed_container(style), tag
+        # Round 6: max-width/min-width/box-sizing alone was proven
+        # insufficient on a real device — every sitewide date input must
+        # also strip native picker chrome.
+        assert _input_has_no_native_chrome(style), tag
 
 
 def test_scroll_hint_has_a_real_gap_and_breathing_room(admin_client):

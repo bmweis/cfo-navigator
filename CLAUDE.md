@@ -8494,6 +8494,60 @@ it supersedes the old "`/save` is token-gated" note.
   not single-form-control cells). **Not fixed in this PR** — reported per
   instruction, pending a decision on scope before touching anything beyond
   `.oh-grid-2`.
+- **Overhead spend fixes, round 5 (2026-09, PR 557 merged) — the round-4
+  track fix was real and correct, but it was not the cause of the overlap
+  either; a follow-up real-device screenshot proved it via a control the
+  earlier rounds hadn't looked at.** Brian's own diagnostic, confirmed
+  correct: Amount sits in the exact same collapsed single-column track as
+  Date (both children of the same `.oh-grid-2` at ≤640px), and Amount
+  rendered at the CORRECT width, lined up with Vendor/Category/Note. If the
+  track itself were oversized, Amount would be oversized too — it wasn't,
+  which rules the track out categorically, no further measurement needed.
+  Only the `<input>` itself was exceeding its own box by ~110px despite
+  `max-width:100%` being present and correctly applied — which points at
+  exactly the Round 3 hypothesis (WebKit does not honor `max-width` against
+  a native date input's own intrinsic picker-chrome width) that was set
+  aside at the time in favor of stacking, and correctly so at the time —
+  stacking WAS a real, necessary fix for the two-column collision it
+  targeted, it just wasn't sufficient for this deeper one underneath it.
+  **Fix: `-webkit-appearance:none;appearance:none`**, added alongside the
+  existing `width:100%;max-width:100%;min-width:0;box-sizing:border-box`
+  on all three real `type="date"` inputs sitewide (Add-a-charge, the
+  overhead-details inline edit form, and the Feature Taxonomy table's
+  `verified_as_of` field). This strips the native picker-segment chrome —
+  and the intrinsic width that chrome demands — outright, rather than
+  trying to constrain a box the browser was never going to constrain no
+  matter what sizing property was thrown at it. **On the usability
+  question this session flagged in round 3 and was talked out of
+  pursuing**: on iOS, tapping a date input opens the native picker
+  regardless of `appearance:none` — that's platform tap behavior tied to
+  the input's `type`, not something CSS `appearance` controls — so the
+  realistic downside is the field's own chrome looking plainer, not losing
+  the picker. **Every fix from rounds 3 through 5 is kept, none reverted**:
+  stacking, track-level `minmax(0,1fr)` containment, and input-level
+  `max-width`/`min-width`/`box-sizing` are all real, correct fixes for
+  real defects they each targeted — they simply weren't the one causing
+  this particular symptom. `appearance:none` is the layer that actually
+  stops it. `tests/test_overhead_spend_grid_regression.py` gained a new
+  `_input_has_no_native_chrome` checker (requiring both
+  `-webkit-appearance:none` and the standard `appearance:none` — WebKit
+  still needs the prefixed form in some versions, and neither alone is
+  proven sufficient) alongside the existing `_input_cannot_exceed_container`
+  checker (renamed in spirit, not in code, to "necessary but proven
+  insufficient" — its docstring says so explicitly now), proven to
+  correctly FAIL against the exact round-3/4 shape that shipped and still
+  overflowed on a real device before being trusted. **Five rounds, five
+  real fixes, only the last one was the actual cause of the reported
+  symptom** — worth remembering as the reference case for why "the CSS
+  looks correct" is never sufficient evidence on its own for a native
+  form-control sizing bug in an engine this sandbox cannot run
+  (`playwright install webkit` remains a confirmed 403 policy denial, not
+  transient) — only a real device, and a control (a sibling field that
+  didn't fail), can rule a hypothesis in or out with confidence. If a
+  `type="date"` input somehow still overflows after this, the documented
+  fallback is a real `overflow:hidden` wrapper around the input —
+  containment rather than sizing, which cannot fail regardless of what the
+  control wants — not yet needed, not yet built.
 
 - **`/admin/copy` split into three pages, one per public page it edits
   (2026-09).** The single "Site copy" page had grown to eight sections
