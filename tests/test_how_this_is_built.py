@@ -80,6 +80,80 @@ def test_web_search_card_says_four_jobs(env):
     assert "One search engine doing four different jobs behind the scenes." in html
 
 
+def test_surface_cards_grid_nests_inside_tool_prose(env):
+    """The four surface cards used to render as a sibling of `.tool-prose`
+    (a bare, unwrapped `<div style="display:grid;...">` between two
+    separate `.tool-prose` divs), so it rendered at the full page width
+    instead of the 760px reading column — the same shape PR #515 fixed for
+    the back-arrow. Parse the HTML and confirm the grid is a genuine
+    descendant of a single `.tool-prose` div, not a sibling of it."""
+    from html.parser import HTMLParser
+
+    html = _client(env).get("/how-this-is-built").text
+
+    class _Finder(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+            self.tool_prose_depths = []
+            self.grid_found_inside_tool_prose = False
+            self.tool_prose_div_count = 0
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            is_tool_prose = tag == "div" and attrs.get("class") == "tool-prose"
+            is_cards_grid = (
+                tag == "div"
+                and "display:grid" in (attrs.get("style") or "")
+                and "grid-template-columns:1fr" in (attrs.get("style") or "")
+            )
+            if is_tool_prose:
+                self.tool_prose_div_count += 1
+            self.stack.append(tag)
+            if is_cards_grid and self.tool_prose_depths:
+                self.grid_found_inside_tool_prose = True
+            if is_tool_prose:
+                self.tool_prose_depths.append(len(self.stack))
+
+        def handle_endtag(self, tag):
+            if self.stack and self.stack[-1] == tag:
+                self.stack.pop()
+
+    p = _Finder()
+    p.feed(html)
+    assert p.tool_prose_div_count == 1, (
+        "expected the page to use exactly one .tool-prose wrapper post-fix, "
+        f"found {p.tool_prose_div_count}"
+    )
+    assert p.grid_found_inside_tool_prose, "the cards grid must nest inside .tool-prose"
+
+
+def test_prose_and_cards_grid_render_at_the_same_width(env):
+    """Direct proof (not just structural) that the fix holds: the cards
+    grid's own <div> and the surrounding .tool-prose share the identical
+    max-width/centering rule, since the grid is now a plain block child of
+    .tool-prose with no width of its own to fight it. Confirmed live via
+    Playwright at 1280px and 390px (see the PR body) — this test pins the
+    CSS-level guarantee that makes that hold, without needing a browser."""
+    html = _client(env).get("/how-this-is-built").text
+    grid_marker = '<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:8px 0 34px;">'
+    assert grid_marker in html
+    # the grid div carries no width/max-width/margin:auto of its own — its
+    # width comes purely from being a block-level child of the 760px
+    # .tool-prose ancestor established above it in the same wrapper.
+    assert "width" not in grid_marker
+    assert "max-width" not in grid_marker
+
+
+def test_each_surface_card_carries_an_explicit_full_width_style(env):
+    """Each card's own <div> is pinned to width:100%;box-sizing:border-box
+    — deliberately redundant with the grid-template-columns:1fr fix above,
+    so no single browser-specific auto-sizing quirk can make one card
+    render narrower/wider than its siblings."""
+    html = _client(env).get("/how-this-is-built").text
+    assert html.count('style="width:100%;box-sizing:border-box;background:#fff;') == 4
+
+
 def test_page_carries_recognized_width_tier(env):
     rows = env._page_index_snapshot()
     row = next(r for r in rows if r["path"] == "/how-this-is-built")
@@ -282,8 +356,25 @@ def test_split_marker_explained_in_both_section_descriptions(env):
     for htib_before_copy, twice for htib_after_copy), so this checks the
     explanatory description text specifically rather than a raw count."""
     html = _client(env).get("/admin/copy/how-this-is-built").text
-    assert "leave that marker in place" in html
+    assert "Leave that marker in place" in html
     assert "Leave both in place" in html
+
+
+def test_split_marker_description_no_longer_repeats_the_raw_html_rule(env):
+    """The raw-HTML/target=_blank rule used to be restated inside each
+    section's own description, on top of the page-level intro paragraph
+    that already states it once — three repetitions before a reader ever
+    reached a textarea. Each section's description is now split-marker-only;
+    the intro paragraph (still asserted by
+    test_each_section_description_says_raw_html_is_allowed) is the one
+    place left that mentions raw HTML/target="_blank" at all."""
+    html = _client(env).get("/admin/copy/how-this-is-built").text
+    assert html.count("raw HTML") == 1
+    # <code>-wrapped, not a bare count — the sitewide footer's Logo.dev
+    # attribution link also carries target="_blank" rel="noopener" (every
+    # outbound link on the site does, per BRAND.md §3.3), so a bare count
+    # would false-fail on that unrelated boilerplate.
+    assert html.count('<code>target="_blank" rel="noopener"</code>') == 1
 
 
 # --- /admin/copy split into three pages -------------------------------------
@@ -338,11 +429,26 @@ def test_admin_copy_pages_require_auth(monkeypatch):
 
 
 def test_homepage_and_about_pages_carry_the_recognized_width_tier(env):
+    """Matches /admin/ai-surfaces/{id}/edit and
+    /admin/thought-leadership/original/{id}/edit — page-standard, with the
+    back-link/heading at the page's own left edge and the fields
+    themselves capped at 900px, not the narrower page-form (640px) tier
+    these three pages used right after the /admin/copy split, which
+    centered the whole page and squeezed the fields."""
     rows = env._page_index_snapshot()
     for path in ("/admin/copy/homepage", "/admin/copy/about", "/admin/copy/how-this-is-built"):
         row = next(r for r in rows if r["path"] == path)
-        assert row["tier"] == "page-form", path
+        assert row["tier"] == "page-standard", path
         assert row["flagged"] is False, path
+
+
+def test_copy_page_fields_are_capped_at_900px_inside_page_standard(env):
+    """Direct proof of the tier-match above: each page's field area sits in
+    its own max-width:900px;margin:0 auto wrapper, the same convention
+    _ai_surface_form_page/_oc_form_page use for their own <form> tags."""
+    for path in ("/admin/copy/homepage", "/admin/copy/about", "/admin/copy/how-this-is-built"):
+        html = _client(env).get(path).text
+        assert 'style="max-width:900px;margin:0 auto;">' in html, path
 
 
 def test_saving_a_section_changes_the_public_page(env):
