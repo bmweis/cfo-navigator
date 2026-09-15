@@ -3758,8 +3758,9 @@ def _avatar(size: int = 140, border_width: int = 3) -> str:
 
 
 # Default site copy for the homepage bio (lead line + rest) and the About page
-# bio — admin-editable at /admin/copy (settings keys below); these are the
-# fallback used when no override has been saved.
+# bio — admin-editable at /admin/copy/homepage and /admin/copy/about
+# respectively (settings keys below); these are the fallback used when no
+# override has been saved.
 _HOMEPAGE_HEADLINE_DEFAULT = "Be the strategic partner your leadership team leans on—not just the scorekeeper."
 _HOMEPAGE_SUBHEAD_DEFAULT = ("Finance used to mean keeping score: close the books, build the model, report what "
                               "happened. The job now is building something solid enough to trust and flexible "
@@ -4089,7 +4090,8 @@ _AI_SURFACES = (
 #
 # Named `*_DEFAULT` because each one now really is a fallback behind a live
 # `lib.get_setting(...)` lookup — the same shape as _ABOUT_COPY_DEFAULT /
-# _HOMEPAGE_HEADLINE_DEFAULT. Editable at /admin/copy; see _HTIB_COPY_SECTIONS.
+# _HOMEPAGE_HEADLINE_DEFAULT. Editable at /admin/copy/how-this-is-built; see
+# _HTIB_COPY_SECTIONS.
 #
 # Outbound links are written as raw `<a href … target="_blank" rel="noopener">`
 # rather than markdown `[text](url)`, because markdown has no syntax for
@@ -4147,16 +4149,16 @@ _HTIB_FOOTNOTE_DEFAULT = (
 
 
 # One row per admin-editable section of /how-this-is-built. Single source of
-# truth for the settings keys, the /admin/copy sections, and the save routes —
-# add a section here and all three pick it up (same registry precedent as
-# _email_template_registry()).
+# truth for the settings keys, the /admin/copy/how-this-is-built page's
+# sections, and the save route — add a section here and all three pick it up
+# (same registry precedent as _email_template_registry()).
 #
 # `html_ok` is True for every row because all five render through
 # _render_original_content_markdown, which passes raw HTML straight through.
 # That is the point (the copy is nine-tenths credit links), but it is also a
-# real difference from the About-page bio field sitting beside these on
-# /admin/copy, which is plain text — so each section's own description says so
-# rather than leaving an admin to discover it.
+# real difference from the About-page bio field on its own separate
+# /admin/copy/about page, which is plain text — so each section's own
+# description says so rather than leaving an admin to discover it.
 _HTIB_COPY_SECTIONS = (
     {
         "key": "htib_intro_copy",
@@ -4254,8 +4256,8 @@ def how_this_is_built(request: Request):
     skip link under the intro for a reader who came for the mechanism
     rather than the story. The skip link targets #where-ai-shows-up, the
     heading that actually holds the four surface cards. Every prose
-    section is admin-editable at /admin/copy; the four surface cards are
-    deliberately not (see _AI_SURFACES' own comment).
+    section is admin-editable at /admin/copy/how-this-is-built; the four
+    surface cards are deliberately not (see _AI_SURFACES' own comment).
 
     `_OC_ARTICLE_CSS` is included for real, not by habit: it's what gives
     the rendered prose its 1.7 line-height and `--ink` body color. Checked
@@ -22675,8 +22677,16 @@ _ADMIN_GROUPS = [
         ("/admin/thought-leadership/game-settings", "Sail, don't row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
+    # /admin/copy split into three pages, one per public page it edits
+    # (Site copy split, 2026-09) — a single "Site copy" card mixing
+    # Homepage/About/How-this-is-built fields gave no way to tell, from the
+    # hub card alone, which public page a given field changed. /admin/copy
+    # itself is not a page any more (see admin_copy_homepage_page's own
+    # docstring) — these three cards are the real entry points now.
     ("Brand, voice, and content", "How the site looks and sounds.", [
-        ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy—changes go live immediately."),
+        ("/admin/copy/homepage", "Homepage",            "Edit the hero headline/subhead and bio-box copy on the homepage—plain text, changes go live immediately."),
+        ("/admin/copy/about",    "About",               "Edit the bio on the About page—plain text, changes go live immediately."),
+        ("/admin/copy/how-this-is-built", "How this is built", "Edit the origin story and rules copy on /how-this-is-built—these fields accept raw HTML for links, unlike Homepage and About."),
         ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
         ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email (warm intro, welcome, password reset, and submission confirmations)—changes go live immediately."),
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
@@ -31937,47 +31947,55 @@ async def admin_voice_review(request: Request):
     return JSONResponse(review_text(text, voice_prompt=voice_prompt))
 
 
-@app.get("/admin/copy", response_class=HTMLResponse)
-def admin_copy_page(request: Request):
-    """Site copy: the homepage bio and the About page bio, editable here so a
-    copy change doesn't need a code deploy. Persisted to
-    the same `settings` table as /admin/voice; each field falls back to its
-    hardcoded default when no override has been saved."""
+_ADMIN_COPY_PROSE_STYLE = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
+                            "font:14px/1.6 var(--font-body);background:var(--bg);resize:vertical;")
+
+
+# /admin/copy split into three pages (one per public page it edits), each
+# under its own /admin/copy/{page} URL — a single "Site copy" page mixing
+# Homepage/About/How-this-is-built fields had grown to eight sections with
+# no way to tell, from the hub card alone, which public page a given field
+# actually changed. `/admin/copy` itself is deliberately NOT an index page:
+# every other admin group prefix on this site (/admin/thought-leadership,
+# /admin/system, /admin/tools, /admin/inbox) is a bare grouping with no route
+# of its own — the hub-nav cards are the real entry point, not the prefix —
+# so this follows that same precedent rather than inventing a landing page
+# nothing else on the site has. No compatibility redirect either, per the
+# standing "admin-only, no redirect on a rename" rule (Admin URL restructure
+# above): `/admin/copy` 404s now.
+#
+# The settings keys, POST routes, and rendering (_htib_copy, _about_copy_html,
+# the homepage/about lookups) are all UNCHANGED — this is a UI split only.
+# /admin/copy/how-this-is-built already existed as a POST save route before
+# this split; GET and POST on the same path are two separate routes in
+# FastAPI (see e.g. /admin/tools/resources/new, /tools/software/{slug}/edit),
+# so adding a GET here is not a rename or a collision — the new page's own
+# "Save" buttons keep posting to this exact path, unchanged.
+@app.get("/admin/copy/homepage", response_class=HTMLResponse)
+def admin_copy_homepage_page(request: Request):
+    """Homepage copy: the hero headline/subhead and the bio-box lead line +
+    body, both plain text (unlike the How this is built page's raw-HTML
+    fields — see that page's own docstring)."""
     if not _is_authed(request):
         return _login_redirect(request)
 
     lib = _lib()
     try:
-        about_copy = lib.get_setting("about_page_copy") or _ABOUT_COPY_DEFAULT
         homepage_headline = lib.get_setting("homepage_headline_copy") or _HOMEPAGE_HEADLINE_DEFAULT
         homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
         homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
-        htib = _htib_copy(lib)
     finally:
         lib.close()
 
-    prose = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
-             "font:14px/1.6 var(--font-body);background:var(--bg);resize:vertical;")
-
-    htib_cards = "".join(
-        f'''<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">{_esc(sec["label"])}</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">{_esc(sec["desc"])} Shown on <a href="/how-this-is-built">/how-this-is-built</a>.</p>
-<textarea id="copy-{sec["key"]}" rows="{sec["rows"]}" style="{prose}">{_esc(htib[sec["key"]])}</textarea>
-<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
-<button id="btn-{sec["key"]}" onclick="saveHtib(&apos;{sec["key"]}&apos;)" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
-<span id="status-{sec["key"]}" style="font-size:13px;color:var(--muted);"></span></div></div>'''
-        for sec in _HTIB_COPY_SECTIONS
-    )
-
-    body = f"""<div class="page page-standard">
+    prose = _ADMIN_COPY_PROSE_STYLE
+    body = f"""<div class="page page-form">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Site copy</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site.</p>
+<h1>Homepage copy</h1>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the text on <a href="/">the homepage</a>&mdash;plain text, no links. Changes save straight to the live site.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage&mdash;hero headline and subhead</div>
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Hero headline and subhead</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The large text at the very top of the homepage, next to your photo.</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Headline</label>
 <textarea id="home-headline" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_headline)}</textarea>
@@ -31988,7 +32006,7 @@ def admin_copy_page(request: Request):
 <span id="headline-status" style="font-size:13px;color:var(--muted);"></span></div></div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage&mdash;bio box</div>
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Bio box</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The card below the hero, above the 3-card row&mdash;a short lead line, then the rest of your bio, both always visible (under a fixed "STATUS:" label that isn't editable here).</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Lead line</label>
 <textarea id="home-teaser" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_teaser)}</textarea>
@@ -31997,33 +32015,9 @@ def admin_copy_page(request: Request):
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="home-save-btn" onclick="saveHomepage()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
 <span id="home-status" style="font-size:13px;color:var(--muted);"></span></div></div>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">About page&mdash;bio</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on <a href="/about">/about</a>. Separate paragraphs with a blank line.</p>
-<textarea id="about-copy" rows="14" style="{prose}">{_esc(about_copy)}</textarea>
-<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
-<button id="about-save-btn" onclick="saveAbout()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
-<span id="about-status" style="font-size:13px;color:var(--muted);"></span></div></div>
-{htib_cards}
 </div>
 
 <script>
-async function saveAbout() {{
-  var text = document.getElementById('about-copy').value.trim();
-  var btn = document.getElementById('about-save-btn'), status = document.getElementById('about-status');
-  if (!text) {{ status.textContent = "Can't save empty copy."; status.style.color = '#b91c1c'; return; }}
-  btn.disabled = true; btn.textContent = 'Saving…';
-  try {{
-    var r = await fetch('/admin/copy/about', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{about_page_copy: text}})}});
-    if (!r.ok) throw new Error();
-    status.textContent = 'Saved.'; status.style.color = '#065f46';
-    setTimeout(function() {{ status.textContent = ''; }}, 3000);
-  }} catch(e) {{
-    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
-  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
-}}
-
 async function saveHeadline() {{
   var headline = document.getElementById('home-headline').value.trim();
   var subhead = document.getElementById('home-subhead').value.trim();
@@ -32055,7 +32049,94 @@ async function saveHomepage() {{
     status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
   }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
 }}
+</script>"""
+    return HTMLResponse(_page("Homepage copy—Admin", "Admin", body, authed=True))
 
+
+@app.get("/admin/copy/about", response_class=HTMLResponse)
+def admin_copy_about_page(request: Request):
+    """The About page bio, plain text (unlike the How this is built page's
+    raw-HTML fields — see that page's own docstring)."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    lib = _lib()
+    try:
+        about_copy = lib.get_setting("about_page_copy") or _ABOUT_COPY_DEFAULT
+    finally:
+        lib.close()
+
+    prose = _ADMIN_COPY_PROSE_STYLE
+    body = f"""<div class="page page-form">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>About page copy</h1>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the bio on <a href="/about">/about</a>&mdash;plain text, no links. Changes save straight to the live site.</p>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Bio</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Separate paragraphs with a blank line.</p>
+<textarea id="about-copy" rows="14" style="{prose}">{_esc(about_copy)}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="about-save-btn" onclick="saveAbout()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<span id="about-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+</div>
+
+<script>
+async function saveAbout() {{
+  var text = document.getElementById('about-copy').value.trim();
+  var btn = document.getElementById('about-save-btn'), status = document.getElementById('about-status');
+  if (!text) {{ status.textContent = "Can't save empty copy."; status.style.color = '#b91c1c'; return; }}
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/copy/about', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{about_page_copy: text}})}});
+    if (!r.ok) throw new Error();
+    status.textContent = 'Saved.'; status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+  }} catch(e) {{
+    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
+}}
+</script>"""
+    return HTMLResponse(_page("About page copy—Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/copy/how-this-is-built", response_class=HTMLResponse)
+def admin_copy_how_this_is_built_page(request: Request):
+    """The five /how-this-is-built prose sections. Unlike Homepage/About
+    above, these accept raw HTML for links (see _HTIB_COPY_SECTIONS' own
+    comment) — each section's description says so, since that's the one
+    real capability difference an admin editing this in three months needs
+    to know before pasting a link into the wrong page's textarea."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    lib = _lib()
+    try:
+        htib = _htib_copy(lib)
+    finally:
+        lib.close()
+
+    prose = _ADMIN_COPY_PROSE_STYLE
+    htib_cards = "".join(
+        f'''<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">{_esc(sec["label"])}</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">{_esc(sec["desc"])} Shown on <a href="/how-this-is-built">/how-this-is-built</a>.</p>
+<textarea id="copy-{sec["key"]}" rows="{sec["rows"]}" style="{prose}">{_esc(htib[sec["key"]])}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="btn-{sec["key"]}" onclick="saveHtib(&apos;{sec["key"]}&apos;)" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<span id="status-{sec["key"]}" style="font-size:13px;color:var(--muted);"></span></div></div>'''
+        for sec in _HTIB_COPY_SECTIONS
+    )
+
+    body = f"""<div class="page page-form">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>How this is built&mdash;copy</h1>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the prose on <a href="/how-this-is-built">/how-this-is-built</a>. These five fields accept raw HTML for links (an outbound one needs <code>target="_blank" rel="noopener"</code> written into the tag); internal links can stay plain markdown. Changes save straight to the live site.</p>
+
+{htib_cards}
+</div>
+
+<script>
 async function saveHtib(key) {{
   var text = document.getElementById('copy-' + key).value.trim();
   var btn = document.getElementById('btn-' + key), status = document.getElementById('status-' + key);
@@ -32071,7 +32152,7 @@ async function saveHtib(key) {{
   }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
 }}
 </script>"""
-    return HTMLResponse(_page("Site copy—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("How this is built copy—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/copy/headline")
@@ -32265,9 +32346,9 @@ def admin_emails_page(request: Request):
     """Every admin-editable outbound email template — subject, body, and
     sign-off, plus a built-in default reference for each — editable here so
     a wording change doesn't need a code deploy. Persisted to the same
-    `settings` table as /admin/copy; each field falls back to its hardcoded
-    default in linklib/email_utils.py when no override has been saved. See
-    _email_template_registry() for the list of what's covered."""
+    `settings` table as /admin/copy/*; each field falls back to its
+    hardcoded default in linklib/email_utils.py when no override has been
+    saved. See _email_template_registry() for the list of what's covered."""
     if not _is_authed(request):
         return _login_redirect(request)
 
