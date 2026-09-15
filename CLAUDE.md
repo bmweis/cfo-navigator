@@ -8345,6 +8345,67 @@ it supersedes the old "`/save` is token-gated" note.
   overlap horizontally regardless of either one's own content-minimum,
   which needs no browser to verify — only that the CSS actually collapses
   to one column at the right breakpoint, which the test does confirm.
+- **Overhead spend fixes, round 3 (2026-09) — stacking above was necessary
+  but not sufficient; the real bug was the `<input type="date">` element
+  itself, not its grid or its row.** A real-device screenshot of the
+  deployed stacking fix showed the Date input's own right edge extending
+  past the card border — past every other field in the form (Vendor,
+  Amount, Category, Note all sat correctly inside the card). The two-column
+  overlap Rounds 2 and 3 chased was always the *symptom*: the input bled
+  into Amount's track because the input itself refuses to shrink, not
+  because the grid failed to give it room. Stacking removed the collision
+  but left the oversized input exposed on its own row. Root cause (verified
+  against the CSS spec, not just asserted): WebKit's native
+  `<input type="date">` has an intrinsic content width driven by its
+  internal day/month/year picker-segment UI, and a plain `width:100%`
+  doesn't override that — `width` computes against the containing block,
+  but nothing forces the *result* to be no wider than that if the control's
+  intrinsic minimum is larger; `max-width`, unlike `width`, is a hard clamp
+  that always wins regardless of intrinsic content (CSS2.1 §10.3.3). Fixed
+  with `max-width:100%` plus `min-width:0` directly on the `<input>` itself
+  (not just its wrapping grid-item `<div>`, which is what the Round 2
+  `min-width:0` fix targeted and is exactly why it never reached this) —
+  on all three real `type="date"` inputs sitewide, found via a full sweep:
+  the Add-a-charge form's Date field, the overhead-details inline edit
+  form's Date field (which also gained the same treatment on its Amount+
+  Category pair and its Vendor field, for consistency within the same
+  `.oh-grid-2` rows, and a `width:100%`/`box-sizing:border-box` pair it had
+  never had at all), and the Feature Taxonomy admin table's `verified_as_of`
+  date input (a fixed `width:130px` with no defensive properties — sits
+  inside an already-horizontally-scrolling table, so any overflow there is
+  absorbed by the table's own scroll rather than breaking out of a card the
+  way the overhead-spend forms did, but the same containment fix was
+  applied regardless, since a fixed pixel width can still lose to a larger
+  intrinsic minimum in the same way `width:100%` did). **Deliberately not
+  applied: `-webkit-appearance:none`/`appearance:none`**, which would strip
+  the native picker chrome that's setting the intrinsic width in the first
+  place — investigated per the explicit instruction to check usability
+  first. Removing native styling from `type="date"`/`type="time"` inputs is
+  documented across the frontend ecosystem as inconsistently supported and
+  can produce a broken or invisible control in some WebKit versions
+  (unlike `type="text"`/`type="number"`, where stripping native chrome is
+  well-understood and safe) — a real usability risk this sandbox has no way
+  to verify live (no WebKit access). Since the standard `max-width`/
+  `min-width:0` remedy already resolves the containment problem without
+  touching the native picker at all, there's no reason to take on that risk.
+  **Stacking is kept** — even with the input's own box now constrained, one
+  field per row is still the right mobile layout, and it removes the
+  original two-column collision permanently regardless of any single
+  field's own sizing quirks in any engine. `tests/
+  test_overhead_spend_grid_regression.py` gained a new containment checker
+  (`_input_cannot_exceed_container`, requiring `max-width:100%` +
+  `min-width:0` + `box-sizing:border-box` together on a date input's own
+  style) plus a sitewide sweep test that scans `webapp/app.py`'s source
+  directly for every `type="date"` input (avoiding the need for a
+  category-features admin fixture to reach the Feature Taxonomy table via
+  a full page render) — both proven to fail against the pre-fix code before
+  being trusted, same discipline as every prior round's own guard. Still no
+  live WebKit confirmation possible from this sandbox (`playwright install
+  webkit` remains a confirmed 403 policy denial); the fix is justified by
+  CSS spec behavior (`max-width` always wins over intrinsic content,
+  unconditionally, in every standards-compliant engine) rather than a live
+  screenshot — the same category of justification Round 2's own stacking
+  fix used, since neither round could get a real WebKit render.
 
 - **`/admin/copy` split into three pages, one per public page it edits
   (2026-09).** The single "Site copy" page had grown to eight sections

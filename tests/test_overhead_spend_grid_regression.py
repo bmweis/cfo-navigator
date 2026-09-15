@@ -1,6 +1,6 @@
 """Regression guard for the overhead-spend Date/Amount overlap bug, which
-shipped THREE times before landing on a fix with no failure mode left to get
-wrong.
+shipped in FOUR rounds before landing on a fix with no failure mode left to
+get wrong.
 
 Round 1 (2026-08-28): a rigid `1fr 1fr` grid overflowed the whole page at
 phone widths, fixed by switching to `repeat(auto-fit,minmax(140px,1fr))`.
@@ -14,18 +14,36 @@ grid items, ALSO didn't survive contact with WebKit — confirmed by a real
 screenshot from the deployed fix, Date's input still rendering underneath
 Amount's left edge.
 
-Round 3 (this file) stops trying to make a two-column layout survive every
-engine's own native-input sizing quirks and stacks the two fields into a
-single column below 640px instead. **A single-column layout has no shared
-row for two fields' content-minimums to collide in — there is no CSS Grid
-mechanism left for this to fail through, in any engine, known or unknown.**
-640px is not a measured WebKit number (this sandbox cannot install
-Playwright's WebKit browser — `playwright install webkit` gets a 403 policy
-denial against playwright.download.prss.microsoft.com and cdn.playwright.dev,
-confirmed via the agent proxy's own status endpoint as a genuine
-organizational policy block, not transient) — it's picked to be comfortably
-above anything a native date input is ever likely to demand, and matches
-this codebase's own `.page-form` width tier.
+Round 3 (2026-09, PR 554) stopped trying to make a two-column layout
+survive every engine's own native-input sizing quirks and stacked the two
+fields into a single column below 640px instead. **A single-column layout
+has no shared row for two fields' content-minimums to collide in — there
+is no CSS Grid mechanism left for this to fail through, in any engine,
+known or unknown.** 640px is not a measured WebKit number (this sandbox
+cannot install Playwright's WebKit browser — `playwright install webkit`
+gets a 403 policy denial against playwright.download.prss.microsoft.com and
+cdn.playwright.dev, confirmed via the agent proxy's own status endpoint as
+a genuine organizational policy block, not transient) — it's picked to be
+comfortably above anything a native date input is ever likely to demand,
+and matches this codebase's own `.page-form` width tier.
+
+Round 4 (this file) found that stacking alone wasn't the whole fix: it
+revealed the REAL bug rather than solving it. A real iPhone screenshot
+showed the Date `<input>` itself wider than its own container — its right
+edge extending past the card border, past every other field — even though
+it now had a whole row to itself. The two-column collision in Round 2/3
+was always the SYMPTOM, not the cause: WebKit's native `<input
+type="date">` has an intrinsic content width driven by its internal
+picker-segment UI that a plain `width:100%` doesn't override (100% of a
+narrow container is still narrower than the control's intrinsic demand).
+The actual fix is `max-width:100%` (a hard clamp that always wins over
+intrinsic content, per CSS2.1 10.3.3, regardless of what `width` computes
+to) plus `min-width:0` directly on the `<input>` itself, not just its
+wrapping grid-item `<div>` (the target of the Round 2 fix, which is why it
+never touched this). Stacking is kept — even with the input's own box
+constrained, one field per row is still the right mobile layout, and it
+removes the two-column collision permanently regardless of any single
+field's own sizing behavior.
 
 Per this repo's own testing convention (see tests/test_screenshot_capture.py
 and tests/test_app_screenshot.py, both of which MOCK Playwright rather than
@@ -34,6 +52,7 @@ check, not a live browser render — consistent with how this suite already
 verifies Playwright-adjacent behavior without depending on a real browser
 being available in every environment that runs it.
 """
+import inspect
 import os
 import re
 import tempfile
@@ -152,6 +171,53 @@ def test_checker_still_fails_the_old_auto_fit_minmax_shape():
     assert not _stacks_at_or_below(old_broken, "oh-grid-2")
 
 
+def _date_input_tags(html: str) -> list[str]:
+    """Return every `<input type="date" ...>` opening tag found in `html`,
+    verbatim, including its full `style="..."` attribute."""
+    return re.findall(r"<input[^>]*type=\"date\"[^>]*>", html)
+
+
+def _style_of(tag: str) -> str:
+    m = re.search(r'style="([^"]*)"', tag)
+    return m.group(1) if m else ""
+
+
+def _input_cannot_exceed_container(style: str) -> bool:
+    """The real invariant from Round 4: a native `<input type="date">`'s own
+    intrinsic content width (WebKit's picker-segment UI) can exceed a plain
+    `width:100%` declaration, since `width` doesn't clamp against intrinsic
+    content the way `max-width` does (CSS2.1 10.3.3 — when the computed
+    width would exceed max-width, max-width wins, unconditionally). A
+    declared `min-width:0` on the input itself (not just a wrapping grid
+    item) is what removes the UA-default `min-width:auto` floor.
+    `box-sizing:border-box` isn't itself the containment mechanism, but its
+    absence would mean padding adds to the box beyond `max-width`, so it's
+    required too for the containment to actually hold in practice."""
+    has_max_width_100 = bool(re.search(r"max-width\s*:\s*100%", style))
+    has_min_width_0 = bool(re.search(r"min-width\s*:\s*0\b", style))
+    has_border_box = bool(re.search(r"box-sizing\s*:\s*border-box", style))
+    return has_max_width_100 and has_min_width_0 and has_border_box
+
+
+def test_checker_catches_a_date_input_with_only_width_100_percent():
+    """Prove the containment checker fails on exactly the Round 3 shape —
+    `width:100%` plus `box-sizing:border-box` but no `max-width`/
+    `min-width:0` on the input — since that shape is what still overflowed
+    on a real iPhone even after stacking removed the two-column collision."""
+    bad = '<input type="date" name="date" style="width:100%;padding:9px;box-sizing:border-box;">'
+    style = _style_of(_date_input_tags(bad)[0])
+    assert not _input_cannot_exceed_container(style)
+
+
+def test_checker_passes_a_real_containment_shape():
+    good = (
+        '<input type="date" name="date" style="width:100%;max-width:100%;'
+        'min-width:0;padding:9px;box-sizing:border-box;">'
+    )
+    style = _style_of(_date_input_tags(good)[0])
+    assert _input_cannot_exceed_container(style)
+
+
 @pytest.fixture
 def admin_client(monkeypatch):
     db = tempfile.mktemp(suffix=".db")
@@ -182,8 +248,16 @@ def test_add_a_charge_form_stacks_date_and_amount_below_640px(admin_client):
     # The two previous, now-abandoned fix shapes must be genuinely gone from
     # this page's rendered output, not just superseded in source.
     assert "auto-fit,minmax(140px,1fr)" not in html
+    # The Round 2 grid-item wrapper fix (a bare min-width:0 on a <div>, with
+    # nothing else in its style) is gone — the containment fix lives on the
+    # <input> itself now, alongside its other real style properties, not on
+    # an otherwise-empty wrapper div.
     assert 'style="min-width:0;"' not in html
     assert _stacks_at_or_below(html, "oh-grid-2")
+    # Round 4: stacking alone isn't the invariant — the input itself must
+    # not be able to exceed its container, in any engine.
+    for tag in _date_input_tags(html):
+        assert _input_cannot_exceed_container(_style_of(tag)), tag
 
 
 def test_overhead_details_inline_edit_form_stacks_vendor_date_and_amount_category(admin_client):
@@ -202,8 +276,35 @@ def test_overhead_details_inline_edit_form_stacks_vendor_date_and_amount_categor
     # confirm it appears (at least) twice, once per pairing.
     assert html.count('class="oh-grid-2"') >= 2
     assert "auto-fit,minmax(120px,1fr)" not in html
-    assert "min-width:0;padding:6px 10px" not in html
     assert _stacks_at_or_below(html, "oh-grid-2")
+    # Round 4: same containment invariant on this page's own Date input.
+    for tag in _date_input_tags(html):
+        assert _input_cannot_exceed_container(_style_of(tag)), tag
+
+
+def test_every_type_date_input_sitewide_has_containment():
+    """Round 4's own sweep instruction: check every `type="date"` input on
+    the site, not just the two overhead-spend forms, and report whether
+    each one can overflow its container. A full-render test isn't practical
+    for the Feature Taxonomy checklist's own `verified_as_of` input (it
+    only renders inside a curated-feature-category table on the tool edit
+    page, which needs a category-features fixture beyond this file's
+    scope), so this scans the live app.py source directly for every
+    `<input type="date" ...>` and asserts the same containment invariant
+    on its literal `style="..."` attribute — this is the app's real,
+    unrendered source of every `type="date"` input, so a match here is
+    exactly what a full page render would also produce for that input."""
+    import webapp.app as appmod
+    source = inspect.getsource(appmod)
+    tags = re.findall(r'<input type="date"[^>]*>', source)
+    # Sanity: this must find all three known sites (Add-a-charge Date,
+    # overhead-details inline-edit Date, Feature Taxonomy verified_as_of) —
+    # if this count ever drops, either a site was removed (update this
+    # test) or the regex stopped matching (a real regression in coverage).
+    assert len(tags) == 3, tags
+    for tag in tags:
+        style = _style_of(tag)
+        assert _input_cannot_exceed_container(style), tag
 
 
 def test_scroll_hint_has_a_real_gap_and_breathing_room(admin_client):
