@@ -18185,7 +18185,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </td>
   <td style="padding:8px 8px;text-align:center;"><input type="checkbox" name="feature_{f['id']}_ai_enabled" value="1" {ai_checked}></td>
   <td style="padding:8px 8px;"><input type="date" name="feature_{f['id']}_verified_as_of" value="{_esc(verified)}"
-    style="width:130px;max-width:100%;min-width:0;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;box-sizing:border-box;"></td>
+    style="width:130px;max-width:100%;min-width:0;-webkit-appearance:none;appearance:none;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;box-sizing:border-box;"></td>
   <td style="padding:8px 8px;min-width:120px;"><input type="text" name="feature_{f['id']}_note" value="{_esc(note)}" maxlength="500" placeholder="Note"
     style="width:100%;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;"></td>
   <td style="padding:8px 8px;min-width:120px;"><input type="url" name="feature_{f['id']}_source_url" value="{_esc(source_url)}" maxlength="500" placeholder="Source URL"
@@ -27690,13 +27690,30 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
            `.oh-grid-2` now uses `minmax(0,1fr)` instead of a bare `1fr` —
            this fixes the TRACK itself, once, so it can't be re-broken by a
            future field that wraps its input in a div without knowing
-           this history (2026-09, Round 5). See CLAUDE.md's
-           overhead-spend-fixes entry for the full history. -->
+           this history (2026-09, Round 5) — a real fix, kept, but not the
+           one causing the overlap: a follow-up screenshot showed Amount
+           (same collapsed track as Date) rendering at the CORRECT width,
+           lined up with Vendor/Category/Note — proof the track itself was
+           never oversized. Only Date overflowed, by ~110px, which could
+           only mean the `<input>` itself was exceeding its own box despite
+           `max-width:100%` — confirming the Round 3 hypothesis (WebKit
+           ignores `max-width` on a native type=date input's own
+           intrinsic picker-chrome width) that was set aside at the time in
+           favor of stacking. Fixed with `-webkit-appearance:none;
+           appearance:none` alongside the existing `width:100%;
+           max-width:100%;min-width:0` — this strips the native picker
+           chrome (and the intrinsic width it demands) entirely, rather
+           than trying to constrain a box the browser won't constrain.
+           iOS still opens the native date picker on tap regardless —
+           that's platform tap behavior, not CSS-controlled — so this
+           only changes the field's own visual chrome, not the picker.
+           (2026-09, Round 6). See CLAUDE.md's overhead-spend-fixes entry
+           for the full history. -->
       <div class="oh-grid-2">
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
-            style="width:100%;max-width:100%;min-width:0;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+            style="width:100%;max-width:100%;min-width:0;-webkit-appearance:none;appearance:none;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
         </div>
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
@@ -27846,7 +27863,7 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
         <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
           style="width:100%;max-width:100%;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;box-sizing:border-box;">
         <input type="date" name="date" value="{_esc(e['date'])}" required
-          style="width:100%;max-width:100%;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;box-sizing:border-box;">
+          style="width:100%;max-width:100%;min-width:0;-webkit-appearance:none;appearance:none;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;box-sizing:border-box;">
       </div>
       <div class="oh-grid-2">
         <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
