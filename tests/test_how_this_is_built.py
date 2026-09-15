@@ -10,6 +10,24 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 
+def _seed_ai_surfaces(appmod):
+    """Seed the 4 `ai_surfaces` rows a real scripts/migrate_ai_surfaces.py
+    --apply run would produce — a fresh test DB otherwise has zero cards,
+    since seeding is a manual, run-by-hand migration now, not automatic
+    schema setup (same precedent as _seed_flagship_original_content in
+    tests/test_thought_leadership_homepage_teaser.py)."""
+    from scripts.migrate_ai_surfaces import planned_rows
+    lib = appmod._lib()
+    try:
+        for r in planned_rows():
+            lib.add_ai_surface(
+                r["slug"], r["title"], r["teaser"], r["body_md"], r["external_href"],
+                r["status"], r["display_order"],
+            )
+    finally:
+        lib.close()
+
+
 @pytest.fixture
 def env(monkeypatch):
     db = tempfile.mktemp(suffix=".db")
@@ -17,6 +35,7 @@ def env(monkeypatch):
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
+    _seed_ai_surfaces(appmod)
     yield appmod
     if os.path.exists(db):
         os.remove(db)
@@ -77,27 +96,17 @@ def test_hub_nav_orphans_clean(env):
 
 
 # --- entry point 1: the About-page phrase link ------------------------------
+#
+# _link_phrase/_about_copy_html/_ABOUT_AI_NATIVE_PHRASE are retired as of
+# explainers-collection Phase 2 — About's body now renders through the same
+# trusted _render_original_content_markdown How this is built already used,
+# with the phrase's link baked directly into _ABOUT_COPY_DEFAULT as a plain
+# raw <a> tag (see that constant). No special-casing left to test on its
+# own; test_about_page_links_the_phrase_live below covers the live result.
 
-def test_link_phrase_wraps_the_match_and_escapes_the_rest(env):
-    out = env._link_phrase("a & b AI-native thing c", "AI-native", "/x")
-    assert out == 'a &amp; b <a href="/x" style="color:var(--navy);">AI-native</a> thing c'
-
-
-def test_link_phrase_falls_back_to_plain_escaped_text_when_absent(env):
-    out = env._link_phrase("no match here & there", "AI-native", "/x")
-    assert out == "no match here &amp; there"
-    assert "<a " not in out
-
-
-def test_about_copy_html_links_the_ai_native_phrase_in_default_copy(env):
-    html = env._about_copy_html(env._ABOUT_COPY_DEFAULT)
+def test_render_original_content_markdown_passes_the_baked_in_link_through(env):
+    html = env._render_original_content_markdown(env._ABOUT_COPY_DEFAULT)
     assert '<a href="/how-this-is-built" style="color:var(--navy);">AI-native before AI-native was a thing</a>' in html
-
-
-def test_about_copy_html_falls_back_when_phrase_is_edited_out(env):
-    html = env._about_copy_html("Para one.\n\nPara two, no special phrase here.")
-    assert html == "<p>Para one.</p><p>Para two, no special phrase here.</p>"
-    assert "<a " not in html
 
 
 def test_about_page_links_the_phrase_live(env):
@@ -242,8 +251,7 @@ def test_the_typography_check_above_can_actually_fail(env):
 # convenience" mode and `_is_authed` is True for every request. That's what
 # makes the admin routes below reachable without a login step here.
 
-_SECTION_KEYS = ("htib_intro_copy", "htib_why_copy", "htib_how_copy",
-                 "htib_what_else_copy", "htib_footnote_copy")
+_SECTION_KEYS = ("htib_before_copy", "htib_after_copy")
 
 
 def test_every_section_has_a_settings_key_and_a_default(env):
@@ -258,14 +266,24 @@ def test_admin_copy_page_renders_a_textarea_per_section(env):
     for key in _SECTION_KEYS:
         assert f'id="copy-{key}"' in html, key
         assert f"saveHtib(&apos;{key}&apos;)" in html, key
+        assert f"previewCopy('copy-{key}','preview-{key}')" in html, key
 
 
 def test_each_section_description_says_raw_html_is_allowed(env):
-    """The asymmetry worth naming: these five take raw HTML (they're
-    nine-tenths links), while the About/Homepage bios on their own separate
-    /admin/copy pages are plain text."""
+    """As of Phase 2, raw HTML is allowed on About's own page too (see
+    test_admin_copy_about_page_renders_the_bio_box) — the asymmetry worth
+    naming now is with Homepage specifically, which stays plain text."""
     html = _client(env).get("/admin/copy/how-this-is-built").text
     assert "raw HTML" in html
+
+
+def test_split_marker_explained_in_both_section_descriptions(env):
+    """The marker shows up in the raw default textarea content too (once
+    for htib_before_copy, twice for htib_after_copy), so this checks the
+    explanatory description text specifically rather than a raw count."""
+    html = _client(env).get("/admin/copy/how-this-is-built").text
+    assert "leave that marker in place" in html
+    assert "Leave both in place" in html
 
 
 # --- /admin/copy split into three pages -------------------------------------
@@ -289,9 +307,12 @@ def test_admin_copy_homepage_page_renders_both_boxes(env):
 
 
 def test_admin_copy_about_page_renders_the_bio_box(env):
+    """As of explainers-collection Phase 2, About also accepts raw HTML for
+    links, same trusted renderer How this is built already used."""
     html = _client(env).get("/admin/copy/about").text
     assert 'id="about-copy"' in html
-    assert "raw HTML" not in html
+    assert "raw HTML" in html
+    assert "previewCopy('about-copy','about-preview')" in html
 
 
 def test_admin_copy_pages_require_auth(monkeypatch):
@@ -327,7 +348,7 @@ def test_homepage_and_about_pages_carry_the_recognized_width_tier(env):
 def test_saving_a_section_changes_the_public_page(env):
     c = _client(env)
     r = c.post("/admin/copy/how-this-is-built",
-               json={"key": "htib_intro_copy", "text": "A brand new opener."})
+               json={"key": "htib_before_copy", "text": "A brand new opener."})
     assert r.status_code == 200
     assert "A brand new opener." in c.get("/how-this-is-built").text
 
@@ -337,14 +358,30 @@ def test_an_unsaved_section_still_renders_its_default(env):
     assert "Feedly sent me a renewal notice" in body
 
 
-def test_saving_one_section_leaves_the_others_on_their_defaults(env):
+def test_saving_one_field_leaves_the_other_on_its_default(env):
     c = _client(env)
     c.post("/admin/copy/how-this-is-built",
-           json={"key": "htib_intro_copy", "text": "Changed."})
+           json={"key": "htib_before_copy", "text": "Changed."})
     body = _article_body(env)
     assert "Changed." in body
-    # The origin story is a different section and must be untouched.
-    assert "Feedly emailed me about my annual renewal" in body
+    # htib_after_copy is a different settings key and must be untouched.
+    assert "FP&amp;A Buddy is required to trace everything to a real citation" in body
+
+
+def test_a_sub_section_within_a_saved_field_can_be_edited_via_the_split_marker(env):
+    """The marker is what lets one saved field still carry two visually
+    distinct sub-sections (the intro's own styling, the "Why I built this"
+    heading+prose) — this is the real mechanism the split-marker consolidation
+    depends on, not just a nice-to-have."""
+    c = _client(env)
+    c.post("/admin/copy/how-this-is-built", json={
+        "key": "htib_before_copy",
+        "text": env._HTIB_INTRO_DEFAULT + env._HTIB_SPLIT_MARKER + "A whole new origin story.",
+    })
+    body = _article_body(env)
+    assert "Feedly sent me a renewal notice" in body  # intro sub-section untouched
+    assert "A whole new origin story." in body
+    assert "Why I built this" in body  # the heading is still template-level, not lost
 
 
 def test_an_unknown_section_key_is_rejected(env):
@@ -358,7 +395,7 @@ def test_a_blank_save_is_rejected(env):
     """Blank would silently fall back to the hardcoded default, which reads
     on the page as "my edit vanished" rather than as an error."""
     r = _client(env).post("/admin/copy/how-this-is-built",
-                          json={"key": "htib_intro_copy", "text": "   "})
+                          json={"key": "htib_before_copy", "text": "   "})
     assert r.status_code == 400
 
 
@@ -367,10 +404,41 @@ def test_saved_copy_can_carry_a_working_outbound_link(env):
     be able to credit someone with a real link."""
     c = _client(env)
     c.post("/admin/copy/how-this-is-built", json={
-        "key": "htib_footnote_copy",
-        "text": 'See <a href="https://example.com" target="_blank" rel="noopener">Example</a>.'})
+        "key": "htib_after_copy",
+        "text": ('X' + env._HTIB_SPLIT_MARKER + 'Y' + env._HTIB_SPLIT_MARKER
+                  + 'See <a href="https://example.com" target="_blank" rel="noopener">Example</a>.'),
+    })
     assert '<a href="https://example.com" target="_blank" rel="noopener">Example</a>' \
         in c.get("/how-this-is-built").text
+
+
+# --- Preview -----------------------------------------------------------------
+
+def test_preview_endpoint_renders_trusted_markdown(env):
+    r = _client(env).post("/admin/copy/preview", json={"text": "**bold** and a [link](https://example.com)."})
+    assert r.status_code == 200
+    assert "<strong>bold</strong>" in r.json()["html"]
+
+
+def test_preview_endpoint_requires_auth(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    try:
+        r = _client(appmod).post("/admin/copy/preview", json={"text": "x"})
+        assert r.status_code == 401
+    finally:
+        if os.path.exists(db):
+            os.remove(db)
+
+
+def test_preview_endpoint_does_not_save_anything(env):
+    c = _client(env)
+    c.post("/admin/copy/preview", json={"text": "Should never persist."})
+    assert "Should never persist." not in c.get("/how-this-is-built").text
 
 
 def test_the_surface_cards_are_not_admin_editable(env):
