@@ -4386,6 +4386,21 @@ def _validate_ai_surface_slug(slug: str, lib, exclude_id: int | None = None) -> 
     return ""
 
 
+def _ai_surface_body_placeholder(values: dict) -> str:
+    """Body's placeholder text, rendered explicit rather than generic once
+    External link is set and Body is empty — a blank textarea with only
+    generic grey placeholder text ("leave blank if...") reads as missing
+    content, not deliberately-empty content, especially on a row (like FP&A
+    Buddy's) where that's simply the correct end state. Server-rendered from
+    the row's own saved values, not live-updated as External link is typed
+    on the Add form — the reported symptom was an already-saved row's
+    page-load state, which this covers; a live JS update was considered and
+    dropped as unnecessary complexity for that."""
+    if (values.get("external_href") or "").strip() and not values.get("body_md"):
+        return "Not needed: this explainer lives at the External link above."
+    return "Leave blank if External link is set, or if this card should read as \"coming soon.\""
+
+
 def _ai_surface_form_fields(values: dict) -> str:
     status_opts = "".join(
         f'<option value="{s}"{" selected" if values.get("status") == s else ""}>{label}</option>'
@@ -4426,10 +4441,11 @@ def _ai_surface_form_fields(values: dict) -> str:
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Body (Markdown)</label>
     <textarea name="body_md" rows="14"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;font-family:ui-monospace,monospace;background:#fff;resize:vertical;"
-      placeholder="Leave blank if External link is set, or if this card should read as 'coming soon.'">{_esc(values.get('body_md', ''))}</textarea>
+      placeholder="{_esc(_ai_surface_body_placeholder(values))}">{_esc(values.get('body_md', ''))}</textarea>
     <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
-      Raw HTML is passed through as-is&mdash;this field is admin-only, never public input.
-      Every outbound link needs target="_blank" rel="noopener" written into the tag.
+      Markdown, plus raw HTML for anything markdown can't express (a table needing custom
+      formatting, an embed)&mdash;this field is admin-only, never public input. Every outbound
+      link needs target="_blank" rel="noopener" written into the tag.
     </p>
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;">
@@ -4461,16 +4477,31 @@ def _ai_surface_form_page(heading: str, action: str, values: dict, error: str, s
         if values.get("body_md"):
             preview_html = (f'<a href="/how-this-is-built/{_esc(values.get("slug", ""))}" target="_blank" '
                              f'rel="noopener" class="btn btn-ghost" style="margin-left:10px;">Preview &rarr;</a>')
+            preview_note = ""
         else:
             preview_html = ('<span class="btn btn-ghost" style="margin-left:10px;color:var(--muted);'
                              'border-color:var(--line);cursor:not-allowed;" '
                              'title="Add body content first—there\'s no page to preview until this has one.">'
                              'Preview &rarr;</span>')
+            # The title attribute above is a real explanation, but it's a
+            # hover-only tooltip — never visible on a touch device, and easy
+            # to miss on desktop too (this is exactly how a disabled Preview
+            # was first misread as broken). Say the same thing as plain,
+            # always-visible text instead of relying on it.
+            preview_note = ('<p style="margin:8px 0 0;font-size:13px;color:var(--muted);">'
+                             'Preview is off because there&rsquo;s no Body content yet&mdash;'
+                             'add some above to enable it.</p>')
     else:
         preview_html = ""
+        preview_note = ""
     return f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/ai-surfaces" style="font-size:13px;color:var(--muted);">&larr; AI surfaces</a></p>
 <h1>{_esc(heading)}</h1>
+<p style="color:var(--muted);margin:4px 0 22px;max-width:900px;font-size:14px;line-height:1.5;">
+  Fill in <strong>Body</strong> and the explainer lives at its own
+  <code>/how-this-is-built/&lt;slug&gt;</code> page. Fill in <strong>External link</strong>
+  instead and the card points straight there, with Slug and Body both ignored.
+</p>
 {error_html}
 <form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_ai_surface_form_fields(values)}
@@ -4478,6 +4509,7 @@ def _ai_surface_form_page(heading: str, action: str, values: dict, error: str, s
     <button type="submit" class="btn">{_esc(submit_label)}</button>
     <a href="/admin/ai-surfaces" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
     {preview_html}
+    {preview_note}
   </div>
 </form>
 </div>"""
@@ -4525,17 +4557,29 @@ def admin_ai_surfaces(request: Request, status: str = ""):
             '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;'
             'background:var(--accent-light);color:var(--muted);">Draft</span>'
         )
-        if it["external_href"]:
-            page_link = (f' &middot; <a href="{_esc(it["external_href"])}" target="_blank" rel="noopener" '
-                         f'style="font-size:12px;">External &rarr;</a>')
+        # The effective destination a visitor's click actually lands on — the
+        # one thing that matters, and the one thing the old plain "Slug"
+        # column couldn't show: a populated slug reads as a real destination
+        # even on a row where External link overrides it entirely (the
+        # FP&A Buddy case), or where Draft status means nothing is linked at
+        # all regardless of what's filled in. Mirrors the "Draft card always
+        # unlinked / External wins / otherwise Body's own page / otherwise
+        # coming soon" rule stated once in the explanatory paragraph below
+        # the table — this column is that same rule, per row.
+        if it["status"] != "live":
+            destination = '<span style="color:var(--muted);">Draft&mdash;unlinked</span>'
+        elif it["external_href"]:
+            destination = (f'<a href="{_esc(it["external_href"])}" target="_blank" rel="noopener" '
+                            f'style="font-size:13px;">{_esc(it["external_href"])}</a>')
         elif it["body_md"]:
-            page_link = (f' &middot; <a href="/how-this-is-built/{_esc(it["slug"])}" target="_blank" rel="noopener" '
-                         f'style="font-size:12px;">View &rarr;</a>')
+            dest_url = f'/how-this-is-built/{it["slug"]}'
+            destination = (f'<a href="{_esc(dest_url)}" target="_blank" rel="noopener" '
+                            f'style="font-size:13px;">{_esc(dest_url)}</a>')
         else:
-            page_link = ""
+            destination = '<span style="color:var(--muted);">&mdash; (coming soon)</span>'
         return f"""<tr style="border-top:1px solid var(--line);">
-  <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}{page_link}</td>
-  <td style="padding:10px 12px;font-size:13px;color:var(--muted);font-family:ui-monospace,monospace;">{_esc(it['slug'])}</td>
+  <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}</td>
+  <td style="padding:10px 12px;font-family:ui-monospace,monospace;">{destination}</td>
   <td style="padding:10px 12px;">{status_badge}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{it['display_order']}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(_relative_age(it['updated_at'])) or '—'}</td>
@@ -4571,7 +4615,7 @@ def admin_ai_surfaces(request: Request, status: str = ""):
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Slug</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Destination</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_STATUS}px;">Status</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_COUNT}px;">Display order</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Updated</th>
@@ -4584,7 +4628,8 @@ def admin_ai_surfaces(request: Request, status: str = ""):
   These are the cards on /how-this-is-built. A Draft card always renders unlinked
   ("Explainer coming soon."). A Live card links to its External link if set, otherwise to
   its own /how-this-is-built/&lt;slug&gt; page if Body is filled in—otherwise it still reads
-  as coming soon.
+  as coming soon. Destination above always shows the real, effective link—or why there isn't
+  one yet.
 </p>
 </div>"""
     return HTMLResponse(_page("AI surfaces—Admin", "", body, authed=True))
