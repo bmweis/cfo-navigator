@@ -27,8 +27,8 @@ a genuine organizational policy block, not transient) — it's picked to be
 comfortably above anything a native date input is ever likely to demand,
 and matches this codebase's own `.page-form` width tier.
 
-Round 4 (this file) found that stacking alone wasn't the whole fix: it
-revealed the REAL bug rather than solving it. A real iPhone screenshot
+Round 4 (2026-09, PR 555) found that stacking alone wasn't the whole fix:
+it revealed the REAL bug rather than solving it. A real iPhone screenshot
 showed the Date `<input>` itself wider than its own container — its right
 edge extending past the card border, past every other field — even though
 it now had a whole row to itself. The two-column collision in Round 2/3
@@ -36,14 +36,49 @@ was always the SYMPTOM, not the cause: WebKit's native `<input
 type="date">` has an intrinsic content width driven by its internal
 picker-segment UI that a plain `width:100%` doesn't override (100% of a
 narrow container is still narrower than the control's intrinsic demand).
-The actual fix is `max-width:100%` (a hard clamp that always wins over
+The fix shipped was `max-width:100%` (a hard clamp that always wins over
 intrinsic content, per CSS2.1 10.3.3, regardless of what `width` computes
 to) plus `min-width:0` directly on the `<input>` itself, not just its
 wrapping grid-item `<div>` (the target of the Round 2 fix, which is why it
-never touched this). Stacking is kept — even with the input's own box
-constrained, one field per row is still the right mobile layout, and it
-removes the two-column collision permanently regardless of any single
-field's own sizing behavior.
+never touched this).
+
+Round 5 (this file) found Round 4's fix ALSO didn't survive a real device —
+Brian's post-deploy screenshot matched the pre-fix state exactly. Verified
+by measurement, not reasoning, per his explicit instruction: a controlled,
+engine-independent reproduction (any element with a genuinely large
+intrinsic minimum, standing in for WebKit's date-input width, since this
+sandbox has no WebKit to measure directly) proved the actual grid TRACK —
+not the input — was the thing overflowing. Date/Amount are each wrapped in
+their own `<div>` (to hold a `<label>` above the field), and THAT `<div>`,
+not the `<input>` one layer inside it, is the real CSS Grid item. A grid
+item's own automatic minimum size is based on its own min-content,
+computed recursively from ITS OWN descendants — and `min-width:0` set on a
+NESTED descendant (the input) does not override the ANCESTOR grid item's
+own automatic-minimum-size computation. `.oh-grid-2`'s bare `1fr` track
+therefore had an implicit minimum of `auto` (the wrapper div's own
+min-content, which is however wide its native-input descendant demands),
+so the track itself expanded past the card — and `max-width:100%` on the
+input then correctly clamped the input to 100% of an already-oversized
+track, exactly matching what shipped and exactly why it changed nothing on
+a real device. Confirmed on the real fixed production markup too: an
+artificial oversized probe injected into the real wrapper div still held
+the track at the card's own width once the fix below was applied.
+
+The fix: `grid-template-columns:minmax(0,1fr)` instead of a bare `1fr`, on
+both the 2-column base rule and the 1-column stacked-breakpoint override,
+on both `.oh-grid-2` definitions (Add-a-charge and the overhead-details
+inline edit form). `minmax(0,1fr)` sets the TRACK's own minimum to `0`
+directly, so it can never expand past the available space regardless of
+what any current or future child inside it declares — chosen over adding
+`min-width:0` to `.oh-grid-2`'s direct children specifically because a
+per-child fix is one careless future addition (a new field wrapped in yet
+another div, with nobody remembering this history) away from re-breaking;
+a track-level fix protects every child, forever, with one declaration.
+Round 4's input-level `max-width:100%`/`min-width:0`/`box-sizing:border-box`
+fix is kept — it's still correct as a second, defense-in-depth layer (an
+input that COULD still exceed its track for some other reason should
+still be clamped), but it is not, on its own, sufficient: the track-level
+containment checked below is the layer that actually stops the bug.
 
 Per this repo's own testing convention (see tests/test_screenshot_capture.py
 and tests/test_app_screenshot.py, both of which MOCK Playwright rather than
@@ -70,36 +105,58 @@ def _extract_rule_block(css: str, selector_pattern: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _split_top_level(value: str) -> list[str]:
+    """Split a grid-template-columns value on whitespace, but only at
+    paren-depth 0 — so `minmax(0,1fr) minmax(0,1fr)` splits into its real
+    two tracks instead of being swallowed whole by a naive
+    `"minmax(" in value` check. Each returned string is one track's own
+    declaration, verbatim (e.g. `minmax(0,1fr)`, `1fr`, `200px`)."""
+    tracks: list[str] = []
+    depth = 0
+    current = ""
+    for ch in value:
+        if ch == "(":
+            depth += 1
+            current += ch
+        elif ch == ")":
+            depth -= 1
+            current += ch
+        elif ch.isspace() and depth == 0:
+            if current:
+                tracks.append(current)
+                current = ""
+        else:
+            current += ch
+    if current:
+        tracks.append(current)
+    return tracks
+
+
 def _grid_track_count(rule_body: str) -> int | None:
     """Parse a grid-template-columns declaration's track count from a rule
-    body, or None if the property isn't present. Doesn't need to handle
-    repeat()/minmax() — this file only ever compares a fixed 1fr/1fr shape
-    against a fixed single-track shape."""
+    body, or None if the property isn't present. A per-track `minmax(...)`
+    (e.g. `minmax(0,1fr) minmax(0,1fr)`) counts correctly as N tracks — only
+    a `repeat()` function (a dynamic, unparseable-without-a-real-CSS-engine
+    track count) falls back to a defensive "more than one"."""
     m = re.search(r"grid-template-columns\s*:\s*([^;]+);", rule_body)
     if not m:
         return None
     value = m.group(1).strip()
-    if "repeat(" in value or "minmax(" in value:
+    if "repeat(" in value:
         # A dynamic track function — not the fixed 1-or-2-track shape this
         # file checks for. Treat as "more than one" defensively, since the
         # whole point here is confirming there's exactly one track at the
         # stacking breakpoint.
         return 2
-    return len(value.split())
+    return len(_split_top_level(value))
 
 
-def _stacks_at_or_below(html: str, class_name: str, max_breakpoint: int = 640) -> bool:
-    """True iff `html` contains a base `.{class_name}` rule with more than
-    one grid track, AND an `@media(max-width:Npx)` block (N <= max_breakpoint)
-    whose own `.{class_name}` rule collapses to exactly one track."""
-    selector = re.escape(f".{class_name}")
-    base_body = _extract_rule_block(html, selector)
-    if base_body is None:
-        return False
-    base_tracks = _grid_track_count(base_body)
-    if base_tracks is None or base_tracks < 2:
-        return False
-
+def _override_body_at_or_below(html: str, selector: str, max_breakpoint: int) -> str | None:
+    """Return the `.{selector}` rule body from the first
+    `@media(max-width:Npx)` block found with N <= max_breakpoint, or None
+    if no such block overrides that selector. Shared by both the stacking
+    check and the track-containment check below — they differ only in what
+    they then assert about the returned rule body."""
     for media_m in re.finditer(r"@media\s*\(\s*max-width\s*:\s*(\d+)px\s*\)\s*\{", html):
         breakpoint_px = int(media_m.group(1))
         if breakpoint_px > max_breakpoint:
@@ -118,12 +175,68 @@ def _stacks_at_or_below(html: str, class_name: str, max_breakpoint: int = 640) -
             i += 1
         media_block = html[start:i - 1]
         override_body = _extract_rule_block(media_block, selector)
-        if override_body is None:
-            continue
-        override_tracks = _grid_track_count(override_body)
-        if override_tracks == 1:
-            return True
-    return False
+        if override_body is not None:
+            return override_body
+    return None
+
+
+def _stacks_at_or_below(html: str, class_name: str, max_breakpoint: int = 640) -> bool:
+    """True iff `html` contains a base `.{class_name}` rule with more than
+    one grid track, AND an `@media(max-width:Npx)` block (N <= max_breakpoint)
+    whose own `.{class_name}` rule collapses to exactly one track."""
+    selector = re.escape(f".{class_name}")
+    base_body = _extract_rule_block(html, selector)
+    if base_body is None:
+        return False
+    base_tracks = _grid_track_count(base_body)
+    if base_tracks is None or base_tracks < 2:
+        return False
+
+    override_body = _override_body_at_or_below(html, selector, max_breakpoint)
+    if override_body is None:
+        return False
+    return _grid_track_count(override_body) == 1
+
+
+def _tracks_have_zero_minimum(rule_body: str) -> bool | None:
+    """Round 5's real invariant: every track in grid-template-columns must
+    declare an explicit zero minimum (`minmax(0,...)`), which is what
+    actually stops a grid ITEM's own automatic minimum size (its
+    min-content, computed from ITS OWN descendants) from expanding the
+    track past its container. A bare `1fr`/`auto` track has an implicit
+    minimum of `auto` — so a wrapper `<div>` holding a native control with
+    a large intrinsic minimum (WebKit's `<input type="date">`, confirmed by
+    measurement) blows the track out regardless of any `min-width:0` set on
+    the control itself, one layer too deep to matter. Returns None if the
+    property isn't present."""
+    m = re.search(r"grid-template-columns\s*:\s*([^;]+);", rule_body)
+    if not m:
+        return None
+    tracks = _split_top_level(m.group(1).strip())
+    if not tracks:
+        return None
+    return all(re.match(r"minmax\(\s*0\s*,", t) for t in tracks)
+
+
+def _grid_track_cannot_exceed_container(html: str, class_name: str, max_breakpoint: int = 640) -> bool:
+    """True iff BOTH the base (multi-column) `.{class_name}` rule AND its
+    stacking-override rule at or below max_breakpoint declare every track
+    with an explicit zero minimum. This is the layer above where the
+    Round 4 input-level containment check (`_input_cannot_exceed_container`)
+    could ever see the bug — that check can pass while the track itself
+    still blows out from a wrapper div's own unset min-width, which is
+    exactly what happened on a real device after Round 4 shipped."""
+    selector = re.escape(f".{class_name}")
+    base_body = _extract_rule_block(html, selector)
+    if base_body is None:
+        return False
+    if not _tracks_have_zero_minimum(base_body):
+        return False
+
+    override_body = _override_body_at_or_below(html, selector, max_breakpoint)
+    if override_body is None:
+        return False
+    return bool(_tracks_have_zero_minimum(override_body))
 
 
 def test_checker_catches_missing_stacking_override():
@@ -169,6 +282,56 @@ def test_checker_still_fails_the_old_auto_fit_minmax_shape():
         "grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;}</style>"
     )
     assert not _stacks_at_or_below(old_broken, "oh-grid-2")
+
+
+def test_checker_catches_the_round_4_shape_bare_1fr_track_can_still_blow_out():
+    """Prove the track-containment checker FAILS against the exact shape
+    that shipped in Round 4 (PR 555) and stacked, and STILL overflowed on a
+    real iPhone — a bare `1fr`/`1fr 1fr` track, correctly stacking to one
+    column, but with no zero-minimum declared on either track. This is the
+    shape `_stacks_at_or_below` alone was satisfied by, which is exactly
+    why stacking wasn't the whole fix."""
+    round4_shape = (
+        "<style>.oh-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}"
+        "@media(max-width:640px){.oh-grid-2{grid-template-columns:1fr;}}</style>"
+    )
+    # It genuinely does stack correctly — that was never the bug.
+    assert _stacks_at_or_below(round4_shape, "oh-grid-2")
+    # But the track itself has no floor, so it can still blow out.
+    assert not _grid_track_cannot_exceed_container(round4_shape, "oh-grid-2")
+
+
+def test_checker_passes_the_real_round_5_shape_minmax_zero_tracks():
+    """The actual fix this PR ships: `minmax(0,1fr)` on both the base
+    2-column rule and the 1-column stacked override, so the track itself
+    can never expand past its container regardless of what any child
+    (a wrapper div with an unset min-width, holding a native input with a
+    large intrinsic minimum) declares."""
+    round5_shape = (
+        "<style>.oh-grid-2{display:grid;"
+        "grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;}"
+        "@media(max-width:640px){.oh-grid-2{grid-template-columns:minmax(0,1fr);}}</style>"
+    )
+    assert _stacks_at_or_below(round5_shape, "oh-grid-2")
+    assert _grid_track_cannot_exceed_container(round5_shape, "oh-grid-2")
+
+
+def test_checker_catches_a_zero_minimum_missing_from_only_one_side():
+    """A fix that only protects the base rule, or only the stacked
+    override, still leaves the other breakpoint exposed — the checker must
+    require containment at BOTH."""
+    only_base_fixed = (
+        "<style>.oh-grid-2{display:grid;"
+        "grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;}"
+        "@media(max-width:640px){.oh-grid-2{grid-template-columns:1fr;}}</style>"
+    )
+    assert not _grid_track_cannot_exceed_container(only_base_fixed, "oh-grid-2")
+
+    only_override_fixed = (
+        "<style>.oh-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}"
+        "@media(max-width:640px){.oh-grid-2{grid-template-columns:minmax(0,1fr);}}</style>"
+    )
+    assert not _grid_track_cannot_exceed_container(only_override_fixed, "oh-grid-2")
 
 
 def _date_input_tags(html: str) -> list[str]:
@@ -255,9 +418,20 @@ def test_add_a_charge_form_stacks_date_and_amount_below_640px(admin_client):
     assert 'style="min-width:0;"' not in html
     assert _stacks_at_or_below(html, "oh-grid-2")
     # Round 4: stacking alone isn't the invariant — the input itself must
-    # not be able to exceed its container, in any engine.
+    # not be able to exceed its container, in any engine. Kept as a
+    # defense-in-depth check, but no longer sufficient on its own (see
+    # Round 5 below).
     for tag in _date_input_tags(html):
         assert _input_cannot_exceed_container(_style_of(tag)), tag
+    # Round 5: the real fix — the grid TRACK itself, not just the input,
+    # must be unable to exceed its container. Prove the now-abandoned
+    # Round 4 shape (a bare 1fr track) is genuinely gone from this page's
+    # own .oh-grid-2 rule specifically (a raw substring check would false-
+    # positive against unrelated CSS elsewhere on the page, e.g.
+    # .tool-form-cols's own `grid-template-columns:1fr;`), and the real
+    # minmax(0,1fr) fix is genuinely present.
+    assert "minmax(0,1fr)" in html
+    assert _grid_track_cannot_exceed_container(html, "oh-grid-2")
 
 
 def test_overhead_details_inline_edit_form_stacks_vendor_date_and_amount_category(admin_client):
@@ -280,6 +454,9 @@ def test_overhead_details_inline_edit_form_stacks_vendor_date_and_amount_categor
     # Round 4: same containment invariant on this page's own Date input.
     for tag in _date_input_tags(html):
         assert _input_cannot_exceed_container(_style_of(tag)), tag
+    # Round 5: same track-level fix on this page's own .oh-grid-2 rules.
+    assert "minmax(0,1fr)" in html
+    assert _grid_track_cannot_exceed_container(html, "oh-grid-2")
 
 
 def test_every_type_date_input_sitewide_has_containment():
