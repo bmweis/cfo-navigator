@@ -4150,9 +4150,14 @@ _HTIB_AFTER_DEFAULT = (
 # field on its own separate /admin/copy/about page — which, as of
 # explainers-collection Phase 2, ALSO renders through this same trusted
 # function (About's own body is plain prose plus one hardcoded link, so it
-# needed no split marker) — so each section's own description still says so
-# rather than leaving an admin to discover it by pasting a link into the
-# wrong field.
+# needed no split marker). The raw-HTML/markdown rule itself is stated once,
+# in this page's own intro paragraph (admin_copy_how_this_is_built_page) —
+# it used to be repeated a third time in each section's own "desc" below,
+# which meant a reader hit the identical sentence three times before
+# reaching a textarea. Each section's "desc" now says only what's actually
+# section-specific: the split-marker mechanism, which the shared intro
+# paragraph has no reason to mention since About's own page has no marker
+# at all.
 _HTIB_COPY_SECTIONS = (
     {
         "key": "htib_before_copy",
@@ -4160,10 +4165,8 @@ _HTIB_COPY_SECTIONS = (
         "default": _HTIB_BEFORE_DEFAULT,
         "rows": 20,
         "desc": ("The intro line, then “Why I built this,” separated by a "
-                 "<!--split--> marker—leave that marker in place, it's what tells "
-                 "the page where the intro ends and the heading begins. Markdown, plus "
-                 "raw HTML for links (an outbound one needs target=\"_blank\" "
-                 "rel=\"noopener\" written into the tag)."),
+                 "<!--split--> marker. Leave that marker in place—it's what tells "
+                 "the page where the intro ends and the heading begins."),
     },
     {
         "key": "htib_after_copy",
@@ -4172,10 +4175,9 @@ _HTIB_COPY_SECTIONS = (
         "rows": 20,
         "desc": ("“How I decided what AI should do,” then “What else I've "
                  "built with AI,” then the footnote—separated by two "
-                 "<!--split--> markers, in that order. Leave both in place. Markdown "
-                 "plus raw HTML for links. The four surface cards above this section "
-                 "aren't editable here—they live in their own collection at "
-                 "/admin/ai-surfaces."),
+                 "<!--split--> markers, in that order. Leave both in place. The four "
+                 "surface cards above this section aren't editable here—they live in "
+                 "their own collection at /admin/ai-surfaces."),
     },
 )
 
@@ -4221,7 +4223,7 @@ def _ai_surface_card_html(row: dict) -> str:
     else:
         action = '<span style="color:var(--muted);font-size:13px;font-style:italic;">Explainer coming soon.</span>'
     return (
-        '<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px 22px;">'
+        '<div style="width:100%;box-sizing:border-box;background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px 22px;">'
         f'<h3 style="margin:0 0 6px;font-size:17px;">{_esc(row["title"])}</h3>'
         f'<p style="margin:0 0 12px;color:var(--ink-soft);font-size:15px;line-height:1.6;">{_esc(row["teaser"])}</p>'
         f'{action}</div>'
@@ -4273,7 +4275,26 @@ def how_this_is_built(request: Request):
     dropping it would visibly change the page. Every rule in it is
     `.oc-body`-scoped, and the section headings sit outside those divs, so
     they keep the shared `.article-atlantic .tool-prose` treatment exactly
-    as they did before this PR."""
+    as they did before this PR.
+
+    The four surface cards render as a single nested `<div>` INSIDE this
+    same `.tool-prose` wrapper, not as a sibling of it (fixed post-merge —
+    the explainers-collection PR had split the page into three separate
+    `.tool-prose` divs with the cards grid sitting between them as its own
+    unwrapped div, so it rendered at the full `.page-standard` width,
+    left-shifted from the 760px reading column above and below it — the
+    same shape PR #515 fixed for the back-arrow). One `.tool-prose` now
+    spans the whole page, so the cards grid inherits its 760px max-width
+    and centering for free; no separate centering rule needed on the grid
+    itself. `grid-template-columns:1fr` is explicit (not left to a bare
+    `display:grid`'s implicit single-column stretch) and each card's own
+    `<div>` carries `width:100%;box-sizing:border-box` directly, so every
+    card is pinned to the same width by two independent, redundant
+    mechanisms rather than relying on one implicit browser behavior. This
+    is a single-column stack, not a multi-card-per-row listing grid, so it
+    doesn't need one of BRAND.md §5's `_CARD_WIDTH_*_MIN` constants
+    (`auto-fill` vs. `auto-fit` is moot with exactly one column) — matching
+    `.tool-prose` is both necessary and sufficient here."""
     lib = _lib()
     try:
         copy = _htib_copy(lib)
@@ -4294,11 +4315,10 @@ def how_this_is_built(request: Request):
 <div class="oc-body">{_render_original_content_markdown(why_copy)}</div>
 
 <h2 id="where-ai-shows-up" style="margin-top:8px;">Where AI shows up</h2>
-</div>
-<div style="display:grid;gap:14px;margin:8px 0 34px;">
+<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:8px 0 34px;">
 {cards_html}
 </div>
-<div class="tool-prose">
+
 <h2>How I decided what AI should do</h2>
 <div class="oc-body">{_render_original_content_markdown(how_copy)}</div>
 
@@ -23025,6 +23045,21 @@ _FPA_BUDDY_TOOLS = [
     ("/admin/fpa-buddy/feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
 ]
 
+# Content-page admin, nested as its own sub-group inside "Brand, voice, and
+# content" — the four cards that edit a specific public page's own copy
+# (Homepage/About/How this is built) or the explainer collection that last
+# page renders (AI surfaces), split out from the three voice/design
+# standards cards (Verbal identity, Email templates, Brand standards) that
+# stay top-level. Same _group_html(..., nested=True) mechanism as
+# _SOFTWARE_TOOLS/_COMMUNITIES_TOOLS/_FPA_BUDDY_TOOLS above — see the
+# splice-in inside admin_page() and _hub_nav_all_hrefs()'s own line for it.
+_CONTENT_TOOLS = [
+    ("/admin/copy/homepage", "Homepage",            "Edit the hero headline/subhead and bio-box copy on the homepage—plain text, changes go live immediately."),
+    ("/admin/copy/about",    "About",               "Edit the bio on the About page—markdown plus raw HTML for links, with a Preview. Changes go live immediately."),
+    ("/admin/copy/how-this-is-built", "How this is built", "Edit the origin story and rules copy on /how-this-is-built, in two fields split at the surface cards—raw HTML for links, unlike Homepage, plus a Preview."),
+    ("/admin/ai-surfaces",   "AI surfaces",         "Add, edit, or delete the explainer cards on /how-this-is-built—markdown body, or an external link when the explainer lives elsewhere."),
+]
+
 # Admin sections — grouped on the hub; each links to its own page.
 # Grouping logic (Phase 6 restructure): the right column now mirrors the
 # public site's own nav order — Thought Leadership, then CFO Toolbox, then
@@ -23067,11 +23102,19 @@ _ADMIN_GROUPS = [
     # hub card alone, which public page a given field changed. /admin/copy
     # itself is not a page any more (see admin_copy_homepage_page's own
     # docstring) — these three cards are the real entry points now.
+    #
+    # Four of what used to be this group's seven direct cards — Homepage,
+    # About, How this is built, AI surfaces — are content PAGES: each one
+    # edits a specific public page's own copy or the explainer collection
+    # that page renders. The other three — Verbal identity, Email templates,
+    # Brand standards — are voice/design STANDARDS, not content, so they
+    # stay top-level. Nested into a "Content" sub-group (same
+    # `_group_html(..., nested=True)` mechanism CFO Toolbox already uses for
+    # Software/Community/FP&A Buddy/Reader — see _CONTENT_TOOLS and its own
+    # splice-in inside admin_page()) rather than left as four cards mixed in
+    # with three standards cards under one heading that no longer describes
+    # either half cleanly.
     ("Brand, voice, and content", "How the site looks and sounds.", [
-        ("/admin/copy/homepage", "Homepage",            "Edit the hero headline/subhead and bio-box copy on the homepage—plain text, changes go live immediately."),
-        ("/admin/copy/about",    "About",               "Edit the bio on the About page—markdown plus raw HTML for links, with a Preview. Changes go live immediately."),
-        ("/admin/copy/how-this-is-built", "How this is built", "Edit the origin story and rules copy on /how-this-is-built, in two fields split at the surface cards—raw HTML for links, unlike Homepage, plus a Preview."),
-        ("/admin/ai-surfaces",   "AI surfaces",         "Add, edit, or delete the explainer cards on /how-this-is-built—markdown body, or an external link when the explainer lives elsewhere."),
         ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
         ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email (warm intro, welcome, password reset, and submission confirmations)—changes go live immediately."),
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
@@ -24164,9 +24207,18 @@ def _hub_nav_all_hrefs() -> set[str]:
     today — the identical assembly admin_page() performs at render time
     (_LIBRARY_TOOLS, now rendered as the Reader group's own quadrant cards,
     + the Compare-summary-feedback card + _FPA_BUDDY_TOOLS + _SOFTWARE_TOOLS
-    + _COMMUNITIES_TOOLS + every _ADMIN_GROUPS item), kept as its own
-    function so admin_page() and this detector can never build two different
-    sets from the same source tuples.
+    + _COMMUNITIES_TOOLS + _CONTENT_TOOLS + every _ADMIN_GROUPS item), kept
+    as its own function so admin_page() and this detector can never build
+    two different sets from the same source tuples.
+
+    Every constant nested as its own sub-group at render time (Software,
+    Community, FP&A Buddy, Reader, and now Content) has to be added here by
+    hand, same as this docstring's own list — none of them are direct
+    _ADMIN_GROUPS items any more, so the generic `for _gname, _gdesc, items
+    in _ADMIN_GROUPS` sweep below can't see them on its own. Forgetting one
+    here is exactly the failure mode this detector exists to catch, so
+    check this list first whenever a hub_nav_orphans() run comes back
+    unexpectedly non-empty right after adding a new nested sub-group.
 
     `/admin/library` is deliberately absent as of PR 9 (2026-09): the
     standalone page it named is gone, so there is no longer a route for a
@@ -24178,6 +24230,7 @@ def _hub_nav_all_hrefs() -> set[str]:
     hrefs |= {href for href, _, _ in _COMMUNITIES_TOOLS}
     hrefs |= {href for href, _, _ in _FPA_BUDDY_TOOLS if href.startswith("/admin")}
     hrefs |= {href for href, _, _ in _SOFTWARE_TOOLS}
+    hrefs |= {href for href, _, _ in _CONTENT_TOOLS}
     for _gname, _gdesc, items in _ADMIN_GROUPS:
         hrefs |= {href for href, _, _ in items}
     return hrefs
@@ -25745,6 +25798,16 @@ def admin_page(request: Request):
         _COMMUNITIES_TOOLS, badge_hrefs=communities_hrefs, nested=True,
     )
 
+    # Content nests inside "Brand, voice, and content" the same way — the
+    # four public-page content editors (Homepage/About/How this is
+    # built/AI surfaces), split from the three voice/design standards
+    # cards that stay direct children of that group.
+    content_hrefs = [href for href, _, _ in _CONTENT_TOOLS]
+    content_subgroup_html = _group_html(
+        "Content", "The site's own copy—Homepage, About, and How this is built, plus its explainer cards.",
+        _CONTENT_TOOLS, badge_hrefs=content_hrefs, nested=True,
+    )
+
     # Two columns on wide viewports: left carries Inbox plus Thought
     # leadership and CFO Toolbox (2026-09 reorder — these two used to sit at
     # the top of the right column; Brand/voice/content and System shifted up
@@ -25765,6 +25828,10 @@ def admin_page(request: Request):
                                [software_subgroup_html, communities_subgroup_html] + list(items)
                                + [fpa_subgroup_html, reader_subgroup_html, compare_summary_feedback_card],
                                badge_hrefs=toolbox_hrefs)
+        elif gname == "Brand, voice, and content":
+            brand_hrefs = [href for href, _, _ in items] + content_hrefs
+            html = _group_html(gname, gdesc, [content_subgroup_html] + list(items),
+                               badge_hrefs=brand_hrefs)
         else:
             html = _group_html(gname, gdesc, items)
         if gname in _LEFT_GROUPS:
@@ -32396,11 +32463,12 @@ def admin_copy_homepage_page(request: Request):
         lib.close()
 
     prose = _ADMIN_COPY_PROSE_STYLE
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Homepage copy</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Edit the text on <a href="/">the homepage</a>&mdash;plain text, no links. Changes save straight to the live site.</p>
 
+<div style="max-width:900px;margin:0 auto;">
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Hero headline and subhead</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The large text at the very top of the homepage, next to your photo.</p>
@@ -32422,6 +32490,7 @@ def admin_copy_homepage_page(request: Request):
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="home-save-btn" onclick="saveHomepage()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
 <span id="home-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+</div>
 </div>
 
 <script>
@@ -32503,11 +32572,12 @@ def admin_copy_about_page(request: Request):
         lib.close()
 
     prose = _ADMIN_COPY_PROSE_STYLE
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>About page copy</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Edit the bio on <a href="/about">/about</a>&mdash;markdown, plus raw HTML for links (an outbound one needs <code>target="_blank" rel="noopener"</code> written into the tag). Changes save straight to the live site.</p>
 
+<div style="max-width:900px;margin:0 auto;">
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Bio</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Separate paragraphs with a blank line.</p>
@@ -32517,6 +32587,7 @@ def admin_copy_about_page(request: Request):
 <button type="button" onclick="previewCopy('about-copy','about-preview')" class="btn btn-ghost" style="font-size:14px;padding:9px 22px;">Preview</button>
 <span id="about-status" style="font-size:13px;color:var(--muted);"></span></div>
 <div id="about-preview" style="display:none;border:1px dashed var(--line);border-radius:10px;padding:16px;margin-top:14px;"></div>
+</div>
 </div>
 </div>
 
@@ -32574,12 +32645,14 @@ def admin_copy_how_this_is_built_page(request: Request):
         for sec in _HTIB_COPY_SECTIONS
     )
 
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>How this is built&mdash;copy</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Edit the prose on <a href="/how-this-is-built">/how-this-is-built</a>. These two fields accept raw HTML for links (an outbound one needs <code>target="_blank" rel="noopener"</code> written into the tag); internal links can stay plain markdown. Changes save straight to the live site.</p>
 
+<div style="max-width:900px;margin:0 auto;">
 {htib_cards}
+</div>
 </div>
 
 <script>

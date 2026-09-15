@@ -8598,6 +8598,94 @@ it supersedes the old "`/save` is token-gated" note.
   silently, and both pages are now raw-HTML-tolerant. See
   ARCHITECTURE.md's "How this is built" section for the full write-up.
 
+- **Explainers collection follow-up (2026-09) — the surface-cards grid fix,
+  the three `/admin/copy/*` pages' width tier, redundant helper text, and a
+  new Content sub-group on `/admin`.** Five small, independently-scoped
+  fixes shipped together.
+  1. **The four `/how-this-is-built` surface cards rendered outside
+     `.tool-prose`** — the same shape PR #515 fixed for the back-arrow. The
+     page had split into three separate `.tool-prose` divs with the cards
+     grid as an unwrapped sibling between them, so it rendered at the full
+     `.page-standard` width, left-shifted from the 760px reading column
+     above and below it. Fixed by merging the page back into ONE
+     `.tool-prose` wrapper spanning the whole page, with the cards grid as
+     a plain nested child — its width now comes from being a block-level
+     descendant of the 760px ancestor, the same mechanism every other
+     element on the page already relies on. `grid-template-columns:1fr` is
+     now explicit (not left to `display:grid`'s bare implicit-single-column
+     stretch) and each card's own `<div>` carries
+     `width:100%;box-sizing:border-box` directly — two independent,
+     redundant mechanisms pinning every card to the identical width, since
+     this is a single-column stack (never more than one card per row), it
+     doesn't need one of BRAND.md §5's `_CARD_WIDTH_*_MIN` constants
+     (`auto-fill` vs. `auto-fit` is moot with exactly one column) — matching
+     `.tool-prose` is both necessary and sufficient. Verified live via
+     Playwright at 1280px and 390px: cards grid now measures x/width
+     identical to `.tool-prose` at both widths, and every card measures
+     identical to its siblings.
+  2. **The three `/admin/copy/*` pages (Homepage, About, How this is
+     built) were on `.page-form` (640px)**, which centers the whole page
+     and narrows every field — inconsistent with every other admin edit
+     page built since (`_ai_surface_form_page`, `_oc_form_page`), both of
+     which use `.page-standard` (1300px) with the back-link/`<h1>` at the
+     page's own left edge and only the fields themselves capped, at 900px,
+     centered via their own `max-width:900px;margin:0 auto;` wrapper.
+     Aligned all three copy pages to that same shape — confirmed live:
+     back-link/h1 render at x=24 (matching `/admin/ai-surfaces/new`'s own
+     x=24 exactly) at both 1280px and 390px, and each page's field wrapper
+     measures x=190/width=900 at 1280px (x=24/width=342 at 390px, same as
+     the form on the reference pages at that width).
+  3. **`/admin/copy/how-this-is-built` explained the raw-HTML/
+     `target="_blank"` rule three times** before a reader reached a
+     textarea — the page intro, and again inside each of the two section
+     descriptions. Cut to one: the page intro is now the sole place that
+     states it (matching About's own single-intro-sentence pattern); each
+     section's own description is now split-marker guidance only, nothing
+     else — which, since there's nothing left to fold it into, already
+     reads as its own clear line rather than a clause inside an HTML-rules
+     paragraph.
+  4. **A new "Content" sub-group nests inside "Brand, voice, and content"**
+     — Homepage, About, How this is built, and AI surfaces, the same
+     `_group_html(..., nested=True)` mechanism CFO Toolbox already uses
+     for its own Software/Community/FP&A Buddy/Reader sub-groups. A new
+     `_CONTENT_TOOLS` constant (mirroring `_SOFTWARE_TOOLS`/
+     `_COMMUNITIES_TOOLS`) holds the four content-page tuples, spliced into
+     the group at render time in `admin_page()`; `_ADMIN_GROUPS`' own
+     static "Brand, voice, and content" entry now lists only the three
+     voice/design standards cards that stay direct children (Verbal
+     identity, Email templates, Brand standards) — those are standards,
+     not content pages, so they don't nest. **`_hub_nav_all_hrefs()` was
+     updated in the same PR**, per the standing warning its own docstring
+     already carries: every constant nested as its own sub-group at
+     render time has to be added there by hand, since the generic
+     per-`_ADMIN_GROUPS` sweep can no longer see items that moved out of
+     that static tuple — forgetting this step is exactly what made the
+     LiveFlow/Runway incident (see the "Admin menu default-state" bullet
+     above) possible in the first place. `hub_nav_orphans()` confirmed
+     clean both before and after, via `tests/test_admin_content_subgroup.py`.
+  5. **The "Preview isn't clickable" report was investigated and could not
+     be reproduced.** Live-tested via a real headless-browser session
+     (not just `TestClient`-rendered HTML, per the standing testing
+     standard) on all three pages that carry a Preview button (About, and
+     both How this is built sections): the button carries no `disabled`
+     attribute, `getComputedStyle` reports `opacity:1`/
+     `pointer-events:auto`/`cursor:pointer` at both 1280px and 390px, and
+     clicking it — on first click, against the untouched default textarea
+     content, with no prior `change` event — correctly toggles the preview
+     box open and populates it with real rendered HTML every time. It is
+     not gated behind a `change` event and not disabled by design; the
+     wiring (`onclick="previewCopy(...)"`, `_ADMIN_COPY_PREVIEW_JS`) is
+     correct as written. **WebKit could not be tested from this
+     sandbox** — `playwright install webkit` is a confirmed 403 policy
+     denial (same standing limitation this doc records elsewhere for
+     other fixes), so a WebKit-specific defect can't be ruled out from
+     here. Flagged as unresolved rather than silently closed: worth
+     re-checking directly in the browser/device the original report came
+     from — a stale cached JS bundle (hard refresh) or a WebKit-specific
+     quirk are both more likely than a code defect, given the button is
+     provably not disabled and provably wired to a function that exists
+     and runs correctly on click.
+
 
 ## Authentication & security
 

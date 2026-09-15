@@ -2221,6 +2221,83 @@ public input.
 precedent as `_TL_FEATURED_CARDS`/`webapp/thought_leadership_data.py`
 elsewhere in this file.
 
+**Follow-up (2026-09) — the surface-cards grid was rendering outside
+`.tool-prose`.** The page's own body was split into three separate
+`.tool-prose` divs (intro/"Why I built this" — "Where AI shows up" heading
+— then a second `.tool-prose` for the rest), with the cards grid sitting
+between them as its own unwrapped `<div style="display:grid;...">` —
+exactly the same shape PR #515 fixed for the back-arrow. That div had no
+`max-width`/centering of its own, so it rendered at the full
+`.page-standard` width (1300px), left-shifted from the 760px reading
+column above and below it, and relied on `display:grid`'s bare implicit
+single-column stretch for per-card width consistency — correct per spec in
+every engine, but redundant to state explicitly rather than lean on.
+Fixed by merging the whole page back into ONE `.tool-prose` wrapper (the
+cards grid is now a plain nested child, so its width comes from being an
+ordinary block-level descendant of the 760px ancestor — no separate
+centering rule needed), making `grid-template-columns:1fr` explicit
+instead of implicit, and adding `width:100%;box-sizing:border-box`
+directly to each card's own `<div>` in `_ai_surface_card_html` — two
+independent mechanisms pinning every card to the identical width. This is
+a single-column stack (never more than one card per row), so it doesn't
+need one of BRAND.md §5's `_CARD_WIDTH_*_MIN` constants — matching
+`.tool-prose` is both necessary and sufficient, since `auto-fill` vs.
+`auto-fit` is moot with exactly one column. Verified live via Playwright
+at 1280px and 390px: the cards grid's `x`/`width` now match `.tool-prose`
+exactly at both widths, and every card matches its siblings.
+
+### `/admin/copy/*` width tier, redundant helper text, and a Content sub-group (2026-09)
+
+Three more fixes shipped alongside the surface-cards fix above.
+
+**Width tier.** The three `/admin/copy/*` pages launched on `.page-form`
+(640px, which centers the whole page and narrows every field) — the wrong
+tier, inconsistent with every other admin edit page built since:
+`_ai_surface_form_page` and `_oc_form_page` both use `.page-standard`
+(1300px) with the back-link/`<h1>` at the page's own left edge and only
+the fields themselves capped, at 900px, centered via their own
+`max-width:900px;margin:0 auto;` wrapper. Aligned all three copy pages to
+that same shape (no native `<form>` element on these pages — the wrapper
+div carries the same 900px cap directly). Verified live: back-link/h1
+render at `x=24` at both 1280px and 390px, matching `/admin/ai-surfaces/new`'s
+own `x=24` exactly; each page's field wrapper measures `x=190,width=900`
+at 1280px.
+
+**Redundant helper text.** `/admin/copy/how-this-is-built` explained the
+raw-HTML/`target="_blank"` rule three times before a reader reached a
+textarea — the page intro, and again inside each of the two
+`_HTIB_COPY_SECTIONS` descriptions. Cut to one: the page intro is now the
+sole place that states it; each section's own `desc` is split-marker
+guidance only.
+
+**Content sub-group.** A new `_CONTENT_TOOLS` constant (mirroring
+`_SOFTWARE_TOOLS`/`_COMMUNITIES_TOOLS`) holds the four content-page tuples
+that used to sit as flat `_ADMIN_GROUPS` items under "Brand, voice, and
+content" — Homepage, About, How this is built, AI surfaces — nested as a
+"Content" sub-group at render time in `admin_page()`, the same
+`_group_html(..., nested=True)` mechanism CFO Toolbox already uses for its
+own Software/Community/FP&A Buddy/Reader sub-groups. `_ADMIN_GROUPS`' own
+static "Brand, voice, and content" entry now lists only the three
+voice/design standards cards that stay direct children (Verbal identity,
+Email templates, Brand standards). `_hub_nav_all_hrefs()` was updated in
+the same PR — its own docstring already warns that a constant nested as
+its own sub-group has to be added there by hand, since the generic
+per-`_ADMIN_GROUPS` sweep can't see items that moved out of that static
+tuple; `hub_nav_orphans()` confirmed clean before and after, covered by
+`tests/test_admin_content_subgroup.py`.
+
+**Investigated, not reproduced: "Preview isn't clickable."** Live-tested
+via a real headless-browser session on all three pages carrying a Preview
+button. The button carries no `disabled` attribute, `getComputedStyle`
+reports `opacity:1`/`pointer-events:auto`/`cursor:pointer` at both 1280px
+and 390px, and clicking it on first load (no prior `change` event, default
+untouched textarea content) correctly toggles the preview box and
+populates it with real rendered HTML every time — not gated behind a
+`change` event, not disabled by design, wiring confirmed correct.
+**WebKit could not be tested from this sandbox** (`playwright install
+webkit` is a confirmed 403 policy denial) — a WebKit-specific defect can't
+be ruled out. Flagged as unresolved rather than silently closed.
+
 ### Outbound links open in a new tab (PR 35, 2026-09)
 
 A standing site-wide rule: every anchor whose destination is not on
