@@ -8190,6 +8190,48 @@ it supersedes the old "`/save` is token-gated" note.
   ARCHITECTURE.md's matching bullets for the full technical write-up and
   `tests/test_how_this_is_built.py` for the coverage.
 
+- **Overhead spend fixes (2026-09) — column-width rebalancing on the
+  details table, the missing scroll hint, and an em-dash frequency fix;
+  one reported bug didn't reproduce.** `/admin/overhead-spend/details`'s
+  "All vendor charges" table had `_COL_WIDTH_NAME` (280px, calibrated for
+  a full software/community name) on its Vendor column, starving the
+  genuinely free-text Note column of room — a real note ("Claude Max
+  monthly subscription (personal account)") wrapped to 5 lines at a
+  scrolled mobile width, confirmed by direct measurement (row height
+  126px → 83px → 46px across 390/960/1280px). Fixed with a new
+  `_COL_WIDTH_VENDOR` (160px) constant plus `white-space:nowrap` on
+  Category (which was wrapping "AI Subscription" even though there was
+  room, since it was unwidthed and competing with Note) and Amount; Note
+  stays unwidthed per the standard's own free-text rule. The table's
+  `min-width` also moved from a hand-picked `720px` literal to
+  `_TABLE_FLOOR_WIDE` (800px, the correct 6-column bucket — Vendor, Date,
+  Category, Note, Amount, Actions). The Actions column also gained a
+  visible "Actions" header — every other column already had one. The
+  table joins Software/Communities in carrying `_ADMIN_SCROLL_HINT_HTML`/
+  `_ADMIN_SCROLL_HINT_JS` (overflow-gated, not a breakpoint), confirmed
+  live to show at 390px and stay hidden at 1920px. **The "Add a charge"
+  form's Date/Amount overlap did not reproduce** — that grid already used
+  `repeat(auto-fit,minmax(140px,1fr))` (fixed 2026-09-01, predating this
+  PR, for a different symptom — page-level mobile overflow), and direct
+  measurement at 320–1920px found no overlap in Chromium at any width.
+  Left as-is rather than guessing at a fix for a bug that can't be
+  reproduced in this environment; flagged for Brian to re-check against
+  the live site, since this sandbox's Chromium may not reproduce an
+  iOS-Safari-specific native-date-input rendering quirk. A sweep of every
+  other admin form using a fixed (non-auto-fit) two-column grid — the
+  overhead-details inline edit form, the Resources add/edit form, the
+  Third-party content admin form, the `/admin/users` "Add a member" form,
+  and the bulk-edit multi-checkbox picker — found none of them pair a
+  native `<input type="date">` with a sibling field, the one field type
+  with a demonstrated cross-browser minimum-width risk; none showed
+  overlap at any tested width. The "Toolbox usage" block's three
+  consecutive paragraphs each carried their own unspaced em dash — passing
+  the mechanical typography lint (unspaced) but violating the frequency
+  half of the em-dash policy (sparingly). Reworded two of the three to a
+  period; the typography lint remains clean (0 findings) since it was
+  never about spacing here. See `BRAND.md`'s "Admin table column widths"
+  section for the `_COL_WIDTH_VENDOR` write-up.
+
 
 ## Authentication & security
 

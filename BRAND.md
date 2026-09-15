@@ -569,7 +569,7 @@ license to collapse every documented exception into a bucket.
 The job PR 15 named above: a column is now sized by what FIELD TYPE it holds,
 not by whatever a given page happened to pick — so "Name" is the same width
 everywhere, not 220px on one admin table and a bare, unspecified width on
-another. Five named constants in `webapp/app.py`, next to the floor buckets
+another. Six named constants in `webapp/app.py`, next to the floor buckets
 above:
 
 | Constant | Width | Field type |
@@ -579,6 +579,7 @@ above:
 | `_COL_WIDTH_DATE` | 140px | Date / timestamp (sized for a full "YYYY-MM-DD HH:MM" value) |
 | `_COL_WIDTH_STATUS` | 110px | A short status/state badge or label |
 | `_COL_WIDTH_COUNT` | 80px | A small count/number column |
+| `_COL_WIDTH_VENDOR` | 160px | A short vendor/company label — deliberately narrower than `_COL_WIDTH_NAME`, which is calibrated for a full software/community name, not a one- or two-word vendor label (overhead spend fixes, 2026-09) |
 
 These are plain `width:` hints on ordinary (non `table-layout:fixed`) tables,
 not a hard cap — real content wider than the hint still grows the column
@@ -656,6 +657,20 @@ is drawn from) now reads its width from the same constant too
 (`min-width:{_COL_WIDTH_NAME}px`, not `width:`, since a sticky column needs
 `min-width` to stay pinned correctly) — it was the origin case for 280px,
 not a further exception.
+
+**Overhead spend's "All vendor charges" details table** (2026-09) is the
+origin case for `_COL_WIDTH_VENDOR`: its Vendor column used to carry
+`_COL_WIDTH_NAME` (280px, calibrated for a full software/community name),
+which was too wide for a one-word vendor label ("Railway", "Anthropic")
+and starved the table's genuinely free-text Note column of room, wrapping
+a real note to 5 lines at a scrolled mobile width. Fixed with the narrower
+`_COL_WIDTH_VENDOR` constant plus `white-space:nowrap` on Category and
+Amount (both short, fixed-vocabulary fields that shouldn't wrap at all) —
+Note stays unwidthed, per the standard's own free-text rule, and now
+absorbs the space Vendor and Category no longer need. The table's
+`min-width` also moved from a hand-picked `720px` to the Wide bucket
+(`_TABLE_FLOOR_WIDE`, 800px — Vendor/Date/Category/Note/Amount/Actions is
+6 columns), matching the bucket system rather than a leftover literal.
 
 ### Card widths
 

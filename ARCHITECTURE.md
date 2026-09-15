@@ -657,14 +657,18 @@ assumed to still hold.
 — the natural next step after the floor-bucket work above: a floor keeps a
 whole table from squeezing itself too narrow, but says nothing about
 whether an individual "Name"/"Date"/"Email" column is the same width from
-one admin table to the next. Five named constants in `webapp/app.py`,
+one admin table to the next. Six named constants in `webapp/app.py`,
 alongside `_TABLE_FLOOR_*` (`_COL_WIDTH_NAME`=280px, `_COL_WIDTH_EMAIL`=220px,
-`_COL_WIDTH_DATE`=140px, `_COL_WIDTH_STATUS`=110px, `_COL_WIDTH_COUNT`=80px)
+`_COL_WIDTH_DATE`=140px, `_COL_WIDTH_STATUS`=110px, `_COL_WIDTH_COUNT`=80px,
+`_COL_WIDTH_VENDOR`=160px — added 2026-09 for a short vendor/company label,
+deliberately narrower than `_COL_WIDTH_NAME`'s full-software/community-name
+calibration)
 are applied as plain `width:` hints on `<th>` elements whose own header text
 literally names that field type, across roughly 30 admin tables (Contact
 submissions, Toolbox intros, the Software/Communities pending-submission
 tables, Third-party/Original content, Tag cleanup, the FP&A Buddy report,
-Overhead spend's vendor-charge and CSV-preview tables, the Users table's
+Overhead spend's "All vendor charges" details table (Vendor column, since
+2026-09) and CSV-preview tables, the Users table's
 Email/Last login/Status columns, the email-templates reference table, and
 the several near-identical CSV import/purge preview tables that all share a
 "Line"/"Article"/"Why" shape). `_COL_WIDTH_NAME` reuses the exact 280px
