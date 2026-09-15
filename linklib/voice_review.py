@@ -89,7 +89,7 @@ def mechanical_findings(text: str) -> list[tuple[str, str]]:
 # legitimately contains an ampersand (Bain & Company, Ernst & Young), and
 # rewriting one would corrupt a real entity name. Brian's own editable copy is
 # out of scope for the same reason — it lives in `settings` (there is no
-# site_copy table) and is edited at /admin/copy and /admin/voice, so a
+# site_copy table) and is edited at /admin/copy/* and /admin/voice, so a
 # violation there gets reported to him, never rewritten from code.
 
 # Standard finance/business abbreviations that carry '&' as part of the term

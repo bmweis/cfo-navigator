@@ -254,7 +254,7 @@ def test_every_section_has_a_settings_key_and_a_default(env):
 
 
 def test_admin_copy_page_renders_a_textarea_per_section(env):
-    html = _client(env).get("/admin/copy").text
+    html = _client(env).get("/admin/copy/how-this-is-built").text
     for key in _SECTION_KEYS:
         assert f'id="copy-{key}"' in html, key
         assert f"saveHtib(&apos;{key}&apos;)" in html, key
@@ -262,10 +262,66 @@ def test_admin_copy_page_renders_a_textarea_per_section(env):
 
 def test_each_section_description_says_raw_html_is_allowed(env):
     """The asymmetry worth naming: these five take raw HTML (they're
-    nine-tenths links), while the About bio on the same page is plain text."""
-    html = _client(env).get("/admin/copy").text
-    panel = html.split("How this is built")[1]
-    assert "raw HTML" in panel
+    nine-tenths links), while the About/Homepage bios on their own separate
+    /admin/copy pages are plain text."""
+    html = _client(env).get("/admin/copy/how-this-is-built").text
+    assert "raw HTML" in html
+
+
+# --- /admin/copy split into three pages -------------------------------------
+
+def test_admin_copy_itself_is_not_a_page(env):
+    """No index page at the bare prefix — same pattern every other admin
+    group prefix on this site follows (/admin/thought-leadership,
+    /admin/system, /admin/tools, /admin/inbox are all bare prefixes with no
+    route of their own)."""
+    assert _client(env).get("/admin/copy").status_code == 404
+
+
+def test_admin_copy_homepage_page_renders_both_boxes(env):
+    html = _client(env).get("/admin/copy/homepage").text
+    assert 'id="home-headline"' in html
+    assert 'id="home-subhead"' in html
+    assert 'id="home-teaser"' in html
+    assert 'id="home-expanded"' in html
+    # This page's fields are plain text — no raw-HTML mention here.
+    assert "raw HTML" not in html
+
+
+def test_admin_copy_about_page_renders_the_bio_box(env):
+    html = _client(env).get("/admin/copy/about").text
+    assert 'id="about-copy"' in html
+    assert "raw HTML" not in html
+
+
+def test_admin_copy_pages_require_auth(monkeypatch):
+    """Same guard the single pre-split page used
+    (`if not _is_authed(request): return _login_redirect(request)`), copied
+    verbatim into all three — a signed-out request must bounce to /login,
+    not render the form."""
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    try:
+        c = _client(appmod)
+        for path in ("/admin/copy/homepage", "/admin/copy/about", "/admin/copy/how-this-is-built"):
+            r = c.get(path, follow_redirects=False)
+            assert r.status_code == 303, path
+            assert r.headers["location"].startswith("/login"), path
+    finally:
+        if os.path.exists(db):
+            os.remove(db)
+
+
+def test_homepage_and_about_pages_carry_the_recognized_width_tier(env):
+    rows = env._page_index_snapshot()
+    for path in ("/admin/copy/homepage", "/admin/copy/about", "/admin/copy/how-this-is-built"):
+        row = next(r for r in rows if r["path"] == path)
+        assert row["tier"] == "page-form", path
+        assert row["flagged"] is False, path
 
 
 def test_saving_a_section_changes_the_public_page(env):
@@ -321,6 +377,6 @@ def test_the_surface_cards_are_not_admin_editable(env):
     """Deliberate: each card's href points at a real route and its empty
     string selects the coming-soon state, neither of which survives a
     textarea. Confirmed by there being no settings key for them."""
-    html = _client(env).get("/admin/copy").text
+    html = _client(env).get("/admin/copy/how-this-is-built").text
     assert "Explainer coming soon" not in html
     assert not any("surface" in s["key"] for s in env._HTIB_COPY_SECTIONS)

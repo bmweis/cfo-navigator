@@ -8495,6 +8495,40 @@ it supersedes the old "`/save` is token-gated" note.
   instruction, pending a decision on scope before touching anything beyond
   `.oh-grid-2`.
 
+- **`/admin/copy` split into three pages, one per public page it edits
+  (2026-09).** The single "Site copy" page had grown to eight sections
+  (Homepage headline/subhead, Homepage bio box, About bio, and the five
+  How this is built prose fields) with no way to tell, from the one hub
+  card, which public page a given field actually changed. Split into
+  `/admin/copy/homepage` (hero headline/subhead + bio-box lead/body),
+  `/admin/copy/about` (the About bio), and `/admin/copy/how-this-is-built`
+  (the five HTIB sections) — three cards under Brand, voice, and content
+  now, replacing the one "Site copy" card. **No settings-key change, no
+  save-route change, no rendering change** — `_htib_copy()`,
+  `_about_copy_html()`, and the homepage/about lookups are all untouched;
+  this is a pure admin-UI reorganization. **`/admin/copy/how-this-is-built`
+  was already a POST save route before this split** (added when the HTIB
+  copy became admin-editable) — GET and POST on the same path are two
+  separate FastAPI routes, same precedent as `/admin/tools/resources/new`
+  or `/tools/software/{slug}/edit`, so adding a GET page here isn't a
+  rename or a collision: the new page's Save buttons keep posting to the
+  exact same path they always did. **`/admin/copy` itself is not an index
+  page — it 404s, with no compatibility redirect**, matching the standing
+  pattern every other admin group prefix on this site already follows
+  (`/admin/thought-leadership`, `/admin/system`, `/admin/tools`,
+  `/admin/inbox` are all bare prefixes with no route of their own; the
+  hub-nav cards are the real entry point, not the prefix) — building a
+  landing page here would be the one inconsistent exception. Each new
+  page moved from the old page's `.page-standard` (1300px, sized for eight
+  sections at once) to `.page-form` (640px) — the same tier every other
+  single-purpose admin edit form on this site uses (`/contact`,
+  `/admin/tools/resources/{id}/edit`), and now a better fit once each page
+  holds one or two sections instead of eight. Every new page's card
+  description states plainly whether its fields are plain text (Homepage,
+  About) or accept raw HTML for links (How this is built) — the one real
+  capability asymmetry `_HTIB_COPY_SECTIONS`' own comment already
+  documented, now visible from the hub without opening the page.
+
 
 ## Authentication & security
 

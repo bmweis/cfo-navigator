@@ -2121,15 +2121,20 @@ See `docs/AI_SURFACES_BRIEF.md` for the underlying research (mechanism,
 cost tracking, and rejected-decisions history for all four surfaces) that
 the eventual per-surface explainer pages will draft from.
 
-**Admin-editable prose (PR 35, 2026-09).** The four prose sections and the
-closing footnote are editable at `/admin/copy`, so a copy change doesn't
-need a deploy. No schema change — five rows in the existing `settings`
-table (`htib_intro_copy`, `htib_why_copy`, `htib_how_copy`,
-`htib_what_else_copy`, `htib_footnote_copy`), each resolved by
-`_htib_copy(lib)` as `get_setting(key) or _HTIB_*_DEFAULT`, the same
-convention the About/homepage copy already uses. `_HTIB_COPY_SECTIONS` is
-the single registry behind the settings keys, the `/admin/copy` sections,
-and the save route — add a section there and all three pick it up
+**Admin-editable prose (PR 35, 2026-09; split into its own page, 2026-09
+follow-up).** The four prose sections and the closing footnote are editable
+at **`/admin/copy/how-this-is-built`**, so a copy change doesn't need a
+deploy — one of three pages `/admin/copy` split into (Homepage, About, and
+this one), each editing the public page its name says; see CLAUDE.md's
+"`/admin/copy` split into three pages" bullet for the full split write-up,
+including why `/admin/copy` itself is not an index page. No schema change —
+five rows in the existing `settings` table (`htib_intro_copy`,
+`htib_why_copy`, `htib_how_copy`, `htib_what_else_copy`,
+`htib_footnote_copy`), each resolved by `_htib_copy(lib)` as
+`get_setting(key) or _HTIB_*_DEFAULT`, the same convention the About/
+homepage copy already uses. `_HTIB_COPY_SECTIONS` is the single registry
+behind the settings keys, the `/admin/copy/how-this-is-built` page's
+sections, and the save route — add a section there and all three pick it up
 (`_email_template_registry()`'s precedent).
 
 `POST /admin/copy/how-this-is-built` is **one** route for all five sections
@@ -2150,8 +2155,9 @@ restricted renderer to allow links would weaken link-escaping across every
 AI-drafted tool/community field site-wide to serve one admin page; a new
 trusted-admin-copy renderer would duplicate the one that already exists.
 
-The trade this makes, stated in each section's own `/admin/copy`
-description rather than left to be discovered: these five fields accept raw
+The trade this makes, stated in each section's own
+`/admin/copy/how-this-is-built` description rather than left to be
+discovered: these five fields accept raw
 HTML, unlike the About-page bio beside them on the same page, which is
 plain text through `_about_copy_html`. That is correct here (admin-only,
 `_is_authed`-gated, and the copy is mostly credit links) but it is a real
@@ -6920,7 +6926,7 @@ docstrings excluded, embedded CSS/JS/HTML comments stripped per literal:
 * Database content is **never** scanned. A real vendor or community name
   legitimately contains an ampersand (Bain & Company, Ernst & Young) and
   rewriting one would corrupt a real entity name. `site_copy` rows are
-  Brian's own copy but live in the DB and are edited at `/admin/copy`, so
+  Brian's own copy but live in the DB and are edited at `/admin/copy/*`, so
   they're reported, never rewritten.
 
 Allowlists are two small lists in the same module, both following the
