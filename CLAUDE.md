@@ -8794,6 +8794,37 @@ it supersedes the old "`/save` is token-gated" note.
      provably not disabled and provably wired to a function that exists
      and runs correctly on click.
 
+- **Current Feed (`GET /current-feed`, 2026-09) — a public mixtape-tracklist
+  page listing the writers/publications Brian actually reads, derived live
+  from the `feeds` table.** Side A ("Old School") is `feed_sections.name ==
+  "Blogs"`; Side B ("New School") is `"Substacks"` — matched by name, not
+  id, since ids aren't stable across environments and the two names are the
+  real semantic split. News and Market Insights are a small, explicit
+  exclusion list (publications/data sources, not writers). **A section that
+  is neither a known side nor a known exclusion — production already has
+  one, "Tools", currently empty of feeds — never silently vanishes or
+  silently guesses**: `_current_feed_unknown_sections()` surfaces it as an
+  admin-only banner naming the section and its feed count, linking to
+  `/admin/reader/feeds`; the unmapped feed's own name is never shown on
+  either side, since the page has no basis for guessing which one it
+  belongs on. Every track links to `feeds.html_url` (the writer's own site,
+  populated at add-time from the feed's own `<link>`/alternate — already
+  existed, already populated on every production row, no new column
+  needed), never `xml_url` (the raw RSS/Atom endpoint). Uses exactly one
+  piece of the graffiti/street-art accent layer (BRAND.md §4) — the
+  Permanent-Marker wordmark font, for track titles only, at 20px — and one
+  plain, already-sanctioned coral underline (BRAND.md §2.3) under the Side
+  B heading, marking the flip of the tape; neither reuses or extends the
+  seafoam marker-underline motif, which stays homepage-hero-only. Reachable
+  from `/how-this-is-built`'s origin story, a small link on
+  `/tools/fpa-buddy` near the Sources chips, and the `web-search`
+  `ai_surfaces` explainer's own body (closed via
+  `scripts/add_current_feed_link_to_web_search_explainer.py`, a one-off,
+  human-run production content fix — see ARCHITECTURE.md's matching
+  section for the full write-up). Also doubles as the FP&A Buddy web-search
+  allowlist, since `linklib.sources.preferred_domains` builds from the same
+  OPML `feeds`/`feed_sections` generate.
+
 
 ## Authentication & security
 

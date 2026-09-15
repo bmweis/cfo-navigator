@@ -321,9 +321,12 @@ undecorated).
    body copy. Max **one or two per page**. Helper: `_sticker()` in `webapp/app.py`.
 3. **Card category icons** — 2px-stroke line icons (not flat color squares) inside
    the small badge on a card-row grid — 2-up, 3-up, or 4-up alike, not restricted to
-   3-up rows. Fixed background order: seafoam-wash `#EAF7F2` → navy-wash `#EEF1F7` →
-   coral-wash `#FBEAE3`, cycling in that order regardless of column count and reused
-   for every card-row grid sitewide. Helper: `_card_icon()` in `webapp/app.py`.
+   3-up rows. Fixed background order: seafoam-wash `#EAF7F2` → navy-wash `#EEF1F7`,
+   cycling in that order regardless of column count and reused for every card-row
+   grid sitewide. **Coral is not part of this cycle** (dropped entirely, PR 16,
+   2026-09 — see §2.3's own writeup of the "spent by array position" incident this
+   fixed; this passage was simply never updated to match at the time). Helper:
+   `_card_icon()` in `webapp/app.py`.
 
 4. **Spray-tag wordmark** — the sitewide "CFO Navigator"/logo mark, nav header and
    navy footer alike, renders in Permanent Marker instead of Outfit. Color unchanged
@@ -333,8 +336,17 @@ undecorated).
 
 **New tokens** (see §7 for the generated block): `--ink-graffiti:#0d0d0d` (sticker
 borders/shadows only — never a fill or text color elsewhere), `--font-sticker:
-'Caveat',cursive` (sticker-only), and `--font-wordmark:'Permanent Marker',cursive`
-(wordmark-only).
+'Caveat',cursive` (sticker-only), and `--font-wordmark:'Permanent Marker',cursive`.
+**One approved, deliberate exception to "wordmark-only"**: `/current-feed`'s
+tracklist (2026-09) also sets each track's title in `var(--font-wordmark)`, at
+20px, one per line, title only — never metadata (author, cadence stay DM Sans).
+Considered and approved specifically because a tracklist's own numbered "track
+name" reads as a display element the same way a wordmark does, at a size large
+enough that Permanent Marker's heavy, imprecise strokes stay legible — the
+opposite of body-copy-density text, which is exactly the case this "wordmark-only"
+rule exists to guard against. Don't extrapolate this onto a denser list (an admin
+table row, a card grid of many short labels) without the same size/short-text
+reasoning holding.
 
 That's the entire graffiti vocabulary. No broader illustration style, no all-over
 pattern, no graffiti marks on admin tables, forms, or the chat UI.

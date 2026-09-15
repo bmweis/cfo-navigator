@@ -2246,6 +2246,96 @@ need one of BRAND.md §5's `_CARD_WIDTH_*_MIN` constants — matching
 at 1280px and 390px: the cards grid's `x`/`width` now match `.tool-prose`
 exactly at both widths, and every card matches its siblings.
 
+### Current Feed — `GET /current-feed` (2026-09)
+
+A public mixtape-tracklist page listing the writers and publications Brian
+actually reads — Side A ("Old School", the blogs) and Side B ("New School",
+the Substacks) — derived live from the `feeds` table, with no hardcoded
+names or counts anywhere. It exists because the origin story on
+`/how-this-is-built` names the writers who shaped Brian's career, and this
+is the current, always-accurate version of that list; it's also the exact
+allowlist `linklib.sources.preferred_domains` builds from the same OPML
+`feeds`/`feed_sections` generate, so it doubles as "which sources can FP&A
+Buddy's web tier draw from."
+
+**The split derives from `feed_sections.name`, matched by string, not
+`id`.** Section ids are autoincrement and not stable across environments (a
+fresh test DB seeds them in whatever order its own fixture inserts rows),
+so an id-based mapping would be more fragile, not less — the two section
+names ("Blogs", "Substacks") are the actual semantic axis this page exists
+to express. `_CURRENT_FEED_SIDES` pairs each name with its side label and
+heading; `_CURRENT_FEED_KNOWN_EXCLUDED_SECTIONS` (`{"News", "Market
+Insights"}`) is a small, explicit exclusion list — those two are
+publications/data sources, not writers, so they're deliberately never
+shown here regardless of how many feeds sit under them.
+
+**A third possibility, neither an include nor an exclude, is what actually
+needed care.** The build brief's own investigation prompt named the real
+risk directly: naming two sections to include and naming two to exclude
+are both silent failure modes the moment a genuinely new kind of section
+shows up — production already has a `Tools` section (currently empty of
+feeds) that is none of these four names, and there's no way to derive
+whether a future section like that belongs on this page or not (a new
+"Podcasts" section might be exactly the kind of "writer" this page is
+about, or might not be). Rather than guess, `_current_feed_unknown_sections()`
+computes which section names, if any, have real feeds attached and aren't
+one of the four known names — and `current_feed()` renders that as an
+admin-only banner (`_is_authed`-gated, never shown to a public visitor)
+naming the section and its feed count, linking to `/admin/reader/feeds` to
+recategorize. The unmapped feed's own name is deliberately never shown on
+either side — the page has no basis for guessing which side it belongs on,
+only for surfacing that a decision is needed. This is the concrete answer
+to "what happens when a section exists that the page doesn't know about":
+visible to an admin, invisible to the page's actual output, never silent.
+
+**Investigation, before any code: does `feeds` have a homepage URL, or only
+the RSS endpoint?** It already has one — `feeds.html_url`, populated at
+add-time from the feed's own `<link>`/Atom alternate (`feed.probe_feed()`,
+existing since well before this page), independent of `xml_url`. A live
+check against production confirmed every one of the 21 real feed rows
+already carries a real `html_url`, including the two cases that would have
+defeated a naive "strip `/feed` from the URL" derivation:
+`feeds.feedburner.com/FeldThoughts` resolves to `https://feld.com/`, not a
+mangled feedburner URL. So no new column and no per-name heuristic was
+needed — `_current_feed_track_html()` links to `html_url`, never `xml_url`,
+with a defensive (currently untested-by-production-data, since every row
+has one) unlinked-plain-text fallback for a hand-added row that somehow
+has none.
+
+**Typography, per BRAND.md §4's own retirement note.** The original build
+brief described the site's motif system as "rope rule, compass star" —
+that pairing is fully retired (BRAND.md §4: "The previous... motif...is
+retired completely, everywhere, including the footer"), replaced by the
+graffiti/street-art accent layer (marker-underline, sticker badge, card
+category icons, the Permanent-Marker wordmark). This page uses exactly one
+piece of that layer — the wordmark font, `var(--font-wordmark)` (Permanent
+Marker) — for each track's title only, at 20px, one per line, never for
+metadata; no new motif is introduced. The one coral moment is a plain CSS
+underline (`border-bottom:3px solid var(--coral)`) under the Side B
+heading, marking the flip of the tape — sanctioned directly by BRAND.md
+§2.3 ("a short coral underline...under a single hero word or section
+number"), a different, older, already-permitted use of coral than the
+graffiti layer's own seafoam marker-underline motif (§4.1, fixed color,
+homepage-hero-only) — this page's coral underline neither reuses nor
+extends that motif. `coral_moment_problems()` never even sees it (it scans
+`background` declarations inside inline `style=` attributes only; a
+`border-bottom` inside a `<style>` block is outside both that HTML region
+and that CSS property entirely), so it's not a mechanically-forced choice
+so much as a deliberately restrained one within what was already allowed.
+
+**Three entry points, no top-nav link**: `/how-this-is-built`'s own origin
+story (`_HTIB_HOW_I_DECIDED_DEFAULT`, "Search is restricted to
+[a list of sites I trust](/current-feed)"); a small muted link on
+`/tools/fpa-buddy` right under the Sources chip group ("See what's in the
+current feed →"); and the `web-search` `ai_surfaces` explainer's own
+body_md, which already described the allowlist in prose ("One list doing
+two jobs...") with nothing to link to at the time it was written — closed
+by `scripts/add_current_feed_link_to_web_search_explainer.py`, a one-off,
+human-run (`railway ssh`) script (preview/`--apply`/write-then-read-back,
+same convention as every other single-record admin fix in this repo) that
+inserts the link into that already-migrated production row rather than
+touching it from a coding session with no direct DB access.
+
 ### `/admin/copy/*` width tier, redundant helper text, and a Content sub-group (2026-09)
 
 Three more fixes shipped alongside the surface-cards fix above.

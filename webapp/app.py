@@ -4089,7 +4089,7 @@ _HTIB_HOW_I_DECIDED_DEFAULT = """FP&A Buddy is required to trace everything to a
 
 All AI-generated content stays in a draft state until a human reviews it, and carries a badge showing which state it's in.
 
-The tools are picked based on what each is good at. Claude drafts and reasons. A separate embedding model finds what a keyword search would miss. Search is restricted to a list of sites I trust, not the open web."""
+The tools are picked based on what each is good at. Claude drafts and reasons. A separate embedding model finds what a keyword search would miss. Search is restricted to [a list of sites I trust](/current-feed), not the open web."""
 
 _HTIB_WHAT_ELSE_DEFAULT = """This site isn't where the experimenting stops.
 
@@ -4367,6 +4367,199 @@ def ai_surface_article(request: Request, slug: str):
         raise HTTPException(status_code=404)
     body = _ai_surface_article_body(row)
     return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "About", body, role=_role(request)))
+
+
+# --- Current Feed ------------------------------------------------------
+#
+# Public mixtape-tracklist page listing the writers/publications Brian
+# actually reads, derived live from the `feeds` table — add a subscription,
+# it appears here; drop one, it's gone. It's also the exact allowlist
+# linklib.sources.preferred_domains builds from the same OPML this table
+# generates, so this doubles as "which sources can FP&A Buddy's web tier
+# actually draw from."
+#
+# Side A ("Old School") / Side B ("New School") are feed_sections.name ==
+# "Blogs" / "Substacks" respectively — matched by NAME, not id. Section ids
+# are autoincrement and not stable across environments (a fresh test DB
+# seeds them in whatever order its own fixture inserts rows), and the two
+# names are the actual semantic split this page exists to express — there's
+# no id-based derivation that would hold up better, only be more opaque.
+#
+# News and Market Insights are deliberately excluded — publications/data
+# sources, not writers, so they don't belong on a page about whose thinking
+# shaped Brian's. That's an explicit two-name exclusion list, not "every
+# section except Blogs/Substacks": the brief's own investigation prompt
+# flagged that naming two sections to include and naming two to exclude are
+# both silent the same way — either one goes quiet the moment a THIRD kind
+# of section shows up with real feeds in it (a "Tools" section already
+# exists in production, currently empty of feeds, and isn't any of these
+# four names). So this code treats the four known names explicitly and
+# treats anything else as unknown rather than silently including or
+# excluding it — see _current_feed_unknown_sections() for what "unknown"
+# actually does.
+_CURRENT_FEED_SIDES = (
+    ("Blogs", "A", "Old School"),
+    ("Substacks", "B", "New School"),
+)
+_CURRENT_FEED_KNOWN_EXCLUDED_SECTIONS = frozenset({"News", "Market Insights"})
+
+
+def _current_feed_unknown_sections(feeds: list) -> list:
+    """Section names present in `feeds` that are neither a Current Feed
+    side nor a known, deliberate exclusion (News/Market Insights) — i.e. a
+    section added after this page was built, with real feeds already
+    subscribed under it. There is no way to derive whether such a section
+    belongs on this page (a new "Podcasts" section might be exactly the
+    kind of "writer" this page is about, or might not be) — so this
+    doesn't guess. It surfaces the fact that an unmapped section exists,
+    admin-only (see current_feed()'s own banner), so the gap is visible
+    instead of silent. Returns (section_name, feed_count) pairs, sorted by
+    name for a stable render."""
+    known = {name for name, _, _ in _CURRENT_FEED_SIDES} | _CURRENT_FEED_KNOWN_EXCLUDED_SECTIONS
+    counts: dict = {}
+    for f in feeds:
+        name = f["section_name"]
+        if name not in known:
+            counts[name] = counts.get(name, 0) + 1
+    return sorted(counts.items())
+
+
+def _current_feed_track_html(feed: dict, num: int) -> str:
+    """One numbered tracklist row. Links to the feed's own site (html_url,
+    populated at add-time from the feed's own <link>/alternate — see
+    feed.probe_feed()), never the raw RSS/Atom endpoint (xml_url) — a
+    visitor clicking a "track" should land on a readable page, not an XML
+    dump. html_url is populated on every feed in production today; the
+    unlinked fallback below is defensive for a hand-added row that
+    somehow has none, not a case this page expects to hit."""
+    name = _esc(feed["name"])
+    href = (feed.get("html_url") or "").strip()
+    if href:
+        title_html = (f'<a href="{_esc(href)}" target="_blank" rel="noopener" '
+                       f'class="cf-track-name">{name}</a>')
+    else:
+        title_html = f'<span class="cf-track-name cf-track-name--unlinked">{name}</span>'
+    return (
+        '<li class="cf-track">'
+        f'<span class="cf-track-num">{num:02d}</span>'
+        f'<div class="cf-track-body">{title_html}</div>'
+        '</li>'
+    )
+
+
+def _current_feed_side_html(label: str, heading: str, feeds: list, *, flip: bool = False) -> str:
+    """One side of the tape. Numbering restarts at 01 per side (the real
+    cassette/vinyl convention — Side A's track 1 and Side B's track 1 are
+    both "1", not a continuation), matching how a mixtape actually reads.
+
+    `flip` marks the one deliberate coral moment on this page — a coral
+    underline under the Side B heading only, marking the flip of the tape.
+    Sanctioned per BRAND.md §2.3 ("a short coral underline... under a
+    single hero word or section number") — this is a plain CSS border, not
+    the graffiti-layer's separate seafoam marker-underline motif (§4.1,
+    fixed color, homepage-hero-only), so it doesn't touch or extend that
+    vocabulary at all."""
+    if not feeds:
+        tracks_html = '<p class="cf-empty">Nothing here yet.</p>'
+    else:
+        tracks_html = ('<ol class="cf-tracklist">'
+                        + "".join(_current_feed_track_html(f, i) for i, f in enumerate(feeds, start=1))
+                        + '</ol>')
+    heading_cls = "cf-side-heading cf-side-heading--flip" if flip else "cf-side-heading"
+    return f"""<div class="cf-side">
+  <div class="cf-side-header">
+    <span class="cf-side-label">Side {label}</span>
+    <h2 class="{heading_cls}">{_esc(heading)}</h2>
+  </div>
+  {tracks_html}
+</div>"""
+
+
+_CURRENT_FEED_CSS = """
+.cf-sides{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:26px;}
+@media(max-width:800px){.cf-sides{grid-template-columns:1fr;gap:34px;}}
+.cf-side-header{margin-bottom:16px;}
+.cf-side-label{display:block;font-size:12px;font-weight:600;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px;}
+.cf-side-heading{margin:0;font-size:21px;}
+.cf-side-heading--flip{display:inline-block;border-bottom:3px solid var(--coral);padding-bottom:2px;}
+.cf-tracklist{list-style:none;margin:0;padding:0;}
+.cf-track{display:flex;align-items:baseline;gap:14px;padding:10px 0;border-bottom:1px solid var(--line);}
+.cf-track:last-child{border-bottom:none;}
+.cf-track-num{flex:0 0 auto;width:24px;font:600 13px var(--font-body);color:var(--muted);
+  font-variant-numeric:tabular-nums;}
+.cf-track-body{min-width:0;flex:1 1 auto;}
+.cf-track-name{font:400 20px var(--font-wordmark);color:var(--navy);text-decoration:none;
+  line-height:1.3;word-break:break-word;}
+.cf-track-name:hover{color:var(--accent);}
+.cf-track-name--unlinked{color:var(--ink-soft);cursor:default;font-family:var(--font-wordmark);font-size:20px;}
+.cf-empty{color:var(--muted);font-size:14px;font-style:italic;margin:0;}
+"""
+
+
+@app.get("/current-feed", response_class=HTMLResponse)
+def current_feed(request: Request):
+    """The writers and publications Brian actually reads, rendered as a
+    mixtape tracklist — Side A ("Old School", the blogs) and Side B ("New
+    School", the Substacks). Derived entirely from the live `feeds` table
+    (Library.list_feeds(), already joined to feed_sections.name) — no
+    hardcoded names, no hardcoded counts, so a new subscription shows up
+    with no code change and a dropped one disappears the same way.
+
+    Reachable from /how-this-is-built (the origin story, where the
+    allowlist is described), /tools/fpa-buddy (a small link near the
+    Sources control, so a reader can see exactly what "trusted web" draws
+    from), and the web-search explainer at /how-this-is-built/web-search
+    (its own body_md, admin-editable — see
+    scripts/add_current_feed_link_to_web_search_explainer.py). Deliberately
+    not in the top nav.
+
+    See _CURRENT_FEED_SIDES/_current_feed_unknown_sections() for how the
+    Blogs/Substacks split works and what happens when a feed sits in a
+    section this page doesn't recognize (News/Market Insights are a known,
+    deliberate exclusion; anything else surfaces as an admin-only banner
+    rather than silently vanishing)."""
+    lib = _lib()
+    try:
+        feeds = lib.list_feeds()
+    finally:
+        lib.close()
+
+    by_section: dict = {}
+    for f in feeds:
+        by_section.setdefault(f["section_name"], []).append(f)
+
+    sides_html = "".join(
+        _current_feed_side_html(label, heading, by_section.get(section_name, []), flip=(label == "B"))
+        for section_name, label, heading in _CURRENT_FEED_SIDES
+    )
+
+    unknown_html = ""
+    if _is_authed(request):
+        unknown = _current_feed_unknown_sections(feeds)
+        if unknown:
+            named = "; ".join(f'{_esc(name)} ({n} feed{"s" if n != 1 else ""})' for name, n in unknown)
+            unknown_html = (
+                '<p style="background:var(--alert-wash);color:var(--alert);border:1px solid var(--alert);'
+                'border-radius:10px;padding:10px 16px;font-size:13.5px;margin:18px 0 0;">'
+                f'<strong>Admin only:</strong> {named}, not Blogs, Substacks, News, or Market Insights, '
+                "so this page doesn't know whether it belongs here. Recategorize at "
+                '<a href="/admin/reader/feeds" style="color:var(--alert);text-decoration:underline;">'
+                'Manage feeds</a>, or update this page\'s section list.</p>'
+            )
+
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">&larr; How this is built</a></p>
+<h1 style="margin-bottom:6px;">Current Feed</h1>
+<p style="color:var(--ink-soft);margin:0 0 4px;font-size:15.5px;line-height:1.6;">The writers and publications I actually read, in two eras. This is also the exact list FP&amp;A Buddy searches when it goes to the web—if an answer cites something from trusted web, it came from one of these.</p>
+<p style="color:var(--muted);font-size:13px;margin:0;">Every name links to the writer's own site, not the raw feed. This list changes as my subscriptions do, with no hand-maintenance behind it.</p>
+{unknown_html}
+<div class="cf-sides">
+{sides_html}
+</div>
+</div>
+<style>{_CURRENT_FEED_CSS}</style>"""
+    return HTMLResponse(_page("Current Feed—Brian Weisberg", "About", body, role=_role(request)))
 
 
 _AI_SURFACE_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -21942,6 +22135,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         <div class="ask-tags">
           {source_tags}
         </div>
+        <p style="margin:6px 0 0;font-size:12.5px;"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
       </div>
       <div class="ask-control">
         <div class="ask-section-label">Depth</div>
