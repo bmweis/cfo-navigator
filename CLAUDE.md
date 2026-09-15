@@ -8406,6 +8406,94 @@ it supersedes the old "`/save` is token-gated" note.
   unconditionally, in every standards-compliant engine) rather than a live
   screenshot — the same category of justification Round 2's own stacking
   fix used, since neither round could get a real WebKit render.
+- **Overhead spend fixes, round 4 (2026-09, PR 555 merged) — round 3's
+  `max-width:100%`/`min-width:0`-on-the-input fix did not work either,
+  confirmed live: a fresh post-deploy iPhone screenshot matched the
+  pre-fix state exactly.** Per explicit instruction ("stop writing CSS and
+  find out what's actually applied to that element"), the served
+  `/admin/overhead-spend` HTML and every matching CSS rule were dumped and
+  inspected directly rather than reasoned about from source — the rule was
+  present, matching, and applying (confirmed: no inline style beat it, no
+  fixed pixel width was present, `box-sizing:border-box` was on the input
+  itself). That ruled out "the fix didn't land" and pointed one layer up,
+  per a second hypothesis floated before touching `appearance:none`: at
+  ≤640px `.oh-grid-2` collapses to a single `1fr` track, and a bare `1fr`
+  track's implicit minimum is `auto` (min-content) — if the wrapper `<div>`
+  holding the Date `<input>` (added to hold a `<label>` above the field)
+  has a larger min-content than the card, the TRACK itself expands to fit
+  it, and `max-width:100%` on the input then correctly clamps the input to
+  100% of an already-oversized track. Per the explicit "verify by
+  measurement, not reasoning" instruction: reproduced with a controlled,
+  engine-independent isolated test (a `white-space:nowrap` element with a
+  guaranteed-large intrinsic minimum standing in for WebKit's real
+  date-input width, since this sandbox cannot measure that width directly)
+  — a wrapper div with `min-width:auto` (unset) blew a 276px card's track
+  out to 954px even with `min-width:0`/`max-width:100%` on the NESTED
+  input one layer inside it, conclusively proving `min-width:0` on a
+  descendant does not override its ANCESTOR grid item's own automatic
+  minimum size. The overhead-details inline edit form was checked the same
+  way and found structurally safe from this exact mechanism, because its
+  `<input>`s are direct children of `.oh-grid-2` with no wrapper div — the
+  input itself is the grid item there, so its own `min-width:0` (already
+  present) correctly caps the track. **Fix, confirmed and applied to both
+  `.oh-grid-2` definitions (Add-a-charge and overhead-details), at both
+  the 2-column base rule and the 1-column stacked-breakpoint override**:
+  `grid-template-columns:minmax(0,1fr)` instead of a bare `1fr` — this
+  sets the TRACK's own minimum to `0` directly, so it can never expand
+  past the available space regardless of what any current or future child
+  declares, chosen over `min-width:0` on `.oh-grid-2`'s direct children
+  specifically because a per-child fix is one careless future field
+  (wrapped in yet another div, with nobody remembering this history) away
+  from re-breaking — a track-level fix protects every child, forever, with
+  one declaration. Round 4's input-level containment
+  (`max-width:100%`/`min-width:0`/`box-sizing:border-box` on the `<input>`
+  itself) is kept as a second, defense-in-depth layer, but it is not, on
+  its own, sufficient — the track-level fix is what actually stops the
+  bug. `tests/test_overhead_spend_grid_regression.py`'s regression guard
+  was rewritten to match: the previous checker asserted input-level
+  containment only, which — per this round's own finding — checks the
+  wrong layer; a new `_grid_track_cannot_exceed_container` asserts every
+  track in `grid-template-columns` declares an explicit `minmax(0,...)`
+  zero minimum, at both the base rule and its stacking override, and is
+  proven to correctly FAIL against the exact bare-`1fr` shape that shipped
+  in this same round (and passed stacking) before being trusted. Fixing
+  `_grid_track_count` itself was a prerequisite: its prior "any `minmax(`
+  usage counts as 2 tracks, defensively" shortcut would have misjudged a
+  1-track `minmax(0,1fr)` override as still 2 tracks, silently breaking the
+  existing stacking check the moment the real fix shipped — replaced with
+  a proper paren-depth-aware track splitter (`_split_top_level`) that
+  counts `minmax(0,1fr) minmax(0,1fr)` as genuinely two tracks and a lone
+  `minmax(0,1fr)` as genuinely one. **Sweep for the same shape, per
+  explicit instruction to report rather than fix beyond this page without
+  saying so**: the vulnerable shape (a bare `1fr`/`repeat(N,1fr)` track
+  whose grid item is a wrapper `<div>` around exactly one native form
+  control, rather than the control itself) also exists at `.ger-grid-2`/
+  `.ger-grid-4` (Growth Engine Ratio calculator, `type="number"` inputs —
+  lower risk than a date input's picker UI, but the same mechanism),
+  `.qe-row` (Software directory Quick Edit panel, Vendor contact name/
+  email text inputs — always 2-column, no stacking override at any width),
+  the Resources admin add/edit form's Coverage/Pricing `<select>` pair
+  (a `<select>`'s intrinsic minimum is its longest option's text, a
+  real risk if an option label is long), the Third-party content admin
+  form's Source/venue paired row (text inputs), and the Users "Add a
+  member" form's own `1fr 1fr` grid (Username/Temp password/Name/Email/
+  Role, including a `<select>`). None of these has shown a visible symptom
+  yet — the bug is latent until a track's content is wide enough to blow
+  it out, which is exactly why nothing else has been reported broken.
+  `.ger-grid-3` is structurally different (inputs are direct grid children,
+  no wrapper div — the same safe shape overhead-details already has) but
+  still has no `min-width:0`/`max-width:100%` guard on the input itself,
+  a related but lesser risk. Confirmed SAFE, different shape entirely:
+  `.backup-actions` (two-column panels of text/buttons/a file-upload
+  `<form>` in its own flex layout, never a single-native-control grid
+  cell), `/tools/submit`'s and the tool-add-form's category-checkbox
+  grids (checkboxes wrap freely with their label text, no fixed-width
+  native control to blow anything out), and `.toolbox-layout`/
+  `.toolbox-grid`/`.admin-cols`/`.home-grid`/`.fpa-intro-layout`/
+  `.ask-controls` (page/section-level layout grids or chip/button rows,
+  not single-form-control cells). **Not fixed in this PR** — reported per
+  instruction, pending a decision on scope before touching anything beyond
+  `.oh-grid-2`.
 
 - **`/admin/copy` split into three pages, one per public page it edits
   (2026-09).** The single "Site copy" page had grown to eight sections

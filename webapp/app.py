@@ -27674,11 +27674,24 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
            its own row — WebKit's native picker UI won't shrink below its
            own intrinsic content width, so `width:100%` alone is not
            enough (100% of a narrow container is still narrower than the
-           control's intrinsic demand). `max-width:100%` (a hard clamp,
-           always wins over intrinsic content per CSS2.1 10.3.3) plus
-           `min-width:0` directly on the <input> (not just the grid item)
-           is the actual containment fix (2026-09, PR round 3). See
-           CLAUDE.md's overhead-spend-fixes entry for the full history. -->
+           control's intrinsic demand). `max-width:100%` plus `min-width:0`
+           directly on the <input> (Round 4, PR 555) still didn't fix it on a
+           real device, because the input was never the layer with the
+           bug: Date/Amount are wrapped in their own <div> (to hold the
+           label above the field), and THAT <div> is the actual grid item
+           — with `min-width:auto`, unset, the whole time. A grid item's
+           implicit minimum size is its own min-content, computed from its
+           descendants' intrinsic sizes, and `min-width:0` on a NESTED
+           descendant (the input, one layer deeper) does not override that
+           — confirmed with a controlled, engine-independent reproduction
+           (any element with a genuinely large intrinsic minimum blows out
+           a `1fr` track the same way, regardless of what CSS is set on it,
+           as long as the ancestor GRID ITEM itself has no min-width:0).
+           `.oh-grid-2` now uses `minmax(0,1fr)` instead of a bare `1fr` —
+           this fixes the TRACK itself, once, so it can't be re-broken by a
+           future field that wraps its input in a div without knowing
+           this history (2026-09, Round 5). See CLAUDE.md's
+           overhead-spend-fixes entry for the full history. -->
       <div class="oh-grid-2">
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
@@ -27779,8 +27792,8 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 </div>
 <style>
 tbody tr{{border-top:1px solid var(--line);}}
-.oh-grid-2{{display:grid;grid-template-columns:1fr 1fr;gap:14px;}}
-@media(max-width:640px){{.oh-grid-2{{grid-template-columns:1fr;}}}}
+.oh-grid-2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;}}
+@media(max-width:640px){{.oh-grid-2{{grid-template-columns:minmax(0,1fr);}}}}
 </style>
 </div>"""
     return HTMLResponse(_page("Overhead spend—Admin", "Admin", body, authed=True))
@@ -27887,8 +27900,8 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
 </div>
 {datalist}
 <style>
-.oh-grid-2{{display:grid;grid-template-columns:1fr 1fr;gap:6px;}}
-@media(max-width:640px){{.oh-grid-2{{grid-template-columns:1fr;}}}}
+.oh-grid-2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;}}
+@media(max-width:640px){{.oh-grid-2{{grid-template-columns:minmax(0,1fr);}}}}
 </style>
 <script>{_ADMIN_SCROLL_HINT_JS}
 function toggleOverheadEdit(id) {{
