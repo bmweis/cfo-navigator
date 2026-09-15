@@ -8796,27 +8796,36 @@ it supersedes the old "`/save` is token-gated" note.
 
 - **Current Feed (`GET /current-feed`, 2026-09) — a public mixtape-tracklist
   page listing the writers/publications Brian actually reads, derived live
-  from the `feeds` table.** Side A ("Old School") is `feed_sections.name ==
-  "Blogs"`; Side B ("New School") is `"Substacks"` — matched by name, not
-  id, since ids aren't stable across environments and the two names are the
-  real semantic split. News and Market Insights are a small, explicit
-  exclusion list (publications/data sources, not writers). **A section that
-  is neither a known side nor a known exclusion — production already has
-  one, "Tools", currently empty of feeds — never silently vanishes or
-  silently guesses**: `_current_feed_unknown_sections()` surfaces it as an
-  admin-only banner naming the section and its feed count, linking to
-  `/admin/reader/feeds`; the unmapped feed's own name is never shown on
-  either side, since the page has no basis for guessing which one it
-  belongs on. Every track links to `feeds.html_url` (the writer's own site,
-  populated at add-time from the feed's own `<link>`/alternate — already
-  existed, already populated on every production row, no new column
-  needed), never `xml_url` (the raw RSS/Atom endpoint). Uses exactly one
-  piece of the graffiti/street-art accent layer (BRAND.md §4) — the
-  Permanent-Marker wordmark font, for track titles only, at 20px — and one
-  plain, already-sanctioned coral underline (BRAND.md §2.3) under the Side
-  B heading, marking the flip of the tape; neither reuses or extends the
-  seafoam marker-underline motif, which stays homepage-hero-only. Reachable
-  from `/how-this-is-built`'s origin story, a small link on
+  from the `feeds` table.** Side A ("Old School") / Side B ("New School")
+  are two per-feed columns — `feeds.show_on_current_feed`/
+  `feeds.current_feed_side` — not section-name matching, per a mid-flight
+  redesign: the original section-based design (Blogs=Side A,
+  Substacks=Side B, News/Market Insights excluded) left one real gap, a
+  feed in a section that's neither a known side nor a known exclusion
+  (production already has an empty "Tools" section) had no clean home. A
+  per-feed flag has no such edge case — any feed, in any section, simply
+  isn't shown until deliberately marked. `Library.seed_current_feed_sides()`
+  (settings-flagged, same discipline as `seed_paywall_cookie_flags`) seeded
+  existing rows once from their section at the time; **new feeds default to
+  hidden** (Brian's own call — deliberate over unreviewed). Admin control is
+  one auto-submitting dropdown per row on `/admin/reader/feeds` itself
+  (Hidden/Old school/New school — `_CURRENT_FEED_SELECT_CHOICES`, shared
+  with the add/edit form) plus the same control there. **The hidden-feed
+  footnote is public, not admin-only** — since a hidden feed is still in
+  FP&A Buddy's web-search allowlist, silently hiding it from the tracklist
+  would misrepresent the tool: `_current_feed_hidden_footnote()` names every
+  hidden feed grouped by section, derived from the data at render time
+  (never a hardcoded list), with a plain "excluded from the tracklist
+  format, not from search" disclosure. Every track links to `feeds.html_url`
+  (the writer's own site, populated at add-time from the feed's own
+  `<link>`/alternate — already existed, already populated on every
+  production row, no new column needed), never `xml_url`. Track titles use
+  Caveat (`var(--font-sticker)`, 700 weight, 16px) — reversed from an
+  initial Permanent-Marker-wordmark pass, since that face is built for a
+  word or two, not seventeen names of varying length. **No coral anywhere
+  on this page** — the Side A/Side B divider was considered and explicitly
+  rejected as a coral moment (structure isn't something a reader acts on).
+  Reachable from `/how-this-is-built`'s origin story, a small link on
   `/tools/fpa-buddy` near the Sources chips, and the `web-search`
   `ai_surfaces` explainer's own body (closed via
   `scripts/add_current_feed_link_to_web_search_explainer.py`, a one-off,

@@ -336,17 +336,18 @@ undecorated).
 
 **New tokens** (see §7 for the generated block): `--ink-graffiti:#0d0d0d` (sticker
 borders/shadows only — never a fill or text color elsewhere), `--font-sticker:
-'Caveat',cursive` (sticker-only), and `--font-wordmark:'Permanent Marker',cursive`.
-**One approved, deliberate exception to "wordmark-only"**: `/current-feed`'s
-tracklist (2026-09) also sets each track's title in `var(--font-wordmark)`, at
-20px, one per line, title only — never metadata (author, cadence stay DM Sans).
-Considered and approved specifically because a tracklist's own numbered "track
-name" reads as a display element the same way a wordmark does, at a size large
-enough that Permanent Marker's heavy, imprecise strokes stay legible — the
-opposite of body-copy-density text, which is exactly the case this "wordmark-only"
-rule exists to guard against. Don't extrapolate this onto a denser list (an admin
-table row, a card grid of many short labels) without the same size/short-text
-reasoning holding.
+'Caveat',cursive`, and `--font-wordmark:'Permanent Marker',cursive` (wordmark-only —
+no exception; a first pass at `/current-feed` below tried one and it was reversed).
+**One approved, deliberate exception to "sticker-only" for `--font-sticker`**:
+`/current-feed`'s tracklist (2026-09) sets each track's title in
+`var(--font-sticker)` at 16px/700 (no rotation, border, or drop-shadow — the plain
+text style only, not the full sticker-badge treatment), title only — never
+metadata (author, cadence stay DM Sans). A first pass used the wordmark font
+instead, at 20px; reversed on direct instruction, since Permanent Marker is built
+for a word or two, not a list of names of varying length, and Caveat is already
+proven readable at this size in sticker badges. Don't extrapolate either exception
+onto a denser list (an admin table row, a card grid of many short labels) without
+the same size/short-text reasoning holding.
 
 That's the entire graffiti vocabulary. No broader illustration style, no all-over
 pattern, no graffiti marks on admin tables, forms, or the chat UI.

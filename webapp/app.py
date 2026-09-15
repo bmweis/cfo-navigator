@@ -610,9 +610,10 @@ def _seed_and_publish_feeds():
     restart), and write_opml no-ops on an empty feeds table so a fresh deploy
     can't overwrite the curated repo copy before seeding has run.
 
-    The paywall-cookie flags and the informational subscription flags seed here
-    too, each on its own settings flag. Neither is part of the OPML round trip:
-    the file has no field for either, so editing one never rewrites it.
+    The paywall-cookie flags, the informational subscription flags, and the
+    Current Feed show/side flags all seed here too, each on its own settings
+    flag. None of the three is part of the OPML round trip: the file has no
+    field for any of them, so editing one never rewrites it.
     """
     lib = _lib()
     try:
@@ -622,6 +623,7 @@ def _seed_and_publish_feeds():
         # flag, so an unreadable OPML on one boot doesn't permanently skip it.
         lib.seed_paywall_cookie_flags()
         lib.seed_active_subscriptions()
+        lib.seed_current_feed_sides()
         lib.write_opml(OPML_PATH)
     except Exception:
         # Never block boot on this. A failure here leaves the existing OPML
@@ -4378,50 +4380,51 @@ def ai_surface_article(request: Request, slug: str):
 # generates, so this doubles as "which sources can FP&A Buddy's web tier
 # actually draw from."
 #
-# Side A ("Old School") / Side B ("New School") are feed_sections.name ==
-# "Blogs" / "Substacks" respectively — matched by NAME, not id. Section ids
-# are autoincrement and not stable across environments (a fresh test DB
-# seeds them in whatever order its own fixture inserts rows), and the two
-# names are the actual semantic split this page exists to express — there's
-# no id-based derivation that would hold up better, only be more opaque.
-#
-# News and Market Insights are deliberately excluded — publications/data
-# sources, not writers, so they don't belong on a page about whose thinking
-# shaped Brian's. That's an explicit two-name exclusion list, not "every
-# section except Blogs/Substacks": the brief's own investigation prompt
-# flagged that naming two sections to include and naming two to exclude are
-# both silent the same way — either one goes quiet the moment a THIRD kind
-# of section shows up with real feeds in it (a "Tools" section already
-# exists in production, currently empty of feeds, and isn't any of these
-# four names). So this code treats the four known names explicitly and
-# treats anything else as unknown rather than silently including or
-# excluding it — see _current_feed_unknown_sections() for what "unknown"
-# actually does.
-_CURRENT_FEED_SIDES = (
-    ("Blogs", "A", "Old School"),
-    ("Substacks", "B", "New School"),
-)
-_CURRENT_FEED_KNOWN_EXCLUDED_SECTIONS = frozenset({"News", "Market Insights"})
+# Side A ("Old School") / Side B ("New School") are driven by two per-feed
+# columns — feeds.show_on_current_feed / feeds.current_feed_side — not by
+# matching feed_sections.name (the original design). That first design
+# worked for the two sections it named (Blogs, Substacks) but left a real
+# gap: a feed sitting in a section that's neither a known side nor a known
+# exclusion (production already has an empty "Tools" section) had no clean
+# home — only silent inclusion, silent exclusion, or an "unmapped" flag to
+# maintain. A per-feed flag has no such edge case: any feed, in any
+# section, simply isn't shown until someone deliberately marks it — see
+# Library.seed_current_feed_sides() for how existing rows were seeded from
+# their section on the migration that introduced these columns, and
+# _CURRENT_FEED_SELECT_CHOICES (webapp/app.py, feeds admin) for where it's
+# set going forward. New feeds default to NOT shown — Brian's own call: he'd
+# rather set it deliberately than have something appear unreviewed.
+_CURRENT_FEED_SIDE_LABELS = (("old_school", "A", "Old School"), ("new_school", "B", "New School"))
 
 
-def _current_feed_unknown_sections(feeds: list) -> list:
-    """Section names present in `feeds` that are neither a Current Feed
-    side nor a known, deliberate exclusion (News/Market Insights) — i.e. a
-    section added after this page was built, with real feeds already
-    subscribed under it. There is no way to derive whether such a section
-    belongs on this page (a new "Podcasts" section might be exactly the
-    kind of "writer" this page is about, or might not be) — so this
-    doesn't guess. It surfaces the fact that an unmapped section exists,
-    admin-only (see current_feed()'s own banner), so the gap is visible
-    instead of silent. Returns (section_name, feed_count) pairs, sorted by
-    name for a stable render."""
-    known = {name for name, _, _ in _CURRENT_FEED_SIDES} | _CURRENT_FEED_KNOWN_EXCLUDED_SECTIONS
-    counts: dict = {}
-    for f in feeds:
-        name = f["section_name"]
-        if name not in known:
-            counts[name] = counts.get(name, 0) + 1
-    return sorted(counts.items())
+def _current_feed_hidden_footnote(feeds: list) -> str:
+    """A footnote naming every feed NOT shown on this page, grouped by
+    section, plus a plain disclosure that the exclusion is presentational
+    only. This exists because the page's whole point is showing which
+    sources FP&A Buddy's web search can draw from — a feed hidden from the
+    tracklist is still in that allowlist, so silently hiding it here would
+    make the page misrepresent what the tool actually does.
+
+    Derived entirely from `feeds` at render time — never a hardcoded list
+    of names or sections, so it can't go stale as feeds are added, removed,
+    or reassigned. Returns "" when nothing is hidden (every feed marked
+    shown), since there's nothing to disclose."""
+    hidden = [f for f in feeds if not f["show_on_current_feed"]]
+    if not hidden:
+        return ""
+    by_section: dict = {}
+    for f in hidden:
+        by_section.setdefault(f["section_name"], []).append(f["name"])
+    groups = [
+        f'{_esc(section)}: {", ".join(_esc(n) for n in sorted(names))}'
+        for section, names in sorted(by_section.items())
+    ]
+    return (
+        '<p style="color:var(--muted);font-size:13px;margin:18px 0 0;line-height:1.6;">'
+        f'<strong>Not on the tape:</strong> {" &middot; ".join(groups)}. '
+        "They're excluded from the tracklist format, not from search&mdash;"
+        "FP&amp;A Buddy still searches every one of them.</p>"
+    )
 
 
 def _current_feed_track_html(feed: dict, num: int) -> str:
@@ -4447,29 +4450,24 @@ def _current_feed_track_html(feed: dict, num: int) -> str:
     )
 
 
-def _current_feed_side_html(label: str, heading: str, feeds: list, *, flip: bool = False) -> str:
+def _current_feed_side_html(label: str, heading: str, feeds: list) -> str:
     """One side of the tape. Numbering restarts at 01 per side (the real
     cassette/vinyl convention — Side A's track 1 and Side B's track 1 are
     both "1", not a continuation), matching how a mixtape actually reads.
 
-    `flip` marks the one deliberate coral moment on this page — a coral
-    underline under the Side B heading only, marking the flip of the tape.
-    Sanctioned per BRAND.md §2.3 ("a short coral underline... under a
-    single hero word or section number") — this is a plain CSS border, not
-    the graffiti-layer's separate seafoam marker-underline motif (§4.1,
-    fixed color, homepage-hero-only), so it doesn't touch or extend that
-    vocabulary at all."""
+    No coral here — Side A/Side B is structure, and per explicit direction
+    coral on structure reads as decoration, not a signal. See current_feed()
+    for where (if anywhere) this page spends its one coral moment."""
     if not feeds:
         tracks_html = '<p class="cf-empty">Nothing here yet.</p>'
     else:
         tracks_html = ('<ol class="cf-tracklist">'
                         + "".join(_current_feed_track_html(f, i) for i, f in enumerate(feeds, start=1))
                         + '</ol>')
-    heading_cls = "cf-side-heading cf-side-heading--flip" if flip else "cf-side-heading"
     return f"""<div class="cf-side">
   <div class="cf-side-header">
     <span class="cf-side-label">Side {label}</span>
-    <h2 class="{heading_cls}">{_esc(heading)}</h2>
+    <h2 class="cf-side-heading">{_esc(heading)}</h2>
   </div>
   {tracks_html}
 </div>"""
@@ -4482,17 +4480,16 @@ _CURRENT_FEED_CSS = """
 .cf-side-label{display:block;font-size:12px;font-weight:600;color:var(--muted);
   text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px;}
 .cf-side-heading{margin:0;font-size:21px;}
-.cf-side-heading--flip{display:inline-block;border-bottom:3px solid var(--coral);padding-bottom:2px;}
 .cf-tracklist{list-style:none;margin:0;padding:0;}
 .cf-track{display:flex;align-items:baseline;gap:14px;padding:10px 0;border-bottom:1px solid var(--line);}
 .cf-track:last-child{border-bottom:none;}
 .cf-track-num{flex:0 0 auto;width:24px;font:600 13px var(--font-body);color:var(--muted);
   font-variant-numeric:tabular-nums;}
 .cf-track-body{min-width:0;flex:1 1 auto;}
-.cf-track-name{font:400 20px var(--font-wordmark);color:var(--navy);text-decoration:none;
+.cf-track-name{font:700 16px var(--font-sticker);color:var(--navy);text-decoration:none;
   line-height:1.3;word-break:break-word;}
 .cf-track-name:hover{color:var(--accent);}
-.cf-track-name--unlinked{color:var(--ink-soft);cursor:default;font-family:var(--font-wordmark);font-size:20px;}
+.cf-track-name--unlinked{color:var(--ink-soft);cursor:default;font-family:var(--font-sticker);font-weight:700;font-size:16px;}
 .cf-empty{color:var(--muted);font-size:14px;font-style:italic;margin:0;}
 """
 
@@ -4500,9 +4497,9 @@ _CURRENT_FEED_CSS = """
 @app.get("/current-feed", response_class=HTMLResponse)
 def current_feed(request: Request):
     """The writers and publications Brian actually reads, rendered as a
-    mixtape tracklist — Side A ("Old School", the blogs) and Side B ("New
-    School", the Substacks). Derived entirely from the live `feeds` table
-    (Library.list_feeds(), already joined to feed_sections.name) — no
+    mixtape tracklist — Side A ("Old School") and Side B ("New School").
+    Derived entirely from the live `feeds` table (Library.list_feeds(),
+    already joined to feed_sections.name for the hidden-feed footnote) — no
     hardcoded names, no hardcoded counts, so a new subscription shows up
     with no code change and a dropped one disappears the same way.
 
@@ -4514,46 +4511,34 @@ def current_feed(request: Request):
     scripts/add_current_feed_link_to_web_search_explainer.py). Deliberately
     not in the top nav.
 
-    See _CURRENT_FEED_SIDES/_current_feed_unknown_sections() for how the
-    Blogs/Substacks split works and what happens when a feed sits in a
-    section this page doesn't recognize (News/Market Insights are a known,
-    deliberate exclusion; anything else surfaces as an admin-only banner
-    rather than silently vanishing)."""
+    See the show_on_current_feed/current_feed_side columns (feeds admin,
+    /admin/reader/feeds) for how a feed lands on a side, and
+    _current_feed_hidden_footnote() for the disclosure that a hidden feed
+    is still searched by FP&A Buddy — this is presentational-only, and the
+    page says so."""
     lib = _lib()
     try:
         feeds = lib.list_feeds()
     finally:
         lib.close()
 
-    by_section: dict = {}
+    by_side: dict = {}
     for f in feeds:
-        by_section.setdefault(f["section_name"], []).append(f)
+        if f["show_on_current_feed"]:
+            by_side.setdefault(f["current_feed_side"], []).append(f)
 
     sides_html = "".join(
-        _current_feed_side_html(label, heading, by_section.get(section_name, []), flip=(label == "B"))
-        for section_name, label, heading in _CURRENT_FEED_SIDES
+        _current_feed_side_html(label, heading, by_side.get(side, []))
+        for side, label, heading in _CURRENT_FEED_SIDE_LABELS
     )
-
-    unknown_html = ""
-    if _is_authed(request):
-        unknown = _current_feed_unknown_sections(feeds)
-        if unknown:
-            named = "; ".join(f'{_esc(name)} ({n} feed{"s" if n != 1 else ""})' for name, n in unknown)
-            unknown_html = (
-                '<p style="background:var(--alert-wash);color:var(--alert);border:1px solid var(--alert);'
-                'border-radius:10px;padding:10px 16px;font-size:13.5px;margin:18px 0 0;">'
-                f'<strong>Admin only:</strong> {named}, not Blogs, Substacks, News, or Market Insights, '
-                "so this page doesn't know whether it belongs here. Recategorize at "
-                '<a href="/admin/reader/feeds" style="color:var(--alert);text-decoration:underline;">'
-                'Manage feeds</a>, or update this page\'s section list.</p>'
-            )
+    footnote_html = _current_feed_hidden_footnote(feeds)
 
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">&larr; How this is built</a></p>
 <h1 style="margin-bottom:6px;">Current Feed</h1>
-<p style="color:var(--ink-soft);margin:0 0 4px;font-size:15.5px;line-height:1.6;">The writers and publications I actually read, in two eras. This is also the exact list FP&amp;A Buddy searches when it goes to the web—if an answer cites something from trusted web, it came from one of these.</p>
+<p style="color:var(--ink-soft);margin:0 0 4px;font-size:15.5px;line-height:1.6;">The writers and publications I actually read, in two eras. This is also the exact list FP&amp;A Buddy searches when it goes to the web&mdash;if an answer cites something from trusted web, it came from one of these.</p>
 <p style="color:var(--muted);font-size:13px;margin:0;">Every name links to the writer's own site, not the raw feed. This list changes as my subscriptions do, with no hand-maintenance behind it.</p>
-{unknown_html}
+{footnote_html}
 <div class="cf-sides">
 {sides_html}
 </div>
@@ -26382,6 +26367,22 @@ def _cookie_env_var_name(domain: str) -> str:
     return _cookie_env_var(domain)
 
 
+# Single control for both show_on_current_feed and current_feed_side —
+# one dropdown, not a checkbox plus a separate select, so "shown but no
+# side picked" can't happen as an intermediate state. "" means hidden;
+# any other value is a real current_feed_side and implies shown=True.
+# Shared by the admin list's per-row auto-submit control and the
+# add/edit form, so the two surfaces can't drift on option order/labels.
+_CURRENT_FEED_SELECT_CHOICES = (("", "Hidden"), ("old_school", "Old school"), ("new_school", "New school"))
+
+
+def _current_feed_select_options(current_value: str) -> str:
+    return "".join(
+        f'<option value="{v}"{" selected" if current_value == v else ""}>{label}</option>'
+        for v, label in _CURRENT_FEED_SELECT_CHOICES
+    )
+
+
 def _feed_form_fields(sections: list, values: dict) -> str:
     """Shared field markup for the add-feed and edit-feed forms."""
     opts = "".join(
@@ -26395,6 +26396,8 @@ def _feed_form_fields(sections: list, values: dict) -> str:
     hint = "font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;"
     sub_checked = " checked" if values.get("has_active_subscription") else ""
     cookie_readout = _feed_cookie_readout(values.get("xml_url", ""))
+    current_feed_value = values.get("current_feed_side") or "" if values.get("show_on_current_feed") else ""
+    current_feed_opts = _current_feed_select_options(current_feed_value)
     return f"""  <div>
     <label style="{lab}">Feed URL *</label>
     <input type="url" name="xml_url" required value="{_esc(values.get('xml_url', ''))}"
@@ -26423,6 +26426,11 @@ def _feed_form_fields(sections: list, values: dict) -> str:
       Subscriber
     </label>
     <p style="{hint}">Whether you currently pay for this source, as a note to yourself. It doesn't affect fetching. Nothing in the app reads this: it doesn't gate anything, doesn't reach the Reader, and is separate from the paywall cookie above.</p>
+  </div>
+  <div>
+    <label style="{lab}">Current Feed</label>
+    <select name="current_feed" style="{inp}">{current_feed_opts}</select>
+    <p style="{hint}">Off by default for a new feed—turn it on deliberately once it's worth listing. Only changes whether this appears on the public /current-feed tracklist; FP&amp;A Buddy's web search still covers every feed regardless of this setting.</p>
   </div>"""
 
 
@@ -26481,6 +26489,12 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
         aria-label="Subscriber: {_esc(f['name'])}"{' checked' if f['has_active_subscription'] else ''}>
     </form>
   </td>
+  <td class="ff-cf">
+    <form method="post" action="/admin/reader/feeds/{f['id']}/current-feed" style="margin:0;">
+      <select name="current_feed" onchange="this.form.submit()" aria-label="Current Feed: {_esc(f['name'])}"
+        style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">{_current_feed_select_options(f['current_feed_side'] if f['show_on_current_feed'] else '')}</select>
+    </form>
+  </td>
   <td class="ff-actions">
     <a href="/admin/reader/feeds/{f['id']}/edit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Edit</a>
     <form method="post" action="/admin/reader/feeds/{f['id']}/delete" style="display:inline;margin:0 0 0 4px;"
@@ -26490,7 +26504,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   </td>
 </tr>"""
     if not feeds:
-        feed_rows = ('<tr class="ff-row"><td colspan="6" class="ff-empty">'
+        feed_rows = ('<tr class="ff-row"><td colspan="7" class="ff-empty">'
                      'No feeds yet. Add a section below, then add a feed to it.</td></tr>')
 
     # -- manage sections: a table matching the feed table above --------------
@@ -26573,13 +26587,14 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .ff-table thead th,.fs-table thead th{{padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);
   font-weight:600;text-transform:uppercase;letter-spacing:.06em;background:var(--bg);}}
 .ff-table tbody tr:first-child>td,.fs-table tbody tr:first-child>td{{border-top:0;}}
-.ff-name{{font-weight:600;font-size:14px;width:18%;}}
-.ff-url{{font-size:13px;color:var(--muted);width:23%;}}
+.ff-name{{font-weight:600;font-size:14px;width:15%;}}
+.ff-url{{font-size:13px;color:var(--muted);width:18%;}}
 .ff-url a{{word-break:break-all;}}
-.ff-section{{width:14%;}}
-.ff-cookie{{width:10%;text-align:center;}}
-.ff-sub{{width:10%;text-align:center;}}
-.ff-actions{{width:25%;text-align:right;white-space:nowrap;}}
+.ff-section{{width:12%;}}
+.ff-cookie{{width:9%;text-align:center;}}
+.ff-sub{{width:9%;text-align:center;}}
+.ff-cf{{width:15%;}}
+.ff-actions{{width:22%;text-align:right;white-space:nowrap;}}
 .ff-empty{{padding:16px 12px;color:var(--muted);font-size:13.5px;}}
 /* Sections table — same shape as the feed table, three columns. */
 .fs-name{{width:50%;}}
@@ -26604,12 +26619,16 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   .ff-row,.fs-row{{border-top:1px solid var(--line);padding:10px 0;}}
   .ff-table tbody tr:first-child,.fs-table tbody tr:first-child{{border-top:0;}}
   .ff-row>td,.fs-row>td{{border-top:0;padding:3px 12px;}}
-  .ff-cookie,.ff-sub,.ff-actions,.fs-actions{{text-align:left;}}
+  .ff-cookie,.ff-sub,.ff-cf,.ff-actions,.fs-actions{{text-align:left;}}
   .ff-section::before{{content:"Section";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   /* Always labelled, unlike the cookie cell: this is a checkbox that carries
      meaning in both states, so an unchecked box still needs its label. */
   .ff-sub::before{{content:"Subscriber";display:block;font-size:11.5px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
+  /* Always labelled, same reasoning as Subscriber — "Hidden" carries
+     meaning too, it's not an empty/default state to hide the label for. */
+  .ff-cf::before{{content:"Current Feed";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   /* Labelled unconditionally, same as Subscriber. Holds a computed
      configured/not-configured readout that carries meaning in both states
@@ -26632,16 +26651,18 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
 <li><strong>Cookie</strong> shows whether this feed's domain has a subscriber cookie set up right now. Each domain gets its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable in Railway; set one there and it's picked up automatically the next time that feed is fetched. <strong>The cookie value itself is never stored in this database</strong>&mdash;only which domains to check is baked into the code. See <code>RUNBOOK.md</code> &sect;5 to refresh an expired one.</li>
 <li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
+<li><strong>Current Feed</strong> controls whether&mdash;and on which side&mdash;this feed appears on the public <a href="/current-feed" style="color:var(--accent);">/current-feed</a> tracklist. A new feed starts Hidden; that's deliberate, not a bug. This is presentation only&mdash;FP&amp;A Buddy's web search still covers every feed here regardless of this setting, and the tracklist page itself says so.</li>
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
   <table class="ff-table">
     <thead><tr>
-      <th style="width:18%;">Name</th><th style="width:23%;">URL</th>
-      <th style="width:14%;">Section</th>
-      <th style="width:10%;text-align:center;">Cookie</th>
-      <th style="width:10%;text-align:center;">Subscriber</th>
-      <th style="width:25%;text-align:right;">Actions</th>
+      <th style="width:15%;">Name</th><th style="width:18%;">URL</th>
+      <th style="width:12%;">Section</th>
+      <th style="width:9%;text-align:center;">Cookie</th>
+      <th style="width:9%;text-align:center;">Subscriber</th>
+      <th style="width:15%;">Current Feed</th>
+      <th style="width:22%;text-align:right;">Actions</th>
     </tr></thead>
     <tbody>{feed_rows}</tbody>
   </table>
@@ -26805,6 +26826,30 @@ async def admin_feeds_set_subscription(request: Request, feed_id: int):
     return RedirectResponse(f"/admin/reader/feeds?msg={quote(detail)}", status_code=303)
 
 
+@app.post("/admin/reader/feeds/{feed_id}/current-feed")
+async def admin_feeds_set_current_feed(request: Request, feed_id: int):
+    """Set show_on_current_feed/current_feed_side from the table's own
+    per-row dropdown — same narrow, single-purpose shape as the Section and
+    Subscriber routes above: one control, auto-submits on change, never
+    touches the URL. A value of "" means hidden; anything else is a real
+    side and implies shown=True (see _CURRENT_FEED_SELECT_CHOICES)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    side = (form.get("current_feed") or "").strip()
+    lib = _lib()
+    try:
+        feed = lib.get_feed(feed_id)
+        if not feed:
+            raise HTTPException(status_code=404, detail="feed not found")
+        lib.set_feed_current_feed_display(feed_id, bool(side), side)
+        label = dict(_CURRENT_FEED_SELECT_CHOICES).get(side, "Hidden")
+        detail = f"{feed['name']} on /current-feed: {label}."
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/reader/feeds?msg={quote(detail)}", status_code=303)
+
+
 @app.get("/admin/reader/feeds/new", response_class=HTMLResponse)
 def admin_feeds_new(request: Request):
     if not _is_authed(request):
@@ -26858,7 +26903,9 @@ async def admin_feeds_new_submit(request: Request):
         "section_id": (form.get("section_id") or "").strip(),
         # Informational only — nothing reads it.
         "has_active_subscription": bool(form.get("has_active_subscription")),
+        "current_feed_side": (form.get("current_feed") or "").strip(),
     }
+    values["show_on_current_feed"] = bool(values["current_feed_side"])
     lib = _lib()
     try:
         sections = lib.list_feed_sections()
@@ -26887,7 +26934,9 @@ async def admin_feeds_new_submit(request: Request):
         # CLAUDE.md's Feeds-page Cookie indicator note and its Archive Queue
         # retirement note), so every new feed just takes the column defaults.
         lib.add_feed(int(values["section_id"]), name, values["xml_url"], html_url,
-                     has_active_subscription=values["has_active_subscription"])
+                     has_active_subscription=values["has_active_subscription"],
+                     show_on_current_feed=values["show_on_current_feed"],
+                     current_feed_side=values["current_feed_side"])
         _publish_feeds(lib)
     finally:
         lib.close()
@@ -26910,7 +26959,9 @@ def admin_feeds_edit(request: Request, feed_id: int):
               "html_url": feed["html_url"], "section_id": feed["section_id"],
               # Round-tripped so a save that doesn't touch this field can't
               # clear it — update_feed writes it on every call.
-              "has_active_subscription": bool(feed["has_active_subscription"])}
+              "has_active_subscription": bool(feed["has_active_subscription"]),
+              "show_on_current_feed": bool(feed["show_on_current_feed"]),
+              "current_feed_side": feed["current_feed_side"]}
     return HTMLResponse(_page("Edit feed—Library Admin", "Admin",
                               _feed_form_page(f'Edit {feed["name"]}',
                                               f"/admin/reader/feeds/{feed_id}/edit",
@@ -26931,7 +26982,9 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
         "section_id": (form.get("section_id") or "").strip(),
         # Informational only — see the add route.
         "has_active_subscription": bool(form.get("has_active_subscription")),
+        "current_feed_side": (form.get("current_feed") or "").strip(),
     }
+    values["show_on_current_feed"] = bool(values["current_feed_side"])
     lib = _lib()
     try:
         feed = lib.get_feed(feed_id)
@@ -26974,7 +27027,9 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
                         values["xml_url"], html_url,
                         exclude_from_queue=bool(feed["exclude_from_queue"]),
                         has_paywall_cookie=bool(feed["has_paywall_cookie"]),
-                        has_active_subscription=values["has_active_subscription"])
+                        has_active_subscription=values["has_active_subscription"],
+                        show_on_current_feed=values["show_on_current_feed"],
+                        current_feed_side=values["current_feed_side"])
         _publish_feeds(lib)
         saved_name = values["name"]
     finally:
