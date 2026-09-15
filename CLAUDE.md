@@ -8548,6 +8548,60 @@ it supersedes the old "`/save` is token-gated" note.
   fallback is a real `overflow:hidden` wrapper around the input —
   containment rather than sizing, which cannot fail regardless of what the
   control wants — not yet needed, not yet built.
+- **Overhead spend fixes, round 6 (2026-09, PR 559 merged) — `appearance:none`
+  fixed the width, but stripped WebKit's own vertical padding around the
+  picker segments along with the chrome, leaving the date input roughly
+  half the height of its siblings.** Brian's own diagnostic again pointed
+  at the exact right layer before any code was written: measure a sibling
+  text input's rendered height first and target that number, rather than
+  guessing at a fix. Confirmed in this sandbox's Chromium that the collapse
+  itself doesn't reproduce here — every before-fix measurement on all
+  three real `type="date"` inputs showed Date already at or above its
+  sibling's rendered height (e.g. 45.09px vs. Vendor/Amount's 43.09px on
+  the Add-a-charge form, 37.4375px matching Vendor exactly on the
+  overhead-details form, 29px vs. Note's 27px on the Feature Taxonomy
+  table) — consistent with the standing pattern in this investigation:
+  Chromium has never reproduced a single one of the real symptoms Brian's
+  iPhone 16 Pro (WebKit) has shown across all six rounds. **Fix: an
+  explicit `min-height` on all three inputs, sized to that context's own
+  sibling text input's measured Chromium height** — 43px (Add-a-charge,
+  matching Vendor/Amount), 37px (overhead-details, matching Vendor in the
+  Vendor+Date row — Amount/Category's own row measures 2px shorter, no
+  `font-weight:500`, so Date's floor targets its real row-mate, not the
+  other row), 27px (Feature Taxonomy, matching Note in the same row). This
+  is a floor, not a resize: verified live before/after that it changes
+  nothing in this sandbox (Date was already taller everywhere), and it can
+  only ever raise a collapsed box up to the sibling height, never push a
+  correctly-sized one down — the mechanism this investigation needed from
+  the start of round 6, since `min-height` composes safely with whatever
+  `appearance:none` does to an engine's internal height calculation without
+  having to know what that calculation actually produces. `tests/
+  test_overhead_spend_grid_regression.py` gained `_declared_min_height`
+  (extracts the numeric px value, proven to fail against the exact round-5
+  shape with `appearance:none` present but no `min-height` yet) — wired
+  into both page-render tests (asserting the exact 43px/37px value on that
+  page's own Date input) and the sitewide source-sweep test (asserting all
+  three sitewide values, sorted, since the regex-based sweep can't
+  distinguish the three inputs by name alone). It also gained a genuinely
+  new kind of check for this file — two tests that launch a real Chromium
+  browser (`_launch_chromium`, `pytest.skip`ping cleanly wherever a browser
+  isn't resolvable, per this repo's own testing-convention precedent for
+  Playwright-adjacent coverage that can't assume a browser exists in every
+  environment) and compare the Date input's real rendered height against
+  its sibling's, within a small pixel tolerance — real coverage in any
+  environment with a working Chromium, a no-op (never a CI failure)
+  everywhere else, since `.github/workflows/qa.yml` installs only
+  `requirements-dev.txt`, no browser binary. **Still no live WebKit
+  confirmation possible from this sandbox** (`playwright install webkit`
+  remains a confirmed 403 policy denial, not transient) — the fix is
+  justified by the mechanical fact that `min-height` is a hard floor in
+  every standards-compliant engine, the same category of justification
+  every prior round in this investigation has had to fall back on for
+  exactly this reason. Six rounds, six real, kept fixes — stacking,
+  track-level containment, input-level `max-width`/`min-width`, native-
+  chrome stripping, and now a height floor — each fixing a real defect
+  along the way, only the accumulation of all six actually closing the bug
+  end to end on the one engine that ever showed it.
 
 - **`/admin/copy` split into three pages, one per public page it edits
   (2026-09).** The single "Site copy" page had grown to eight sections

@@ -18569,7 +18569,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </td>
   <td style="padding:8px 8px;text-align:center;"><input type="checkbox" name="feature_{f['id']}_ai_enabled" value="1" {ai_checked}></td>
   <td style="padding:8px 8px;"><input type="date" name="feature_{f['id']}_verified_as_of" value="{_esc(verified)}"
-    style="width:130px;max-width:100%;min-width:0;-webkit-appearance:none;appearance:none;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;box-sizing:border-box;"></td>
+    style="width:130px;max-width:100%;min-width:0;min-height:27px;-webkit-appearance:none;appearance:none;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;box-sizing:border-box;"></td>
   <td style="padding:8px 8px;min-width:120px;"><input type="text" name="feature_{f['id']}_note" value="{_esc(note)}" maxlength="500" placeholder="Note"
     style="width:100%;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;"></td>
   <td style="padding:8px 8px;min-width:120px;"><input type="url" name="feature_{f['id']}_source_url" value="{_esc(source_url)}" maxlength="500" placeholder="Source URL"
@@ -28092,13 +28092,24 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
            iOS still opens the native date picker on tap regardless —
            that's platform tap behavior, not CSS-controlled — so this
            only changes the field's own visual chrome, not the picker.
-           (2026-09, Round 6). See CLAUDE.md's overhead-spend-fixes entry
-           for the full history. -->
+           (2026-09, Round 6). Round 7: appearance:none also strips
+           WebKit's own vertical padding around the picker segments along
+           with the chrome, so the same declared padding that produces a
+           normal-height text input renders roughly half as tall on a
+           date input — confirmed on a real device (Vendor/Amount
+           unaffected, only Date short). Chromium in this sandbox never
+           reproduced the collapse (measured Date >= its sibling text
+           input's height here), so `min-height` is a floor, not a resize:
+           it changes nothing where the box is already tall enough and
+           only kicks in where an engine collapses it. Value matches the
+           sibling text input's own measured rendered height at this
+           padding/font-size (43px), not a guess. See CLAUDE.md's
+           overhead-spend-fixes entry for the full history. -->
       <div class="oh-grid-2">
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
-            style="width:100%;max-width:100%;min-width:0;-webkit-appearance:none;appearance:none;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+            style="width:100%;max-width:100%;min-width:0;min-height:43px;-webkit-appearance:none;appearance:none;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
         </div>
         <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
@@ -28248,7 +28259,7 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
         <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
           style="width:100%;max-width:100%;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;box-sizing:border-box;">
         <input type="date" name="date" value="{_esc(e['date'])}" required
-          style="width:100%;max-width:100%;min-width:0;-webkit-appearance:none;appearance:none;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;box-sizing:border-box;">
+          style="width:100%;max-width:100%;min-width:0;min-height:37px;-webkit-appearance:none;appearance:none;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;box-sizing:border-box;">
       </div>
       <div class="oh-grid-2">
         <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
