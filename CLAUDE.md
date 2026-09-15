@@ -8294,6 +8294,57 @@ it supersedes the old "`/save` is token-gated" note.
   verification in this codebase should say which engine actually produced
   it. See `BRAND.md`'s "Admin table column widths" section for the
   `_COL_WIDTH_VENDOR` write-up.
+- **Overhead spend fixes, follow-up (2026-09) — the `min-width:0` fix above
+  did not work either; Date/Amount are stacked now, not fixed a third time.**
+  A screenshot from the deployed `min-width:0` fix still showed the overlap
+  on Brian's real iPhone 16 Pro — the second CSS Grid "correct-looking"
+  attempt in a row that didn't survive WebKit (the first was `auto-fit`/
+  `minmax`). Both tried to keep Date and Amount side by side and make the
+  shared row absorb whatever minimum width WebKit's native
+  `<input type="date">` actually demands — a number this sandbox still can't
+  measure (Playwright's WebKit browser remains uninstallable here, a
+  confirmed 403 policy denial, not a transient failure). **Stopped trying to
+  make the two-column grid survive the engine and stacked the fields
+  instead**: every other field in both affected forms (Vendor, Category,
+  Note) was already full width; Date and Amount were the only side-by-side
+  pair and the only thing that has ever broken here. A shared `.oh-grid-2`
+  class (`1fr 1fr` above 640px, `1fr` at or below it via
+  `@media(max-width:640px)`) replaces the auto-fit/minmax/min-width:0
+  machinery on both the Add-a-charge form and the overhead-details inline
+  edit form's Vendor+Date/Amount+Category pairs. **A single-column layout has
+  no shared row for two fields' content-minimums to collide in — there is no
+  CSS Grid failure mode left to get wrong, in any engine.** 640px is not a
+  measured WebKit number; it's picked to be comfortably above anything a
+  native date input is likely to demand, and matches this codebase's own
+  `.page-form` width tier.
+  **Also found the real root cause of the scroll hint's cramped spacing,
+  which turned out to be a genuinely missing stylesheet, not just a tight
+  gap value**: `.admin-scroll-hint` was defined inside `_CMP_SHARED_CSS`,
+  which is injected on exactly two pages (the Software/Communities Compare
+  pages) — but `_ADMIN_SCROLL_HINT_HTML`/`_JS` are reused on every wide admin
+  table (Software, Communities, Overhead spend details), so the hint
+  rendered with **zero** styling on all three: no gap, no color, no
+  font-size, no margin, only the inline `style="display:none"`/JS-toggled
+  `flex` controlling visibility. That's the actual mechanism behind "the
+  icon sits flush against the text and the whole thing hugs the table's
+  top-left corner" — there was no rule reaching the page at all. Moved
+  `.admin-scroll-hint`/`.admin-scroll-hint svg` into the sitewide `_CSS`
+  (injected on every page via `_page()`), so any future page reusing this
+  component gets the styling for free instead of silently repeating the same
+  gap, and widened `gap` (6px→10px) and the bottom margin (8px→14px) now
+  that it actually applies.
+  `tests/test_overhead_spend_grid_regression.py` was rewritten end to end —
+  the old `min-width:0`-presence checker is replaced with a stacking checker
+  that confirms each `.oh-grid-2` collapses to a genuine single track at or
+  below 640px, proven to fail against BOTH of the two previous, now-
+  abandoned fix shapes (`auto-fit`/`minmax` alone, and `min-width:0`) before
+  being trusted — the same "a guard that can never fail is worse than none"
+  discipline this repo already applies elsewhere. Still no live WebKit
+  confirmation possible from this sandbox; the fix is justified by the
+  simple, mechanical fact that two elements on separate grid rows cannot
+  overlap horizontally regardless of either one's own content-minimum,
+  which needs no browser to verify — only that the CSS actually collapses
+  to one column at the right breakpoint, which the test does confirm.
 
 
 ## Authentication & security

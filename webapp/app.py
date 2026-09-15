@@ -1599,6 +1599,24 @@ details[open] > summary .disclosure-caret{transform:rotate(90deg);}
   animation:gen-anim-march 2.6s linear infinite;}
 @keyframes gen-anim-march{to{stroke-dashoffset:-36px;}}
 @media (prefers-reduced-motion: reduce){.gen-anim-svg rect{animation:none;}}
+
+/* Admin table scroll hint (PR 32, 2026-09) — see _ADMIN_SCROLL_HINT_HTML/_JS.
+   Moved here from _CMP_SHARED_CSS (2026-09 follow-up): that block is only
+   ever injected on the two Compare pages, but _ADMIN_SCROLL_HINT_HTML/_JS
+   are used on every wide admin table (Software, Communities, Overhead
+   spend details), so this class was rendering completely unstyled on all
+   three — no gap, no color, no font-size, no margin, since the inline
+   style="display:none" only ever controlled visibility, never appearance.
+   That's the actual root cause of "the icon sits flush against the text
+   and the whole thing hugs the table's top-left corner": there was no
+   styled rule reaching the page at all, not merely a cramped one. Living
+   in the sitewide CSS (injected on every page via _page()) means any
+   future page that reuses _ADMIN_SCROLL_HINT_HTML gets this for free,
+   instead of silently repeating the same gap. The base display:none here
+   is the pre-JS/no-JS fallback (a visible hint that never disappears is
+   worse than none) — JS flips it to flex once real overflow is detected. */
+.admin-scroll-hint{display:none;align-items:center;gap:10px;color:var(--muted);font-size:12.5px;margin:4px 0 14px;}
+.admin-scroll-hint svg{flex-shrink:0;}
 """
 
 # Admin table width floors (PR 14, 2026-09) — replaces 22 hand-picked
@@ -2290,12 +2308,6 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 @media (max-width:700px){{
   .cmp-swipe-hint{{display:flex;}}
 }}
-/* Admin table scroll hint (PR 32, 2026-09) — see _ADMIN_SCROLL_HINT_HTML/_JS
-   for why this is overflow-gated by JS rather than a breakpoint like
-   .cmp-swipe-hint above; the base display:none here is the pre-JS/no-JS
-   fallback (a visible hint that never disappears is worse than none). */
-.admin-scroll-hint{{align-items:center;gap:6px;color:var(--muted);font-size:12.5px;margin:0 0 8px;}}
-.admin-scroll-hint svg{{flex-shrink:0;}}
 /* AI comparison summary (Compare Redesign Phase 2) — a light seafoam card
    above the table, same register as this page's own intro paragraph, not a
    loud callout: this is a heads-up, not the page's main content. */
@@ -27633,31 +27645,28 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
-      <!-- auto-fit/minmax, not a hardcoded 1fr 1fr (CSS Grid blowout — see
-           CLAUDE.md's Phase P note): a native <input type="date"> has a
-           fixed intrinsic rendering minimum that doesn't shrink below that
-           regardless of width:100%, so a rigid 1fr/1fr track forced this
-           whole card — and therefore the page — to overflow horizontally
-           on real phone widths (measured: 320px through 414px in
-           Chromium). minmax(140px,1fr) alone was not enough, and this is
-           the regression this codebase hit twice (2026-09): a grid item
-           defaults to min-width:auto, so its track still can't shrink
-           below the item's own content minimum even inside a minmax
-           track — and WebKit's native date input has a substantially
-           larger content-minimum than Chromium's, which the original fix
-           (verified in Chromium only) never accounted for. min-width:0 on
-           both grid-item divs below is required so the track can actually
-           shrink to the minmax floor in every engine, not just the one
-           this was tested in. See CLAUDE.md's overhead-spend-fixes entry
-           for the full history and the WebKit-install limitation of this
-           dev sandbox. -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;">
-        <div style="min-width:0;">
+      <!-- Two-column ONLY above 640px, via the .oh-grid-2 class defined in
+           this page's own <style> block below — a single column has no
+           overlap failure mode to get wrong, unlike an auto-fit/minmax
+           track (2026-09-01) or min-width:0 on the grid items (2026-09,
+           PR 553), both of which looked correct and both of which a real
+           iPhone 16 Pro (WebKit) still overlapped: a native
+           <input type="date"> has a larger intrinsic content-minimum in
+           WebKit than in Chromium, and every prior fix here was verified
+           in Chromium only. 640px is comfortably above any width WebKit's
+           date-input minimum is likely to demand, and matches this
+           codebase's own .page-form width tier — not tuned to a measured
+           WebKit number, since this dev sandbox cannot install/run
+           Playwright's WebKit browser (confirmed 403 policy denial on the
+           download hosts, not a transient failure). See CLAUDE.md's
+           overhead-spend-fixes entry for the full history. -->
+      <div class="oh-grid-2">
+        <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
           <input type="date" name="date" required
             style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
         </div>
-        <div style="min-width:0;">
+        <div>
           <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
           <input type="number" step="0.01" name="amount" required placeholder="0.00"
             style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
@@ -27751,6 +27760,8 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 </div>
 <style>
 tbody tr{{border-top:1px solid var(--line);}}
+.oh-grid-2{{display:grid;grid-template-columns:1fr 1fr;gap:14px;}}
+@media(max-width:640px){{.oh-grid-2{{grid-template-columns:1fr;}}}}
 </style>
 </div>"""
     return HTMLResponse(_page("Overhead spend—Admin", "Admin", body, authed=True))
@@ -27799,17 +27810,17 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
   <td colspan="6" style="padding:12px;background:var(--bg);">
     <form method="post" action="/admin/overhead-spend/{eid}/edit" style="display:grid;gap:6px;margin:0 0 8px;max-width:640px;">
       <input type="hidden" name="back" value="details">
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;">
+      <div class="oh-grid-2">
         <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
-          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;">
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;">
         <input type="date" name="date" value="{_esc(e['date'])}" required
-          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;">
+      <div class="oh-grid-2">
         <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
-          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
         <input type="text" name="category" value="{_esc(e['category'])}" maxlength="60" placeholder="Category" list="overhead-categories-details"
-          style="min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
       </div>
       <input type="text" name="note" value="{_esc(e['note'])}" maxlength="300" placeholder="Note (optional)"
         style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:#fff;">
@@ -27856,6 +27867,10 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
   </table>
 </div>
 {datalist}
+<style>
+.oh-grid-2{{display:grid;grid-template-columns:1fr 1fr;gap:6px;}}
+@media(max-width:640px){{.oh-grid-2{{grid-template-columns:1fr;}}}}
+</style>
 <script>{_ADMIN_SCROLL_HINT_JS}
 function toggleOverheadEdit(id) {{
   var row = document.getElementById('oh-row-' + id);
