@@ -3288,24 +3288,6 @@ def _underline_phrase(text: str, phrase: str, stroke: float = 4.0, color: str = 
     return f"{_esc(before)}{underlined}{_esc(after)}"
 
 
-def _link_phrase(text: str, phrase: str, href: str) -> str:
-    """Wrap the first case-insensitive occurrence of `phrase` (raw,
-    unescaped) inside `text` in a plain inline link — same phrase-matching
-    approach as `_underline_phrase` above, applied to a link instead of an
-    accent (the About page: "I was AI-native before AI-native was a thing"
-    is the entry point into /how-this-is-built). Falls back to the plain
-    escaped text when `phrase` isn't found (e.g. the admin-editable
-    about-page copy is rewritten without it) — the phrase still renders,
-    it just stops being a link, rather than the page breaking."""
-    lower_text, lower_phrase = text.lower(), phrase.lower()
-    idx = lower_text.find(lower_phrase)
-    if idx == -1:
-        return _esc(text)
-    before, match, after = text[:idx], text[idx:idx + len(phrase)], text[idx + len(phrase):]
-    linked = (f'<a href="{_esc(href)}" style="color:var(--navy);">{_esc(match)}</a>')
-    return f"{_esc(before)}{linked}{_esc(after)}"
-
-
 def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
     """2px-stroke line-icon badge for a card-row grid (2-up, 3-up, or 4-up).
     Cycles seafoam-wash -> navy-wash by `index` (coral dropped from this
@@ -3779,7 +3761,7 @@ Finance functions from scratch. Trust with boards, teams, and the room outside t
 
 Right now that shows up in three places at once. Building it inside Mux. Advising early-stage companies selling into the office of the CFO, who need someone who's sat in that seat. And showing up for the finance community itself, as a voice (or shoulder) on where AI earns its keep in finance versus where it's just hype.
 
-Different rooms, same instinct: see around corners, take action early, think a few steps ahead, bring the people around me into it. I was AI-native before AI-native was a thing, and I still read more from other finance and AI thinkers than I write myself.
+Different rooms, same instinct: see around corners, take action early, think a few steps ahead, bring the people around me into it. I was <a href="/how-this-is-built" style="color:var(--navy);">AI-native before AI-native was a thing</a>, and I still read more from other finance and AI thinkers than I write myself.
 
 None of that's abstract. I led finance through two acquisitions—Ansible to Red Hat, Tidelift to Sonar—both LOI to close in under 45 days. At Tidelift I took the company from under a dozen people to 70-plus, raised $73.5M through Series B and C, and built the payment infrastructure behind it. I'm a founding member of The F Suite, a network of 1,000-plus CFOs, and I host The Cash Flow Show with OnlyCFO. Earned secrets—the kind you only get from being in the room—are the throughline in all of it.
 
@@ -3798,31 +3780,6 @@ def _copy_paragraphs_html(text: str, style: str = "") -> str:
     attr = f' style="{style}"' if style else ""
     return "".join(f"<p{attr}>{_esc(p)}</p>" for p in paras)
 
-
-# The phrase this links, verbatim, out of the admin-editable about-page copy
-# — see _link_phrase's own docstring and CLAUDE.md's "How this is built"
-# entry. Kept as a named constant rather than a literal buried inside
-# _about_copy_html so the one place that has to stay in sync with the
-# default copy above is easy to find.
-_ABOUT_AI_NATIVE_PHRASE = "AI-native before AI-native was a thing"
-
-
-def _about_copy_html(text: str) -> str:
-    """Same paragraph split as `_copy_paragraphs_html`, except whichever
-    paragraph contains `_ABOUT_AI_NATIVE_PHRASE` gets that phrase linked to
-    /how-this-is-built — the claim and its evidence in one sentence. Falls
-    back to `_copy_paragraphs_html`'s own plain rendering, paragraph by
-    paragraph, whenever the phrase isn't present (an admin rewrite of the
-    about-page copy) — the page never breaks, the phrase just stops being
-    a link."""
-    paras = [p.strip() for p in text.strip().split("\n\n") if p.strip()]
-    out = []
-    for p in paras:
-        if _ABOUT_AI_NATIVE_PHRASE.lower() in p.lower():
-            out.append(f"<p>{_link_phrase(p, _ABOUT_AI_NATIVE_PHRASE, '/how-this-is-built')}</p>")
-        else:
-            out.append(f"<p>{_esc(p)}</p>")
-    return "".join(out)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -4018,7 +3975,7 @@ def about_page(request: Request):
   </div>
 </div>
 
-{_about_copy_html(about_copy)}
+{_render_original_content_markdown(about_copy)}
 
 <div style="display:grid;grid-template-columns:2fr 3fr;gap:10px;margin-top:32px;">
   <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking on stage"
@@ -4039,19 +3996,23 @@ def about_page(request: Request):
     return HTMLResponse(_page("About—Brian Weisberg", "About", body, role=_role(request)))
 
 
-# Surfaces shown on /how-this-is-built below — (title, one-line description,
-# href or "" for a not-yet-written explainer). Kept as one module-level
-# tuple, not inline in the route, so a future explainer page just needs its
-# href filled in here rather than the route itself edited. Order follows the
-# build brief's own table: the one live page first, then the three not yet
-# written, in the order they were investigated for the research brief
-# (docs/AI_SURFACES_BRIEF.md).
+# Seed data for scripts/migrate_ai_surfaces.py only — the four cards below
+# used to be rendered directly from this tuple, but the explainers-collection
+# PR moved that job to the DB-backed `ai_surfaces` table (Library.
+# list_ai_surfaces / add_ai_surface / etc.), the same "add a piece, set a
+# slug, write the body, flip it live" shape Original content already has.
+# Kept here, unimported by the live route, purely as the migration script's
+# source data and as a rollback reference — same precedent as
+# _TL_FEATURED_CARDS/webapp/thought_leadership_data.py elsewhere in this
+# file. Order follows the build brief's own table: the one live page first,
+# then the three not yet written, in the order they were investigated for
+# the research brief (docs/AI_SURFACES_BRIEF.md).
 #
-# Deliberately NOT admin-editable copy, unlike the four prose sections below
-# (see _HTIB_INTRO and friends): each card is structured — title, description,
-# link, coming-soon state — and its href points at a real route, so it belongs
-# in code alongside the routes it links to rather than in a settings row an
-# edit could silently break.
+# FP&A Buddy is the one row whose own explainer already lives elsewhere
+# (/tools/fpa-buddy/how-it-works, outside the ai_surfaces/how-this-is-built
+# system entirely) — seeded as a Live row with body_md left NULL and
+# external_href pointing there, so the card links straight out rather than
+# to a /how-this-is-built/<slug> page that would just 404.
 _AI_SURFACES = (
     ("FP&A Buddy",
      "An interactive chatbot that answers your burning strategic finance questions from my "
@@ -4148,57 +4109,73 @@ _HTIB_FOOTNOTE_DEFAULT = (
 )
 
 
+# Explainers-collection Phase 2 — the five prose sections above consolidate
+# into two settings keys/admin textareas, split exactly where the four
+# surface cards interrupt the page: "before" (intro + "Why I built this")
+# and "after" ("How I decided..." + "What else I've built..." + footnote).
+# A single field for the whole page isn't possible without either moving
+# the cards to the end of the page (a real layout change) or introducing a
+# placeholder token — and a genuinely single field for "before" or "after"
+# runs into the same problem one level down: the intro's own font-size/
+# line-height/color and the footnote's own border-top/small-print treatment
+# are each distinct, template-level styling around ONE of several
+# sub-sections of a combined field, not the whole thing — so this reuses
+# the identical raw-HTML-tolerant convention every other how-this-is-built
+# field already has and threads the same lightweight `<!--split-->` marker
+# through each combined field to mark that same sub-section boundary,
+# rather than fabricate a placeholder scheme just for this. This is
+# disclosed explicitly rather than silently: it is a real placeholder
+# token, the kind the brief that requested this consolidation flagged as
+# "more machinery, not less" — chosen anyway because it's the only way to
+# get to two settings keys while keeping every sub-section's own distinct
+# styling and rendering byte-identical to the pre-consolidation five-field
+# version. An admin editing either field sees the marker in the raw text
+# and is told, in the field's own description, not to remove it.
+_HTIB_SPLIT_MARKER = "\n\n<!--split-->\n\n"
+
+_HTIB_BEFORE_DEFAULT = _HTIB_INTRO_DEFAULT + _HTIB_SPLIT_MARKER + _HTIB_WHY_I_BUILT_THIS_DEFAULT
+_HTIB_AFTER_DEFAULT = (
+    _HTIB_HOW_I_DECIDED_DEFAULT + _HTIB_SPLIT_MARKER + _HTIB_WHAT_ELSE_DEFAULT
+    + _HTIB_SPLIT_MARKER + _HTIB_FOOTNOTE_DEFAULT
+)
+
 # One row per admin-editable section of /how-this-is-built. Single source of
 # truth for the settings keys, the /admin/copy/how-this-is-built page's
-# sections, and the save route — add a section here and all three pick it up
+# sections, and the save route — add a section here and both pick it up
 # (same registry precedent as _email_template_registry()).
 #
-# `html_ok` is True for every row because all five render through
-# _render_original_content_markdown, which passes raw HTML straight through.
-# That is the point (the copy is nine-tenths credit links), but it is also a
-# real difference from the About-page bio field on its own separate
-# /admin/copy/about page, which is plain text — so each section's own
-# description says so rather than leaving an admin to discover it.
+# Both rows render through _render_original_content_markdown, which passes
+# raw HTML straight through. That is the point (the copy is nine-tenths
+# credit links), but it is also a real difference from the About-page bio
+# field on its own separate /admin/copy/about page — which, as of
+# explainers-collection Phase 2, ALSO renders through this same trusted
+# function (About's own body is plain prose plus one hardcoded link, so it
+# needed no split marker) — so each section's own description still says so
+# rather than leaving an admin to discover it by pasting a link into the
+# wrong field.
 _HTIB_COPY_SECTIONS = (
     {
-        "key": "htib_intro_copy",
-        "label": "How this is built—intro",
-        "default": _HTIB_INTRO_DEFAULT,
-        "rows": 3,
-        "desc": ("The one-line opener under the title. Markdown, and raw HTML "
-                 "including links is allowed here (unlike the About bio below)."),
+        "key": "htib_before_copy",
+        "label": "How this is built—before the cards",
+        "default": _HTIB_BEFORE_DEFAULT,
+        "rows": 20,
+        "desc": ("The intro line, then “Why I built this,” separated by a "
+                 "<!--split--> marker—leave that marker in place, it's what tells "
+                 "the page where the intro ends and the heading begins. Markdown, plus "
+                 "raw HTML for links (an outbound one needs target=\"_blank\" "
+                 "rel=\"noopener\" written into the tag)."),
     },
     {
-        "key": "htib_why_copy",
-        "label": "How this is built—why I built this",
-        "default": _HTIB_WHY_I_BUILT_THIS_DEFAULT,
-        "rows": 18,
-        "desc": ("The origin story. Markdown, plus raw HTML for links. An outbound "
-                 "link needs target=\"_blank\" rel=\"noopener\" written into the tag; "
-                 "an internal one can stay plain markdown."),
-    },
-    {
-        "key": "htib_how_copy",
-        "label": "How this is built—how I decided what AI should do",
-        "default": _HTIB_HOW_I_DECIDED_DEFAULT,
-        "rows": 8,
-        "desc": ("The rules section, above the four surface cards. Markdown plus raw "
-                 "HTML. The cards themselves aren't editable here—they live in code "
-                 "beside the routes they link to."),
-    },
-    {
-        "key": "htib_what_else_copy",
-        "label": "How this is built—what else I've built with AI",
-        "default": _HTIB_WHAT_ELSE_DEFAULT,
-        "rows": 10,
-        "desc": "The closing section. Markdown plus raw HTML for links.",
-    },
-    {
-        "key": "htib_footnote_copy",
-        "label": "How this is built—footnote",
-        "default": _HTIB_FOOTNOTE_DEFAULT,
-        "rows": 3,
-        "desc": "The small print under the divider. Markdown plus raw HTML for links.",
+        "key": "htib_after_copy",
+        "label": "How this is built—after the cards",
+        "default": _HTIB_AFTER_DEFAULT,
+        "rows": 20,
+        "desc": ("“How I decided what AI should do,” then “What else I've "
+                 "built with AI,” then the footnote—separated by two "
+                 "<!--split--> markers, in that order. Leave both in place. Markdown "
+                 "plus raw HTML for links. The four surface cards above this section "
+                 "aren't editable here—they live in their own collection at "
+                 "/admin/ai-surfaces."),
     },
 )
 
@@ -4206,7 +4183,7 @@ _HTIB_COPY_KEYS = frozenset(s["key"] for s in _HTIB_COPY_SECTIONS)
 
 
 def _htib_copy(lib) -> dict:
-    """Resolve every /how-this-is-built section to its live text.
+    """Resolve both /how-this-is-built combined fields to their live text.
 
     A saved override wins; otherwise the hardcoded default. Same
     `get_setting(key) or DEFAULT` convention as the About/homepage copy.
@@ -4214,15 +4191,39 @@ def _htib_copy(lib) -> dict:
     return {s["key"]: (lib.get_setting(s["key"]) or s["default"]) for s in _HTIB_COPY_SECTIONS}
 
 
-def _ai_surface_card_html(title: str, desc: str, href: str) -> str:
+def _htib_split(raw: str, n: int) -> list[str]:
+    """Splits a combined htib_before_copy/htib_after_copy value on
+    _HTIB_SPLIT_MARKER into exactly `n` parts — padding with "" for a
+    part an admin edit removed entirely, never raising, so a mis-edited
+    marker degrades to a missing section instead of a 500."""
+    parts = raw.split(_HTIB_SPLIT_MARKER)
+    parts += [""] * (n - len(parts))
+    return parts[:n]
+
+
+def _ai_surface_card_html(row: dict) -> str:
+    """Renders one /how-this-is-built card from an ai_surfaces row.
+
+    Href resolution, in order: a Draft row never links anywhere (unlinked
+    "Explainer coming soon.", same treatment as an empty href always had —
+    the hub should show what's planned, not hide it). A Live row with
+    external_href links straight there (the FP&A Buddy case — its own
+    explainer lives outside this collection entirely). A Live row with a
+    real body_md links to its own /how-this-is-built/<slug> page. A Live
+    row with neither still reads as "coming soon" — it's been flipped live
+    with nothing to show yet, which is a real, valid state (a title/teaser
+    placeholder an admin is still drafting the body for)."""
+    href = ""
+    if row.get("status") == "live":
+        href = row.get("external_href") or ("" if not row.get("body_md") else f"/how-this-is-built/{row['slug']}")
     if href:
         action = f'<a href="{_esc(href)}" style="color:var(--navy);font-weight:600;font-size:14px;text-decoration:none;">See the full mechanism &rarr;</a>'
     else:
         action = '<span style="color:var(--muted);font-size:13px;font-style:italic;">Explainer coming soon.</span>'
     return (
         '<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px 22px;">'
-        f'<h3 style="margin:0 0 6px;font-size:17px;">{_esc(title)}</h3>'
-        f'<p style="margin:0 0 12px;color:var(--ink-soft);font-size:15px;line-height:1.6;">{_esc(desc)}</p>'
+        f'<h3 style="margin:0 0 6px;font-size:17px;">{_esc(row["title"])}</h3>'
+        f'<p style="margin:0 0 12px;color:var(--ink-soft);font-size:15px;line-height:1.6;">{_esc(row["teaser"])}</p>'
         f'{action}</div>'
     )
 
@@ -4231,19 +4232,25 @@ def _ai_surface_card_html(title: str, desc: str, href: str) -> str:
 def how_this_is_built(request: Request):
     """The evidence behind /about's "I was AI-native before AI-native was a
     thing" — a plain map of where AI actually does real work on this site,
-    not a marketing page. Reachable from that phrase (see _link_phrase),
+    not a marketing page. Reachable from that phrase (a plain raw-HTML link
+    baked into _ABOUT_COPY_DEFAULT, rendered through the same trusted
+    _render_original_content_markdown the About body itself now uses — see
+    _about_page's own docstring; _link_phrase was retired for this, the
+    explainers-collection PR's Phase 2),
     the About page's own button row, and a homepage link — deliberately not
     the top nav (see CLAUDE.md's "How this is built" entry). Written for a
     curious CFO or finance leader, the same audience every public page on
     this site is written for — not a hiring manager or an engineer, though
     both may read it.
 
-    Only FP&A Buddy is linked to its own explainer today
-    (/tools/fpa-buddy/how-it-works); the other three surfaces are listed,
-    not linked, per the standing rule that a visitor who finds three
-    placeholders learns less than one who finds one real page — each gets
-    its own explainer as it's written, at which point _AI_SURFACES just
-    gains an href, no other code change. No diagram on this page —
+    The four cards are now a managed collection (Library.list_ai_surfaces,
+    admin CRUD at /admin/ai-surfaces) instead of a hardcoded tuple — the
+    explainers-collection PR. Only FP&A Buddy links to its own explainer
+    today (external_href = /tools/fpa-buddy/how-it-works); the other three
+    render unlinked ("Explainer coming soon.") until their own body_md is
+    written and the row flipped to status='live', per the standing rule
+    that a visitor who finds three placeholders learns less than one who
+    finds one real page. No diagram on this page —
     considered and deliberately skipped, since the four surfaces are
     independent mechanisms, not one branching/parallel flow a picture
     would show better than this list does; the one diagram that earns its
@@ -4267,21 +4274,24 @@ def how_this_is_built(request: Request):
     `.oc-body`-scoped, and the section headings sit outside those divs, so
     they keep the shared `.article-atlantic .tool-prose` treatment exactly
     as they did before this PR."""
-    cards_html = "".join(_ai_surface_card_html(t, d, h) for t, d, h in _AI_SURFACES)
     lib = _lib()
     try:
         copy = _htib_copy(lib)
+        surfaces = lib.list_ai_surfaces()
     finally:
         lib.close()
+    cards_html = "".join(_ai_surface_card_html(row) for row in surfaces)
+    intro_copy, why_copy = _htib_split(copy["htib_before_copy"], 2)
+    how_copy, what_else_copy, footnote_copy = _htib_split(copy["htib_after_copy"], 3)
     body = f"""<div class="page page-standard article-atlantic">
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/about" style="font-size:13px;color:var(--muted);">&larr; About</a></p>
 <h1>How this is built</h1>
-<div class="oc-body" style="color:var(--ink-soft);margin:-4px 0 10px;font-size:16px;line-height:1.65;">{_render_original_content_markdown(copy["htib_intro_copy"])}</div>
+<div class="oc-body" style="color:var(--ink-soft);margin:-4px 0 10px;font-size:16px;line-height:1.65;">{_render_original_content_markdown(intro_copy)}</div>
 <p style="margin:0 0 28px;"><a href="#where-ai-shows-up" style="font-size:14px;font-weight:600;color:var(--navy);">Skip to how the tooling works &rarr;</a></p>
 
 <h2>Why I built this</h2>
-<div class="oc-body">{_render_original_content_markdown(copy["htib_why_copy"])}</div>
+<div class="oc-body">{_render_original_content_markdown(why_copy)}</div>
 
 <h2 id="where-ai-shows-up" style="margin-top:8px;">Where AI shows up</h2>
 </div>
@@ -4290,16 +4300,385 @@ def how_this_is_built(request: Request):
 </div>
 <div class="tool-prose">
 <h2>How I decided what AI should do</h2>
-<div class="oc-body">{_render_original_content_markdown(copy["htib_how_copy"])}</div>
+<div class="oc-body">{_render_original_content_markdown(how_copy)}</div>
 
 <h2>What else I've built with AI</h2>
-<div class="oc-body">{_render_original_content_markdown(copy["htib_what_else_copy"])}</div>
+<div class="oc-body">{_render_original_content_markdown(what_else_copy)}</div>
 
-<div class="oc-body" style="border-top:1px solid var(--line);margin-top:34px;padding-top:18px;font-size:14px;color:var(--muted);">{_render_original_content_markdown(copy["htib_footnote_copy"])}</div>
+<div class="oc-body" style="border-top:1px solid var(--line);margin-top:34px;padding-top:18px;font-size:14px;color:var(--muted);">{_render_original_content_markdown(footnote_copy)}</div>
 </div>
 </div>
 <style>{_OC_ARTICLE_CSS}</style>"""
     return HTMLResponse(_page("How this is built—Brian Weisberg", "About", body, role=_role(request)))
+
+
+def _ai_surface_article_body(row: dict) -> str:
+    """The article shell for an explainer that has its own /how-this-is-built/
+    <slug> page — same .oc-body/_render_original_content_markdown treatment
+    as _original_content_article_body, minus the tag/date byline that page
+    has (ai_surfaces has neither field) and back-linking to /how-this-is-built
+    instead of /thought-leadership."""
+    body_html = _render_original_content_markdown(row["body_md"] or "")
+    return f"""<div class="page page-standard article-atlantic">
+<style>{_OC_ARTICLE_CSS}</style>
+<div class="tool-prose">
+<p style="margin:0 0 12px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">&larr; How this is built</a></p>
+<h1 style="margin:0 0 36px;">{_esc(row["title"])}</h1>
+<div class="oc-body">{body_html}</div>
+</div>
+</div>"""
+
+
+@app.get("/how-this-is-built/{slug}", response_class=HTMLResponse)
+def ai_surface_article(request: Request, slug: str):
+    """The explainer page behind an ai_surfaces card with a real body_md —
+    same live/draft/404 contract as GET /thought-leadership/{slug}: a Live
+    row is public, a Draft renders only for a signed-in admin at its own
+    canonical URL, and a row with no body_md (or an unknown slug) 404s for
+    everyone regardless of status."""
+    lib = _lib()
+    try:
+        row = lib.get_ai_surface_by_slug(slug)
+    finally:
+        lib.close()
+    if row is None or not row["body_md"]:
+        raise HTTPException(status_code=404)
+    if row["status"] != "live" and not _is_authed(request):
+        raise HTTPException(status_code=404)
+    body = _ai_surface_article_body(row)
+    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "About", body, role=_role(request)))
+
+
+_AI_SURFACE_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+
+def _validate_ai_surface_slug(slug: str, lib, exclude_id: int | None = None) -> str:
+    """Same shape as _validate_oc_slug, minus the reserved-bespoke-path
+    check — there's no literal /how-this-is-built/* route this could ever
+    collide with."""
+    if not slug:
+        return "Slug is required."
+    if not _AI_SURFACE_SLUG_RE.match(slug):
+        return "Slug must be lowercase letters, numbers, and single hyphens only (e.g. \"web-search\")."
+    existing = lib.get_ai_surface_by_slug(slug)
+    if existing and existing["id"] != exclude_id:
+        return f"“{slug}” is already used by another explainer (“{existing['title']}”)."
+    return ""
+
+
+def _ai_surface_form_fields(values: dict) -> str:
+    status_opts = "".join(
+        f'<option value="{s}"{" selected" if values.get("status") == s else ""}>{label}</option>'
+        for s, label in (("draft", "Draft"), ("live", "Live"))
+    )
+    return f"""  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Title *</label>
+    <input name="title" required maxlength="300" value="{_esc(values.get('title', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Slug *</label>
+    <input name="slug" required maxlength="200" value="{_esc(values.get('slug', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;font-family:ui-monospace,monospace;"
+      placeholder="web-search">
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+      The URL is /how-this-is-built/&lt;slug&gt;. Ignored entirely if External link (below) is set.
+    </p>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Teaser *</label>
+    <input name="teaser" required maxlength="400" value="{_esc(values.get('teaser', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="One or two sentences, shown on the card">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">External link</label>
+    <input name="external_href" maxlength="300" value="{_esc(values.get('external_href', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="e.g. /tools/fpa-buddy/how-it-works">
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+      Set this only when the explainer's own page already lives somewhere else on the site
+      (FP&amp;A Buddy's does). When set, the card links straight there instead of to
+      /how-this-is-built/&lt;slug&gt;, and Body below is usually left blank.
+    </p>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Body (Markdown)</label>
+    <textarea name="body_md" rows="14"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;font-family:ui-monospace,monospace;background:#fff;resize:vertical;"
+      placeholder="Leave blank if External link is set, or if this card should read as 'coming soon.'">{_esc(values.get('body_md', ''))}</textarea>
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+      Raw HTML is passed through as-is&mdash;this field is admin-only, never public input.
+      Every outbound link needs target="_blank" rel="noopener" written into the tag.
+    </p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Status</label>
+      <select name="status" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {status_opts}
+      </select>
+      <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+        Draft's card is always unlinked ("Explainer coming soon."), even with a body or an
+        external link filled in—flip to Live once it's ready.
+      </p>
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order</label>
+      <input name="display_order" type="number" value="{_esc(str(values.get('display_order')) if values.get('display_order') not in (None, '') else '')}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="Auto-assigned">
+    </div>
+  </div>"""
+
+
+def _ai_surface_form_page(heading: str, action: str, values: dict, error: str, submit_label: str,
+                           show_preview: bool = False) -> str:
+    error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                  f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
+                  if error else '')
+    if show_preview:
+        if values.get("body_md"):
+            preview_html = (f'<a href="/how-this-is-built/{_esc(values.get("slug", ""))}" target="_blank" '
+                             f'rel="noopener" class="btn btn-ghost" style="margin-left:10px;">Preview &rarr;</a>')
+        else:
+            preview_html = ('<span class="btn btn-ghost" style="margin-left:10px;color:var(--muted);'
+                             'border-color:var(--line);cursor:not-allowed;" '
+                             'title="Add body content first—there\'s no page to preview until this has one.">'
+                             'Preview &rarr;</span>')
+    else:
+        preview_html = ""
+    return f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/ai-surfaces" style="font-size:13px;color:var(--muted);">&larr; AI surfaces</a></p>
+<h1>{_esc(heading)}</h1>
+{error_html}
+<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
+{_ai_surface_form_fields(values)}
+  <div>
+    <button type="submit" class="btn">{_esc(submit_label)}</button>
+    <a href="/admin/ai-surfaces" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    {preview_html}
+  </div>
+</form>
+</div>"""
+
+
+def _ai_surface_values_from_form(form) -> dict:
+    display_order_raw = (form.get("display_order") or "").strip()
+    if display_order_raw == "":
+        display_order = None
+    else:
+        try:
+            display_order = int(display_order_raw)
+        except ValueError:
+            display_order = None
+    status = (form.get("status") or "draft").strip()
+    if status not in ("draft", "live"):
+        status = "draft"
+    return {
+        "title": (form.get("title") or "").strip(),
+        "slug": (form.get("slug") or "").strip(),
+        "teaser": (form.get("teaser") or "").strip(),
+        "external_href": (form.get("external_href") or "").strip(),
+        "body_md": (form.get("body_md") or "").strip() or None,
+        "status": status,
+        "display_order_raw": display_order_raw,
+        "display_order": display_order,
+    }
+
+
+@app.get("/admin/ai-surfaces", response_class=HTMLResponse)
+def admin_ai_surfaces(request: Request, status: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        items = lib.list_ai_surfaces(status=status or None)
+    finally:
+        lib.close()
+
+    def _row(it: dict) -> str:
+        status_badge = (
+            '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;'
+            'background:var(--seafoam-wash);color:var(--seafoam-deep);">Live</span>'
+            if it["status"] == "live" else
+            '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;'
+            'background:var(--accent-light);color:var(--muted);">Draft</span>'
+        )
+        if it["external_href"]:
+            page_link = (f' &middot; <a href="{_esc(it["external_href"])}" target="_blank" rel="noopener" '
+                         f'style="font-size:12px;">External &rarr;</a>')
+        elif it["body_md"]:
+            page_link = (f' &middot; <a href="/how-this-is-built/{_esc(it["slug"])}" target="_blank" rel="noopener" '
+                         f'style="font-size:12px;">View &rarr;</a>')
+        else:
+            page_link = ""
+        return f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}{page_link}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);font-family:ui-monospace,monospace;">{_esc(it['slug'])}</td>
+  <td style="padding:10px 12px;">{status_badge}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{it['display_order']}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(_relative_age(it['updated_at'])) or '—'}</td>
+  <td style="padding:10px 12px;white-space:nowrap;">
+    <a href="/admin/ai-surfaces/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <form method="post" action="/admin/ai-surfaces/{it['id']}/delete" style="display:inline;"
+          onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot;?');">
+      <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+
+    rows = "".join(_row(it) for it in items) or \
+        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No entries yet.</td></tr>'
+
+    def _filter_link(s: str, label: str) -> str:
+        active = s == status
+        href = "/admin/ai-surfaces" + (f"?status={s}" if s else "")
+        style = "font-weight:700;color:var(--navy);" if active else "color:var(--muted);"
+        return f'<a href="{href}" style="font-size:13px;margin-right:14px;{style}">{label}</a>'
+
+    filters = _filter_link("", "All") + _filter_link("live", "Live") + _filter_link("draft", "Draft")
+
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+  <h1>AI surfaces</h1>
+  <a href="/admin/ai-surfaces/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add explainer</a>
+</div>
+<p style="margin:0 0 16px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
+<div style="margin-bottom:16px;">{filters}</div>
+<div style="overflow-x:auto;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Slug</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_STATUS}px;">Status</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_COUNT}px;">Display order</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Updated</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>
+<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
+  These are the cards on /how-this-is-built. A Draft card always renders unlinked
+  ("Explainer coming soon."). A Live card links to its External link if set, otherwise to
+  its own /how-this-is-built/&lt;slug&gt; page if Body is filled in—otherwise it still reads
+  as coming soon.
+</p>
+</div>"""
+    return HTMLResponse(_page("AI surfaces—Admin", "", body, authed=True))
+
+
+@app.get("/admin/ai-surfaces/new", response_class=HTMLResponse)
+def admin_ai_surfaces_new(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    return HTMLResponse(_page("Add AI surface—Admin", "",
+                              _ai_surface_form_page("Add an explainer", "/admin/ai-surfaces/new",
+                                                    {"status": "draft"}, "", "Add explainer"),
+                              authed=True))
+
+
+@app.post("/admin/ai-surfaces/new")
+async def admin_ai_surfaces_new_submit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    v = _ai_surface_values_from_form(form)
+    lib = _lib()
+    try:
+        def _reject(message: str):
+            return HTMLResponse(_page(
+                "Add AI surface—Admin", "",
+                _ai_surface_form_page("Add an explainer", "/admin/ai-surfaces/new", v, message, "Add explainer"),
+                authed=True), status_code=400)
+
+        if not v["title"]:
+            return _reject("Title is required.")
+        if not v["teaser"]:
+            return _reject("Teaser is required.")
+        if v["display_order_raw"] and v["display_order"] is None:
+            return _reject("Display order must be a number.")
+        slug_error = _validate_ai_surface_slug(v["slug"], lib)
+        if slug_error:
+            return _reject(slug_error)
+
+        lib.add_ai_surface(
+            v["slug"], v["title"], v["teaser"], v["body_md"], v["external_href"],
+            v["status"], v["display_order"],
+        )
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/ai-surfaces", status_code=303)
+
+
+@app.get("/admin/ai-surfaces/{item_id}/edit", response_class=HTMLResponse)
+def admin_ai_surfaces_edit(request: Request, item_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        it = lib.get_ai_surface(item_id)
+    finally:
+        lib.close()
+    if not it:
+        raise HTTPException(status_code=404, detail="AI surface not found")
+    values = dict(it)
+    values["body_md"] = values["body_md"] or ""
+    return HTMLResponse(_page(f"Edit {it['title']}—Admin", "",
+                              _ai_surface_form_page(f"Edit {it['title']}", f"/admin/ai-surfaces/{item_id}/edit",
+                                                    values, "", "Save changes", show_preview=True),
+                              authed=True))
+
+
+@app.post("/admin/ai-surfaces/{item_id}/edit")
+async def admin_ai_surfaces_edit_submit(request: Request, item_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    v = _ai_surface_values_from_form(form)
+    lib = _lib()
+    try:
+        if not lib.get_ai_surface(item_id):
+            raise HTTPException(status_code=404, detail="AI surface not found")
+
+        def _reject(message: str):
+            return HTMLResponse(_page(
+                f"Edit {v['title']}—Admin", "",
+                _ai_surface_form_page(f"Edit {v['title']}", f"/admin/ai-surfaces/{item_id}/edit",
+                                     v, message, "Save changes", show_preview=True),
+                authed=True), status_code=400)
+
+        if not v["title"]:
+            return _reject("Title is required.")
+        if not v["teaser"]:
+            return _reject("Teaser is required.")
+        if v["display_order_raw"] and v["display_order"] is None:
+            return _reject("Display order must be a number.")
+        slug_error = _validate_ai_surface_slug(v["slug"], lib, exclude_id=item_id)
+        if slug_error:
+            return _reject(slug_error)
+
+        lib.update_ai_surface(
+            item_id, v["slug"], v["title"], v["teaser"], v["body_md"], v["external_href"],
+            v["status"], v["display_order"] or 0,
+        )
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/ai-surfaces", status_code=303)
+
+
+@app.post("/admin/ai-surfaces/{item_id}/delete")
+def admin_ai_surfaces_delete(request: Request, item_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_ai_surface(item_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/ai-surfaces", status_code=303)
 
 
 # The one Speaking & Events entry with photos (Abacum AI Summit). Excluded
@@ -15327,6 +15706,7 @@ def admin_original_content(request: Request, status: str = ""):
     lib = _lib()
     try:
         items = lib.list_original_content(status=status or None)
+        all_items = lib.list_original_content() if status else items
     finally:
         lib.close()
 
@@ -15358,6 +15738,14 @@ def admin_original_content(request: Request, status: str = ""):
 
     rows = "".join(_row(it) for it in items) or \
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No entries yet.</td></tr>'
+    no_body_count = sum(1 for it in all_items if not it["body_md"])
+    no_body_note = (
+        f'<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">'
+        f'{no_body_count} piece{"s" if no_body_count != 1 else ""} '
+        f'{"have" if no_body_count != 1 else "has"} no body—only card metadata, rendered on '
+        f'/thought-leadership without its own page. A piece with a body renders at its own '
+        f'/thought-leadership/&lt;slug&gt; page once it&rsquo;s live.</p>'
+    ) if no_body_count else ""
 
     def _filter_link(s: str, label: str) -> str:
         active = s == status
@@ -15389,11 +15777,7 @@ def admin_original_content(request: Request, status: str = ""):
 <tbody>{rows}</tbody>
 </table>
 </div>
-<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
-  The 3 flagship pieces (Growth Engine Ratio, Sail Don&rsquo;t Row, Connecting Claude to NetSuite) have no
-  body&mdash;their own hand-built pages render them. A piece with a body renders at its own
-  /thought-leadership/&lt;slug&gt; page once it&rsquo;s live.
-</p>
+{no_body_note}
 </div>"""
     return HTMLResponse(_page("Original content—Admin", "", body, authed=True))
 
@@ -22685,8 +23069,9 @@ _ADMIN_GROUPS = [
     # docstring) — these three cards are the real entry points now.
     ("Brand, voice, and content", "How the site looks and sounds.", [
         ("/admin/copy/homepage", "Homepage",            "Edit the hero headline/subhead and bio-box copy on the homepage—plain text, changes go live immediately."),
-        ("/admin/copy/about",    "About",               "Edit the bio on the About page—plain text, changes go live immediately."),
-        ("/admin/copy/how-this-is-built", "How this is built", "Edit the origin story and rules copy on /how-this-is-built—these fields accept raw HTML for links, unlike Homepage and About."),
+        ("/admin/copy/about",    "About",               "Edit the bio on the About page—markdown plus raw HTML for links, with a Preview. Changes go live immediately."),
+        ("/admin/copy/how-this-is-built", "How this is built", "Edit the origin story and rules copy on /how-this-is-built, in two fields split at the surface cards—raw HTML for links, unlike Homepage, plus a Preview."),
+        ("/admin/ai-surfaces",   "AI surfaces",         "Add, edit, or delete the explainer cards on /how-this-is-built—markdown body, or an external link when the explainer lives elsewhere."),
         ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
         ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email (warm intro, welcome, password reset, and submission confirmations)—changes go live immediately."),
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
@@ -23536,7 +23921,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Toolbox—Communities", ["communities", "community_audit_log", "community_categories",
                                 "community_competitors", "community_profiles",
                                 "community_gap_submissions", "community_profile_views"]),
-    ("Thought leadership / game", ["thought_leadership", "original_content",
+    ("Thought leadership / game", ["thought_leadership", "original_content", "ai_surfaces",
                                     "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
@@ -32092,10 +32477,39 @@ async function saveHomepage() {{
     return HTMLResponse(_page("Homepage copy—Admin", "Admin", body, authed=True))
 
 
+# Shared by /admin/copy/about and /admin/copy/how-this-is-built (Phase 2 of
+# the explainers-collection PR) — both now render admin text through the
+# same trusted _render_original_content_markdown, so both need the same
+# "see it before you save it" Preview toggle. Posts to /admin/copy/preview
+# and injects the returned HTML into a bordered box below the textarea,
+# rather than saving anything — the whole point is catching a raw-HTML
+# mistake (an unclosed <div>) before it reaches the live page.
+_ADMIN_COPY_PREVIEW_JS = """
+async function previewCopy(taId, boxId) {
+  var box = document.getElementById(boxId);
+  if (box.style.display === 'block') { box.style.display = 'none'; return; }
+  var text = document.getElementById(taId).value;
+  try {
+    var r = await fetch('/admin/copy/preview', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: text})});
+    var d = await r.json();
+    box.innerHTML = d.html || '<em style="color:var(--muted);">Nothing to preview.</em>';
+  } catch (e) {
+    box.innerHTML = '<em style="color:#b91c1c;">Preview failed—try again.</em>';
+  }
+  box.style.display = 'block';
+}
+"""
+
+
 @app.get("/admin/copy/about", response_class=HTMLResponse)
 def admin_copy_about_page(request: Request):
-    """The About page bio, plain text (unlike the How this is built page's
-    raw-HTML fields — see that page's own docstring)."""
+    """The About page bio. As of explainers-collection Phase 2, this renders
+    through the same trusted _render_original_content_markdown How this is
+    built uses — raw HTML (including links) is allowed here now too,
+    unlike before that PR (see this route's own git history for the prior
+    plain-text-only version, and _render_original_content_markdown's own
+    docstring for the trust model it shares with original_content/
+    ai_surfaces bodies)."""
     if not _is_authed(request):
         return _login_redirect(request)
 
@@ -32109,7 +32523,7 @@ def admin_copy_about_page(request: Request):
     body = f"""<div class="page page-form">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>About page copy</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Edit the bio on <a href="/about">/about</a>&mdash;plain text, no links. Changes save straight to the live site.</p>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the bio on <a href="/about">/about</a>&mdash;markdown, plus raw HTML for links (an outbound one needs <code>target="_blank" rel="noopener"</code> written into the tag). Changes save straight to the live site.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Bio</div>
@@ -32117,10 +32531,14 @@ def admin_copy_about_page(request: Request):
 <textarea id="about-copy" rows="14" style="{prose}">{_esc(about_copy)}</textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="about-save-btn" onclick="saveAbout()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
-<span id="about-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+<button type="button" onclick="previewCopy('about-copy','about-preview')" class="btn btn-ghost" style="font-size:14px;padding:9px 22px;">Preview</button>
+<span id="about-status" style="font-size:13px;color:var(--muted);"></span></div>
+<div id="about-preview" style="display:none;border:1px dashed var(--line);border-radius:10px;padding:16px;margin-top:14px;"></div>
+</div>
 </div>
 
 <script>
+{_ADMIN_COPY_PREVIEW_JS}
 async function saveAbout() {{
   var text = document.getElementById('about-copy').value.trim();
   var btn = document.getElementById('about-save-btn'), status = document.getElementById('about-status');
@@ -32141,11 +32559,14 @@ async function saveAbout() {{
 
 @app.get("/admin/copy/how-this-is-built", response_class=HTMLResponse)
 def admin_copy_how_this_is_built_page(request: Request):
-    """The five /how-this-is-built prose sections. Unlike Homepage/About
-    above, these accept raw HTML for links (see _HTIB_COPY_SECTIONS' own
-    comment) — each section's description says so, since that's the one
-    real capability difference an admin editing this in three months needs
-    to know before pasting a link into the wrong page's textarea."""
+    """The two /how-this-is-built combined prose fields (explainers-
+    collection Phase 2 — consolidated from the original five, split at the
+    surface cards; see _HTIB_SPLIT_MARKER's own comment). Same raw-HTML-
+    for-links convention as About's own page above (see
+    _HTIB_COPY_SECTIONS' own comment) — each section's description says so,
+    plus how the <!--split--> marker works, since both are the two real
+    things an admin editing this in three months needs to know before
+    breaking either one."""
     if not _is_authed(request):
         return _login_redirect(request)
 
@@ -32163,19 +32584,23 @@ def admin_copy_how_this_is_built_page(request: Request):
 <textarea id="copy-{sec["key"]}" rows="{sec["rows"]}" style="{prose}">{_esc(htib[sec["key"]])}</textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="btn-{sec["key"]}" onclick="saveHtib(&apos;{sec["key"]}&apos;)" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
-<span id="status-{sec["key"]}" style="font-size:13px;color:var(--muted);"></span></div></div>'''
+<button type="button" onclick="previewCopy('copy-{sec["key"]}','preview-{sec["key"]}')" class="btn btn-ghost" style="font-size:14px;padding:9px 22px;">Preview</button>
+<span id="status-{sec["key"]}" style="font-size:13px;color:var(--muted);"></span></div>
+<div id="preview-{sec["key"]}" style="display:none;border:1px dashed var(--line);border-radius:10px;padding:16px;margin-top:14px;"></div>
+</div>'''
         for sec in _HTIB_COPY_SECTIONS
     )
 
     body = f"""<div class="page page-form">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>How this is built&mdash;copy</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Edit the prose on <a href="/how-this-is-built">/how-this-is-built</a>. These five fields accept raw HTML for links (an outbound one needs <code>target="_blank" rel="noopener"</code> written into the tag); internal links can stay plain markdown. Changes save straight to the live site.</p>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the prose on <a href="/how-this-is-built">/how-this-is-built</a>. These two fields accept raw HTML for links (an outbound one needs <code>target="_blank" rel="noopener"</code> written into the tag); internal links can stay plain markdown. Changes save straight to the live site.</p>
 
 {htib_cards}
 </div>
 
 <script>
+{_ADMIN_COPY_PREVIEW_JS}
 async function saveHtib(key) {{
   var text = document.getElementById('copy-' + key).value.trim();
   var btn = document.getElementById('btn-' + key), status = document.getElementById('status-' + key);
@@ -32252,11 +32677,29 @@ async def admin_copy_save_homepage(request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/admin/copy/preview")
+async def admin_copy_preview(request: Request):
+    """Renders arbitrary admin-typed text through the same trusted
+    _render_original_content_markdown both About and How this is built now
+    use, without saving anything — the Preview button on both pages (Phase
+    2 of the explainers-collection PR). Exists specifically so raw HTML
+    written into one of these fields (an unclosed <div>, a mistyped tag)
+    is visible before Save, not after it's already live — see this PR's
+    own motivating incident. Shared by both pages rather than duplicated:
+    neither has any field-specific rendering logic to preserve, only the
+    raw text differs."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    text = (payload.get("text") or "").strip()
+    return JSONResponse({"html": _render_original_content_markdown(text) if text else ""})
+
+
 @app.post("/admin/copy/how-this-is-built")
 async def admin_copy_save_how_this_is_built(request: Request):
-    """Save one /how-this-is-built prose section.
+    """Save one /how-this-is-built combined prose field.
 
-    One route for all five sections rather than five near-identical ones —
+    One route for both fields rather than two near-identical ones —
     the section is named in the payload and validated against
     _HTIB_COPY_KEYS, so an unknown key is rejected outright rather than
     writing an arbitrary settings row. Rejects blank content, same as every

@@ -8583,6 +8583,75 @@ it supersedes the old "`/save` is token-gated" note.
   capability asymmetry `_HTIB_COPY_SECTIONS`' own comment already
   documented, now visible from the hub without opening the page.
 
+- **Explainers collection, Phase 1 (2026-09) — the four `/how-this-is-built`
+  surface cards move from the hardcoded `_AI_SURFACES` tuple into a managed
+  DB collection, `ai_surfaces`.** Same "add a piece, set a slug, write the
+  body, flip it live" shape `original_content` already has: `Library.
+  list_ai_surfaces`/`get_ai_surface`/`get_ai_surface_by_slug`/
+  `add_ai_surface`/`update_ai_surface`/`delete_ai_surface`, admin CRUD at
+  `/admin/ai-surfaces` (modeled directly on `/admin/thought-leadership/
+  original`'s own form/list shape), and a public `GET /how-this-is-built/
+  {slug}` article route with the identical live/draft/404 contract
+  `GET /thought-leadership/{slug}` already has. **The FP&A Buddy case named
+  in the build brief — an explainer whose own page lives elsewhere** — is
+  handled with a new `external_href` column: when set on a `status='live'`
+  row, the card links straight there instead of to this table's own
+  `/how-this-is-built/<slug>` page, and `body_md` is left `NULL` since
+  there's nothing here to render; FP&A Buddy is seeded exactly this way
+  (`external_href="/tools/fpa-buddy/how-it-works"`). A Draft row's card is
+  always unlinked ("Explainer coming soon."), regardless of what `body_md`/
+  `external_href` hold — flipping to Live is the one action that changes
+  what a visitor sees. `scripts/migrate_ai_surfaces.py` (not yet run
+  against production, not yet archived — same human-review-before-a-
+  production-write precedent as `scripts/archive/migrate_original_
+  content.py`) seeds the four existing cards from `_AI_SURFACES`, which
+  stays in the repo, unimported by any live route, purely as the
+  migration's seed data and a rollback reference (same precedent as
+  `_TL_FEATURED_CARDS`). Same PR fixed a real comment-staleness bug on
+  `/admin/thought-leadership/original`'s own footer, which named "the 3
+  flagship pieces" by title as having no body — a static claim that would
+  go wrong the moment a fourth body-less piece existed; it's now a live
+  count derived from the current table (`no_body_count`), not a hardcoded
+  sentence.
+- **Explainers collection, Phase 2 (2026-09) — About's body joins the
+  trusted markdown renderer, the five How this is built prose fields
+  consolidate to two, and both pages gain a Preview action.** `/about`'s
+  bio previously rendered through a retired `_about_copy_html`/
+  `_link_phrase` pair (plain text, with one special case: wrap the phrase
+  "AI-native before AI-native was a thing" in a link to
+  `/how-this-is-built`). Both are gone — the About route now calls
+  `_render_original_content_markdown(about_copy)` directly, same as How
+  this is built, and the link is a plain raw `<a>` baked straight into
+  `_ABOUT_COPY_DEFAULT` — verified byte-identical to the old rendered
+  output for the default copy before shipping. `_link_phrase` had exactly
+  one caller, confirmed by grep before retiring it. **The five
+  `_HTIB_*_DEFAULT` prose constants stay** (Brian's actual copy,
+  unduplicated) but the admin-editable settings surface drops from five
+  keys to two — `htib_before_copy` (intro + "Why I built this") and
+  `htib_after_copy` ("How I decided..." + "What else I've built..." + the
+  footnote) — split exactly where the four surface cards interrupt the
+  page. **A genuinely single field per side isn't possible without moving
+  the cards or introducing a placeholder token, and this uses one anyway,
+  disclosed as exactly that rather than presented as a clean design**: the
+  intro's own font-size/line-height/color and the footnote's own
+  border-top/small-print treatment are each a template-level style around
+  one sub-section of a combined field, not the whole thing, so both
+  combined defaults are built by joining the original five constants with
+  a lightweight `_HTIB_SPLIT_MARKER = "\n\n<!--split-->\n\n"`, and
+  `_htib_split(raw, n)` splits a saved field back into exactly `n` parts
+  (padding with `""` rather than raising if an edit removes a marker) —
+  reproducing the pre-consolidation five-field rendering byte-for-byte
+  while genuinely halving the settings-key/textarea count. Each field's
+  admin description explains the marker and warns not to remove it. **Both
+  `/admin/copy/about` and `/admin/copy/how-this-is-built` gained a shared
+  Preview action** — `POST /admin/copy/preview` renders arbitrary posted
+  text through `_render_original_content_markdown` with no save, and one
+  shared JS toggle (`_ADMIN_COPY_PREVIEW_JS`) injects the result into a
+  bordered box under the textarea — built specifically because raw HTML
+  without a preview is exactly how an unclosed `<div>` reaches production
+  silently, and both pages are now raw-HTML-tolerant. See
+  ARCHITECTURE.md's "How this is built" section for the full write-up.
+
 
 ## Authentication & security
 

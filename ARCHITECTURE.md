@@ -2046,67 +2046,121 @@ back if they set any, "Ranked using Brian's default priorities" otherwise —
 by design, no separate methodology explanation beyond stating the weights in
 effect.
 
-### How this is built — `GET /how-this-is-built` (2026-09)
+### How this is built — `GET /how-this-is-built` (2026-09, explainers collection Phase 1/2)
 
 The evidence behind `/about`'s "I was AI-native before AI-native was a
 thing" claim — a plain public page naming where AI actually does real work
 on the site, for a curious CFO or finance leader, not a hiring manager or an
-engineer. No schema, no DB read — a static route built from one module-level
-tuple, `_AI_SURFACES` (title, one-line description, href-or-empty), rendered
-by `_ai_surface_card_html`, plus five module-level markdown constants for
-the prose.
+engineer.
 
-**PR 35 replaced the page's copy wholesale with Brian's own** (run against
-his `write-like-brian` voice rules before it landed, and it passes
-`typography_findings` untouched — no allowlist entry needed). Structurally
-that added two sections and changed how the prose is stored:
+**Phase 1 replaced the hardcoded `_AI_SURFACES` tuple with a managed
+collection, `ai_surfaces`** — the same "add a piece, set a slug, write the
+body, flip it live" shape `original_content` already established. Schema
+(`linklib/db.py`): `id`, `slug` (unique), `title`, `teaser`, `body_md`
+(nullable), `external_href` (default `''`), `status` (`'draft'`\|`'live'`),
+`display_order`, `created_at`, `updated_at`. `Library.list_ai_surfaces` /
+`get_ai_surface` / `get_ai_surface_by_slug` / `add_ai_surface` /
+`update_ai_surface` / `delete_ai_surface` mirror `original_content`'s own
+CRUD methods exactly.
 
-- **Prose lives in five markdown constants** — `_HTIB_INTRO`,
-  `_HTIB_WHY_I_BUILT_THIS`, `_HTIB_HOW_I_DECIDED`, `_HTIB_WHAT_ELSE`,
-  `_HTIB_FOOTNOTE` — each rendered through
-  `_render_original_content_markdown`, the **admin-authored-and-trusted**
-  renderer the three `original_content` long-form pieces already use.
-  That choice is load-bearing, not incidental: the copy carries nine inline
+Href resolution (`_ai_surface_card_html`), in order: a **Draft** row never
+links anywhere — unlinked "Explainer coming soon.", the same treatment the
+old empty-href tuple entry always had, so the hub keeps showing what's
+planned rather than hiding it. A **Live** row with `external_href` links
+straight there — the case named in the build brief: an explainer whose own
+page lives elsewhere. FP&A Buddy is exactly this: seeded Live,
+`external_href="/tools/fpa-buddy/how-it-works"`, `body_md` left `NULL`,
+since that explainer's own page is outside this system entirely. A Live row
+with a real `body_md` and no external href links to its own
+`GET /how-this-is-built/{slug}` page — same live/draft/404 contract as
+`GET /thought-leadership/{slug}`: a draft renders only for a signed-in
+admin at its own canonical URL, a row with no `body_md` 404s regardless of
+status, an unknown slug 404s. A Live row with neither still reads as
+coming soon (flipped live with nothing to show yet is a real, valid state).
+
+`scripts/migrate_ai_surfaces.py` (not yet run against production, not yet
+archived — same "human review before a production write" precedent as
+`scripts/archive/migrate_original_content.py`) seeds the four original
+cards: `planned_rows()` flattens the still-in-repo, now-unimported
+`_AI_SURFACES` tuple (kept purely as the migration's own source data and a
+rollback reference, same precedent as `_TL_FEATURED_CARDS`) into insert-
+ready dicts, slugging each title (`_slug_from_title`). Admin CRUD lives at
+`/admin/ai-surfaces` (list/new/edit/delete), under the "Brand, voice, and
+content" hub-nav group, modeled directly on
+`/admin/thought-leadership/original`'s own form/list/validation shape
+(`_validate_ai_surface_slug`, no reserved-path check needed since nothing
+under `/how-this-is-built/*` is a literal bespoke route the way three
+`/thought-leadership/*` pieces used to be).
+
+**Phase 2 rewrote the page's copy wholesale in Brian's own voice** (run
+against his `write-like-brian` rules, passes `typography_findings`
+untouched) and consolidated the prose fields:
+
+- **The five original prose constants stay** (`_HTIB_INTRO_DEFAULT`,
+  `_HTIB_WHY_I_BUILT_THIS_DEFAULT`, `_HTIB_HOW_I_DECIDED_DEFAULT`,
+  `_HTIB_WHAT_ELSE_DEFAULT`, `_HTIB_FOOTNOTE_DEFAULT`) — Brian's actual
+  copy, unduplicated — but the **admin-editable settings surface
+  consolidates from five keys to two**, split exactly where the four
+  surface cards interrupt the page: `htib_before_copy` (intro + "Why I
+  built this") and `htib_after_copy` ("How I decided..." + "What else
+  I've built..." + the footnote). Both still render through
+  `_render_original_content_markdown`, the admin-authored-and-trusted
+  renderer the three `original_content` long-form pieces use — that
+  choice is load-bearing, not incidental: the copy carries nine inline
   links crediting other people's blogs, and `webapp/markdown_render.py`'s
-  restricted renderer deliberately escapes links (it serves AI-drafted
-  fields — a different trust model, see its own docstring). Markdown rather
-  than hand-built HTML because nine `<a>` tags plus manual escaping is more
-  code and more drift surface than the same text as prose.
-- Named plainly, **not** `*_DEFAULT`: in this file that suffix means
-  "hardcoded fallback behind a live `lib.get_setting(...)` lookup"
-  (`_ABOUT_COPY_DEFAULT`, `_HOMEPAGE_HEADLINE_DEFAULT`). Nothing overrides
-  these yet, so the suffix would be a false signal about the code's state.
-- **New "Why I built this"** (the origin story — deliberately long) and
-  **"What else I've built with AI"** (a closer naming work beyond this
-  site), plus a footnote recording Fred Wilson's 2024 AVC.com → avc.xyz
-  move.
-- **A skip link under the intro**, "Skip to how the tooling works →",
-  anchored to `#where-ai-shows-up` — the heading that actually holds the
-  four surface cards, so a reader who came for the mechanism rather than
-  the story can jump straight to it.
-- The four surface cards stay in `_AI_SURFACES` with edited copy (the Web
-  search card now says *four* jobs, not three). They are deliberately **not**
-  markdown/admin-editable alongside the prose: each is structured (title,
-  description, link, coming-soon state) and its href points at a real route,
-  so it belongs in code next to the routes it links to.
+  restricted renderer deliberately escapes links (a different trust
+  model — AI-drafted fields, see its own docstring).
+- **A genuinely single field per side isn't possible without either
+  moving the cards to the end of the page or introducing a placeholder
+  token** — and a single field for "before" or "after" alone runs into
+  the same problem one level down, since the intro's own font-size/
+  line-height/color and the footnote's own border-top/small-print
+  treatment are each a template-level style around one sub-section of a
+  combined field, not the whole thing. Rather than invent a bespoke
+  scheme, both combined defaults (`_HTIB_BEFORE_DEFAULT`,
+  `_HTIB_AFTER_DEFAULT`) are built by joining the original five constants
+  with one lightweight marker, `_HTIB_SPLIT_MARKER = "\n\n<!--split-->\n\n"`,
+  and `_htib_split(raw, n)` splits a saved field back into exactly `n`
+  parts (padding with `""` if an edit removes a marker outright — never
+  raising). This **is** a placeholder token, disclosed as exactly that in
+  the constant's own comment rather than presented as a clean two-field
+  design: it's the only way to reach two settings keys while keeping
+  every sub-section's own distinct styling and reproducing the pre-
+  consolidation five-field rendering byte-for-byte. Each field's admin
+  description explains the marker and warns not to remove it.
+- `how_this_is_built()` splits each combined field
+  (`intro_copy, why_copy = _htib_split(copy["htib_before_copy"], 2)`;
+  `how_copy, what_else_copy, footnote_copy = _htib_split(copy["htib_after_copy"], 3)`)
+  and renders through the **exact same template structure** as before the
+  consolidation — the "Why I built this" / "Where AI shows up" / "How I
+  decided..." / "What else I've built..." headings, and the intro's/
+  footnote's own distinct wrapper `<div>` styles, are all still literal
+  template markup, untouched by the consolidation.
+- **New sections**: "Why I built this" (the origin story) and "What else
+  I've built with AI" (a closer naming work beyond this site), plus a
+  footnote recording Fred Wilson's 2024 AVC.com → avc.xyz move. A skip
+  link under the intro, "Skip to how the tooling works →", anchored to
+  `#where-ai-shows-up` — the heading that actually holds the surface
+  cards.
+- **About's own bio, on its own separate `/admin/copy/about` page, now
+  renders through this same trusted function too** (previously plain
+  text via a retired `_about_copy_html`/`_link_phrase` pair) — see
+  "About's body joins the trusted renderer" below.
 
 Reachable three ways, deliberately never from the top nav: (1) the phrase
-itself in `/about`'s own copy, linked via a new `_link_phrase(text, phrase,
-href)` helper (mirrors `_underline_phrase`'s phrase-matching-with-fallback
-shape, but wraps an `<a>` instead of an accent — falls back to plain escaped
-text if an admin rewrites the about-page copy without the phrase); (2) a
-fourth button in `/about`'s existing button row, between "Get in touch" and
-"LinkedIn" so the three internal links stay together and the one external
-link (LinkedIn) stays last; (3) a plain text link on the homepage, directly
-under the hero subhead.
+"AI-native before AI-native was a thing" inside `/about`'s own bio, now a
+plain raw `<a href="/how-this-is-built">` baked directly into
+`_ABOUT_COPY_DEFAULT` (see below — `_link_phrase` is retired); (2) a fourth
+button in `/about`'s existing button row, between "Get in touch" and
+"LinkedIn"; (3) a plain text link on the homepage, directly under the hero
+subhead.
 
 Lists four AI surfaces (FP&A Buddy, Exa's four call sites, profile/
 description generation, matchmakers and compare summaries) but links only
-the one with an existing explainer (`/tools/fpa-buddy/how-it-works`) — the
-other three render a title + description + "Explainer coming soon." rather
-than a placeholder link, so a visitor who clicks learns something every
-time. Adding an explainer for one of the other three is a one-line change
-(fill in its `href` in `_AI_SURFACES`), not a route or template change.
+the one with an existing explainer — the other three render a title +
+teaser + "Explainer coming soon." rather than a placeholder link. Adding an
+explainer for one of the other three is now an admin action at
+`/admin/ai-surfaces` (write the body, flip to Live), not a code change.
 
 No diagram — considered and deliberately skipped: the four surfaces are
 independent mechanisms rendered as a list, not one branching/parallel flow
@@ -2119,55 +2173,53 @@ still passes with none used, since it flags more than one, not fewer.
 
 See `docs/AI_SURFACES_BRIEF.md` for the underlying research (mechanism,
 cost tracking, and rejected-decisions history for all four surfaces) that
-the eventual per-surface explainer pages will draft from.
+a future per-surface explainer's body can draft from.
 
 **Admin-editable prose (PR 35, 2026-09; split into its own page, 2026-09
-follow-up).** The four prose sections and the closing footnote are editable
-at **`/admin/copy/how-this-is-built`**, so a copy change doesn't need a
-deploy — one of three pages `/admin/copy` split into (Homepage, About, and
-this one), each editing the public page its name says; see CLAUDE.md's
-"`/admin/copy` split into three pages" bullet for the full split write-up,
-including why `/admin/copy` itself is not an index page. No schema change —
-five rows in the existing `settings` table (`htib_intro_copy`,
-`htib_why_copy`, `htib_how_copy`, `htib_what_else_copy`,
-`htib_footnote_copy`), each resolved by `_htib_copy(lib)` as
-`get_setting(key) or _HTIB_*_DEFAULT`, the same convention the About/
-homepage copy already uses. `_HTIB_COPY_SECTIONS` is the single registry
-behind the settings keys, the `/admin/copy/how-this-is-built` page's
-sections, and the save route — add a section there and all three pick it up
-(`_email_template_registry()`'s precedent).
+follow-up; consolidated to two fields, explainers-collection Phase 2).**
+Both combined fields are editable at **`/admin/copy/how-this-is-built`**,
+one of three pages `/admin/copy` split into (Homepage, About, and this
+one) — see CLAUDE.md's "`/admin/copy` split into three pages" bullet for
+the full split write-up. No schema change — two rows in the existing
+`settings` table (`htib_before_copy`, `htib_after_copy`), each resolved by
+`_htib_copy(lib)` as `get_setting(key) or _HTIB_*_DEFAULT`. `POST
+/admin/copy/how-this-is-built` is one route for both fields, validated
+against `_HTIB_COPY_KEYS`; blank text is still rejected (a blank save
+would silently fall back to the hardcoded default).
 
-`POST /admin/copy/how-this-is-built` is **one** route for all five sections
-rather than five near-identical ones: the section is named in the JSON
-payload and validated against `_HTIB_COPY_KEYS`, so an unknown key is
-rejected (400) instead of writing an arbitrary settings row. Blank text is
-rejected too — a blank save would silently fall back to the hardcoded
-default, which reads on the page as "my edit vanished" rather than as an
-error.
+**A shared Preview action, new in Phase 2, on both this page and
+`/admin/copy/about`.** `POST /admin/copy/preview` takes arbitrary text and
+returns it rendered through `_render_original_content_markdown` — no save.
+Motivated directly by the fact that raw HTML without a preview is exactly
+how an unclosed `<div>` reaches production silently: an admin can now see
+the actual rendered output (including a broken nesting) before clicking
+Save, on any of these raw-HTML-tolerant fields. Both pages share one JS
+helper (`_ADMIN_COPY_PREVIEW_JS`, a `previewCopy(textareaId, boxId)`
+toggle) rather than duplicating it per page.
 
-**Rendering is unchanged, and that was the point of the investigation that
-gated this.** The prose already went through
-`_render_original_content_markdown` — the admin-authored-and-trusted
-renderer the `original_content` long-form pieces use, which passes raw HTML
-through — so making the copy editable needed no renderer work at all. Two
-alternatives were rejected: extending `webapp/markdown_render.py`'s
-restricted renderer to allow links would weaken link-escaping across every
-AI-drafted tool/community field site-wide to serve one admin page; a new
-trusted-admin-copy renderer would duplicate the one that already exists.
+**About's body joins the trusted renderer (explainers-collection Phase
+2).** `/about`'s bio previously rendered through `_about_copy_html`, a
+plain-text-only renderer with one special case: whichever paragraph
+contained the literal phrase "AI-native before AI-native was a thing" got
+that phrase wrapped in a link via `_link_phrase`, a small phrase-matching
+helper mirroring `_underline_phrase`'s shape. Both are now retired — the
+About route calls `_render_original_content_markdown(about_copy)`
+directly, the same function How this is built already used, and the link
+is written as a literal raw `<a href="/how-this-is-built"
+style="color:var(--navy);">` directly inside `_ABOUT_COPY_DEFAULT`. This
+was verified byte-identical for the default copy before shipping (both
+paths produce the same `<p>`-wrapped paragraphs with the same anchor tag)
+and removes the one remaining single-purpose phrase-linking mechanism in
+the codebase — `_link_phrase` had exactly one caller. The trade this
+already made for How this is built now applies to About too: raw HTML
+(including links) is admin-typeable here, correct because the page is
+admin-only (`_is_authed`-gated) and the field is Brian's own bio, not
+public input.
 
-The trade this makes, stated in each section's own
-`/admin/copy/how-this-is-built` description rather than left to be
-discovered: these five fields accept raw
-HTML, unlike the About-page bio beside them on the same page, which is
-plain text through `_about_copy_html`. That is correct here (admin-only,
-`_is_authed`-gated, and the copy is mostly credit links) but it is a real
-asymmetry between two fields on one screen.
-
-`_AI_SURFACES` — the four surface cards — stays in code deliberately. Each
-entry is a 3-tuple whose href points at a real route and whose empty string
-selects the "Explainer coming soon." state; neither survives a textarea
-intact (a typo'd href silently 404s, and the coming-soon state has no
-sensible text form).
+`_AI_SURFACES` stays in the repo, unimported by any live route — purely
+`scripts/migrate_ai_surfaces.py`'s seed data and a rollback reference, same
+precedent as `_TL_FEATURED_CARDS`/`webapp/thought_leadership_data.py`
+elsewhere in this file.
 
 ### Outbound links open in a new tab (PR 35, 2026-09)
 

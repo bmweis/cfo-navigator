@@ -290,6 +290,35 @@ CREATE TABLE IF NOT EXISTS original_content (
     updated_at    TEXT
 );
 
+-- The AI-surface cards on /how-this-is-built (Original Content, explainers-
+-- collection PR) — previously a hardcoded Python tuple, _AI_SURFACES. Same
+-- draft/live + display_order shape as original_content above, minus the
+-- flagship-card-specific columns (tag_label/link_label/featured_home) this
+-- page never needed. body_md is nullable and rendered through the same
+-- trusted _render_original_content_markdown() original_content uses (this
+-- is admin-authored content, never public input) — a row with a real
+-- body_md is reachable at /how-this-is-built/<slug>, same catch-all
+-- convention as GET /thought-leadership/{slug}. external_href is the case
+-- named in the build brief: an explainer whose own page lives elsewhere
+-- (FP&A Buddy's, at /tools/fpa-buddy/how-it-works) — when set, the card
+-- links straight there instead of to this table's own /how-this-is-built/
+-- <slug> route, and body_md is typically left NULL for that row since
+-- there's nothing here to render. A row with neither body_md nor
+-- external_href, or with status='draft', renders its card unlinked
+-- ("Explainer coming soon.") on the public /how-this-is-built page.
+CREATE TABLE IF NOT EXISTS ai_surfaces (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug          TEXT NOT NULL UNIQUE,
+    title         TEXT NOT NULL DEFAULT '',
+    teaser        TEXT NOT NULL DEFAULT '',
+    body_md       TEXT,
+    external_href TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'draft',
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT,
+    updated_at    TEXT
+);
+
 -- Personal bookmark list — private per user, never shared with other users
 -- or with the admin-curated Archive. user_id has no NOT NULL/UNIQUE
 -- constraint here on purpose: on a fresh DB every row gets a real user_id at
@@ -6421,6 +6450,64 @@ class Library:
 
     def delete_original_content(self, item_id: int) -> None:
         self.conn.execute("DELETE FROM original_content WHERE id = ?", (item_id,))
+        self.conn.commit()
+
+    # -- AI surfaces (the /how-this-is-built cards) --
+    # Ordering is display_order first, same "curated card order" convention
+    # as original_content above — there's no sort_key/date to tiebreak on
+    # here, so ties just fall back to id.
+    _AI_SURFACE_ORDER_SQL = "display_order ASC, id ASC"
+
+    def list_ai_surfaces(self, status: str | None = None) -> list[dict]:
+        if status:
+            rows = self.conn.execute(
+                f"SELECT * FROM ai_surfaces WHERE status = ? ORDER BY {self._AI_SURFACE_ORDER_SQL}",
+                (status,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                f"SELECT * FROM ai_surfaces ORDER BY {self._AI_SURFACE_ORDER_SQL}"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_ai_surface(self, item_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM ai_surfaces WHERE id = ?", (item_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_ai_surface_by_slug(self, slug: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM ai_surfaces WHERE slug = ?", (slug,)).fetchone()
+        return dict(row) if row else None
+
+    def add_ai_surface(self, slug: str, title: str, teaser: str = "", body_md: str | None = None,
+                        external_href: str = "", status: str = "draft",
+                        display_order: int | None = None) -> int:
+        if display_order is None:
+            display_order = self.conn.execute(
+                "SELECT COALESCE(MAX(display_order), -1) + 1 FROM ai_surfaces"
+            ).fetchone()[0]
+        now = _now()
+        cur = self.conn.execute(
+            "INSERT INTO ai_surfaces (slug, title, teaser, body_md, external_href, status, "
+            "display_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (slug.strip(), title.strip(), teaser.strip(), body_md, external_href.strip(),
+             status, display_order, now, now),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_ai_surface(self, item_id: int, slug: str, title: str, teaser: str,
+                           body_md: str | None, external_href: str, status: str,
+                           display_order: int) -> None:
+        self.conn.execute(
+            "UPDATE ai_surfaces SET slug=?, title=?, teaser=?, body_md=?, external_href=?, "
+            "status=?, display_order=?, updated_at=? WHERE id=?",
+            (slug.strip(), title.strip(), teaser.strip(), body_md, external_href.strip(),
+             status, display_order, _now(), item_id),
+        )
+        self.conn.commit()
+
+    def delete_ai_surface(self, item_id: int) -> None:
+        self.conn.execute("DELETE FROM ai_surfaces WHERE id = ?", (item_id,))
         self.conn.commit()
 
     def set_original_content_mirrored_article_id(self, item_id: int, article_id: int | None) -> None:
