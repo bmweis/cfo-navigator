@@ -255,6 +255,38 @@ def test_footnote_explains_the_column_once(app_env):
     assert "The cookie value itself is never stored in this database" in html
 
 
+def test_column_reference_moved_below_the_table(app_env):
+    """2026-09: five bullets plus a paragraph used to sit above the table,
+    re-teaching the same mechanics on every visit. Only a one-line intro
+    stays above the table now; the field-by-field reference (plus the
+    pre-existing cookie-finding instructions it now sits beside) moved
+    below it."""
+    with _client(app_env) as client:
+        html = client.get("/admin/reader/feeds").text
+    table_idx = html.index('<table class="ff-table">')
+    reference_idx = html.index("Column reference")
+    cookie_bullet_idx = html.index("<strong>Cookie</strong> shows two different facts")
+    finding_cookie_idx = html.index("Finding the right cookie in DevTools")
+    # The reference heading and its field bullets sit AFTER the table...
+    assert reference_idx > table_idx
+    assert cookie_bullet_idx > table_idx
+    # ...directly alongside the pre-existing cookie-finding instructions.
+    assert reference_idx < finding_cookie_idx
+    # And only a short intro remains above the table.
+    above_table = html[:table_idx]
+    assert "Sources</strong> rail only lists feeds" not in above_table
+    assert "<strong>Order</strong>" not in above_table
+
+
+def test_order_bullet_explains_the_rank_number(app_env):
+    """The new "N of M" rank indicator (added alongside the arrows fix)
+    gets a line in the moved-below reference explaining what it means and
+    why it can differ from the row's own position in the table."""
+    with _client(app_env) as client:
+        html = client.get("/admin/reader/feeds").text
+    assert "this table's own row order doesn't reflect it" in html
+
+
 def test_cookie_route_is_gone(app_env):
     """The old POST .../cookie toggle route was removed along with the
     checkbox it served — there's nothing left for it to write."""
@@ -357,7 +389,7 @@ def test_checkbox_columns_are_centre_justified(app_env):
         assert f'text-align:center;">{label}</th>' in html
     assert "Read only</th>" not in html
     assert '<th style="width:15%;">Name</th>' in html
-    assert '<th style="width:12%;">Section</th>' in html
+    assert '<th style="width:11%;">Section</th>' in html
 
 
 # ---------------------------------------------------------------------------

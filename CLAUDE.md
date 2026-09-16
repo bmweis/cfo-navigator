@@ -8955,6 +8955,88 @@ it supersedes the old "`/save` is token-gated" note.
   both rows — not a misrepresentation, since it *is* true of both — so
   this objection didn't hold up once actually building the per-row
   version.
+- **Feeds-admin follow-up, three real issues from live use (2026-09) — a
+  rank indicator (not a functional bug), a shared cookie-state helper, and
+  a page-copy trim.** All three surfaced the same day the arrows/registry/
+  per-row-health PR above shipped.
+  1. **Arrow sizing.** `_cf_order_arrows_html`'s outer `<span>` was a plain
+     `display:inline-flex` with no `align-items` set — the default,
+     `stretch`, sizes each flex child to the container's full cross-axis
+     height, and a bare `disabled` `<button>` and a `<form>`-wrapped
+     `<button>` don't report the same natural height to that stretch
+     calculation, so a disabled arrow rendered visibly smaller than an
+     enabled one. Fixed with `align-items:center` on the outer span (which
+     now also holds the new rank text below), with the two arrow buttons
+     nested in their own inner flex span.
+  2. **"Reordering doesn't work" — investigated and confirmed NOT a
+     functional bug.** Brian's USV/Fred Wilson report (an up arrow that
+     moved once then wouldn't move again, despite the row not looking like
+     it was at the top) was checked directly against production data via
+     the `/mcp` introspection tools: USV genuinely held `current_feed_order=0`,
+     a real, valid, unique rank-1 value, inside a clean dense `0..10`
+     sequence with no duplicates or gaps — the disabled-boundary check and
+     the whole-side renumber (both from the arrows-not-typing PR above)
+     were both already correct. The actual cause is structural, not a bug:
+     `Library.list_feeds()`'s own ordering (by section, then feed id — see
+     that PR's own docstring) has zero relationship to a feed's Current
+     Feed rank, so the admin table's row position has never meant "this is
+     first/last within its side." A correctly-disabled up arrow on a row
+     sitting visibly lower in the table reads as broken when nothing next
+     to it says otherwise. Fixed by rendering the feed's real rank ("1 of
+     11") beside the arrows — `admin_feeds()`'s `_cf_boundary` map grew
+     from `(is_first, is_last)` to `(is_first, is_last, rank_1indexed,
+     total)`, computed once per side from the same sort the renumber logic
+     already uses, so the number shown is guaranteed to match what the
+     arrows themselves are keyed off. No change to the disabled condition,
+     the move route, or the renumber — this is a display-only fix for a
+     display-only confusion.
+  3. **Cookie column: cramped width and disagreement with the edit page —
+     fixed at the root with one shared computation.** `_cf_cookie_cell_html`
+     and `_feed_cookie_readout` (the list cell and the add/edit form's own
+     readout) each independently derived "is this cookie configured/
+     working" from a slightly different question — the edit form said
+     "Cookie configured for this domain" in green for any domain with a
+     `LINKLIB_COOKIE_<DOMAIN>` variable set, regardless of what the list
+     page's own health probe had found for it, which is exactly how
+     Cautious Optimism's row could read "expired" on one page and green on
+     the other for the identical feed. New `_cookie_health_state(domain,
+     configured, status)` is the single function both now call — returns a
+     dict (`state`/`color`/`label`/`age`/`detail`) covering the same four
+     states either surface needs (not configured / configured-but-
+     unchecked / working / expired-or-unknown) — so the two pages can no
+     longer independently disagree, by construction rather than by
+     convention. Threading the edit form's readout onto the same live
+     `authcheck.get_auth_status()` data the list page already reads
+     required passing `auth_status` through `_feed_cookie_readout` ->
+     `_feed_form_fields` -> `_feed_form_page`, fetched fresh at all three
+     call sites that render the edit/reject form (`admin_feeds_edit`, and
+     the `_reject()` closures inside both `admin_feeds_new_submit` and
+     `admin_feeds_edit_submit`) — the add form (no existing feed, no
+     `xml_url` yet) has nothing to compute against and passes `None`.
+     Width fixed by switching the Cookie column from a hand-picked `9%`
+     to the existing shared `_COL_WIDTH_STATUS` (110px) constant, plus
+     shortening the visible unchecked-state text from "configured, not yet
+     checked" (which wrapped to three lines in that width) to "Not yet
+     checked" — the fuller phrase survives only in the `title`/aria-label
+     for anyone who hovers or uses a screen reader.
+  4. **Too much explanatory text above the table.** The 2-sentence intro
+     paragraph plus 5-bullet mechanics list (Sources rail, Cookie,
+     Subscriber, Current Feed, Order) that used to sit between the auth
+     panel and the table is cut to one sentence ("The RSS subscriptions
+     behind the Reader's Feed view and FP&A Buddy's web-search
+     allowlist."); the same five explanations move to a new "Column
+     reference" section right after the table, alongside the pre-existing
+     "Finding the right cookie in DevTools" instructions they already sat
+     near — reference material a returning admin skips past, not
+     onboarding copy re-taught on every visit. The Order bullet also
+     gained a line explicitly naming that the table's own row order
+     doesn't reflect a feed's Current Feed rank, tying the copy fix back
+     to fix #2 above rather than leaving that a silent design fact.
+  See `tests/test_current_feed.py` (rank-matches-current-feed-order,
+  consistent arrow sizing), `tests/test_cookie_status_panel.py`
+  (shortened text, named-constant width, list/edit agreement), and
+  `tests/test_feed_cookie_flag.py` (column-reference relocation, the
+  updated Section-column width) for the regression coverage.
 
 
 ## Authentication & security

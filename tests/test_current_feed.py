@@ -645,6 +645,89 @@ def test_order_arrows_reflect_position_within_the_side(env):
     assert _arrow_states(last_id, "Last") == (False, True)      # up enabled, down disabled
 
 
+def test_order_cell_shows_rank_matching_current_feed_order_not_row_position(env):
+    """The real bug behind a 2026-09 report: a feed's row position in this
+    admin table (Library.list_feeds() orders by section/feed id, not by
+    current_feed_order) has no relationship to its actual position within
+    its Current Feed side — a feed can sit near the bottom of the table
+    while genuinely being rank 1 (order=0) on /current-feed, so a correctly-
+    disabled up arrow reads as broken with nothing else to explain why.
+    The "N of M" rank text next to the arrows is what actually answers
+    that, so this pins it against a deliberately out-of-table-order
+    current_feed_order assignment — the exact shape of the real report
+    (Fred Wilson's USV feed genuinely held order=0 while sitting mid-table
+    by id)."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        # Added in this order (so table/id order is A,B,C,D,E), but C is
+        # given the LOWEST current_feed_order — genuinely first on
+        # /current-feed despite sitting third in the table.
+        a = _add(lib, sid, "A", "https://a.example/feed", "https://a.example/", side="old_school", order=1)
+        b = _add(lib, sid, "B", "https://b.example/feed", "https://b.example/", side="old_school", order=2)
+        c = _add(lib, sid, "C", "https://c.example/feed", "https://c.example/", side="old_school", order=0)
+        d = _add(lib, sid, "D", "https://d.example/feed", "https://d.example/", side="old_school", order=3)
+        e = _add(lib, sid, "E", "https://e.example/feed", "https://e.example/", side="old_school", order=4)
+    finally:
+        lib.close()
+    _login(client)
+    html = client.get("/admin/reader/feeds").text
+
+    def _rank_text(feed_id):
+        marker = f"/admin/reader/feeds/{feed_id}/section"
+        i = html.index(marker)
+        start = html.rindex('<tr class="ff-row">', 0, i)
+        end = html.index("</tr>", i) + len("</tr>")
+        row = html[start:end]
+        m = re.search(r"(\d+) of (\d+)", row)
+        return m.group(0)
+
+    # Rank matches current_feed_order, not table/id position — C (order=0)
+    # is genuinely "1 of 5" even though it's the third row in the table.
+    assert _rank_text(c) == "1 of 5"
+    assert _rank_text(a) == "2 of 5"
+    assert _rank_text(b) == "3 of 5"
+    assert _rank_text(d) == "4 of 5"
+    assert _rank_text(e) == "5 of 5"
+
+    # And C's up arrow is correctly disabled, matching that real rank —
+    # not a bug, just previously invisible without the rank text.
+    up = re.search(r'<button[^>]*aria-label="Move up: C"[^>]*>',
+                    html[html.rindex('<tr class="ff-row">', 0, html.index(f"/admin/reader/feeds/{c}/section")):])
+    assert "disabled" in up.group(0)
+
+
+def test_order_arrows_render_at_a_consistent_size_disabled_or_not(env):
+    """2026-09 regression: a disabled arrow (a bare <button>, no wrapping
+    <form>) rendered visibly taller than an enabled one (<form>-wrapped)
+    in the same inline-flex row, because the container's default
+    align-items:stretch let the two differently-boxed children diverge.
+    Fixed by pinning align-items:center on the wrapping span — this pins
+    that the fix is still in place, since the failure mode is invisible to
+    a plain HTML-content assertion and only shows up as a rendered size
+    difference."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        first_id = _add(lib, sid, "First", "https://a.example/feed", "https://a.example/",
+                        side="old_school", order=0)
+        _add(lib, sid, "Last", "https://b.example/feed", "https://b.example/",
+             side="old_school", order=1)
+    finally:
+        lib.close()
+    _login(client)
+    html = client.get("/admin/reader/feeds").text
+    idx = html.index(f"/admin/reader/feeds/{first_id}/section")
+    start = html.rindex('<tr class="ff-row">', 0, idx)
+    end = html.index("</tr>", idx) + len("</tr>")
+    row = html[start:end]
+    order_cell_start = row.index('<td class="ff-order">')
+    order_cell = row[order_cell_start:row.index("</td>", order_cell_start)]
+    assert 'align-items:center' in order_cell.split("gap:5px")[0]
+
+
 def test_add_edit_form_has_no_current_feed_order_field(env):
     """The typed Order field is gone from the add/edit forms entirely —
     reordering is the admin table's arrows' job now, not a form field's."""

@@ -193,7 +193,72 @@ def test_a_never_checked_domain_reads_configured_not_yet_checked(app_env):
         html = client.get("/admin/reader/feeds").text
     for name in FEED_NAMES.values():
         cell = _cookie_cell(html, name)
+        # The aria-label keeps the fuller phrase for accessibility; the
+        # VISIBLE text was shortened (2026-09) after the fuller phrase
+        # wrapped to three lines in a production report (Cautious
+        # Optimism) — see test_not_yet_checked_text_fits_on_one_line.
         assert "configured, not yet checked" in cell
+        assert ">Not yet checked<" in cell
+
+
+def test_not_yet_checked_text_is_short_enough_for_the_column(app_env):
+    """2026-09 regression: "configured, not yet checked" (27 chars) wrapped
+    to three lines in the Cookie column, stretching that row far taller
+    than its neighbors. Shortened to "Not yet checked" — this doesn't
+    re-measure real layout (no browser here), but pins the actual visible
+    string so a future edit can't silently revert to the longer phrase."""
+    with _client(app_env) as client:
+        html = client.get("/admin/reader/feeds").text
+    for name in FEED_NAMES.values():
+        cell = _cookie_cell(html, name)
+        if "Not yet checked" in cell:
+            visible = re.search(r">([^<]+)</span>$", cell.rstrip())
+            assert visible and visible.group(1) == "Not yet checked"
+
+
+def test_cookie_column_width_uses_the_named_status_constant(app_env):
+    """2026-09: the column was a bare 9%, which measured out to the same
+    ~110px _COL_WIDTH_STATUS already names elsewhere — using the constant
+    directly (rather than a magic percentage that happens to match it)
+    is what this pins, per this repo's admin-table column-width
+    convention."""
+    with _client(app_env) as client:
+        html = client.get("/admin/reader/feeds").text
+    from webapp.app import _COL_WIDTH_STATUS
+    assert f'width:{_COL_WIDTH_STATUS}px;text-align:center;">Cookie</th>' in html
+    assert f'.ff-cookie{{width:{_COL_WIDTH_STATUS}px' in html
+
+
+def test_list_and_edit_pages_agree_on_a_feeds_cookie_state(app_env):
+    """2026-09 regression: the edit form used to compute its own narrower
+    "is a variable set" answer and say "Cookie configured for this
+    domain" in green for ANY configured domain — even one the list page's
+    own health probe had already marked expired. Both surfaces now read
+    the same _cookie_health_state(), so a real health state (not just
+    "configured") has to agree between them."""
+    import json
+    from linklib import authcheck
+    fresh = _ago(0.01)
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = lib.find_feed_by_url("https://www.mostlymetrics.com/feed")
+            lib.set_setting(authcheck.STATUS_KEY, json.dumps({
+                "mostlymetrics.com": {"ok": False, "checked_at": fresh, "detail": "got a preview/paywall"},
+            }))
+        finally:
+            lib.close()
+        list_html = client.get("/admin/reader/feeds").text
+        list_cell = _cookie_cell(list_html, feed["name"])
+        assert "expired" in list_cell
+
+        edit_html = client.get(f"/admin/reader/feeds/{feed['id']}/edit").text
+        idx = edit_html.index("Cookie</label>")
+        edit_excerpt = edit_html[idx:idx + 300]
+        # The edit form must say the SAME thing the list does — "expired",
+        # not the old context-free "Cookie configured for this domain".
+        assert "expired" in edit_excerpt
+        assert "Cookie configured for this domain" not in edit_excerpt
 
 
 # ---------------------------------------------------------------------------
