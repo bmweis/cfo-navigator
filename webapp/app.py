@@ -26590,7 +26590,7 @@ function ffApplySort() {
     if (active) th.setAttribute('aria-sort', state.dir === 'asc' ? 'ascending' : 'descending');
     else th.removeAttribute('aria-sort');
   });
-  if (!state) return;   // default order (section, then feed id) — nothing to reorder
+  if (!state) return;   // default order (section, then feed id)—nothing to reorder
 
   var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-id]'));
   if (!rows.length) return;
