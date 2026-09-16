@@ -307,8 +307,11 @@ Two places surface it, both fed by the same stored record
 - **`/admin/reader/feeds`**—the primary surface. With everything healthy
   you see only a compact **Re-check subscriber access** button, nothing else.
   When a cookie has actually gone stale, that button is absorbed into a coral
-  **"Subscriber cookie expired"** panel carrying a status line per domain and
-  an abbreviated version of 5.2–5.3 inline.
+  **"Subscriber cookie expired"** panel carrying an abbreviated version of
+  5.2–5.3 inline. (Before 2026-09 this panel also carried a status line per
+  domain; that per-domain detail now lives in each feed's own **Cookie**
+  column instead—see below—so the panel keeps only the part a per-row dot
+  can't carry: which env var to update.)
 - **The Reader**—its own banner, posting to the same
   `POST /admin/auth/recheck`.
 
@@ -328,21 +331,27 @@ Each domain reports one of three states:
 | **expired** | `got a preview/paywall — cookie missing or expired` | **This runbook.** |
 | **untested** | `no recent post found to test` | The probe found no post to check. Not a cookie failure—see 5.5. |
 
-The feed table's **Cookie** column is a computed, read-only indicator—whether
-a subscriber cookie is currently configured for that feed's domain, checked
-live against the host environment. It drives nothing: it does not gate
-fetching and it is not what the probe reads. (Before 2026-08 this was a
-manually-ticked checkbox that recorded intent, not fact, and could silently
-drift from reality—see CLAUDE.md's Feeds-page Cookie-indicator note. It's
-gone now; there's nothing to tick.)
+The feed table's **Cookie** column is a computed, read-only indicator—it
+drives nothing, does not gate fetching, and is not what the probe reads.
+(Before 2026-08 this was a manually-ticked checkbox that recorded intent,
+not fact, and could silently drift from reality—see CLAUDE.md's Feeds-page
+Cookie-indicator note. It's gone now; there's nothing to tick.) It shows two
+different facts per row (2026-09): a dash when no `LINKLIB_COOKIE_<DOMAIN>`
+variable is set for that feed's domain, checked live against the host
+environment; and, once a variable is set, either "configured, not yet
+checked" or one of this table's three colored states plus how long ago it
+was checked—the same persisted `auth_cookie_status` record this section
+already describes, rendered per feed instead of in a separate summary.
 
-> **Only domains in `linklib.extract._COOKIE_DOMAINS` are probed at all.**
-> That's a short, hand-maintained tuple, not `feed.PAYWALLED_DOMAINS`. A
-> paywalled feed whose domain isn't in `_COOKIE_DOMAINS` is silently never
-> checked—it just never returns full text. If a source you expect to see is
-> absent from the panel entirely, that's the reason, and the fix is to add
-> the domain to `_COOKIE_DOMAINS` (a code change) before configuring its
-> variable in 5.3.
+> **Every feed's domain is checked automatically (2026-09) — no code change
+> needed for a new subscription.** Before 2026-09, only domains in a short
+> hand-maintained tuple (`linklib.extract._COOKIE_DOMAINS`) were ever
+> probed — this silently broke Cautious Optimism's cookie, which was set in
+> Railway and simply never read, since the tuple was never extended for it.
+> `_opml_feed_domains()` now derives the candidate set live from
+> `preferred_sites.opml` (every feed's domain), so any feed on
+> `/admin/reader/feeds` is checked the moment its `LINKLIB_COOKIE_<DOMAIN>`
+> variable is set in 5.3 — no code change, no deploy.
 
 ### 5.2 Get a fresh cookie value
 
@@ -403,10 +412,11 @@ Key rules, from `_auth_cookies` and `_cookie_for`:
   before matching.
 - Subdomains match automatically (`host == dom or host.endswith("." + dom)`),
   so `LINKLIB_COOKIE_MOSTLYMETRICS_COM` also covers `www.mostlymetrics.com`.
-- **A domain must be listed in `linklib.extract._COOKIE_DOMAINS` before its
-  variable is ever read**—setting `LINKLIB_COOKIE_<DOMAIN>` for a domain not
-  in that tuple does nothing. Adding a new domain is a small code change
-  (append to `_COOKIE_DOMAINS`) plus setting its variable—see §6.
+- **Every feed's domain is checked automatically (2026-09)** — derived live
+  from `preferred_sites.opml` (`linklib.extract._opml_feed_domains`), not a
+  hardcoded list. Setting `LINKLIB_COOKIE_<DOMAIN>` for a domain that's
+  already a feed on `/admin/reader/feeds` is the whole fix; no code change,
+  no deploy—see §6.
 
 In Railway: the `cfo-navigator` service → **Variables** → add/edit the
 domain's `LINKLIB_COOKIE_<DOMAIN>` variable → save.
@@ -479,14 +489,18 @@ feed, per anything else with an unbounded set of instances), use
 `LINKLIB_<AREA>_<INSTANCE>`, where `<INSTANCE>` is the qualifier normalized
 to `[A-Z0-9_]` and uppercased (dots and hyphens become underscores). This is
 the pattern `LINKLIB_COOKIE_<DOMAIN>` follows (§5.3 above)—it's the
-reference case for this half of the convention. Pair it with an explicit,
-hand-maintained registry of the valid instances in code (`_COOKIE_DOMAINS`
-in `linklib/extract.py`, mirroring the existing `feed.PAYWALLED_DOMAINS`
-precedent), not a wildcard `os.environ` scan for the prefix—a domain
-containing both dots and hyphens isn't unambiguously reversible from its
-normalized variable name, so the registry is the source of truth for which
-instances exist, and the variable is only ever read for an instance already
-in it.
+reference case for this half of the convention. Pair it with an explicit
+list of the valid instances that's still not a wildcard `os.environ` scan
+for the prefix—a domain containing both dots and hyphens isn't unambiguously
+reversible from its normalized variable name, so *something* has to name
+which instances exist before the variable is read. Originally a small
+hand-maintained tuple in code (`_COOKIE_DOMAINS`, mirroring `feed.
+PAYWALLED_DOMAINS`); as of 2026-09 that list is instead derived live from
+`preferred_sites.opml` (`linklib.extract._opml_feed_domains`, every real
+feed's domain) after the hardcoded version silently missed a newly added
+paid subscription (Cautious Optimism)—the instance names now come from the
+same data an admin already maintains on `/admin/reader/feeds`, not a second,
+easy-to-forget copy in source.
 
 **No other variable needed a rename to fit this convention** as of the
 2026-08 audit—`LINKLIB_AUTH_COOKIES` was the only one that broke the

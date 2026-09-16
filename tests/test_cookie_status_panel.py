@@ -1,13 +1,23 @@
-"""Per-domain subscriber-cookie health summary on /admin/reader/feeds.
+"""Per-feed subscriber-cookie health, shown in the feed table's Cookie column
+(2026-09) — not a separate summary panel sitting apart from the rows it
+describes.
 
-Before this, two of the three states rendered nothing at all: the page only
-showed a panel when `stale_domains()` was non-empty, and that returns domains
-where `ok is False` only. A working cookie and a cookie that could not be
-probed looked identical — blank — so "nothing on screen" meant both "healthy"
-and "we have no idea".
+Before this, the health check rendered as a standalone "one row per domain"
+panel above the feed table, and the table's own Cookie column only ever said
+"configured" (a variable exists) with no way to tell whether fetching
+actually worked. That gap was diagnosed live: Cautious Optimism's cookie was
+set in Railway and the row still read exactly like a healthy one, because
+nothing in the table connected to the health-check result at all. Now the
+same persisted `auth_cookie_status` record renders per feed row, right next
+to that feed's own Cookie/Subscriber/Order controls.
 
-The summary reads the persisted `auth_cookie_status` record, so it survives a
-reload rather than only appearing right after a Re-check.
+Before this, two of the three health states rendered nothing at all in the
+old summary panel: it only showed a coral block when `stale_domains()` was
+non-empty, and that returns domains where `ok is False` only. A working
+cookie and a cookie that could not be probed looked identical — blank — so
+"nothing on screen" meant both "healthy" and "we have no idea". That fix
+carries over unchanged into the per-row rendering: all three states always
+render something.
 
 Amber is strictly `ok: None`. A passing check stays green however old it is:
 staleness is shown as relative text, never promoted to its own colour.
@@ -16,10 +26,11 @@ Colours are true stoplight values, a sanctioned exception registered in
 brand_check.AUX_COLORS and documented in BRAND.md §6 — the semantic tokens were
 tried first and `--good` is navy, which reads as ordinary text rather than a
 health signal. The amber is dot-only: #CA8A04 as text on white is 2.94:1, below
-AA, so the state word stays in --ink-soft.
+AA, so the state word stays outside the coloured span.
 """
 import json
 import pathlib
+import re
 import shutil
 import sys
 from datetime import datetime, timedelta, timezone
@@ -32,6 +43,12 @@ from linklib import authcheck
 
 REPO_OPML = str(pathlib.Path(__file__).resolve().parents[1] / "preferred_sites.opml")
 DOMAINS = ("mostlymetrics.com", "stratechery.com", "blog.publiccomps.com")
+# One real feed per domain in REPO_OPML — see preferred_sites.opml itself.
+FEED_NAMES = {
+    "mostlymetrics.com": "Mostly Metrics (CJ Gustafson)",
+    "stratechery.com": "Ben Thompson (Stratechery)",
+    "blog.publiccomps.com": "Public Comps",
+}
 
 
 def _ago(hours):
@@ -51,11 +68,13 @@ def app_env(monkeypatch, tmp_path):
     """Boot with cookies configured, so the control renders at all.
 
     DOMAINS includes stratechery.com and blog.publiccomps.com purely as test
-    fixtures for exercising all three health states — patched into the real
-    _COOKIE_DOMAINS registry rather than assuming they're production entries.
+    fixtures for exercising all three health states. Since 2026-09 the
+    candidate domain set is derived live from LINKLIB_SITES_OPML rather than
+    a hardcoded registry — all three DOMAINS are already real feeds in
+    REPO_OPML (copied below), so no domain-list patch is needed, only the
+    env vars.
     """
     from linklib import extract as extract_mod
-    monkeypatch.setattr(extract_mod, "_COOKIE_DOMAINS", DOMAINS)
     for d in DOMAINS:
         monkeypatch.setenv(extract_mod._cookie_env_var(d), "x=1")
     opml = tmp_path / "sites.opml"
@@ -88,34 +107,39 @@ def _seed_status(appmod, mostly=True, strat=False, public=None, hours=(3, 5, 9))
         lib.close()
 
 
-def _panel_markup(html):
-    """The <div class="ck-panel"> element only. Matching on the bare string
-    would hit the stylesheet rule of the same name, which is always emitted."""
-    start = html.index('<div class="ck-panel"')
-    depth, i = 0, start
-    while i < len(html):
-        if html.startswith("<div", i):
-            depth += 1
-        elif html.startswith("</div>", i):
-            depth -= 1
-            if depth == 0:
-                return html[start:i + 6]
-        i += 1
-    raise AssertionError("unbalanced ck-panel markup")
+def _feed_row(html: str, feed_name: str) -> str:
+    """The <tr class="ff-row">...</tr> block for `feed_name`. Rows don't
+    nest other <tr>s, so a plain split-and-find is enough."""
+    marker = f'<td class="ff-name">{feed_name}</td>'
+    idx = html.index(marker)
+    start = html.rindex('<tr class="ff-row">', 0, idx)
+    end = html.index("</tr>", idx) + len("</tr>")
+    return html[start:end]
 
 
-def _rows(html):
-    import re
-    out = []
-    for block in re.findall(r'<div class="ck-row">(?:(?!</div>).)*</div>', html, re.S):
-        dom = re.search(r'class="ck-dom">([^<]+)', block)
-        state = re.search(r'class="ck-state"[^>]*>([^<]+)', block)
-        colour = re.search(r'class="ck-dot" style="background:([^;]+);', block)
-        age = re.search(r'class="ck-age">([^<]*)', block)
-        out.append({"domain": dom.group(1) if dom else "",
-                    "state": state.group(1) if state else "",
-                    "colour": colour.group(1) if colour else "",
-                    "age": age.group(1) if age else ""})
+def _cookie_cell(html: str, feed_name: str) -> str:
+    row = _feed_row(html, feed_name)
+    start = row.index('<td class="ff-cookie">')
+    end = row.index("</td>", start)
+    return row[start:end]
+
+
+def _cookie_rows(html: str) -> dict:
+    """{domain: {"state", "colour", "age"}} for every domain with a real
+    feed, parsed from each feed's own .ff-cookie cell — the per-row
+    replacement for the old .ck-panel summary."""
+    out = {}
+    for dom, name in FEED_NAMES.items():
+        cell = _cookie_cell(html, name)
+        colour = re.search(r'background:([^;]+);', cell)
+        # The state word is the second inline <span> (after the dot).
+        state = re.search(r'color:[^;]+;">([a-z]+)</span>', cell)
+        age = re.search(r'&middot;\s*([^<]+)</span>', cell)
+        out[dom] = {
+            "state": state.group(1) if state else "",
+            "colour": colour.group(1) if colour else "",
+            "age": (age.group(1).strip() if age else ""),
+        }
     return out
 
 
@@ -126,31 +150,28 @@ def _rows(html):
 def test_each_state_gets_its_own_colour_and_label(app_env):
     _seed_status(app_env)
     with _client(app_env) as client:
-        rows = _rows(client.get("/admin/reader/feeds").text)
+        rows = _cookie_rows(client.get("/admin/reader/feeds").text)
 
-    by_dom = {r["domain"]: r for r in rows}
-    assert len(rows) == 3
+    assert rows["mostlymetrics.com"]["state"] == "working"
+    assert rows["mostlymetrics.com"]["colour"] == "#15803D"
 
-    assert by_dom["mostlymetrics.com"]["state"] == "working"
-    assert by_dom["mostlymetrics.com"]["colour"] == "#15803D"
+    assert rows["stratechery.com"]["state"] == "expired"
+    assert rows["stratechery.com"]["colour"] == "#b91c1c"
 
-    assert by_dom["stratechery.com"]["state"] == "expired"
-    assert by_dom["stratechery.com"]["colour"] == "#b91c1c"
-
-    assert by_dom["blog.publiccomps.com"]["state"] == "inconclusive"
-    assert by_dom["blog.publiccomps.com"]["colour"] == "#CA8A04"
+    assert rows["blog.publiccomps.com"]["state"] == "inconclusive"
+    assert rows["blog.publiccomps.com"]["colour"] == "#CA8A04"
 
 
 def test_working_and_inconclusive_now_render_at_all(app_env):
     """The regression this feature exists to fix: previously only `expired`
     produced any output, so a healthy and an untestable cookie were both
-    invisible."""
+    indistinguishable from "nothing checked yet"."""
     _seed_status(app_env, mostly=True, strat=True, public=None)
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
     assert "Subscriber cookie expired" not in html      # nothing is expired
-    rows = _rows(html)
-    assert {r["state"] for r in rows} == {"working", "inconclusive"}
+    rows = _cookie_rows(html)
+    assert {r["state"] for r in rows.values()} == {"working", "inconclusive"}
 
 
 def test_a_stale_but_passing_check_stays_green(app_env):
@@ -158,20 +179,21 @@ def test_a_stale_but_passing_check_stays_green(app_env):
     _seed_status(app_env, mostly=True, strat=True, public=True,
                  hours=(11.5, 11.5, 11.5))
     with _client(app_env) as client:
-        rows = _rows(client.get("/admin/reader/feeds").text)
-    assert all(r["colour"] == "#15803D" for r in rows)
-    assert all(r["state"] == "working" for r in rows)
-    assert all(r["age"].endswith("ago") for r in rows)
+        rows = _cookie_rows(client.get("/admin/reader/feeds").text)
+    assert all(r["colour"] == "#15803D" for r in rows.values())
+    assert all(r["state"] == "working" for r in rows.values())
+    assert all(r["age"].endswith("ago") for r in rows.values())
 
 
-def test_a_never_checked_domain_reads_inconclusive(app_env):
-    """No stored record at all — the panel must still render a row rather than
-    omit the domain silently."""
+def test_a_never_checked_domain_reads_configured_not_yet_checked(app_env):
+    """No stored record at all — the cell must still say something (not go
+    blank), but "never checked" and "checked and inconclusive" are genuinely
+    different facts, so this doesn't collapse into the amber state."""
     with _client(app_env) as client:
-        rows = _rows(client.get("/admin/reader/feeds").text)
-    assert len(rows) == 3
-    assert all(r["state"] == "inconclusive" for r in rows)
-    assert all(r["colour"] == "#CA8A04" for r in rows)
+        html = client.get("/admin/reader/feeds").text
+    for name in FEED_NAMES.values():
+        cell = _cookie_cell(html, name)
+        assert "configured, not yet checked" in cell
 
 
 # ---------------------------------------------------------------------------
@@ -182,40 +204,29 @@ def test_the_result_survives_a_reload(app_env):
     """It reads the stored record, so it is not a flash message."""
     _seed_status(app_env)
     with _client(app_env) as client:
-        first = _rows(client.get("/admin/reader/feeds").text)
-        second = _rows(client.get("/admin/reader/feeds").text)
+        first = _cookie_rows(client.get("/admin/reader/feeds").text)
+        second = _cookie_rows(client.get("/admin/reader/feeds").text)
     assert first == second
-    assert {r["state"] for r in first} == {"working", "expired", "inconclusive"}
+    assert {r["state"] for r in first.values()} == {"working", "expired", "inconclusive"}
 
 
 def test_relative_age_is_shown_per_domain(app_env):
     _seed_status(app_env, hours=(3, 5, 9))
     with _client(app_env) as client:
-        by_dom = {r["domain"]: r for r in _rows(client.get("/admin/reader/feeds").text)}
-    assert by_dom["mostlymetrics.com"]["age"] == "3h ago"
-    assert by_dom["stratechery.com"]["age"] == "5h ago"
-    assert by_dom["blog.publiccomps.com"]["age"] == "9h ago"
+        rows = _cookie_rows(client.get("/admin/reader/feeds").text)
+    assert rows["mostlymetrics.com"]["age"] == "3h ago"
+    assert rows["stratechery.com"]["age"] == "5h ago"
+    assert rows["blog.publiccomps.com"]["age"] == "9h ago"
 
 
 # ---------------------------------------------------------------------------
-# Separation from the Cookie checkbox, and from the expired panel
+# Separation from the expired panel; dormant with no cookies configured
 # ---------------------------------------------------------------------------
-
-def test_the_panel_holds_no_checkboxes_and_no_seafoam(app_env):
-    """Different thing from the Cookie column: static declaration vs dynamic
-    health. A dot, not a checkbox, and none of the checkbox's accent colour."""
-    _seed_status(app_env)
-    with _client(app_env) as client:
-        html = client.get("/admin/reader/feeds").text
-    panel = _panel_markup(html)
-    assert panel.count('class="ck-row"') == 3
-    assert "<input" not in panel
-    assert "seafoam" not in panel
-
 
 def test_the_expired_panel_no_longer_repeats_the_domains(app_env):
-    """The summary already names them in colour; the coral panel keeps only
-    the part the summary cannot carry, which is how to fix it."""
+    """The per-row cells already name each domain's status, in colour, right
+    on the feed table — the coral panel keeps only the part a row can't
+    carry without cluttering it: how to fix it."""
     _seed_status(app_env, mostly=True, strat=False, public=None)
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
@@ -226,18 +237,11 @@ def test_the_expired_panel_no_longer_repeats_the_domains(app_env):
     assert "To refresh an expired cookie" in html
 
 
-def test_the_panel_sits_between_the_header_and_the_feed_table(app_env):
-    _seed_status(app_env)
-    with _client(app_env) as client:
-        html = client.get("/admin/reader/feeds").text
-    assert html.index('class="ff-head"') < html.index('class="ck-panel"')
-    assert html.index('class="ck-panel"') < html.index('class="ff-table"')
-
-
 def test_nothing_renders_when_no_cookies_are_configured(monkeypatch, tmp_path):
-    """The whole feature stays dormant until a LINKLIB_COOKIE_<DOMAIN> var is set."""
+    """The whole feature stays dormant until a LINKLIB_COOKIE_<DOMAIN> var is
+    set — the Cookie column still renders (as a dash for every feed), but
+    there's no Re-check button and no expired-cookie panel."""
     from linklib import extract as extract_mod
-    monkeypatch.setattr(extract_mod, "_COOKIE_DOMAINS", DOMAINS)
     for d in DOMAINS:
         monkeypatch.delenv(extract_mod._cookie_env_var(d), raising=False)
     opml = tmp_path / "sites.opml"
@@ -252,8 +256,12 @@ def test_nothing_renders_when_no_cookies_are_configured(monkeypatch, tmp_path):
 
     with _client(appmod) as client:
         html = client.get("/admin/reader/feeds").text
-    assert '<div class="ck-panel"' not in html   # the CSS rule is always emitted
-    assert "Re-check subscriber access" not in html
+    # The button's own action, not its label text — the label also appears
+    # in the page's static Cookie-column help copy (naming the button by
+    # name), which renders regardless of whether the feature is active.
+    assert '/admin/auth/recheck' not in html
+    for name in FEED_NAMES.values():
+        assert "&mdash;" in _cookie_cell(html, name)
 
 
 # ---------------------------------------------------------------------------
@@ -285,23 +293,11 @@ def test_relative_age_handles_a_naive_timestamp(app_env):
     assert app_env._relative_age(naive) == "2h ago"
 
 
-def test_the_state_word_is_not_tinted_amber(app_env):
-    """#CA8A04 as text on the panel's white surface is 2.94:1 — under AA (4.5)
-    and even AA-large (3.0). The colour belongs on the dot, which is a graphic;
-    the word stays readable ink."""
-    _seed_status(app_env)
-    with _client(app_env) as client:
-        panel = _panel_markup(client.get("/admin/reader/feeds").text)
-    assert 'class="ck-state" style="color:' not in panel
-    assert "#CA8A04" in panel        # still present, on the dot
-
-
 def test_the_red_reuses_the_destructive_action_value(app_env):
-    """One red sitewide: the same #b91c1c as Delete/Reject, not a second red."""
+    """One red sitewide: the same #b91c1c as Delete/Remove, not a second red."""
     _seed_status(app_env, mostly=True, strat=False, public=True)
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert "#b91c1c" in _panel_markup(html)
     # It is the same value the Remove buttons already use on this page.
     assert html.count("#b91c1c") > 1
 

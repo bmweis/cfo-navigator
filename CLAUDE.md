@@ -391,6 +391,36 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   is the existing 12-hour background re-probe, not a colour. It's a per-domain
   panel rather than a table column because cookies are keyed by domain and the
   table is keyed by feed.
+- **The cookie domain registry stopped being a hardcoded tuple (2026-09) —
+  it's derived live from `preferred_sites.opml` instead, so a new paid
+  subscription is a data event, not a deploy.** Found live: Cautious
+  Optimism's cookie was set in Railway, deployed, and the row still showed
+  "No cookie configured" — the `www` normalization the edit page displays
+  the variable name with (`_cookie_env_var`) already matched
+  `_cookie_for`'s own www-stripping exactly, so that wasn't it. The real
+  cause was `linklib.extract._COOKIE_DOMAINS`, the "small hand-maintained
+  tuple" described in the bullet above: it only ever held
+  `("mostlymetrics.com", "onlycfo.io")`, so a domain never added to that
+  literal list — regardless of what env var is set for it — was never
+  checked at all, silently. Brian's own understanding ("every
+  Subscriber-flagged feed gets checked for a matching variable") was false;
+  the Cookie column's own help text ("only which domains to check is baked
+  into the code") was the accurate description all along, just easy to
+  read as a footnote rather than the actual gate. Fixed by replacing
+  `_COOKIE_DOMAINS` with `extract._opml_feed_domains()` — parses
+  `preferred_sites.opml` (the file `Library.write_opml()` already
+  regenerates from the feeds table on every mutation) for every
+  `xmlUrl`/`htmlUrl` domain, www-stripped the same way `_cookie_for`
+  already was, on every call. Deliberately uncached (unlike
+  `sources.preferred_domains`'s `lru_cache`, which needs `write_opml()` to
+  remember to clear it): a fetch already dwarfs an OPML parse, so there's
+  no performance reason to cache, and skipping it sidesteps a whole class
+  of test/process cross-contamination the cache-plus-clear pattern would
+  otherwise need to manage. `linklib.extract._COOKIE_DOMAINS` no longer
+  exists — the `has_active_subscription`/"Subscriber" checkbox is still
+  purely descriptive and reads nothing (see the CLAUDE.md Subscriber
+  bullet near the feeds-page help text), the fix is only in which domains
+  `_auth_cookies()`/`has_configured_cookie()` ever look at.
 - **The Reader's Feed view caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
   item dicts are shallow-copied before mutation — never mutate a cached entry in place.
   Editing the OPML won't show up live until the cache expires or the app restarts.
@@ -8853,6 +8883,78 @@ it supersedes the old "`/save` is token-gated" note.
   `0` is also a real "goes first" value) from the render order shown
   feeds already had before the column existed, so shipping it didn't
   move anything; Brian reorders from there.
+- **Current Feed order, arrows-not-typing follow-up (2026-09) — the number
+  `<input>` from the bullet above is retired; two problems it had, both
+  fixed structurally rather than validated around.** The number field's
+  `onchange="this.form.submit()"` fired on every keystroke change, not
+  once per edit — typing "12" submitted "1" first, a real intermediate
+  value reaching the database before the second digit was ever typed.
+  Worse, nothing stopped two feeds from ending up at the same order value
+  (Brian hit this directly: setting one feed's order to 1 left it tied
+  with another feed already at 1, saved silently, no warning). Both are
+  gone now, not mitigated: the Order column is two buttons (&uarr;/&darr;,
+  `_cf_order_arrows_html`), each posting to a new
+  `POST /admin/reader/feeds/{id}/order-move` (`direction=up|down`,
+  `admin_feeds_move_order`) — there is no text field to type an
+  intermediate value into. Every move renumbers the **whole side** to a
+  dense `0..N-1` sequence, not just the two rows being swapped (find the
+  feed's index in its side, sorted by the same `(current_feed_order, id)`
+  tie-break `current_feed()` itself uses; swap with the neighbor in that
+  direction if one exists; reassign `0..N-1` across the resulting list) —
+  so the very first move on a side with a pre-existing duplicate or gap
+  self-heals it, and a fresh duplicate can never be created going forward.
+  An arrow is rendered `disabled` (a plain non-form `<button>`, so clicking
+  it can't even post a no-op) for a Hidden feed (order is inert until
+  shown) or when the feed already sits at that end of its side. The typed
+  field is gone from the full add/edit forms too, not just the inline
+  table row — a brand-new feed, or a feed newly joining a side from Hidden
+  or the other side, is appended to the end via a new
+  `_next_current_feed_order(lib, side, exclude_feed_id=None)` helper
+  (`count of what's already shown on that side` — always correct because
+  every side stays densely numbered); a feed keeping the same side on an
+  edit-form save keeps its existing order untouched, since reordering
+  within a side is the arrows' job now, not a field a save can silently
+  reset.
+- **Cookie domain registry, live-derived (2026-09) — see the entry above
+  in this same section for the full incident and fix** (`_COOKIE_DOMAINS`
+  hardcoded tuple → `linklib.extract._opml_feed_domains()`, parsed live
+  from `preferred_sites.opml`). Filed here too since it was diagnosed and
+  fixed in the same pass as the two feeds-admin items above it.
+- **Subscriber-cookie health moved into the feed table (2026-09) — the
+  always-on per-domain summary panel above the table is retired; status
+  and last-checked now render in each feed's own Cookie cell.** The old
+  panel (`_cookie_status_panel`, one `<div class="ck-row">` per domain)
+  sat visually apart from the rows it described, and the table's own
+  Cookie column only ever said "configured" — true the moment a variable
+  exists, regardless of whether fetching actually works. That gap is
+  exactly what let Cautious Optimism's mismatch go unnoticed: its row read
+  identically to a genuinely healthy cookie. Fixed by moving
+  `authcheck.get_auth_status()`'s persisted per-domain record
+  (`{"ok": bool|None, "checked_at", "detail"}`) into a new
+  `_cf_cookie_cell_html(domain, configured, status, feed_name)`, called
+  once per row from the same loop that already renders Section/Cookie/
+  Subscriber/Current Feed/Order — a colored dot (green/red/amber, the same
+  `_COOKIE_STATE_STYLES` triple as before) plus a relative "3h ago" via
+  the existing `_relative_age()`, or "configured, not yet checked" for a
+  domain with a variable set but no probe result yet. `_auth_cookie_controls()`
+  now returns a 3-tuple (`button_html, refresh_steps_html, status`) instead
+  of `(button_html, panel_html)` — the domain-summary half of its return
+  value is gone; the coral "Subscriber cookie expired" block with the
+  step-by-step refresh instructions is unchanged and still renders when
+  any domain is stale, since a per-row dot can't carry "here's exactly
+  which env var to update" without cluttering every row. **"Re-check
+  subscriber access" stays the only trigger** — nothing about how or when
+  the check runs changed, only where its result is displayed. The now-dead
+  `.ck-panel`/`.ck-row`/`.ck-dot`/`.ck-dom`/`.ck-state`/`.ck-detail`/
+  `.ck-age` CSS is removed along with `_cookie_status_panel()` itself.
+  **One design point from the retired panel's own comment worth noting as
+  reversed, not silently dropped**: it argued a per-row light would
+  "misrepresent the relationship" whenever two feeds shared a domain,
+  since cookies are keyed by domain and the table by feed. In practice two
+  feeds sharing a domain would just show the identical, correct status on
+  both rows — not a misrepresentation, since it *is* true of both — so
+  this objection didn't hold up once actually building the per-row
+  version.
 
 
 ## Authentication & security

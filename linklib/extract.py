@@ -47,9 +47,7 @@ _BROWSER_HEADERS = {
 
 # Domains with a subscriber cookie configured for full-text fetching (e.g. paid
 # Substacks/beehiivs). Each domain's cookie value lives in its own env var,
-# LINKLIB_COOKIE_<DOMAIN> (see _cookie_env_var below), never in the codebase —
-# only the domain names themselves are checked in. Add a domain here, and set
-# its env var in the host, to configure a new one.
+# LINKLIB_COOKIE_<DOMAIN> (see _cookie_env_var below), never in the codebase.
 #
 # 2026-08: replaced a single LINKLIB_AUTH_COOKIES JSON blob (one var covering
 # every domain) after a hand-edited-JSON typo silently broke every domain's
@@ -59,10 +57,16 @@ _BROWSER_HEADERS = {
 # domain's cookie is malformed." A per-domain var can't have this failure mode:
 # each is one raw string, nothing to parse, so a typo in one domain's cookie
 # can't take another domain's down with it.
-_COOKIE_DOMAINS = (
-    "mostlymetrics.com",
-    "onlycfo.io",
-)
+#
+# 2026-09: WHICH domains get checked stopped being a hardcoded tuple here
+# (a fixed ("mostlymetrics.com", "onlycfo.io") list) after Cautious
+# Optimism's cookie was set in Railway, deployed, and silently never read —
+# the domain simply wasn't in the list, and nothing here would ever notice a
+# new paid subscription until someone remembered to add a line and redeploy.
+# _opml_feed_domains() now derives the candidate set live from
+# preferred_sites.opml (the generated cache of the feeds table — see
+# Library.write_opml) instead, so adding/editing a feed on
+# /admin/reader/feeds is what makes its domain checkable, not a code change.
 
 
 def _cookie_env_var(domain: str) -> str:
@@ -72,9 +76,50 @@ def _cookie_env_var(domain: str) -> str:
     return "LINKLIB_COOKIE_" + re.sub(r"[^A-Za-z0-9]", "_", domain).upper()
 
 
+def _opml_feed_domains() -> tuple[str, ...]:
+    """Every www-stripped domain named by a feed's xmlUrl/htmlUrl in
+    preferred_sites.opml — the candidate set _auth_cookies() checks for a
+    configured LINKLIB_COOKIE_<DOMAIN> var.
+
+    Reads the file fresh on every call, deliberately uncached (unlike
+    sources.preferred_domains' lru_cache): a fetch already dwarfs the cost of
+    parsing a small OPML file, and caching here would just be one more place
+    a test (or a real feed edit) has to remember to invalidate. Resolves the
+    same LINKLIB_SITES_OPML env var / repo-relative fallback path as
+    sources.py, but independently — importing sources.py here isn't needed
+    for one path computation and would be a real, if small, coupling this
+    module has never had.
+
+    Best-effort like the rest of this file's cookie handling: any read/parse
+    failure returns an empty tuple rather than raising, which just means no
+    domain's cookie is checked, exactly as if none were configured.
+    """
+    path = os.environ.get(
+        "LINKLIB_SITES_OPML",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "preferred_sites.opml"))
+    try:
+        import xml.etree.ElementTree as ET
+        root = ET.parse(path).getroot()
+    except Exception:
+        return ()
+    domains: set[str] = set()
+    for o in root.iter("outline"):
+        for attr in ("xmlUrl", "htmlUrl"):
+            url = o.get(attr) or ""
+            if not url:
+                continue
+            host = (urlsplit(url).netloc or "").lower().split(":")[0]
+            if host.startswith("www."):
+                host = host[4:]
+            if host:
+                domains.add(host)
+    return tuple(sorted(domains))
+
+
 def _auth_cookies() -> dict[str, str]:
     """Per-domain auth cookies for fetching subscriber-only content, sourced
-    from one env var per domain in _COOKIE_DOMAINS (LINKLIB_COOKIE_<DOMAIN>,
+    from one env var per domain in _opml_feed_domains() (LINKLIB_COOKIE_<DOMAIN>,
     a raw Cookie header string — no JSON, nothing to parse). Kept in the host
     env so no secret ever touches the repo. Same return shape as before this
     was split from a single LINKLIB_AUTH_COOKIES blob (domain -> cookie
@@ -85,7 +130,7 @@ def _auth_cookies() -> dict[str, str]:
     surface stays summaries + citations, same as every other article.
     """
     result: dict[str, str] = {}
-    for domain in _COOKIE_DOMAINS:
+    for domain in _opml_feed_domains():
         value = (os.environ.get(_cookie_env_var(domain)) or "").strip()
         if value:
             result[domain] = value
@@ -273,7 +318,7 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     follow-up investigation confirmed the previous identifiable bot string
     provided no benefit against real 403s, so there's no reason to keep
     declaring it). For domains with a configured auth cookie
-    (LINKLIB_COOKIE_<DOMAIN>, per _COOKIE_DOMAINS), the same browser headers are sent plus the cookie,
+    (LINKLIB_COOKIE_<DOMAIN>, per _opml_feed_domains), the same browser headers are sent plus the cookie,
     so subscriber-only full text is fetched instead of a preview. `blocked`
     flags a response that still looks paywalled — the signal that a
     configured cookie is missing or expired. `fetch_error` carries the reason
