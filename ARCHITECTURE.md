@@ -2355,6 +2355,40 @@ same convention as every other single-record admin fix in this repo) that
 inserts the link into that already-migrated production row rather than
 touching it from a coding session with no direct DB access.
 
+**Display order (2026-09 follow-up) — a mixtape's running order is
+deliberate, so it's a third per-feed column, not left to `list_feeds()`'s
+own section/name ordering.** `feeds` gained
+`current_feed_order INTEGER NOT NULL DEFAULT 0`. Within a side,
+`current_feed()` sorts by `(current_feed_order, id)` — id (permanent,
+already unique) is the stable tie-breaker, so two feeds sharing a number
+render in a fixed sequence rather than whatever unspecified order SQLite
+happens to return, and the page can't shuffle between requests.
+`Library.set_feed_current_feed_display()` now takes an `order` parameter
+alongside `show`/`side`, written together in the same call for the same
+reason those two are: the admin form always submits all three as one
+group. **The admin control is a second per-row field, not hidden when a
+feed is Hidden** — a plain number `<input>` in its own `.ff-order` column,
+cross-associated to the same per-row `<form>` as the side `<select>` via
+HTML's `form=""` attribute (the same plain-HTML cross-cell trick the
+Sections table already uses for its rename form/button split), so either
+control's `onchange` submits both fields in one request. Left visible and
+editable regardless of Hidden/shown state, on purpose: hiding it would
+need JS to toggle visibility on the side dropdown's own change event, for
+no real benefit — an inert value sitting in a visible field costs nothing,
+and it lets Brian pre-set a position before turning a feed on rather than
+losing that value or being blocked from entering it. The add/edit form
+carries the identical field. **Seeded once**, via
+`Library.seed_current_feed_order()` (settings-flagged, same
+non-emptiness-check discipline as every other one-time feed seed in this
+file — `0` is also a real "goes first" value, so "still at 0" can't mean
+"never seeded"): shown feeds are numbered 0, 1, 2, ... independently within
+each side, in the exact order `list_feeds()` already produced them in
+before this column existed (section display order, then feed display
+order/name) — so shipping the column doesn't visually reorder anything;
+Brian reorders from there. A hidden feed's value is left at the column
+default, not seeded, since there's nothing to seed for a feed that was
+never rendering in the first place.
+
 ### `/admin/copy/*` width tier, redundant helper text, and a Content sub-group (2026-09)
 
 Three more fixes shipped alongside the surface-cards fix above.
@@ -2767,7 +2801,7 @@ from the public page. Not editable via the admin CRUD.
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `feed_sections` | The subscription list's top-level groups, one per OPML folder ("News", "Blogs", "Substacks", …). Rendered as the Reader's Sources tree headings and as the section dropdown on `/admin/reader/feeds`. **Pure grouping — sections carry no settings of their own.** | `name` (unique), `display_order` |
-| `feeds` | One row per RSS/Atom subscription. | `xml_url` (**the natural key**, unique — the same feed can't be subscribed twice; **stored and regenerated verbatim**, see §4), `html_url` (the publication's own site: what `sources.preferred_domains` turns into FP&A Buddy's web-search allowlist), `section_id` (FK → `feed_sections`), `name` (the label shown in the Reader), `exclude_from_queue` (**RETIRED, frozen not dropped (2026-09, PR 3)** — used to mean "read in the Reader, never proposed into the archive queue," replacing the retired `QUEUE_EXCLUDE_CATEGORIES` name-matched env var; the Archive Queue itself, and every read/write path for this column, is gone — see the `library_queue` row above), `has_paywall_cookie` (frozen historical value as of 2026-08 — the admin checkbox that wrote it was replaced with a computed live indicator, `extract.has_configured_cookie`; nothing reads this column going forward, same retirement as `paywall_cookie_note`; see §4), `paywall_cookie_note` (retired free-text predecessor, frozen; see §4), `has_active_subscription` (`1` = Brian currently pays for this source — **informational only, nothing reads it**; see §4), `show_on_current_feed`/`current_feed_side` (2026-09 — whether and where this feed appears on the public `/current-feed` mixtape tracklist; free-text side value (`'old_school'`/`'new_school'`/`''`), admin-editable per row on `/admin/reader/feeds`; new feeds default to hidden — see the Current Feed section above) |
+| `feeds` | One row per RSS/Atom subscription. | `xml_url` (**the natural key**, unique — the same feed can't be subscribed twice; **stored and regenerated verbatim**, see §4), `html_url` (the publication's own site: what `sources.preferred_domains` turns into FP&A Buddy's web-search allowlist), `section_id` (FK → `feed_sections`), `name` (the label shown in the Reader), `exclude_from_queue` (**RETIRED, frozen not dropped (2026-09, PR 3)** — used to mean "read in the Reader, never proposed into the archive queue," replacing the retired `QUEUE_EXCLUDE_CATEGORIES` name-matched env var; the Archive Queue itself, and every read/write path for this column, is gone — see the `library_queue` row above), `has_paywall_cookie` (frozen historical value as of 2026-08 — the admin checkbox that wrote it was replaced with a computed live indicator, `extract.has_configured_cookie`; nothing reads this column going forward, same retirement as `paywall_cookie_note`; see §4), `paywall_cookie_note` (retired free-text predecessor, frozen; see §4), `has_active_subscription` (`1` = Brian currently pays for this source — **informational only, nothing reads it**; see §4), `show_on_current_feed`/`current_feed_side`/`current_feed_order` (2026-09 — whether, where, and in what order this feed appears on the public `/current-feed` mixtape tracklist; free-text side value (`'old_school'`/`'new_school'`/`''`), integer order (ties broken by `feeds.id`); all three admin-editable per row on `/admin/reader/feeds`; new feeds default to hidden — see the Current Feed section above) |
 
 These two tables are the source of truth; **`preferred_sites.opml` is a derived
 cache**, regenerated by `Library.write_opml()` on every mutation and again on

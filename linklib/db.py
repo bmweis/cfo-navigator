@@ -2465,6 +2465,20 @@ class Library:
             # seed_paywall_cookie_flags — see that method's own docstring).
             "ALTER TABLE feeds ADD COLUMN show_on_current_feed INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE feeds ADD COLUMN current_feed_side TEXT NOT NULL DEFAULT ''",
+            # Running order within a side (2026-09 follow-up) — a mixtape's
+            # track order is part of the point, so it's not left to whatever
+            # list_feeds()'s own section/name ordering happens to produce.
+            # Lower sorts first; only meaningful for a shown feed (see
+            # current_feed()'s own sort, which reads this column only after
+            # filtering to show_on_current_feed=1) — a hidden feed's value is
+            # inert, not cleared, so a position set before a feed is turned
+            # back on isn't lost. Ties fall back to feeds.id, the one value
+            # that's both permanent and already unique, so two equal-order
+            # feeds render in the same order on every request rather than
+            # shuffling with SQLite's own unspecified tie order. Existing
+            # rows are seeded once, from the render order they already had,
+            # by Library.seed_current_feed_order() — see its own docstring.
+            "ALTER TABLE feeds ADD COLUMN current_feed_order INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -8406,7 +8420,8 @@ class Library:
                  has_paywall_cookie: bool = False,
                  has_active_subscription: bool = False,
                  show_on_current_feed: bool = False,
-                 current_feed_side: str = "") -> int:
+                 current_feed_side: str = "",
+                 current_feed_order: int = 0) -> int:
         """Store a feed. `xml_url` is written verbatim apart from surrounding
         whitespace — no normalization, no query-string handling. A feed URL can
         carry a subscriber token, and rewriting one silently breaks the feed.
@@ -8421,7 +8436,8 @@ class Library:
         `show_on_current_feed` defaults to False for every new feed — a
         deliberate product decision (2026-09), not just a schema default: a
         new subscription should never appear on the public /current-feed
-        page unreviewed.
+        page unreviewed. `current_feed_order` defaults to 0 (ties with
+        every other unset row, broken by feed id — see current_feed()'s sort).
         """
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(display_order), -1) + 1 FROM feeds WHERE section_id = ?",
@@ -8430,12 +8446,12 @@ class Library:
         cur = self.conn.execute(
             "INSERT INTO feeds (section_id, name, xml_url, html_url, exclude_from_queue, "
             "has_paywall_cookie, has_active_subscription, show_on_current_feed, "
-            "current_feed_side, display_order, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "current_feed_side, current_feed_order, display_order, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (section_id, name.strip(), xml_url.strip(), html_url.strip(),
              int(bool(exclude_from_queue)), int(bool(has_paywall_cookie)),
              int(bool(has_active_subscription)), int(bool(show_on_current_feed)),
-             (current_feed_side or "").strip(), next_order, _now()),
+             (current_feed_side or "").strip(), int(current_feed_order), next_order, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -8446,24 +8462,25 @@ class Library:
                     has_paywall_cookie: bool = False,
                     has_active_subscription: bool = False,
                     show_on_current_feed: bool = False,
-                    current_feed_side: str = "") -> None:
+                    current_feed_side: str = "",
+                    current_feed_order: int = 0) -> None:
         """Same verbatim-URL guarantee as add_feed — see its docstring.
 
         `has_paywall_cookie`, `has_active_subscription`,
-        `show_on_current_feed`, and `current_feed_side` are all written on
-        every call, so the edit form has to round-trip the current values or
-        a save would clear them. That's the same contract every other field
-        on this method already has.
+        `show_on_current_feed`, `current_feed_side`, and `current_feed_order`
+        are all written on every call, so the edit form has to round-trip the
+        current values or a save would clear them. That's the same contract
+        every other field on this method already has.
         """
         self.conn.execute(
             "UPDATE feeds SET section_id=?, name=?, xml_url=?, html_url=?, "
             "exclude_from_queue=?, has_paywall_cookie=?, has_active_subscription=?, "
-            "show_on_current_feed=?, current_feed_side=? "
+            "show_on_current_feed=?, current_feed_side=?, current_feed_order=? "
             "WHERE id=?",
             (section_id, name.strip(), xml_url.strip(), html_url.strip(),
              int(bool(exclude_from_queue)), int(bool(has_paywall_cookie)),
              int(bool(has_active_subscription)), int(bool(show_on_current_feed)),
-             (current_feed_side or "").strip(), feed_id),
+             (current_feed_side or "").strip(), int(current_feed_order), feed_id),
         )
         self.conn.commit()
 
@@ -8489,17 +8506,23 @@ class Library:
                           (section_id, feed_id))
         self.conn.commit()
 
-    def set_feed_current_feed_display(self, feed_id: int, show: bool, side: str) -> None:
+    def set_feed_current_feed_display(self, feed_id: int, show: bool, side: str,
+                                       order: int = 0) -> None:
         """The /current-feed row control — narrow, same shape as the three
         toggles above. `side` is free text ('old_school'/'new_school'/''),
         not CHECK-constrained, so a future third side is a rendering-code
-        change, not a migration. Both columns are written together (not two
+        change, not a migration. All three columns are written together (not
         separate setters) since the admin form always submits them as one
-        pair — a feed marked "show" with no side selected would render
+        group — a feed marked "show" with no side selected would render
         nowhere on the page, which is worth preventing at the write site
-        rather than discovering it as a silent gap later."""
-        self.conn.execute("UPDATE feeds SET show_on_current_feed=?, current_feed_side=? WHERE id=?",
-                          (int(bool(show)), (side or "").strip(), feed_id))
+        rather than discovering it as a silent gap later. `order` defaults to
+        0 for a caller (like seed_current_feed_sides) that only cares about
+        show/side — current_feed_order is seeded separately, and 0 is
+        already the column's own default for an unset row."""
+        self.conn.execute(
+            "UPDATE feeds SET show_on_current_feed=?, current_feed_side=?, "
+            "current_feed_order=? WHERE id=?",
+            (int(bool(show)), (side or "").strip(), int(order), feed_id))
         self.conn.commit()
 
     # set_feed_excluded (the "Read only" row-control toggle) was retired
@@ -8730,6 +8753,50 @@ class Library:
                 updated += 1
 
         self.set_setting("current_feed_sides_seeded", "1")
+        return {"seeded": True, "feeds": updated}
+
+    def seed_current_feed_order(self) -> dict:
+        """One-time seed of current_feed_order (2026-09 follow-up) from the
+        render order shown feeds already had before this column existed, so
+        shipping it doesn't visually reorder anything on /current-feed —
+        Brian reorders from here by hand.
+
+        "Already had" means list_feeds()'s own ordering (section display
+        order, then feed display order/name — the same ordering current_feed()
+        grouped by side before this column existed), numbered 0, 1, 2, ...
+        independently within each side. A hidden feed is left at the column
+        default; its order is inert until it's shown, and there's nothing to
+        seed for it anyway.
+
+        Guarded by a settings flag, not an emptiness/default check — same
+        reasoning as every other one-time feed seed in this file: 0 is also
+        a real, deliberately-set "goes first" value, so "still at 0" can't
+        tell never-seeded apart from already-first. A separate flag from
+        seed_current_feed_sides() since this column, and this seed, shipped
+        later — the two run independently and neither re-runs the other.
+
+        Returns {"seeded": bool, "feeds": n}.
+        """
+        if self.get_setting("current_feed_order_seeded") == "1":
+            return {"seeded": False, "feeds": 0}
+
+        shown = [f for f in self.list_feeds() if f["show_on_current_feed"]]
+        if not shown:
+            # Nothing shown yet — don't burn the flag, same reasoning as
+            # seed_current_feed_sides's own empty-table guard.
+            return {"seeded": False, "feeds": 0}
+
+        by_side: dict[str, list[dict]] = {}
+        for f in shown:
+            by_side.setdefault(f["current_feed_side"], []).append(f)
+
+        updated = 0
+        for side_feeds in by_side.values():
+            for i, f in enumerate(side_feeds):
+                self.set_feed_current_feed_display(f["id"], True, f["current_feed_side"], i)
+                updated += 1
+
+        self.set_setting("current_feed_order_seeded", "1")
         return {"seeded": True, "feeds": updated}
 
     def seed_voice_prompts(self) -> dict:

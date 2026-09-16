@@ -4,12 +4,13 @@ table.
 
 The property worth protecting: this page has NO hardcoded names and NO
 hardcoded counts — everything renders from whatever is actually in the
-`feeds` table at request time, driven by two per-feed columns
-(show_on_current_feed, current_feed_side), not by section-name matching.
-Add a shown feed, it appears; drop one, it's gone; a hidden feed never
-appears on either side, but is named in the page's own footnote (grouped
-by section) with a plain disclosure that FP&A Buddy still searches it —
-the exclusion is presentational only.
+`feeds` table at request time, driven by three per-feed columns
+(show_on_current_feed, current_feed_side, current_feed_order), not by
+section-name matching. Add a shown feed, it appears; drop one, it's gone;
+a hidden feed never appears on either side, but is named in the page's own
+footnote (grouped by section) with a plain disclosure that FP&A Buddy
+still searches it — the exclusion is presentational only. Within a side,
+tracks sort by current_feed_order ascending, tie-broken by feed id.
 """
 import pathlib
 import sys
@@ -32,8 +33,19 @@ def lib(tmp_path):
 
 @pytest.fixture
 def env(monkeypatch, tmp_path):
+    """Boot the app against a temp DB and a temp OPML.
+
+    LINKLIB_SITES_OPML must point at a scratch path — booting the app runs
+    the seed-and-regenerate startup hook, which otherwise writes into the
+    repo's own preferred_sites.opml on every test in this file (this fixture
+    was missing that env var from when this page first shipped; every run
+    of this suite was silently overwriting the tracked file until this was
+    caught and fixed). See tests/test_feed_management.py's own fixture
+    comment for the same convention.
+    """
     db = str(tmp_path / "app.db")
     monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_SITES_OPML", str(tmp_path / "feeds.opml"))
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
     import importlib
@@ -44,10 +56,10 @@ def env(monkeypatch, tmp_path):
     yield appmod, client
 
 
-def _add(lib, section_id, name, xml, html, *, side=""):
+def _add(lib, section_id, name, xml, html, *, side="", order=0):
     fid = lib.add_feed(section_id, name, xml, html)
     if side:
-        lib.set_feed_current_feed_display(fid, True, side)
+        lib.set_feed_current_feed_display(fid, True, side, order)
     return fid
 
 
@@ -408,3 +420,207 @@ def test_seed_current_feed_sides_does_not_resurrect_a_deliberate_change(lib):
     lib.set_feed_current_feed_display(fid, False, "")
     lib.seed_current_feed_sides()  # already flagged — must not re-run
     assert lib.get_feed(fid)["show_on_current_feed"] == 0
+
+
+# --- display order ----------------------------------------------------------
+
+def test_tracks_sort_by_current_feed_order_within_a_side(env):
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        _add(lib, sid, "Third", "https://c.example/feed", "https://c.example/",
+             side="old_school", order=2)
+        _add(lib, sid, "First", "https://a.example/feed", "https://a.example/",
+             side="old_school", order=0)
+        _add(lib, sid, "Second", "https://b.example/feed", "https://b.example/",
+             side="old_school", order=1)
+    finally:
+        lib.close()
+    html = client.get("/current-feed").text
+    assert html.index("First") < html.index("Second") < html.index("Third")
+
+
+def test_order_ties_fall_back_to_feed_id_and_stay_stable(env):
+    """Two feeds sharing an order value must render in a fixed sequence —
+    not whatever order SQLite happens to return them in — and that sequence
+    must not change between requests."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        first_id = _add(lib, sid, "Tied First", "https://a.example/feed",
+                         "https://a.example/", side="old_school", order=0)
+        second_id = _add(lib, sid, "Tied Second", "https://b.example/feed",
+                          "https://b.example/", side="old_school", order=0)
+        assert first_id < second_id
+    finally:
+        lib.close()
+    html1 = client.get("/current-feed").text
+    html2 = client.get("/current-feed").text
+    assert html1.index("Tied First") < html1.index("Tied Second")
+    assert html1 == html2
+
+
+def test_reordering_from_the_admin_table_changes_the_tracklist(env):
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        a_id = _add(lib, sid, "Alpha", "https://a.example/feed", "https://a.example/",
+                    side="old_school", order=0)
+        _add(lib, sid, "Beta", "https://b.example/feed", "https://b.example/",
+             side="old_school", order=1)
+    finally:
+        lib.close()
+    html = client.get("/current-feed").text
+    assert html.index("Alpha") < html.index("Beta")
+
+    _login(client)
+    client.post(f"/admin/reader/feeds/{a_id}/current-feed",
+                data={"current_feed": "old_school", "current_feed_order": "5"})
+    html2 = client.get("/current-feed").text
+    assert html2.index("Beta") < html2.index("Alpha")
+
+
+def test_hidden_feeds_order_value_is_inert(env):
+    """A hidden feed's order is stored (not cleared) but does nothing — it
+    never renders as a track, hidden or shown, until show_on_current_feed
+    flips on. (Its name still appears in the page's hidden-feed footnote,
+    same as any other hidden feed — that's the existing disclosure, not
+    something order affects.)"""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        fid = lib.add_feed(sid, "Waiting In The Wings", "https://a.example/feed",
+                            "https://a.example/")
+        lib.set_feed_current_feed_display(fid, False, "", 99)
+        assert lib.get_feed(fid)["current_feed_order"] == 99
+    finally:
+        lib.close()
+    assert 'href="https://a.example/"' not in client.get("/current-feed").text
+
+
+def test_admin_table_current_feed_order_field_present(env):
+    """The Order input is visible and populated even for a Hidden feed —
+    left visible-but-ignored rather than hidden by JS when the side dropdown
+    reads Hidden, so a position can be set ahead of turning a feed on."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        shown_id = lib.add_feed(sid, "Shown One", "https://a.example/feed", "https://a.example/")
+        lib.set_feed_current_feed_display(shown_id, True, "old_school", 3)
+        hidden_id = lib.add_feed(sid, "Hidden One", "https://b.example/feed", "https://b.example/")
+        lib.set_feed_current_feed_display(hidden_id, False, "", 7)
+    finally:
+        lib.close()
+    _login(client)
+    html = client.get("/admin/reader/feeds").text
+    assert "Order</th>" in html
+    assert 'name="current_feed_order"' in html
+    assert f'form="cf-form-{shown_id}" value="3"' in html
+    # Hidden feed's stored order still renders in the field, not blanked.
+    assert f'form="cf-form-{hidden_id}" value="7"' in html
+
+
+def test_add_edit_form_has_current_feed_order_field(env):
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        lib.add_feed_section("Blogs")
+    finally:
+        lib.close()
+    _login(client)
+    add_html = client.get("/admin/reader/feeds/new").text
+    assert 'name="current_feed_order"' in add_html
+    assert 'value="0"' in add_html
+
+
+def test_new_feed_can_be_created_with_an_explicit_order(env, monkeypatch):
+    from linklib.feed import FeedProbe
+    monkeypatch.setattr("linklib.feed.probe_feed",
+                        lambda url, **k: FeedProbe(True, title="New With Order",
+                                                   html_url="https://new.example/"))
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+    finally:
+        lib.close()
+    _login(client)
+    r = client.post("/admin/reader/feeds/new", data={
+        "xml_url": "https://new.example/feed", "name": "New With Order",
+        "section_id": str(sid), "current_feed": "old_school",
+        "current_feed_order": "42",
+    }, follow_redirects=False)
+    assert r.status_code in (200, 303), r.text
+    lib = appmod._lib()
+    try:
+        feed = lib.find_feed_by_url("https://new.example/feed")
+    finally:
+        lib.close()
+    assert feed["current_feed_order"] == 42
+
+
+def test_edit_form_round_trips_current_feed_order(env):
+    """A save that doesn't touch Order must not silently reset it to 0 — the
+    edit form has to carry the current value forward, same contract as
+    update_feed's other current_feed_* fields."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        fid = lib.add_feed(sid, "Editable", "https://a.example/feed", "https://a.example/")
+        lib.set_feed_current_feed_display(fid, True, "old_school", 8)
+    finally:
+        lib.close()
+    _login(client)
+    edit_html = client.get(f"/admin/reader/feeds/{fid}/edit").text
+    assert 'value="8"' in edit_html
+    client.post(f"/admin/reader/feeds/{fid}/edit", data={
+        "xml_url": "https://a.example/feed", "name": "Editable Renamed",
+        "section_id": str(sid), "current_feed": "old_school",
+        "current_feed_order": "8",
+    }, follow_redirects=False)
+    lib = appmod._lib()
+    try:
+        feed = lib.get_feed(fid)
+    finally:
+        lib.close()
+    assert feed["current_feed_order"] == 8
+    assert feed["name"] == "Editable Renamed"
+
+
+def test_seed_current_feed_order_matches_existing_render_order(lib):
+    """Seeding must not move anything — it numbers shown feeds within each
+    side in the exact order they already rendered in (list_feeds()'s own
+    section/feed ordering), before this column ever existed."""
+    blogs_id = lib.add_feed_section("Blogs")
+    subs_id = lib.add_feed_section("Substacks")
+    a = lib.add_feed(blogs_id, "A Blogger", "https://a.example/feed", "https://a.example/")
+    b = lib.add_feed(blogs_id, "B Blogger", "https://b.example/feed", "https://b.example/")
+    c = lib.add_feed(subs_id, "A Substacker", "https://c.example/feed", "https://c.example/")
+    lib.seed_current_feed_sides()
+
+    result = lib.seed_current_feed_order()
+    assert result["seeded"] is True
+    assert result["feeds"] == 3
+
+    feeds = {f["id"]: f for f in lib.list_feeds()}
+    assert feeds[a]["current_feed_order"] == 0
+    assert feeds[b]["current_feed_order"] == 1
+    assert feeds[c]["current_feed_order"] == 0  # its own side, numbered independently
+
+    # settings-flagged — a later reorder must survive a re-run
+    lib.set_feed_current_feed_display(a, True, "old_school", 99)
+    result2 = lib.seed_current_feed_order()
+    assert result2 == {"seeded": False, "feeds": 0}
+    assert lib.get_feed(a)["current_feed_order"] == 99
+
+
+def test_seed_current_feed_order_noops_when_nothing_shown(lib):
+    lib.add_feed_section("Blogs")
+    result = lib.seed_current_feed_order()
+    assert result == {"seeded": False, "feeds": 0}
