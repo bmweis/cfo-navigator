@@ -32,7 +32,7 @@ def env(monkeypatch):
     # runs, same reason test_thought_leadership_homepage_teaser.py's own
     # fixture seeds the flagship rows — reusing the migration script's own
     # content/date_label rather than a duplicated copy.
-    from scripts.migrate_netsuite_mcp_content import BODY_MD as _NS_BODY_MD, DATE_LABEL as _NS_DATE_LABEL
+    from scripts.archive.migrate_netsuite_mcp_content import BODY_MD as _NS_BODY_MD, DATE_LABEL as _NS_DATE_LABEL
     from webapp.app import _sort_key_from_date_label as _sort_key
     ns_row = lib.get_original_content_by_slug("netsuite-mcp")
     if ns_row is None:
@@ -48,7 +48,7 @@ def env(monkeypatch):
         )
     # /thought-leadership/ai-hackathon-playbook — same situation, same fix,
     # as of Original Content Phase 4b (its own bespoke route retired).
-    from scripts.migrate_hackathon_playbook_content import (
+    from scripts.archive.migrate_hackathon_playbook_content import (
         BODY_MD as _FAH_BODY_MD, DATE_LABEL as _FAH_DATE_LABEL, TITLE as _FAH_TITLE,
     )
     fah_row = lib.get_original_content_by_slug("ai-hackathon-playbook")

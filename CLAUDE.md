@@ -179,6 +179,62 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   "Published-content ingestion" write-up (under FP&A Buddy) for the full
   mechanism and `tests/test_original_content_ingestion.py` for coverage,
   including the RRF-non-interference regression.
+- **Mirror-consistency gap, found and closed (2026-09) — the sync stays in
+  the routes, not the data layer; a real invariant on `/admin/checks`
+  closes the gap instead.** Two ported pieces (`ai-hackathon-playbook`,
+  `netsuite-mcp`) sat live with real `body_md` and no working `articles`
+  mirror for roughly three weeks: `sync_original_content_article()` only
+  runs from the two admin save routes, and both `scripts/archive/migrate_
+  hackathon_playbook_content.py`/`migrate_netsuite_mcp_content.py` wrote
+  `body_md` directly via `Library.update_original_content()`, bypassing it.
+  Both rows self-healed the instant an admin opened them and clicked
+  Save. **Considered and rejected: moving the sync into
+  `Library.update_original_content()`/`add_original_content()` itself** —
+  a real circular import (`db -> original_content_sync -> db`, workable
+  only via a lazy import, unlike the one existing precedent for a
+  write-time side effect baked into `db.py`,
+  `voice_mechanics.normalize_voice_mechanics`, which is pure/synchronous/
+  zero-I/O and categorically simpler than "insert/update/delete a row in a
+  different table, cascade FTS/vector/citation rows, attempt an OpenAI
+  embedding call"); at least seven test fixtures call `add_original_content`/
+  `update_original_content` directly to seed unrelated tests, with no
+  interest in a mirroring side effect; and every other cross-cutting side
+  effect of this shape in this codebase (`write_opml()`, the AI-drafted-field
+  generate-then-persist flows) is triggered from the route layer, not
+  automatically inside the write method. **Instead: a real, mechanically-
+  enforced, no-judgment-call check** — "Original content mirrored for
+  retrieval" on `/admin/checks` (`webapp.checks.original_content_mirror_
+  problems()`, backed by `Library.list_unmirrored_original_content()`),
+  same shape as `hub_nav_orphan_problems()`, not the dated manual-
+  attestation shape the pricing/model-freshness banners use — any row with
+  non-empty `body_md` must have a `mirrored_article_id` pointing at a real
+  `articles` row, checked with a plain SQL query, no external truth or
+  judgment call involved. A future non-route write can still leave a row
+  briefly unmirrored, but never silently — the fix is always the same
+  (open it in `/admin/thought-leadership/original`, click Save) and needs
+  no code. **Separate finding, informational, not fixed here**: a no-op
+  admin save on `netsuite-mcp` changed `body_md` from 18,527 to 18,766
+  chars — the edit form's textarea normalizes LF to CRLF on every submit,
+  so every save rewrites the full body regardless of whether anything
+  changed. Confirmed this doesn't worsen the sync-frequency question above
+  — `plain_text_from_body_md()`'s markdown-render-then-strip step produces
+  byte-identical output for LF vs. CRLF input, so `embed_article`'s
+  content-hash guard still dedupes correctly — but it's a real, separate
+  save-path bug worth its own fix later. Both dead migration scripts
+  (`migrate_hackathon_playbook_content.py`, `migrate_netsuite_mcp_content.py`)
+  were `git mv`'d into `scripts/archive/` in this same PR, per the standing
+  "archive a one-time script once its run is confirmed" rule —
+  `migrate_growth_engine_ratio_content.py` stays in `scripts/`, unconfirmed
+  as run against production, same as before. `scripts/refetch_lopsided_
+  logos.py` was investigated as a possible rider and found to already
+  import `linklib.logodev`, not `linklib.brandfetch` — its own docstring
+  says so — with no repo evidence its `--apply` run has ever been
+  confirmed, so it was left alone rather than archived on a premise that
+  didn't hold. See ARCHITECTURE.md's matching bullet (under Published-
+  content ingestion) for the full write-up and
+  `tests/test_original_content_ingestion.py`'s
+  `test_list_unmirrored_*`/`test_admin_checks_surfaces_an_unmirrored_row`
+  for the regression coverage.
 - **Embedding costs are split by who pays for them.** Embed-on-save/backfill cost is
   Brian's overhead (`article_embeddings.cost_usd`) and never touches a user's Ask
   budget. Embedding the retrieval QUESTION at ask-time is a user-cap cost — it folds
