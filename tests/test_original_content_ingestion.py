@@ -460,3 +460,108 @@ def test_ask_retrieves_and_cites_own_content_piece(lib, monkeypatch):
     assert ans.citations[0]["own_content"] is True
     assert ans.citations[0]["article_id"] == article_id
     assert "[1]" in ans.text
+
+
+# --- list_unmirrored_original_content: the /admin/checks invariant ----------
+# Backs webapp.checks.original_content_mirror_problems() (2026-09) — the
+# safety net for the exact gap this incident exposed: a write via any path
+# other than the two admin save routes (a migration script, a future bulk
+# edit) can leave a live row with real body_md and no working mirror, with
+# nothing surfacing it. See CLAUDE.md's Published-Content Ingestion entry
+# for the full write-up of why the sync stays in the routes rather than
+# moving into Library.update_original_content() itself.
+
+def test_list_unmirrored_finds_nothing_on_a_freshly_synced_row(lib):
+    item_id = lib.add_original_content(
+        "synced-piece", "Title", "Teaser", "Guide", "Read it",
+        body_md="Real body.", status="live",
+    )
+    sync_original_content_article(lib, item_id)
+    assert lib.list_unmirrored_original_content() == []
+
+
+def test_list_unmirrored_flags_a_row_written_around_the_sync(lib):
+    """Simulates exactly what scripts/archive/migrate_hackathon_playbook_content.py
+    and scripts/archive/migrate_netsuite_mcp_content.py actually did: a direct
+    Library.update_original_content() call with real body_md, never followed
+    by sync_original_content_article — the live incident this check exists
+    to catch."""
+    item_id = lib.add_original_content(
+        "bypassed-piece", "Title", "Teaser", "Guide", "Read it",
+        body_md=None, status="live",
+    )
+    row = lib.get_original_content(item_id)
+    lib.update_original_content(
+        item_id, row["slug"], row["title"], row["teaser"], row["tag_label"],
+        row["link_label"], "Body written around the sync.", "live",
+        row["featured_home"], row["date_label"], row["sort_key"], row["display_order"],
+    )
+    # No sync_original_content_article() call — this is the gap.
+    unmirrored = lib.list_unmirrored_original_content()
+    assert len(unmirrored) == 1
+    assert unmirrored[0]["slug"] == "bypassed-piece"
+    assert unmirrored[0]["mirrored_article_id"] is None
+
+
+def test_list_unmirrored_flags_a_dangling_mirrored_article_id(lib):
+    """A mirrored_article_id pointing at an articles row that no longer
+    exists (e.g. the mirror was deleted out from under it) is exactly as
+    broken as a NULL pointer — both mean FP&A Buddy can't retrieve this
+    content, so both must flag."""
+    item_id = lib.add_original_content(
+        "dangling-piece", "Title", "Teaser", "Guide", "Read it",
+        body_md="Real body.", status="live",
+    )
+    article_id = sync_original_content_article(lib, item_id)
+    lib.delete_article(article_id)
+    # The delete didn't go through the sync's own clear-on-empty-body path,
+    # so mirrored_article_id is left dangling — reproducing the shape a bug
+    # elsewhere (not this feature) could produce.
+    unmirrored = lib.list_unmirrored_original_content()
+    assert len(unmirrored) == 1
+    assert unmirrored[0]["slug"] == "dangling-piece"
+
+
+def test_list_unmirrored_ignores_a_body_less_row(lib):
+    """A card-metadata-only row (body_md IS NULL, one of the literal bespoke
+    routes renders it) is never expected to have a mirror — flagging it
+    would be a false positive."""
+    lib.add_original_content(
+        "metadata-only-piece", "Title", "Teaser", "Guide", "Read it",
+        body_md=None, status="live",
+    )
+    assert lib.list_unmirrored_original_content() == []
+
+
+def test_admin_checks_surfaces_an_unmirrored_row(monkeypatch, tmp_path):
+    """End-to-end: the exact same gap, caught the way an admin would
+    actually see it — a red row on /admin/checks, not just a passing
+    Library-layer unit test."""
+    import importlib
+    monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "checks.db"))
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import webapp.app as appmod
+    importlib.reload(appmod)
+    import webapp.checks as checksmod
+    importlib.reload(checksmod)
+
+    db_lib = appmod._lib()
+    try:
+        item_id = db_lib.add_original_content(
+            "bypassed-piece", "Title", "Teaser", "Guide", "Read it",
+            body_md=None, status="live",
+        )
+        row = db_lib.get_original_content(item_id)
+        db_lib.update_original_content(
+            item_id, row["slug"], row["title"], row["teaser"], row["tag_label"],
+            row["link_label"], "Body written around the sync.", "live",
+            row["featured_home"], row["date_label"], row["sort_key"], row["display_order"],
+        )
+    finally:
+        db_lib.close()
+
+    results = checksmod.run_all()
+    row = next(r for r in results if r["name"] == "Original content mirrored for retrieval")
+    assert row["ok"] is False
+    assert "bypassed-piece" in row["detail"]

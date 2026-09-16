@@ -249,7 +249,7 @@ def test_play_easter_egg_link_on_hackathon_page(env):
     the page is served by the GET /thought-leadership/{slug} catch-all
     (its bespoke Python route was retired), so this fixture's bare DB needs
     a real original_content row with the easter-egg link in its body_md —
-    this test's own fixture never runs scripts/migrate_hackathon_playbook_content.py,
+    this test's own fixture never runs scripts/archive/migrate_hackathon_playbook_content.py,
     so it seeds just enough of the real body_md's closing blurb directly,
     matching what that migration actually writes in production."""
     appmod, client = env

@@ -926,6 +926,91 @@ pieces get the same provenance treatment once Brian bookmarklet-saves them
 follow-up note). Like `needs_content_check`, this is a set-only, durable
 fact — nothing clears it once learned.
 
+**Mirror-consistency gap, found and closed (2026-09).** Two of the three
+ported Original Content pieces (`ai-hackathon-playbook`, `netsuite-mcp`)
+sat live with real `body_md` and no working `articles` mirror for roughly
+three weeks — retrievable and citable in theory, invisible to FP&A Buddy in
+practice, with nothing anywhere surfacing the gap. Root cause:
+`sync_original_content_article()` (`linklib/original_content_sync.py`) only
+ever runs from the two admin save routes (`POST /admin/thought-leadership/
+original/new`, `.../{id}/edit`) — `scripts/archive/migrate_hackathon_
+playbook_content.py` and `scripts/archive/migrate_netsuite_mcp_content.py`
+both wrote `body_md` directly via `Library.update_original_content()`,
+bypassing the sync entirely, since a one-time migration script has no
+reason to import a web-route helper. Both rows self-healed the moment an
+admin opened them and clicked Save — any save re-runs the sync
+unconditionally, confirmed live in production before this was investigated
+further.
+
+**Decision: the sync stays in the routes, not moved into
+`Library.update_original_content()`/`add_original_content()` itself** —
+weighed and rejected for three reasons, not just left alone by default.
+(1) **Circular import.** `original_content_sync.py` imports `.db` (for
+`Library`) and lazily imports `.pipeline` (`embed_article`), which itself
+imports `.db` — `linklib/db.py` importing `original_content_sync` at
+module level would be `db -> original_content_sync -> db`, resolvable only
+with a lazy import inside the method body, the same workaround
+`original_content_sync.py` already uses for `pipeline`. Workable, but a
+smell: `db.py` becoming aware of embedding/OpenAI-cost-tracking business
+logic is a real layering violation, unlike the one precedent for a
+write-time side effect already living in `db.py`
+(`voice_mechanics.normalize_voice_mechanics`, imported at module level and
+applied inside many write methods) — that's a pure, synchronous,
+zero-I/O string transform, categorically simpler than "insert/update/
+delete a row in a different table, cascade FTS/vector/citation-log rows,
+attempt an OpenAI embedding call." (2) **Scope creep on a general CRUD
+method.** At least seven test fixtures (`tests/test_thought_leadership_
+homepage_teaser.py`, `test_narrative_field_markdown.py`, `test_play_route.py`,
+`test_access_tiers.py`) call `add_original_content`/`update_original_content`
+directly to seed a live row with `body_md`, deliberately without mirroring
+— they're testing something else entirely (homepage rendering, access
+tiers) and have no interest in an `articles` side effect. Folding the sync
+into the data-layer method would silently start creating mirror rows in
+every one of them; harmless today (no assertion relies on the mirror's
+absence, and `embed_texts()` early-returns with no network call when
+`OPENAI_API_KEY` is unset — confirmed, not assumed), but it couples a
+general "store this row" method to one specific downstream feature
+(FP&A Buddy retrieval indexing) with no way for a future caller to opt out
+— e.g. a genuinely-in-progress draft an admin wants to keep out of search
+while iterating. (3) **Precedent.** Every other cross-cutting side effect
+of this shape in this codebase — `Library.write_opml()` on feed mutation,
+the four AI-drafted-field generation-then-persist flows — is triggered
+from the route/orchestration layer, not automatically inside the `Library`
+write method itself; `voice_mechanics` is the one deliberate exception,
+and it's the kind of transform (pure, cheap, can't fail, can't have side
+effects on another table) that's actually safe to bake into every write
+path. `sync_original_content_article` doesn't meet that bar.
+
+**The safety net instead: a real, mechanically-enforced, no-judgment-call
+invariant on `/admin/checks`** — "Original content mirrored for
+retrieval" (`webapp.checks.original_content_mirror_problems()`, backed by
+`Library.list_unmirrored_original_content()`) — same shape as `hub_nav_
+orphan_problems()`/`ai_config_editable_outside_ai_page()` above it in
+`run_all()`'s list, not the dated manual-attestation shape the pricing/
+model-freshness banners use elsewhere on that same page, since this is a
+plain SQL fact with no external truth or human judgment involved: any
+`original_content` row with non-empty `body_md` (the same condition
+`sync_original_content_article` itself checks, any `status`) must have a
+`mirrored_article_id` pointing at a real `articles` row. A migration
+script or any future non-route write path can still produce a temporarily
+unmirrored row, but it can no longer do so silently — the next
+`/admin/checks` load (or `/admin` nav badge, via `webapp.tasks.
+_failing_checks_count()`) shows it, and the fix is always the same:
+open the piece in `/admin/thought-leadership/original` and click Save.
+
+**A separate, informational finding surfaced during this investigation,
+deliberately not fixed here**: a no-op admin save on `netsuite-mcp` (no
+field actually edited) changed `body_md` from 18,527 to 18,766 characters
+— exactly +239, matching its newline count. The edit form's textarea
+normalizes LF to CRLF on submit, so every save rewrites the full body
+regardless of whether anything changed. This doesn't make the mirror-sync
+decision above any worse (`embed_article`'s content-hash guard already
+dedupes on the rendered plain text, which is whitespace-insensitive to
+this exact difference — a CRLF/LF-only change doesn't survive markdown
+rendering into a different `plain_text_from_body_md()` output, so no
+extra embedding cost results), but it's a real, separate bug in the save
+path worth its own investigation and fix later.
+
 ### Accounts
 
 | Table | Purpose | Columns that carry meaning |

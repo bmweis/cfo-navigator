@@ -4,8 +4,10 @@ existing `growth-engine-ratio` original_content row, so the article half of
 the page can be served through the shared article template
 (GET /thought-leadership/{slug}) instead of the bespoke Python route. See
 CLAUDE.md's Original Content Phase 4c entry for the full reasoning — same
-pattern as Phase 4a's migrate_netsuite_mcp_content.py and Phase 4b's
-migrate_hackathon_playbook_content.py.
+pattern as Phase 4a's scripts/archive/migrate_netsuite_mcp_content.py and
+Phase 4b's scripts/archive/migrate_hackathon_playbook_content.py (both
+archived once their runs were confirmed — this script hasn't run against
+production yet, so it stays in scripts/ until it has).
 
 Unlike 4a/4b, this port SPLITS the retired route rather than porting it
 whole: the ~380-line live JS calculator (two dynamically-generated SVG
@@ -63,7 +65,7 @@ touches body_md/date_label/sort_key.
 Deliberately a manual, run-by-hand script — NOT wired into an automatic
 boot hook, same standing rule as every other production DATA write in this
 repo. Safe by default (preview only, no writes) — same --apply convention
-as scripts/migrate_netsuite_mcp_content.py / migrate_hackathon_playbook_content.py.
+as scripts/archive/migrate_netsuite_mcp_content.py / migrate_hackathon_playbook_content.py.
 
 Idempotent: guarded by checking whether the row's body_md already matches
 what this script would set — a second run reports "already applied" and

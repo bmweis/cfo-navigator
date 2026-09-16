@@ -26,7 +26,7 @@ def _seed_flagship_original_content(appmod):
 
     Also applies the one later-phase change this file's assertions actually
     depend on: Original Content Phase 4b's ai-hackathon-playbook title fix
-    (scripts/migrate_hackathon_playbook_content.py). That migration only
+    (scripts/archive/migrate_hackathon_playbook_content.py). That migration only
     touches the ai-hackathon-playbook row (title/body_md/date_label), and
     the flagship homepage/thought-leadership cards render straight from
     the DB row's own title (_oc_featured_cards_html/_tl_fcard, not the
@@ -36,7 +36,7 @@ def _seed_flagship_original_content(appmod):
     migration needed no equivalent here since it never touched that row's
     title, only its body_md."""
     from scripts.archive.migrate_original_content import planned_rows
-    from scripts.migrate_hackathon_playbook_content import TITLE as HACKATHON_TITLE
+    from scripts.archive.migrate_hackathon_playbook_content import TITLE as HACKATHON_TITLE
     lib = appmod._lib()
     try:
         for r in planned_rows():

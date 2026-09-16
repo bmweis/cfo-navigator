@@ -6559,6 +6559,35 @@ class Library:
         )
         self.conn.commit()
 
+    def list_unmirrored_original_content(self) -> list[dict]:
+        """Every original_content row that SHOULD have a working articles
+        mirror (per linklib.original_content_sync.sync_original_content_
+        article's own rule: any row with non-empty body_md, regardless of
+        status) but doesn't — mirrored_article_id is NULL, or it points at
+        an articles row that no longer exists.
+
+        Backs the "Original content mirrored for retrieval" /admin/checks
+        invariant (2026-09). Root cause this exists for: the sync only ever
+        fires from the two admin save routes (POST /admin/thought-leadership/
+        original/new and .../{id}/edit) — a write via any other path (the
+        three scripts/migrate_*_content.py one-time migrations included) can
+        silently leave a row unmirrored, with nothing surfacing it until
+        FP&A Buddy quietly fails to retrieve content that actually exists.
+        Two rows sat exactly like this for three weeks before anyone
+        noticed. This check exists so that gap is visible on the very next
+        /admin/checks load instead of found by chance — the fix for a
+        flagged row is always the same and needs no code: open it in
+        /admin/thought-leadership/original and click Save, which re-runs
+        the sync unconditionally."""
+        rows = self.conn.execute(
+            "SELECT oc.id, oc.slug, oc.title, oc.mirrored_article_id "
+            "FROM original_content oc LEFT JOIN articles a ON a.id = oc.mirrored_article_id "
+            "WHERE TRIM(COALESCE(oc.body_md, '')) != '' "
+            "AND (oc.mirrored_article_id IS NULL OR a.id IS NULL) "
+            "ORDER BY oc.id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def insert_mirrored_article(self, url: str, title: str, content: str) -> int:
         """Create the articles row backing a mirrored original_content piece.
         Deliberately NOT Library.upsert() — upsert's merge-into-existing-row

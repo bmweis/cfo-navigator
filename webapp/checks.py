@@ -121,6 +121,33 @@ def ai_config_orphan_problems() -> list[str]:
     return app.ai_config_editable_outside_ai_page()
 
 
+# --- Original content mirroring invariant (2026-09) --------------------------
+# sync_original_content_article() only ever fires from the two admin save
+# routes (see linklib/original_content_sync.py) — a write via any other path
+# (a migration script, a future bulk edit) can leave a live row with real
+# body_md and no working articles mirror, with nothing surfacing it until
+# FP&A Buddy quietly fails to cite content that actually exists. Found live
+# 2026-09: two rows (ai-hackathon-playbook, netsuite-mcp) sat exactly like
+# this for three weeks after scripts/archive/migrate_*_content.py wrote
+# body_md directly, bypassing the sync — both self-healed the moment an
+# admin opened them and clicked Save, since any save re-runs the sync
+# unconditionally. Deliberately kept in the routes rather than moved into
+# Library.update_original_content() itself — see CLAUDE.md's Published-
+# Content Ingestion entry for the full trade-off; this check is the
+# alternative safety net that decision requires: a real, no-judgment-call,
+# mechanically-enforced invariant, the same shape as hub_nav_orphan_problems
+# above, not a dated manual attestation like the pricing/model-freshness
+# banners on /admin/checks.
+def original_content_mirror_problems() -> list[str]:
+    from webapp.app import _lib
+    lib = _lib()
+    try:
+        rows = lib.list_unmirrored_original_content()
+    finally:
+        lib.close()
+    return [f"{r['slug']!r} (id {r['id']}) has body_md but no working articles mirror" for r in rows]
+
+
 # --- coral discipline: at most one coral moment per public page (PR 16) -----
 def coral_moment_problems() -> list[str]:
     from webapp import app
@@ -274,6 +301,12 @@ def run_all() -> list[dict]:
         "name": "AI config consolidated", "where": "Live + CI", "ok": not ac,
         "what": "AI settings only live in one place (/admin/system/ai)—nothing left over from the pages that used to hold them.",
         "detail": "; ".join(ac) if ac else "AI configuration lives only at /admin/system/ai."})
+
+    om = original_content_mirror_problems()
+    results.append({
+        "name": "Original content mirrored for retrieval", "where": "Live + CI", "ok": not om,
+        "what": "Every original_content row with real body_md has a working articles mirror, so FP&A Buddy can find and cite it.",
+        "detail": "; ".join(om) if om else "Every row with body_md has a valid mirror."})
 
     cm = coral_moment_problems()
     results.append({
