@@ -4902,10 +4902,11 @@ A read-only remote MCP server, mounted **in-process** inside the same
 FastAPI app/deploy (no second service, no second process) at the path
 `/mcp`, reachable both at `mcp.bmweis.com` (see the deployment-diagram note
 above for why that subdomain is deliberately unproxied at the DNS level)
-and at the raw Railway origin as a fallback. This phase ships exactly three
+and at the raw Railway origin as a fallback. This phase shipped three
 admin-gated, read-only schema-introspection tools (`list_tables`,
 `describe_table`, `sample_rows`) — no Toolbox/Communities/Library/Feed/
-Buddy tools, no writes of any kind, per the phase's own explicit scope.
+Buddy tools, no writes of any kind, per the phase's own explicit scope. A
+fourth, `get_rows`, joined the same tier in Phase 2 (retrieval) below.
 
 **Two ergonomics fixes from live production use (cleanup/hardening PR,
 2026-09).** `list_tables` now labels FTS5's/sqlite-vec's extension-internal
@@ -4919,6 +4920,62 @@ table too. `sample_rows` caps each string cell at `max_cell_chars` (default
 500, disable with `<=0`) with a visible truncation marker — a production
 sample of 25 `articles` rows came back at 523KB with no cap, mostly full
 article body text nobody asked to see.
+
+**MCP introspection, Phase 2 — retrieval (2026-09): `get_rows` plus an
+`offset` on `sample_rows`, closing a real reachability gap `sample_rows`'
+original two fixed windows left open.** `sample_rows` only ever offered a
+head window (`ORDER BY rowid ASC LIMIT n`) and a tail window (`ORDER BY
+rowid DESC LIMIT n`, reversed), each capped at 25 rows, with no offset and
+no cursor — the two windows stop meeting once a table passes 50 rows,
+leaving `total - 50` rows in a middle no parameter combination could
+reach. Confirmed live, not hypothetical: `settings` (55 rows in
+production) had exactly this 5-row dead window, and `htib_before_copy`/
+`htib_after_copy` (the `/how-this-is-built` page copy) sat inside it —
+unreadable through MCP by any call, silently, with no error, which is
+what forced a recent content change to be matched from a screenshot
+instead of from source. `ai_surfaces`/`original_content`/
+`thought_leadership` were all under the 50-row line at the time and so
+unaffected today, but only by row-count luck, not by design.
+
+Two additions, both admin-role-only and read-only, same tier as the three
+Phase 1 tools:
+- **`sample_rows` gained `offset: int = 0`.** `offset=0,25,50,...` walks a
+  table of any size in order with no gap and no overlap (`ORDER BY rowid
+  {ASC|DESC} LIMIT ? OFFSET ?`, negative values clamped to 0); omitting it
+  is a pure no-op — every existing caller's behavior is unchanged, since
+  `OFFSET 0` is identical to no `OFFSET` clause at all. `from_end` keeps
+  working exactly as before, now offsettable from either end. **The 25-row
+  cap itself is deliberately untouched** — the fix is reachability, not
+  bigger payloads.
+- **New `get_rows(name, where_column, where_value, n, max_cell_chars)`** —
+  fetches by exact column match instead of by position, so a specific row
+  (a `settings` key, an `id`) is reachable in one call regardless of table
+  size or where the row happens to sit. `where_value` is always bound as a
+  parameter (never interpolated) and always passed/compared as text — SQLite's
+  own type affinity still matches it correctly against an INTEGER/NUMERIC
+  column (confirmed: binding `"5"` against an `INTEGER PRIMARY KEY` column
+  matches the row holding `5`). `name` is validated against the live
+  table/view list exactly like `sample_rows` (`_validate_table`, extracted
+  from `sample_rows`' own inline check so the two tools can't validate
+  differently); `where_column` is validated per-table via the same
+  `PRAGMA table_info` path `describe_table` already uses (`_validate_column`)
+  — a column that's real on some OTHER table in the schema is still
+  rejected, since validation is per-table, not a global column allowlist.
+  A match on nothing is a normal empty result (`count: 0, rows: []`), not
+  an error. Returns the identical row shape, `n` cap, and `max_cell_chars`
+  truncation behavior (including the `truncated` flag) as `sample_rows` —
+  both tools now call one shared `_apply_cell_truncation()` helper rather
+  than each implementing the truncation loop, so the two can never drift
+  into subtly different truncation behavior.
+
+Deliberately out of scope this phase (see CLAUDE.md's matching bullet for
+the full reasoning): a discovery registry for non-schema content surfaces
+(the `ai_surfaces`/`original_content`/`homepage`/`about` copy keys) —
+handled by writing the surface inventory into project documentation
+instead of building a tool for it — and the route-render tool (Phase 3),
+still parked. See `tests/test_mcp_server.py`'s Phase 2 section for the
+full regression coverage, including the literal `settings`-at-55-rows
+paging scenario and the dead-middle-row `get_rows` lookup.
 
 **Why a new auth mechanism instead of reusing `LINKLIB_SAVE_TOKEN`.** The
 existing flat token carries no identity — a call authenticated with it is

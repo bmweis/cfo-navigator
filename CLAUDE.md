@@ -5707,6 +5707,50 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   truncation marker — a production sample of 25 `articles` rows had come
   back at 523KB uncapped. See ARCHITECTURE.md's matching section for the
   full write-up.
+- **MCP server, Phase 2 — retrieval (2026-09) — `get_rows` plus an
+  `offset` on `sample_rows`, closing a real reachability gap the original
+  three introspection tools left open.** `sample_rows`' two fixed windows
+  (head: `ORDER BY rowid ASC LIMIT n`; tail: `ORDER BY rowid DESC LIMIT n`,
+  reversed — each capped at 25, no offset, no cursor) stop meeting once a
+  table passes 50 rows, leaving `total - 50` rows permanently unreachable
+  through MCP by any parameter combination — silently, with no error.
+  Confirmed live, not hypothetical: `settings` had 55 rows, and
+  `htib_before_copy`/`htib_after_copy` (the `/how-this-is-built` page
+  copy) sat in the 5-row dead middle — unreadable through MCP, which is
+  what forced a recent copy change to be matched from a screenshot rather
+  than source. `ai_surfaces`/`original_content`/`thought_leadership` were
+  all under 50 rows at the time and so unaffected today, but only by row-
+  count luck. Two additions, both admin-role-only, same tier as the three
+  Phase 1 tools: **`sample_rows` gained `offset: int = 0`** — `offset=
+  0,25,50,...` walks a table of any size in order with no gap and no
+  overlap, negative values clamped to 0, omitting it a pure no-op (`OFFSET
+  0` is identical to no clause) so every existing caller is unaffected;
+  **new `get_rows(name, where_column, where_value, n, max_cell_chars)`**
+  fetches by exact column match instead of position, so one specific row
+  is reachable in a single call regardless of table size — `where_value`
+  is always parameter-bound (never interpolated) and passed as text, with
+  SQLite's own type affinity still matching it correctly against an
+  INTEGER column; `name`/`where_column` are validated against the live
+  schema exactly like the existing tools (`_validate_table`/
+  `_validate_column`, both extracted so `sample_rows`/`get_rows`/
+  `describe_table` can't drift into validating differently); a
+  no-match query is a normal empty result, never an error. Both tools now
+  share one `_apply_cell_truncation()` helper for the `max_cell_chars`/
+  `truncated` behavior, rather than each implementing the truncation loop
+  separately. **The 25-row cap itself is deliberately untouched** — the
+  fix is reachability, not bigger payloads. **Deliberately out of scope
+  this phase**: a discovery registry for non-schema content surfaces (the
+  `ai_surfaces`/`original_content`/homepage/about copy `settings` keys) —
+  Phase 0C's own investigation into that question found discovery is
+  better solved by writing the surface inventory into project
+  documentation than by building a tool for it, so this phase is retrieval
+  only; and the route-render tool (Phase 3 of the *investigation* track,
+  not to be confused with this same-numbered MCP *tool* Phase 3 below),
+  still parked pending the GET-route side-effect audit and the
+  `_CORAL_CHECK_IN_PROGRESS` race question, both being tracked separately.
+  See ARCHITECTURE.md's matching section and `tests/test_mcp_server.py`'s
+  Phase 2 section (the literal `settings`-at-55-rows paging case and the
+  dead-middle-row `get_rows` lookup) for the full write-up and coverage.
 - **MCP server, Phase 3 (2026-09) — six read-only Toolbox/Communities
   content tools (`search_software`, `get_software`, `search_communities`,
   `get_community`, `compare_software`, `compare_communities`), a new
