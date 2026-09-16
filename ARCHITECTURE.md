@@ -2579,8 +2579,88 @@ doesn't reflect a feed's real Current Feed rank — tying the copy fix
 back to the rank-indicator fix above rather than leaving that a silent
 design fact a reader has to infer. See
 `tests/test_feed_cookie_flag.py::test_column_reference_moved_below_the_table`
-and `::test_order_bullet_explains_the_rank_number` for the regression
-coverage.
+and (superseded by the sortable-columns follow-up directly below)
+`::test_order_bullet_explains_sorting_by_side_then_position` for the
+regression coverage.
+
+### Feeds table: click-to-sort headers, retiring the rank readout (2026-09)
+
+The rank indicator from the section above was a workaround, not a fix —
+it existed only because the table's default row order (section, then
+feed id) never matched a feed's real Current Feed position, so a
+correctly-disabled up arrow on a genuinely-first row looked broken with
+nothing in the table to explain why. Making the Order column directly
+sortable removes the need to compute and print a separate number: once
+sorted, a feed's rank is just wherever it sits.
+
+**Client-side sort, not server-side** — the table holds ~21 rows, small
+enough that a full client-side reorder is instant, and (the deciding
+factor) the Order arrows are still a plain `POST`-then-redirect full page
+reload, not an AJAX call — a server-side sort would need its own
+`?sort=`/`?dir=` query params threaded through every arrow's redirect
+target for no simpler an implementation. Client-side sorting also
+reorders existing `<tr>` DOM nodes rather than re-rendering server
+output, which keeps every row's live `<form>`/`<select>` controls
+(Section dropdown, Subscriber checkbox, Current Feed select) intact
+across a sort with no extra plumbing.
+
+**Six of eight columns are sortable** — Name, Section, Cookie,
+Subscriber, Current Feed, Order; URL and Actions have nothing worth
+sorting by and stay plain `<th>`s. Each sortable header carries
+`data-sort="<field>"`, is keyboard-operable (`tabindex="0"`,
+`role="button"`, Enter/Space handled via `onkeydown`), and renders a
+`.ff-sort-ind` span that shows ▲/▼ for whichever column is currently
+active. `admin_feeds()` computes one `data-*` sort attribute per row for
+each of the six fields, all pre-lowercased so the shared JS comparator
+(`_FEEDS_SORT_JS`) needs no per-field logic except Order's composite key.
+
+**Order's sort key groups by side first, then by position within it** —
+`f"{side_rank}-{order:04d}"`, where `side_rank` is 0 for `old_school`, 1
+for `new_school`, 2 for Hidden (computed the same way the row's own
+Current Feed select value is: `f['current_feed_side'] if
+f['show_on_current_feed'] else ''`). That's the exact sequence the
+up/down arrows move a feed through, so sorting by Order is the one view
+where a feed's row position directly IS its rank — the answer the
+retired rank readout used to compute separately and print beside the
+arrows.
+
+**The sort state persists in `localStorage` (key `ffSort`), not a URL
+query param** — this is the one non-obvious design choice, and it's
+load-bearing: an Order-arrow click is a real page navigation (a `POST`
+to `.../order-move`, redirecting to the bare `GET /admin/reader/feeds`
+with no query string), so without persistence, sorting by Order and then
+clicking an arrow to test it would silently drop back to the default
+section/id view on the very next page load — undoing the one sort state
+that actually proves the move worked, reproducing the exact confusion
+this whole follow-up sets out to fix. `ffApplySort()` runs on
+`DOMContentLoaded` and is a genuine no-op when nothing is stored
+(`ffSortState()` returns `null`), so a fresh visitor with no saved
+preference sees exactly the same default order as before — the explicit
+requirement that nothing moves for anyone not deliberately sorting.
+
+**The "N of M" rank readout from the section above is retired outright,
+not kept alongside the new sort as a second safety net.**
+`_cf_order_arrows_html`'s boundary tuple reverts from `(is_first,
+is_last, rank, total)` to plain `(is_first, is_last)`; the Order cell's
+markup collapses from two nested `<span>`s (one wrapping both the arrows
+and the rank text) to one plain arrow-wrapping span. Once sorting by
+Order shows the same answer directly, in the row order itself, a
+recomputed number next to two already-narrow buttons read as noise
+competing for space in a tight cell rather than a genuinely independent
+signal — the explicit call this follow-up asked to make, not a default
+kept out of caution. The Column reference bullet for Order was rewritten
+to describe the sort instead of the retired number.
+
+Verified live with a real headless-browser session, not just rendered
+HTML: sorting by Name toggles ascending/descending correctly with the
+indicator flipping ▲/▼; sorting by Order groups a same-side feed set by
+position ahead of a different-side one regardless of table/insertion
+order; the sort survives a page reload; switching the active column
+clears the previous one's indicator. See
+`tests/test_current_feed.py::test_order_column_is_sortable_by_side_then_position`
+(the composite key, and confirming the retired rank text is genuinely
+gone) and `::test_order_column_headers_are_clickable_and_carry_a_sort_indicator`
+for the regression coverage.
 
 ### `/admin/copy/*` width tier, redundant helper text, and a Content sub-group (2026-09)
 

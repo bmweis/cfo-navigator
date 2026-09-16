@@ -112,7 +112,7 @@ def _feed_row(html: str, feed_name: str) -> str:
     nest other <tr>s, so a plain split-and-find is enough."""
     marker = f'<td class="ff-name">{feed_name}</td>'
     idx = html.index(marker)
-    start = html.rindex('<tr class="ff-row">', 0, idx)
+    start = html.rindex('<tr class="ff-row"', 0, idx)
     end = html.index("</tr>", idx) + len("</tr>")
     return html[start:end]
 
@@ -225,7 +225,7 @@ def test_cookie_column_width_uses_the_named_status_constant(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
     from webapp.app import _COL_WIDTH_STATUS
-    assert f'width:{_COL_WIDTH_STATUS}px;text-align:center;">Cookie</th>' in html
+    assert f'width:{_COL_WIDTH_STATUS}px;text-align:center;" data-sort="cookie"' in html
     assert f'.ff-cookie{{width:{_COL_WIDTH_STATUS}px' in html
 
 

@@ -15,6 +15,7 @@ shipped and had to fix. So seeding is settings-flagged, exactly like
 seed_feeds_from_opml.
 """
 import pathlib
+import re
 import shutil
 import sys
 
@@ -196,7 +197,7 @@ def test_feed_table_has_a_cookie_column_with_no_checkbox(app_env):
     there is nothing left for an admin to tick."""
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert ">Cookie</th>" in html
+    assert 'data-sort="cookie"' in html   # the sortable <th> header
     assert 'name="has_paywall_cookie"' not in html
 
 
@@ -263,7 +264,7 @@ def test_column_reference_moved_below_the_table(app_env):
     below it."""
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    table_idx = html.index('<table class="ff-table">')
+    table_idx = html.index('<table class="ff-table"')
     reference_idx = html.index("Column reference")
     cookie_bullet_idx = html.index("<strong>Cookie</strong> shows two different facts")
     finding_cookie_idx = html.index("Finding the right cookie in DevTools")
@@ -278,13 +279,15 @@ def test_column_reference_moved_below_the_table(app_env):
     assert "<strong>Order</strong>" not in above_table
 
 
-def test_order_bullet_explains_the_rank_number(app_env):
-    """The new "N of M" rank indicator (added alongside the arrows fix)
-    gets a line in the moved-below reference explaining what it means and
-    why it can differ from the row's own position in the table."""
+def test_order_bullet_explains_sorting_by_side_then_position(app_env):
+    """2026-09 follow-up: the old "N of M" rank readout is retired now that
+    the Order column is directly sortable — the moved-below reference bullet
+    explains that sorting by Order groups by side, then position, which is
+    what actually makes a feed's row position mean something."""
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert "this table's own row order doesn't reflect it" in html
+    assert "Sorting by <strong>Order</strong> groups the table by side" in html
+    assert "N of M" not in html
 
 
 def test_cookie_route_is_gone(app_env):
@@ -382,14 +385,19 @@ def test_startup_hook_seeds_the_flags(app_env):
 def test_checkbox_columns_are_centre_justified(app_env):
     """BRAND.md: checkbox/boolean-indicator columns centre, everything else
     stays left. (Read only came out of the table entirely along with the
-    Archive Queue itself — 2026-09, PR 3.)"""
+    Archive Queue itself — 2026-09, PR 3.) 2026-09 follow-up: headers are
+    now clickable sort buttons (a trailing indicator <span> sits between
+    the label and </th>), so this checks each <th>'s own style attribute
+    and content directly, rather than an exact "...>{label}</th>" tag."""
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    for label in ("Cookie", "Subscriber"):
-        assert f'text-align:center;">{label}</th>' in html
+    for field, label in (("cookie", "Cookie"), ("subscriber", "Subscriber")):
+        m = re.search(rf'<th style="([^"]*)" data-sort="{field}"[^>]*>{label}<', html)
+        assert m, f"no centred sortable <th> found for {label}"
+        assert "text-align:center;" in m.group(1)
     assert "Read only</th>" not in html
-    assert '<th style="width:15%;">Name</th>' in html
-    assert '<th style="width:11%;">Section</th>' in html
+    assert 'width:15%;" data-sort="name"' in html
+    assert 'width:11%;" data-sort="section"' in html
 
 
 # ---------------------------------------------------------------------------
@@ -476,7 +484,7 @@ def test_nothing_outside_the_admin_surface_reads_the_flag(app_env):
 def test_feed_table_has_an_active_subscription_column(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert ">Subscriber</th>" in html
+    assert 'data-sort="subscriber"' in html   # the sortable <th> header
     assert 'name="has_active_subscription"' in html
 
 
