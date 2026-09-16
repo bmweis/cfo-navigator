@@ -594,7 +594,7 @@ def test_admin_table_shows_order_arrows_not_a_number_field(env):
         lib.close()
     _login(client)
     html = client.get("/admin/reader/feeds").text
-    assert "Order</th>" in html
+    assert '>Order<' in html   # the sortable <th> header (a <span> indicator follows the label)
     assert 'name="current_feed_order"' not in html
     assert 'type="number"' not in html
     # Both feeds are alone in their own state (Shown One is the only shown
@@ -633,7 +633,7 @@ def test_order_arrows_reflect_position_within_the_side(env):
         no <form> around it."""
         section_marker = f"/admin/reader/feeds/{feed_id}/section"
         i = html.index(section_marker)
-        start = html.rindex('<tr class="ff-row">', 0, i)
+        start = html.rindex('<tr class="ff-row"', 0, i)
         end = html.index("</tr>", i) + len("</tr>")
         row = html[start:end]
         up = re.search(rf'<button[^>]*aria-label="Move up: {re.escape(name)}"[^>]*>', row)
@@ -643,6 +643,124 @@ def test_order_arrows_reflect_position_within_the_side(env):
     assert _arrow_states(first_id, "First") == (True, False)    # up disabled, down enabled
     assert _arrow_states(mid_id, "Middle") == (False, False)    # both enabled
     assert _arrow_states(last_id, "Last") == (False, True)      # up enabled, down disabled
+
+
+def test_order_column_is_sortable_by_side_then_position(env):
+    """The real bug behind a 2026-09 report: a feed's row position in this
+    admin table (Library.list_feeds() orders by section/feed id, not by
+    current_feed_order) has no relationship to its actual position within
+    its Current Feed side — a feed can sit near the bottom of the table
+    while genuinely being rank 1 (order=0) on /current-feed, so a correctly-
+    disabled up arrow reads as broken with nothing else to explain why.
+
+    Fixed at the root (2026-09 follow-up) by making the Order column itself
+    sortable: its data-order sort key groups by side first (old_school,
+    then new_school, then Hidden) and only then by position within it — the
+    exact sequence the arrows move a feed through. This pins that key
+    against a deliberately out-of-table-order current_feed_order assignment
+    — the exact shape of the real report (Fred Wilson's USV feed genuinely
+    held order=0 while sitting mid-table by id) — and confirms the earlier
+    "N of M" rank readout (retired once sorting made it redundant) is
+    genuinely gone."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        # Added in this order (so table/id order is A,B,C,D,E), but C is
+        # given the LOWEST current_feed_order — genuinely first on
+        # /current-feed despite sitting third in the table.
+        a = _add(lib, sid, "A", "https://a.example/feed", "https://a.example/", side="old_school", order=1)
+        b = _add(lib, sid, "B", "https://b.example/feed", "https://b.example/", side="old_school", order=2)
+        c = _add(lib, sid, "C", "https://c.example/feed", "https://c.example/", side="old_school", order=0)
+        d = _add(lib, sid, "D", "https://d.example/feed", "https://d.example/", side="old_school", order=3)
+        e = _add(lib, sid, "E", "https://e.example/feed", "https://e.example/", side="old_school", order=4)
+    finally:
+        lib.close()
+    _login(client)
+    html = client.get("/admin/reader/feeds").text
+
+    def _row(feed_id):
+        marker = f"/admin/reader/feeds/{feed_id}/section"
+        i = html.index(marker)
+        start = html.rindex('<tr class="ff-row"', 0, i)
+        end = html.index("</tr>", i) + len("</tr>")
+        return html[start:end]
+
+    def _data_order(feed_id):
+        m = re.search(r'data-order="([^"]+)"', _row(feed_id))
+        return m.group(1)
+
+    # data-order sorts C first (order=0), regardless of its table position —
+    # the same value the arrows/renumbering logic already keys off.
+    assert sorted([_data_order(x) for x in (a, b, c, d, e)]) == [
+        _data_order(c), _data_order(a), _data_order(b), _data_order(d), _data_order(e)]
+
+    # The old rank text ("N of M") is retired — sorting by Order answers the
+    # same question directly now, so there's nothing left to render here.
+    assert not re.search(r"\d+ of \d+", _row(a))
+
+    # C's up arrow is correctly disabled, matching its real (order=0) rank —
+    # not a bug, just previously invisible without a way to see its position.
+    up = re.search(r'<button[^>]*aria-label="Move up: C"[^>]*>', _row(c))
+    assert "disabled" in up.group(0)
+
+
+def test_order_column_headers_are_clickable_and_carry_a_sort_indicator(env):
+    """The six sortable columns (Name/Section/Cookie/Subscriber/Current
+    Feed/Order) each get a clickable <th data-sort="..."> with a visible
+    indicator span; URL and Actions have nothing worth sorting by and stay
+    plain."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        _add(lib, sid, "A", "https://a.example/feed", "https://a.example/")
+    finally:
+        lib.close()
+    _login(client)
+    html = client.get("/admin/reader/feeds").text
+    for field in ("name", "section", "cookie", "subscriber", "current-feed", "order"):
+        assert f'data-sort="{field}"' in html
+        assert f"ffSortBy('{field}')" in html
+    thead_start = html.index("<thead>")
+    thead_end = html.index("</thead>") + len("</thead>")
+    thead = html[thead_start:thead_end]
+    assert thead.count('class="ff-sort-ind"') == 6
+    assert "function ffSortBy" in html
+    assert "function ffApplySort" in html
+
+
+def test_order_arrows_render_at_a_consistent_size_disabled_or_not(env):
+    """2026-09 regression: a disabled arrow (a bare <button>, no wrapping
+    <form>) rendered visibly taller than an enabled one (<form>-wrapped)
+    in the same inline-flex row, because the container's default
+    align-items:stretch let the two differently-boxed children diverge.
+    Fixed by pinning align-items:center on the wrapping span — this pins
+    that the fix is still in place, since the failure mode is invisible to
+    a plain HTML-content assertion and only shows up as a rendered size
+    difference. (2026-09 follow-up: the cell used to have an outer span
+    wrapping both the arrows AND a rank readout; the rank readout is
+    retired now that Order is sortable, leaving one plain arrow-wrapping
+    span — this still pins align-items:center on it.)"""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        first_id = _add(lib, sid, "First", "https://a.example/feed", "https://a.example/",
+                        side="old_school", order=0)
+        _add(lib, sid, "Last", "https://b.example/feed", "https://b.example/",
+             side="old_school", order=1)
+    finally:
+        lib.close()
+    _login(client)
+    html = client.get("/admin/reader/feeds").text
+    idx = html.index(f"/admin/reader/feeds/{first_id}/section")
+    start = html.rindex('<tr class="ff-row"', 0, idx)
+    end = html.index("</tr>", idx) + len("</tr>")
+    row = html[start:end]
+    order_cell_start = row.index('<td class="ff-order">')
+    order_cell = row[order_cell_start:row.index("</td>", order_cell_start)]
+    assert 'align-items:center' in order_cell
 
 
 def test_add_edit_form_has_no_current_feed_order_field(env):
