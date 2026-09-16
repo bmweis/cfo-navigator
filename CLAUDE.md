@@ -8833,6 +8833,26 @@ it supersedes the old "`/save` is token-gated" note.
   section for the full write-up). Also doubles as the FP&A Buddy web-search
   allowlist, since `linklib.sources.preferred_domains` builds from the same
   OPML `feeds`/`feed_sections` generate.
+- **Current Feed display order (2026-09 follow-up) — a third per-feed
+  column, `feeds.current_feed_order`, since a mixtape's running order is
+  part of the point.** `current_feed()` sorts within each side by
+  `(current_feed_order, id)` — `id` is the stable tie-breaker (permanent,
+  already unique), so two feeds sharing a number render in a fixed
+  sequence rather than an unspecified SQLite order, and the page can't
+  reshuffle between requests. The admin control is a second per-row
+  number `<input>` (`.ff-order`), cross-associated to the same `<form>`
+  as the existing side `<select>` via `form=""` (the same cross-cell
+  trick the Sections table's rename form already uses), so either
+  control's `onchange` submits both fields together. **Left visible and
+  editable even when a feed is Hidden** — deliberate, not an oversight:
+  hiding it would need JS keyed off the side dropdown for no real
+  benefit, and leaving it visible lets a position be set ahead of turning
+  a feed on rather than blocking or losing that value. Seeded once via
+  `Library.seed_current_feed_order()` (settings-flagged, same
+  non-emptiness-check discipline as every other one-time feed seed —
+  `0` is also a real "goes first" value) from the render order shown
+  feeds already had before the column existed, so shipping it didn't
+  move anything; Brian reorders from there.
 
 
 ## Authentication & security

@@ -611,9 +611,9 @@ def _seed_and_publish_feeds():
     can't overwrite the curated repo copy before seeding has run.
 
     The paywall-cookie flags, the informational subscription flags, and the
-    Current Feed show/side flags all seed here too, each on its own settings
-    flag. None of the three is part of the OPML round trip: the file has no
-    field for any of them, so editing one never rewrites it.
+    Current Feed show/side/order columns all seed here too, each on its own
+    settings flag. None of the four is part of the OPML round trip: the file
+    has no field for any of them, so editing one never rewrites it.
     """
     lib = _lib()
     try:
@@ -624,6 +624,7 @@ def _seed_and_publish_feeds():
         lib.seed_paywall_cookie_flags()
         lib.seed_active_subscriptions()
         lib.seed_current_feed_sides()
+        lib.seed_current_feed_order()
         lib.write_opml(OPML_PATH)
     except Exception:
         # Never block boot on this. A failure here leaves the existing OPML
@@ -4380,9 +4381,10 @@ def ai_surface_article(request: Request, slug: str):
 # generates, so this doubles as "which sources can FP&A Buddy's web tier
 # actually draw from."
 #
-# Side A ("Old School") / Side B ("New School") are driven by two per-feed
-# columns — feeds.show_on_current_feed / feeds.current_feed_side — not by
-# matching feed_sections.name (the original design). That first design
+# Side A ("Old School") / Side B ("New School") are driven by three per-feed
+# columns — feeds.show_on_current_feed / feeds.current_feed_side /
+# feeds.current_feed_order (running order within a side, 2026-09 follow-up)
+# — not by matching feed_sections.name (the original design). That first design
 # worked for the two sections it named (Blogs, Substacks) but left a real
 # gap: a feed sitting in a section that's neither a known side nor a known
 # exclusion (production already has an empty "Tools" section) had no clean
@@ -4515,7 +4517,15 @@ def current_feed(request: Request):
     /admin/reader/feeds) for how a feed lands on a side, and
     _current_feed_hidden_footnote() for the disclosure that a hidden feed
     is still searched by FP&A Buddy — this is presentational-only, and the
-    page says so."""
+    page says so.
+
+    Within a side, tracks sort by current_feed_order ascending — a mixtape's
+    running order is deliberate, not whatever the query happens to return.
+    Ties (including every feed before Library.seed_current_feed_order() ran,
+    or two feeds Brian gives the same number) fall back to feed id ascending,
+    the one value that's both permanent and already unique, so the order
+    can't shuffle between requests the way an unordered tie would under
+    SQLite."""
     lib = _lib()
     try:
         feeds = lib.list_feeds()
@@ -4526,6 +4536,8 @@ def current_feed(request: Request):
     for f in feeds:
         if f["show_on_current_feed"]:
             by_side.setdefault(f["current_feed_side"], []).append(f)
+    for side_feeds in by_side.values():
+        side_feeds.sort(key=lambda f: (f["current_feed_order"], f["id"]))
 
     sides_html = "".join(
         _current_feed_side_html(label, heading, by_side.get(side, []))
@@ -26383,6 +26395,15 @@ def _current_feed_select_options(current_value: str) -> str:
     )
 
 
+def _parse_current_feed_order(raw) -> int:
+    """Defensive int parse for the Current Feed order field. It's a plain
+    number input, but nothing stops a missing/blank/malformed value from
+    reaching a route — falls back to 0 (the column's own default) rather
+    than rejecting the save outright."""
+    raw = (raw or "").strip()
+    return int(raw) if raw.lstrip("-").isdigit() else 0
+
+
 def _feed_form_fields(sections: list, values: dict) -> str:
     """Shared field markup for the add-feed and edit-feed forms."""
     opts = "".join(
@@ -26431,6 +26452,11 @@ def _feed_form_fields(sections: list, values: dict) -> str:
     <label style="{lab}">Current Feed</label>
     <select name="current_feed" style="{inp}">{current_feed_opts}</select>
     <p style="{hint}">Off by default for a new feed—turn it on deliberately once it's worth listing. Only changes whether this appears on the public /current-feed tracklist; FP&amp;A Buddy's web search still covers every feed regardless of this setting.</p>
+  </div>
+  <div>
+    <label style="{lab}">Current Feed order</label>
+    <input type="number" name="current_feed_order" value="{values.get('current_feed_order', 0)}" style="{inp}">
+    <p style="{hint}">Where this track sits within its side, lowest first. Left visible but ignored while Hidden above&mdash;set it ahead of time if you like, it just won't do anything until the feed is shown. Two feeds with the same number keep a stable order between page loads (broken by feed ID, not left to chance).</p>
   </div>"""
 
 
@@ -26490,10 +26516,15 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     </form>
   </td>
   <td class="ff-cf">
-    <form method="post" action="/admin/reader/feeds/{f['id']}/current-feed" style="margin:0;">
+    <form id="cf-form-{f['id']}" method="post" action="/admin/reader/feeds/{f['id']}/current-feed" style="margin:0;">
       <select name="current_feed" onchange="this.form.submit()" aria-label="Current Feed: {_esc(f['name'])}"
         style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">{_current_feed_select_options(f['current_feed_side'] if f['show_on_current_feed'] else '')}</select>
     </form>
+  </td>
+  <td class="ff-order">
+    <input type="number" name="current_feed_order" form="cf-form-{f['id']}" value="{f['current_feed_order']}"
+      onchange="this.form.submit()" aria-label="Current Feed order: {_esc(f['name'])}"
+      style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
   </td>
   <td class="ff-actions">
     <a href="/admin/reader/feeds/{f['id']}/edit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Edit</a>
@@ -26504,7 +26535,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   </td>
 </tr>"""
     if not feeds:
-        feed_rows = ('<tr class="ff-row"><td colspan="7" class="ff-empty">'
+        feed_rows = ('<tr class="ff-row"><td colspan="8" class="ff-empty">'
                      'No feeds yet. Add a section below, then add a feed to it.</td></tr>')
 
     # -- manage sections: a table matching the feed table above --------------
@@ -26593,8 +26624,9 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .ff-section{{width:12%;}}
 .ff-cookie{{width:9%;text-align:center;}}
 .ff-sub{{width:9%;text-align:center;}}
-.ff-cf{{width:15%;}}
-.ff-actions{{width:22%;text-align:right;white-space:nowrap;}}
+.ff-cf{{width:12%;}}
+.ff-order{{width:7%;}}
+.ff-actions{{width:18%;text-align:right;white-space:nowrap;}}
 .ff-empty{{padding:16px 12px;color:var(--muted);font-size:13.5px;}}
 /* Sections table — same shape as the feed table, three columns. */
 .fs-name{{width:50%;}}
@@ -26619,7 +26651,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   .ff-row,.fs-row{{border-top:1px solid var(--line);padding:10px 0;}}
   .ff-table tbody tr:first-child,.fs-table tbody tr:first-child{{border-top:0;}}
   .ff-row>td,.fs-row>td{{border-top:0;padding:3px 12px;}}
-  .ff-cookie,.ff-sub,.ff-cf,.ff-actions,.fs-actions{{text-align:left;}}
+  .ff-cookie,.ff-sub,.ff-cf,.ff-order,.ff-actions,.fs-actions{{text-align:left;}}
   .ff-section::before{{content:"Section";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   /* Always labelled, unlike the cookie cell: this is a checkbox that carries
@@ -26629,6 +26661,8 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   /* Always labelled, same reasoning as Subscriber — "Hidden" carries
      meaning too, it's not an empty/default state to hide the label for. */
   .ff-cf::before{{content:"Current Feed";display:block;font-size:11.5px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
+  .ff-order::before{{content:"Order";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   /* Labelled unconditionally, same as Subscriber. Holds a computed
      configured/not-configured readout that carries meaning in both states
@@ -26652,6 +26686,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <li><strong>Cookie</strong> shows whether this feed's domain has a subscriber cookie set up right now. Each domain gets its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable in Railway; set one there and it's picked up automatically the next time that feed is fetched. <strong>The cookie value itself is never stored in this database</strong>&mdash;only which domains to check is baked into the code. See <code>RUNBOOK.md</code> &sect;5 to refresh an expired one.</li>
 <li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
 <li><strong>Current Feed</strong> controls whether&mdash;and on which side&mdash;this feed appears on the public <a href="/current-feed" style="color:var(--accent);">/current-feed</a> tracklist. A new feed starts Hidden; that's deliberate, not a bug. This is presentation only&mdash;FP&amp;A Buddy's web search still covers every feed here regardless of this setting, and the tracklist page itself says so.</li>
+<li><strong>Order</strong> sets where a feed lands within its side, lowest first. It stays visible and editable even while Hidden&mdash;it just does nothing until the feed is shown. Two feeds sharing a number keep a stable order (broken by feed ID) rather than reshuffling between visits.</li>
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
@@ -26661,15 +26696,23 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
       <th style="width:12%;">Section</th>
       <th style="width:9%;text-align:center;">Cookie</th>
       <th style="width:9%;text-align:center;">Subscriber</th>
-      <th style="width:15%;">Current Feed</th>
-      <th style="width:22%;text-align:right;">Actions</th>
+      <th style="width:12%;">Current Feed</th>
+      <th style="width:7%;">Order</th>
+      <th style="width:18%;text-align:right;">Actions</th>
     </tr></thead>
     <tbody>{feed_rows}</tbody>
   </table>
 </div>
-<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.6;">
-<strong>Finding the right cookie in DevTools:</strong> log into the site, open DevTools &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> for that domain, and copy the minimum cookie that carries the session&mdash;not the whole jar. It varies by platform: a <strong>Substack</strong> site's session cookie is typically named <code>connect.sid</code>; a <strong>beehiiv</strong> site (e.g. Mostly Metrics) uses a signed JWT, usually under a name containing <code>token</code> or <code>session</code>. When in doubt, RUNBOOK.md &sect;5.2's fallback still works: copy the entire <code>Cookie:</code> request header instead of hunting for one name.
-</p>
+<div style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.65;">
+<p style="margin:0 0 6px;"><strong>Finding the right cookie in DevTools:</strong> log into the site, open DevTools &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> for that domain, and copy the minimum cookie that carries the session&mdash;not the whole jar. It varies by platform: a <strong>Substack</strong> site's session cookie is typically named <code>connect.sid</code>; a <strong>beehiiv</strong> site (e.g. Mostly Metrics, Cautious Optimism) uses a signed JWT, usually under a name containing <code>token</code> or <code>session</code>.</p>
+<ul style="margin:0 0 6px;padding-left:18px;">
+<li><strong>Format:</strong> paste it as <code>name=value</code>, not the value alone&mdash;both currently-configured cookies use this shape, and a bare value with no name will fail.</li>
+<li><strong>Lifetime varies enormously by platform.</strong> A beehiiv token typically expires in about 48 hours; a Substack <code>connect.sid</code> lasts months. A beehiiv cookie needs re-grabbing regularly&mdash;and a stale one fails <em>silently</em>: no error anywhere, it just quietly stops returning full text.</li>
+<li><strong>A cookie visible in DevTools may already be expired.</strong> The browser keeps showing it either way. To force a fresh one: log out, log back in, and copy it immediately.</li>
+<li><strong>Checking validity:</strong> a JWT cookie's payload carries an <code>exp</code> timestamp. Paste the token into any JWT decoder (e.g. jwt.io) to see whether it's still valid before assuming the fetch failure is something else.</li>
+</ul>
+<p style="margin:0;">When in doubt, RUNBOOK.md &sect;5.2's fallback still works: copy the entire <code>Cookie:</code> request header instead of hunting for one name.</p>
+</div>
 
 <h2 style="font-size:17px;margin:34px 0 4px;">Manage sections</h2>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Sections group feeds in the Reader's Sources rail. They carry no settings of their own. A section can only be removed once it's empty.</p>
@@ -26828,23 +26871,28 @@ async def admin_feeds_set_subscription(request: Request, feed_id: int):
 
 @app.post("/admin/reader/feeds/{feed_id}/current-feed")
 async def admin_feeds_set_current_feed(request: Request, feed_id: int):
-    """Set show_on_current_feed/current_feed_side from the table's own
-    per-row dropdown — same narrow, single-purpose shape as the Section and
-    Subscriber routes above: one control, auto-submits on change, never
-    touches the URL. A value of "" means hidden; anything else is a real
-    side and implies shown=True (see _CURRENT_FEED_SELECT_CHOICES)."""
+    """Set show_on_current_feed/current_feed_side/current_feed_order from the
+    table's own per-row controls — same narrow, single-purpose shape as the
+    Section and Subscriber routes above, extended to a pair of controls
+    instead of one: the Order <input> lives in a separate <td> but is
+    associated to this same form via HTML's form="" attribute (the same
+    plain-HTML cross-cell trick the Sections table uses), so either control's
+    onchange submits both fields together. A side value of "" means hidden;
+    anything else is a real side and implies shown=True (see
+    _CURRENT_FEED_SELECT_CHOICES)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
     side = (form.get("current_feed") or "").strip()
+    order = _parse_current_feed_order(form.get("current_feed_order"))
     lib = _lib()
     try:
         feed = lib.get_feed(feed_id)
         if not feed:
             raise HTTPException(status_code=404, detail="feed not found")
-        lib.set_feed_current_feed_display(feed_id, bool(side), side)
+        lib.set_feed_current_feed_display(feed_id, bool(side), side, order)
         label = dict(_CURRENT_FEED_SELECT_CHOICES).get(side, "Hidden")
-        detail = f"{feed['name']} on /current-feed: {label}."
+        detail = f"{feed['name']} on /current-feed: {label} (order {order})."
     finally:
         lib.close()
     return RedirectResponse(f"/admin/reader/feeds?msg={quote(detail)}", status_code=303)
@@ -26904,6 +26952,7 @@ async def admin_feeds_new_submit(request: Request):
         # Informational only — nothing reads it.
         "has_active_subscription": bool(form.get("has_active_subscription")),
         "current_feed_side": (form.get("current_feed") or "").strip(),
+        "current_feed_order": _parse_current_feed_order(form.get("current_feed_order")),
     }
     values["show_on_current_feed"] = bool(values["current_feed_side"])
     lib = _lib()
@@ -26936,7 +26985,8 @@ async def admin_feeds_new_submit(request: Request):
         lib.add_feed(int(values["section_id"]), name, values["xml_url"], html_url,
                      has_active_subscription=values["has_active_subscription"],
                      show_on_current_feed=values["show_on_current_feed"],
-                     current_feed_side=values["current_feed_side"])
+                     current_feed_side=values["current_feed_side"],
+                     current_feed_order=values["current_feed_order"])
         _publish_feeds(lib)
     finally:
         lib.close()
@@ -26961,7 +27011,8 @@ def admin_feeds_edit(request: Request, feed_id: int):
               # clear it — update_feed writes it on every call.
               "has_active_subscription": bool(feed["has_active_subscription"]),
               "show_on_current_feed": bool(feed["show_on_current_feed"]),
-              "current_feed_side": feed["current_feed_side"]}
+              "current_feed_side": feed["current_feed_side"],
+              "current_feed_order": feed["current_feed_order"]}
     return HTMLResponse(_page("Edit feed—Library Admin", "Admin",
                               _feed_form_page(f'Edit {feed["name"]}',
                                               f"/admin/reader/feeds/{feed_id}/edit",
@@ -26983,6 +27034,7 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
         # Informational only — see the add route.
         "has_active_subscription": bool(form.get("has_active_subscription")),
         "current_feed_side": (form.get("current_feed") or "").strip(),
+        "current_feed_order": _parse_current_feed_order(form.get("current_feed_order")),
     }
     values["show_on_current_feed"] = bool(values["current_feed_side"])
     lib = _lib()
@@ -27029,7 +27081,8 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
                         has_paywall_cookie=bool(feed["has_paywall_cookie"]),
                         has_active_subscription=values["has_active_subscription"],
                         show_on_current_feed=values["show_on_current_feed"],
-                        current_feed_side=values["current_feed_side"])
+                        current_feed_side=values["current_feed_side"],
+                        current_feed_order=values["current_feed_order"])
         _publish_feeds(lib)
         saved_name = values["name"]
     finally:
