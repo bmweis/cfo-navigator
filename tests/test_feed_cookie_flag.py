@@ -15,6 +15,7 @@ shipped and had to fix. So seeding is settings-flagged, exactly like
 seed_feeds_from_opml.
 """
 import pathlib
+import re
 import shutil
 import sys
 
@@ -196,7 +197,7 @@ def test_feed_table_has_a_cookie_column_with_no_checkbox(app_env):
     there is nothing left for an admin to tick."""
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert ">Cookie</th>" in html
+    assert 'data-sort="cookie"' in html   # the sortable <th> header
     assert 'name="has_paywall_cookie"' not in html
 
 
@@ -253,6 +254,40 @@ def test_footnote_explains_the_column_once(app_env):
         html = client.get("/admin/reader/feeds").text
     assert "<strong>Cookie</strong> shows two different facts, not one." in html
     assert "The cookie value itself is never stored in this database" in html
+
+
+def test_column_reference_moved_below_the_table(app_env):
+    """2026-09: five bullets plus a paragraph used to sit above the table,
+    re-teaching the same mechanics on every visit. Only a one-line intro
+    stays above the table now; the field-by-field reference (plus the
+    pre-existing cookie-finding instructions it now sits beside) moved
+    below it."""
+    with _client(app_env) as client:
+        html = client.get("/admin/reader/feeds").text
+    table_idx = html.index('<table class="ff-table"')
+    reference_idx = html.index("Column reference")
+    cookie_bullet_idx = html.index("<strong>Cookie</strong> shows two different facts")
+    finding_cookie_idx = html.index("Finding the right cookie in DevTools")
+    # The reference heading and its field bullets sit AFTER the table...
+    assert reference_idx > table_idx
+    assert cookie_bullet_idx > table_idx
+    # ...directly alongside the pre-existing cookie-finding instructions.
+    assert reference_idx < finding_cookie_idx
+    # And only a short intro remains above the table.
+    above_table = html[:table_idx]
+    assert "Sources</strong> rail only lists feeds" not in above_table
+    assert "<strong>Order</strong>" not in above_table
+
+
+def test_order_bullet_explains_sorting_by_side_then_position(app_env):
+    """2026-09 follow-up: the old "N of M" rank readout is retired now that
+    the Order column is directly sortable — the moved-below reference bullet
+    explains that sorting by Order groups by side, then position, which is
+    what actually makes a feed's row position mean something."""
+    with _client(app_env) as client:
+        html = client.get("/admin/reader/feeds").text
+    assert "Sorting by <strong>Order</strong> groups the table by side" in html
+    assert "N of M" not in html
 
 
 def test_cookie_route_is_gone(app_env):
@@ -350,14 +385,19 @@ def test_startup_hook_seeds_the_flags(app_env):
 def test_checkbox_columns_are_centre_justified(app_env):
     """BRAND.md: checkbox/boolean-indicator columns centre, everything else
     stays left. (Read only came out of the table entirely along with the
-    Archive Queue itself — 2026-09, PR 3.)"""
+    Archive Queue itself — 2026-09, PR 3.) 2026-09 follow-up: headers are
+    now clickable sort buttons (a trailing indicator <span> sits between
+    the label and </th>), so this checks each <th>'s own style attribute
+    and content directly, rather than an exact "...>{label}</th>" tag."""
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    for label in ("Cookie", "Subscriber"):
-        assert f'text-align:center;">{label}</th>' in html
+    for field, label in (("cookie", "Cookie"), ("subscriber", "Subscriber")):
+        m = re.search(rf'<th style="([^"]*)" data-sort="{field}"[^>]*>{label}<', html)
+        assert m, f"no centred sortable <th> found for {label}"
+        assert "text-align:center;" in m.group(1)
     assert "Read only</th>" not in html
-    assert '<th style="width:15%;">Name</th>' in html
-    assert '<th style="width:12%;">Section</th>' in html
+    assert 'width:15%;" data-sort="name"' in html
+    assert 'width:11%;" data-sort="section"' in html
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +484,7 @@ def test_nothing_outside_the_admin_surface_reads_the_flag(app_env):
 def test_feed_table_has_an_active_subscription_column(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert ">Subscriber</th>" in html
+    assert 'data-sort="subscriber"' in html   # the sortable <th> header
     assert 'name="has_active_subscription"' in html
 
 
