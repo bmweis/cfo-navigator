@@ -4422,7 +4422,8 @@ def _current_feed_hidden_footnote(feeds: list) -> str:
         for section, names in sorted(by_section.items())
     ]
     return (
-        '<p style="color:var(--muted);font-size:13px;margin:18px 0 0;line-height:1.6;">'
+        '<p style="color:var(--muted);font-size:13px;margin:32px 0 0;padding-top:16px;'
+        'border-top:1px solid var(--line);line-height:1.6;">'
         f'<strong>Not on the tape:</strong> {" &middot; ".join(groups)}. '
         "They're excluded from the tracklist format, not from search&mdash;"
         "FP&amp;A Buddy still searches every one of them.</p>"
@@ -4488,10 +4489,10 @@ _CURRENT_FEED_CSS = """
 .cf-track-num{flex:0 0 auto;width:24px;font:600 13px var(--font-body);color:var(--muted);
   font-variant-numeric:tabular-nums;}
 .cf-track-body{min-width:0;flex:1 1 auto;}
-.cf-track-name{font:700 16px var(--font-sticker);color:var(--navy);text-decoration:none;
-  line-height:1.3;word-break:break-word;}
+.cf-track-name{font:700 18px var(--font-sticker);color:var(--navy);text-decoration:none;
+  line-height:1.35;word-break:break-word;}
 .cf-track-name:hover{color:var(--accent);}
-.cf-track-name--unlinked{color:var(--ink-soft);cursor:default;font-family:var(--font-sticker);font-weight:700;font-size:16px;}
+.cf-track-name--unlinked{color:var(--ink-soft);cursor:default;font-family:var(--font-sticker);font-weight:700;font-size:18px;}
 .cf-empty{color:var(--muted);font-size:14px;font-style:italic;margin:0;}
 """
 
@@ -4548,12 +4549,14 @@ def current_feed(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">&larr; How this is built</a></p>
 <h1 style="margin-bottom:6px;">Current Feed</h1>
-<p style="color:var(--ink-soft);margin:0 0 4px;font-size:15.5px;line-height:1.6;">The writers and publications I actually read, in two eras. This is also the exact list FP&amp;A Buddy searches when it goes to the web&mdash;if an answer cites something from trusted web, it came from one of these.</p>
+<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">You know that friend whose mixtape you'd borrow? The one where every track was something you'd never have found on your own?</p>
+<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">I can't hand you my feed. I pay for some of this. But I can show you what's on the tape.</p>
+<p style="color:var(--ink-soft);margin:0 0 4px;font-size:15.5px;line-height:1.6;">These are the writers I read, in two eras. It's also the exact list FP&amp;A Buddy searches when it goes to the web&mdash;if an answer cites something from trusted web, it came from one of these.</p>
 <p style="color:var(--muted);font-size:13px;margin:0;">Every name links to the writer's own site, not the raw feed. This list changes as my subscriptions do, with no hand-maintenance behind it.</p>
-{footnote_html}
 <div class="cf-sides">
 {sides_html}
 </div>
+{footnote_html}
 </div>
 <style>{_CURRENT_FEED_CSS}</style>"""
     return HTMLResponse(_page("Current Feed—Brian Weisberg", "About", body, role=_role(request)))
