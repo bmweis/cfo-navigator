@@ -355,8 +355,8 @@ def test_checkbox_columns_are_centre_justified(app_env):
     for label in ("Cookie", "Subscriber"):
         assert f'text-align:center;">{label}</th>' in html
     assert "Read only</th>" not in html
-    assert '<th style="width:18%;">Name</th>' in html
-    assert '<th style="width:14%;">Section</th>' in html
+    assert '<th style="width:15%;">Name</th>' in html
+    assert '<th style="width:12%;">Section</th>' in html
 
 
 # ---------------------------------------------------------------------------

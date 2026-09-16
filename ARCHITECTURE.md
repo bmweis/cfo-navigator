@@ -2246,6 +2246,115 @@ need one of BRAND.md §5's `_CARD_WIDTH_*_MIN` constants — matching
 at 1280px and 390px: the cards grid's `x`/`width` now match `.tool-prose`
 exactly at both widths, and every card matches its siblings.
 
+### Current Feed — `GET /current-feed` (2026-09)
+
+A public mixtape-tracklist page listing the writers and publications Brian
+actually reads — Side A ("Old School") and Side B ("New School") — derived
+live from the `feeds` table, with no hardcoded names or counts anywhere. It
+exists because the origin story on `/how-this-is-built` names the writers
+who shaped Brian's career, and this is the current, always-accurate version
+of that list; it's also the exact allowlist
+`linklib.sources.preferred_domains` builds from the same OPML
+`feeds`/`feed_sections` generate, so it doubles as "which sources can FP&A
+Buddy's web tier draw from."
+
+**The split is two per-feed columns, not section-name matching — a real
+mid-flight redesign, not the shipped v1.** `feeds` gained
+`show_on_current_feed INTEGER NOT NULL DEFAULT 0` and
+`current_feed_side TEXT NOT NULL DEFAULT ''` (free text —
+`"old_school"`/`"new_school"`/`""` — deliberately not CHECK-constrained, so
+a future third side is a rendering-code change, not a migration). The
+original design (`_CURRENT_FEED_SIDES` matching `feed_sections.name`,
+`_CURRENT_FEED_KNOWN_EXCLUDED_SECTIONS` for News/Market Insights) worked
+for the two sections it named but left a real gap the build brief's own
+investigation flagged: production already has an empty `Tools` section
+that's neither a known side nor a known exclusion, and there's no way to
+derive whether a genuinely new section like that belongs on the page or
+not. The per-feed columns dissolve that question entirely — a feed in any
+section, however new, simply isn't shown until someone deliberately marks
+it. `Library.seed_current_feed_sides()` (settings-flagged, same
+non-emptiness-check discipline as `seed_paywall_cookie_flags` — an empty
+column can't be told apart from a deliberately-cleared one) seeded the
+existing rows once, from their section at the time: Blogs → shown,
+`old_school`; Substacks → shown, `new_school`; every other section left at
+the column default (hidden). **New feeds default to hidden** — a
+deliberate product decision, not just the schema default: a new
+subscription should never appear on the public page unreviewed.
+
+**Admin control lives on `/admin/reader/feeds` itself, not only the
+per-feed edit form.** A `Current Feed` column (`.ff-cf`) holds one
+auto-submitting `<select>` per row — `Hidden` / `Old school` / `New
+school` (`_CURRENT_FEED_SELECT_CHOICES`, shared by the table and the add/
+edit form so the two surfaces can't drift on option labels) — posting to
+`POST /admin/reader/feeds/{id}/current-feed`
+(`Library.set_feed_current_feed_display`, writing both columns together so
+"shown but no side picked" can't exist as an intermediate state). The add/
+edit form carries the identical single select rather than a checkbox plus
+a separate side dropdown, for the same reason.
+
+**The hidden-feed footnote is the concrete answer to "what happens when a
+feed is excluded" — and it's public, not admin-only.** The page's whole
+point is showing which sources feed FP&A Buddy's web search, so silently
+hiding a feed from the tracklist while it's still in that allowlist would
+make the page misrepresent the tool. `_current_feed_hidden_footnote()`
+groups every feed with `show_on_current_feed=0` by its current section
+name and renders one line — "Not on the tape: News: Crunchbase News,
+TechCrunch · Market Insights: Public Comps. They're excluded from the
+tracklist format, not from search — FP&A Buddy still searches every one of
+them" — derived from `feeds`/`feed_sections` at render time, never a
+hardcoded list, so it can't go stale as feeds are hidden, shown, or moved
+between sections. Renders `""` (nothing) when every feed is currently
+shown, since there's nothing to disclose.
+
+**Investigation, before any code: does `feeds` have a homepage URL, or only
+the RSS endpoint?** It already has one — `feeds.html_url`, populated at
+add-time from the feed's own `<link>`/Atom alternate (`feed.probe_feed()`,
+existing since well before this page), independent of `xml_url`. A live
+check against production confirmed every one of the 21 real feed rows
+already carries a real `html_url`, including the two cases that would have
+defeated a naive "strip `/feed` from the URL" derivation:
+`feeds.feedburner.com/FeldThoughts` resolves to `https://feld.com/`, not a
+mangled feedburner URL. So no new column and no per-name heuristic was
+needed — `_current_feed_track_html()` links to `html_url`, never `xml_url`,
+with a defensive (currently untested-by-production-data, since every row
+has one) unlinked-plain-text fallback for a hand-added row that somehow
+has none. Renaming a feed (`feeds.name`) is reflected immediately, with no
+code change — the page renders the field verbatim, so a Blog-then-Author
+naming convention (e.g. "Kellblog (Dave Kellogg)") just works.
+
+**Typography, per BRAND.md §4's own retirement note, then corrected again
+on direct feedback.** The original build brief described the site's motif
+system as "rope rule, compass star" — that pairing is fully retired
+(BRAND.md §4: "The previous... motif...is retired completely, everywhere,
+including the footer"), replaced by the graffiti/street-art accent layer
+(marker-underline, sticker badge, card category icons, the
+Permanent-Marker wordmark). The first pass used the wordmark font
+(`var(--font-wordmark)`, Permanent Marker) for track titles — reversed on
+direct instruction: Permanent Marker is built for a word or two, not
+seventeen names of varying length, and a handwritten tracklist on a real
+J-card was pen, not marker. Track titles now use `var(--font-sticker)`
+(Caveat, 700 weight, 16px) — the same face already proven readable at
+sticker-badge size (15-16px) elsewhere on the site — title only, never
+metadata. **Coral was dropped from the Side A/Side B divider entirely**,
+also on direct instruction: structure isn't a place to spend the page's one
+coral moment, since coral on structure reads as decoration rather than
+something a reader acts on. `_current_feed_side_html()` no longer accepts
+a `flip` parameter at all — there is currently no coral anywhere on this
+page.
+
+**Three entry points, no top-nav link**: `/how-this-is-built`'s own origin
+story (`_HTIB_HOW_I_DECIDED_DEFAULT`, "Search is restricted to
+[a list of sites I trust](/current-feed)"); a small muted link on
+`/tools/fpa-buddy` right under the Sources chip group ("See what's in the
+current feed →"); and the `web-search` `ai_surfaces` explainer's own
+body_md, which already described the allowlist in prose ("One list doing
+two jobs...") with nothing to link to at the time it was written — closed
+by `scripts/add_current_feed_link_to_web_search_explainer.py`, a one-off,
+human-run (`railway ssh`) script (preview/`--apply`/write-then-read-back,
+same convention as every other single-record admin fix in this repo) that
+inserts the link into that already-migrated production row rather than
+touching it from a coding session with no direct DB access.
+
 ### `/admin/copy/*` width tier, redundant helper text, and a Content sub-group (2026-09)
 
 Three more fixes shipped alongside the surface-cards fix above.
@@ -2658,7 +2767,7 @@ from the public page. Not editable via the admin CRUD.
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `feed_sections` | The subscription list's top-level groups, one per OPML folder ("News", "Blogs", "Substacks", …). Rendered as the Reader's Sources tree headings and as the section dropdown on `/admin/reader/feeds`. **Pure grouping — sections carry no settings of their own.** | `name` (unique), `display_order` |
-| `feeds` | One row per RSS/Atom subscription. | `xml_url` (**the natural key**, unique — the same feed can't be subscribed twice; **stored and regenerated verbatim**, see §4), `html_url` (the publication's own site: what `sources.preferred_domains` turns into FP&A Buddy's web-search allowlist), `section_id` (FK → `feed_sections`), `name` (the label shown in the Reader), `exclude_from_queue` (**RETIRED, frozen not dropped (2026-09, PR 3)** — used to mean "read in the Reader, never proposed into the archive queue," replacing the retired `QUEUE_EXCLUDE_CATEGORIES` name-matched env var; the Archive Queue itself, and every read/write path for this column, is gone — see the `library_queue` row above), `has_paywall_cookie` (frozen historical value as of 2026-08 — the admin checkbox that wrote it was replaced with a computed live indicator, `extract.has_configured_cookie`; nothing reads this column going forward, same retirement as `paywall_cookie_note`; see §4), `paywall_cookie_note` (retired free-text predecessor, frozen; see §4), `has_active_subscription` (`1` = Brian currently pays for this source — **informational only, nothing reads it**; see §4) |
+| `feeds` | One row per RSS/Atom subscription. | `xml_url` (**the natural key**, unique — the same feed can't be subscribed twice; **stored and regenerated verbatim**, see §4), `html_url` (the publication's own site: what `sources.preferred_domains` turns into FP&A Buddy's web-search allowlist), `section_id` (FK → `feed_sections`), `name` (the label shown in the Reader), `exclude_from_queue` (**RETIRED, frozen not dropped (2026-09, PR 3)** — used to mean "read in the Reader, never proposed into the archive queue," replacing the retired `QUEUE_EXCLUDE_CATEGORIES` name-matched env var; the Archive Queue itself, and every read/write path for this column, is gone — see the `library_queue` row above), `has_paywall_cookie` (frozen historical value as of 2026-08 — the admin checkbox that wrote it was replaced with a computed live indicator, `extract.has_configured_cookie`; nothing reads this column going forward, same retirement as `paywall_cookie_note`; see §4), `paywall_cookie_note` (retired free-text predecessor, frozen; see §4), `has_active_subscription` (`1` = Brian currently pays for this source — **informational only, nothing reads it**; see §4), `show_on_current_feed`/`current_feed_side` (2026-09 — whether and where this feed appears on the public `/current-feed` mixtape tracklist; free-text side value (`'old_school'`/`'new_school'`/`''`), admin-editable per row on `/admin/reader/feeds`; new feeds default to hidden — see the Current Feed section above) |
 
 These two tables are the source of truth; **`preferred_sites.opml` is a derived
 cache**, regenerated by `Library.write_opml()` on every mutation and again on

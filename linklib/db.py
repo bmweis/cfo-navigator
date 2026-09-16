@@ -2442,6 +2442,29 @@ class Library:
             # per-turn Exa cost was ever tracked for them).
             "ALTER TABLE ask_questions ADD COLUMN exa_result_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE ask_questions ADD COLUMN exa_cost_usd REAL NOT NULL DEFAULT 0",
+            # Current Feed (/current-feed, 2026-09) — replaces the original
+            # section-name-matching design (Blogs=Side A, Substacks=Side B,
+            # News/Market Insights excluded) with two explicit, per-feed
+            # columns, admin-editable on /admin/reader/feeds. The
+            # section-based design worked but left one real gap: a feed
+            # sitting in a section that's neither a known side nor a known
+            # exclusion (production already has an empty "Tools" section)
+            # had no clean home — it could only be silently included,
+            # silently excluded, or flagged as an unmapped edge case. A
+            # per-feed "show" flag has no such edge case: a feed in any
+            # section, however new, simply isn't shown until someone
+            # deliberately marks it. New feeds default to NOT shown
+            # (show_on_current_feed=0) — Brian's own call: he'd rather set
+            # it deliberately than have something appear unreviewed.
+            # current_feed_side is free text ('old_school'/'new_school'/''),
+            # not a CHECK constraint, so a future third side needs no
+            # migration — only current_feed()'s own rendering code needs to
+            # learn a new value. Existing rows are seeded from their CURRENT
+            # section by Library.seed_current_feed_sides() (settings-flagged,
+            # not emptiness-checked, same precedent as
+            # seed_paywall_cookie_flags — see that method's own docstring).
+            "ALTER TABLE feeds ADD COLUMN show_on_current_feed INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE feeds ADD COLUMN current_feed_side TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -8381,7 +8404,9 @@ class Library:
     def add_feed(self, section_id: int, name: str, xml_url: str,
                  html_url: str = "", exclude_from_queue: bool = False,
                  has_paywall_cookie: bool = False,
-                 has_active_subscription: bool = False) -> int:
+                 has_active_subscription: bool = False,
+                 show_on_current_feed: bool = False,
+                 current_feed_side: str = "") -> int:
         """Store a feed. `xml_url` is written verbatim apart from surrounding
         whitespace — no normalization, no query-string handling. A feed URL can
         carry a subscriber token, and rewriting one silently breaks the feed.
@@ -8392,6 +8417,11 @@ class Library:
         parameter only matters for a caller migrating old rows; the web app's
         own add/edit routes no longer pass anything but the default. It never
         changed fetch behaviour anywhere, before or after.
+
+        `show_on_current_feed` defaults to False for every new feed — a
+        deliberate product decision (2026-09), not just a schema default: a
+        new subscription should never appear on the public /current-feed
+        page unreviewed.
         """
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(display_order), -1) + 1 FROM feeds WHERE section_id = ?",
@@ -8399,11 +8429,13 @@ class Library:
         ).fetchone()[0]
         cur = self.conn.execute(
             "INSERT INTO feeds (section_id, name, xml_url, html_url, exclude_from_queue, "
-            "has_paywall_cookie, has_active_subscription, display_order, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "has_paywall_cookie, has_active_subscription, show_on_current_feed, "
+            "current_feed_side, display_order, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (section_id, name.strip(), xml_url.strip(), html_url.strip(),
              int(bool(exclude_from_queue)), int(bool(has_paywall_cookie)),
-             int(bool(has_active_subscription)), next_order, _now()),
+             int(bool(has_active_subscription)), int(bool(show_on_current_feed)),
+             (current_feed_side or "").strip(), next_order, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -8412,21 +8444,26 @@ class Library:
                     xml_url: str, html_url: str,
                     exclude_from_queue: bool = False,
                     has_paywall_cookie: bool = False,
-                    has_active_subscription: bool = False) -> None:
+                    has_active_subscription: bool = False,
+                    show_on_current_feed: bool = False,
+                    current_feed_side: str = "") -> None:
         """Same verbatim-URL guarantee as add_feed — see its docstring.
 
-        `has_paywall_cookie` and `has_active_subscription` are written on every
-        call, so the edit form has to round-trip the current values or a save
-        would clear them. That's the same contract every other field on this
-        method already has.
+        `has_paywall_cookie`, `has_active_subscription`,
+        `show_on_current_feed`, and `current_feed_side` are all written on
+        every call, so the edit form has to round-trip the current values or
+        a save would clear them. That's the same contract every other field
+        on this method already has.
         """
         self.conn.execute(
             "UPDATE feeds SET section_id=?, name=?, xml_url=?, html_url=?, "
-            "exclude_from_queue=?, has_paywall_cookie=?, has_active_subscription=? "
+            "exclude_from_queue=?, has_paywall_cookie=?, has_active_subscription=?, "
+            "show_on_current_feed=?, current_feed_side=? "
             "WHERE id=?",
             (section_id, name.strip(), xml_url.strip(), html_url.strip(),
              int(bool(exclude_from_queue)), int(bool(has_paywall_cookie)),
-             int(bool(has_active_subscription)), feed_id),
+             int(bool(has_active_subscription)), int(bool(show_on_current_feed)),
+             (current_feed_side or "").strip(), feed_id),
         )
         self.conn.commit()
 
@@ -8450,6 +8487,19 @@ class Library:
         carrying a subscriber token can be moved with no risk of a rewrite."""
         self.conn.execute("UPDATE feeds SET section_id=? WHERE id=?",
                           (section_id, feed_id))
+        self.conn.commit()
+
+    def set_feed_current_feed_display(self, feed_id: int, show: bool, side: str) -> None:
+        """The /current-feed row control — narrow, same shape as the three
+        toggles above. `side` is free text ('old_school'/'new_school'/''),
+        not CHECK-constrained, so a future third side is a rendering-code
+        change, not a migration. Both columns are written together (not two
+        separate setters) since the admin form always submits them as one
+        pair — a feed marked "show" with no side selected would render
+        nowhere on the page, which is worth preventing at the write site
+        rather than discovering it as a silent gap later."""
+        self.conn.execute("UPDATE feeds SET show_on_current_feed=?, current_feed_side=? WHERE id=?",
+                          (int(bool(show)), (side or "").strip(), feed_id))
         self.conn.commit()
 
     # set_feed_excluded (the "Read only" row-control toggle) was retired
@@ -8637,6 +8687,49 @@ class Library:
         # not-ready-yet signal, and re-checking on every future boot would only
         # risk re-setting a cleared box.
         self.set_setting("paywall_cookie_flags_seeded", "1")
+        return {"seeded": True, "feeds": updated}
+
+    # Sections whose feeds seed straight onto a Current Feed side. Anything
+    # else (News, Market Insights, Tools, or a future section) seeds as
+    # not-shown — the column default already matches, so those rows are
+    # simply left alone rather than written to their own default value.
+    _CURRENT_FEED_SEED_SIDES = {"Blogs": "old_school", "Substacks": "new_school"}
+
+    def seed_current_feed_sides(self) -> dict:
+        """One-time seed of show_on_current_feed/current_feed_side from each
+        feed's CURRENT section, so /current-feed works immediately on an
+        existing database without Brian having to hand-tag every feed first.
+        Blogs -> shown, old_school; Substacks -> shown, new_school; every
+        other section (News, Market Insights, Tools, ...) is left at the
+        column default (not shown, no side) — Brian adjusts from there via
+        /admin/reader/feeds.
+
+        Guarded by a settings flag, NOT by "is the column still at its
+        default" — same reasoning as seed_paywall_cookie_flags/
+        seed_feeds_from_opml above: an emptiness check can't tell "never
+        seeded" from "deliberately set back to not-shown," so it would
+        silently re-show a feed Brian turned off. The flag means this runs
+        exactly once, ever.
+
+        Returns {"seeded": bool, "feeds": n}.
+        """
+        if self.get_setting("current_feed_sides_seeded") == "1":
+            return {"seeded": False, "feeds": 0}
+
+        feeds = self.list_feeds()
+        if not feeds:
+            # Nothing to seed yet — don't burn the flag, same reasoning as
+            # seed_paywall_cookie_flags's own empty-table guard.
+            return {"seeded": False, "feeds": 0}
+
+        updated = 0
+        for feed in feeds:
+            side = self._CURRENT_FEED_SEED_SIDES.get(feed["section_name"])
+            if side:
+                self.set_feed_current_feed_display(feed["id"], True, side)
+                updated += 1
+
+        self.set_setting("current_feed_sides_seeded", "1")
         return {"seeded": True, "feeds": updated}
 
     def seed_voice_prompts(self) -> dict:

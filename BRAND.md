@@ -321,9 +321,12 @@ undecorated).
    body copy. Max **one or two per page**. Helper: `_sticker()` in `webapp/app.py`.
 3. **Card category icons** — 2px-stroke line icons (not flat color squares) inside
    the small badge on a card-row grid — 2-up, 3-up, or 4-up alike, not restricted to
-   3-up rows. Fixed background order: seafoam-wash `#EAF7F2` → navy-wash `#EEF1F7` →
-   coral-wash `#FBEAE3`, cycling in that order regardless of column count and reused
-   for every card-row grid sitewide. Helper: `_card_icon()` in `webapp/app.py`.
+   3-up rows. Fixed background order: seafoam-wash `#EAF7F2` → navy-wash `#EEF1F7`,
+   cycling in that order regardless of column count and reused for every card-row
+   grid sitewide. **Coral is not part of this cycle** (dropped entirely, PR 16,
+   2026-09 — see §2.3's own writeup of the "spent by array position" incident this
+   fixed; this passage was simply never updated to match at the time). Helper:
+   `_card_icon()` in `webapp/app.py`.
 
 4. **Spray-tag wordmark** — the sitewide "CFO Navigator"/logo mark, nav header and
    navy footer alike, renders in Permanent Marker instead of Outfit. Color unchanged
@@ -333,8 +336,18 @@ undecorated).
 
 **New tokens** (see §7 for the generated block): `--ink-graffiti:#0d0d0d` (sticker
 borders/shadows only — never a fill or text color elsewhere), `--font-sticker:
-'Caveat',cursive` (sticker-only), and `--font-wordmark:'Permanent Marker',cursive`
-(wordmark-only).
+'Caveat',cursive`, and `--font-wordmark:'Permanent Marker',cursive` (wordmark-only —
+no exception; a first pass at `/current-feed` below tried one and it was reversed).
+**One approved, deliberate exception to "sticker-only" for `--font-sticker`**:
+`/current-feed`'s tracklist (2026-09) sets each track's title in
+`var(--font-sticker)` at 16px/700 (no rotation, border, or drop-shadow — the plain
+text style only, not the full sticker-badge treatment), title only — never
+metadata (author, cadence stay DM Sans). A first pass used the wordmark font
+instead, at 20px; reversed on direct instruction, since Permanent Marker is built
+for a word or two, not a list of names of varying length, and Caveat is already
+proven readable at this size in sticker badges. Don't extrapolate either exception
+onto a denser list (an admin table row, a card grid of many short labels) without
+the same size/short-text reasoning holding.
 
 That's the entire graffiti vocabulary. No broader illustration style, no all-over
 pattern, no graffiti marks on admin tables, forms, or the chat UI.
