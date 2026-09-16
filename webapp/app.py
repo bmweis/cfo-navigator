@@ -24872,7 +24872,7 @@ mermaid.initialize({{
 <ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
 <li><strong>Library</strong> (highest authority, always searched first): the curated archive of saved articles, retrieved by a hybrid of keyword search (FTS5) and semantic search (vector embeddings), merged by a rank-fusion algorithm so an article can surface even when the question's wording doesn't match the source's own.</li>
 <li><strong>Feed:</strong> recent items from the subscribed RSS/Atom feeds, matched to the question by keyword overlap. Optional&mdash;off by default.</li>
-<li><strong>Web:</strong> live web search, scoped only to the domains on the trusted-sites list (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list, whichever mechanism handles it. Exa's search API, called directly from the server, is the preferred mechanism, on by default.</li>
+<li><strong>Web:</strong> live web search, scoped only to the domains on <a href="/current-feed" style="color:var(--accent);">the trusted-sites list</a> (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list, whichever mechanism handles it. Exa's search API, called directly from the server, is the preferred mechanism, on by default.</li>
 </ul>
 <div class="article-callout" style="margin:16px 0;">
 <div class="article-callout-title">Which engine handled this answer?</div>
