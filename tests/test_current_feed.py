@@ -13,6 +13,7 @@ still searches it — the exclusion is presentational only. Within a side,
 tracks sort by current_feed_order ascending, tie-broken by feed id.
 """
 import pathlib
+import re
 import sys
 
 import pytest
@@ -463,6 +464,9 @@ def test_order_ties_fall_back_to_feed_id_and_stay_stable(env):
 
 
 def test_reordering_from_the_admin_table_changes_the_tracklist(env):
+    """The up/down arrows (admin_feeds_move_order), not a typed number, are
+    now the only way to change a feed's position — see CLAUDE.md's Current
+    Feed display-order note for why the old typed field was removed."""
     appmod, client = env
     lib = appmod._lib()
     try:
@@ -477,10 +481,80 @@ def test_reordering_from_the_admin_table_changes_the_tracklist(env):
     assert html.index("Alpha") < html.index("Beta")
 
     _login(client)
-    client.post(f"/admin/reader/feeds/{a_id}/current-feed",
-                data={"current_feed": "old_school", "current_feed_order": "5"})
+    client.post(f"/admin/reader/feeds/{a_id}/order-move", data={"direction": "down"})
     html2 = client.get("/current-feed").text
     assert html2.index("Beta") < html2.index("Alpha")
+
+
+def test_move_order_renumbers_the_whole_side_densely(env):
+    """Every move renumbers the whole side to 0..N-1, not just the two
+    swapped rows — the self-healing behavior that closes the exact bug a
+    typed number input could produce (two feeds silently sharing one
+    order value)."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        a_id = _add(lib, sid, "Alpha", "https://a.example/feed", "https://a.example/",
+                    side="old_school", order=1)
+        b_id = _add(lib, sid, "Beta", "https://b.example/feed", "https://b.example/",
+                    side="old_school", order=1)   # duplicate, pre-existing
+        c_id = _add(lib, sid, "Gamma", "https://c.example/feed", "https://c.example/",
+                    side="old_school", order=5)
+    finally:
+        lib.close()
+    _login(client)
+    # Nudge Alpha (tied with Beta at order 1, but wins the (order, id)
+    # tie-break since its id is lower) up — a no-op boundary move, since
+    # it's already first — but it still forces the renumber.
+    client.post(f"/admin/reader/feeds/{a_id}/order-move", data={"direction": "up"})
+    lib = appmod._lib()
+    try:
+        orders = {f["id"]: f["current_feed_order"] for f in lib.list_feeds()}
+    finally:
+        lib.close()
+    assert sorted(orders[i] for i in (a_id, b_id, c_id)) == [0, 1, 2]
+    assert len(set(orders[i] for i in (a_id, b_id, c_id))) == 3   # no duplicates survive
+
+
+def test_move_up_is_a_noop_at_the_top(env):
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        a_id = _add(lib, sid, "Alpha", "https://a.example/feed", "https://a.example/",
+                    side="old_school", order=0)
+        _add(lib, sid, "Beta", "https://b.example/feed", "https://b.example/",
+             side="old_school", order=1)
+    finally:
+        lib.close()
+    _login(client)
+    client.post(f"/admin/reader/feeds/{a_id}/order-move", data={"direction": "up"})
+    html = client.get("/current-feed").text
+    assert html.index("Alpha") < html.index("Beta")   # unchanged
+
+
+def test_move_order_is_a_noop_for_a_hidden_feed(env):
+    """A hidden feed's order is inert — a move request for it changes
+    nothing, matching the arrows being disabled for it in the admin UI."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        fid = lib.add_feed(sid, "Waiting In The Wings", "https://a.example/feed",
+                            "https://a.example/")
+        lib.set_feed_current_feed_display(fid, False, "", 3)
+    finally:
+        lib.close()
+    _login(client)
+    r = client.post(f"/admin/reader/feeds/{fid}/order-move", data={"direction": "down"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    lib = appmod._lib()
+    try:
+        assert lib.get_feed(fid)["current_feed_order"] == 3
+    finally:
+        lib.close()
 
 
 def test_hidden_feeds_order_value_is_inert(env):
@@ -502,10 +576,12 @@ def test_hidden_feeds_order_value_is_inert(env):
     assert 'href="https://a.example/"' not in client.get("/current-feed").text
 
 
-def test_admin_table_current_feed_order_field_present(env):
-    """The Order input is visible and populated even for a Hidden feed —
-    left visible-but-ignored rather than hidden by JS when the side dropdown
-    reads Hidden, so a position can be set ahead of turning a feed on."""
+def test_admin_table_shows_order_arrows_not_a_number_field(env):
+    """The Order column is up/down arrows now (2026-09) — no typed number
+    field survives, since a typed number auto-saved on every keystroke and
+    could silently duplicate another feed's order value. A feed alone in
+    its side has both arrows disabled (nothing to swap with); a Hidden
+    feed has both disabled too, regardless of its stored order value."""
     appmod, client = env
     lib = appmod._lib()
     try:
@@ -519,13 +595,59 @@ def test_admin_table_current_feed_order_field_present(env):
     _login(client)
     html = client.get("/admin/reader/feeds").text
     assert "Order</th>" in html
-    assert 'name="current_feed_order"' in html
-    assert f'form="cf-form-{shown_id}" value="3"' in html
-    # Hidden feed's stored order still renders in the field, not blanked.
-    assert f'form="cf-form-{hidden_id}" value="7"' in html
+    assert 'name="current_feed_order"' not in html
+    assert 'type="number"' not in html
+    # Both feeds are alone in their own state (Shown One is the only shown
+    # feed on old_school; Hidden One is hidden) — every arrow is disabled,
+    # so there's no order-move <form> to click for either one.
+    assert f'/admin/reader/feeds/{shown_id}/order-move' not in html
+    assert f'/admin/reader/feeds/{hidden_id}/order-move' not in html
+    assert 'Move up: Shown One' in html
+    assert 'Move down: Shown One' in html
+    assert 'Move up: Hidden One' in html
+    assert 'Move down: Hidden One' in html
+    assert html.count("disabled") >= 4
 
 
-def test_add_edit_form_has_current_feed_order_field(env):
+def test_order_arrows_reflect_position_within_the_side(env):
+    """Up is disabled for whichever feed is first, down for whichever is
+    last — a real, non-boundary feed in the middle has both enabled."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        first_id = _add(lib, sid, "First", "https://a.example/feed", "https://a.example/",
+                        side="old_school", order=0)
+        mid_id = _add(lib, sid, "Middle", "https://b.example/feed", "https://b.example/",
+                      side="old_school", order=1)
+        last_id = _add(lib, sid, "Last", "https://c.example/feed", "https://c.example/",
+                       side="old_school", order=2)
+    finally:
+        lib.close()
+    _login(client)
+    html = client.get("/admin/reader/feeds").text
+
+    def _arrow_states(feed_id, name):
+        """(up_disabled, down_disabled) for a feed, found via its own
+        aria-labels — robust to either arrow being a disabled <button> with
+        no <form> around it."""
+        section_marker = f"/admin/reader/feeds/{feed_id}/section"
+        i = html.index(section_marker)
+        start = html.rindex('<tr class="ff-row">', 0, i)
+        end = html.index("</tr>", i) + len("</tr>")
+        row = html[start:end]
+        up = re.search(rf'<button[^>]*aria-label="Move up: {re.escape(name)}"[^>]*>', row)
+        down = re.search(rf'<button[^>]*aria-label="Move down: {re.escape(name)}"[^>]*>', row)
+        return ("disabled" in up.group(0), "disabled" in down.group(0))
+
+    assert _arrow_states(first_id, "First") == (True, False)    # up disabled, down enabled
+    assert _arrow_states(mid_id, "Middle") == (False, False)    # both enabled
+    assert _arrow_states(last_id, "Last") == (False, True)      # up enabled, down disabled
+
+
+def test_add_edit_form_has_no_current_feed_order_field(env):
+    """The typed Order field is gone from the add/edit forms entirely —
+    reordering is the admin table's arrows' job now, not a form field's."""
     appmod, client = env
     lib = appmod._lib()
     try:
@@ -534,26 +656,29 @@ def test_add_edit_form_has_current_feed_order_field(env):
         lib.close()
     _login(client)
     add_html = client.get("/admin/reader/feeds/new").text
-    assert 'name="current_feed_order"' in add_html
-    assert 'value="0"' in add_html
+    assert 'name="current_feed_order"' not in add_html
+    assert "Current Feed order" not in add_html
 
 
-def test_new_feed_can_be_created_with_an_explicit_order(env, monkeypatch):
+def test_new_feed_shown_on_a_side_is_appended_to_the_end(env, monkeypatch):
+    """A brand-new feed has no arrows to click yet, so it lands at the end
+    of its chosen side automatically."""
     from linklib.feed import FeedProbe
     monkeypatch.setattr("linklib.feed.probe_feed",
-                        lambda url, **k: FeedProbe(True, title="New With Order",
+                        lambda url, **k: FeedProbe(True, title="New Feed",
                                                    html_url="https://new.example/"))
     appmod, client = env
     lib = appmod._lib()
     try:
         sid = lib.add_feed_section("Blogs")
+        _add(lib, sid, "Already Here", "https://a.example/feed", "https://a.example/",
+             side="old_school", order=0)
     finally:
         lib.close()
     _login(client)
     r = client.post("/admin/reader/feeds/new", data={
-        "xml_url": "https://new.example/feed", "name": "New With Order",
+        "xml_url": "https://new.example/feed", "name": "New Feed",
         "section_id": str(sid), "current_feed": "old_school",
-        "current_feed_order": "42",
     }, follow_redirects=False)
     assert r.status_code in (200, 303), r.text
     lib = appmod._lib()
@@ -561,13 +686,14 @@ def test_new_feed_can_be_created_with_an_explicit_order(env, monkeypatch):
         feed = lib.find_feed_by_url("https://new.example/feed")
     finally:
         lib.close()
-    assert feed["current_feed_order"] == 42
+    assert feed["current_feed_order"] == 1   # appended after the one already there
 
 
-def test_edit_form_round_trips_current_feed_order(env):
-    """A save that doesn't touch Order must not silently reset it to 0 — the
-    edit form has to carry the current value forward, same contract as
-    update_feed's other current_feed_* fields."""
+def test_edit_form_save_keeps_order_when_side_is_unchanged(env):
+    """A save that doesn't change Current Feed side must not disturb the
+    stored order — there's no field to submit it through any more
+    (reordering is the admin table's arrows' job), so the edit route has
+    to preserve it itself whenever the side comes back unchanged."""
     appmod, client = env
     lib = appmod._lib()
     try:
@@ -578,11 +704,10 @@ def test_edit_form_round_trips_current_feed_order(env):
         lib.close()
     _login(client)
     edit_html = client.get(f"/admin/reader/feeds/{fid}/edit").text
-    assert 'value="8"' in edit_html
+    assert "current_feed_order" not in edit_html
     client.post(f"/admin/reader/feeds/{fid}/edit", data={
         "xml_url": "https://a.example/feed", "name": "Editable Renamed",
         "section_id": str(sid), "current_feed": "old_school",
-        "current_feed_order": "8",
     }, follow_redirects=False)
     lib = appmod._lib()
     try:
@@ -591,6 +716,33 @@ def test_edit_form_round_trips_current_feed_order(env):
         lib.close()
     assert feed["current_feed_order"] == 8
     assert feed["name"] == "Editable Renamed"
+
+
+def test_edit_form_save_appends_to_the_end_when_side_changes(env):
+    """Moving a feed from Hidden to a real side (or between sides) via the
+    edit form appends it to the end of the new side, rather than keeping a
+    stale order value from wherever it used to be."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        _add(lib, sid, "Already Here", "https://a.example/feed", "https://a.example/",
+             side="new_school", order=0)
+        fid = lib.add_feed(sid, "Moving In", "https://b.example/feed", "https://b.example/")
+        lib.set_feed_current_feed_display(fid, False, "", 99)   # hidden, stale order
+    finally:
+        lib.close()
+    _login(client)
+    client.post(f"/admin/reader/feeds/{fid}/edit", data={
+        "xml_url": "https://b.example/feed", "name": "Moving In",
+        "section_id": str(sid), "current_feed": "new_school",
+    }, follow_redirects=False)
+    lib = appmod._lib()
+    try:
+        feed = lib.get_feed(fid)
+    finally:
+        lib.close()
+    assert feed["current_feed_order"] == 1   # appended after the one already there
 
 
 def test_seed_current_feed_order_matches_existing_render_order(lib):

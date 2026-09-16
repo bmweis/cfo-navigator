@@ -2363,31 +2363,113 @@ own section/name ordering.** `feeds` gained
 already unique) is the stable tie-breaker, so two feeds sharing a number
 render in a fixed sequence rather than whatever unspecified order SQLite
 happens to return, and the page can't shuffle between requests.
-`Library.set_feed_current_feed_display()` now takes an `order` parameter
+`Library.set_feed_current_feed_display()` takes an `order` parameter
 alongside `show`/`side`, written together in the same call for the same
-reason those two are: the admin form always submits all three as one
-group. **The admin control is a second per-row field, not hidden when a
-feed is Hidden** — a plain number `<input>` in its own `.ff-order` column,
-cross-associated to the same per-row `<form>` as the side `<select>` via
-HTML's `form=""` attribute (the same plain-HTML cross-cell trick the
-Sections table already uses for its rename form/button split), so either
-control's `onchange` submits both fields in one request. Left visible and
-editable regardless of Hidden/shown state, on purpose: hiding it would
-need JS to toggle visibility on the side dropdown's own change event, for
-no real benefit — an inert value sitting in a visible field costs nothing,
-and it lets Brian pre-set a position before turning a feed on rather than
-losing that value or being blocked from entering it. The add/edit form
-carries the identical field. **Seeded once**, via
-`Library.seed_current_feed_order()` (settings-flagged, same
-non-emptiness-check discipline as every other one-time feed seed in this
-file — `0` is also a real "goes first" value, so "still at 0" can't mean
-"never seeded"): shown feeds are numbered 0, 1, 2, ... independently within
-each side, in the exact order `list_feeds()` already produced them in
-before this column existed (section display order, then feed display
-order/name) — so shipping the column doesn't visually reorder anything;
-Brian reorders from there. A hidden feed's value is left at the column
-default, not seeded, since there's nothing to seed for a feed that was
-never rendering in the first place.
+reason those two are. **Seeded once**, via `Library.seed_current_feed_order()`
+(settings-flagged, same non-emptiness-check discipline as every other
+one-time feed seed in this file — `0` is also a real "goes first" value,
+so "still at 0" can't mean "never seeded"): shown feeds are numbered
+0, 1, 2, ... independently within each side, in the exact order
+`list_feeds()` already produced them in before this column existed
+(section display order, then feed display order/name) — so shipping the
+column didn't visually reorder anything at ship time.
+
+**The admin control was originally a second per-row typed number field —
+retired in a 2026-09 follow-up for up/down arrows instead, after it
+produced two real bugs in production.** The number `<input>`'s
+`onchange="this.form.submit()"` fired on every keystroke, not once per
+edit: typing "12" saved "1" first, a genuine intermediate value reaching
+the database mid-keystroke. And nothing stopped two feeds from landing on
+the same order value — Brian hit this directly, setting one feed's order
+to 1 and silently tying it with another feed already there. Both problems
+are fixed structurally, not validated around: the Order column
+(`_cf_order_arrows_html`) is now two buttons, &uarr;/&darr;, each a plain
+`<form method="post" action="/admin/reader/feeds/{id}/order-move">` with a
+hidden `direction=up|down` field, posting to a new
+`admin_feeds_move_order()` route. There is no text field left to type an
+intermediate value into. `admin_feeds_move_order()` finds the feed's index
+within its side (sorted by the same `(current_feed_order, id)` tie-break
+`current_feed()` uses), swaps it with the adjacent index if one exists in
+that direction, then **renumbers the entire side to a dense `0..N-1`
+sequence** — not just the two swapped rows. That last step is what makes a
+move self-healing: the very first move touching a side with a pre-existing
+duplicate or gap collapses it to a clean sequence, and a fresh duplicate
+can never be created by this route going forward, since every write is a
+full, dense renumbering rather than an independent single-row edit. An
+arrow renders as a plain non-form, `disabled` `<button>` — not merely
+styled to look disabled — for a Hidden feed (its order is inert until
+shown) or when the feed already sits at that end of its side, computed
+per row in `admin_feeds()` from a `(is_first, is_last)` boundary dict built
+once before the row loop. The typed field is also gone from the full
+add/edit forms, not just the inline table: a brand-new feed, or a feed
+whose Current Feed side actually changes (new feed; Hidden → shown; one
+side → the other), is appended to the end of its target side via a new
+`_next_current_feed_order(lib, side, exclude_feed_id=None)` helper — a
+plain count of what's already shown there, always correct because every
+side stays densely numbered as an invariant of every move. A feed whose
+side is *unchanged* on an edit-form save keeps its existing order
+untouched (reordering within a side is the arrows' job now, not something
+a save can silently reset to a default). See `tests/test_current_feed.py`'s
+order-move/boundary/append-to-end tests for the regression coverage.
+
+### Feeds-admin fixes: cookie domain registry, and per-row subscriber-cookie health (2026-09)
+
+Two separate fixes on `/admin/reader/feeds`, diagnosed and shipped in the
+same pass as the display-order arrows above.
+
+**Cookie domain registry stopped being hardcoded.** Found live: Cautious
+Optimism's cookie was set and deployed
+(`LINKLIB_COOKIE_CAUTIOUSOPTIMISM_NEWS`), the feed had Subscriber ticked,
+and the Cookie column still read "No cookie configured." Neither of the
+two obvious culprits — the variable-name normalization
+(`extract._cookie_env_var`, dots/hyphens → underscores, uppercased) or a
+www mismatch between what the edit page displays and what `_cookie_for`
+strips — was the cause; both already agreed. The real cause was
+`linklib.extract._COOKIE_DOMAINS`, a fixed
+`("mostlymetrics.com", "onlycfo.io")` tuple that was never extended for
+the new subscription, so `_auth_cookies()` never even looked at
+`cautiousoptimism.news`, regardless of what env var was set. Fixed by
+replacing it with `_opml_feed_domains()` — parses `preferred_sites.opml`
+(already regenerated from the feeds table by `Library.write_opml()` on
+every mutation) for every feed's `xmlUrl`/`htmlUrl` domain, www-stripped
+the same way `_cookie_for` already normalizes, read fresh on every call
+(deliberately uncached, unlike `sources.preferred_domains`'s `lru_cache` —
+a fetch already dwarfs an OPML parse, and skipping the cache avoids having
+to wire a second `write_opml()`-clears-it dependency for the same file).
+`has_configured_cookie`/`authcheck.check_auth_cookies` both read through
+`_auth_cookies()` unchanged — this is a source-of-truth swap underneath
+them, not a shape change. Adding a paid subscription is now a data event
+(add the feed, set its env var) rather than a deploy. See
+`tests/test_auth_fetch.py::test_opml_feed_domains_derives_from_the_feeds_table_not_a_hardcoded_list`
+for the direct regression coverage.
+
+**Subscriber-cookie health moved from a standalone summary panel into the
+feed table itself.** The panel (`_cookie_status_panel`, retired) rendered
+one row per domain above the table, separate from the feed rows it
+described; the table's own Cookie column only ever said "configured" —
+true the instant an env var exists, regardless of whether the cookie
+actually still fetches full text. That gap is exactly what let Cautious
+Optimism's mismatch go unnoticed as long as it did: the row read
+identically to a genuinely healthy cookie. `_cf_cookie_cell_html(domain,
+configured, status, feed_name)` now renders, per feed row: a dash for no
+cookie configured; "configured, not yet checked" (seafoam) for a
+configured domain with no stored probe result; or a colored dot (green/
+red/amber, `_COOKIE_STATE_STYLES`, unchanged from the retired panel) plus
+a relative "3h ago" (`_relative_age`) and the stored `detail` text as a
+`title` tooltip. `_auth_cookie_controls()`'s return shape changed from
+`(button_html, panel_html)` to `(button_html, refresh_steps_html, status)`
+— the summary-panel half is gone from its output; the coral "Subscriber
+cookie expired" step-by-step refresh block is unchanged and still renders
+when any domain is stale, since a per-row dot can't carry "update this
+exact env var in Railway" without cluttering every row with it. **"Re-check
+subscriber access" is unchanged as the only trigger** — only where the
+result renders moved, not how or when the check runs. The now-dead
+`.ck-panel`/`.ck-row`/`.ck-dot`/`.ck-dom`/`.ck-state`/`.ck-detail`/`.ck-age`
+CSS and `_cookie_status_panel()` are removed. See
+`tests/test_cookie_status_panel.py` (rewritten to parse each feed's own
+`.ff-cookie` cell instead of the retired `.ck-row` blocks) for the full
+regression coverage, including all three health states, persistence
+across a reload, and the "no cookies configured at all" dormant state.
 
 ### `/admin/copy/*` width tier, redundant helper text, and a Content sub-group (2026-09)
 
@@ -2801,7 +2883,7 @@ from the public page. Not editable via the admin CRUD.
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `feed_sections` | The subscription list's top-level groups, one per OPML folder ("News", "Blogs", "Substacks", …). Rendered as the Reader's Sources tree headings and as the section dropdown on `/admin/reader/feeds`. **Pure grouping — sections carry no settings of their own.** | `name` (unique), `display_order` |
-| `feeds` | One row per RSS/Atom subscription. | `xml_url` (**the natural key**, unique — the same feed can't be subscribed twice; **stored and regenerated verbatim**, see §4), `html_url` (the publication's own site: what `sources.preferred_domains` turns into FP&A Buddy's web-search allowlist), `section_id` (FK → `feed_sections`), `name` (the label shown in the Reader), `exclude_from_queue` (**RETIRED, frozen not dropped (2026-09, PR 3)** — used to mean "read in the Reader, never proposed into the archive queue," replacing the retired `QUEUE_EXCLUDE_CATEGORIES` name-matched env var; the Archive Queue itself, and every read/write path for this column, is gone — see the `library_queue` row above), `has_paywall_cookie` (frozen historical value as of 2026-08 — the admin checkbox that wrote it was replaced with a computed live indicator, `extract.has_configured_cookie`; nothing reads this column going forward, same retirement as `paywall_cookie_note`; see §4), `paywall_cookie_note` (retired free-text predecessor, frozen; see §4), `has_active_subscription` (`1` = Brian currently pays for this source — **informational only, nothing reads it**; see §4), `show_on_current_feed`/`current_feed_side`/`current_feed_order` (2026-09 — whether, where, and in what order this feed appears on the public `/current-feed` mixtape tracklist; free-text side value (`'old_school'`/`'new_school'`/`''`), integer order (ties broken by `feeds.id`); all three admin-editable per row on `/admin/reader/feeds`; new feeds default to hidden — see the Current Feed section above) |
+| `feeds` | One row per RSS/Atom subscription. | `xml_url` (**the natural key**, unique — the same feed can't be subscribed twice; **stored and regenerated verbatim**, see §4), `html_url` (the publication's own site: what `sources.preferred_domains` turns into FP&A Buddy's web-search allowlist), `section_id` (FK → `feed_sections`), `name` (the label shown in the Reader), `exclude_from_queue` (**RETIRED, frozen not dropped (2026-09, PR 3)** — used to mean "read in the Reader, never proposed into the archive queue," replacing the retired `QUEUE_EXCLUDE_CATEGORIES` name-matched env var; the Archive Queue itself, and every read/write path for this column, is gone — see the `library_queue` row above), `has_paywall_cookie` (frozen historical value as of 2026-08 — the admin checkbox that wrote it was replaced with a computed live indicator, `extract.has_configured_cookie`; nothing reads this column going forward, same retirement as `paywall_cookie_note`; see §4), `paywall_cookie_note` (retired free-text predecessor, frozen; see §4), `has_active_subscription` (`1` = Brian currently pays for this source — **informational only, nothing reads it**; see §4), `show_on_current_feed`/`current_feed_side`/`current_feed_order` (2026-09 — whether, where, and in what order this feed appears on the public `/current-feed` mixtape tracklist; free-text side value (`'old_school'`/`'new_school'`/`''`), integer order (ties broken by `feeds.id`, densely renumbered per side on every up/down move — never admin-typed, see the Current Feed section above for why the typed field was retired); side/shown admin-editable per row on `/admin/reader/feeds`, order changed only via its own &uarr;/&darr; buttons; new feeds default to hidden — see the Current Feed section above) |
 
 These two tables are the source of truth; **`preferred_sites.opml` is a derived
 cache**, regenerated by `Library.write_opml()` on every mutation and again on
@@ -7912,8 +7994,9 @@ control sits at the top of this page, above the H1. It moved from
 `/admin/library` once this page existed: it probes a recent post per paywalled
 source (`authcheck.check_auth_cookies`) to confirm that source's subscriber
 cookie still fetches full text, which is feed-specific work. Only rendered when
-at least one `LINKLIB_COOKIE_<DOMAIN>` variable (see `linklib.extract._COOKIE_DOMAINS`)
-is configured; dormant otherwise.
+at least one `LINKLIB_COOKIE_<DOMAIN>` variable (see `linklib.extract._opml_feed_domains`,
+the live-derived-from-`preferred_sites.opml` candidate set — see "Cookie domain registry
+is no longer hardcoded" below) is configured; dormant otherwise.
 
 `POST /admin/auth/recheck` keeps its path — the Reader's own subscriber-access
 banner posts to it as well, and the path isn't library-page-specific, so moving
@@ -8630,7 +8713,7 @@ recorded anywhere, it's flagged rather than invented.
   they are deliberately different shapes in different places. The column says
   "this domain currently has a cookie configured"; the summary panel under the
   page header says "here is whether that cookie still works". `authcheck.check_auth_cookies`
-  probes one recent post per domain in `linklib.extract._COOKIE_DOMAINS` and
+  probes one recent post per domain in `linklib.extract._opml_feed_domains()` and
   persists the result to `settings.auth_cookie_status`, so the panel shows the
   last known result across reloads rather than only after a Re-check click.
   **2026-08 update — the `has_paywall_cookie` bullet above describes the
@@ -8673,6 +8756,35 @@ recorded anywhere, it's flagged rather than invented.
   the moment two feeds shared a domain. The coral expired panel still appears
   on top when something is broken, but now carries only the refresh steps — the
   per-domain detail it used to repeat is in the summary above it.
+- **Cookie domain registry is no longer hardcoded (2026-09) — a new paid
+  subscription is a data event, not a deploy.** Found live: Cautious
+  Optimism's cookie was set and deployed in Railway
+  (`LINKLIB_COOKIE_CAUTIOUSOPTIMISM_NEWS`), the feed had Subscriber ticked,
+  and the row still read "No cookie configured" — `_cookie_env_var`'s
+  normalization (dots/hyphens → underscores, uppercased) matched the actual
+  variable name exactly, and `_cookie_for`'s www-stripping already agreed
+  with what the edit page displays, so a www mismatch wasn't the cause. The
+  real cause was `linklib.extract._COOKIE_DOMAINS`: a fixed
+  `("mostlymetrics.com", "onlycfo.io")` tuple that was never updated for the
+  new subscription, so `_auth_cookies()` never checked
+  `cautiousoptimism.news` at all, regardless of the env var. Fixed by
+  replacing it with `_opml_feed_domains()` — parses `preferred_sites.opml`
+  (the file `Library.write_opml()` already regenerates from the feeds
+  table on every mutation, per the "dual-purpose OPML" decision above) for
+  every feed's `xmlUrl`/`htmlUrl` domain, www-stripped the same way
+  `_cookie_for` already normalizes. Read fresh on every call, deliberately
+  **not** cached the way `sources.preferred_domains` is: a fetch already
+  dwarfs an OPML parse, and skipping the cache sidesteps having to wire a
+  `write_opml()`-clears-it dependency into a second cache for the same
+  file. `has_configured_cookie`/`authcheck.check_auth_cookies` both read
+  through `_auth_cookies()` unchanged, so this is a source-of-truth swap
+  underneath them, not a shape change — every existing caller/test needed
+  only its domain-registry monkeypatch updated (either patch
+  `_opml_feed_domains` directly, or rely on the domain already being a
+  real feed in the fixture's own OPML — most of the previously-patched
+  test domains already were). See `tests/test_auth_fetch.py`'s
+  `test_opml_feed_domains_derives_from_the_feeds_table_not_a_hardcoded_list`
+  for the direct regression coverage.
 - **`feeds.has_active_subscription` is informational only — nothing reads it.**
   A per-feed note about whether Brian currently pays for that source. It does
   not gate fetching, does not reach the Reader, and is independent of both

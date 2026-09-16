@@ -212,9 +212,10 @@ def test_cookie_cell_has_no_input_or_form(app_env):
 
 def test_every_row_shows_a_computed_cookie_indicator(app_env, monkeypatch):
     """One indicator per row; only the domain with a configured env var reads
-    as configured."""
+    as configured. mostlymetrics.com needs no domain-registry patch anymore
+    (2026-09) — it's a real feed in the seeded OPML, so it's already in the
+    live-derived candidate set; only its env var is test-specific."""
     from linklib import extract as extract_mod
-    monkeypatch.setattr(extract_mod, "_COOKIE_DOMAINS", ("mostlymetrics.com",))
     monkeypatch.setenv(extract_mod._cookie_env_var("mostlymetrics.com"), "sid=1")
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
@@ -250,7 +251,7 @@ def test_cookie_indicator_has_its_own_aria_label_shape(app_env):
 def test_footnote_explains_the_column_once(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert "<strong>Cookie</strong> shows whether this feed's domain has a subscriber cookie set up right now" in html
+    assert "<strong>Cookie</strong> shows two different facts, not one." in html
     assert "The cookie value itself is never stored in this database" in html
 
 

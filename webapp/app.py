@@ -25768,63 +25768,75 @@ _COOKIE_STATE_STYLES = {
 }
 
 
-def _cookie_status_panel(cookies, status: dict) -> str:
-    """Always-on summary of the last stored probe result, one row per domain.
+def _cf_cookie_cell_html(domain: str, configured: bool, status: dict, feed_name: str) -> str:
+    """Cookie column cell — status AND last-checked live where the feed is,
+    not in a banner at the top of the page (2026-09). Before this, the
+    column only ever said "configured", which means an env var exists, not
+    that fetching actually works — Cautious Optimism's row read exactly
+    the same as a genuinely working cookie right up until someone dug into
+    why it wasn't returning full text. See CLAUDE.md's Current Feed
+    display-order-adjacent Cookie-registry note for the incident this
+    fixes alongside.
 
-    Reads the persisted `auth_cookie_status` record, so it survives reloads and
-    shows the last known result rather than going blank until someone clicks
-    Re-check. Distinct from the feed table's Cookie checkbox by design: that is
-    a static declaration that a feed needs a cookie, this is the dynamic health
-    of the cookie itself. Different surface, different shape (a dot, not a
-    checkbox), no seafoam, so the two don't read as one control.
+    `status` is authcheck.get_auth_status()'s domain-keyed dict — the exact
+    same persisted record the "Re-check subscriber access" button (still
+    the only trigger) already writes; this just reads it per-row instead
+    of in a separate always-on summary panel, which is retired by this
+    change (a domain-keyed list sitting apart from the feed rows it
+    describes was the thing that let Cautious Optimism's mismatch go
+    unnoticed).
     """
-    rows = ""
-    for dom in cookies:
-        s = status.get(dom) or {}
-        ok = s.get("ok")
-        key = "working" if ok else ("unknown" if ok is None else "expired")
-        color, label = _COOKIE_STATE_STYLES[key]
-        detail = s.get("detail") or "not checked yet"
-        age = _relative_age(s.get("checked_at", ""))
-        rows += (
-            f'<div class="ck-row">'
-            f'<span class="ck-dot" style="background:{color};" aria-hidden="true"></span>'
-            f'<span class="ck-dom">{_esc(dom)}</span>'
-            f'<span class="ck-state">{label}</span>'
-            f'<span class="ck-detail">{_esc(detail)}</span>'
-            f'<span class="ck-age">{_esc(age)}</span>'
-            f'</div>')
-    return (f'<div class="ck-panel" role="group" aria-label="Subscriber cookie status">'
-            f'{rows}</div>')
+    if not domain:
+        return '<span style="color:var(--muted);font-size:13px;">&mdash;</span>'
+    if not configured:
+        return (f'<span aria-label="Cookie for {_esc(feed_name)}: not configured" '
+                f'title="No LINKLIB_COOKIE_&lt;DOMAIN&gt; variable is set for this domain." '
+                f'style="color:var(--muted);font-size:13px;">&mdash;</span>')
+    s = status.get(domain)
+    if s is None:
+        return (f'<span aria-label="Cookie for {_esc(feed_name)}: configured, not yet checked" '
+                f'title="A cookie is configured but the re-check button above hasn\'t probed it yet." '
+                f'style="color:var(--seafoam-deep);font-size:13px;">configured, not yet checked</span>')
+    ok = s.get("ok")
+    key = "working" if ok else ("unknown" if ok is None else "expired")
+    color, label = _COOKIE_STATE_STYLES[key]
+    age = _relative_age(s.get("checked_at", "")) or "just now"
+    detail = s.get("detail") or ""
+    return (f'<span aria-label="Cookie for {_esc(feed_name)}: {label}, checked {age}" '
+            f'title="{_esc(detail)}" style="font-size:13px;display:inline-flex;align-items:center;gap:5px;">'
+            f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{color};flex:none;" aria-hidden="true"></span>'
+            f'<span style="color:{color};">{label}</span>'
+            f'<span style="color:var(--muted);">&middot; {_esc(age)}</span></span>')
 
 
 def _auth_cookie_controls(request: Request,
-                          background_tasks: BackgroundTasks) -> tuple[str, str]:
+                          background_tasks: BackgroundTasks) -> tuple[str, str, dict]:
     """Subscriber-cookie status control, shown at the top of
     /admin/reader/feeds. It's a feed-specific tool — it probes a recent post
     per paywalled source to confirm that source's subscriber cookie still
     fetches full text — so it lives with feed management rather than on the
-    Library hub, where it sat before the Feeds page existed. Only rendered
-    when at least one LINKLIB_COOKIE_<DOMAIN> var is set. Kicks a background
-    re-check when the stored status is missing or stale.
+    Library hub, where it sat before the Feeds page existed. Kicks a
+    background re-check when the stored status is missing or stale.
 
-    Phase 1 removed the permanent green "Subscriber access" status box that
-    used to sit on the Admin hub — the manual re-check trigger and the
-    underlying check logic (authcheck.check_auth_cookies) are unchanged, but
-    the UI only surfaces a colored panel with per-domain detail when a cookie
-    has actually gone stale (any_bad). Otherwise this renders just a compact
-    "Re-check" control, so there's still a way to trigger a check by hand
-    without a status box sitting there permanently.
+    2026-09: no longer returns a rendered per-domain summary panel — that
+    "one row per domain" list sat apart from the feed rows it described,
+    which is exactly what let Cautious Optimism's cookie mismatch go
+    unnoticed (see CLAUDE.md's Cookie-registry note). Status and
+    last-checked now render per feed row instead (_cf_cookie_cell_html,
+    called by admin_feeds() with the `status` dict this function returns
+    as its third element), so this function's only remaining rendered
+    output is the button and, when something's actually expired, the
+    coral "how to fix it" instructions — the one thing a per-row dot can't
+    carry without cluttering every row.
 
-    Returns (button_html, panel_html). The button now sits beside "+ Add feed"
-    in the page header, so the panel no longer renders a second copy of it —
-    two identical triggers a few hundred pixels apart read as two different
-    actions. Both halves are "" when no cookies are configured.
+    Returns (button_html, refresh_steps_html, status). All three are
+    ""/""/{} when no cookies are configured at all — the feature stays
+    dormant until then, same as before.
     """
     from linklib.extract import _auth_cookies
     cookies = _auth_cookies()
     if not cookies:
-        return "", ""   # feature dormant until cookies are configured
+        return "", "", {}   # feature dormant until cookies are configured
 
     from linklib import authcheck
     lib = _lib()
@@ -25844,9 +25856,8 @@ def _auth_cookie_controls(request: Request,
                      '<button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">'
                      'Re-check subscriber access</button></form>')
 
-    summary = _cookie_status_panel(cookies, status)
     if not any_bad:
-        return recheck_form, summary
+        return recheck_form, "", status
 
     from linklib.extract import _cookie_env_var
     stale_vars = ", ".join(f"<code>{_esc(_cookie_env_var(d))}</code>" for d in stale)
@@ -25859,13 +25870,13 @@ def _auth_cookie_controls(request: Request,
 <li>Update {stale_vars} in Railway &rarr; Variables.</li>
 </ol>""")
 
-    # Which domains are stale is already shown, in colour, in the summary
-    # above — this panel now carries only what that can't: the fix.
+    # Which domains are stale is already shown, per row, in the feed table
+    # below — this panel now carries only what a per-row dot can't: the fix.
     panel = f"""<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 22px;">
   <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);">Subscriber cookie expired</div>
   {refresh_steps}
 </div>"""
-    return recheck_form, summary + panel
+    return recheck_form, panel, status
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -26395,13 +26406,56 @@ def _current_feed_select_options(current_value: str) -> str:
     )
 
 
-def _parse_current_feed_order(raw) -> int:
-    """Defensive int parse for the Current Feed order field. It's a plain
-    number input, but nothing stops a missing/blank/malformed value from
-    reaching a route — falls back to 0 (the column's own default) rather
-    than rejecting the save outright."""
-    raw = (raw or "").strip()
-    return int(raw) if raw.lstrip("-").isdigit() else 0
+def _next_current_feed_order(lib, side: str, exclude_feed_id: int | None = None) -> int:
+    """Order value for a feed newly joining `side` on /current-feed —
+    appended to the end, dense 0..N-1. Always correct as "the count of
+    what's already shown on this side" because admin_feeds_move_order keeps
+    every side densely numbered as a side effect of every up/down move, so
+    there's never a gap to land in the middle of.
+
+    Used whenever a feed's side actually changes (new feed, or an existing
+    feed moving from Hidden/the other side) — a feed that keeps the SAME
+    side keeps its existing order untouched; reordering within a side is
+    the up/down arrows' job now, not this function's or any typed field's.
+    2026-09: replaces a free-typed number <input> that auto-saved on every
+    keystroke (typing "12" saved "1" first) and could silently duplicate an
+    existing feed's order — see CLAUDE.md's Current Feed display-order note."""
+    if not side:
+        return 0
+    return sum(
+        1 for f in lib.list_feeds()
+        if f["show_on_current_feed"] and f["current_feed_side"] == side
+        and f["id"] != exclude_feed_id
+    )
+
+
+def _cf_order_arrows_html(feed: dict, boundary: tuple) -> str:
+    """Up/down move buttons for the Order column — the only way to change
+    a feed's position within its Current Feed side (2026-09; see
+    admin_feeds_move_order). Disabled outright, not just inert, for a
+    Hidden feed (nothing to move — order plays no role until the feed is
+    shown) or at whichever end of its side the feed already sits at
+    (`boundary` = (is_first, is_last)), so a click can never be a no-op
+    that still round-trips a request."""
+    shown = bool(feed["show_on_current_feed"]) and bool(feed["current_feed_side"])
+    is_first, is_last = boundary if shown else (True, True)
+    btn = ("border:1px solid var(--line);border-radius:6px;background:#fff;"
+           "font:inherit;font-size:12px;line-height:1;padding:3px 7px;cursor:pointer;")
+    disabled_btn = "border:1px solid var(--line);border-radius:6px;background:var(--surface);" \
+                   "font:inherit;font-size:12px;line-height:1;padding:3px 7px;color:var(--muted);"
+
+    def _btn(direction: str, label: str, disabled: bool) -> str:
+        if disabled:
+            return f'<button type="button" disabled aria-label="{label}: {_esc(feed["name"])}" style="{disabled_btn}">{"&uarr;" if direction == "up" else "&darr;"}</button>'
+        return (f'<form method="post" action="/admin/reader/feeds/{feed["id"]}/order-move" style="display:inline;margin:0;">'
+                f'<input type="hidden" name="direction" value="{direction}">'
+                f'<button type="submit" aria-label="{label}: {_esc(feed["name"])}" style="{btn}">'
+                f'{"&uarr;" if direction == "up" else "&darr;"}</button></form>')
+
+    return (f'<span style="display:inline-flex;gap:3px;">'
+            f'{_btn("up", "Move up", not shown or is_first)}'
+            f'{_btn("down", "Move down", not shown or is_last)}'
+            f'</span>')
 
 
 def _feed_form_fields(sections: list, values: dict) -> str:
@@ -26451,12 +26505,7 @@ def _feed_form_fields(sections: list, values: dict) -> str:
   <div>
     <label style="{lab}">Current Feed</label>
     <select name="current_feed" style="{inp}">{current_feed_opts}</select>
-    <p style="{hint}">Off by default for a new feed—turn it on deliberately once it's worth listing. Only changes whether this appears on the public /current-feed tracklist; FP&amp;A Buddy's web search still covers every feed regardless of this setting.</p>
-  </div>
-  <div>
-    <label style="{lab}">Current Feed order</label>
-    <input type="number" name="current_feed_order" value="{values.get('current_feed_order', 0)}" style="{inp}">
-    <p style="{hint}">Where this track sits within its side, lowest first. Left visible but ignored while Hidden above&mdash;set it ahead of time if you like, it just won't do anything until the feed is shown. Two feeds with the same number keep a stable order between page loads (broken by feed ID, not left to chance).</p>
+    <p style="{hint}">Off by default for a new feed&mdash;turn it on deliberately once it's worth listing. Only changes whether this appears on the public /current-feed tracklist; FP&amp;A Buddy's web search still covers every feed regardless of this setting. A feed newly shown here joins the end of its side&mdash;use the &uarr;/&darr; arrows on the feed table to reorder it from there.</p>
   </div>"""
 
 
@@ -26465,7 +26514,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
                 msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
-    auth_button, auth_panel = _auth_cookie_controls(request, background_tasks)
+    auth_button, auth_panel, auth_status = _auth_cookie_controls(request, background_tasks)
     lib = _lib()
     try:
         sections = lib.list_feed_sections()
@@ -26484,6 +26533,20 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     # Section is a per-row dropdown, posting on change, so a feed's grouping
     # is edited in place rather than through a section-level control.
     from linklib.extract import has_configured_cookie
+    # Boundary flags for the Order column's up/down arrows — a feed already
+    # first/last within its side gets that arrow disabled rather than
+    # posting a no-op move. Same (order, id) tie-break as current_feed()'s
+    # own sort and admin_feeds_move_order's own renumbering.
+    _shown_by_side: dict[str, list[dict]] = {}
+    for f in feeds:
+        if f["show_on_current_feed"] and f["current_feed_side"]:
+            _shown_by_side.setdefault(f["current_feed_side"], []).append(f)
+    for _side_feeds in _shown_by_side.values():
+        _side_feeds.sort(key=lambda x: (x["current_feed_order"], x["id"]))
+    _cf_boundary = {}  # feed id -> (is_first, is_last)
+    for _side_feeds in _shown_by_side.values():
+        for _i, _sf in enumerate(_side_feeds):
+            _cf_boundary[_sf["id"]] = (_i == 0, _i == len(_side_feeds) - 1)
     feed_rows = ""
     for f in feeds:
         opts = "".join(
@@ -26502,13 +26565,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
         style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">{opts}</select>
     </form>
   </td>
-  <td class="ff-cookie">
-    <span aria-label="Cookie for {_esc(f['name'])}: {'configured' if _cookie_configured else 'not configured'}"
-      title="Computed from whether a subscriber cookie is configured for this domain—not editable here."
-      style="color:{'var(--seafoam-deep)' if _cookie_configured else 'var(--muted)'};font-size:13px;">
-      {'&#10003; configured' if _cookie_configured else '&mdash;'}
-    </span>
-  </td>
+  <td class="ff-cookie">{_cf_cookie_cell_html(_cookie_domain, _cookie_configured, auth_status, f['name'])}</td>
   <td class="ff-sub">
     <form method="post" action="/admin/reader/feeds/{f['id']}/subscription" style="margin:0;">
       <input type="checkbox" name="has_active_subscription" value="1" onchange="this.form.submit()"
@@ -26516,16 +26573,12 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     </form>
   </td>
   <td class="ff-cf">
-    <form id="cf-form-{f['id']}" method="post" action="/admin/reader/feeds/{f['id']}/current-feed" style="margin:0;">
+    <form method="post" action="/admin/reader/feeds/{f['id']}/current-feed" style="margin:0;">
       <select name="current_feed" onchange="this.form.submit()" aria-label="Current Feed: {_esc(f['name'])}"
         style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">{_current_feed_select_options(f['current_feed_side'] if f['show_on_current_feed'] else '')}</select>
     </form>
   </td>
-  <td class="ff-order">
-    <input type="number" name="current_feed_order" form="cf-form-{f['id']}" value="{f['current_feed_order']}"
-      onchange="this.form.submit()" aria-label="Current Feed order: {_esc(f['name'])}"
-      style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
-  </td>
+  <td class="ff-order">{_cf_order_arrows_html(f, _cf_boundary.get(f['id'], (True, True)))}</td>
   <td class="ff-actions">
     <a href="/admin/reader/feeds/{f['id']}/edit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Edit</a>
     <form method="post" action="/admin/reader/feeds/{f['id']}/delete" style="display:inline;margin:0 0 0 4px;"
@@ -26580,28 +26633,6 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 
     body = f"""<div class="page page-standard">
 <style>
-/* Cookie health summary. Sits under the header actions, deliberately not in
-   the feed table: cookies are keyed by domain while the table is keyed by
-   feed, so a per-row light would misrepresent the relationship the moment two
-   feeds shared a domain. A dot, never a checkbox — the Cookie column declares
-   that a feed needs a cookie; this reports whether that cookie still works. */
-.ck-panel{{background:var(--surface);border:1px solid var(--line);border-radius:12px;
-  padding:10px 14px;margin:0 0 18px;display:grid;gap:4px;}}
-.ck-row{{display:flex;align-items:baseline;gap:9px;font-size:13px;flex-wrap:wrap;}}
-.ck-dot{{width:9px;height:9px;border-radius:50%;flex:0 0 auto;
-  transform:translateY(-1px);}}
-.ck-dom{{font-weight:600;color:var(--ink-soft);}}
-/* Deliberately NOT tinted to match its dot. #CA8A04 as text on --surface is
-   2.94:1, failing AA (4.5) and even AA-large (3.0); the colour lives on the
-   dot, which is a graphic, while the word stays in normal readable ink. */
-.ck-state{{font-weight:600;color:var(--ink-soft);}}
-.ck-detail{{color:var(--muted);min-width:0;overflow-wrap:anywhere;}}
-.ck-age{{color:var(--muted);margin-left:auto;white-space:nowrap;}}
-@media (max-width:560px){{
-  /* Let the timestamp sit with the text rather than stranded at the far edge
-     of a wrapped row, where it reads as belonging to the next line. */
-  .ck-age{{margin-left:0;}}
-}}
 .ff-head{{display:flex;align-items:center;justify-content:space-between;gap:12px;
   margin-bottom:4px;flex-wrap:wrap;}}
 /* Both actions in one group so they wrap together under the title rather than
@@ -26683,10 +26714,10 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <p style="color:var(--muted);margin:8px 0 6px;">The RSS subscriptions behind the Reader's Feed view. This same list is the domain allowlist FP&amp;A Buddy's web search is restricted to, so a source added here becomes citable there too. Changes take effect on the next page load.</p>
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
-<li><strong>Cookie</strong> shows whether this feed's domain has a subscriber cookie set up right now. Each domain gets its own <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable in Railway; set one there and it's picked up automatically the next time that feed is fetched. <strong>The cookie value itself is never stored in this database</strong>&mdash;only which domains to check is baked into the code. See <code>RUNBOOK.md</code> &sect;5 to refresh an expired one.</li>
+<li><strong>Cookie</strong> shows two different facts, not one. Whether a variable is set: every feed's domain is checked automatically (derived live from this feed list, not a hardcoded list of domains&mdash;add a feed with a paid subscription and set its <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable in Railway, no code change needed); a dash means none is set. And, once the re-check button above has probed it, whether fetching actually works: a colored dot (working / expired / inconclusive) plus how long ago it was checked. A variable being set only means "configured"&mdash;it doesn't mean the fetch is succeeding, which is exactly what the dot is for. <strong>The cookie value itself is never stored in this database.</strong> See <code>RUNBOOK.md</code> &sect;5 to refresh an expired one.</li>
 <li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
 <li><strong>Current Feed</strong> controls whether&mdash;and on which side&mdash;this feed appears on the public <a href="/current-feed" style="color:var(--accent);">/current-feed</a> tracklist. A new feed starts Hidden; that's deliberate, not a bug. This is presentation only&mdash;FP&amp;A Buddy's web search still covers every feed here regardless of this setting, and the tracklist page itself says so.</li>
-<li><strong>Order</strong> sets where a feed lands within its side, lowest first. It stays visible and editable even while Hidden&mdash;it just does nothing until the feed is shown. Two feeds sharing a number keep a stable order (broken by feed ID) rather than reshuffling between visits.</li>
+<li><strong>Order</strong>'s &uarr;/&darr; arrows move a feed within its side, lowest first&mdash;there's nothing to type. Both arrows are disabled while Hidden (nothing to reorder yet), and whichever arrow would move a feed past the top or bottom of its side is disabled too. Moving a feed renumbers its whole side to a clean 0, 1, 2&hellip; sequence as a side effect, so it can't create&mdash;or leave standing&mdash;two feeds sharing the same position.</li>
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
@@ -26871,31 +26902,87 @@ async def admin_feeds_set_subscription(request: Request, feed_id: int):
 
 @app.post("/admin/reader/feeds/{feed_id}/current-feed")
 async def admin_feeds_set_current_feed(request: Request, feed_id: int):
-    """Set show_on_current_feed/current_feed_side/current_feed_order from the
-    table's own per-row controls — same narrow, single-purpose shape as the
-    Section and Subscriber routes above, extended to a pair of controls
-    instead of one: the Order <input> lives in a separate <td> but is
-    associated to this same form via HTML's form="" attribute (the same
-    plain-HTML cross-cell trick the Sections table uses), so either control's
-    onchange submits both fields together. A side value of "" means hidden;
+    """Set show_on_current_feed/current_feed_side from the table's own
+    per-row Current Feed select — same narrow, single-purpose shape as the
+    Section and Subscriber routes above. A side value of "" means hidden;
     anything else is a real side and implies shown=True (see
-    _CURRENT_FEED_SELECT_CHOICES)."""
+    _CURRENT_FEED_SELECT_CHOICES).
+
+    2026-09: no longer also sets current_feed_order — that used to travel
+    alongside via a separate <td>'s number <input> cross-associated to this
+    same form (HTML's form="" trick), but a typed number auto-saved on
+    every keystroke and could silently duplicate another feed's order (see
+    CLAUDE.md's Current Feed display-order note). Order is the up/down
+    arrows' job now (admin_feeds_move_order, its own route/form). A feed
+    keeping the same side keeps its existing order untouched; a feed newly
+    joining a side is appended to the end via _next_current_feed_order."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
     side = (form.get("current_feed") or "").strip()
-    order = _parse_current_feed_order(form.get("current_feed_order"))
     lib = _lib()
     try:
         feed = lib.get_feed(feed_id)
         if not feed:
             raise HTTPException(status_code=404, detail="feed not found")
+        if side == feed["current_feed_side"]:
+            order = feed["current_feed_order"]
+        else:
+            order = _next_current_feed_order(lib, side, exclude_feed_id=feed_id)
         lib.set_feed_current_feed_display(feed_id, bool(side), side, order)
         label = dict(_CURRENT_FEED_SELECT_CHOICES).get(side, "Hidden")
-        detail = f"{feed['name']} on /current-feed: {label} (order {order})."
+        detail = f"{feed['name']} on /current-feed: {label}."
     finally:
         lib.close()
     return RedirectResponse(f"/admin/reader/feeds?msg={quote(detail)}", status_code=303)
+
+
+@app.post("/admin/reader/feeds/{feed_id}/order-move")
+async def admin_feeds_move_order(request: Request, feed_id: int):
+    """Move a feed one position up/down within its Current Feed side.
+
+    Replaces the old free-typed Order number field entirely (2026-09) — see
+    CLAUDE.md's Current Feed display-order note for the incident that
+    prompted it: typing "12" auto-saved "1" first (an intermediate
+    keystroke value reaching the database), and nothing stopped two feeds
+    from silently sharing the same order value. Arrows remove both
+    problems structurally rather than validating around them: there is no
+    text field to type an intermediate value into, and every move
+    renumbers the WHOLE side to a dense 0..N-1 sequence (not just the two
+    swapped rows), so a pre-existing duplicate or gap self-heals the first
+    time either of the tied feeds is nudged, and a fresh duplicate can
+    never be created by this route.
+
+    No-ops (redirects with no change) when the feed is Hidden — its order
+    is inert — or already at the boundary in that direction, matching the
+    Order column's own disabled-arrow rendering."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    direction = (form.get("direction") or "").strip()
+    if direction not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="direction must be 'up' or 'down'")
+    lib = _lib()
+    try:
+        feed = lib.get_feed(feed_id)
+        if not feed:
+            raise HTTPException(status_code=404, detail="feed not found")
+        side = feed["current_feed_side"]
+        if feed["show_on_current_feed"] and side:
+            side_feeds = sorted(
+                (f for f in lib.list_feeds()
+                 if f["show_on_current_feed"] and f["current_feed_side"] == side),
+                key=lambda f: (f["current_feed_order"], f["id"]))
+            idx = next(i for i, f in enumerate(side_feeds) if f["id"] == feed_id)
+            swap_idx = idx - 1 if direction == "up" else idx + 1
+            if 0 <= swap_idx < len(side_feeds):
+                side_feeds[idx], side_feeds[swap_idx] = side_feeds[swap_idx], side_feeds[idx]
+            for new_order, f in enumerate(side_feeds):
+                if f["current_feed_order"] != new_order:
+                    lib.set_feed_current_feed_display(f["id"], True, side, new_order)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/reader/feeds", status_code=303)
 
 
 @app.get("/admin/reader/feeds/new", response_class=HTMLResponse)
@@ -26952,7 +27039,6 @@ async def admin_feeds_new_submit(request: Request):
         # Informational only — nothing reads it.
         "has_active_subscription": bool(form.get("has_active_subscription")),
         "current_feed_side": (form.get("current_feed") or "").strip(),
-        "current_feed_order": _parse_current_feed_order(form.get("current_feed_order")),
     }
     values["show_on_current_feed"] = bool(values["current_feed_side"])
     lib = _lib()
@@ -26978,6 +27064,7 @@ async def admin_feeds_new_submit(request: Request):
 
         name = values["name"] or probe.title or values["xml_url"]
         html_url = values["html_url"] or probe.html_url
+        order = _next_current_feed_order(lib, values["current_feed_side"])
         # has_paywall_cookie and exclude_from_queue are no longer
         # admin-settable — both are frozen, unread historical columns (see
         # CLAUDE.md's Feeds-page Cookie indicator note and its Archive Queue
@@ -26986,7 +27073,7 @@ async def admin_feeds_new_submit(request: Request):
                      has_active_subscription=values["has_active_subscription"],
                      show_on_current_feed=values["show_on_current_feed"],
                      current_feed_side=values["current_feed_side"],
-                     current_feed_order=values["current_feed_order"])
+                     current_feed_order=order)
         _publish_feeds(lib)
     finally:
         lib.close()
@@ -27011,8 +27098,7 @@ def admin_feeds_edit(request: Request, feed_id: int):
               # clear it — update_feed writes it on every call.
               "has_active_subscription": bool(feed["has_active_subscription"]),
               "show_on_current_feed": bool(feed["show_on_current_feed"]),
-              "current_feed_side": feed["current_feed_side"],
-              "current_feed_order": feed["current_feed_order"]}
+              "current_feed_side": feed["current_feed_side"]}
     return HTMLResponse(_page("Edit feed—Library Admin", "Admin",
                               _feed_form_page(f'Edit {feed["name"]}',
                                               f"/admin/reader/feeds/{feed_id}/edit",
@@ -27034,7 +27120,6 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
         # Informational only — see the add route.
         "has_active_subscription": bool(form.get("has_active_subscription")),
         "current_feed_side": (form.get("current_feed") or "").strip(),
-        "current_feed_order": _parse_current_feed_order(form.get("current_feed_order")),
     }
     values["show_on_current_feed"] = bool(values["current_feed_side"])
     lib = _lib()
@@ -27071,6 +27156,15 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
                 return _reject(probe.error)
             html_url = values["html_url"] or probe.html_url
 
+        # A feed keeping the same side keeps its existing order untouched —
+        # reordering is the up/down arrows' job now. A feed newly joining a
+        # side (from Hidden, or from the other side) is appended to the end.
+        if values["current_feed_side"] == feed["current_feed_side"]:
+            order = feed["current_feed_order"]
+        else:
+            order = _next_current_feed_order(lib, values["current_feed_side"],
+                                              exclude_feed_id=feed_id)
+
         # has_paywall_cookie and exclude_from_queue are no longer
         # admin-settable (see the add-route comment) — preserve each row's
         # existing value rather than letting update_feed's defaults
@@ -27082,7 +27176,7 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
                         has_active_subscription=values["has_active_subscription"],
                         show_on_current_feed=values["show_on_current_feed"],
                         current_feed_side=values["current_feed_side"],
-                        current_feed_order=values["current_feed_order"])
+                        current_feed_order=order)
         _publish_feeds(lib)
         saved_name = values["name"]
     finally:
