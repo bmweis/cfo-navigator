@@ -9580,6 +9580,62 @@ it supersedes the old "`/save` is token-gated" note.
   this: re-check both premises (is Pillow now a real dependency for some
   other reason? has the publishing cadence materially increased?) before
   assuming either has changed.
+- **Social share cards, review-round corrections (2026-09, same day) — two
+  real gaps found by explicit review questions, both fixed before merge.**
+  (1) **Escaping — evaluated and replaced.** The original two-helper design
+  (`_esc_attr_quote_only()` for `original_content.teaser`'s pre-encoded
+  convention, plain `_esc()` for `ai_surfaces.teaser`'s/`homepage_teaser`'s
+  plain-text convention) was replaced with one shared rule,
+  `_esc_attr_normalize()` — `_esc(html.unescape(s))` — per an explicit
+  request to check that single-rule alternative before shipping two
+  per-field treatments. Tested against real production data and
+  constructed edge cases (a pre-encoded `&amp;`, a plain `&`, a literal
+  `"`, a pathological already-double-encoded string) before trusting it: it
+  produces correct output for both storage conventions, and is genuinely
+  safer than the two-helper version it replaced, not just simpler — the
+  retired `_esc_attr_quote_only()` trusted a pre-encoded field's `&`
+  completely, so a single un-pre-encoded ampersand slipping into
+  `original_content.teaser` (a plausible admin typo, not a contrived case)
+  would have shipped as a literal, unescaped `&` in the rendered
+  attribute — invalid markup. Decode-then-re-encode can't have that
+  failure mode: every `&` in the output is a real, correctly-escaped
+  entity exactly once, regardless of how the source string was typed —
+  confirmed with a real inconsistent-input test case
+  (`"Ben & Jerry's &amp; Associates"`) that fails against the old helper
+  and passes against the new one. All three `og_description` call sites
+  (homepage, `ai_surface_article`, `original_content_article`) now go
+  through this one function.
+  (2) **og:url threading — a real, shipped gap, found by asking for the
+  full list instead of accepting a spot check.** The original build
+  threaded `request=request` through only 5 hand-picked "the pages that
+  matter" routes (per Phase 0's own stated recommendation to avoid
+  touching all 181 `_page()` call sites) — but that recommendation was
+  read too narrowly: it left 44 other genuinely public (non-`/admin`)
+  `_page()` calls across 39 routes silently falling back to the bare
+  `PUBLIC_BASE` root for `og:url`, **including every individual tool and
+  community profile page** (`/tools/software/{slug}`,
+  `/tools/communities/{slug}`), the three directory pages, both compare
+  pages, `/contact`, `/current-feed`, `/tools/fpa-buddy`, and more — any
+  two of these pages would have reported an identical `og:url`,
+  indistinguishable from the homepage to a scraper. Fixed by threading
+  `request=request` through all 44 (every route with `request` in its own
+  signature, minus `/admin/*`) — confirmed live afterward that an
+  individual tool profile page now reports its own real URL, not the
+  homepage's. **Made permanent, not just fixed once**: `og_url_
+  threading_problems()` (`webapp/app.py`) is a mechanical drift detector
+  in the same spirit as `hub_nav_orphans()` — live `app.routes`
+  introspection plus `inspect.getsource()` per route (the same established
+  technique `_page_index_tier_for` already uses, not a hand-rolled
+  whole-file line scan, which the function's own first draft tried and hit
+  two real false-positive classes with: matching `_page(` as a substring
+  of a route-function name ending in "`_page`" like `login_page(`, and
+  matching a `#` comment that merely *mentions* `_page()`; both are now
+  guarded against and unit-tested directly). Wired into
+  `webapp.checks.run_all()` as "og:url threading," the same way
+  `hub_nav_orphans()` is wired in as "Hub-nav orphans" — confirmed it
+  actually catches a planted regression (a temporarily-reverted
+  `/tools` route) before trusting it clean, per this codebase's own
+  standing "prove the detector isn't trivially passing" discipline.
 
 
 ## Authentication & security
