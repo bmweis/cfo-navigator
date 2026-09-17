@@ -456,11 +456,10 @@ def build_mcp(
         equals `where_value` — the correct tool for reading one specific
         row by key (e.g. a `settings` row by its `key`, or any row by its
         `id`), regardless of where that row sits in the table or how many
-        rows the table has. `sample_rows`' head/tail windows only ever
-        reach the first and last `n` rows by rowid — a table past 50 rows
-        has a dead middle window neither `sample_rows` window can reach at
-        any `n`/`offset` combination unless you already know the row's
-        position; `get_rows` finds it directly, by value, instead.
+        rows the table has. `sample_rows`' `offset` can reach the same row
+        too, but only if you already know (or can compute) its position —
+        `get_rows` needs neither: give it the value you're looking for and
+        it finds the row directly, with no position to work out first.
 
         `where_value` is always compared as text; SQLite's own type
         affinity still matches it against an INTEGER/NUMERIC column
