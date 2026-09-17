@@ -9637,27 +9637,35 @@ it supersedes the old "`/save` is token-gated" note.
   `/tools` route) before trusting it clean, per this codebase's own
   standing "prove the detector isn't trivially passing" discipline.
 
-- **Slow page loads (first raised 2026-09-15) — still open, cause unknown.
-  NOT a Railway cold start: Serverless is confirmed OFF for this service in
-  the Railway dashboard (checked 2026-09-17), so the container isn't
-  sleeping between requests and cold start can't be the explanation.**
-  Diagnostic Brian ran directly against production: two loads ten seconds
-  apart — first ~7s, second 1-2s. That pattern is real, but with Serverless
-  off it means something got warmed by the first request (not that the
-  container booted) — don't read a first-slow/second-fast result as proof
-  of cold start on this service; check the Serverless setting first. A real
-  confounder in this specific measurement: it was taken roughly an hour
-  after #577 merged, so the slow first load may simply have followed a
-  deploy restart rather than reflecting steady-state behavior — the
-  measurement needs to be re-run well away from any deploy before it means
-  anything. **What's still genuinely established**: per-request paths are
-  ruled out by the 1-2s warm load — `webapp.checks.run_all()`, the
-  og:image filename lookup, and ordinary request handling are fine.
-  Everything else (why the first load is slow, whether 1-2s warm is itself
-  too slow for an inline-HTML route) is open. **Not being investigated
-  right now** — Brian is re-testing after a day of normal use, on desktop
-  wifi, away from any deploy, and will bring clean numbers back if it
-  reproduces.
+- **Slow first page load (raised 2026-09-15, re-raised 2026-09-17): UNRESOLVED,
+  cause unknown.**
+
+  Measured: first load ~7s, second load ten seconds later 1-2s. Real and
+  reproducible at the time of measurement.
+
+  Ruled out:
+  - Railway Serverless / container sleep — the toggle is OFF, confirmed in
+    the dashboard 2026-09-17. **This is the important one: first-slow/
+    second-fast is NOT diagnostic of cold start here.** That was the first
+    hypothesis raised for this pattern, and it did not survive the
+    dashboard check — worth remembering, because the next session will
+    otherwise reach for the same shortcut: a first-slow/second-fast
+    measurement alone does not prove cold start on this service. Check the
+    Serverless setting before treating it as the explanation.
+  - Per-request application paths — the 1-2s warm load rules out
+    `webapp.checks.run_all()`, the og:image filename lookup, and ordinary
+    request handling generally.
+
+  Not ruled out: whatever the first request warms. Some cache, connection,
+  or lazy initialization. Boot cost is also unmeasured, though with
+  Serverless off the container should not be booting between requests.
+
+  Confounder: measured roughly an hour after #577 merged. A deploy restarts
+  the container, so the first load may simply have followed that restart.
+
+  Next step: re-test after a day of normal use, on desktop wifi, well away
+  from any deploy. Do not investigate code paths until that measurement
+  exists.
 
 
 ## Authentication & security
