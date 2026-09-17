@@ -121,6 +121,12 @@ def ai_config_orphan_problems() -> list[str]:
     return app.ai_config_editable_outside_ai_page()
 
 
+# --- Social share cards: og:url threading (2026-09) --------------------------
+def og_url_threading_problems() -> list[str]:
+    from webapp import app
+    return app.og_url_threading_problems()
+
+
 # --- Original content mirroring invariant (2026-09) --------------------------
 # sync_original_content_article() only ever fires from the two admin save
 # routes (see linklib/original_content_sync.py) — a write via any other path
@@ -301,6 +307,12 @@ def run_all() -> list[dict]:
         "name": "AI config consolidated", "where": "Live + CI", "ok": not ac,
         "what": "AI settings only live in one place (/admin/system/ai)—nothing left over from the pages that used to hold them.",
         "detail": "; ".join(ac) if ac else "AI configuration lives only at /admin/system/ai."})
+
+    ou = og_url_threading_problems()
+    results.append({
+        "name": "og:url threading", "where": "Live + CI", "ok": not ou,
+        "what": "Every public page's _page() call passes request=request—so og:url reports its own real URL, never a silent fallback to the homepage.",
+        "detail": "; ".join(ou) if ou else "Every public route threads request into og:url."})
 
     om = original_content_mirror_problems()
     results.append({

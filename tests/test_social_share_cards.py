@@ -149,7 +149,7 @@ def test_default_description_used_when_no_teaser_given(env):
 # html.unescape() then _esc() — is one shared rule that produces correct
 # output for both conventions, replacing an earlier two-helper design (one
 # helper per convention) after evaluating this single-rule alternative and
-# finding it not just simpler but strictly more robust — see its own
+# finding it not just simpler but harder to get wrong — see its own
 # docstring and test_esc_attr_normalize_handles_inconsistent_admin_input
 # below for the concrete gap the two-helper version had.
 
@@ -369,3 +369,70 @@ def test_growth_engine_ratio_slug_resolves_to_its_real_committed_card(env):
     html = _client(env).get("/thought-leadership/growth-engine-ratio").text
     assert ('<meta property="og:image" content='
             '"https://bmweis.com/static/og/growth-engine-ratio.png">') in html
+
+
+# -- og:url threading audit (mechanical drift guard, mirrors hub_nav_orphans) -
+#
+# A real, shipped gap: the original Phase 1 build only threaded request=
+# through 5 hand-picked routes, leaving 44 other genuinely public _page()
+# calls across 39 routes — including every individual tool/community
+# profile page — silently reporting the homepage's og:url. Fixed the same
+# day; this is the permanent, mechanical guard against it recurring,
+# wired into webapp.checks.run_all() ("og:url threading") the same way
+# hub_nav_orphans() is wired in as "Hub-nav orphans".
+
+def test_every_public_route_threads_request_today(env):
+    """The real, current state — every public route's _page() call passes
+    request=request. Proves the fix, not just the detector."""
+    assert env.og_url_threading_problems() == []
+
+
+def test_detector_catches_a_missing_request_kwarg():
+    """Unit-tests the pure detection helper (_og_url_call_missing_request)
+    directly against synthetic source snippets — including the two false-
+    positive shapes the detector's own first draft actually hit and had to
+    fix (a route-function name ending in "_page", and a comment mentioning
+    _page()) — rather than mutating the real 34k-line source file on disk
+    mid-test."""
+    import webapp.app as appmod
+
+    # The real bug shape: a genuine _page() call with no request=request.
+    missing = '''
+def tools_landing(request: Request):
+    body = "<div></div>"
+    return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+'''
+    assert appmod._og_url_call_missing_request(missing) is True
+
+    # Fixed shape: request=request present.
+    fixed = '''
+def tools_landing(request: Request):
+    body = "<div></div>"
+    return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
+'''
+    assert appmod._og_url_call_missing_request(fixed) is False
+
+    # False-positive shape 1: a function name ending in "_page" must never
+    # be mistaken for a call to the _page() function itself.
+    false_positive_name = '''
+def login_page(request: Request, next: str = ""):
+    return HTMLResponse(_page("Sign in—Brian Weisberg", "", body, request=request))
+'''
+    assert appmod._og_url_call_missing_request(false_positive_name) is False
+
+    # False-positive shape 2: a comment mentioning _page() is not a call.
+    false_positive_comment = '''
+def some_route(request: Request):
+    # threaded through _page()'s ~250 call sites, see the docstring
+    return HTMLResponse(body)
+'''
+    assert appmod._og_url_call_missing_request(false_positive_comment) is False
+
+
+def test_detector_wired_into_admin_checks():
+    """The live /admin/checks entry — mirrors "Hub-nav orphans"'s own
+    wiring exactly."""
+    from webapp import checks
+    row = [r for r in checks.run_all() if r["name"] == "og:url threading"][0]
+    assert row["ok"] is True
+    assert row["where"] == "Live + CI"
