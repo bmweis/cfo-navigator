@@ -5744,11 +5744,18 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Phase 0C's own investigation into that question found discovery is
   better solved by writing the surface inventory into project
   documentation than by building a tool for it, so this phase is retrieval
-  only; and the route-render tool (Phase 3 of the *investigation* track,
-  not to be confused with this same-numbered MCP *tool* Phase 3 below),
-  still parked pending the GET-route side-effect audit and the
-  `_CORAL_CHECK_IN_PROGRESS` race question, both being tracked separately.
-  See ARCHITECTURE.md's matching section and `tests/test_mcp_server.py`'s
+  only. **The route-render tool (Phase 3 of the *investigation* track, not
+  to be confused with this same-numbered MCP *tool* Phase 3 below) is
+  killed outright as of 2026-09, not parked** — #570 (`get_rows`) already
+  solved the actual motivating problem (reading editable page copy at any
+  table size), the residual need (seeing served markup/computed layout) is
+  already covered by Brian pasting view-source or devtools output when he
+  needs it, and the cost side (rendering arbitrary routes as an
+  authenticated admin, with no completed GET-route side-effect audit and
+  `/read/{article_id}` already known to fire a live external fetch on
+  load) was real and never closed. The GET-route side-effect audit that
+  would have gated this tool is dropped along with it — it had no other
+  purpose. See ARCHITECTURE.md's matching section and `tests/test_mcp_server.py`'s
   Phase 2 section (the literal `settings`-at-55-rows paging case and the
   dead-middle-row `get_rows` lookup) for the full write-up and coverage.
 - **MCP server, Phase 3 (2026-09) — six read-only Toolbox/Communities
