@@ -384,6 +384,17 @@ above if the site doesn't work after copying just one cookie.
 > do identify the real cookie name the next time you run this, write it down
 > here**—that's the gap this note marks.
 
+**Lifetime varies enormously by platform.** A beehiiv token typically expires
+in about 48 hours; a Substack `connect.sid` lasts months. A beehiiv cookie
+needs re-grabbing regularly—and a stale one fails *silently*: no error
+anywhere, it just quietly stops returning full text. **A cookie visible in
+DevTools may already be expired**—the browser keeps showing it either way, so
+force a fresh one by logging out, logging back in, and copying it
+immediately. **Checking a JWT's validity directly:** a beehiiv cookie's
+payload carries an `exp` timestamp—paste the token into any JWT decoder
+(e.g. jwt.io) to see whether it's still valid before assuming the fetch
+failure is something else.
+
 ### 5.3 Update the domain's `LINKLIB_COOKIE_<DOMAIN>` variable
 
 **One variable per domain, each holding a raw `Cookie` header value—no JSON,

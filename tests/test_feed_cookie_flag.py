@@ -250,29 +250,36 @@ def test_cookie_indicator_has_its_own_aria_label_shape(app_env):
 
 
 def test_footnote_explains_the_column_once(app_env):
+    """2026-09 compression: the Cookie bullet used to spell out six facts
+    (the derived domain list, variable naming, dot states, age display, what
+    "configured" doesn't mean, and where the value is stored) in one dense
+    paragraph. It's now two short sentences plus a pointer to RUNBOOK.md §5
+    for the rest — most of those facts are visible from the column itself
+    once you've read it once."""
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert "<strong>Cookie</strong> shows two different facts, not one." in html
-    assert "The cookie value itself is never stored in this database" in html
+    assert "a dash means no" in html
+    assert "LINKLIB_COOKIE_&lt;DOMAIN&gt;" in html
+    assert "never stored here" in html
+    assert "RUNBOOK.md" in html
 
 
 def test_column_reference_moved_below_the_table(app_env):
     """2026-09: five bullets plus a paragraph used to sit above the table,
     re-teaching the same mechanics on every visit. Only a one-line intro
-    stays above the table now; the field-by-field reference (plus the
-    pre-existing cookie-finding instructions it now sits beside) moved
-    below it."""
+    stays above the table now; the compressed field-by-field reference
+    moved below it, pointing at RUNBOOK.md §5 for the full cookie-refresh
+    procedure instead of restating it on the page."""
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
     table_idx = html.index('<table class="ff-table"')
     reference_idx = html.index("Column reference")
-    cookie_bullet_idx = html.index("<strong>Cookie</strong> shows two different facts")
-    finding_cookie_idx = html.index("Finding the right cookie in DevTools")
+    cookie_bullet_idx = html.index("<strong>Cookie</strong>: a dash means no")
+    runbook_pointer_idx = html.index("Full cookie-refresh steps")
     # The reference heading and its field bullets sit AFTER the table...
     assert reference_idx > table_idx
     assert cookie_bullet_idx > table_idx
-    # ...directly alongside the pre-existing cookie-finding instructions.
-    assert reference_idx < finding_cookie_idx
+    assert runbook_pointer_idx > cookie_bullet_idx
     # And only a short intro remains above the table.
     above_table = html[:table_idx]
     assert "Sources</strong> rail only lists feeds" not in above_table
@@ -281,12 +288,14 @@ def test_column_reference_moved_below_the_table(app_env):
 
 def test_order_bullet_explains_sorting_by_side_then_position(app_env):
     """2026-09 follow-up: the old "N of M" rank readout is retired now that
-    the Order column is directly sortable — the moved-below reference bullet
-    explains that sorting by Order groups by side, then position, which is
-    what actually makes a feed's row position mean something."""
+    the Order column is directly sortable. This bullet is the one exception
+    to the 2026-09 compression pass — kept in full, not shortened, because
+    it's the non-obvious fact: every other sort leaves the table in its
+    default order, so sorting by Order is the one view where row position
+    actually equals a feed's real rank."""
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert "Sorting by <strong>Order</strong> groups the table by side" in html
+    assert "Sorting by <strong>Order</strong> is the one sort that shows a feed's real rank" in html
     assert "N of M" not in html
 
 
@@ -592,7 +601,7 @@ def test_form_helper_copy_says_it_is_informational(app_env):
 def test_page_footnote_explains_the_flag(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert "<strong>Subscriber</strong> marks whether you currently pay" in html
+    assert "<strong>Subscriber</strong> is a note to yourself" in html
 
 
 def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
