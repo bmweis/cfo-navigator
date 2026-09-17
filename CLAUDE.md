@@ -8933,8 +8933,10 @@ it supersedes the old "`/save` is token-gated" note.
 
 - **Current Feed (`GET /current-feed`, 2026-09) — a public mixtape-tracklist
   page listing the writers/publications Brian actually reads, derived live
-  from the `feeds` table.** Side A ("Old School") / Side B ("New School")
-  are two per-feed columns — `feeds.show_on_current_feed`/
+  from the `feeds` table.** Side A ("Timeless Classics") / Side B ("The New
+  Generation") — renamed from the original "Old School"/"New School" in a
+  2026-09 cassette-treatment follow-up, see below — are two per-feed
+  columns — `feeds.show_on_current_feed`/
   `feeds.current_feed_side` — not section-name matching, per a mid-flight
   redesign: the original section-based design (Blogs=Side A,
   Substacks=Side B, News/Market Insights excluded) left one real gap, a
@@ -8946,8 +8948,9 @@ it supersedes the old "`/save` is token-gated" note.
   existing rows once from their section at the time; **new feeds default to
   hidden** (Brian's own call — deliberate over unreviewed). Admin control is
   one auto-submitting dropdown per row on `/admin/reader/feeds` itself
-  (Hidden/Old school/New school — `_CURRENT_FEED_SELECT_CHOICES`, shared
-  with the add/edit form) plus the same control there. **The hidden-feed
+  (Hidden/Timeless Classics/The New Generation —
+  `_CURRENT_FEED_SELECT_CHOICES`, shared with the add/edit form) plus the
+  same control there. **The hidden-feed
   footnote is public, not admin-only** — since a hidden feed is still in
   FP&A Buddy's web-search allowlist, silently hiding it from the tracklist
   would misrepresent the tool: `_current_feed_hidden_footnote()` names every
@@ -9221,6 +9224,80 @@ it supersedes the old "`/save` is token-gated" note.
   sort key, and confirming the old rank text is genuinely gone) and
   `test_order_column_headers_are_clickable_and_carry_a_sort_indicator`
   for the regression coverage.
+
+- **`/current-feed` cassette J-card visual treatment (2026-09) — an
+  investigate-and-propose build with a real approval gate, plus a side
+  rename: "Old School"/"New School" become "Timeless Classics"/"The New
+  Generation" everywhere.** Brian's ask was the literal 1990s cassette
+  J-card, not a stylistic nod — the paper card, the ruled tracklist form,
+  a boxed side letter, tilt, shadow. Investigated first: BRAND.md §4's
+  graffiti/street-art accent layer is a closed, four-item vocabulary with
+  no room for a paper-card panel or a plastic case, so this needed a new,
+  page-scoped BRAND.md exception before any CSS shipped — added as a
+  fifth, explicitly-scoped item, not a general license (see BRAND.md §4).
+  Two full mockups (card-only, and card-plus-plastic-case) were built and
+  screenshotted at 1280px/390px before writing real code, per the standing
+  "mock it and show, don't just describe it" instruction for this kind of
+  visual proposal. **The case didn't ship** — it read as a convincing
+  stylized case, never photorealistic (a flat gradient sheen and a
+  border-radius aren't real depth cues), and Brian's call was that its
+  cost wasn't worth it against the plainer card alone, which already reads
+  as "cassette" without anything that looks like it's trying. Only
+  `.cf-tape-card` (off-white panel, 1px border, warm-black shadow, a
+  slight `-0.6deg` tilt) shipped.
+  **Two direct-feedback iterations shaped the final boxed-letter
+  treatment.** The first mockup paired the box with a small preprinted
+  "DATE/TIME · NOISE REDUCTION" label; cut on direct instruction, since a
+  standalone "Side A" eyebrow, the boxed letter, and the side's own name
+  were three labels doing one job. The tradeoff was flagged before
+  cutting, not silently dropped: on a real J-card, that preprinted form
+  text is what makes the handwriting read as filled INTO a form, so
+  losing it makes the box read as a plain label rather than a form field
+  — accepted as the simpler version to try first, confirmed against a
+  real screenshot with real fonts loaded. The box itself stayed — "the
+  strongest cassette cue on the page," per direct instruction — merged
+  onto one line directly beside the side's name, with the standalone
+  eyebrow removed and `aria-hidden="true"` on the box (the heading already
+  names the side). Ruled lines are dotted and darkened/thickened from an
+  earlier, fainter pass specifically so they read as part of a printed
+  form rather than a plain content divider that happens to be dotted.
+  **Side names became mixtape themes, not category labels, in the same
+  pass** — "Old School"/"New School" (the original 2026-09 launch copy)
+  are now "Timeless Classics"/"The New Generation", in exactly the two
+  places the old names appeared: `_CURRENT_FEED_SIDE_LABELS`' heading on
+  `/current-feed` itself and `_CURRENT_FEED_SELECT_CHOICES`' admin
+  dropdown label on `/admin/reader/feeds` — one vocabulary, so an admin
+  picking a side sees the same name a visitor reads. **Display copy
+  only** — the stored `current_feed_side` values (`old_school`/
+  `new_school`) are untouched; a display rename doesn't need a migration.
+  Checked for crowding before shipping: the admin `<select>` sits in an
+  `11%`-width table column and a closed `<select>`'s box doesn't reflow on
+  a longer selected-option string (the browser truncates the closed-state
+  text, never the box), and the `/current-feed` page line fits its
+  half-width grid column at 1280px+ with no measured crowding either — no
+  shortening needed on either surface. No coral anywhere on the page,
+  still — the paper panel and its shadow are achromatic, matching the
+  black-ink-on-white-card reference photo, and Brian's explicit call was
+  that the page doesn't need a coral moment to work. At `max-width:430px`
+  the tilt, shadow, and rounded corners all flatten to a plain bordered
+  rectangle — no case (there never was one), no tilt, no shadow drama on a
+  phone; the existing 800px `.cf-sides` stacking breakpoint needed no
+  change. **Verified against real Google Fonts before sign-off, not this
+  sandbox's fallback-font default** — this sandbox's headless Chromium
+  normally can't reach `fonts.googleapis.com` at all (a documented,
+  standing limitation elsewhere in this doc), but a direct `curl` check
+  found the outbound TLS proxy actually does reach it; Chromium was only
+  refusing the connection because it doesn't trust the proxy's own CA the
+  way system `curl` does. Launched with `--ignore-certificate-errors` for
+  this one verification render (never something to carry into production
+  code or a committed test) and confirmed via `document.fonts` — not just
+  the CSS declaration, which reports what was asked for regardless of
+  whether it loaded — that Caveat 700 genuinely reached `status:'loaded'`
+  before the screenshot was taken; a fallback-font screenshot would have
+  completely hidden the handwriting-versus-print contrast the whole
+  review was about. See ARCHITECTURE.md's "Current Feed" section for the
+  full write-up and `tests/test_current_feed.py` for the regression
+  coverage.
 
 - **Coral-guard correction (2026-09) — the module-level bool from the PR 16
   recursion-fix bullet above WAS a real cross-thread race after all, and

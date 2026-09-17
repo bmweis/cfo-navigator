@@ -333,24 +333,49 @@ undecorated).
    (navy in the nav, white in the footer) — only the font swaps. No rotation, no
    halo, no separate decorative stamp elsewhere on the page; this reskins the
    wordmark text in place, sitewide, every page and breakpoint.
+5. **The cassette J-card panel — a single, page-scoped exception, `/current-feed`
+   only (2026-09).** Not a fifth generally-available accent — the closed
+   four-item vocabulary above still holds for every other page. `/current-feed`'s
+   tracklist sits inside `.cf-tape-card`: an off-white paper panel (`#fbfaf6`,
+   reusing the existing GER-projected-quarter-input aux color rather than a
+   new hex) with a warm-gray border (`#d0cac0`, likewise reusing the reader
+   empty-state input border), a warm-black drop shadow, and a slight (`-0.6deg`)
+   tilt — the physical cassette J-card the page's copy already describes, not a
+   nod to the aesthetic. A `2px` graffiti-ink bordered square (`.cf-ab-box`,
+   reusing `--ink-graffiti`) holds each side's letter (A/B) directly beside its
+   name. Approved after two full mockups (card-only, and card-plus-a-plastic-
+   case) were built and screenshotted before any code shipped, at Brian's
+   explicit ask that CSS's real ceiling be reported honestly rather than
+   guessed at: the case (a tinted gradient, a diagonal sheen, repeating-gradient
+   spine-hinge dashes) read as a convincing STYLIZED case, never photorealistic
+   — a flat gradient and a border-radius aren't real depth — and its cost wasn't
+   judged worth it against the plainer card, which already reads as "cassette"
+   on its own. **Only the card shipped; there is no case anywhere on the live
+   page.** At `max-width:430px` the tilt, shadow, and rounded corners all
+   flatten to a plain bordered rectangle — no case, no tilt, no shadow drama on
+   a phone. Never extrapolate this to another page without the same
+   investigate-and-propose gate this one went through.
 
 **New tokens** (see §7 for the generated block): `--ink-graffiti:#0d0d0d` (sticker
-borders/shadows only — never a fill or text color elsewhere), `--font-sticker:
-'Caveat',cursive`, and `--font-wordmark:'Permanent Marker',cursive` (wordmark-only —
-no exception; a first pass at `/current-feed` below tried one and it was reversed).
+borders/shadows, plus the cassette A/B box border above — never a fill or text
+color elsewhere), `--font-sticker:'Caveat',cursive`, and `--font-wordmark:
+'Permanent Marker',cursive` (wordmark-only — no exception; a first pass at
+`/current-feed` below tried one and it was reversed).
 **One approved, deliberate exception to "sticker-only" for `--font-sticker`**:
 `/current-feed`'s tracklist (2026-09) sets each track's title in
-`var(--font-sticker)` at 16px/700 (no rotation, border, or drop-shadow — the plain
-text style only, not the full sticker-badge treatment), title only — never
-metadata (author, cadence stay DM Sans). A first pass used the wordmark font
-instead, at 20px; reversed on direct instruction, since Permanent Marker is built
-for a word or two, not a list of names of varying length, and Caveat is already
-proven readable at this size in sticker badges. Don't extrapolate either exception
-onto a denser list (an admin table row, a card grid of many short labels) without
-the same size/short-text reasoning holding.
+`var(--font-sticker)` at 18px/700 (bumped from an initial 16px in a later pass;
+no rotation, border, or drop-shadow — the plain text style only, not the full
+sticker-badge treatment), title only — never metadata (author, cadence stay DM
+Sans). A first pass used the wordmark font instead, at 20px; reversed on direct
+instruction, since Permanent Marker is built for a word or two, not a list of
+names of varying length, and Caveat is already proven readable at this size in
+sticker badges. Don't extrapolate either exception onto a denser list (an admin
+table row, a card grid of many short labels) without the same size/short-text
+reasoning holding.
 
-That's the entire graffiti vocabulary. No broader illustration style, no all-over
-pattern, no graffiti marks on admin tables, forms, or the chat UI.
+That's the entire graffiti vocabulary, plus the one page-scoped cassette-panel
+exception above. No broader illustration style, no all-over pattern, no
+graffiti marks on admin tables, forms, or the chat UI.
 
 ---
 

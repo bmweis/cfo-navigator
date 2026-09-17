@@ -4382,8 +4382,8 @@ def ai_surface_article(request: Request, slug: str):
 # generates, so this doubles as "which sources can FP&A Buddy's web tier
 # actually draw from."
 #
-# Side A ("Old School") / Side B ("New School") are driven by three per-feed
-# columns — feeds.show_on_current_feed / feeds.current_feed_side /
+# Side A ("Timeless Classics") / Side B ("The New Generation") are driven by
+# three per-feed columns — feeds.show_on_current_feed / feeds.current_feed_side /
 # feeds.current_feed_order (running order within a side, 2026-09 follow-up)
 # — not by matching feed_sections.name (the original design). That first design
 # worked for the two sections it named (Blogs, Substacks) but left a real
@@ -4397,7 +4397,14 @@ def ai_surface_article(request: Request, slug: str):
 # _CURRENT_FEED_SELECT_CHOICES (webapp/app.py, feeds admin) for where it's
 # set going forward. New feeds default to NOT shown — Brian's own call: he'd
 # rather set it deliberately than have something appear unreviewed.
-_CURRENT_FEED_SIDE_LABELS = (("old_school", "A", "Old School"), ("new_school", "B", "New School"))
+#
+# The display names ("Timeless Classics" / "The New Generation") are copy
+# only — the stored side values (old_school / new_school) never changed and
+# never needed to; renaming what a mixtape side is CALLED shouldn't touch
+# what's actually stored under it. _CURRENT_FEED_SELECT_CHOICES (the admin
+# dropdown) uses the identical two display strings so the two surfaces can't
+# drift onto different names for the same side.
+_CURRENT_FEED_SIDE_LABELS = (("old_school", "A", "Timeless Classics"), ("new_school", "B", "The New Generation"))
 
 
 def _current_feed_hidden_footnote(feeds: list) -> str:
@@ -4459,6 +4466,18 @@ def _current_feed_side_html(label: str, heading: str, feeds: list) -> str:
     cassette/vinyl convention — Side A's track 1 and Side B's track 1 are
     both "1", not a continuation), matching how a mixtape actually reads.
 
+    The boxed letter (A/B) sits directly beside the side's name on one
+    line — a deliberate simplification after an earlier build proposal
+    also carried a standalone "Side A" eyebrow and a small preprinted-
+    looking "Date/Time / Noise Reduction" form label beside the box. Both
+    were cut: with the side name, the box, AND an eyebrow all naming the
+    same thing, it read as three labels doing one job. The tradeoff,
+    flagged and accepted before cutting it — on a real J-card, that
+    preprinted form text is what makes the handwritten track names read
+    as filled INTO a form; losing it makes the box read as a plain label
+    rather than a form field. Kept anyway, per explicit direction, as the
+    simpler version to try first.
+
     No coral here — Side A/Side B is structure, and per explicit direction
     coral on structure reads as decoration, not a signal. See current_feed()
     for where (if anywhere) this page spends its one coral moment."""
@@ -4470,7 +4489,7 @@ def _current_feed_side_html(label: str, heading: str, feeds: list) -> str:
                         + '</ol>')
     return f"""<div class="cf-side">
   <div class="cf-side-header">
-    <span class="cf-side-label">Side {label}</span>
+    <span class="cf-ab-box" aria-hidden="true">{label}</span>
     <h2 class="cf-side-heading">{_esc(heading)}</h2>
   </div>
   {tracks_html}
@@ -4478,15 +4497,24 @@ def _current_feed_side_html(label: str, heading: str, feeds: list) -> str:
 
 
 _CURRENT_FEED_CSS = """
-.cf-sides{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:26px;}
+.cf-tape-card{background:#fbfaf6;border:1px solid #d0cac0;border-radius:3px;
+  box-shadow:0 14px 30px -8px rgba(20,15,5,.28),0 2px 6px rgba(20,15,5,.10);
+  transform:rotate(-0.6deg);padding:28px 30px;margin-top:26px;position:relative;}
+.cf-tape-card::before{content:"";position:absolute;inset:0;border-radius:3px;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.5);pointer-events:none;}
+.cf-sides{display:grid;grid-template-columns:1fr 1fr;gap:40px;}
 @media(max-width:800px){.cf-sides{grid-template-columns:1fr;gap:34px;}}
-.cf-side-header{margin-bottom:16px;}
-.cf-side-label{display:block;font-size:12px;font-weight:600;color:var(--muted);
-  text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px;}
+.cf-side-header{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
+.cf-ab-box{flex:0 0 auto;width:22px;height:22px;border:2px solid var(--ink-graffiti);
+  display:flex;align-items:center;justify-content:center;font:800 13px var(--font-head);
+  color:var(--ink-graffiti);border-radius:2px;background:#fff;line-height:1;}
 .cf-side-heading{margin:0;font-size:21px;}
 .cf-tracklist{list-style:none;margin:0;padding:0;}
-.cf-track{display:flex;align-items:baseline;gap:14px;padding:10px 0;border-bottom:1px solid var(--line);}
+.cf-track{display:flex;align-items:baseline;gap:14px;padding:10px 0;border-bottom:1.5px dotted rgba(15,15,10,.62);}
 .cf-track:last-child{border-bottom:none;}
+@media(max-width:430px){
+  .cf-tape-card{transform:none;border-radius:2px;box-shadow:0 4px 14px rgba(20,15,5,.18);padding:18px 16px;}
+}
 .cf-track-num{flex:0 0 auto;width:24px;font:600 13px var(--font-body);color:var(--muted);
   font-variant-numeric:tabular-nums;}
 .cf-track-body{min-width:0;flex:1 1 auto;}
@@ -4501,7 +4529,8 @@ _CURRENT_FEED_CSS = """
 @app.get("/current-feed", response_class=HTMLResponse)
 def current_feed(request: Request):
     """The writers and publications Brian actually reads, rendered as a
-    mixtape tracklist — Side A ("Old School") and Side B ("New School").
+    mixtape tracklist — Side A ("Timeless Classics") and Side B ("The New
+    Generation").
     Derived entirely from the live `feeds` table (Library.list_feeds(),
     already joined to feed_sections.name for the hidden-feed footnote) — no
     hardcoded names, no hardcoded counts, so a new subscription shows up
@@ -4554,8 +4583,10 @@ def current_feed(request: Request):
 <p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">I can't hand you my feed. I pay for some of this. But I can show you what's on the tape.</p>
 <p style="color:var(--ink-soft);margin:0 0 4px;font-size:15.5px;line-height:1.6;">These are the writers I read, in two eras. It's also the exact list FP&amp;A Buddy searches when it goes to the web&mdash;if an answer cites something from trusted web, it came from one of these.</p>
 <p style="color:var(--muted);font-size:13px;margin:0;">Every name links to the writer's own site, not the raw feed. This list changes as my subscriptions do, with no hand-maintenance behind it.</p>
+<div class="cf-tape-card">
 <div class="cf-sides">
 {sides_html}
+</div>
 </div>
 {footnote_html}
 </div>
@@ -26492,7 +26523,24 @@ def _cookie_env_var_name(domain: str) -> str:
 # any other value is a real current_feed_side and implies shown=True.
 # Shared by the admin list's per-row auto-submit control and the
 # add/edit form, so the two surfaces can't drift on option order/labels.
-_CURRENT_FEED_SELECT_CHOICES = (("", "Hidden"), ("old_school", "Old school"), ("new_school", "New school"))
+#
+# Display labels match /current-feed's own side names exactly ("Timeless
+# Classics" / "The New Generation") — one vocabulary in both places, so an
+# admin picking a side here sees the same name a visitor sees on the page.
+# The stored values (old_school / new_school) are unaffected by the rename;
+# only what's printed next to them changed.
+#
+# The rename (2026-09, part of the cassette J-card treatment) needed a
+# column-width follow-up: the previous, shorter display copy fit the
+# original Current Feed/Order/Actions widths (11%/9%/17%) comfortably, but
+# the longer replacement copy clipped inside a closed <select> at both 11%
+# and a first-pass 14% widening — confirmed live, a native <select>'s own
+# dropdown-arrow chrome eats real width beyond the box's own CSS width, on
+# top of the text itself. Settled at 16%/7%/15% (see .ff-cf/.ff-order/
+# .ff-actions on /admin/reader/feeds, and the matching <th> widths a few
+# lines below them) once a live measurement showed the box comfortably
+# wider than the text again.
+_CURRENT_FEED_SELECT_CHOICES = (("", "Hidden"), ("old_school", "Timeless Classics"), ("new_school", "The New Generation"))
 
 
 def _current_feed_select_options(current_value: str) -> str:
@@ -26855,9 +26903,18 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .ff-section{{width:11%;}}
 .ff-cookie{{width:{_COL_WIDTH_STATUS}px;text-align:center;}}
 .ff-sub{{width:9%;text-align:center;}}
-.ff-cf{{width:11%;}}
-.ff-order{{width:9%;}}
-.ff-actions{{width:17%;text-align:right;white-space:nowrap;}}
+/* NOTE: with table-layout:fixed, the browser reads column widths from the
+   FIRST row only — here, the <thead><tr>'s own inline width="..." styles,
+   not these .ff-* class rules. These class widths are effectively inert
+   for column sizing (kept for the text-align/mobile-label rules that DO
+   read them below); the real controlling values live on the <th> tags
+   themselves, a few dozen lines down. Change both together, or a width
+   edit here silently does nothing. See the Python comment above
+   _CURRENT_FEED_SELECT_CHOICES for why these three columns' widths
+   changed from their original 11/9/17%. */
+.ff-cf{{width:16%;}}
+.ff-order{{width:7%;}}
+.ff-actions{{width:15%;text-align:right;white-space:nowrap;}}
 .ff-empty{{padding:16px 12px;color:var(--muted);font-size:13.5px;}}
 /* Sections table — same shape as the feed table, three columns. */
 .fs-name{{width:50%;}}
@@ -26925,11 +26982,11 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
         onclick="ffSortBy('cookie')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('cookie');}}">Cookie<span class="ff-sort-ind" aria-hidden="true"></span></th>
       <th style="width:9%;text-align:center;" data-sort="subscriber" tabindex="0" role="button" aria-label="Sort by subscriber"
         onclick="ffSortBy('subscriber')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('subscriber');}}">Subscriber<span class="ff-sort-ind" aria-hidden="true"></span></th>
-      <th style="width:11%;" data-sort="current-feed" tabindex="0" role="button" aria-label="Sort by Current Feed"
+      <th style="width:16%;" data-sort="current-feed" tabindex="0" role="button" aria-label="Sort by Current Feed"
         onclick="ffSortBy('current-feed')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('current-feed');}}">Current Feed<span class="ff-sort-ind" aria-hidden="true"></span></th>
-      <th style="width:9%;" data-sort="order" tabindex="0" role="button" aria-label="Sort by order: groups by side, then position within it"
+      <th style="width:7%;" data-sort="order" tabindex="0" role="button" aria-label="Sort by order: groups by side, then position within it"
         onclick="ffSortBy('order')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('order');}}">Order<span class="ff-sort-ind" aria-hidden="true"></span></th>
-      <th style="width:17%;text-align:right;">Actions</th>
+      <th style="width:15%;text-align:right;">Actions</th>
     </tr></thead>
     <tbody id="ff-tbody">{feed_rows}</tbody>
   </table>

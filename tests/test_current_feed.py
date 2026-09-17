@@ -102,10 +102,17 @@ def test_renders_both_sides_from_live_feeds(env):
     html = r.text
     assert "Old Blog Writer" in html
     assert "New Substack Writer" in html
-    assert "Old School" in html
-    assert "New School" in html
-    assert "Side A" in html
-    assert "Side B" in html
+    assert "Timeless Classics" in html
+    assert "The New Generation" in html
+    assert '<span class="cf-ab-box" aria-hidden="true">A</span>' in html
+    assert '<span class="cf-ab-box" aria-hidden="true">B</span>' in html
+    # the old standalone "Side A"/"Side B" eyebrow and the pre-cassette
+    # "Old School"/"New School" copy are both gone, replaced by the boxed
+    # letter beside the side's mixtape-theme name
+    assert "Side A" not in html
+    assert "Side B" not in html
+    assert "Old School" not in html
+    assert "New School" not in html
 
 
 def test_links_go_to_the_homepage_not_the_raw_feed(env):
@@ -894,3 +901,94 @@ def test_seed_current_feed_order_noops_when_nothing_shown(lib):
     lib.add_feed_section("Blogs")
     result = lib.seed_current_feed_order()
     assert result == {"seeded": False, "feeds": 0}
+
+
+# --- cassette J-card visual treatment (2026-09) ---------------------------
+
+def test_tape_card_panel_wraps_both_sides(env):
+    """The tracklist sits inside a single paper-card panel (.cf-tape-card)
+    wrapping .cf-sides — the approved treatment (card only, no plastic
+    case, per BRAND.md §4's new page-scoped exception)."""
+    appmod, client = env
+    _seed(
+        appmod,
+        old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")],
+        new_school=[("New Substack Writer", "https://newsub.example/feed", "https://newsub.example/")],
+    )
+    html = client.get("/current-feed").text
+    assert '<div class="cf-tape-card">' in html
+    assert re.search(r'<div class="cf-tape-card">\s*<div class="cf-sides">', html)
+    # no plastic-case markup anywhere — that half of the proposal was
+    # explicitly not shipped
+    assert "cf-tape-case" not in html
+    assert "tape-case" not in html
+
+
+def test_tape_card_css_has_tilt_shadow_and_mobile_flatten(env):
+    appmod, client = env
+    _seed(appmod, old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")])
+    html = client.get("/current-feed").text
+    assert ".cf-tape-card{" in html
+    assert "transform:rotate(-0.6deg)" in html
+    assert "box-shadow:" in html
+    # mobile: tilt/shadow/rounding all flatten, no case to strip since none shipped
+    assert "@media(max-width:430px)" in html
+    mobile_block = html.split("@media(max-width:430px)", 1)[1]
+    assert "transform:none" in mobile_block
+
+
+def test_ruled_lines_are_dotted_not_solid(env):
+    """Track dividers read as printed form ruling (dotted), not a plain
+    solid content divider — darkened/thickened from an earlier, fainter
+    mockup pass specifically so they don't read as "a weak border"."""
+    appmod, client = env
+    _seed(appmod, old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")])
+    html = client.get("/current-feed").text
+    assert "border-bottom:1.5px dotted" in html
+
+
+def test_boxed_letter_sits_beside_the_side_name_on_one_line(env):
+    """The strongest cassette cue (the boxed A/B letter) is kept, merged
+    onto one line with the side's own heading — no standalone "Side A"
+    eyebrow and no preprinted "Date/Time / Noise Reduction" form-label
+    text (both cut on direct feedback: three labels for one side name)."""
+    appmod, client = env
+    _seed(appmod, old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")])
+    html = client.get("/current-feed").text
+    assert re.search(
+        r'<div class="cf-side-header">\s*'
+        r'<span class="cf-ab-box" aria-hidden="true">A</span>\s*'
+        r'<h2 class="cf-side-heading">Timeless Classics</h2>',
+        html,
+    )
+    assert "Date/Time" not in html
+    assert "Noise Reduction" not in html
+    assert "NOISE REDUCTION" not in html
+
+
+def test_no_coral_on_the_cassette_treatment(env):
+    """The panel and its shadow are achromatic, matching the black-ink-
+    on-white-card reference — no coral moment spent on this page. Scoped
+    to the page's own <div class="page page-standard">...</div> body, not
+    the full response — the sitewide :root token block legitimately
+    defines --coral/--coral-deep for every page and would false-positive
+    a whole-response substring check."""
+    appmod, client = env
+    _seed(appmod, old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")])
+    html = client.get("/current-feed").text
+    body = html.split('<div class="page page-standard">', 1)[1].split("<style>", 1)[0]
+    assert "coral" not in body.lower()
+
+
+def test_admin_dropdown_uses_the_same_side_names_as_the_page(env):
+    """One vocabulary in both places — the admin Current Feed dropdown on
+    /admin/reader/feeds must say what /current-feed itself says, not the
+    retired "Old school"/"New school" copy."""
+    appmod, client = env
+    _seed(appmod, old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")])
+    _login(client)
+    html = client.get("/admin/reader/feeds").text
+    assert '<option value="old_school" selected>Timeless Classics</option>' in html
+    assert '<option value="new_school">The New Generation</option>' in html
+    assert "Old school" not in html
+    assert "New school" not in html
