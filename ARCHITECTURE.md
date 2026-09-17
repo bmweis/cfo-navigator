@@ -2610,6 +2610,25 @@ explicitly to `/current-feed`, not a general license) and
 ruled-line styling, the boxed-letter/heading merge, and the tape-card
 panel's presence at both viewport widths.
 
+**Copy revision + "Last mixed" stamp (2026-09 follow-up).** The `<h1>`
+moved to sentence case ("Current feed", per BRAND.md §3.2); the intro
+copy and `_current_feed_hidden_footnote()`'s output were both revised —
+the footnote is now a lead sentence followed by a real `<ul>` of the same
+per-section `{section}: {names}` groups it always derived, plus a new
+closing CTA line linking "Send me the demo track" to `/contact`. A new
+`_current_feed_stamp_date(feeds)` computes `MAX(feeds.created_at)` from
+the already-fetched `feeds` list — deliberately the date a feed was
+*added* (`add_feed()` sets `created_at` on every insert; `update_feed()`
+never touches it), not a general "last updated" timestamp, since editing
+an existing feed's name/section/etc. must never move the stamp forward.
+Renders as `.cf-stamp`, a small white write-on cassette-label box in a
+`justify-content:flex-end` row placed after `.cf-sides` inside
+`.cf-tape-card` — normal flow, not an absolute overlay, so it can never
+overlap either side's tracklist regardless of track count. Renders only
+when real data exists (a non-empty, parseable `created_at`); with no
+feeds, or an unparseable value, the stamp is simply absent rather than
+falling back to a different timestamp.
+
 ### Feeds-admin fixes: cookie domain registry, and per-row subscriber-cookie health (2026-09)
 
 Two separate fixes on `/admin/reader/feeds`, diagnosed and shipped in the

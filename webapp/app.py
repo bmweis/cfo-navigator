@@ -4432,23 +4432,28 @@ def _current_feed_hidden_footnote(feeds: list) -> str:
     Derived entirely from `feeds` at render time — never a hardcoded list
     of names or sections, so it can't go stale as feeds are added, removed,
     or reassigned. Returns "" when nothing is hidden (every feed marked
-    shown), since there's nothing to disclose."""
+    shown), since there's nothing to disclose. Restructured (2026-09) from
+    one run-on sentence into a lead sentence plus a real bulleted list —
+    only the framing changed, the per-section groups are exactly the same
+    data-derived {section}: {names} pairs as before."""
     hidden = [f for f in feeds if not f["show_on_current_feed"]]
     if not hidden:
         return ""
     by_section: dict = {}
     for f in hidden:
         by_section.setdefault(f["section_name"], []).append(f["name"])
-    groups = [
-        f'{_esc(section)}: {", ".join(_esc(n) for n in sorted(names))}'
+    items_html = "".join(
+        f'<li>{_esc(section)}: {", ".join(_esc(n) for n in sorted(names))}</li>'
         for section, names in sorted(by_section.items())
-    ]
+    )
     return (
-        '<p style="color:var(--muted);font-size:13px;margin:32px 0 0;padding-top:16px;'
+        '<div style="color:var(--muted);font-size:13px;margin:32px 0 0;padding-top:16px;'
         'border-top:1px solid var(--line);line-height:1.6;">'
-        f'<strong>Not on the tape:</strong> {" &middot; ".join(groups)}. '
-        "They're excluded from the tracklist format, not from search&mdash;"
-        "FP&amp;A Buddy still searches every one of them.</p>"
+        '<p style="margin:0 0 10px;"><strong>Not on the tape:</strong> While I wish I could '
+        "read everything, time is finite&mdash;so the Buddy also pulls from a few other "
+        'trusted sites for more timely news and data.</p>'
+        f'<ul style="margin:0;padding-left:20px;">{items_html}</ul>'
+        '</div>'
     )
 
 
@@ -4510,6 +4515,25 @@ def _current_feed_side_html(label: str, heading: str, feeds: list) -> str:
 </div>"""
 
 
+def _current_feed_stamp_date(feeds: list) -> str:
+    """The date Brian last added a feed — MAX(feeds.created_at) — not a
+    general "last updated" timestamp (update_feed() never touches
+    created_at, so this can only move when a genuinely new feed is added,
+    never when an existing one is edited/reordered/re-sided). Returns ""
+    when there's nothing to show (no feeds, or every created_at is
+    unparseable), in which case the "Last mixed" stamp doesn't render at
+    all — this is real data or nothing, never a substitute timestamp."""
+    dates = [f["created_at"] for f in feeds if f.get("created_at")]
+    if not dates:
+        return ""
+    newest = max(dates)
+    try:
+        dt = datetime.fromisoformat(newest.replace("Z", "+00:00"))
+    except Exception:
+        return ""
+    return dt.strftime("%-d %b %Y")
+
+
 _CURRENT_FEED_CSS = """
 .cf-tape-card{background:#fbfaf6;border:1px solid #d0cac0;border-radius:3px;
   box-shadow:0 14px 30px -8px rgba(20,15,5,.28),0 2px 6px rgba(20,15,5,.10);
@@ -4518,6 +4542,14 @@ _CURRENT_FEED_CSS = """
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.5);pointer-events:none;}
 .cf-sides{display:grid;grid-template-columns:1fr 1fr;gap:40px;}
 @media(max-width:800px){.cf-sides{grid-template-columns:1fr;gap:34px;}}
+.cf-stamp-row{display:flex;justify-content:flex-end;margin-top:22px;}
+.cf-stamp{background:#fff;border:1px solid #d0cac0;border-radius:2px;
+  padding:6px 12px 5px;box-shadow:0 3px 8px rgba(20,15,5,.16);
+  transform:rotate(1.4deg);display:flex;flex-direction:column;
+  align-items:center;gap:1px;text-align:center;}
+.cf-stamp-label{font:700 8px var(--font-head);letter-spacing:.09em;
+  color:var(--ink-soft);text-transform:uppercase;}
+.cf-stamp-date{font:700 15px var(--font-sticker);color:var(--ink-graffiti);}
 .cf-side-header{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
 .cf-ab-box{flex:0 0 auto;width:22px;height:22px;border:2px solid var(--ink-graffiti);
   display:flex;align-items:center;justify-content:center;font:800 13px var(--font-head);
@@ -4590,19 +4622,28 @@ def current_feed(request: Request):
     )
     footnote_html = _current_feed_hidden_footnote(feeds)
 
+    stamp_date = _current_feed_stamp_date(feeds)
+    stamp_html = (
+        f'<div class="cf-stamp-row"><div class="cf-stamp" aria-hidden="true">'
+        f'<span class="cf-stamp-label">Last mixed</span>'
+        f'<span class="cf-stamp-date">{_esc(stamp_date)}</span></div></div>'
+        if stamp_date else ""
+    )
+
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">&larr; How this is built</a></p>
-<h1 style="margin-bottom:6px;">Current Feed</h1>
-<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">You know that friend whose mixtape you'd borrow? The one where every track was something you'd never have found on your own?</p>
-<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">I can't hand you my feed. I pay for some of this. But I can show you what's on the tape.</p>
-<p style="color:var(--ink-soft);margin:0 0 4px;font-size:15.5px;line-height:1.6;">These are the writers I read, in two eras. It's also the exact list FP&amp;A Buddy searches when it goes to the web&mdash;if an answer cites something from trusted web, it came from one of these.</p>
-<p style="color:var(--muted);font-size:13px;margin:0;">Every name links to the writer's own site, not the raw feed. This list changes as my subscriptions do, with no hand-maintenance behind it.</p>
+<h1 style="margin-bottom:6px;">Current feed</h1>
+<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">Remember that friend who had the best mixtape? The one you couldn't get enough of and seemed to have the best stuff you didn't know existed.</p>
+<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">While I can't give you direct access to my feed, I can do the next best thing. Below is my reading list, the same list that powers the FP&amp;A Buddy, split into two eras. If the Buddy cites something from trusted web, it came from one of these.</p>
+<p style="color:var(--muted);font-size:13px;margin:0;">Every name links to the writer's own site, not the raw feed. And the list is dynamic, changing as I change my own reading list.</p>
 <div class="cf-tape-card">
 <div class="cf-sides">
 {sides_html}
 </div>
+{stamp_html}
 </div>
 {footnote_html}
+<p style="color:var(--muted);font-size:13px;margin:16px 0 0;">Have something you think I should add to the list? <a href="/contact">Send me the demo track</a> and you might see it show up on a future update.</p>
 </div>
 <style>{_CURRENT_FEED_CSS}</style>"""
     return HTMLResponse(_page("Current Feed—Brian Weisberg", "About", body, role=_role(request)))
