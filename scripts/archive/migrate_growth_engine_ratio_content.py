@@ -75,8 +75,8 @@ Per the write-then-read-back standing practice, an --apply run re-reads the
 row afterward and confirms body_md/date_label/sort_key match what was set.
 
 Usage:
-    python -m scripts.migrate_growth_engine_ratio_content --db library.db            # preview
-    python -m scripts.migrate_growth_engine_ratio_content --db library.db --apply     # write for real
+    python -m scripts.archive.migrate_growth_engine_ratio_content --db library.db            # preview
+    python -m scripts.archive.migrate_growth_engine_ratio_content --db library.db --apply     # write for real
 """
 from __future__ import annotations
 

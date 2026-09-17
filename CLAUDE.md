@@ -9499,6 +9499,88 @@ it supersedes the old "`/save` is token-gated" note.
   timeout — the test that matters most, since a naive lock-based "fix"
   would have hung it permanently rather than merely run it slowly.
 
+- **Social share cards — Open Graph / Twitter Card metadata (2026-09).**
+  Every page previously shared as a bare link: no description, no image
+  — a grep sweep confirmed zero `og:`/`twitter:` tags anywhere. Shipped in
+  two planned phases; **Phase 2 (automated image generation) is killed
+  outright, not deferred** — recorded here with the reasoning, not just
+  the outcome, so a future session doesn't quietly rebuild it.
+  **Phase 1 (shipped)**: `_page()` (`webapp/app.py`, the one shared
+  `<head>`-assembly function behind 181 route call sites) gained three
+  optional keyword params — `request` (for an accurate absolute `og:url`;
+  threaded through only the handful of genuinely public/shareable pages —
+  `/`, `/about`, `/thought-leadership`, and the two catch-all article
+  routes — everything else, mostly admin, falls back to the bare
+  `PUBLIC_BASE` root rather than erroring), `og_description`, and
+  `og_image_slug` — and now emits `og:title`/`og:description`/`og:image`/
+  `og:url`/`og:type`/`og:site_name`, the four `twitter:*` tags, and
+  `<meta name="description">` on every page, with a hardcoded
+  `_OG_DEFAULT_DESCRIPTION` fallback when a route passes nothing. `og:title`
+  reuses `_short_title(title)` — the same suffix-stripped value already
+  computed for the real `<title>` tag, just without the "BMW CFO · "
+  prefix. Committed 1200×630 PNGs live in `webapp/static/og/`, slug-keyed
+  (`{slug}.png`) with one `default.png` fallback for everything else;
+  `_og_image_slugs()` is a module-level, computed-once filename-set cache
+  (`_OG_IMAGE_SLUGS`, same "doesn't reset between tests in the same
+  process" caveat as `webapp.tasks`' own `_checks_cache` — tests that
+  add/remove files under `_OG_DIR` must reset it explicitly) rather than
+  an `os.path.exists()` per render. **A real Phase 0 finding that changed
+  the actual route shape**: `/static/{filename}` is a single-path-segment
+  route with no `:path` converter, so `/static/og/{slug}.png` as originally
+  proposed can't route at all — a nested URL simply never matches. Fixed
+  with a dedicated sibling route, `GET /static/og/{filename}` → a new
+  `_OG_DIR`, mirroring the established precedent every other "committed
+  images in a subdirectory" need on this site already uses
+  (`tools_software_screenshot`, `tools_software_logo`, etc.) — same
+  basename-only traversal guard as `/static/{filename}`.
+  **Escaping — two different treatments for what looks like the same
+  field, confirmed live via production data before writing any code**:
+  `original_content.teaser` is stored PRE-ENCODED (real HTML entities
+  already in the string — `"R&amp;D"`, `"&mdash;"`, confirmed against the
+  live growth-engine-ratio row) — the normal `_esc()` would double-encode
+  it (`R&amp;amp;D`, rendering as literal `&amp;D` to a scraper), so it's
+  interpolated through a new, narrowly-scoped `_esc_attr_quote_only()`
+  instead — escapes only a literal `"` (the one character that can break
+  out of the `content="..."` attribute), deliberately leaves `&` alone,
+  matching `_oc_card_tuple`'s own established raw-interpolation precedent
+  for this exact field. `ai_surfaces.teaser`, by contrast, is stored as
+  genuinely plain text (confirmed the same way) and goes through the
+  ordinary `_esc()`. Both regression tests are proven to actually fail
+  against the wrong escaping choice, not just pass trivially against the
+  right one. `/admin/brand` gained a "Social share cards" section listing
+  every committed card for download (`default.png` first, then every
+  `{slug}.png` sorted) via a plain `<a href download>` link — the same
+  general "download a static asset" pattern every other admin download
+  affordance on this site already uses (CSV template downloads, the DB
+  snapshot download) — not the Avatar section's own upload/remove pattern,
+  which the original build brief assumed existed for the headshot and
+  doesn't; there's no upload path for these, they're committed directly to
+  the repo.
+  **Phase 2 killed, not deferred — the reasoning, so it stays killed**:
+  Pillow is a dependency this codebase has deliberately avoided at least
+  three separate times already — the App screenshot upload uses
+  client-side Cropper.js specifically to avoid server-side image
+  processing; `scripts/audit_tool_logo_dimensions.py` hand-parses
+  PNG/JPEG/GIF/WEBP/ICO headers with an explicit "NO NEW DEPENDENCY"
+  comment rather than reach for Pillow just to read image dimensions;
+  upload validation in several places uses a magic-bytes check, "not
+  Pillow," by name, more than once. Pillow itself was never a real
+  dependency to begin with — confirmed absent from `requirements.txt` and
+  from every `import`, listed in `/admin/open-source`'s showcase (and
+  `webapp/checks.py`'s `OSS_EXTRAS`) purely as a one-off historical build
+  tool that drew the two favicon files, once, years before this feature.
+  Building a generator would also mean committing font files for the first
+  time ever (Outfit/DM Sans/Caveat/Permanent Marker are all Google-Fonts-
+  CDN-only sitewide — a PNG renderer can't reach a CDN font) — a real,
+  separate cost with no other beneficiary. Against all of that: original
+  pieces publish at roughly one a month. A generator's fixed build-and-
+  maintain cost never pays back at that cadence — a ten-minute pass in a
+  design tool wins on cost every time. No font files were committed; that
+  decision died with Phase 2. If a future session is tempted to rebuild
+  this: re-check both premises (is Pillow now a real dependency for some
+  other reason? has the publishing cadence materially increased?) before
+  assuming either has changed.
+
 
 ## Authentication & security
 

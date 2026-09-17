@@ -69,7 +69,7 @@ def env(monkeypatch):
     # /thought-leadership/growth-engine-calculator route, which needs no DB
     # row at all — it stays a bespoke Python route, so it's already 200
     # with no seeding, same as any other hand-built page).
-    from scripts.migrate_growth_engine_ratio_content import BODY_MD as _GER_BODY_MD, DATE_LABEL as _GER_DATE_LABEL
+    from scripts.archive.migrate_growth_engine_ratio_content import BODY_MD as _GER_BODY_MD, DATE_LABEL as _GER_DATE_LABEL
     ger_row = lib.get_original_content_by_slug("growth-engine-ratio")
     if ger_row is None:
         lib.add_original_content("growth-engine-ratio", "The Growth Engine Ratio",

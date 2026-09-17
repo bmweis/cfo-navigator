@@ -16,6 +16,7 @@ Public routes (no auth):
     GET  /reset-password / POST /reset-password    Set a new password from an emailed token
     GET  /logout               Clear the session
     GET  /static/{file}        Static assets (e.g. headshot)
+    GET  /static/og/{file}     Committed social-share-card PNGs (Open Graph / Twitter Card)
     GET  /health               Health check
 
 Private routes (require login cookie; API routes also accept a token):
@@ -280,6 +281,76 @@ _DEFAULT_BENCHMARKS = [
 _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
+
+# --- Social share cards (Open Graph / Twitter Card, Phase 1) ----------------
+# Committed 1200x630 PNGs live in webapp/static/og/, slug-keyed
+# ({slug}.png matches an original_content/ai_surfaces row's own slug) plus
+# one default.png fallback for every page without its own card. Generation
+# (Phase 2) was investigated and killed outright — see CLAUDE.md's "Social
+# share cards" bullet for the full reasoning; this stays a hand-built,
+# hand-maintained asset directory, same as the favicon files already in
+# webapp/static/.
+_OG_DIR = os.path.join(_STATIC_DIR, "og")
+_OG_IMAGE_SLUGS: frozenset | None = None
+
+
+def _og_image_slugs() -> frozenset:
+    """Slugs with a real webapp/static/og/{slug}.png, computed once per
+    process and cached — the directory's contents are fixed at Docker
+    build time (a redeploy is a fresh process), so there's nothing to
+    invalidate, and this is the one-time directory scan the Phase 0
+    investigation called for instead of an os.path.exists() per render.
+    default.png is deliberately excluded — it's the fallback image, not a
+    per-slug card, so no page's slug should ever "match" it here.
+
+    Tests that add/remove files under _OG_DIR must reset
+    webapp.app._OG_IMAGE_SLUGS to None first — this module-level cache
+    does not reset itself between tests in the same process (same caveat
+    as webapp.tasks' _checks_cache)."""
+    global _OG_IMAGE_SLUGS
+    if _OG_IMAGE_SLUGS is None:
+        if os.path.isdir(_OG_DIR):
+            _OG_IMAGE_SLUGS = frozenset(
+                fn[:-4] for fn in os.listdir(_OG_DIR)
+                if fn.endswith(".png") and fn != "default.png"
+            )
+        else:
+            _OG_IMAGE_SLUGS = frozenset()
+    return _OG_IMAGE_SLUGS
+
+
+def _og_image_url(slug: str | None) -> str:
+    """Absolute URL for a page's social-card image — the committed
+    {slug}.png when one exists, else the committed default.png. Always
+    resolves to something real; there is no "no image" state."""
+    if slug and slug in _og_image_slugs():
+        return f"{PUBLIC_BASE}/static/og/{slug}.png"
+    return f"{PUBLIC_BASE}/static/og/default.png"
+
+
+def _esc_attr_quote_only(s) -> str:
+    """For content that's ALREADY HTML-entity-encoded (original_content.teaser
+    and any other admin-authored field that follows the same convention —
+    see CLAUDE.md's "HTML escaping on the way into an attribute" investigation)
+    being interpolated into an HTML attribute value. Running it through the
+    normal _esc() would double-encode an existing &amp;/&mdash;/etc. — the
+    same double-escape bug class documented elsewhere in this codebase
+    ("Speaking &amp; Events", the Original Content Phase 4b title fix). The
+    only character that can actually break out of a double-quoted attribute
+    here is a literal, un-encoded double quote, so that's the only thing
+    this escapes — unlike _esc(), it deliberately leaves "&" alone."""
+    return (str(s) or "").replace('"', "&quot;")
+
+
+# Site-level og:description fallback — used only when a route doesn't pass
+# its own (a specific piece's teaser, the live homepage_teaser setting,
+# etc.). A plain literal, not DB-backed (_page() has no Library handle),
+# so it's intentionally close to but independent of _HOMEPAGE_TEASER_DEFAULT.
+_OG_DEFAULT_DESCRIPTION = (
+    "Brian Weisberg's CFO Navigator: FP&A research, the CFO Toolbox, and "
+    "thought leadership from a CFO who builds finance functions designed "
+    "to scale."
+)
 
 # --- Auth -------------------------------------------------------------------
 # A single shared secret protects the private tools. LINKLIB_PASSWORD is the
@@ -1828,10 +1899,27 @@ def _has_open_admin_tasks() -> bool:
 
 
 def _page(title: str, active: str, body: str, authed: bool = False,
-          role: str | None = None) -> str:
+          role: str | None = None, *, request: Request | None = None,
+          og_description: str | None = None, og_image_slug: str | None = None) -> str:
     # role: "admin" | "user" | "guest". Falls back to authed for legacy callers.
     if role is None:
         role = "admin" if authed else "guest"
+    # Social share cards (Open Graph / Twitter Card, Phase 1). og_description
+    # must already be attribute-safe when passed — a caller sourcing it from
+    # an already-HTML-entity-encoded field (original_content.teaser) should
+    # use _esc_attr_quote_only(); a caller sourcing it from plain text
+    # (ai_surfaces.teaser, any other DB string) should use the normal _esc().
+    # Falls back to a site-level default (never blank) when omitted. og:url
+    # is only accurate for callers that pass `request` — every other page
+    # (most admin routes, a couple of nested form-page helpers with no
+    # request in scope) resolves to the bare site root instead of erroring,
+    # since those pages were never meant to be shared. og_image_slug is
+    # looked up against the committed webapp/static/og/ directory and always
+    # falls back to default.png when no match exists.
+    og_short_title = _esc(_short_title(title))
+    og_desc = og_description if og_description else _OG_DEFAULT_DESCRIPTION
+    og_image_url = _og_image_url(og_image_slug)
+    og_url = f"{PUBLIC_BASE}{request.url.path}" if request is not None else PUBLIC_BASE
     # "Sail, Don't Row" (/play) is deliberately not in the nav — it's an
     # easter egg linked only from the bottom of /thought-leadership/ai-hackathon-playbook.
     public = [("/about", "About"), ("/thought-leadership", "Thought leadership"),
@@ -1870,6 +1958,17 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(f"BMW CFO · {_short_title(title)}")}</title>
+<meta name="description" content="{og_desc}">
+<meta property="og:title" content="{og_short_title}">
+<meta property="og:description" content="{og_desc}">
+<meta property="og:image" content="{og_image_url}">
+<meta property="og:url" content="{og_url}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CFO Navigator">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{og_short_title}">
+<meta name="twitter:description" content="{og_desc}">
+<meta name="twitter:image" content="{og_image_url}">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" href="/static/favicon.ico" sizes="any">
@@ -3973,7 +4072,8 @@ def homepage(request: Request):
   </div>
 </div>
 </div>"""
-    return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
+    return HTMLResponse(_page("Home", "Home", body, role=_role(request), request=request,
+                               og_description=_esc(homepage_teaser)))
 
 
 @app.get("/about", response_class=HTMLResponse)
@@ -4011,7 +4111,7 @@ def about_page(request: Request):
 </div>
 </div>
 </div>"""
-    return HTMLResponse(_page("About—Brian Weisberg", "About", body, role=_role(request)))
+    return HTMLResponse(_page("About—Brian Weisberg", "About", body, role=_role(request), request=request))
 
 
 # Seed data for scripts/migrate_ai_surfaces.py only — the four cards below
@@ -4384,7 +4484,11 @@ def ai_surface_article(request: Request, slug: str):
     if row["status"] != "live" and not _is_authed(request):
         raise HTTPException(status_code=404)
     body = _ai_surface_article_body(row)
-    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "About", body, role=_role(request)))
+    # ai_surfaces.teaser is stored as plain text (unlike original_content.teaser,
+    # which is pre-encoded HTML entities) — see CLAUDE.md's escaping
+    # investigation. _esc() is the correct treatment here.
+    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "About", body, role=_role(request),
+                               request=request, og_description=_esc(row["teaser"]), og_image_slug=slug))
 
 
 # --- Current Feed ------------------------------------------------------
@@ -5177,7 +5281,7 @@ function toggleTLDesc(btn, descId) {
 }
 </script>"""
     body += "</div>"
-    return HTMLResponse(_page("Thought leadership—Brian Weisberg", "Thought leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Thought leadership—Brian Weisberg", "Thought leadership", body, role=_role(request), request=request))
 
 
 @app.get("/growth-engine-ratio")
@@ -5192,7 +5296,7 @@ def growth_engine_ratio_redirect(request: Request):
 # calculator. Split off from the retired growth_engine_ratio() bespoke
 # route: the article itself is now an ordinary original_content row served
 # through GET /thought-leadership/{slug} (see
-# scripts/migrate_growth_engine_ratio_content.py), but the calculator is
+# scripts/archive/migrate_growth_engine_ratio_content.py), but the calculator is
 # genuinely interactive (live inputs, on-demand JS computation, two
 # dynamically-generated SVG charts) — not markdown-representable content —
 # so it stays a hand-built Python route, same as before, just at its own
@@ -5846,7 +5950,14 @@ def original_content_article(request: Request, slug: str):
     if row["status"] != "live" and not _is_authed(request):
         raise HTTPException(status_code=404)
     body = _original_content_article_body(row)
-    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "Thought leadership", body, role=_role(request)))
+    # original_content.teaser is stored PRE-ENCODED (real HTML entities
+    # already in the string — "R&amp;D", "&mdash;") — see CLAUDE.md's
+    # escaping investigation and _oc_card_tuple's own identical, established
+    # raw-interpolation treatment. _esc() would double-escape it; only the
+    # bare-quote guard is needed for the attribute context.
+    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "Thought leadership", body, role=_role(request),
+                               request=request, og_description=_esc_attr_quote_only(row["teaser"]),
+                               og_image_slug=slug))
 
 
 # ---------------------------------------------------------------------------
@@ -32704,6 +32815,35 @@ def admin_brand(request: Request):
         + '</div></div>'
     )
 
+    # Social share cards (Open Graph / Twitter Card, Phase 1) — hand-built,
+    # committed PNGs in webapp/static/og/, listed here for download the same
+    # way every other admin download affordance on this site works (a plain
+    # <a href> to the file's own route), not the upload/remove pattern the
+    # Avatar section above uses — there's no upload path for these, they're
+    # committed directly to the repo. default.png (the homepage/fallback
+    # card) always appears first; every {slug}.png after it, sorted, so a
+    # newly committed card shows up here with no code change.
+    _og_card_names = (["default.png"] if os.path.isfile(os.path.join(_OG_DIR, "default.png")) else []) \
+        + sorted(f"{s}.png" for s in _og_image_slugs())
+    og_cards_html = "".join(
+        f'<a href="/static/og/{name}" download style="display:flex;align-items:center;gap:12px;'
+        f'padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;'
+        f'text-decoration:none;color:var(--ink);font-size:13px;">'
+        f'<img src="/static/og/{name}" alt="" style="width:80px;height:42px;object-fit:cover;border-radius:4px;'
+        f'border:1px solid var(--line);">'
+        f'<span style="flex:1;">{_esc(name)}</span>'
+        f'<span style="color:var(--navy);font-weight:600;">Download &darr;</span></a>'
+        for name in _og_card_names
+    ) or '<p style="color:var(--muted);font-size:13px;font-style:italic;">None committed yet.</p>'
+    social_cards_section = (
+        '<h2>Social share cards</h2>'
+        '<p style="color:var(--muted);margin:-6px 0 18px;font-size:14px;">Committed 1200&times;630 PNGs in '
+        '<code>webapp/static/og/</code>&mdash;hand-built, not generated (see CLAUDE.md\'s "Social share cards" '
+        'bullet for why). Every page emits Open Graph/Twitter Card tags automatically; a page with no matching '
+        'card falls back to <code>default.png</code>.</p>'
+        f'<div style="display:grid;gap:8px;margin-bottom:30px;">{og_cards_html}</div>'
+    )
+
     # Brand palette (literal hexes mirror the _CSS :root tokens; see BRAND.md §7).
     CORAL, CORAL_WASH, CORAL_DEEP = "#E8704F", "#FBEAE3", "#B14A30"
 
@@ -32879,6 +33019,8 @@ def admin_brand(request: Request):
 navy/seafoam/coral finance-tool base. <code>BRAND.md</code> has the full written reference.</p>
 
 {avatar_section}
+
+{social_cards_section}
 
 <h2>Brand colors</h2>
 <p style="color:var(--muted);margin:-6px 0 18px;font-size:14px;">Three families, each with a working ramp.
@@ -34172,6 +34314,20 @@ def static_file(filename: str):
              "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp",
              "ico": "image/x-icon", "mp3": "audio/mpeg"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
+
+
+@app.get("/static/og/{filename}")
+def static_og_file(filename: str):
+    """Serves committed social-share-card PNGs from _OG_DIR — a separate
+    route/directory pair (same precedent as tools_software_screenshot,
+    tools_software_logo, etc. below) because /static/{filename}'s own
+    single-segment path param can't match a nested "/og/..." URL at all.
+    Same basename-only traversal guard as /static/{filename}."""
+    safe = os.path.basename(filename)
+    path = os.path.join(_OG_DIR, safe)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/tools/software/screenshot/{filename}")
