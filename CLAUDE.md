@@ -9025,6 +9025,51 @@ it supersedes the old "`/save` is token-gated" note.
   edit-form save keeps its existing order untouched, since reordering
   within a side is the arrows' job now, not a field a save can silently
   reset.
+- **Feeds admin Cookie column, wide enough for status plus age (2026-09) —
+  the same per-row health indicator introduced in "Subscriber-cookie
+  health moved into the feed table" above still wrapped onto two lines in
+  production** (OnlyCFO, Cautious Optimism, Mostly Metrics), because the
+  `<th>`/`.ff-cookie` width was `_COL_WIDTH_STATUS` (110px) — right for a
+  bare status badge, but this column's real content is a dot, a state
+  word ("working"/"inconclusive"/"expired"), and a relative age
+  ("· just now"/"· 45d ago") all on one line. Measured in real Chromium
+  with DM Sans loaded: "inconclusive · 45d ago" needs ~148px of content
+  width, and "· 999d ago" (the longest `_relative_age()` can ever
+  produce) pushes that to ~157px — plus 24px of cell padding, a worst
+  case around 181px, comfortably past the old 110px column. A new
+  `_COL_WIDTH_STATUS_AGE = 190` constant (documented alongside the other
+  `_COL_WIDTH_*` field-type widths) replaces `_COL_WIDTH_STATUS` for this
+  one column, leaving a small margin over the measured worst case rather
+  than sitting flush against it. **The deeper root cause wasn't Cookie's
+  width alone — `.ff-table` had no `min-width` at all**, so with
+  `table-layout:fixed`, every column (Cookie included) got proportionally
+  squeezed to fit whatever container width the page happened to render
+  at, at any desktop width; there was no floor and no scroll, only a
+  full-stacked-cards fallback below 820px. Fixed the same way every other
+  wide (8+-column) admin table on this site already is: `.ff-table` now
+  carries a real `min-width:{_TABLE_FLOOR_XWIDE}px` (the 8+-column
+  bucket — Name, URL, Section, Cookie, Subscriber, Current Feed, Order,
+  Actions is exactly 8), wrapped in the same shared `#cmp-scroll-wrap`/
+  `_ADMIN_SCROLL_HINT_HTML`/`_ADMIN_SCROLL_HINT_JS` overflow-x:auto +
+  "Scroll for more" hint every other wide admin table already uses,
+  rather than inventing a page-specific mechanism. The existing
+  `@media(max-width:820px)` stacked-card breakpoint resets the min-width
+  back to `0` in the same rule (a class rule, not an inline style, so a
+  later same-specificity media-query rule wins with no `!important`
+  needed — confirmed, not assumed, since PR 12 needed `!important` for
+  the inline-style version of this exact problem elsewhere). Verified
+  live end to end (real Chromium, real Google Fonts, the actual rendered
+  `/admin/reader/feeds` response, not a simplified repro): the worst-case
+  content ("inconclusive · 999d ago") renders on one line at every
+  desktop width from the 820px breakpoint up to 1920px, and at the
+  table's 960px floor every other column still renders its full intended
+  share (Name/URL/Current Feed ~131-140px, Section ~96px, Subscriber
+  ~79px, Order ~61px, Actions ~132px) rather than being squeezed further.
+  See `tests/test_feed_cookie_flag.py`'s
+  `test_cookie_column_is_wide_enough_for_status_plus_age`/
+  `test_feeds_table_has_a_min_width_and_scrolls_instead_of_squeezing` for
+  the regression coverage — both confirmed to fail against the pre-fix
+  code before being trusted.
 - **`/current-feed` copy revision + a "Last mixed" cassette-label stamp
   (2026-09).** Three changes, all Brian-directed. (1) The `<h1>` moved
   from "Current Feed" to "Current feed" — the one holdout of BRAND.md

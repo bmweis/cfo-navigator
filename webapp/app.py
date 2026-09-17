@@ -1670,6 +1670,20 @@ _COL_WIDTH_VENDOR = 160       # A short vendor/company label (Railway,
                               # full software/community name, not a one-
                               # or two-word vendor label (overhead spend
                               # fixes, 2026-09)
+_COL_WIDTH_STATUS_AGE = 190   # A status word PLUS a relative-age readout on
+                              # the same line (e.g. the feeds admin table's
+                              # Cookie column: a dot, "inconclusive", " · ",
+                              # "999d ago") — _COL_WIDTH_STATUS (110) is
+                              # right for a bare badge, but this content is
+                              # measurably wider. Measured in real Chromium
+                              # with DM Sans loaded: "inconclusive · 45d
+                              # ago" needs ~148px of content width, "· 999d
+                              # ago" (the longest _relative_age() can
+                              # produce) pushes that to ~157px; +24px of
+                              # cell padding (12px each side) puts the
+                              # worst case at ~181px. 190 leaves a small
+                              # margin over that rather than sitting flush
+                              # against it.
 
 # Card-listing width floors (PR 33, 2026-09) — "cards keep their width;
 # containers distribute them." A card stretching wider on a sparse row than
@@ -26902,6 +26916,18 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
         section_rows = ('<tr class="fs-row"><td colspan="3" class="ff-empty">'
                         'No sections yet.</td></tr>')
 
+    # .ff-table's own min-width + #cmp-scroll-wrap (below) fix a real cramped-
+    # Cookie-column report: with table-layout:fixed and no floor, a
+    # px-specified column doesn't hold its requested width once the table's
+    # percentage columns need room too — every column, Cookie included, gets
+    # squeezed to fit whatever the container happens to be, which is exactly
+    # what made a working/inconclusive/expired label plus its relative age
+    # wrap onto two lines on several real rows in production. Fixed the way
+    # every other wide (8+-column) admin table on this site already is: a
+    # real min-width (_TABLE_FLOOR_XWIDE) plus the shared scroll-hint/
+    # overflow-x:auto wrapper, so a narrower container scrolls instead of
+    # squeezing every column proportionally. See _COL_WIDTH_STATUS_AGE's own
+    # comment for the measured widths this is sized against.
     body = f"""<div class="page page-standard">
 <style>
 .ff-head{{display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -26916,6 +26942,11 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   .ff-head-actions{{width:100%;justify-content:flex-start;}}
 }}
 .ff-table,.fs-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
+/* .ff-table's own min-width, not shared with .fs-table (the 3-column
+   Sections table, which never needed one) — see the comment above
+   #cmp-scroll-wrap in the route below for why this exists and what it's
+   sized to (_TABLE_FLOOR_XWIDE, the 8+-column bucket). */
+.ff-table{{min-width:{_TABLE_FLOOR_XWIDE}px;}}
 .ff-row>td,.fs-row>td{{padding:9px 12px;vertical-align:middle;border-top:1px solid var(--line);}}
 /* vertical-align:top is explicit, not decorative: on a narrow column
    (Subscriber, Current Feed) the trailing sort-indicator span doesn't fit
@@ -26942,7 +26973,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .ff-url{{font-size:13px;color:var(--muted);width:16%;}}
 .ff-url a{{word-break:break-all;}}
 .ff-section{{width:11%;}}
-.ff-cookie{{width:{_COL_WIDTH_STATUS}px;text-align:center;}}
+.ff-cookie{{width:{_COL_WIDTH_STATUS_AGE}px;text-align:center;}}
 .ff-sub{{width:9%;text-align:center;}}
 /* NOTE: with table-layout:fixed, the browser reads column widths from the
    FIRST row only — here, the <thead><tr>'s own inline width="..." styles,
@@ -26952,7 +26983,11 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
    themselves, a few dozen lines down. Change both together, or a width
    edit here silently does nothing. See the Python comment above
    _CURRENT_FEED_SELECT_CHOICES for why these three columns' widths
-   changed from their original 11/9/17%. */
+   changed from their original 11/9/17%, and the Cookie-column-cramped
+   comment above #cmp-scroll-wrap below for why Cookie is _COL_WIDTH_STATUS_AGE
+   (a real px floor, not a percentage) and why the table now carries a
+   min-width + horizontal scroll instead of letting every column get
+   proportionally squeezed to fit an arbitrary container width. */
 .ff-cf{{width:16%;}}
 .ff-order{{width:7%;}}
 .ff-actions{{width:15%;text-align:right;white-space:nowrap;}}
@@ -26976,6 +27011,12 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 @media (max-width:820px){{
   .ff-table,.ff-table tbody,.ff-row,.ff-row>td,
   .fs-table,.fs-table tbody,.fs-row,.fs-row>td{{display:block;width:auto;}}
+  /* .ff-table's own min-width (see above) would otherwise survive this
+     block-layout switch and keep the stacked-card table pinned to
+     _TABLE_FLOOR_XWIDE px wide even though every row is now a full-width
+     card with nothing left to scroll — same class-rule-cascade fix PR 32
+     already used elsewhere for exactly this. */
+  .ff-table{{min-width:0;}}
   .ff-table thead,.fs-table thead{{display:none;}}
   .ff-row,.fs-row{{border-top:1px solid var(--line);padding:10px 0;}}
   .ff-table tbody tr:first-child,.fs-table tbody tr:first-child{{border-top:0;}}
@@ -27011,7 +27052,8 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 {auth_panel}
 <p style="color:var(--muted);margin:8px 0 18px;">The RSS subscriptions behind the Reader's Feed view and FP&amp;A Buddy's web-search allowlist.</p>
 {banner}{error_banner}
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
+{_ADMIN_SCROLL_HINT_HTML}
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
   <table class="ff-table" id="ff-table">
     <thead><tr>
       <th style="width:15%;" data-sort="name" tabindex="0" role="button" aria-label="Sort by name"
@@ -27019,7 +27061,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
       <th style="width:16%;">URL</th>
       <th style="width:11%;" data-sort="section" tabindex="0" role="button" aria-label="Sort by section"
         onclick="ffSortBy('section')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('section');}}">Section<span class="ff-sort-ind" aria-hidden="true"></span></th>
-      <th style="width:{_COL_WIDTH_STATUS}px;text-align:center;" data-sort="cookie" tabindex="0" role="button" aria-label="Sort by cookie status"
+      <th style="width:{_COL_WIDTH_STATUS_AGE}px;text-align:center;" data-sort="cookie" tabindex="0" role="button" aria-label="Sort by cookie status"
         onclick="ffSortBy('cookie')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('cookie');}}">Cookie<span class="ff-sort-ind" aria-hidden="true"></span></th>
       <th style="width:9%;text-align:center;" data-sort="subscriber" tabindex="0" role="button" aria-label="Sort by subscriber"
         onclick="ffSortBy('subscriber')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('subscriber');}}">Subscriber<span class="ff-sort-ind" aria-hidden="true"></span></th>
@@ -27032,7 +27074,9 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     <tbody id="ff-tbody">{feed_rows}</tbody>
   </table>
 </div>
-<script>{_FEEDS_SORT_JS}</script>
+<script>{_FEEDS_SORT_JS}{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>
 <h2 style="font-size:15px;margin:22px 0 8px;color:var(--navy);">Column reference</h2>
 <ul style="color:var(--muted);margin:0 0 14px;padding-left:20px;font-size:13px;line-height:1.65;">
 <li>Click a heading to sort, click again to reverse. The sort sticks across reloads until you clear site data.</li>
