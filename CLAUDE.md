@@ -9637,6 +9637,33 @@ it supersedes the old "`/save` is token-gated" note.
   `/tools` route) before trusting it clean, per this codebase's own
   standing "prove the detector isn't trivially passing" discipline.
 
+- **Slow page loads (first raised 2026-09-15, resolved 2026-09-17): Railway
+  cold start, not application code — per-request paths ruled out, boot cost
+  unmeasured and still open.** Diagnostic Brian ran directly against
+  production: two loads ten seconds apart — first ~7s, second 1-2s.
+  First-slow/second-fast is the cold-start signature; slow-both-times would
+  mean something real in the request path. **Run this test before
+  investigating any code path a future slow-load report might point at** —
+  it's cheap and it's the fastest way to rule the whole request path in or
+  out before touching `webapp.checks.run_all()`, the og:image filename
+  lookup, Cloudflare/Railway networking, or anything else per-request.
+  The fix for the cold-start symptom itself is Railway service
+  configuration (a sleep/scale-to-zero setting) — Brian's account, not this
+  repo. **Scope of what's actually ruled out, stated precisely rather than
+  broadly**: the warm (second) load proves per-request paths are fine —
+  `run_all()`, the og:image lookup, and ordinary request handling are
+  genuinely ruled out by that measurement. **Boot cost is NOT ruled out.**
+  Seven seconds is long for a cold start, and cold start includes Python
+  import and app startup — anything at module level is inside that number,
+  including sqlite-vec loading, DB connection setup, and any cache built at
+  import time. Separately, still-open and explicitly not to be pre-empted:
+  Brian's 1-2s *warm* measurement was over cellular on mobile, slower than
+  this app should be for inline-HTML routes — he's re-testing on desktop
+  wifi, and if it's still 1-2s warm there he'll raise it as its own item
+  with real numbers. **Trigger to revisit boot cost**: after the current
+  promotion push, or if keeping the container warm doesn't resolve the
+  cold-start symptom on its own.
+
 
 ## Authentication & security
 
