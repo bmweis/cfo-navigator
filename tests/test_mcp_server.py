@@ -642,3 +642,239 @@ def test_sample_rows_max_cell_chars_zero_disables_truncation(live_server):
     row = next(r for r in payload["rows"] if r["key"] == "mcp_no_truncation_test")
     assert row["value"] == long_value
     assert payload["truncated"] is False
+
+
+# -- Phase 2 (retrieval): sample_rows' offset ---------------------------------
+
+def _seed_settings_rows(db_path: str, n: int, prefix: str = "paging_test"):
+    """Insert n freshly-keyed settings rows (a fresh test Library seeds
+    zero settings rows — confirmed directly — so this gives a controlled,
+    known-size table to page through)."""
+    lib = Library(db_path)
+    for i in range(n):
+        lib.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)",
+                          (f"{prefix}_{i:03d}", f"value-{i:03d}"))
+    lib.conn.commit()
+    lib.close()
+
+
+def test_sample_rows_offset_slides_the_ascending_window(live_server):
+    _seed_settings_rows(live_server.db_path, 10, prefix="slide_asc")
+    first = _call_tool(live_server.base_url, live_server.admin, "sample_rows",
+                        {"name": "settings", "n": 3, "offset": 0})
+    second = _call_tool(live_server.base_url, live_server.admin, "sample_rows",
+                         {"name": "settings", "n": 3, "offset": 3})
+    import json
+    first_keys = [r["key"] for r in json.loads(first.content[0].text)["rows"]]
+    second_keys = [r["key"] for r in json.loads(second.content[0].text)["rows"]]
+    assert first_keys != second_keys
+    assert not set(first_keys) & set(second_keys)
+
+
+def test_sample_rows_offset_defaults_to_zero_unchanged_behavior(live_server):
+    """Omitting offset must behave exactly as it always has — a pure
+    additive change, not a behavior shift for every existing caller."""
+    _seed_settings_rows(live_server.db_path, 5, prefix="unchanged")
+    with_default = _call_tool(live_server.base_url, live_server.admin, "sample_rows",
+                               {"name": "settings", "n": 5})
+    with_explicit_zero = _call_tool(live_server.base_url, live_server.admin, "sample_rows",
+                                     {"name": "settings", "n": 5, "offset": 0})
+    assert with_default.content[0].text == with_explicit_zero.content[0].text
+
+
+def test_sample_rows_settings_paging_covers_every_row_no_gap_no_overlap(live_server):
+    """The literal acceptance case: a settings-shaped table past the old
+    50-row dead zone, paged 25/25/5 with zero gap and zero overlap. The
+    live app's own startup hooks seed a handful of settings rows before
+    this test ever runs (voice_core, pricing_last_verified, and friends —
+    real production behavior, not a fixture quirk), so those are cleared
+    first to get a truly controlled 55-row table matching the brief's
+    literal scenario, rather than asserting against a moving baseline."""
+    lib = Library(live_server.db_path)
+    lib.conn.execute("DELETE FROM settings")
+    lib.conn.commit()
+    lib.close()
+    _seed_settings_rows(live_server.db_path, 55, prefix="page55")
+    import json
+    seen_keys: list[str] = []
+    counts = []
+    for offset in (0, 25, 50):
+        result = _call_tool(live_server.base_url, live_server.admin, "sample_rows",
+                             {"name": "settings", "n": 25, "offset": offset})
+        assert not result.isError
+        payload = json.loads(result.content[0].text)
+        counts.append(payload["count"])
+        seen_keys.extend(r["key"] for r in payload["rows"])
+    assert counts == [25, 25, 5]
+    # No gap, no overlap: every key appears exactly once across all three pages.
+    assert len(seen_keys) == len(set(seen_keys)) == 55
+
+
+def test_sample_rows_negative_offset_clamped_to_zero(live_server):
+    _seed_settings_rows(live_server.db_path, 3, prefix="neg_offset")
+    result = _call_tool(live_server.base_url, live_server.admin, "sample_rows",
+                         {"name": "settings", "n": 3, "offset": -10})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    assert payload["count"] == 3
+
+
+# -- Phase 2 (retrieval): get_rows ---------------------------------------------
+
+def test_get_rows_finds_a_row_in_the_dead_middle_of_a_55_row_table(live_server):
+    """The exact motivating scenario: a table with a dead window neither
+    sample_rows head nor tail window can reach — get_rows finds the row
+    directly, by key, regardless of position."""
+    lib = Library(live_server.db_path)
+    for i in range(55):
+        lib.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)",
+                          (f"htib_row_{i:03d}", f"copy-{i:03d}"))
+    lib.conn.commit()
+    lib.close()
+
+    # Row 30 of 55 sits outside both a 25-row head window (rows 1-25) and a
+    # 25-row tail window (rows 31-55) — the dead middle this tool exists for.
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "settings", "where_column": "key",
+                          "where_value": "htib_row_029"})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    assert payload["count"] == 1
+    assert payload["rows"][0]["value"] == "copy-029"
+
+
+def test_get_rows_would_still_work_at_5000_rows(live_server):
+    """Direct acceptance check: get_rows("settings", "key", ...) finds the
+    row by value, never by position — unaffected by table size."""
+    lib = Library(live_server.db_path)
+    for i in range(400):
+        lib.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)",
+                          (f"bulk_{i:04d}", f"bulk-value-{i:04d}"))
+    lib.conn.commit()
+    lib.close()
+
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "settings", "where_column": "key",
+                          "where_value": "bulk_0250"})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    assert payload["count"] == 1
+    assert payload["rows"][0]["value"] == "bulk-value-0250"
+
+
+def test_get_rows_empty_result_is_not_an_error(live_server):
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "settings", "where_column": "key",
+                          "where_value": "no-such-key-anywhere"})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    assert payload["count"] == 0
+    assert payload["rows"] == []
+    assert payload["truncated"] is False
+
+
+def test_get_rows_rejects_unknown_table_no_injection(live_server):
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "settings; DROP TABLE settings;--",
+                          "where_column": "key", "where_value": "x"})
+    assert result.isError
+
+
+def test_get_rows_rejects_unknown_column_no_injection(live_server):
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "settings",
+                          "where_column": "key\"; DROP TABLE settings;--",
+                          "where_value": "x"})
+    assert result.isError
+
+
+def test_get_rows_rejects_a_real_column_on_the_wrong_table(live_server):
+    """A column that's real somewhere in the schema but not on THIS table
+    must still be rejected — validation is per-table, not a global column
+    name allowlist."""
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "settings", "where_column": "username",
+                          "where_value": "admin_user"})
+    assert result.isError
+
+
+def test_get_rows_matches_an_integer_column_via_string_value(live_server):
+    """where_value is always passed as text, but SQLite's own type
+    affinity still matches it against an INTEGER column correctly."""
+    lib = Library(live_server.db_path)
+    user = lib.get_user("admin_user")
+    lib.close()
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "users", "where_column": "id",
+                          "where_value": str(user["id"])})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    assert payload["count"] == 1
+    assert payload["rows"][0]["username"] == "admin_user"
+
+
+def test_get_rows_caps_n_at_25(live_server):
+    _seed_settings_rows(live_server.db_path, 40, prefix="cap_test")
+    lib = Library(live_server.db_path)
+    lib.conn.execute("UPDATE settings SET value = 'shared' WHERE key LIKE 'cap_test_%'")
+    lib.conn.commit()
+    lib.close()
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "settings", "where_column": "value",
+                          "where_value": "shared", "n": 1000})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    assert payload["count"] <= 25
+
+
+def test_get_rows_truncates_long_cells_by_default(live_server):
+    lib = Library(live_server.db_path)
+    long_value = "z" * 900
+    lib.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)",
+                      ("get_rows_truncation_test", long_value))
+    lib.conn.commit()
+    lib.close()
+
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "settings", "where_column": "key",
+                          "where_value": "get_rows_truncation_test"})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    row = payload["rows"][0]
+    assert len(row["value"]) < len(long_value)
+    assert "truncated" in row["value"]
+    assert payload["truncated"] is True
+
+
+def test_get_rows_max_cell_chars_zero_disables_truncation(live_server):
+    lib = Library(live_server.db_path)
+    long_value = "w" * 900
+    lib.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)",
+                      ("get_rows_no_truncation_test", long_value))
+    lib.conn.commit()
+    lib.close()
+
+    result = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                         {"name": "settings", "where_column": "key",
+                          "where_value": "get_rows_no_truncation_test",
+                          "max_cell_chars": 0})
+    assert not result.isError
+    import json
+    payload = json.loads(result.content[0].text)
+    assert payload["rows"][0]["value"] == long_value
+    assert payload["truncated"] is False
+
+
+def test_get_rows_refused_for_non_admin_role(live_server):
+    result = _call_tool(live_server.base_url, live_server.plain_user, "get_rows",
+                         {"name": "settings", "where_column": "key",
+                          "where_value": "x"})
+    assert result.isError
+    assert "admin" in result.content[0].text.lower()

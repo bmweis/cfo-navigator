@@ -1,12 +1,24 @@
 """MCP server, Phase 1: read-only schema-introspection tools mounted at
 `/mcp` inside the main FastAPI app (webapp/app.py).
 
-This module builds the FastMCP instance and its three admin-gated
-introspection tools (list_tables / describe_table / sample_rows). It does
-NOT import anything from webapp.app — webapp.app imports this module and
-hands it a `lib_factory` callable (webapp.app._lib) after that's defined,
-which avoids a circular import and keeps this module trivially testable on
-its own with any Library-producing callable (e.g. a temp-DB fixture).
+This module builds the FastMCP instance and its four admin-gated
+introspection tools (list_tables / describe_table / sample_rows / get_rows).
+It does NOT import anything from webapp.app — webapp.app imports this
+module and hands it a `lib_factory` callable (webapp.app._lib) after that's
+defined, which avoids a circular import and keeps this module trivially
+testable on its own with any Library-producing callable (e.g. a temp-DB
+fixture).
+
+Phase 2 (retrieval, 2026-09) added `get_rows` and an `offset` parameter on
+`sample_rows` — closing a real reachability gap `sample_rows`' original
+two fixed windows (head/tail, 25 rows each) left open: once a table passes
+50 rows, the middle becomes permanently unreachable through either window
+at any `n`. Confirmed live: `settings` (55 rows) had a 5-row dead window
+that made `htib_before_copy`/`htib_after_copy` (the `/how-this-is-built`
+page copy) unreadable through MCP by any parameter combination — silently,
+with no error, which is what made it worth fixing rather than just
+widening the 25-row cap (deliberately left unchanged; the fix is
+reachability, not bigger payloads).
 
 Auth model (see CLAUDE.md's MCP section for the full write-up): every tool
 call independently re-derives "who's asking" from the live HTTP request
@@ -166,6 +178,53 @@ def _table_rows(lib: Library) -> list[sqlite3.Row]:
 
 def _is_virtual(create_sql: str | None) -> bool:
     return bool(create_sql) and create_sql.strip().upper().startswith("CREATE VIRTUAL TABLE")
+
+
+def _validate_table(lib: Library, name: str) -> None:
+    """Raise ToolError unless `name` is a real table/view — the one gate
+    every query-building tool in this module runs before `name` is ever
+    interpolated into SQL. Shared by sample_rows and get_rows so the two
+    can't drift into validating differently."""
+    valid = {r["name"] for r in _table_rows(lib)}
+    if name not in valid:
+        raise ToolError(f"no such table or view: {name!r}")
+
+
+def _validate_column(lib: Library, name: str, column: str) -> None:
+    """Raise ToolError unless `column` is a real column on `name` — same
+    PRAGMA path describe_table already uses to enumerate columns, so a
+    column name is never interpolated into SQL without first being checked
+    against the table's own live schema. Works on views too (PRAGMA
+    table_info reports a view's output columns)."""
+    try:
+        cols = lib.conn.execute(f'PRAGMA table_info("{name}")').fetchall()
+    except sqlite3.Error as e:
+        raise ToolError(f"could not read columns for {name!r}: {e}")
+    valid_cols = {c["name"] for c in cols}
+    if column not in valid_cols:
+        raise ToolError(f"no such column {column!r} on {name!r}")
+
+
+def _apply_cell_truncation(result_rows: list[dict], max_cell_chars: int) -> bool:
+    """Cap every string cell at max_cell_chars, mutating result_rows in
+    place, and return whether anything was actually cut. The one
+    truncation implementation both sample_rows and get_rows use — shaped
+    exactly as sample_rows always has, so a caller of either tool sees the
+    identical truncation marker and `truncated` flag, not two similar-but-
+    different behaviors."""
+    truncated = False
+    if max_cell_chars > 0:
+        for result_row in result_rows:
+            for key, value in result_row.items():
+                if isinstance(value, str) and len(value) > max_cell_chars:
+                    omitted = len(value) - max_cell_chars
+                    result_row[key] = (
+                        value[:max_cell_chars]
+                        + f"...[truncated, showing {max_cell_chars} of "
+                          f"{len(value)} chars, {omitted} omitted]"
+                    )
+                    truncated = True
+    return truncated
 
 
 def _shadow_of(name: str, virtual_names: set[str]) -> str | None:
@@ -332,12 +391,20 @@ def build_mcp(
 
     @mcp.tool()
     async def sample_rows(ctx: Context, name: str, n: int = _DEFAULT_SAMPLE_N,
-                           from_end: bool = False,
+                           from_end: bool = False, offset: int = 0,
                            max_cell_chars: int = _DEFAULT_MAX_CELL_CHARS) -> dict:
         """Return up to n rows from a table or view (default 5, hard cap
-        25). Strictly read-only — SELECT ... LIMIT only. `name` is
-        validated against the live table/view list before it's ever used
-        in a query; no raw tool input is interpolated without that check.
+        25), starting `offset` rows into the ordering `from_end` selects —
+        NOT a complete-coverage sample on its own. `from_end=False` orders
+        by rowid ascending, `from_end=True` orders descending (still
+        returned in ascending order); `offset` slides either window along
+        that order, so `offset=0,25,50,...` walks the whole table in order
+        with no gap and no overlap. To read every row of a table larger
+        than 25, page with `offset`, or use `get_rows` to jump straight to
+        one row by key instead of walking the table. Strictly read-only —
+        SELECT ... LIMIT/OFFSET only. `name` is validated against the live
+        table/view list before it's ever used in a query; no raw tool
+        input is interpolated without that check.
 
         Each string cell is capped at `max_cell_chars` (default 500) with a
         visible `"...[truncated, showing X of Y chars]"` marker appended —
@@ -351,35 +418,77 @@ def build_mcp(
         role model."""
         _require_admin(ctx, lib_factory)
         n = max(1, min(int(n), _MAX_SAMPLE_N))
+        offset = max(0, int(offset))
         lib = lib_factory()
         try:
-            valid = {r["name"] for r in _table_rows(lib)}
-            if name not in valid:
-                raise ToolError(f"no such table or view: {name!r}")
+            _validate_table(lib, name)
             order = "DESC" if from_end else "ASC"
             try:
                 rows = lib.conn.execute(
-                    f'SELECT * FROM "{name}" ORDER BY rowid {order} LIMIT ?', (n,)
+                    f'SELECT * FROM "{name}" ORDER BY rowid {order} LIMIT ? OFFSET ?',
+                    (n, offset),
                 ).fetchall()
             except sqlite3.Error:
-                # No rowid (a WITHOUT ROWID table, or a view) — plain LIMIT,
-                # order is whatever SQLite's default scan order gives us.
-                rows = lib.conn.execute(f'SELECT * FROM "{name}" LIMIT ?', (n,)).fetchall()
+                # No rowid (a WITHOUT ROWID table, or a view) — plain
+                # LIMIT/OFFSET, order is whatever SQLite's default scan
+                # order gives us.
+                rows = lib.conn.execute(
+                    f'SELECT * FROM "{name}" LIMIT ? OFFSET ?', (n, offset)
+                ).fetchall()
             result_rows = [dict(r) for r in rows]
             if from_end:
                 result_rows.reverse()
-            truncated = False
-            if max_cell_chars > 0:
-                for result_row in result_rows:
-                    for key, value in result_row.items():
-                        if isinstance(value, str) and len(value) > max_cell_chars:
-                            omitted = len(value) - max_cell_chars
-                            result_row[key] = (
-                                value[:max_cell_chars]
-                                + f"...[truncated, showing {max_cell_chars} of "
-                                  f"{len(value)} chars, {omitted} omitted]"
-                            )
-                            truncated = True
+            truncated = _apply_cell_truncation(result_rows, max_cell_chars)
+            return {
+                "name": name,
+                "count": len(result_rows),
+                "rows": result_rows,
+                "truncated": truncated,
+            }
+        finally:
+            lib.close()
+
+    @mcp.tool()
+    async def get_rows(ctx: Context, name: str, where_column: str, where_value: str,
+                        n: int = _DEFAULT_SAMPLE_N,
+                        max_cell_chars: int = _DEFAULT_MAX_CELL_CHARS) -> dict:
+        """Return up to n rows from a table or view where `where_column`
+        equals `where_value` — the correct tool for reading one specific
+        row by key (e.g. a `settings` row by its `key`, or any row by its
+        `id`), regardless of where that row sits in the table or how many
+        rows the table has. `sample_rows`' `offset` can reach the same row
+        too, but only if you already know (or can compute) its position —
+        `get_rows` needs neither: give it the value you're looking for and
+        it finds the row directly, with no position to work out first.
+
+        `where_value` is always compared as text; SQLite's own type
+        affinity still matches it against an INTEGER/NUMERIC column
+        correctly (e.g. `where_value="5"` matches an integer `id` column
+        holding `5`). `name` and `where_column` are both validated against
+        the live schema (via the same table/view list `sample_rows` uses,
+        and `PRAGMA table_info` for the column) before either is ever used
+        in a query — no raw tool input is interpolated without that check,
+        and `where_value` is always bound as a parameter, never
+        interpolated. A `where_column`/`where_value` pair matching nothing
+        returns a normal empty result (`count: 0, rows: []`), not an error.
+
+        Same `n` cap, same row shape, and the same `max_cell_chars`
+        truncation behavior (including the `truncated` flag) as
+        `sample_rows` — see that tool's docstring for the truncation
+        details. Admin-role only, same as every other row-returning tool
+        in this module."""
+        _require_admin(ctx, lib_factory)
+        n = max(1, min(int(n), _MAX_SAMPLE_N))
+        lib = lib_factory()
+        try:
+            _validate_table(lib, name)
+            _validate_column(lib, name, where_column)
+            rows = lib.conn.execute(
+                f'SELECT * FROM "{name}" WHERE "{where_column}" = ? LIMIT ?',
+                (where_value, n),
+            ).fetchall()
+            result_rows = [dict(r) for r in rows]
+            truncated = _apply_cell_truncation(result_rows, max_cell_chars)
             return {
                 "name": name,
                 "count": len(result_rows),
