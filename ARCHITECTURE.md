@@ -2334,8 +2334,9 @@ exactly at both widths, and every card matches its siblings.
 ### Current Feed — `GET /current-feed` (2026-09)
 
 A public mixtape-tracklist page listing the writers and publications Brian
-actually reads — Side A ("Old School") and Side B ("New School") — derived
-live from the `feeds` table, with no hardcoded names or counts anywhere. It
+actually reads — Side A ("Timeless Classics") and Side B ("The New
+Generation") — derived live from the `feeds` table, with no hardcoded names
+or counts anywhere. It
 exists because the origin story on `/how-this-is-built` names the writers
 who shaped Brian's career, and this is the current, always-accurate version
 of that list; it's also the exact allowlist
@@ -2368,9 +2369,10 @@ subscription should never appear on the public page unreviewed.
 
 **Admin control lives on `/admin/reader/feeds` itself, not only the
 per-feed edit form.** A `Current Feed` column (`.ff-cf`) holds one
-auto-submitting `<select>` per row — `Hidden` / `Old school` / `New
-school` (`_CURRENT_FEED_SELECT_CHOICES`, shared by the table and the add/
-edit form so the two surfaces can't drift on option labels) — posting to
+auto-submitting `<select>` per row — `Hidden` / `Timeless Classics` / `The
+New Generation` (`_CURRENT_FEED_SELECT_CHOICES`, shared by the table and
+the add/edit form so the two surfaces can't drift on option labels) —
+posting to
 `POST /admin/reader/feeds/{id}/current-feed`
 (`Library.set_feed_current_feed_display`, writing both columns together so
 "shown but no side picked" can't exist as an intermediate state). The add/
@@ -2418,9 +2420,10 @@ Permanent-Marker wordmark). The first pass used the wordmark font
 direct instruction: Permanent Marker is built for a word or two, not
 seventeen names of varying length, and a handwritten tracklist on a real
 J-card was pen, not marker. Track titles now use `var(--font-sticker)`
-(Caveat, 700 weight, 16px) — the same face already proven readable at
-sticker-badge size (15-16px) elsewhere on the site — title only, never
-metadata. **Coral was dropped from the Side A/Side B divider entirely**,
+(Caveat, 700 weight, 18px — bumped from 16px in a later pass) — the same
+face already proven readable at sticker-badge size elsewhere on the site —
+title only, never metadata. **Coral was dropped from the Side A/Side B
+divider entirely**,
 also on direct instruction: structure isn't a place to spend the page's one
 coral moment, since coral on structure reads as decoration rather than
 something a reader acts on. `_current_feed_side_html()` no longer accepts
@@ -2496,6 +2499,116 @@ side is *unchanged* on an edit-form save keeps its existing order
 untouched (reordering within a side is the arrows' job now, not something
 a save can silently reset to a default). See `tests/test_current_feed.py`'s
 order-move/boundary/append-to-end tests for the regression coverage.
+
+**Cassette J-card visual treatment (2026-09) — an investigate-and-propose
+build with an approval gate, since it needed a BRAND.md §4 exception before
+any CSS shipped.** Brian's ask was the literal object, not a nod to the
+1990s: the paper card, the ruled tracklist form, the boxed side letter, the
+tilt, the shadow — the physical J-card a reader actually held. Investigated
+first, per the brief's own gate: BRAND.md §4's graffiti/street-art accent
+layer is a closed, four-item enumerated vocabulary (marker-underline,
+sticker badge, card category icons, the spray-tag wordmark) that says so
+explicitly ("That's the entire graffiti vocabulary. No broader illustration
+style...") — none of the four cover a paper-card panel or a plastic case, so
+this needed a fifth, page-scoped exception rather than reading as already
+covered. Two full mockups (card-only, and card-plus-case) were built and
+screenshotted at 1280px/390px before any real code — the case (a tinted
+gradient panel, a diagonal sheen `::before`, repeating-gradient spine-hinge
+dashes) was judged and reported honestly as a real CSS ceiling: it reads as
+a convincing STYLIZED case, not a photorealistic one, since a flat gradient
+sheen and a border-radius aren't real depth cues. **Brian's call: ship the
+card alone (Version 1), drop the case — its cost wasn't earning its
+keep.** The tilt, shadow, and paper panel alone already read as "cassette"
+without anything that reads as trying.
+
+**Two design iterations after the first mockup, both driven by direct
+feedback, both worth keeping as the reasoning for why the shipped version
+looks the way it does.** The first mockup paired the boxed A/B letter with
+a small preprinted-looking "DATE/TIME · NOISE REDUCTION" label, matching
+the reference photo's own form chrome. Cut on direct instruction: between a
+standalone "Side A" eyebrow, the boxed letter, and the side's own name,
+three labels were doing the one job of naming the side. The tradeoff was
+flagged explicitly before cutting it, not silently dropped — on a real
+J-card, that preprinted form text is what makes the handwriting read as
+filled INTO a form; losing it makes the box read as a plain label rather
+than a form field. Brian's own read, confirmed against a real screenshot
+with real fonts loaded: exactly that tradeoff showed up, and it was
+accepted as the simpler version to try first, with the door left open to
+revisit if it stopped reading as a cassette. The boxed letter is kept
+regardless — "the strongest cassette cue on the page," per direct
+instruction — now rendered directly beside the side's name on one line
+(`.cf-side-header{display:flex}`), with the standalone "Side A" eyebrow
+gone and `aria-hidden="true"` on the box itself (the heading text already
+names the side; a screen reader doesn't need "A" announced twice).
+
+**Side names became mixtape themes, not category labels, in the same
+pass — "Old School"/"New School" (the pre-cassette copy, in place since the
+page's original 2026-09 launch) became "Timeless Classics"/"The New
+Generation".** One vocabulary, in both places it appears:
+`_CURRENT_FEED_SIDE_LABELS`' display heading on `/current-feed` itself, and
+`_CURRENT_FEED_SELECT_CHOICES`' admin-dropdown label on
+`/admin/reader/feeds` — both point at the identical two strings, so an
+admin picking a side sees the same name a visitor reads on the page.
+**Display copy only** — the stored `current_feed_side` values
+(`old_school`/`new_school`) are completely unaffected; renaming what a side
+is CALLED doesn't touch what's stored under it, matching this repo's
+standing convention for a pure copy rename (see the "Benchmarking →
+Resources" rename, or the tool/community edit-page label-alignment sweep,
+elsewhere in this doc). Checked for crowding before shipping, per the
+build brief's own ask: the admin `<select>` sits in an `11%`-width table
+column (`.ff-cf`) — a closed `<select>`'s own box doesn't reflow or break
+layout regardless of its selected option's text length (the browser
+truncates the closed-state text, never the box), so "The New Generation"
+was confirmed to fit without any column-width change. The `/current-feed`
+page line (`[A] Timeless Classics`) sits beside the box inside a half-width
+grid column at 1280px+ with no measured crowding either.
+
+**Ruled lines are dotted, not the pre-cassette solid `1px` divider** —
+`.cf-track{border-bottom:1.5px dotted rgba(15,15,10,.62)}`, thickened and
+darkened from an earlier, fainter mockup pass specifically so the line
+reads as part of a printed form (the reference J-card's own ruling) rather
+than as a plain content divider that happens to be dotted.
+
+**No coral anywhere on this page — still true, unchanged by this pass.**
+The paper-card panel, its tilt, and its shadow are all achromatic
+(off-white `#fbfaf6` panel — reusing the existing GER-input-background aux
+color rather than a new hex — warm-gray `#d0cac0` border, warm-black
+shadow), matching the black-ink-
+on-white-card reference photo directly; Brian's explicit call was that the
+page doesn't need a coral moment to work, so none was spent.
+
+**Verified against real Google Fonts, not the sandbox's fallback-font
+default, before sign-off** — a real, load-bearing verification step this
+session almost skipped past: this sandbox's headless Chromium normally
+can't reach `fonts.googleapis.com` (a documented, standing limitation
+elsewhere in this doc), but a direct `curl` check found the sandbox's
+outbound TLS proxy DOES reach it — Chromium was simply refusing the
+connection with `ERR_CERT_AUTHORITY_INVALID` because it doesn't trust the
+proxy's own CA the way the system `curl` does. Launched with
+`--ignore-certificate-errors` (plus `ignore_https_errors=True` on the
+browser context) as a scoped, throwaway verification measure for this one
+mockup render — never something to carry into production code or a real
+test — and confirmed via `document.fonts` (not just the CSS declaration,
+which reports what was ASKED for regardless of whether it loaded) that
+Caveat 700 genuinely reached `status:'loaded'` before the screenshot was
+taken. This is the concrete instance of the standing "verify computed/
+rendered values, not a screenshot glance" testing lesson elsewhere in this
+doc — a fallback-font screenshot would have completely hidden the
+handwriting-versus-print contrast that was the whole point of the review.
+
+**Mobile (390px, `@media(max-width:430px)`)**: the tilt, shadow, and
+rounded corners all flatten to a plain bordered rectangle
+(`transform:none`, a smaller flat `box-shadow`, `border-radius:2px`); the
+two sides stack via the pre-existing `.cf-sides` breakpoint at 800px, which
+needed no change for this pass. Verified zero horizontal overflow via
+direct `scrollWidth`/`clientWidth` measurement at 390px, not a screenshot
+glance.
+
+See BRAND.md §4 for the new, fifth accent-layer exception (scoped
+explicitly to `/current-feed`, not a general license) and
+`tests/test_current_feed.py` for the regression coverage — side names,
+ruled-line styling, the boxed-letter/heading merge, and the tape-card
+panel's presence at both viewport widths.
 
 ### Feeds-admin fixes: cookie domain registry, and per-row subscriber-cookie health (2026-09)
 
