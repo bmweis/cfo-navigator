@@ -5744,11 +5744,18 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Phase 0C's own investigation into that question found discovery is
   better solved by writing the surface inventory into project
   documentation than by building a tool for it, so this phase is retrieval
-  only; and the route-render tool (Phase 3 of the *investigation* track,
-  not to be confused with this same-numbered MCP *tool* Phase 3 below),
-  still parked pending the GET-route side-effect audit and the
-  `_CORAL_CHECK_IN_PROGRESS` race question, both being tracked separately.
-  See ARCHITECTURE.md's matching section and `tests/test_mcp_server.py`'s
+  only. **The route-render tool (Phase 3 of the *investigation* track, not
+  to be confused with this same-numbered MCP *tool* Phase 3 below) is
+  killed outright as of 2026-09, not parked** — #570 (`get_rows`) already
+  solved the actual motivating problem (reading editable page copy at any
+  table size), the residual need (seeing served markup/computed layout) is
+  already covered by Brian pasting view-source or devtools output when he
+  needs it, and the cost side (rendering arbitrary routes as an
+  authenticated admin, with no completed GET-route side-effect audit and
+  `/read/{article_id}` already known to fire a live external fetch on
+  load) was real and never closed. The GET-route side-effect audit that
+  would have gated this tool is dropped along with it — it had no other
+  purpose. See ARCHITECTURE.md's matching section and `tests/test_mcp_server.py`'s
   Phase 2 section (the literal `settings`-at-55-rows paging case and the
   dead-middle-row `get_rows` lookup) for the full write-up and coverage.
 - **MCP server, Phase 3 (2026-09) — six read-only Toolbox/Communities
@@ -9214,6 +9221,79 @@ it supersedes the old "`/save` is token-gated" note.
   sort key, and confirming the old rank text is genuinely gone) and
   `test_order_column_headers_are_clickable_and_carry_a_sort_indicator`
   for the regression coverage.
+
+- **Coral-guard correction (2026-09) — the module-level bool from the PR 16
+  recursion-fix bullet above WAS a real cross-thread race after all, and
+  its first proposed fix (`threading.local()`) was built, measured, and
+  rejected before merge; the guard is `contextvars.ContextVar` now.** A
+  later review pushed back on PR 16's own "deliberately not thread-local,
+  no genuine parallelism" framing: `webapp.tasks._failing_checks_count()`
+  holds `_checks_cache_lock` only long enough to check/update the cache
+  dict — it releases the lock BEFORE calling `_checks.run_all()`, so two
+  admin-role page renders landing close together against a stale (120s
+  TTL) cache genuinely call `run_all()` -> `coral_moment_problems()`
+  concurrently, on two different threadpool threads (FastAPI dispatches
+  sync `def` route handlers via `run_in_threadpool`). This needs no
+  exotic trigger — two ordinary overlapping page loads by the one admin
+  user, e.g. two tabs, around a cache-expiry boundary. A shared module
+  bool is wrong for this: thread A mid-loop (flag already `True`) makes
+  thread B's own, unrelated top-level call silently short-circuit to
+  `[]`, so B's `run_all()` reports "no coral problems" as fact even if a
+  real one exists — a false negative on an advisory check.
+  `threading.local()` looked like the fix, and was built and measured
+  before being trusted, per the standing discipline for this kind of
+  concurrency change — and found WRONG: the re-entrant case this guard
+  exists for is not confined to one OS thread. `coral_moment_problems()`
+  calls `TestClient(app).get(path)` in a loop, and each of those calls
+  dispatches through `run_in_threadpool` again, onto a THREADPOOL WORKER
+  THREAD that may be a different OS thread than the one already running
+  this function. Measured directly: a single signed-out GET "/" in
+  open-auth (admin) mode recurses through this exact chain (the same
+  chain PR 16's own recursion fix describes), and with `threading.local()`
+  each nested call landed on a genuinely different OS thread (confirmed
+  via `threading.get_ident()` at 5+ levels deep before the probe was
+  killed) — so each one saw its own thread-local `in_progress=False` and
+  started a brand-new, real, unbounded pass over every route, turning the
+  old bool's bounded ~18s recursion into indefinite threadpool growth (a
+  real deadlock risk in production, since anyio's worker pool has a
+  capacity limit). The module bool "worked" for this specific case only
+  by accident, by being visible to every thread regardless of which one
+  set it. `contextvars.ContextVar` is the primitive that has both
+  properties this guard actually needs: Starlette's `run_in_threadpool`
+  explicitly `copy_context()`s the calling context into each dispatched
+  worker thread, so a `.set(True)` made before a nested
+  `client.get(...)` call is correctly visible inside that nested call —
+  restoring the ~18s bounded-recursion baseline with no threadpool
+  blowup (verified) — while a genuinely unrelated top-level call (a raw
+  `threading.Thread`, or a separate incoming request's own asyncio Task
+  spawned from the server's own never-`.set()` top-level context) starts
+  from an unmutated ancestor context and never inherits another call's
+  in-progress flag (verified with a real two-thread harness: the second
+  thread's own result is a real, non-suppressed check, not a leaked
+  `[]`). See `webapp/app.py`'s own comment above `_CORAL_CHECK_CONTEXT`
+  for the full mechanism — **do not revert this to a plain module-level
+  bool or to `threading.local()` "for simplicity"; both were tried, both
+  were measured, both are wrong.**
+  `tests/test_coral_discipline.py::
+  test_concurrent_calls_do_not_leak_in_progress_state_across_threads` (a
+  deliberately synchronized two-thread harness, not a hopeful timing
+  test) fails deterministically against the old module bool
+  (`AssertionError: thread B's result was suppressed by thread A's
+  unrelated in-progress state...: {'problems': []}`) and passes against
+  the `contextvars` fix;
+  `test_same_request_recursion_stays_bounded_across_threadpool_workers`
+  fails (times out past 90s, still recursing) against a
+  `threading.local()` reconstruction and passes (~28s for the whole
+  9-test file) against the `contextvars` fix — both reproduced live in
+  this session before either fix was trusted, per the standing "prove a
+  regression test actually fails against the old code, don't just show
+  it passing" discipline. `webapp.tasks._failing_checks_count()`'s own
+  lock still only guards the cache dict, not the `run_all()` call — two
+  concurrent cache-miss threads now both correctly compute a real,
+  non-suppressed result (fixed by this change), but they still
+  redundantly redo that expensive computation rather than one waiting on
+  the other's in-flight result. Flagged as a real, separate performance
+  question — assessed, not fixed here, out of explicit scope.
 
 
 ## Authentication & security
