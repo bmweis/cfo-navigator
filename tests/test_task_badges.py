@@ -643,3 +643,183 @@ def test_opening_a_group_does_not_hide_a_collapsed_child_groups_badge(admin_clie
     # on CFO Toolbox's state) is what the fix guarantees.
     assert "task-badge" in r.text[details_start:summary_end]
     assert details_end > summary_end
+
+
+# --- _failing_checks_count() re-entrancy + concurrent-miss dedup (2026-09) --
+# See webapp/tasks.py's own comment above `_checks_computing` for the full
+# story: this function is genuinely re-entered through its own call chain in
+# open-auth mode (coral_moment_problems() -> render every public route as
+# role="admin" -> _has_open_admin_tasks() -> this function again, on a
+# DIFFERENT OS thread than the one already running the outer call, since
+# anyio dispatches each nested render onto its own threadpool worker) — so a
+# plain lock held across the compute step would deadlock (the outer thread
+# holds it while blocked on the render; the nested call, on a different
+# thread, blocks trying to acquire the very lock the outer thread won't
+# release until the nested call returns). Fixed with a non-blocking sentinel
+# instead of any lock a thread can wait on.
+
+@pytest.fixture
+def no_password_env(monkeypatch):
+    """No LINKLIB_PASSWORD/LINKLIB_SAVE_TOKEN at all — the documented "open,
+    local-dev convenience" auth mode that makes _is_authed()/_role() treat
+    every visitor as admin, which is what actually triggers the re-entrant
+    call chain this section tests. Same shape as
+    tests/test_coral_discipline.py's own fixture of the same name."""
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.delenv("LINKLIB_PASSWORD", raising=False)
+    monkeypatch.delenv("LINKLIB_SAVE_TOKEN", raising=False)
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    yield appmod
+    if os.path.exists(db):
+        os.remove(db)
+
+
+def test_concurrent_cache_miss_computes_run_all_only_once(monkeypatch):
+    """Two GENUINELY INDEPENDENT concurrent cache-miss callers (e.g. two
+    separate admin browser tabs hitting a stale cache around the same
+    moment) — deliberately synchronized, not hoped-for — must result in
+    run_all() executing once, not twice. This is the real waste the
+    coral-PR investigation flagged: a plain cache-check-then-compute with no
+    de-dup between the check and the compute lets two overlapping callers
+    both redo the ~3.5-9s run_all() pass for the same 120s-TTL value.
+
+    Written to fail deterministically against the pre-fix code (a bare
+    cache-check with no _checks_computing sentinel: both threads pass the
+    stale-cache check before either writes a fresh value, so both call
+    run_all()) and pass against the fix — see the PR description for real
+    captured output from both states, per the same discipline the coral PR
+    itself used."""
+    import threading as _threading
+    from webapp import tasks as taskmod
+
+    taskmod._checks_cache = None
+    taskmod._checks_computing = False
+
+    run_all_calls = {"n": 0}
+    a_started = _threading.Event()
+    a_may_finish = _threading.Event()
+    call_lock = _threading.Lock()
+
+    def fake_run_all():
+        with call_lock:
+            run_all_calls["n"] += 1
+            n = run_all_calls["n"]
+        if n == 1:
+            # Thread A: signal it has started computing, then block — the
+            # exact window a genuinely concurrent second caller would land
+            # in against the real ~3.5-9s run_all() pass.
+            a_started.set()
+            a_may_finish.wait(timeout=5)
+        return [{"where": "In-app", "ok": True}]
+
+    monkeypatch.setattr(taskmod._checks, "run_all", fake_run_all)
+
+    results = {}
+
+    def run_a():
+        results["a"] = taskmod._failing_checks_count()
+
+    def run_b():
+        assert a_started.wait(timeout=5), "thread A never started computing"
+        results["b"] = taskmod._failing_checks_count()
+
+    t_a = _threading.Thread(target=run_a)
+    t_b = _threading.Thread(target=run_b)
+    t_a.start()
+    assert a_started.wait(timeout=5), "thread A never started computing"
+    t_b.start()
+    t_b.join(timeout=10)
+    a_may_finish.set()
+    t_a.join(timeout=10)
+
+    assert not t_a.is_alive() and not t_b.is_alive(), "a thread never finished"
+    assert run_all_calls["n"] == 1, (
+        f"run_all() was computed {run_all_calls['n']} times for two "
+        "concurrent independent cache-miss callers — should be exactly 1"
+    )
+    # Thread B got a real value back (whatever's cached/in-flight — never an
+    # exception, never a wait that never resolves) rather than being made to
+    # redundantly recompute.
+    assert results.get("b") == 0
+
+
+def test_reentrant_failing_checks_count_does_not_hang(no_password_env):
+    """The test that matters most: a real signed-out GET "/" in open-auth
+    mode — which recurses through _page()'s admin-nav badge computation back
+    into _failing_checks_count(), on a different OS thread per nested render
+    (see the module comment above) — must finish within a generous bound in
+    a background thread. A naive fix here (a threading.Lock or RLock held
+    across run_all()) would hang this permanently, not just slowly: the
+    outer thread holds the lock while blocked waiting for the render to
+    finish, and the nested call — on a different thread — blocks trying to
+    acquire that same lock. This is the same harness shape
+    tests/test_coral_discipline.py used to catch the analogous
+    threading.local() regression in the coral guard itself."""
+    import threading as _threading
+    from webapp import tasks as taskmod
+    from fastapi.testclient import TestClient
+
+    # webapp.tasks' cache/sentinel are plain module globals, never reloaded
+    # by no_password_env's importlib.reload(webapp.app) — reset explicitly
+    # so an earlier test in this same process (which may have left a fresh
+    # cache behind) can't make this render skip the compute path entirely.
+    taskmod._checks_cache = None
+    taskmod._checks_computing = False
+
+    client = TestClient(no_password_env.app, raise_server_exceptions=False)
+    result = {}
+
+    def run():
+        result["resp"] = client.get("/", follow_redirects=False)
+
+    t = _threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout=90)
+    assert not t.is_alive(), (
+        "GET \"/\" in open-auth mode did not finish within 90s — a lock "
+        "held across run_all() would deadlock here permanently; the fix "
+        "must be a non-blocking sentinel instead"
+    )
+    assert result["resp"].status_code == 200
+
+
+def test_reentrant_call_skips_recomputation_entirely(no_password_env):
+    """Direct proof the fix does more than avoid a hang: the re-entrant call
+    (triggered for real, not simulated) never redoes run_all() at all — it
+    returns the in-flight sentinel's fallback immediately. Instruments
+    webapp.checks.run_all (the exact symbol webapp.tasks imports as
+    `_checks`) to count real invocations for one real signed-out GET "/" in
+    open-auth mode; before this fix, the coral PR's own investigation
+    measured exactly 2 (the outer call, plus one genuine recomputation
+    triggered by the very first nested render) — this asserts exactly 1."""
+    from webapp import tasks as taskmod
+
+    # Same isolation reset as the sibling test above — a fresh cache left
+    # by an earlier test in this process would make this render skip
+    # run_all() entirely and falsely look like the fix already works.
+    taskmod._checks_cache = None
+    taskmod._checks_computing = False
+
+    call_count = {"n": 0}
+    orig_run_all = taskmod._checks.run_all
+
+    def counting_run_all():
+        call_count["n"] += 1
+        return orig_run_all()
+
+    taskmod._checks.run_all = counting_run_all
+    try:
+        from fastapi.testclient import TestClient
+        client = TestClient(no_password_env.app, raise_server_exceptions=False)
+        resp = client.get("/", follow_redirects=False)
+        assert resp.status_code == 200
+        assert call_count["n"] == 1, (
+            f"run_all() ran {call_count['n']} times for one page render — "
+            "the re-entrant nested call should return the in-flight "
+            "sentinel's fallback instead of recomputing"
+        )
+    finally:
+        taskmod._checks.run_all = orig_run_all

@@ -55,16 +55,65 @@ _CHECKS_CACHE_TTL = 120  # seconds
 _checks_cache_lock = threading.Lock()
 _checks_cache: tuple[float, int] | None = None
 
+# 2026-09 (coral-PR follow-up): the naive fix here — a plain lock held
+# across the run_all() call, so a concurrent cache-miss caller waits for
+# whoever's already computing instead of redoing the work — is UNSAFE.
+# This function is genuinely re-entered through its own call chain:
+# run_all() -> coral_moment_problems() renders every public route, and in
+# open-auth mode (no LINKLIB_PASSWORD/LINKLIB_SAVE_TOKEN — see
+# webapp.app's own comment on _CORAL_CHECK_CONTEXT for why that's the
+# trigger) every one of those renders is role="admin", so _page() calls
+# _has_open_admin_tasks() -> this function again — on a DIFFERENT OS
+# thread than the one already running the outer call, since anyio's
+# run_in_threadpool dispatches each nested TestClient render onto its own
+# threadpool worker (the exact mechanism the coral fix's own comment
+# documents; confirmed again here with a live instrumented GET "/" in
+# open-auth mode: depth reached exactly 2, on two distinct thread ids,
+# confirmed by call-graph reading, not just re-derived from that
+# comment). A `threading.Lock` around the compute step would have the
+# outer thread hold the lock while it's blocked waiting for the render to
+# finish, and the nested call — on that different thread — block trying
+# to acquire the very lock the outer thread won't release until the
+# nested call returns: a permanent cross-thread deadlock, not a slow
+# path. `threading.RLock` does NOT fix this — it only waives re-entry for
+# the SAME thread, and the nested call is provably on a different one
+# (see above), so RLock blocks it exactly like a plain Lock would.
+#
+# Fixed instead with a non-blocking sentinel, never a lock a thread can
+# wait on: `_checks_computing` marks "a computation is in flight"; any
+# caller — genuinely concurrent OR the recursive same-chain case above —
+# that sees it set just returns whatever's already cached (or 0, on a
+# cold start with nothing cached yet) instead of trying to also compute
+# or waiting for the one in flight to finish. Nothing ever blocks on
+# another thread's progress, so this can't deadlock regardless of whether
+# the second caller is an independent request or this exact function
+# re-entering itself nested inside its own first call. The recursive case
+# additionally benefits: it no longer redoes run_all() a second time at
+# all (the coral-PR-era measurement of "2x run_all(), ~18s" for one
+# open-auth page render no longer applies — confirmed below). The only
+# behavioral cost is a returned count that can be transiently stale (up
+# to the ~3.5-9s a `run_all()` pass takes) during the narrow window a
+# computation is actually in flight — acceptable for a nav badge that was
+# already only ever a 120s-stale approximation, and never a value
+# anything besides that badge depends on for correctness.
+_checks_computing = False
+
 
 def _failing_checks_count() -> int:
-    global _checks_cache
+    global _checks_cache, _checks_computing
     now = time.time()
     with _checks_cache_lock:
         if _checks_cache is not None and now - _checks_cache[0] < _CHECKS_CACHE_TTL:
             return _checks_cache[1]
-    count = sum(1 for r in _checks.run_all() if r["where"] == "In-app" and r["ok"] is False)
-    with _checks_cache_lock:
-        _checks_cache = (now, count)
+        if _checks_computing:
+            return _checks_cache[1] if _checks_cache is not None else 0
+        _checks_computing = True
+    try:
+        count = sum(1 for r in _checks.run_all() if r["where"] == "In-app" and r["ok"] is False)
+    finally:
+        with _checks_cache_lock:
+            _checks_cache = (time.time(), count)
+            _checks_computing = False
     return count
 
 
