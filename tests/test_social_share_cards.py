@@ -305,3 +305,38 @@ def test_typography_and_brand_checks_pass_on_new_code(env):
     assert not brand_check.findings(src)
     assert not voice_review.typography_findings(src)
     assert not brand_check.outbound_link_problems(src)
+
+
+# -- The real committed images (webapp/static/og/, landed via a separate --
+# -- commit before this branch was rebased onto it) -----------------------
+
+def test_the_four_real_committed_cards_exist_and_serve(env):
+    """Not a temp-dir fixture — the actual files Brian committed directly
+    to webapp/static/og/ (default.png, growth-engine-ratio.png,
+    ai-hackathon-playbook.png, netsuite-mcp.png). If this ever fails, the
+    directory's real contents changed — that's exactly what this test
+    exists to catch."""
+    real_dir = pathlib.Path(env._OG_DIR)
+    expected = {"default", "growth-engine-ratio", "ai-hackathon-playbook", "netsuite-mcp"}
+    on_disk = {p.stem for p in real_dir.glob("*.png")}
+    assert on_disk == expected, on_disk
+    c = _client(env)
+    for slug in expected:
+        r = c.get(f"/static/og/{slug}.png")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/png"
+
+
+def test_growth_engine_ratio_slug_resolves_to_its_real_committed_card(env):
+    """End-to-end, no temp-dir override: the real webapp/static/og/ directory
+    plus a real original_content row for growth-engine-ratio must produce
+    the matching card URL — the actual promotion-deadline page this whole
+    feature exists for."""
+    _add_oc(env, slug="growth-engine-ratio", title="The Growth Engine Ratio",
+            tag_label="Framework",
+            teaser="A metric for how R&amp;D and GTM investments work together to "
+                   "drive growth&mdash;with an interactive calculator.",
+            body_md="# hi", status="live")
+    html = _client(env).get("/thought-leadership/growth-engine-ratio").text
+    assert ('<meta property="og:image" content='
+            '"https://bmweis.com/static/og/growth-engine-ratio.png">') in html
