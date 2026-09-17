@@ -4422,7 +4422,8 @@ def _current_feed_hidden_footnote(feeds: list) -> str:
         for section, names in sorted(by_section.items())
     ]
     return (
-        '<p style="color:var(--muted);font-size:13px;margin:18px 0 0;line-height:1.6;">'
+        '<p style="color:var(--muted);font-size:13px;margin:32px 0 0;padding-top:16px;'
+        'border-top:1px solid var(--line);line-height:1.6;">'
         f'<strong>Not on the tape:</strong> {" &middot; ".join(groups)}. '
         "They're excluded from the tracklist format, not from search&mdash;"
         "FP&amp;A Buddy still searches every one of them.</p>"
@@ -4488,10 +4489,10 @@ _CURRENT_FEED_CSS = """
 .cf-track-num{flex:0 0 auto;width:24px;font:600 13px var(--font-body);color:var(--muted);
   font-variant-numeric:tabular-nums;}
 .cf-track-body{min-width:0;flex:1 1 auto;}
-.cf-track-name{font:700 16px var(--font-sticker);color:var(--navy);text-decoration:none;
-  line-height:1.3;word-break:break-word;}
+.cf-track-name{font:700 18px var(--font-sticker);color:var(--navy);text-decoration:none;
+  line-height:1.35;word-break:break-word;}
 .cf-track-name:hover{color:var(--accent);}
-.cf-track-name--unlinked{color:var(--ink-soft);cursor:default;font-family:var(--font-sticker);font-weight:700;font-size:16px;}
+.cf-track-name--unlinked{color:var(--ink-soft);cursor:default;font-family:var(--font-sticker);font-weight:700;font-size:18px;}
 .cf-empty{color:var(--muted);font-size:14px;font-style:italic;margin:0;}
 """
 
@@ -4548,12 +4549,14 @@ def current_feed(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">&larr; How this is built</a></p>
 <h1 style="margin-bottom:6px;">Current Feed</h1>
-<p style="color:var(--ink-soft);margin:0 0 4px;font-size:15.5px;line-height:1.6;">The writers and publications I actually read, in two eras. This is also the exact list FP&amp;A Buddy searches when it goes to the web&mdash;if an answer cites something from trusted web, it came from one of these.</p>
+<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">You know that friend whose mixtape you'd borrow? The one where every track was something you'd never have found on your own?</p>
+<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">I can't hand you my feed. I pay for some of this. But I can show you what's on the tape.</p>
+<p style="color:var(--ink-soft);margin:0 0 4px;font-size:15.5px;line-height:1.6;">These are the writers I read, in two eras. It's also the exact list FP&amp;A Buddy searches when it goes to the web&mdash;if an answer cites something from trusted web, it came from one of these.</p>
 <p style="color:var(--muted);font-size:13px;margin:0;">Every name links to the writer's own site, not the raw feed. This list changes as my subscriptions do, with no hand-maintenance behind it.</p>
-{footnote_html}
 <div class="cf-sides">
 {sides_html}
 </div>
+{footnote_html}
 </div>
 <style>{_CURRENT_FEED_CSS}</style>"""
     return HTMLResponse(_page("Current Feed—Brian Weisberg", "About", body, role=_role(request)))
@@ -26767,8 +26770,19 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 }}
 .ff-table,.fs-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
 .ff-row>td,.fs-row>td{{padding:9px 12px;vertical-align:middle;border-top:1px solid var(--line);}}
+/* vertical-align:top is explicit, not decorative: on a narrow column
+   (Subscriber, Current Feed) the trailing sort-indicator span doesn't fit
+   on the same line as the label text and wraps onto its own invisible
+   second line, so the row's shared height grows to fit two lines even
+   though only one renders. Under the browser default (vertical-align:
+   middle), that pushes the visible text up toward the row's true
+   center — noticeably higher than a header whose text+span fit on one
+   line and centers as a single line. Pinning every header to the top
+   removes the dependence on how many (possibly invisible) lines a given
+   cell happens to have — every label starts flush at the same edge
+   regardless. */
 .ff-table thead th,.fs-table thead th{{padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);
-  font-weight:600;text-transform:uppercase;letter-spacing:.06em;background:var(--bg);}}
+  font-weight:600;text-transform:uppercase;letter-spacing:.06em;background:var(--bg);vertical-align:top;}}
 /* Sortable headers (Name/Section/Cookie/Subscriber/Current Feed/Order) —
    URL and Actions have nothing worth sorting by, so they stay plain <th>s
    with no click affordance. */
@@ -26865,23 +26879,14 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <script>{_FEEDS_SORT_JS}</script>
 <h2 style="font-size:15px;margin:22px 0 8px;color:var(--navy);">Column reference</h2>
 <ul style="color:var(--muted);margin:0 0 14px;padding-left:20px;font-size:13px;line-height:1.65;">
-<li>Click a column heading&mdash;<strong>Name</strong>, <strong>Section</strong>, <strong>Cookie</strong>, <strong>Subscriber</strong>, <strong>Current Feed</strong>, or <strong>Order</strong>&mdash;to sort by it; click again to reverse. The sort you pick sticks around across page reloads (including the one after clicking an Order arrow), until you clear it by reloading with a fresh browser profile or clearing site data.</li>
-<li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
-<li><strong>Cookie</strong> shows two different facts, not one. Whether a variable is set: every feed's domain is checked automatically (derived live from this feed list, not a hardcoded list of domains&mdash;add a feed with a paid subscription and set its <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable in Railway, no code change needed); a dash means none is set. And, once the re-check button above has probed it, whether fetching actually works: a colored dot (working / expired / inconclusive) plus how long ago it was checked. A variable being set only means "configured"&mdash;it doesn't mean the fetch is succeeding, which is exactly what the dot is for. <strong>The cookie value itself is never stored in this database.</strong> See <code>RUNBOOK.md</code> &sect;5 to refresh an expired one.</li>
-<li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
-<li><strong>Current Feed</strong> controls whether&mdash;and on which side&mdash;this feed appears on the public <a href="/current-feed" style="color:var(--accent);">/current-feed</a> tracklist. A new feed starts Hidden; that's deliberate, not a bug. This is presentation only&mdash;FP&amp;A Buddy's web search still covers every feed here regardless of this setting, and the tracklist page itself says so.</li>
-<li><strong>Order</strong>'s &uarr;/&darr; arrows move a feed within its side, lowest first&mdash;there's nothing to type. Both arrows are disabled while Hidden (nothing to reorder yet), and whichever arrow would move a feed past the top or bottom of its side is disabled too. Sorting by <strong>Order</strong> groups the table by side&mdash;Old school, then New school, then Hidden&mdash;and then by position within it: the exact sequence the arrows move a feed through, so sorted-by-Order is the one view where a feed's row position actually shows its real rank. Moving a feed renumbers its whole side to a clean 0, 1, 2&hellip; sequence as a side effect, so it can't create&mdash;or leave standing&mdash;two feeds sharing the same position.</li>
+<li>Click a heading to sort, click again to reverse. The sort sticks across reloads until you clear site data.</li>
+<li><strong>Sources</strong> in the Reader only lists feeds with items currently in view, so a quiet feed can be here and not there&mdash;expected, not a sync problem.</li>
+<li><strong>Cookie</strong>: a dash means no <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable is set; once one is, the dot shows whether fetching actually works, not just that a variable exists. The value itself is never stored here. See <code>RUNBOOK.md</code> &sect;5.</li>
+<li><strong>Subscriber</strong> is a note to yourself for whether you pay for a source&mdash;nothing reads it or gates on it.</li>
+<li><strong>Current Feed</strong> controls whether and on which side a feed shows on <a href="/current-feed" style="color:var(--accent);">/current-feed</a>. New feeds start Hidden. Presentation only&mdash;web search still covers every feed regardless.</li>
+<li>Sorting by <strong>Order</strong> is the one sort that shows a feed's real rank: every other sort leaves the table in its default order, so a correctly-disabled arrow on a row that isn't visibly first or last can look stuck. Sorted by Order, row position and rank actually match.</li>
 </ul>
-<div style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.65;">
-<p style="margin:0 0 6px;"><strong>Finding the right cookie in DevTools:</strong> log into the site, open DevTools &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> for that domain, and copy the minimum cookie that carries the session&mdash;not the whole jar. It varies by platform: a <strong>Substack</strong> site's session cookie is typically named <code>connect.sid</code>; a <strong>beehiiv</strong> site (e.g. Mostly Metrics, Cautious Optimism) uses a signed JWT, usually under a name containing <code>token</code> or <code>session</code>.</p>
-<ul style="margin:0 0 6px;padding-left:18px;">
-<li><strong>Format:</strong> paste it as <code>name=value</code>, not the value alone&mdash;both currently-configured cookies use this shape, and a bare value with no name will fail.</li>
-<li><strong>Lifetime varies enormously by platform.</strong> A beehiiv token typically expires in about 48 hours; a Substack <code>connect.sid</code> lasts months. A beehiiv cookie needs re-grabbing regularly&mdash;and a stale one fails <em>silently</em>: no error anywhere, it just quietly stops returning full text.</li>
-<li><strong>A cookie visible in DevTools may already be expired.</strong> The browser keeps showing it either way. To force a fresh one: log out, log back in, and copy it immediately.</li>
-<li><strong>Checking validity:</strong> a JWT cookie's payload carries an <code>exp</code> timestamp. Paste the token into any JWT decoder (e.g. jwt.io) to see whether it's still valid before assuming the fetch failure is something else.</li>
-</ul>
-<p style="margin:0;">When in doubt, RUNBOOK.md &sect;5.2's fallback still works: copy the entire <code>Cookie:</code> request header instead of hunting for one name.</p>
-</div>
+<p style="font-size:12.5px;color:var(--muted);margin:0;">Full cookie-refresh steps, including how to find the right value in DevTools, live in <code>RUNBOOK.md</code> &sect;5.</p>
 
 <h2 style="font-size:17px;margin:34px 0 4px;">Manage sections</h2>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Sections group feeds in the Reader's Sources rail. They carry no settings of their own. A section can only be removed once it's empty.</p>
