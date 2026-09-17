@@ -9294,6 +9294,48 @@ it supersedes the old "`/save` is token-gated" note.
   redundantly redo that expensive computation rather than one waiting on
   the other's in-flight result. Flagged as a real, separate performance
   question — assessed, not fixed here, out of explicit scope.
+- **`_failing_checks_count()` redundant-work fix (2026-09) — the "assessed,
+  not fixed" question the coral-guard bullet above left open, closed with
+  the same investigate-before-you-build discipline.** The obvious fix
+  (double-checked locking: acquire a lock, re-check the cache under it,
+  compute only if still stale) is unsafe: `_failing_checks_count()` is
+  genuinely re-entered through its own call chain (`run_all()` ->
+  `coral_moment_problems()` renders every public route, and in open-auth
+  mode every one of those renders is `role="admin"`, so `_page()` calls
+  `_has_open_admin_tasks()` -> this function again) — on a *different* OS
+  thread than the one running the outer call, since `run_in_threadpool`
+  dispatches each nested render onto its own worker (the exact mechanism
+  the coral fix's own comment documents). Confirmed live with real
+  instrumentation on a signed-out `GET /` in open-auth mode, per the
+  brief's own "prove it, don't read the call graph" requirement: `run_all()`
+  executed twice, at depth 2, on two distinct thread ids — matching the
+  earlier bullet's own measurement exactly. A `threading.Lock` held across
+  `run_all()` would deadlock permanently in this case (the outer thread
+  holds the lock while blocked waiting for the render; the nested call, on
+  a different thread, blocks trying to acquire that same lock — neither
+  ever proceeds). `threading.RLock` does not fix it either — it only waives
+  re-entry for the *same* thread, and the nested call is provably on a
+  different one. **Fixed with a non-blocking sentinel instead**
+  (`_checks_computing`, `webapp/tasks.py`): any caller — genuinely
+  concurrent (two admin browser tabs hitting a stale cache) or the
+  recursive same-chain case above — that finds a computation already in
+  flight just returns whatever's cached (or `0` cold-start) rather than
+  trying to compute or waiting for the in-flight one to finish. Nothing
+  ever blocks on another thread's progress, so this can't deadlock either
+  way — and it does better than merely being safe: the recursive case now
+  skips the redundant `run_all()` entirely (confirmed: the same real
+  open-auth `GET /` that showed depth-2/2x `run_all()` before the fix now
+  shows depth-1/1x after it), and two genuinely independent concurrent
+  cache misses now compute `run_all()` exactly once instead of twice
+  (confirmed with a deliberately synchronized two-thread harness, same
+  discipline as the coral PR's own concurrent-threads test — proven to
+  fail against the pre-fix code with `run_all()` computed twice before
+  passing against the fix). See ARCHITECTURE.md's matching section for the
+  full write-up and `tests/test_task_badges.py`'s re-entrancy/concurrent-
+  miss section for the regression coverage, including a real signed-out
+  `GET /` in open-auth mode run in a background thread with a hard join
+  timeout — the test that matters most, since a naive lock-based "fix"
+  would have hung it permanently rather than merely run it slowly.
 
 
 ## Authentication & security

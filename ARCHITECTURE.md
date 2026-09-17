@@ -2852,6 +2852,60 @@ anchor site-wide complies:
   `/how-this-is-built` copy writes its 12 outbound links as raw `<a>` tags
   and leaves its 2 internal links as plain markdown.
 
+### `_failing_checks_count()` re-entrancy fix (2026-09, coral-PR follow-up)
+
+`webapp.tasks._failing_checks_count()` badges `/admin`'s nav dot and the
+"/admin/checks" href with the same in-app check results `run_all()`
+computes live, cached for `_CHECKS_CACHE_TTL` (120s) so an ordinary page
+render doesn't pay the ~3.5-9s `run_all()` cost (pyflakes over the whole
+tree, a `node --check` per shared `<script>` block) on every load. The
+original cache-check-then-compute had no de-dup between the two steps, so
+two callers landing on a stale cache close together both recomputed — a
+real, bounded waste the coral PR's own investigation flagged.
+
+**The obvious fix — a lock held across the compute step — is unsafe here,
+for the same reason `_CORAL_CHECK_CONTEXT` (see the section above) had to
+be a `contextvars.ContextVar` and not a plain lock or `threading.local()`.**
+`_failing_checks_count()` is genuinely re-entered through its own call
+chain: `run_all()` -> `coral_moment_problems()` renders every public route,
+and in open-auth mode (no `LINKLIB_PASSWORD`/`LINKLIB_SAVE_TOKEN` — the
+same "local-dev convenience" trigger the coral guard's own comment
+documents) every one of those renders is `role="admin"`, so `_page()`
+calls `_has_open_admin_tasks()` -> this function again — on a *different*
+OS thread than the one already running the outer call, since anyio's
+`run_in_threadpool` dispatches each nested `TestClient` render onto its
+own threadpool worker. Confirmed live with instrumentation on a real
+signed-out `GET /` in open-auth mode: `run_all()` executed twice (depth 2,
+two distinct thread ids), matching the coral PR's own earlier measurement
+exactly. A `threading.Lock` around the compute step would have the outer
+thread hold the lock while blocked on the render, and the nested call — on
+that different thread — block trying to acquire the very lock the outer
+thread won't release until the nested call returns: a permanent
+cross-thread deadlock, not a slow path. `threading.RLock` does not fix
+this — it only waives re-entry for the *same* thread, and the nested call
+is provably on a different one.
+
+**Fixed with a non-blocking sentinel instead of any lock a thread can wait
+on**: `_checks_computing` marks "a computation is in flight." Any caller —
+genuinely concurrent (two admin browser tabs) or the recursive same-chain
+case above — that finds it already set just returns whatever's cached (or
+`0` on a cold start with nothing cached yet) rather than trying to also
+compute or blocking on the one in flight. Nothing ever waits on another
+thread's progress, so this can't deadlock regardless of which kind of
+second caller shows up — and the recursive case now skips the redundant
+`run_all()` entirely rather than merely surviving it safely (verified: the
+same real open-auth `GET /` now computes `run_all()` exactly once). The
+only cost is a badge count that can be transiently stale for the ~3.5-9s a
+computation is in flight — acceptable for a nav dot that was already only
+ever a 120s-stale approximation. See `webapp/tasks.py`'s own comment above
+`_checks_computing` for the full mechanism, and
+`tests/test_task_badges.py`'s re-entrancy/concurrent-miss section for the
+regression coverage — both a deliberately synchronized two-thread harness
+(proven to fail against the pre-fix code: `run_all()` computed twice for
+two independent concurrent misses) and a real open-auth `GET /` in a
+background thread with a hard join timeout, the same harness shape the
+coral fix's own `threading.local()` regression test used.
+
 ### Thought Leadership
 
 | Table | Purpose | Columns that carry meaning |
