@@ -2819,7 +2819,11 @@ internal links are same-tab for free.
 mode here is a hand-typed anchor in `webapp/app.py`, and a source scan also
 covers admin pages (a signed-out rendered scan can't reach them), costs no
 render time, and carries none of the re-entrancy hazard PR 16 had to build
-`_CORAL_CHECK_IN_PROGRESS` for.
+a guard for (`webapp/app.py`'s `_CORAL_CHECK_CONTEXT` — a
+`contextvars.ContextVar`, not the plain module-level bool this originally
+shipped as; see CLAUDE.md's "Coral-guard correction" entry for why a
+module bool and, later, `threading.local()` were each tried and found
+wrong for this guard specifically).
 
 It reads **raw source spans**, not evaluated string values, because an
 anchor is routinely split across adjacent Python string literals
