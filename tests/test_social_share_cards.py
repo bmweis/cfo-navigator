@@ -4,9 +4,11 @@ its serving route, and the /admin/brand download list.
 
 Phase 2 (image generation) was investigated and killed outright — see
 CLAUDE.md's "Social share cards" bullet for the reasoning. This file covers
-Phase 1 only: metadata emission, the two escaping paths (pre-encoded
-original_content.teaser vs. plain ai_surfaces.teaser), and the
-filename-existence-check mechanism for og:image.
+Phase 1 only: metadata emission, the single-rule escaping helper
+(_esc_attr_normalize — html.unescape() then _esc(), correct for both
+original_content.teaser's pre-encoded convention and ai_surfaces.teaser's/
+homepage_teaser's plain-text convention), and the filename-existence-check
+mechanism for og:image.
 """
 import os
 import pathlib
@@ -139,14 +141,22 @@ def test_default_description_used_when_no_teaser_given(env):
     assert env._OG_DEFAULT_DESCRIPTION.split(":")[0] in html
 
 
-# -- The two escaping paths ------------------------------------------------
+# -- Escaping: one shared rule, evaluated against two storage conventions --
+#
+# original_content.teaser is stored PRE-ENCODED (real HTML entities already
+# in the string, e.g. "R&amp;D"/"&mdash;"); ai_surfaces.teaser and
+# homepage_teaser are stored as plain text. _esc_attr_normalize() —
+# html.unescape() then _esc() — is one shared rule that produces correct
+# output for both conventions, replacing an earlier two-helper design (one
+# helper per convention) after evaluating this single-rule alternative and
+# finding it not just simpler but strictly more robust — see its own
+# docstring and test_esc_attr_normalize_handles_inconsistent_admin_input
+# below for the concrete gap the two-helper version had.
 
 def test_original_content_teaser_is_not_double_escaped(env):
-    """original_content.teaser is stored PRE-ENCODED (real &amp;/&mdash;
-    entities already in the string) — og:description must interpolate it
-    raw plus a bare-quote guard, never through the normal _esc(), or an
-    existing &amp; becomes &amp;amp; (renders as literal "&amp;D" to a
-    scraper). This is the exact production teaser for growth-engine-ratio."""
+    """A pre-encoded &amp; must not become &amp;amp; — this is the exact
+    production teaser for growth-engine-ratio. html.unescape() first
+    decodes it back to a raw "&", then _esc() re-encodes it exactly once."""
     _add_oc(env, slug="ger", title="The Growth Engine Ratio", tag_label="Framework",
             teaser="A metric for how R&amp;D and GTM investments work together to "
                    "drive growth&mdash;with an interactive calculator.",
@@ -156,12 +166,15 @@ def test_original_content_teaser_is_not_double_escaped(env):
     assert "R&amp;D" in desc_tag
     assert "R&amp;amp;D" not in desc_tag
     assert "&amp;amp;" not in desc_tag
+    # A decoded-and-not-re-escaped entity like &mdash; (not one of _esc()'s
+    # four dangerous characters) renders as its literal Unicode character —
+    # harmless in a UTF-8 attribute, and expected under this design.
+    assert "—with an interactive calculator" in desc_tag
 
 
 def test_original_content_teaser_quote_is_escaped(env):
-    """The one character _esc_attr_quote_only guards against: a literal
-    double quote in an already-pre-encoded teaser would otherwise break out
-    of the content="..." attribute."""
+    """A literal double quote in an already-pre-encoded teaser would
+    otherwise break out of the content="..." attribute."""
     _add_oc(env, slug="quoted", title="Quoted Piece", tag_label="Framework",
             teaser='A piece about the "real" numbers.',
             body_md="# hi", status="live")
@@ -172,8 +185,7 @@ def test_original_content_teaser_quote_is_escaped(env):
 def test_ai_surface_teaser_is_escaped_normally(env):
     """ai_surfaces.teaser is stored as PLAIN text (no pre-encoding) — the
     opposite convention from original_content.teaser. A literal ampersand
-    here must go through the normal _esc(), or it would render unescaped
-    (invalid HTML / a raw & inside an attribute)."""
+    here must still end up escaped exactly once."""
     _add_ai_surface(env, slug="fp-a-buddy", title="FP&A Buddy",
                      teaser="Answers questions from my archive & the web.",
                      body_md="Body.", status="live")
@@ -183,9 +195,10 @@ def test_ai_surface_teaser_is_escaped_normally(env):
     assert "archive & the web" not in desc_tag
 
 
-def test_esc_attr_quote_only_leaves_ampersand_and_entities_alone(env):
-    helper = env._esc_attr_quote_only
-    assert helper("R&amp;D&mdash;done") == "R&amp;D&mdash;done"
+def test_esc_attr_normalize_handles_both_conventions(env):
+    helper = env._esc_attr_normalize
+    assert helper("R&amp;D done") == "R&amp;D done"  # pre-encoded, stays single-encoded
+    assert helper("R&D done") == "R&amp;D done"       # plain, gets encoded
     assert helper('a "quoted" phrase') == "a &quot;quoted&quot; phrase"
     assert helper("") == ""
     # Matches _esc()'s own established str(s)-or-"" pattern exactly (same
@@ -193,6 +206,22 @@ def test_esc_attr_quote_only_leaves_ampersand_and_entities_alone(env):
     # this isn't a None-safety guarantee, deliberately consistent with the
     # existing helper rather than diverging from it.
     assert helper(None) == "None"
+
+
+def test_esc_attr_normalize_handles_inconsistent_admin_input(env):
+    """The concrete robustness gap that motivated replacing the two-helper
+    design: a teaser with ONE raw, un-pre-encoded ampersand mixed with one
+    already-encoded one (a plausible admin typo, not a contrived case).
+    The retired _esc_attr_quote_only() trusted original_content.teaser's
+    "&" completely and would have shipped the raw one un-escaped — invalid
+    markup. The single decode-then-re-encode rule can't have that failure
+    mode: every "&" in the output is a real, correctly-escaped entity
+    regardless of how it arrived."""
+    helper = env._esc_attr_normalize
+    mixed = "Ben & Jerry's &amp; Associates"
+    result = helper(mixed)
+    assert result == "Ben &amp; Jerry's &amp; Associates"
+    assert "Ben & Jerry" not in result  # no raw, unescaped ampersand survives
 
 
 # -- og:image slug lookup ---------------------------------------------------

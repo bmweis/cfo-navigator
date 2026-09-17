@@ -45,6 +45,7 @@ import asyncio
 import difflib
 import hashlib
 import hmac
+import html
 import inspect
 import contextvars
 import json
@@ -328,18 +329,37 @@ def _og_image_url(slug: str | None) -> str:
     return f"{PUBLIC_BASE}/static/og/default.png"
 
 
-def _esc_attr_quote_only(s) -> str:
-    """For content that's ALREADY HTML-entity-encoded (original_content.teaser
-    and any other admin-authored field that follows the same convention —
-    see CLAUDE.md's "HTML escaping on the way into an attribute" investigation)
-    being interpolated into an HTML attribute value. Running it through the
-    normal _esc() would double-encode an existing &amp;/&mdash;/etc. — the
-    same double-escape bug class documented elsewhere in this codebase
-    ("Speaking &amp; Events", the Original Content Phase 4b title fix). The
-    only character that can actually break out of a double-quoted attribute
-    here is a literal, un-encoded double quote, so that's the only thing
-    this escapes — unlike _esc(), it deliberately leaves "&" alone."""
-    return (str(s) or "").replace('"', "&quot;")
+def _esc_attr_normalize(s) -> str:
+    """One shared rule for an og:description/twitter:description source,
+    regardless of which storage convention the field it came from uses —
+    original_content.teaser (pre-encoded: real "&amp;"/"&mdash;" entities
+    already in the string) or ai_surfaces.teaser/homepage_teaser (plain
+    text). An earlier version of this function shipped as two separate
+    helpers, one per convention (_esc_attr_quote_only, which trusted a
+    pre-encoded field's "&" completely and left it untouched, plus the
+    ordinary _esc() for plain fields) — collapsed into this single rule
+    after evaluating html.unescape(s) then _esc(s) as one normalization
+    step for both cases, per an explicit request to check that alternative
+    before shipping two per-field treatments.
+
+    html.unescape() first decodes ANY existing entities (&amp; -> &,
+    &mdash; -> the literal em dash character, numeric refs, etc.) back to
+    their raw form — a no-op on already-plain text, since unescape only
+    touches substrings that actually match a recognized entity pattern.
+    _esc() then re-encodes only the four characters that are ever
+    structurally dangerous in this context (&, <, >, "). The result is
+    correct for both storage conventions with one rule instead of two.
+
+    This is strictly more robust than the two-helper version it replaced,
+    not just simpler: the old _esc_attr_quote_only() trusted a pre-encoded
+    field's "&" completely, so a single un-pre-encoded ampersand slipping
+    into original_content.teaser (an admin typo, not a hypothetical) would
+    have shipped as a literal, un-escaped "&" in the rendered attribute —
+    technically invalid markup. Decode-then-re-encode can't have that
+    failure mode: every "&" in the output is guaranteed to be a real
+    escaped entity, encoded exactly once, regardless of how the source
+    string was typed."""
+    return _esc(html.unescape(str(s) or ""))
 
 
 # Site-level og:description fallback — used only when a route doesn't pass
@@ -1905,10 +1925,11 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     if role is None:
         role = "admin" if authed else "guest"
     # Social share cards (Open Graph / Twitter Card, Phase 1). og_description
-    # must already be attribute-safe when passed — a caller sourcing it from
-    # an already-HTML-entity-encoded field (original_content.teaser) should
-    # use _esc_attr_quote_only(); a caller sourcing it from plain text
-    # (ai_surfaces.teaser, any other DB string) should use the normal _esc().
+    # must already be attribute-safe when passed — every caller should run
+    # its source string through _esc_attr_normalize() (see its own
+    # docstring), which handles both original_content.teaser's pre-encoded
+    # convention and ai_surfaces.teaser's/homepage_teaser's plain-text
+    # convention correctly with one shared rule.
     # Falls back to a site-level default (never blank) when omitted. og:url
     # is only accurate for callers that pass `request` — every other page
     # (most admin routes, a couple of nested form-page helpers with no
@@ -4073,7 +4094,7 @@ def homepage(request: Request):
 </div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request), request=request,
-                               og_description=_esc(homepage_teaser)))
+                               og_description=_esc_attr_normalize(homepage_teaser)))
 
 
 @app.get("/about", response_class=HTMLResponse)
@@ -4484,11 +4505,12 @@ def ai_surface_article(request: Request, slug: str):
     if row["status"] != "live" and not _is_authed(request):
         raise HTTPException(status_code=404)
     body = _ai_surface_article_body(row)
-    # ai_surfaces.teaser is stored as plain text (unlike original_content.teaser,
-    # which is pre-encoded HTML entities) — see CLAUDE.md's escaping
-    # investigation. _esc() is the correct treatment here.
+    # ai_surfaces.teaser is stored as plain text, unlike original_content.teaser
+    # (pre-encoded HTML entities) — _esc_attr_normalize() handles both
+    # conventions correctly with one rule. See its own docstring.
     return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "About", body, role=_role(request),
-                               request=request, og_description=_esc(row["teaser"]), og_image_slug=slug))
+                               request=request, og_description=_esc_attr_normalize(row["teaser"]),
+                               og_image_slug=slug))
 
 
 # --- Current Feed ------------------------------------------------------
@@ -5952,11 +5974,12 @@ def original_content_article(request: Request, slug: str):
     body = _original_content_article_body(row)
     # original_content.teaser is stored PRE-ENCODED (real HTML entities
     # already in the string — "R&amp;D", "&mdash;") — see CLAUDE.md's
-    # escaping investigation and _oc_card_tuple's own identical, established
-    # raw-interpolation treatment. _esc() would double-escape it; only the
-    # bare-quote guard is needed for the attribute context.
+    # escaping investigation. _esc_attr_normalize() handles both this
+    # convention and ai_surfaces'/homepage's plain-text convention correctly
+    # with one shared rule. See its own docstring for why a plain _esc()
+    # call would double-escape this field specifically.
     return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "Thought leadership", body, role=_role(request),
-                               request=request, og_description=_esc_attr_quote_only(row["teaser"]),
+                               request=request, og_description=_esc_attr_normalize(row["teaser"]),
                                og_image_slug=slug))
 
 
