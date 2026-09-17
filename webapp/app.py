@@ -45,6 +45,7 @@ import difflib
 import hashlib
 import hmac
 import inspect
+import contextvars
 import json
 import math
 import os
@@ -24691,17 +24692,75 @@ def _coral_moments_on_page(html: str) -> int:
 # actual infinite recursion (confirmed to at least depth 3 before being
 # killed) via coral_moment_problems() -> renders "/" -> _page() (role=
 # "admin") -> _has_open_admin_tasks() -> checks.run_all() ->
-# coral_moment_problems() again. A plain module-level flag is enough (not
-# thread-local): Starlette's TestClient blocks the calling thread for the
-# duration of each request, so the outer call's flag is still set,
-# GIL-visible, and never concurrently written to while any nested call
-# from inside that same request's rendering runs — there is no genuine
-# parallelism to guard against, only recursion within one logical call
-# chain. A nested call has nothing useful to check anyway — it's asking
-# "does the page currently rendering have a coral problem" from inside
-# that same page's own render — so it returns [] immediately rather than
-# recursing further.
-_CORAL_CHECK_IN_PROGRESS = False
+# coral_moment_problems() again.
+#
+# CALL-CHAIN-SCOPED STATE, VIA contextvars.ContextVar — deliberately NOT a
+# plain module-level bool, and NOT threading.local() either (2026-09
+# correction; a `threading.local()` version genuinely shipped here briefly
+# and was found broken before merge — see below).
+#
+# `webapp.tasks._failing_checks_count()` holds `_checks_cache_lock` only
+# long enough to check/update the cache dict — it releases the lock BEFORE
+# calling `_checks.run_all()`, so two admin-role page renders landing close
+# together against a stale (120s TTL) cache genuinely call `run_all()` ->
+# `coral_moment_problems()` concurrently, on two different threadpool
+# threads (FastAPI runs sync `def` route handlers via `run_in_threadpool`).
+# This needs no exotic trigger — it's two ordinary overlapping page loads
+# by the one admin user, e.g. two tabs, around a cache-expiry boundary. A
+# single shared module-level bool is wrong for this: thread A mid-loop
+# (flag already True) makes thread B's own, unrelated top-level call
+# silently short-circuit to `[]`, so B's `run_all()` reports "no coral
+# problems" as fact even if a real one exists — a false negative on an
+# advisory check.
+#
+# `threading.local()` looks like the fix and ISN'T: it was built, measured,
+# and rejected in the same session. The re-entrant case this guard exists
+# for is NOT confined to one OS thread the way that name suggests —
+# `coral_moment_problems()` calls `TestClient(app).get(path)` in a loop,
+# and EACH of those calls dispatches through Starlette's own
+# `run_in_threadpool` again, onto a THREADPOOL WORKER THREAD that may well
+# be a different OS thread than the one already running this function.
+# Measured directly: a single signed-out GET "/" in open-auth (admin) mode
+# recurses `coral_moment_problems()` -> renders "/" -> `_page()` (role=
+# "admin") -> `_has_open_admin_tasks()` -> `run_all()` ->
+# `coral_moment_problems()` again — and with `threading.local()`, each of
+# those nested calls landed on a genuinely different OS thread (confirmed
+# via `threading.get_ident()` at 5+ levels deep before the probe was
+# killed), so each one saw its OWN thread-local `in_progress=False` and
+# happily started a brand-new, real, unbounded pass over every route —
+# turning the old module-global's ~18s bounded recursion into indefinite
+# threadpool growth (anyio's worker pool has a capacity limit, so this
+# risks an outright deadlock in production, not just slowness). A
+# module-level bool "worked" for this specific case only by accident, by
+# being visible to every thread regardless of which one set it.
+#
+# `contextvars.ContextVar` is the primitive that actually has both
+# properties this guard needs at once. anyio's `run_in_threadpool`
+# explicitly `copy_context()`s the CALLING context and runs the dispatched
+# function inside that copy on the worker thread (this is how e.g.
+# structlog/Sentry context survives being dispatched to a thread) — so a
+# `.set(True)` made before a nested `client.get(...)` call IS visible
+# inside that nested call, on whatever worker thread actually services it,
+# correctly re-establishing the same-call-chain suppression a module
+# global gave by accident (verified: restores the ~18s baseline exactly,
+# no threadpool blowup). At the same time, a genuinely UNRELATED top-level
+# call — a raw `threading.Thread`, or a separate incoming request's own
+# asyncio Task spawned from the server's own top-level (never-`.set()`)
+# context — starts from an unmutated ancestor context, so it never
+# inherits another call's in-progress flag (verified with a real two-thread
+# harness: the second thread's own result is a real, non-suppressed check,
+# not a leaked `[]`). This is the one primitive that distinguishes "the
+# same logical check, hopped onto a different worker thread" from "an
+# unrelated concurrent check" — thread identity alone cannot make that
+# distinction, since the former can (and does) cross OS threads.
+#
+# Do not revert this to a plain module-level bool OR to `threading.local()`
+# "for simplicity" — both were tried, both were measured, both are wrong:
+# the bool reintroduces the cross-request false-negative; threading.local()
+# reintroduces the unbounded recursion the original guard existed to stop.
+_CORAL_CHECK_CONTEXT: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "coral_moment_check_in_progress", default=False
+)
 
 
 def coral_moment_problems() -> list[str]:
@@ -24709,13 +24768,12 @@ def coral_moment_problems() -> list[str]:
     out — see the module comment above for what this can and can't catch.
     Sorted for a stable, diffable result, mirroring hub_nav_orphans()'s own
     return shape."""
-    global _CORAL_CHECK_IN_PROGRESS
-    if _CORAL_CHECK_IN_PROGRESS:
+    if _CORAL_CHECK_CONTEXT.get():
         return []
     from fastapi.testclient import TestClient
     client = TestClient(app, raise_server_exceptions=False)
     problems = []
-    _CORAL_CHECK_IN_PROGRESS = True
+    token = _CORAL_CHECK_CONTEXT.set(True)
     try:
         for path in _coral_check_routes():
             try:
@@ -24728,7 +24786,7 @@ def coral_moment_problems() -> list[str]:
             if count > 1:
                 problems.append(f"{path} ({count} coral moments)")
     finally:
-        _CORAL_CHECK_IN_PROGRESS = False
+        _CORAL_CHECK_CONTEXT.reset(token)
     problems.sort()
     return problems
 

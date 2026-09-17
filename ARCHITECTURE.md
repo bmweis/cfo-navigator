@@ -2932,7 +2932,11 @@ internal links are same-tab for free.
 mode here is a hand-typed anchor in `webapp/app.py`, and a source scan also
 covers admin pages (a signed-out rendered scan can't reach them), costs no
 render time, and carries none of the re-entrancy hazard PR 16 had to build
-`_CORAL_CHECK_IN_PROGRESS` for.
+a guard for (`webapp/app.py`'s `_CORAL_CHECK_CONTEXT` — a
+`contextvars.ContextVar`, not the plain module-level bool this originally
+shipped as; see CLAUDE.md's "Coral-guard correction" entry for why a
+module bool and, later, `threading.local()` were each tried and found
+wrong for this guard specifically).
 
 It reads **raw source spans**, not evaluated string values, because an
 anchor is routinely split across adjacent Python string literals
@@ -5085,8 +5089,19 @@ Deliberately out of scope this phase (see CLAUDE.md's matching bullet for
 the full reasoning): a discovery registry for non-schema content surfaces
 (the `ai_surfaces`/`original_content`/`homepage`/`about` copy keys) —
 handled by writing the surface inventory into project documentation
-instead of building a tool for it — and the route-render tool (Phase 3),
-still parked. See `tests/test_mcp_server.py`'s Phase 2 section for the
+instead of building a tool for it. **A route-render MCP tool was also
+considered and is now killed outright, not parked** (2026-09) — the
+motivating gap (reading editable page copy without a rendered page) was
+this same Phase 2 work's own job, and `get_rows` closes it directly at
+any table size; the residual need (seeing served markup or computed
+layout) is already served by Brian loading the page and pasting
+view-source/devtools output, which is manual, occasional, and free. The
+cost side was real and unresolved (rendering arbitrary routes as an
+authenticated admin, with GET-safety a convention rather than an
+enforced property in this codebase, and no completed audit of every
+GET route for side effects) — an audit to enable a path that already
+works by other means was overbuilding, the same call that retired the
+Archive Queue. See `tests/test_mcp_server.py`'s Phase 2 section for the
 full regression coverage, including the literal `settings`-at-55-rows
 paging scenario and the dead-middle-row `get_rows` lookup.
 
