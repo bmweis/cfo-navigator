@@ -216,17 +216,21 @@ def test_not_yet_checked_text_is_short_enough_for_the_column(app_env):
             assert visible and visible.group(1) == "Not yet checked"
 
 
-def test_cookie_column_width_uses_the_named_status_constant(app_env):
-    """2026-09: the column was a bare 9%, which measured out to the same
-    ~110px _COL_WIDTH_STATUS already names elsewhere — using the constant
-    directly (rather than a magic percentage that happens to match it)
-    is what this pins, per this repo's admin-table column-width
-    convention."""
-    with _client(app_env) as client:
-        html = client.get("/admin/reader/feeds").text
-    from webapp.app import _COL_WIDTH_STATUS
-    assert f'width:{_COL_WIDTH_STATUS}px;text-align:center;" data-sort="cookie"' in html
-    assert f'.ff-cookie{{width:{_COL_WIDTH_STATUS}px' in html
+# test_cookie_column_width_uses_the_named_status_constant was removed
+# (2026-09): it pinned the Cookie column's <th>/CSS width to _COL_WIDTH_STATUS
+# (110px), which was the column's width when this test was written. A later
+# fix ("Feeds admin Cookie column, wide enough for status plus age" — see
+# CLAUDE.md) deliberately widened the column to a dedicated
+# _COL_WIDTH_STATUS_AGE (190px) constant, because the column's real content
+# (a dot, a state word, and a relative age like "· 45d ago") measured wider
+# than 110px in production and wrapped to two lines on every configured row.
+# That fix shipped its own regression test —
+# test_cookie_column_is_wide_enough_for_status_plus_age in
+# tests/test_feed_cookie_flag.py — asserting the correct, current width; this
+# test was simply never updated or removed at the time, so it kept asserting
+# the pre-fix value and started failing against current code. Deleted rather
+# than fixed in place, since the behavior it asserted was deliberately
+# superseded and a correct replacement already exists elsewhere.
 
 
 def test_list_and_edit_pages_agree_on_a_feeds_cookie_state(app_env):

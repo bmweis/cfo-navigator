@@ -16,6 +16,7 @@ Public routes (no auth):
     GET  /reset-password / POST /reset-password    Set a new password from an emailed token
     GET  /logout               Clear the session
     GET  /static/{file}        Static assets (e.g. headshot)
+    GET  /static/og/{file}     Committed social-share-card PNGs (Open Graph / Twitter Card)
     GET  /health               Health check
 
 Private routes (require login cookie; API routes also accept a token):
@@ -44,6 +45,7 @@ import asyncio
 import difflib
 import hashlib
 import hmac
+import html
 import inspect
 import contextvars
 import json
@@ -280,6 +282,171 @@ _DEFAULT_BENCHMARKS = [
 _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
+
+# --- Social share cards (Open Graph / Twitter Card, Phase 1) ----------------
+# Committed 1200x630 PNGs live in webapp/static/og/, slug-keyed
+# ({slug}.png matches an original_content/ai_surfaces row's own slug) plus
+# one default.png fallback for every page without its own card. Generation
+# (Phase 2) was investigated and killed outright — see CLAUDE.md's "Social
+# share cards" bullet for the full reasoning; this stays a hand-built,
+# hand-maintained asset directory, same as the favicon files already in
+# webapp/static/.
+_OG_DIR = os.path.join(_STATIC_DIR, "og")
+_OG_IMAGE_SLUGS: frozenset | None = None
+
+
+def _og_image_slugs() -> frozenset:
+    """Slugs with a real webapp/static/og/{slug}.png, computed once per
+    process and cached — the directory's contents are fixed at Docker
+    build time (a redeploy is a fresh process), so there's nothing to
+    invalidate, and this is the one-time directory scan the Phase 0
+    investigation called for instead of an os.path.exists() per render.
+    default.png is deliberately excluded — it's the fallback image, not a
+    per-slug card, so no page's slug should ever "match" it here.
+
+    Tests that add/remove files under _OG_DIR must reset
+    webapp.app._OG_IMAGE_SLUGS to None first — this module-level cache
+    does not reset itself between tests in the same process (same caveat
+    as webapp.tasks' _checks_cache)."""
+    global _OG_IMAGE_SLUGS
+    if _OG_IMAGE_SLUGS is None:
+        if os.path.isdir(_OG_DIR):
+            _OG_IMAGE_SLUGS = frozenset(
+                fn[:-4] for fn in os.listdir(_OG_DIR)
+                if fn.endswith(".png") and fn != "default.png"
+            )
+        else:
+            _OG_IMAGE_SLUGS = frozenset()
+    return _OG_IMAGE_SLUGS
+
+
+def _og_image_url(slug: str | None) -> str:
+    """Absolute URL for a page's social-card image — the committed
+    {slug}.png when one exists, else the committed default.png. Always
+    resolves to something real; there is no "no image" state."""
+    if slug and slug in _og_image_slugs():
+        return f"{PUBLIC_BASE}/static/og/{slug}.png"
+    return f"{PUBLIC_BASE}/static/og/default.png"
+
+
+def _esc_attr_normalize(s) -> str:
+    """One shared rule for an og:description/twitter:description source,
+    regardless of which storage convention the field it came from uses —
+    original_content.teaser (pre-encoded: real "&amp;"/"&mdash;" entities
+    already in the string) or ai_surfaces.teaser/homepage_teaser (plain
+    text). An earlier version of this function shipped as two separate
+    helpers, one per convention (_esc_attr_quote_only, which trusted a
+    pre-encoded field's "&" completely and left it untouched, plus the
+    ordinary _esc() for plain fields) — collapsed into this single rule
+    after evaluating html.unescape(s) then _esc(s) as one normalization
+    step for both cases, per an explicit request to check that alternative
+    before shipping two per-field treatments.
+
+    html.unescape() first decodes ANY existing entities (&amp; -> &,
+    &mdash; -> the literal em dash character, numeric refs, etc.) back to
+    their raw form — a no-op on already-plain text, since unescape only
+    touches substrings that actually match a recognized entity pattern.
+    _esc() then re-encodes only the four characters that are ever
+    structurally dangerous in this context (&, <, >, "). The result is
+    correct for both storage conventions with one rule instead of two.
+
+    This is strictly harder to get wrong than the two-helper version it
+    replaced, not just simpler: the old _esc_attr_quote_only() trusted a pre-encoded
+    field's "&" completely, so a single un-pre-encoded ampersand slipping
+    into original_content.teaser (an admin typo, not a hypothetical) would
+    have shipped as a literal, un-escaped "&" in the rendered attribute —
+    technically invalid markup. Decode-then-re-encode can't have that
+    failure mode: every "&" in the output is guaranteed to be a real
+    escaped entity, encoded exactly once, regardless of how the source
+    string was typed."""
+    return _esc(html.unescape(str(s) or ""))
+
+
+# Site-level og:description fallback — used only when a route doesn't pass
+# its own (a specific piece's teaser, the live homepage_teaser setting,
+# etc.). A plain literal, not DB-backed (_page() has no Library handle),
+# so it's intentionally close to but independent of _HOMEPAGE_TEASER_DEFAULT.
+_OG_DEFAULT_DESCRIPTION = (
+    "Brian Weisberg's CFO Navigator: FP&A research, the CFO Toolbox, and "
+    "thought leadership from a CFO who builds finance functions designed "
+    "to scale."
+)
+
+
+def _og_url_call_missing_request(func_src: str) -> bool:
+    """True if `func_src` contains a genuine `_page(...)` call with no
+    `request=request` anywhere inside it. `_page(` is matched only as a
+    real function call — not as a substring of a longer name ending in
+    "_page" (e.g. login_page(, reset_password_page( — a real false match
+    this check's own first draft hit and had to fix) — and never inside a
+    `#` comment on the same line."""
+    for m in re.finditer(r"_page\(", func_src):
+        pos = m.start()
+        if pos > 0 and (func_src[pos - 1].isalnum() or func_src[pos - 1] == "_"):
+            continue  # part of a longer identifier, e.g. login_page(
+        line_start = func_src.rfind("\n", 0, pos) + 1
+        if "#" in func_src[line_start:pos]:
+            continue  # a comment mentioning _page(, not a call
+        call_start = pos + len("_page(")
+        depth = 1
+        k = call_start
+        while k < len(func_src) and depth > 0:
+            if func_src[k] == "(":
+                depth += 1
+            elif func_src[k] == ")":
+                depth -= 1
+            k += 1
+        if "request=request" not in func_src[pos:k]:
+            return True
+    return False
+
+
+def og_url_threading_problems() -> list[str]:
+    """Every non-/admin GET route that renders through _page() and has
+    `request` in its own signature should thread `request=request` into
+    every _page() call it makes — otherwise og:url silently collapses to
+    the bare PUBLIC_BASE root for that page, indistinguishable from the
+    homepage to any scraper. A real, shipped gap: the original Phase 1
+    build only threaded request through 5 hand-picked "the pages that
+    matter" routes, leaving 44 other genuinely public _page() calls across
+    39 routes — including every individual tool/community profile page —
+    silently reporting the homepage's URL. Found and fixed the same day,
+    per an explicit review question asking for the full list rather than
+    a spot check. This is that audit, made permanent and reusable rather
+    than a one-off script, in the same spirit as hub_nav_orphans() — live
+    `app.routes` introspection plus `inspect.getsource()` per route
+    (exactly `_page_index_tier_for`'s own established technique), not a
+    hand-rolled whole-file line scan — a mechanical drift detector for a
+    class of bug this codebase has hit more than once (see CLAUDE.md's
+    repeated "hand-maintained list drifts from reality" incidents).
+
+    Deliberately excludes: /admin/* routes (never meant to be shared);
+    routes with no `request` parameter at all (file-serving/redirect
+    routes that never call _page() anyway); non-HTMLResponse/POST/etc.
+    routes; and the rare case `inspect.getsource()` itself can't resolve
+    (falls through silently, same as `_page_index_tier_for`'s own
+    precedent, rather than raising)."""
+    from fastapi.routing import APIRoute
+    problems = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if "GET" not in route.methods:
+            continue
+        if route.path.startswith("/admin"):
+            continue
+        try:
+            func_src = inspect.getsource(route.endpoint)
+        except (OSError, TypeError):
+            continue
+        if "request: Request" not in func_src and "request:Request" not in func_src:
+            continue
+        if "_page(" not in func_src:
+            continue
+        if _og_url_call_missing_request(func_src):
+            problems.append(f"{route.path}: _page() call missing request=request")
+    return problems
+
 
 # --- Auth -------------------------------------------------------------------
 # A single shared secret protects the private tools. LINKLIB_PASSWORD is the
@@ -1828,10 +1995,28 @@ def _has_open_admin_tasks() -> bool:
 
 
 def _page(title: str, active: str, body: str, authed: bool = False,
-          role: str | None = None) -> str:
+          role: str | None = None, *, request: Request | None = None,
+          og_description: str | None = None, og_image_slug: str | None = None) -> str:
     # role: "admin" | "user" | "guest". Falls back to authed for legacy callers.
     if role is None:
         role = "admin" if authed else "guest"
+    # Social share cards (Open Graph / Twitter Card, Phase 1). og_description
+    # must already be attribute-safe when passed — every caller should run
+    # its source string through _esc_attr_normalize() (see its own
+    # docstring), which handles both original_content.teaser's pre-encoded
+    # convention and ai_surfaces.teaser's/homepage_teaser's plain-text
+    # convention correctly with one shared rule.
+    # Falls back to a site-level default (never blank) when omitted. og:url
+    # is only accurate for callers that pass `request` — every other page
+    # (most admin routes, a couple of nested form-page helpers with no
+    # request in scope) resolves to the bare site root instead of erroring,
+    # since those pages were never meant to be shared. og_image_slug is
+    # looked up against the committed webapp/static/og/ directory and always
+    # falls back to default.png when no match exists.
+    og_short_title = _esc(_short_title(title))
+    og_desc = og_description if og_description else _OG_DEFAULT_DESCRIPTION
+    og_image_url = _og_image_url(og_image_slug)
+    og_url = f"{PUBLIC_BASE}{request.url.path}" if request is not None else PUBLIC_BASE
     # "Sail, Don't Row" (/play) is deliberately not in the nav — it's an
     # easter egg linked only from the bottom of /thought-leadership/ai-hackathon-playbook.
     public = [("/about", "About"), ("/thought-leadership", "Thought leadership"),
@@ -1870,6 +2055,17 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(f"BMW CFO · {_short_title(title)}")}</title>
+<meta name="description" content="{og_desc}">
+<meta property="og:title" content="{og_short_title}">
+<meta property="og:description" content="{og_desc}">
+<meta property="og:image" content="{og_image_url}">
+<meta property="og:url" content="{og_url}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CFO Navigator">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{og_short_title}">
+<meta name="twitter:description" content="{og_desc}">
+<meta name="twitter:image" content="{og_image_url}">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" href="/static/favicon.ico" sizes="any">
@@ -3461,7 +3657,7 @@ def login_page(request: Request, next: str = "", error: str = "", reset: str = "
 </form>
 <p style="margin:18px 0 0;"><a href="/forgot-password" style="font-size:13px;color:var(--muted);">Forgot your password?</a></p>
 </div>"""
-    return HTMLResponse(_page("Sign in—Brian Weisberg", "", body))
+    return HTMLResponse(_page("Sign in—Brian Weisberg", "", body, request=request))
 
 
 @app.get("/forgot-password", response_class=HTMLResponse)
@@ -3476,7 +3672,7 @@ reset link is on its way—it expires in 1 hour. If we don&rsquo;t have an email
 notified and will reset it for you directly.</p>
 <p><a href="/login" style="font-size:14px;">&larr; Back to sign in</a></p>
 </div>"""
-        return HTMLResponse(_page("Forgot password—Brian Weisberg", "", body))
+        return HTMLResponse(_page("Forgot password—Brian Weisberg", "", body, request=request))
     body = """<div class="page page-form">
 <h1>Forgot your password?</h1>
 <p style="color:var(--muted);margin:4px 0 28px;">Enter your username and we&rsquo;ll email you a reset link.</p>
@@ -3487,7 +3683,7 @@ notified and will reset it for you directly.</p>
 </form>
 <p style="margin:18px 0 0;"><a href="/login" style="font-size:13px;color:var(--muted);">&larr; Back to sign in</a></p>
 </div>"""
-    return HTMLResponse(_page("Forgot password—Brian Weisberg", "", body))
+    return HTMLResponse(_page("Forgot password—Brian Weisberg", "", body, request=request))
 
 
 @app.post("/forgot-password")
@@ -3553,7 +3749,7 @@ def reset_password_page(request: Request, token: str = "", error: str = ""):
 Request a new one below.</p>
 <p><a href="/forgot-password" class="btn" style="display:inline-block;">Request a new link</a></p>
 </div>"""
-        return HTMLResponse(_page("Link expired—Brian Weisberg", "", body))
+        return HTMLResponse(_page("Link expired—Brian Weisberg", "", body, request=request))
     err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">Password must be at least 8 characters.</p>'
            if error else "")
     body = f"""<div class="page page-form">
@@ -3567,7 +3763,7 @@ Request a new one below.</p>
   <button type="submit" class="btn">Set new password</button>
 </form>
 </div>"""
-    return HTMLResponse(_page("Reset password—Brian Weisberg", "", body))
+    return HTMLResponse(_page("Reset password—Brian Weisberg", "", body, request=request))
 
 
 @app.post("/reset-password")
@@ -3656,7 +3852,7 @@ def change_password_page(request: Request, error: str = ""):
 <p style="color:var(--muted);margin:4px 0 20px;">Your password has been changed.</p>
 <p><a href="/" style="font-size:14px;">&larr; Back to the site</a></p>
 </div>"""
-        return HTMLResponse(_page("Password updated—Brian Weisberg", "", body, authed=_is_authed(request)))
+        return HTMLResponse(_page("Password updated—Brian Weisberg", "", body, authed=_is_authed(request), request=request))
     err = ""
     if error == "current":
         err = '<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That current password isn&rsquo;t right—try again.</p>'
@@ -3674,7 +3870,7 @@ def change_password_page(request: Request, error: str = ""):
   <button type="submit" class="btn">Update password</button>
 </form>
 </div>"""
-    return HTMLResponse(_page("Change password—Brian Weisberg", "", body, authed=_is_authed(request)))
+    return HTMLResponse(_page("Change password—Brian Weisberg", "", body, authed=_is_authed(request), request=request))
 
 
 @app.post("/change-password")
@@ -3973,7 +4169,8 @@ def homepage(request: Request):
   </div>
 </div>
 </div>"""
-    return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
+    return HTMLResponse(_page("Home", "Home", body, role=_role(request), request=request,
+                               og_description=_esc_attr_normalize(homepage_teaser)))
 
 
 @app.get("/about", response_class=HTMLResponse)
@@ -4011,7 +4208,7 @@ def about_page(request: Request):
 </div>
 </div>
 </div>"""
-    return HTMLResponse(_page("About—Brian Weisberg", "About", body, role=_role(request)))
+    return HTMLResponse(_page("About—Brian Weisberg", "About", body, role=_role(request), request=request))
 
 
 # Seed data for scripts/migrate_ai_surfaces.py only — the four cards below
@@ -4347,7 +4544,7 @@ def how_this_is_built(request: Request):
 </div>
 </div>
 <style>{_OC_ARTICLE_CSS}</style>"""
-    return HTMLResponse(_page("How this is built—Brian Weisberg", "About", body, role=_role(request)))
+    return HTMLResponse(_page("How this is built—Brian Weisberg", "About", body, role=_role(request), request=request))
 
 
 def _ai_surface_article_body(row: dict) -> str:
@@ -4384,7 +4581,12 @@ def ai_surface_article(request: Request, slug: str):
     if row["status"] != "live" and not _is_authed(request):
         raise HTTPException(status_code=404)
     body = _ai_surface_article_body(row)
-    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "About", body, role=_role(request)))
+    # ai_surfaces.teaser is stored as plain text, unlike original_content.teaser
+    # (pre-encoded HTML entities) — _esc_attr_normalize() handles both
+    # conventions correctly with one rule. See its own docstring.
+    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "About", body, role=_role(request),
+                               request=request, og_description=_esc_attr_normalize(row["teaser"]),
+                               og_image_slug=slug))
 
 
 # --- Current Feed ------------------------------------------------------
@@ -4646,7 +4848,7 @@ def current_feed(request: Request):
 <p style="color:var(--muted);font-size:13px;margin:16px 0 0;">Have something you think I should add to the list? <a href="/contact">Send me the demo track</a> and you might see it show up on a future update.</p>
 </div>
 <style>{_CURRENT_FEED_CSS}</style>"""
-    return HTMLResponse(_page("Current Feed—Brian Weisberg", "About", body, role=_role(request)))
+    return HTMLResponse(_page("Current Feed—Brian Weisberg", "About", body, role=_role(request), request=request))
 
 
 _AI_SURFACE_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -5177,7 +5379,7 @@ function toggleTLDesc(btn, descId) {
 }
 </script>"""
     body += "</div>"
-    return HTMLResponse(_page("Thought leadership—Brian Weisberg", "Thought leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Thought leadership—Brian Weisberg", "Thought leadership", body, role=_role(request), request=request))
 
 
 @app.get("/growth-engine-ratio")
@@ -5192,7 +5394,7 @@ def growth_engine_ratio_redirect(request: Request):
 # calculator. Split off from the retired growth_engine_ratio() bespoke
 # route: the article itself is now an ordinary original_content row served
 # through GET /thought-leadership/{slug} (see
-# scripts/migrate_growth_engine_ratio_content.py), but the calculator is
+# scripts/archive/migrate_growth_engine_ratio_content.py), but the calculator is
 # genuinely interactive (live inputs, on-demand JS computation, two
 # dynamically-generated SVG charts) — not markdown-representable content —
 # so it stays a hand-built Python route, same as before, just at its own
@@ -5803,7 +6005,7 @@ function loadTimelineExample() {
 // Build the timeline table up front so its rows exist before the user switches tabs.
 renderTL();
 </script>"""
-    return HTMLResponse(_page("Growth Engine Ratio calculator—Brian Weisberg", "Thought leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Growth Engine Ratio calculator—Brian Weisberg", "Thought leadership", body, role=_role(request), request=request))
 
 
 @app.get("/finops-ai-hackathon")
@@ -5846,7 +6048,15 @@ def original_content_article(request: Request, slug: str):
     if row["status"] != "live" and not _is_authed(request):
         raise HTTPException(status_code=404)
     body = _original_content_article_body(row)
-    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "Thought leadership", body, role=_role(request)))
+    # original_content.teaser is stored PRE-ENCODED (real HTML entities
+    # already in the string — "R&amp;D", "&mdash;") — see CLAUDE.md's
+    # escaping investigation. _esc_attr_normalize() handles both this
+    # convention and ai_surfaces'/homepage's plain-text convention correctly
+    # with one shared rule. See its own docstring for why a plain _esc()
+    # call would double-escape this field specifically.
+    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "Thought leadership", body, role=_role(request),
+                               request=request, og_description=_esc_attr_normalize(row["teaser"]),
+                               og_image_slug=slug))
 
 
 # ---------------------------------------------------------------------------
@@ -7417,7 +7627,7 @@ def play_sail_dont_row(request: Request):
     finally:
         lib.close()
     body = _sdr_build_body(ranks, signed_in=_is_member(request), is_admin=_role(request) == "admin")
-    return HTMLResponse(_page("Sail, don't row—Brian Weisberg", "Sail, don't row", body, role=_role(request)))
+    return HTMLResponse(_page("Sail, don't row—Brian Weisberg", "Sail, don't row", body, role=_role(request), request=request))
 
 
 @app.post("/play/submit")
@@ -7538,7 +7748,7 @@ visible at a glance, side by side.</p>
 <div class="sdr-leaderboard">""" + rows_html + """</div>
 </div>
 </div>"""
-    return HTMLResponse(_page("Leaderboard—Sail, don't row", "Sail, don't row", body, role=_role(request)))
+    return HTMLResponse(_page("Leaderboard—Sail, don't row", "Sail, don't row", body, role=_role(request), request=request))
 
 
 # Query-param values for /contact's `context` param — each maps to a
@@ -7559,7 +7769,7 @@ def contact_page(request: Request, submitted: str = "", message: str = "", conte
 <p>I'll get back to you shortly.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
-        return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request)))
+        return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request), request=request))
 
     if not message and context in _CONTACT_CONTEXT_PREFIXES:
         message = _CONTACT_CONTEXT_PREFIXES[context]
@@ -7588,7 +7798,7 @@ def contact_page(request: Request, submitted: str = "", message: str = "", conte
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request)))
+    return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request), request=request))
 
 
 @app.post("/contact")
@@ -7692,7 +7902,7 @@ def privacy_page(request: Request):
 <hr style="border:none;border-top:1px solid var(--line);margin:32px 0;">
 <p style="font-size:13px;color:var(--muted);font-style:italic;">This is a plain-language description of what the site actually does, written by the person who built it&mdash;not a substitute for legal advice.</p>
 </div>"""
-    return HTMLResponse(_page("Privacy—Brian Weisberg", "", body, role=_role(request)))
+    return HTMLResponse(_page("Privacy—Brian Weisberg", "", body, role=_role(request), request=request))
 
 
 # ---------------------------------------------------------------------------
@@ -7726,7 +7936,7 @@ def library_submit_page(request: Request, submitted: str = ""):
 <p>I review every suggestion personally. If it's a fit for the archive, it'll join the collection.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
-        return HTMLResponse(_page("Suggestion received—Brian Weisberg", "", body, role=_role(request)))
+        return HTMLResponse(_page("Suggestion received—Brian Weisberg", "", body, role=_role(request), request=request))
 
     body = """<div class="page page-form">
 <h1>Suggest a piece for the archive</h1>
@@ -7763,7 +7973,7 @@ def library_submit_page(request: Request, submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Suggest a piece—Brian Weisberg", "", body, role=_role(request)))
+    return HTMLResponse(_page("Suggest a piece—Brian Weisberg", "", body, role=_role(request), request=request))
 
 
 @app.post("/library/submit")
@@ -8030,7 +8240,7 @@ def tools_landing(request: Request):
   </div>
 </div>
 </div>"""
-    return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 @app.get("/tools/software", response_class=HTMLResponse)
@@ -8737,7 +8947,7 @@ function submitIntroForm() {
   });
 }
 </script>"""
-    return HTMLResponse(_page("Software—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Software—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 # Registered before /tools/software/{slug} so "compare" isn't swallowed as a
@@ -8783,7 +8993,7 @@ def tools_software_compare(request: Request, ids: str = ""):
 to compare them side by side. Check the box on any card, then use the compare bar at the bottom of the page.</p>
 <a href="/tools/software" class="btn btn-ghost">Back to Software</a>
 </div>"""
-        return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+        return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
     _compare_authed = _is_authed(request)
     entities, tag_diff = compare.build_software_compare(tools, citations, competitors)
@@ -8870,7 +9080,7 @@ confirmed yet.</p>
 {_CMP_SHARED_CSS}
 </style>
 <script>{_CMP_SWIPE_HINT_JS}</script>"""
-    return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 # Chat Matchmaker (Phase 2): same pattern as the Communities matchmaker
@@ -9060,7 +9270,7 @@ document.addEventListener('keydown', function(e) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
 });
 </script>"""
-    resp = HTMLResponse(_page("Software matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page("Software matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
     _set_visitor_cookie(request, resp, session_id)
     return resp
 
@@ -9698,7 +9908,7 @@ function submitIntroForm() {{
 </style>
 {intro_modal_block}
 {feature_suggest_modal_block}"""
-    return HTMLResponse(_page(f"{tool['name']}—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page(f"{tool['name']}—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 # ---------------------------------------------------------------------------
@@ -9977,7 +10187,7 @@ def tools_resources(request: Request):
 .bench-desc{{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}}
 </style>"""
-    return HTMLResponse(_page("Resources—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Resources—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 def _visitor_session_id(request: Request) -> str:
@@ -10464,7 +10674,7 @@ function goToCommPage(page) {{
 
 renderCommunities(ALL_COMMUNITIES);
 </script>"""
-    return HTMLResponse(_page("Communities—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Communities—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 def _community_geo_line(c: dict) -> str:
@@ -10567,7 +10777,7 @@ def tools_community_gap(request: Request, community_id: int = 0, q: str = "",
 <h1>Thanks, that&rsquo;s genuinely useful.</h1>
 <p style="color:var(--muted);margin:8px 0 0;line-height:1.6;">I read every one of these. If you left an email and there&rsquo;s something worth following up on, I&rsquo;ll be in touch.</p>
 </div>"""
-        return HTMLResponse(_page("Thanks—Communities", "CFO Toolbox", body, role=_role(request)))
+        return HTMLResponse(_page("Thanks—Communities", "CFO Toolbox", body, role=_role(request), request=request))
 
     by_id = {c["id"]: c["name"] for c in communities}
     closest_name = by_id.get(community_id, "")
@@ -10640,7 +10850,7 @@ close the gap.</p>
   <button type="submit" class="btn" style="align-self:flex-start;">Submit</button>
 </form>
 </div>"""
-    return HTMLResponse(_page("Tell us where communities fall short—Communities", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Tell us where communities fall short—Communities", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 @app.post("/tools/communities/gap")
@@ -10678,7 +10888,7 @@ def tools_communities_submit_page(request: Request, submitted: str = ""):
 <p>Your community has been submitted for review. If approved, it'll appear in the Communities directory shortly.</p>
 <a href="/tools/communities" class="btn btn-ghost" style="margin-top:8px;">Back to Communities</a>
 </div>"""
-        return HTMLResponse(_page("Submission received: CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+        return HTMLResponse(_page("Submission received: CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
     body = """<div class="page page-form">
 <h1>Suggest a community</h1>
@@ -10707,7 +10917,7 @@ def tools_communities_submit_page(request: Request, submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Suggest a community: CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Suggest a community: CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 @app.post("/tools/communities/submit")
@@ -10792,7 +11002,7 @@ def tools_communities_compare(request: Request, ids: str = ""):
 to compare them side by side. Check the box on any card, then use the compare bar at the bottom of the page.</p>
 <a href="/tools/communities" class="btn btn-ghost">Back to Communities</a>
 </div>"""
-        return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+        return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
     entities, tag_diff = compare.build_communities_compare(communities, profiles, citations, similar)
 
@@ -10886,7 +11096,7 @@ confirmed yet.</p>
 .comm-star{{font-size:14px;color:#b8860b;}}
 </style>
 <script>{_CMP_SWIPE_HINT_JS}</script>"""
-    return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 # Compare Redesign Phase 2 — the AI comparison summary's feedback mechanism.
@@ -10921,7 +11131,7 @@ def compare_summary_feedback_form(request: Request, type: str = "", ids: str = "
 <button type="submit" class="btn">Submit feedback</button>
 </form>
 </div>"""
-    return HTMLResponse(_page("Flag an issue—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Flag an issue—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 @app.post("/compare-summary/feedback")
@@ -11241,7 +11451,7 @@ document.addEventListener('keydown', function(e) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
 });
 </script>"""
-    resp = HTMLResponse(_page("Community matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page("Community matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
     _set_visitor_cookie(request, resp, session_id)
     return resp
 
@@ -11297,7 +11507,7 @@ def tools_community_correct(request: Request, community_id: int = 0, submitted: 
 <h1>Thanks, that&rsquo;s genuinely useful.</h1>
 <p style="color:var(--muted);margin:8px 0 0;line-height:1.6;">I&rsquo;ll check it against the source and fix what needs fixing. If you left an email and there&rsquo;s something worth following up on, I&rsquo;ll be in touch.</p>
 </div>"""
-        return HTMLResponse(_page("Thanks—Communities", "CFO Toolbox", body, role=_role(request)))
+        return HTMLResponse(_page("Thanks—Communities", "CFO Toolbox", body, role=_role(request), request=request))
 
     body = f"""<div class="page page-form">
 <p style="margin:0 0 4px;"><a href="/tools/communities/{_esc(community['slug'])}" style="font-size:13px;color:var(--muted);">&larr; {_esc(community['name'])}</a></p>
@@ -11314,7 +11524,7 @@ def tools_community_correct(request: Request, community_id: int = 0, submitted: 
   <button type="submit" class="btn" style="align-self:flex-start;">Submit</button>
 </form>
 </div>"""
-    return HTMLResponse(_page(f"Suggest a correction—{community['name']}", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page(f"Suggest a correction—{community['name']}", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 @app.post("/tools/communities/correct")
@@ -11730,7 +11940,7 @@ def tools_community_profile(request: Request, slug: str):
 .tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);
   background:var(--coral-wash);border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 </style>"""
-    resp = HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request), request=request))
     _set_visitor_cookie(request, resp, session_id)
     return resp
 
@@ -12107,7 +12317,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
 <p>Your tool has been submitted for review. If approved, it'll appear in the CFO Toolbox shortly.</p>
 <a href="/tools/software" class="btn btn-ghost" style="margin-top:8px;">Back to CFO Toolbox</a>
 </div>"""
-        return HTMLResponse(_page("Submission received—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+        return HTMLResponse(_page("Submission received—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
     lib = _lib()
     try:
@@ -12154,7 +12364,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Submit a tool—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Submit a tool—CFO Toolbox", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 @app.post("/tools/submit")
@@ -17792,7 +18002,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 {_SHOT_CROP_CSS}
 </style>
 <script>{_GENERATE_LISTING_JS}{_APP_SCREENSHOT_CROP_JS}</script>"""
-    return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
+    return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True, request=request))
 
 
 @app.post("/tools/communities/{slug}/edit")
@@ -19431,7 +19641,7 @@ async function generateCompetitorMatches(toolId, statusId, errBoxId, hostId) {{
   }}
 }}
 </script>"""
-    return HTMLResponse(_page(f"Edit {_esc(tool['name'])}—CFO Toolbox", "", body, authed=True))
+    return HTMLResponse(_page(f"Edit {_esc(tool['name'])}—CFO Toolbox", "", body, authed=True, request=request))
 
 
 @app.post("/tools/software/{slug}/edit")
@@ -21950,7 +22160,7 @@ async function rrRecheckAuth(e) {{
 </script>"""
     )
 
-    return HTMLResponse(_page("Reader—Brian Weisberg", "Reader", body, role=_role(request)))
+    return HTMLResponse(_page("Reader—Brian Weisberg", "Reader", body, role=_role(request), request=request))
 
 
 # Note: /library/past-questions was retired in Phase 2 — folded into the
@@ -22869,7 +23079,7 @@ loadRecent();
 fpaEqualizeChipWidths();
 </script>"""
 
-    return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 @app.post("/ask")
@@ -23128,7 +23338,7 @@ def ask_history(request: Request):
 .convo-chip .disclosure-caret{{font-size:11px;}}
 </style>
 </div>"""
-    return HTMLResponse(_page("Your FP&A Buddy history—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Your FP&A Buddy history—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 @app.post("/save")
@@ -25111,7 +25321,7 @@ mermaid.initialize({{
 thead .cc-cell{{border-bottom:2px solid var(--line);}}
 </style>
 </div>"""
-    return HTMLResponse(_page("How FP&A Buddy works—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("How FP&A Buddy works—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 
 
 def _enrich_model_label(model_id: str) -> str:
@@ -32704,6 +32914,35 @@ def admin_brand(request: Request):
         + '</div></div>'
     )
 
+    # Social share cards (Open Graph / Twitter Card, Phase 1) — hand-built,
+    # committed PNGs in webapp/static/og/, listed here for download the same
+    # way every other admin download affordance on this site works (a plain
+    # <a href> to the file's own route), not the upload/remove pattern the
+    # Avatar section above uses — there's no upload path for these, they're
+    # committed directly to the repo. default.png (the homepage/fallback
+    # card) always appears first; every {slug}.png after it, sorted, so a
+    # newly committed card shows up here with no code change.
+    _og_card_names = (["default.png"] if os.path.isfile(os.path.join(_OG_DIR, "default.png")) else []) \
+        + sorted(f"{s}.png" for s in _og_image_slugs())
+    og_cards_html = "".join(
+        f'<a href="/static/og/{name}" download style="display:flex;align-items:center;gap:12px;'
+        f'padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;'
+        f'text-decoration:none;color:var(--ink);font-size:13px;">'
+        f'<img src="/static/og/{name}" alt="" style="width:80px;height:42px;object-fit:cover;border-radius:4px;'
+        f'border:1px solid var(--line);">'
+        f'<span style="flex:1;">{_esc(name)}</span>'
+        f'<span style="color:var(--navy);font-weight:600;">Download &darr;</span></a>'
+        for name in _og_card_names
+    ) or '<p style="color:var(--muted);font-size:13px;font-style:italic;">None committed yet.</p>'
+    social_cards_section = (
+        '<h2>Social share cards</h2>'
+        '<p style="color:var(--muted);margin:-6px 0 18px;font-size:14px;">Committed 1200&times;630 PNGs in '
+        '<code>webapp/static/og/</code>&mdash;hand-built, not generated (see CLAUDE.md\'s "Social share cards" '
+        'bullet for why). Every page emits Open Graph/Twitter Card tags automatically; a page with no matching '
+        'card falls back to <code>default.png</code>.</p>'
+        f'<div style="display:grid;gap:8px;margin-bottom:30px;">{og_cards_html}</div>'
+    )
+
     # Brand palette (literal hexes mirror the _CSS :root tokens; see BRAND.md §7).
     CORAL, CORAL_WASH, CORAL_DEEP = "#E8704F", "#FBEAE3", "#B14A30"
 
@@ -32879,6 +33118,8 @@ def admin_brand(request: Request):
 navy/seafoam/coral finance-tool base. <code>BRAND.md</code> has the full written reference.</p>
 
 {avatar_section}
+
+{social_cards_section}
 
 <h2>Brand colors</h2>
 <p style="color:var(--muted);margin:-6px 0 18px;font-size:14px;">Three families, each with a working ramp.
@@ -34172,6 +34413,20 @@ def static_file(filename: str):
              "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp",
              "ico": "image/x-icon", "mp3": "audio/mpeg"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
+
+
+@app.get("/static/og/{filename}")
+def static_og_file(filename: str):
+    """Serves committed social-share-card PNGs from _OG_DIR — a separate
+    route/directory pair (same precedent as tools_software_screenshot,
+    tools_software_logo, etc. below) because /static/{filename}'s own
+    single-segment path param can't match a nested "/og/..." URL at all.
+    Same basename-only traversal guard as /static/{filename}."""
+    safe = os.path.basename(filename)
+    path = os.path.join(_OG_DIR, safe)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/tools/software/screenshot/{filename}")

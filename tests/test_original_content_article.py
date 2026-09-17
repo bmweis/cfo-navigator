@@ -239,7 +239,7 @@ def test_growth_engine_ratio_now_served_by_catch_all(env):
     split-page pieces this phase specifically produced: the CTA linking out
     to the new standalone calculator page, and the tier table's page-
     specific CSS classes."""
-    from scripts.migrate_growth_engine_ratio_content import BODY_MD
+    from scripts.archive.migrate_growth_engine_ratio_content import BODY_MD
     _add(env, slug="growth-engine-ratio", title="The Growth Engine Ratio",
          tag_label="Framework", date_label="June 2026", body_md=BODY_MD, status="live")
     r = _client(env).get("/thought-leadership/growth-engine-ratio")
@@ -279,7 +279,7 @@ def test_growth_engine_ratio_table_header_and_cta_button_styled_correctly(env):
     CSS's class-count-first specificity comparison), a permanent fix for
     any future body_md piece using this same sitewide button, not just this
     one — this was the first body_md content anywhere to use it."""
-    from scripts.migrate_growth_engine_ratio_content import BODY_MD
+    from scripts.archive.migrate_growth_engine_ratio_content import BODY_MD
     _add(env, slug="growth-engine-ratio-styling", title="The Growth Engine Ratio",
          tag_label="Framework", date_label="June 2026", body_md=BODY_MD, status="live")
     r = _client(env).get("/thought-leadership/growth-engine-ratio-styling")
@@ -305,7 +305,7 @@ def test_growth_engine_ratio_table_wrap_has_no_visible_gap(env):
     Fixed by resetting `.ger-table`'s own margin to 0, so the wrapper (which
     already carries the correct outer spacing via its own inline
     `margin:0 0 32px`) is the single source of the box's outer edge."""
-    from scripts.migrate_growth_engine_ratio_content import BODY_MD
+    from scripts.archive.migrate_growth_engine_ratio_content import BODY_MD
     _add(env, slug="growth-engine-ratio-table-gap", title="The Growth Engine Ratio",
          tag_label="Framework", date_label="June 2026", body_md=BODY_MD, status="live")
     r = _client(env).get("/thought-leadership/growth-engine-ratio-table-gap")

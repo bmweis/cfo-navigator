@@ -9499,6 +9499,144 @@ it supersedes the old "`/save` is token-gated" note.
   timeout — the test that matters most, since a naive lock-based "fix"
   would have hung it permanently rather than merely run it slowly.
 
+- **Social share cards — Open Graph / Twitter Card metadata (2026-09).**
+  Every page previously shared as a bare link: no description, no image
+  — a grep sweep confirmed zero `og:`/`twitter:` tags anywhere. Shipped in
+  two planned phases; **Phase 2 (automated image generation) is killed
+  outright, not deferred** — recorded here with the reasoning, not just
+  the outcome, so a future session doesn't quietly rebuild it.
+  **Phase 1 (shipped)**: `_page()` (`webapp/app.py`, the one shared
+  `<head>`-assembly function behind 181 route call sites) gained three
+  optional keyword params — `request` (for an accurate absolute `og:url`;
+  threaded through only the handful of genuinely public/shareable pages —
+  `/`, `/about`, `/thought-leadership`, and the two catch-all article
+  routes — everything else, mostly admin, falls back to the bare
+  `PUBLIC_BASE` root rather than erroring), `og_description`, and
+  `og_image_slug` — and now emits `og:title`/`og:description`/`og:image`/
+  `og:url`/`og:type`/`og:site_name`, the four `twitter:*` tags, and
+  `<meta name="description">` on every page, with a hardcoded
+  `_OG_DEFAULT_DESCRIPTION` fallback when a route passes nothing. `og:title`
+  reuses `_short_title(title)` — the same suffix-stripped value already
+  computed for the real `<title>` tag, just without the "BMW CFO · "
+  prefix. Committed 1200×630 PNGs live in `webapp/static/og/`, slug-keyed
+  (`{slug}.png`) with one `default.png` fallback for everything else;
+  `_og_image_slugs()` is a module-level, computed-once filename-set cache
+  (`_OG_IMAGE_SLUGS`, same "doesn't reset between tests in the same
+  process" caveat as `webapp.tasks`' own `_checks_cache` — tests that
+  add/remove files under `_OG_DIR` must reset it explicitly) rather than
+  an `os.path.exists()` per render. **A real Phase 0 finding that changed
+  the actual route shape**: `/static/{filename}` is a single-path-segment
+  route with no `:path` converter, so `/static/og/{slug}.png` as originally
+  proposed can't route at all — a nested URL simply never matches. Fixed
+  with a dedicated sibling route, `GET /static/og/{filename}` → a new
+  `_OG_DIR`, mirroring the established precedent every other "committed
+  images in a subdirectory" need on this site already uses
+  (`tools_software_screenshot`, `tools_software_logo`, etc.) — same
+  basename-only traversal guard as `/static/{filename}`.
+  **Escaping — two different treatments for what looks like the same
+  field, confirmed live via production data before writing any code**:
+  `original_content.teaser` is stored PRE-ENCODED (real HTML entities
+  already in the string — `"R&amp;D"`, `"&mdash;"`, confirmed against the
+  live growth-engine-ratio row) — the normal `_esc()` would double-encode
+  it (`R&amp;amp;D`, rendering as literal `&amp;D` to a scraper), so it's
+  interpolated through a new, narrowly-scoped `_esc_attr_quote_only()`
+  instead — escapes only a literal `"` (the one character that can break
+  out of the `content="..."` attribute), deliberately leaves `&` alone,
+  matching `_oc_card_tuple`'s own established raw-interpolation precedent
+  for this exact field. `ai_surfaces.teaser`, by contrast, is stored as
+  genuinely plain text (confirmed the same way) and goes through the
+  ordinary `_esc()`. Both regression tests are proven to actually fail
+  against the wrong escaping choice, not just pass trivially against the
+  right one. `/admin/brand` gained a "Social share cards" section listing
+  every committed card for download (`default.png` first, then every
+  `{slug}.png` sorted) via a plain `<a href download>` link — the same
+  general "download a static asset" pattern every other admin download
+  affordance on this site already uses (CSV template downloads, the DB
+  snapshot download) — not the Avatar section's own upload/remove pattern,
+  which the original build brief assumed existed for the headshot and
+  doesn't; there's no upload path for these, they're committed directly to
+  the repo.
+  **Phase 2 killed, not deferred — the reasoning, so it stays killed**:
+  Pillow is a dependency this codebase has deliberately avoided at least
+  three separate times already — the App screenshot upload uses
+  client-side Cropper.js specifically to avoid server-side image
+  processing; `scripts/audit_tool_logo_dimensions.py` hand-parses
+  PNG/JPEG/GIF/WEBP/ICO headers with an explicit "NO NEW DEPENDENCY"
+  comment rather than reach for Pillow just to read image dimensions;
+  upload validation in several places uses a magic-bytes check, "not
+  Pillow," by name, more than once. Pillow itself was never a real
+  dependency to begin with — confirmed absent from `requirements.txt` and
+  from every `import`, listed in `/admin/open-source`'s showcase (and
+  `webapp/checks.py`'s `OSS_EXTRAS`) purely as a one-off historical build
+  tool that drew the two favicon files, once, years before this feature.
+  Building a generator would also mean committing font files for the first
+  time ever (Outfit/DM Sans/Caveat/Permanent Marker are all Google-Fonts-
+  CDN-only sitewide — a PNG renderer can't reach a CDN font) — a real,
+  separate cost with no other beneficiary. Against all of that: original
+  pieces publish at roughly one a month. A generator's fixed build-and-
+  maintain cost never pays back at that cadence — a ten-minute pass in a
+  design tool wins on cost every time. No font files were committed; that
+  decision died with Phase 2. If a future session is tempted to rebuild
+  this: re-check both premises (is Pillow now a real dependency for some
+  other reason? has the publishing cadence materially increased?) before
+  assuming either has changed.
+- **Social share cards, review-round corrections (2026-09, same day) — two
+  real gaps found by explicit review questions, both fixed before merge.**
+  (1) **Escaping — evaluated and replaced.** The original two-helper design
+  (`_esc_attr_quote_only()` for `original_content.teaser`'s pre-encoded
+  convention, plain `_esc()` for `ai_surfaces.teaser`'s/`homepage_teaser`'s
+  plain-text convention) was replaced with one shared rule,
+  `_esc_attr_normalize()` — `_esc(html.unescape(s))` — per an explicit
+  request to check that single-rule alternative before shipping two
+  per-field treatments. Tested against real production data and
+  constructed edge cases (a pre-encoded `&amp;`, a plain `&`, a literal
+  `"`, a pathological already-double-encoded string) before trusting it: it
+  produces correct output for both storage conventions, and is genuinely
+  safer than the two-helper version it replaced, not just simpler — the
+  retired `_esc_attr_quote_only()` trusted a pre-encoded field's `&`
+  completely, so a single un-pre-encoded ampersand slipping into
+  `original_content.teaser` (a plausible admin typo, not a contrived case)
+  would have shipped as a literal, unescaped `&` in the rendered
+  attribute — invalid markup. Decode-then-re-encode can't have that
+  failure mode: every `&` in the output is a real, correctly-escaped
+  entity exactly once, regardless of how the source string was typed —
+  confirmed with a real inconsistent-input test case
+  (`"Ben & Jerry's &amp; Associates"`) that fails against the old helper
+  and passes against the new one. All three `og_description` call sites
+  (homepage, `ai_surface_article`, `original_content_article`) now go
+  through this one function.
+  (2) **og:url threading — a real, shipped gap, found by asking for the
+  full list instead of accepting a spot check.** The original build
+  threaded `request=request` through only 5 hand-picked "the pages that
+  matter" routes (per Phase 0's own stated recommendation to avoid
+  touching all 181 `_page()` call sites) — but that recommendation was
+  read too narrowly: it left 44 other genuinely public (non-`/admin`)
+  `_page()` calls across 39 routes silently falling back to the bare
+  `PUBLIC_BASE` root for `og:url`, **including every individual tool and
+  community profile page** (`/tools/software/{slug}`,
+  `/tools/communities/{slug}`), the three directory pages, both compare
+  pages, `/contact`, `/current-feed`, `/tools/fpa-buddy`, and more — any
+  two of these pages would have reported an identical `og:url`,
+  indistinguishable from the homepage to a scraper. Fixed by threading
+  `request=request` through all 44 (every route with `request` in its own
+  signature, minus `/admin/*`) — confirmed live afterward that an
+  individual tool profile page now reports its own real URL, not the
+  homepage's. **Made permanent, not just fixed once**: `og_url_
+  threading_problems()` (`webapp/app.py`) is a mechanical drift detector
+  in the same spirit as `hub_nav_orphans()` — live `app.routes`
+  introspection plus `inspect.getsource()` per route (the same established
+  technique `_page_index_tier_for` already uses, not a hand-rolled
+  whole-file line scan, which the function's own first draft tried and hit
+  two real false-positive classes with: matching `_page(` as a substring
+  of a route-function name ending in "`_page`" like `login_page(`, and
+  matching a `#` comment that merely *mentions* `_page()`; both are now
+  guarded against and unit-tested directly). Wired into
+  `webapp.checks.run_all()` as "og:url threading," the same way
+  `hub_nav_orphans()` is wired in as "Hub-nav orphans" — confirmed it
+  actually catches a planted regression (a temporarily-reverted
+  `/tools` route) before trusting it clean, per this codebase's own
+  standing "prove the detector isn't trivially passing" discipline.
+
 
 ## Authentication & security
 

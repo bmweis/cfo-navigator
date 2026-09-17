@@ -104,6 +104,23 @@ grid cycles seafoam/navy only); the one deliberate coral use on `/tools` and the
 is the MCP capability callout (`_mcp_callout_html`), a non-clickable statement, never a
 button.
 
+**Sanctioned exception: social share cards (2026-09).** The committed 1200×630 Open
+Graph/Twitter Card PNGs (`webapp/static/og/`) carry **two** coral elements — a full-height
+left edge bar and an uppercase eyebrow — deliberately, not an oversight. Reasoning:
+1. The bar functions as **chrome** (a fixed frame element identifying "this is a CFO
+   Navigator card," the same role a masthead color plays), not body content competing for
+   the reader's attention the way a coral fill inside an article page would.
+2. `coral_moment_problems()` (§8) renders HTML routes and counts coral **backgrounds**
+   inside rendered `style="..."` attributes — it has no way to inspect a PNG's pixels at
+   all, so this exception is structurally invisible to the mechanical check regardless of
+   whether it's documented here. It's recorded anyway because the written standard should
+   say what's true, not just what a scanner happens to catch.
+
+This exception is scoped narrowly to the social-card template — it does not license a
+second coral background anywhere else on a rendered page. See "Social share cards" in
+§5's UI components for the full card spec (dimensions, element order, and the string
+constraints that keep the hand-maintained template consistent).
+
 ### 2.4 Data-visualization palette
 
 Charts use the three brand families as categorical colors — cool for structure and outcome,
@@ -758,6 +775,55 @@ every individual field is clamped to the same max. Clamp and min-height are
 a pair — apply both together, on every variable-length field in a card, or
 neither; one without the other still leaves rows uneven.
 
+### Social share cards
+
+**1200×630 PNGs, committed to `webapp/static/og/`, hand-built — not generated.**
+Generation was investigated and killed outright (Phase 2 of the original build,
+2026-09): Pillow is a dependency this codebase has deliberately avoided at least
+three separate times (client-side Cropper.js for the App screenshot upload instead
+of server-side image processing; `scripts/audit_tool_logo_dimensions.py`'s own
+"NO NEW DEPENDENCY" hand-parsed PNG/JPEG/GIF/WEBP/ICO header reader; magic-bytes
+upload validation in several places, explicitly chosen over Pillow each time), and
+at roughly one original piece a month, an automated generator loses to a ten-minute
+pass in a design tool on cost alone — the fixed cost of building and maintaining a
+renderer (plus committing font files, since none of Outfit/DM Sans/Caveat/Permanent
+Marker exist locally — this site loads all four from the Google Fonts CDN, which a
+server-side renderer can't reach) never pays back at that cadence. This reasoning is
+recorded here, not just the outcome, specifically so a future pass doesn't rebuild
+Phase 2 without first re-checking whether either premise has actually changed.
+
+**Element order and dimensions:**
+1. Canvas: 1200×630px, `--bg` (warm off-white).
+2. A coral left edge bar, full height — see §2.3's sanctioned exception for why two
+   coral elements are allowed on this one template.
+3. An uppercase coral eyebrow — the piece's `tag_label`, uppercased.
+4. A large Outfit headline — the piece's `title`.
+5. A DM Sans subhead — a one-line summary distinct from the page's own teaser/meta
+   description field (see the field-mapping table below).
+6. A muted footer line, static: `Brian Weisberg · bmweis.com`.
+
+**String constraints — hand-enforced, not validated, because Phase 2 (the only thing
+that could enforce them automatically) is killed:**
+- Headline must fit one line at the template's specified size.
+- Subhead: 50–66 characters, one line. The three cards built so far run 66, 60, and
+  61 characters — treat 66 as the practical ceiling, not just the nominal one.
+- Eyebrow is the piece's `tag_label`, uppercased — no separate copy to write.
+- Footer is always exactly `Brian Weisberg · bmweis.com` — never per-card copy.
+
+Because nothing renders or wraps these strings before they're baked into a PNG, a
+subhead that runs long or a headline that wraps is a silent authoring mistake, not
+a build failure — check both against the constraints above by eye before exporting
+a new card, the same discipline the hand-built favicon files already require.
+
+**Field mapping** (for the one page every card is generated against a real teaser
+field, before the PNG is hand-built): eyebrow ← `tag_label`; headline ← `title`;
+subhead ← a hand-trimmed one-liner, not necessarily identical to the page's own
+`teaser`/description field — the live Growth Engine Ratio card's subhead ("A metric
+for how R&D and go-to-market work together to drive growth.") is a deliberately
+shortened, reworded version of that piece's actual `teaser`
+("...GTM investments work together to drive growth—with an interactive
+calculator."), picked for what reads well at card size, not copied verbatim.
+
 ### Editorial content system — Atlantic pattern
 
 A long-form register for pages Brian wants to read like a considered piece rather
@@ -1074,7 +1140,7 @@ dash" policy:
   on a spaced em dash in `webapp/app.py`'s UI copy, in both its literal and `&mdash;` spellings.
   The flagging workflow still applies to every new em dash, spaced or not — the lint checks
   typography, not cadence.
-- **En dash (–)** is a numeric-range separator — `$0.50–$0.70`, `Q3–Q4`, `1–10 employees`. Also
+- **En dash (–)** is a numeric-range separator — `$1.10–$1.30`, `Q3–Q4`, `1–10 employees`. Also
   always unspaced, same discipline as the em dash, but it's a different character doing a
   different job (a range, not a sentence-level pause), not a second flavor of em dash. No flagging
   workflow needed for en dashes — a spaced one is a straightforward typo to fix on sight, since

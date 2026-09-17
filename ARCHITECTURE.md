@@ -3038,6 +3038,69 @@ two independent concurrent misses) and a real open-auth `GET /` in a
 background thread with a hard join timeout, the same harness shape the
 coral fix's own `threading.local()` regression test used.
 
+### Social share cards — Open Graph / Twitter Card metadata (2026-09)
+
+Every page previously shared as a bare link — no description, no image. Fixed
+in `_page()` (`webapp/app.py`, the one shared `<head>`-assembly function
+behind every HTML route): three new optional keyword params —
+`request` (for an absolute `og:url`), `og_description`, and `og_image_slug`
+— drive `og:title`/`og:description`/`og:image`/`og:url`/`og:type`/
+`og:site_name`, the four `twitter:*` tags, and `<meta name="description">`,
+emitted on every page. `og:title` reuses `_short_title(title)` — the same
+suffix-stripped value already computed for the real `<title>` tag, just
+without the "BMW CFO · " prefix. A hardcoded `_OG_DEFAULT_DESCRIPTION`
+covers any route that passes nothing.
+
+**Images.** Committed 1200×630 PNGs live in `webapp/static/og/`, slug-keyed
+(`{slug}.png`, matching an `original_content`/`ai_surfaces` row's own slug)
+with one `default.png` fallback. `_og_image_slugs()` is a module-level,
+computed-once filename-set cache (`_OG_IMAGE_SLUGS`) rather than an
+`os.path.exists()` per render. Served through a dedicated
+`GET /static/og/{filename}` route into a new `_OG_DIR` — `/static/{filename}`
+itself is a single-path-segment route with no `:path` converter, so it
+can't match a nested `/og/...` URL at all; the new route mirrors the
+established precedent every other "committed images in a subdirectory" need
+on this site already uses (`tools_software_screenshot`, `tools_software_logo`).
+`/admin/brand` lists every committed card for download.
+
+**Escaping — one shared rule, not two.** `original_content.teaser` is
+stored pre-encoded (real HTML entities already in the string — `"R&amp;D"`);
+`ai_surfaces.teaser`/`homepage_teaser` are stored as plain text. Both go
+through `_esc_attr_normalize()` — `_esc(html.unescape(s))` — which decodes
+any existing entities back to raw form (a no-op on already-plain text) and
+then re-encodes only the four structurally dangerous characters (`&`, `<`,
+`>`, `"`) exactly once, correct for both conventions with one rule. This
+replaced an earlier two-helper design (one helper per convention) after
+evaluating the single-rule alternative and finding it strictly safer, not
+just simpler: the retired helper trusted a pre-encoded field's `&`
+completely, so a single un-pre-encoded ampersand slipping into
+`original_content.teaser` (a plausible admin typo) would have shipped as
+literal, unescaped markup.
+
+**og:url threading.** `request=request` is threaded through every
+`_page()` call in every non-`/admin` route whose own signature has
+`request` — otherwise `og:url` falls back to the bare `PUBLIC_BASE` root,
+indistinguishable from the homepage to a scraper. A permanent mechanical
+guard, `og_url_threading_problems()`, checks this live (the same
+`app.routes` + `inspect.getsource()` technique `_page_index_tier_for`
+already uses) and is wired into `webapp.checks.run_all()` as "og:url
+threading," the same way `hub_nav_orphans()` guards against a hand-
+maintained list drifting from reality.
+
+**Killed, not deferred: automated image generation.** Pillow is a
+dependency this codebase has deliberately avoided at least three times
+already (client-side Cropper.js for the App screenshot upload, the
+hand-parsed image-header reader in `scripts/audit_tool_logo_dimensions.py`,
+magic-bytes upload validation in several places) and isn't a real
+dependency today — it's listed in `/admin/open-source`'s showcase purely
+as a one-off historical tool that drew the favicon files. Building a
+generator would also mean committing font files for the first time ever
+(every typeface on this site loads from the Google Fonts CDN). Against
+original pieces publishing at roughly one a month, a generator's fixed
+build-and-maintain cost never pays back — see CLAUDE.md's "Social share
+cards" bullet for the full reasoning, which a future session should
+re-check before reviving this.
+
 ### Thought Leadership
 
 | Table | Purpose | Columns that carry meaning |
