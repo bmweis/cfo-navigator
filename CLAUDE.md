@@ -9025,6 +9025,46 @@ it supersedes the old "`/save` is token-gated" note.
   edit-form save keeps its existing order untouched, since reordering
   within a side is the arrows' job now, not a field a save can silently
   reset.
+- **`/current-feed` copy revision + a "Last mixed" cassette-label stamp
+  (2026-09).** Three changes, all Brian-directed. (1) The `<h1>` moved
+  from "Current Feed" to "Current feed" — the one holdout of BRAND.md
+  §3.2's sentence-case standard on this page. (2) The intro copy and the
+  hidden-feed footnote were both replaced/restructured: the footnote's
+  old single run-on sentence became a lead sentence ("Not on the tape:
+  While I wish I could read everything, time is finite—so the Buddy also
+  pulls from a few other trusted sites for more timely news and data.")
+  followed by a real `<ul>` — the underlying per-section `{section}:
+  {names}` groups `_current_feed_hidden_footnote()` derives are
+  byte-for-byte the same data as before, only the framing/markup around
+  them changed. A new closing line ("Have something you think I should
+  add to the list? Send me the demo track and you might see it show up
+  on a future update.") links "Send me the demo track" to `/contact` —
+  a bare internal link, not `/contact?context=...`, since nothing asked
+  for the resource-suggestion prefill convention here. (3) A new
+  **"Last mixed [date]" stamp**, styled as a small white write-on
+  cassette label (`.cf-stamp`/`.cf-stamp-row`), sits in the lower-right
+  of `.cf-tape-card` — a `justify-content:flex-end` row placed after
+  `.cf-sides` inside the card, not an absolutely-positioned overlay, so
+  it can never overlap the tracklists regardless of how many tracks each
+  side has. **Investigated and confirmed before building, per explicit
+  instruction not to substitute a different timestamp if this didn't
+  exist**: `feeds.created_at` is a real column, present since the
+  table's original `CREATE TABLE` (not a later `ALTER TABLE` migration),
+  set to `_now()` by `add_feed()` on every insert (including
+  `seed_feeds_from_opml()`'s own calls) and never touched by
+  `update_feed()` — so `MAX(feeds.created_at)` genuinely answers "when
+  was a feed last ADDED," not "when was anything about the feed table
+  last touched," exactly the distinction Brian's own instruction called
+  for. `_current_feed_stamp_date(feeds)` computes this directly from the
+  `feeds` list `current_feed()` already fetches (no new query, no new
+  `Library` method) and returns `""` on no feeds or an unparseable
+  `created_at` — the stamp renders only when that's non-empty, real data
+  or nothing, never a substitute. Verified live (real Chromium, real
+  Google Fonts) at desktop and 390px mobile: the stamp sits inside the
+  card with no overlap at either width. See `tests/test_current_feed.py`'s
+  new copy-revision/stamp section for the regression coverage, including
+  a direct proof that editing an existing feed's name never moves the
+  stamp forward (only adding a genuinely new feed can).
 - **Cookie domain registry, live-derived (2026-09) — see the entry above
   in this same section for the full incident and fix** (`_COOKIE_DOMAINS`
   hardcoded tuple → `linklib.extract._opml_feed_domains()`, parsed live

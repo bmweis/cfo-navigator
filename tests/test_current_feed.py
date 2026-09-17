@@ -260,9 +260,9 @@ def test_footnote_names_hidden_sources_grouped_by_section(env):
         lib.close()
     html = client.get("/current-feed").text
     assert "Not on the tape" in html
-    assert "News: Crunchbase News, TechCrunch" in html
-    assert "Market Insights: Public Comps" in html
-    assert "FP&amp;A Buddy still searches every one of them" in html
+    assert "<li>News: Crunchbase News, TechCrunch</li>" in html
+    assert "<li>Market Insights: Public Comps</li>" in html
+    assert "time is finite&mdash;so the Buddy also pulls from a few other trusted sites" in html
 
 
 def test_no_footnote_when_nothing_is_hidden(env):
@@ -286,8 +286,8 @@ def test_hidden_footnote_helper_directly(env):
     ]
     html = appmod._current_feed_hidden_footnote(feeds)
     assert "Not on the tape" in html
-    assert "News: Crunchbase News, TechCrunch" in html
-    assert "Market Insights: Public Comps" in html
+    assert "<li>News: Crunchbase News, TechCrunch</li>" in html
+    assert "<li>Market Insights: Public Comps</li>" in html
     assert "Shown One" not in html
 
 
@@ -992,3 +992,99 @@ def test_admin_dropdown_uses_the_same_side_names_as_the_page(env):
     assert '<option value="new_school">The New Generation</option>' in html
     assert "Old school" not in html
     assert "New school" not in html
+
+
+# --- copy revision + "Last mixed" stamp (2026-09) --------------------------
+
+def test_h1_is_sentence_case(env):
+    """BRAND.md §3.2 — page titles are sentence case; "Current Feed" (title
+    case) was the one holdout on this page."""
+    appmod, client = env
+    _seed(appmod, old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")])
+    html = client.get("/current-feed").text
+    assert "<h1" in html
+    h1 = html[html.index("<h1"):html.index("</h1>") + 5]
+    assert ">Current feed<" in h1
+    assert ">Current Feed<" not in h1
+
+
+def test_intro_copy_matches_the_approved_text(env):
+    appmod, client = env
+    _seed(appmod, old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")])
+    html = client.get("/current-feed").text
+    assert ("Remember that friend who had the best mixtape? The one you couldn't "
+            "get enough of and seemed to have the best stuff you didn't know "
+            "existed.") in html
+    assert ("While I can&#x27;t give you direct access to my feed" in html
+            or "While I can't give you direct access to my feed" in html)
+    assert "split into two eras" in html
+    assert "Every name links to the writer's own site, not the raw feed." in html
+    assert "And the list is dynamic, changing as I change my own reading list." in html
+    # the retired copy is gone, not just superseded
+    assert "You know that friend whose mixtape you" not in html
+    assert "I can't hand you my feed" not in html
+
+
+def test_demo_track_cta_links_to_contact(env):
+    appmod, client = env
+    _seed(appmod, old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")])
+    html = client.get("/current-feed").text
+    assert re.search(
+        r'Have something you think I should add to the list\? '
+        r'<a href="/contact">Send me the demo track</a> and you might see it '
+        r'show up on a future update\.',
+        html,
+    )
+
+
+def test_stamp_shows_the_most_recently_added_feeds_date(env):
+    """MAX(feeds.created_at) — the date a feed was ADDED, never touched by
+    update_feed(). Editing an existing feed must not move the stamp."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        sid = lib.add_feed_section("Blogs")
+        old_id = lib.add_feed(sid, "Old One", "https://old.example/feed", "https://old.example/")
+        lib.conn.execute("UPDATE feeds SET created_at=? WHERE id=?", ("2020-01-01T00:00:00+00:00", old_id))
+        new_id = lib.add_feed(sid, "New One", "https://new.example/feed", "https://new.example/")
+        lib.conn.execute("UPDATE feeds SET created_at=? WHERE id=?", ("2026-09-15T12:00:00+00:00", new_id))
+        lib.conn.commit()
+        lib.set_feed_current_feed_display(old_id, True, "old_school", 0)
+        lib.set_feed_current_feed_display(new_id, True, "old_school", 1)
+        # editing the OLDER feed must not move the stamp forward
+        lib.update_feed(old_id, sid, "Old One (renamed)", "https://old.example/feed",
+                        "https://old.example/")
+    finally:
+        lib.close()
+    html = client.get("/current-feed").text
+    assert "Last mixed" in html
+    assert "15 Sep 2026" in html
+
+
+def test_stamp_is_a_write_on_cassette_label_in_the_lower_right(env):
+    appmod, client = env
+    _seed(appmod, old_school=[("Old Blog Writer", "https://oldblog.example/feed", "https://oldblog.example/")])
+    html = client.get("/current-feed").text
+    assert '<div class="cf-stamp-row"><div class="cf-stamp" aria-hidden="true">' in html
+    assert '<span class="cf-stamp-label">Last mixed</span>' in html
+    assert "justify-content:flex-end" in html   # sits in the tape card's lower-right
+    assert ".cf-stamp{background:#fff;" in html
+
+
+def test_stamp_is_absent_when_there_are_no_feeds(env):
+    """No feeds at all -> no created_at data -> no stamp. This must never
+    fall back to a different timestamp; it's real data or nothing."""
+    appmod, client = env
+    html = client.get("/current-feed").text
+    assert "Last mixed" not in html
+    assert 'class="cf-stamp-row"' not in html
+    assert 'class="cf-stamp"' not in html
+
+
+def test_stamp_date_helper_ignores_unparseable_created_at(env):
+    import webapp.app as appmod
+    assert appmod._current_feed_stamp_date([{"created_at": "not-a-date"}]) == ""
+    assert appmod._current_feed_stamp_date([{"created_at": ""}]) == ""
+    assert appmod._current_feed_stamp_date([]) == ""
+    assert appmod._current_feed_stamp_date(
+        [{"created_at": "2026-09-15T12:00:00+00:00"}]) == "15 Sep 2026"
