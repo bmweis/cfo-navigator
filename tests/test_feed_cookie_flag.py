@@ -232,6 +232,56 @@ def test_every_row_shows_a_computed_cookie_indicator(app_env, monkeypatch):
     assert "not configured" not in html[span_start:span_start + 120]
 
 
+def test_cookie_column_is_wide_enough_for_status_plus_age(app_env, monkeypatch):
+    """Real 2026-09 bug: the Cookie column's <th> width was _COL_WIDTH_STATUS
+    (110px), sized for a bare status badge — but this column's actual content
+    is a dot, a state word ("working"/"inconclusive"/"expired"), and a
+    relative age ("· just now"/"· 45d ago") all on one line, which measured
+    wider than 110px in real production rows (OnlyCFO, Cautious Optimism,
+    Mostly Metrics all wrapped to two lines). Fixed with a dedicated
+    _COL_WIDTH_STATUS_AGE constant, sized with real headroom over the
+    measured worst case ("inconclusive · 999d ago", the longest
+    _relative_age() can ever produce)."""
+    from webapp import app as appmod
+    assert appmod._COL_WIDTH_STATUS_AGE > appmod._COL_WIDTH_STATUS
+    assert appmod._COL_WIDTH_STATUS_AGE >= 180
+    with _client(app_env) as client:
+        html = client.get("/admin/reader/feeds").text
+    assert f'width:{appmod._COL_WIDTH_STATUS_AGE}px;text-align:center;" data-sort="cookie"' in html
+    assert f'.ff-cookie{{width:{appmod._COL_WIDTH_STATUS_AGE}px' in html
+
+
+def test_feeds_table_has_a_min_width_and_scrolls_instead_of_squeezing(app_env):
+    """The real root cause behind the Cookie-column wrap above wasn't
+    Cookie's width alone — .ff-table had NO min-width at all, so
+    table-layout:fixed proportionally squeezed every column (Cookie
+    included) to fit whatever container width it was given, at any
+    viewport down to the 820px mobile-card breakpoint. Fixed the same way
+    every other wide (8+-column) admin table on this site already is: a
+    real min-width (_TABLE_FLOOR_XWIDE, the 8+-column bucket — Name, URL,
+    Section, Cookie, Subscriber, Current Feed, Order, Actions) plus the
+    shared overflow-x:auto scroll wrapper and "Scroll for more" hint, so a
+    narrower container scrolls instead of squeezing every column."""
+    from webapp import app as appmod
+    with _client(app_env) as client:
+        html = client.get("/admin/reader/feeds").text
+    assert f'.ff-table{{min-width:{appmod._TABLE_FLOOR_XWIDE}px;}}' in html
+    assert 'id="cmp-scroll-wrap"' in html
+    assert appmod._ADMIN_SCROLL_HINT_HTML in html
+    assert "initAdminScrollHint();" in html
+    # The mobile stacked-card breakpoint must reset the min-width back to 0,
+    # or the min-width would pin a full-width stacked card at the desktop
+    # floor even though there's nothing left to scroll — the exact bug PR 12
+    # already fixed once for other tables' inline min-widths (see that PR's
+    # own !important note); this table's min-width is a class rule, not
+    # inline, so a later same-specificity media-query rule can win without
+    # needing !important — confirmed here rather than assumed.
+    media_start = html.index("@media (max-width:820px)")
+    reset_start = html.index(".ff-table{min-width:0", media_start)
+    assert reset_start - media_start < 2000   # inside this breakpoint, not a later one
+    assert ".ff-table{min-width:0;}" in html[reset_start:reset_start + 40]
+
+
 def test_cookie_indicator_has_its_own_aria_label_shape(app_env):
     """Deliberately different from Subscriber's aria-label — this is
     a computed fact, not a per-row control, so it isn't held to the same
