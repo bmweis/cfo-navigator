@@ -9637,6 +9637,33 @@ it supersedes the old "`/save` is token-gated" note.
   `/tools` route) before trusting it clean, per this codebase's own
   standing "prove the detector isn't trivially passing" discipline.
 
+- **Slow first page load (raised 2026-09-15, resolved 2026-09-17): confirmed as
+  `webapp.checks.run_all()`, reached via `webapp.tasks._failing_checks_count()`
+  from `_page()` on every admin-role render. Its result caches for 120
+  seconds, so only the first render after the cache expires pays the cost; a
+  warm load inside the TTL is 1-2s and tells you nothing.**
+
+  Measured on the identical URL with 3+ minutes idle before each load:
+  signed in 7-8s, signed out 2s. Auth state was the only variable.
+
+  Ruled out along the way: Railway Serverless / container sleep — the toggle is
+  OFF, confirmed in the dashboard 2026-09-17. Worth remembering that
+  first-slow/second-fast was the first hypothesis for this pattern and did not
+  survive the dashboard check; on this service that measurement alone does not
+  prove cold start.
+
+  The mechanism: `run_all()` renders every public route through `TestClient` so
+  `coral_moment_problems()` can count coral backgrounds, and it now carries ten
+  checks. #573 halved the cost on the re-entrant path via the
+  `_checks_computing` sentinel but never touched per-pass cost. The existing
+  parked item's own trigger, "if suite runtime or admin page loads become a
+  problem," has fired.
+
+  Not yet scoped: what to do about it. Every admin page load Brian makes after
+  a two-minute gap pays ~6 seconds. Options not yet evaluated — a longer TTL, a
+  background refresh, making the route-rendering check opt-in rather than part
+  of the badge path, or precomputing at deploy.
+
 
 ## Authentication & security
 
