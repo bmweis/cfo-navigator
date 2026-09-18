@@ -9637,35 +9637,32 @@ it supersedes the old "`/save` is token-gated" note.
   `/tools` route) before trusting it clean, per this codebase's own
   standing "prove the detector isn't trivially passing" discipline.
 
-- **Slow first page load (raised 2026-09-15, re-raised 2026-09-17): UNRESOLVED,
-  cause unknown.**
+- **Slow first page load (raised 2026-09-15, resolved 2026-09-17): confirmed as
+  `webapp.checks.run_all()`, reached via `webapp.tasks._failing_checks_count()`
+  from `_page()` on every admin-role render. Its result caches for 120
+  seconds, so only the first render after the cache expires pays the cost; a
+  warm load inside the TTL is 1-2s and tells you nothing.**
 
-  Measured: first load ~7s, second load ten seconds later 1-2s. Real and
-  reproducible at the time of measurement.
+  Measured on the identical URL with 3+ minutes idle before each load:
+  signed in 7-8s, signed out 2s. Auth state was the only variable.
 
-  Ruled out:
-  - Railway Serverless / container sleep — the toggle is OFF, confirmed in
-    the dashboard 2026-09-17. **This is the important one: first-slow/
-    second-fast is NOT diagnostic of cold start here.** That was the first
-    hypothesis raised for this pattern, and it did not survive the
-    dashboard check — worth remembering, because the next session will
-    otherwise reach for the same shortcut: a first-slow/second-fast
-    measurement alone does not prove cold start on this service. Check the
-    Serverless setting before treating it as the explanation.
-  - Per-request application paths — the 1-2s warm load rules out
-    `webapp.checks.run_all()`, the og:image filename lookup, and ordinary
-    request handling generally.
+  Ruled out along the way: Railway Serverless / container sleep — the toggle is
+  OFF, confirmed in the dashboard 2026-09-17. Worth remembering that
+  first-slow/second-fast was the first hypothesis for this pattern and did not
+  survive the dashboard check; on this service that measurement alone does not
+  prove cold start.
 
-  Not ruled out: whatever the first request warms. Some cache, connection,
-  or lazy initialization. Boot cost is also unmeasured, though with
-  Serverless off the container should not be booting between requests.
+  The mechanism: `run_all()` renders every public route through `TestClient` so
+  `coral_moment_problems()` can count coral backgrounds, and it now carries ten
+  checks. #573 halved the cost on the re-entrant path via the
+  `_checks_computing` sentinel but never touched per-pass cost. The existing
+  parked item's own trigger, "if suite runtime or admin page loads become a
+  problem," has fired.
 
-  Confounder: measured roughly an hour after #577 merged. A deploy restarts
-  the container, so the first load may simply have followed that restart.
-
-  Next step: re-test after a day of normal use, on desktop wifi, well away
-  from any deploy. Do not investigate code paths until that measurement
-  exists.
+  Not yet scoped: what to do about it. Every admin page load Brian makes after
+  a two-minute gap pays ~6 seconds. Options not yet evaluated — a longer TTL, a
+  background refresh, making the route-rendering check opt-in rather than part
+  of the badge path, or precomputing at deploy.
 
 
 ## Authentication & security
