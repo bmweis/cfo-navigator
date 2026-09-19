@@ -10430,6 +10430,140 @@ docs honest, **in the same PR as the change** (never a follow-up):
    in `scripts/archive/` are deliberately excluded from the registry; they're
    kept only for git history, never meant to run again in the ordinary course.
 
+## Voice enforcement
+
+**`BANNED_WORDS`/`FILLER_PHRASES`/`PERFORMATIVE` (`linklib/voice_review.py`) stay in
+source, permanently — decided and closed (2026-09 voice-enforcement PR, do not
+re-litigate).** An earlier round of this same investigation considered moving them into
+the DB alongside `voice_core` (so `/admin/voice` would be the single source of truth for
+every voice rule, mechanical and holistic). The investigation that followed is why the
+answer is no: CI has no authenticated route to the live production database that isn't
+wildly disproportionate to the need (the only existing path, `/mcp`'s `get_rows`, has no
+per-table denylist — an admin-role token stored as a GitHub Actions secret would be read
+access to `users`/`api_tokens`/`password_reset_requests`/`contacts`, held by a
+third-party CI system, to read four settings rows), and there is no DB-to-source
+generation pattern in this repo to fall back on either (`scripts/generate_brand_docs.py`
+is the closest analog, but its source — CSS in `webapp/app.py` — lives in the same git
+commit as what it generates; a DB-sourced version would be asymmetric, regeneratable
+only by someone with production access, never by CI). A committed mirror can drift from
+a live settings row with nothing in the running Railway container able to close that gap
+automatically — which is exactly the contradiction the DB-as-source-of-truth idea was
+supposed to prevent. Keeping one copy, in source, means there's nothing to diverge.
+`/admin/voice` mirrors all three lists **read-only**, in a "Mechanical rules" card marked
+"Source-managed" — changing them is a code change, not an admin edit — so the full voice
+picture (editable prose rubric above, mechanical enforcement below) still lives on one
+page, just not one editable surface.
+
+**Mechanical scan scope widened to match typography's own file list, and the two checks
+now share one implementation.** Both rules used to have different footprints:
+`typography_findings` (bare ampersands, spaced em dashes) already swept
+`TYPOGRAPHY_SCANNED_FILES` — `webapp/app.py`, `linklib/enrich.py`, `linklib/feature_scan.py`
+(PR 15) — and failed CI on a hit; the mechanical rules only ever swept `webapp/app.py`,
+via a separate, hand-rolled regex scanner in `tests/test_voice_standards.py` (`_hits()`)
+that never actually called `mechanical_findings()` — meaning the test, the live
+`/admin/checks` dashboard, and any future caller could in principle disagree about what
+counts as a violation. Renamed `TYPOGRAPHY_SCANNED_FILES` → `VOICE_SCANNED_FILES` (same
+tuple, both rules read it now) and retired `_hits()` — the sweep test now calls
+`mechanical_findings()` directly, closing that drift risk and widening coverage from 1
+file to 3 in the same move. `webapp.checks.run_all()`'s "Voice standards" row does the
+same widened sweep for the live dashboard.
+
+**A real false positive from the widened scope, fixed with a general mask, not a
+line-number exclusion.** `linklib/enrich.py`'s own rule text — "No marketing language:
+no 'powerful,' 'seamless,' 'game-changing,' 'best-in-class,' ..." — cites `BANNED_WORDS`
+members as examples of what NOT to write; a naive file-list widening would have flagged
+the rule for stating itself. `linklib.agent.VOICE_CORE_DEFAULT`'s own "- Avoid: ...
+delve, robust, seamless, ..." line has the identical shape, confirming this needed a
+general fix rather than excluding one known line. `voice_review._mask_rubric_enumerations`
+blanks a rubric's own "words to avoid" enumeration (the marker phrase through the next
+sentence-ending period, curated via `_RUBRIC_ENUMERATION_RE` — "No marketing language:"
+and "- Avoid:" today, same "add a real one when it turns up" discipline as
+`AMPERSAND_NAMES`/`AMPERSAND_ACRONYMS`) before `mechanical_findings` scans anything — a
+real violation elsewhere in the same string, even the same sentence before the marker,
+still gets caught. Note the mask doesn't cover every shape `agent.py`'s own rubric uses
+("No performative openers or closers (...)", "No filler (...)" are a different marker
+shape) — harmless today since `agent.py` isn't in `VOICE_SCANNED_FILES`, but a future
+sweep that adds it needs new markers, not just a file-list edit.
+
+**Semantic contradiction, checked separately from the mechanical mirror above: does
+`voice_core`'s own prose promise a rejection the machine doesn't actually enforce?**
+`voice_review.voice_core_gap_problems(voice_core_text)` extracts every 2+-word quoted
+phrase from the rubric and confirms each is covered by re-running it through
+`mechanical_findings` itself (never a second, independent containment check, so this can
+never disagree with what real copy scanning does). One direction only — a
+`BANNED_WORDS`/`FILLER_PHRASES`/`PERFORMATIVE` entry the prose never mentions is fine,
+the lists are allowed to be more specific than the rubric. The 2+-word floor is
+evidence-based, not arbitrary: a blind scan of every double-quoted span in the real
+`VOICE_CORE_DEFAULT` flags `"&"`, `"and"`, and `"to"` too — single-word/character asides
+quoted for an unrelated reason (the ampersand-spelling rule, an arrow-notation
+replacement suggestion), not "avoid this phrase" examples; every real
+`FILLER_PHRASES`/`PERFORMATIVE` example in that same text is a genuine 2+-word phrase, so
+the floor removes exactly the three false positives and none of the real signal. Running
+this against the real rubric before shipping found one genuine gap: "there are many
+factors to consider" (voice_core's own generic-hedging example) wasn't in
+`FILLER_PHRASES` — fixed by adding the phrase to the list (a code change extending
+enforcement to match an existing promise, not a rewrite of Brian's prose). Wired into
+`run_all()` as a CI-safe row against `VOICE_CORE_DEFAULT` (the code constant) — an admin
+edit to the *live* `voice_core` setting that names a new example isn't caught by this
+row, only a drift in the code default is; same CI-has-no-DB-route boundary as everything
+else in this section.
+
+**Database content is scanned too — but only live, on `/admin/checks`, never in CI.**
+A growing share of real user-facing copy lives in the database, not source: `settings`
+overrides (`homepage_*_copy`, `about_page_copy`, `htib_before_copy`/`htib_after_copy`),
+`original_content`, `ai_surfaces`, `thought_leadership`, `tools` (description/summary/
+agent_taxonomy_note/competitive_differentiation/suite_note), `communities`
+(demographic/cost_note/notes/local_markets), all 23 `community_profiles` narrative
+fields, `category_features.name`, `benchmarks`, and `tool_categories`/
+`community_categories.description` — the last two confirmed rendering publicly as `title=`
+tooltips on the `/tools/software`/`/tools/communities` category filter pills (a
+correction to an earlier, incomplete scan of the same question — both genuinely do
+render, not just one). `linklib/voice_db_scan.py`'s `scan_db_copy(lib)` runs both
+`mechanical_findings` and a new plain-text sibling, `typography_findings_plain`
+(factored out of `typography_findings` — same masking/allowlist logic, no `ast.parse`,
+since a DB value is already the whole literal, not something to extract one from), over
+every enumerated column. Surfaced as a "Database-backed copy" section on `/admin/checks`
+(a live count + a capped violation list, colored banner, no reviewed-toggle — unlike the
+three dated pricing/model-freshness reminders on the same page, this is a fact computed
+fresh on every load, not a human attestation) — it counts and reports, it never
+rewrites; any real fix is an ordinary editorial change through whichever admin page owns
+the record, reviewed by Brian before it ships, same as any other copy edit.
+
+Two real, found-before-shipping design points, not incidental: (1) **`tools.name`/
+`communities.name`/`benchmarks.name` are exempt from the typography half of the scan**
+(mechanical checks still apply) — these are third-party entity names, and
+`typography_findings_plain("Bain & Company")` genuinely flags it as a bare ampersand,
+reproducing the exact false-positive risk BRAND.md's own ampersand rule already
+documents for source-code scanning. `category_features.name`/`tool_categories.name`/
+`community_categories.name` are Brian's own curated vocabulary, not third-party names,
+so they stay in typography scope. (2) **`category_features.definition`/`pointer_note`
+are excluded from the scanner entirely, not just from typography** — confirmed neither
+renders on any public page: `list_tool_feature_links_with_details()` (the read path both
+the public "Key features" card and the Software Matchmaker's context use) doesn't even
+`SELECT` those two columns, and the only place either renders is two `_is_authed`-gated
+admin surfaces. This is a real, separate, logged-not-fixed finding: real per-feature
+reference text Brian writes and re-reads that nothing public — not the profile card, not
+Compare, not the Matchmaker — ever shows. Worth its own decision later (render it, or
+stop collecting it as if it were user-facing); out of scope here.
+
+**A related root-cause fix, found while building the scanner's own tests, not assumed:**
+`add_category_feature`/`update_category_feature` (`linklib/db.py`) never ran their
+`definition`/`pointer_note` fields through `voice_mechanics.normalize_voice_mechanics`
+(`_voice_fix`) — the same spaced-em-dash write-time backstop nearly every other
+narrative-field write path in this file already uses (`tools.description`,
+`communities.demographic`, all 23 `community_profiles` fields, ...). This is almost
+certainly why the confirmed live production violation this whole investigation started
+from — `category_features` id 8's `definition`, "...patterns that don't look right —
+not necessarily a balance change" — exists at all. Fixed for future writes only (both
+methods now call `_voice_fix()` on `definition`/`pointer_note`, matching the established
+pattern exactly); the already-stored live value is untouched — it's exactly the kind of
+finding the DB scanner above is for, surfaced there, fixed through the admin UI like any
+other copy edit, never auto-corrected.
+
+See `linklib/voice_review.py`, `linklib/voice_db_scan.py`, `webapp/checks.py`'s
+`VOICE_SCANNED_FILES`, `tests/test_voice_standards.py`, and `tests/test_voice_db_scan.py`
+for the full implementation and regression coverage.
+
 ## Voice — em dash policy
 
 The voice guide (`BRAND.md` §9, rubric text in `linklib.agent.VOICE_CORE_DEFAULT`)

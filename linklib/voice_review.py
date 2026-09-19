@@ -37,16 +37,56 @@ BANNED_WORDS = [
 FILLER_PHRASES = [
     "at the end of the day", "needless to say", "in order to",
     "it's worth noting", "it is worth noting",
+    # Added 2026-09 (voice-enforcement PR) — voice_core's own prose already
+    # names this as a generic-hedging example ("don't pad the gap with
+    # generic hedging"), quoted verbatim, but it was never in this list —
+    # found by voice_core_gap_problems() below, which exists specifically
+    # to catch a rubric promising a rejection the mechanical lists don't
+    # enforce. See that function's docstring.
+    "there are many factors to consider",
 ]
 PERFORMATIVE = [
     "i'm excited to share", "i am excited to share", "thrilled to",
     "onward!", "excited for what's next", "without further ado",
 ]
 
+# A rubric line that enumerates words/phrases NOT to write — the model reads
+# these as instructions, but the words inside are cited as examples of what
+# to avoid, not live copy that violates them. Masking is scoped to the
+# enumeration itself (the marker phrase through the next sentence-ending
+# period), never the whole string literal, so a real mechanical violation
+# elsewhere in the same literal — even the same sentence, before the marker —
+# still gets caught. `[^.]` already matches a newline (only a bare `.` needs
+# DOTALL to do that), so this spans a line-wrapped enumeration for free.
+#
+# Curated, not general — same "add a real one when it turns up" discipline
+# as AMPERSAND_NAMES/AMPERSAND_ACRONYMS below: a marker is added here only
+# once real source needs it, never guessed at. Found via linklib/enrich.py's
+# "No marketing language: no 'powerful,' 'seamless,' ..." rule text (which
+# quotes BANNED_WORDS members as cited bad examples) — the identical shape
+# recurs in linklib.agent.VOICE_CORE_DEFAULT's own "- Avoid: ... delve,
+# robust, seamless, ..." line, not yet in a scanned file, kept here so a
+# future file sweep doesn't have to rediscover this.
+_RUBRIC_ENUMERATION_RE = re.compile(
+    r"(?:No marketing language:|-\s*Avoid:)[^.]*\.", re.IGNORECASE,
+)
+
+
+def _mask_rubric_enumerations(text: str) -> str:
+    """Same-length blanking (never trims) of a rubric's own "words to avoid"
+    listing, so offsets any caller computes against the original `text`
+    stay valid. See `_RUBRIC_ENUMERATION_RE`'s own comment for scope."""
+    return _RUBRIC_ENUMERATION_RE.sub(lambda m: " " * len(m.group(0)), text)
+
 
 def mechanical_findings(text: str) -> list[tuple[str, str]]:
-    """Deterministic voice violations as (rule, matched_phrase). No API calls."""
-    low = text.lower()
+    """Deterministic voice violations as (rule, matched_phrase). No API calls.
+
+    Scans `text` with a rubric's own "words to avoid" enumeration masked out
+    first (see `_mask_rubric_enumerations`) — a prompt telling Claude not to
+    write "seamless" is not itself a violation of that rule.
+    """
+    low = _mask_rubric_enumerations(text).lower()
     findings: list[tuple[str, str]] = []
     for w in BANNED_WORDS:
         if re.search(r"\b" + re.escape(w) + r"\b", low):
@@ -58,6 +98,54 @@ def mechanical_findings(text: str) -> list[tuple[str, str]]:
         if p in low:
             findings.append(("performative", p))
     return findings
+
+
+# --- Semantic contradiction: does voice_core promise a rejection the ------
+# --- mechanical lists don't enforce? ---------------------------------------
+# The mechanical contradiction (voice_review.py disagreeing with itself) is
+# now impossible by construction — there's one copy of the lists. This is
+# the other kind: voice_core's PROSE names a word or phrase as unwanted, in
+# quotes, but the word never made it into BANNED_WORDS/FILLER_PHRASES/
+# PERFORMATIVE, so nothing actually rejects it in real copy.
+#
+# One direction only, deliberately: a list entry the prose doesn't mention
+# is fine (the lists are allowed to be more specific than the rubric) — only
+# a prose-named term with no mechanical backing is a problem.
+#
+# Extraction is deliberately narrowed to quoted spans of 2+ words. Checked
+# against the real VOICE_CORE_DEFAULT before shipping (not assumed): a bare
+# regex over every double-quoted span there flags `"&"`, `"and"`, and `"to"`
+# too — single-word/character asides quoted for an unrelated reason (the
+# ampersand-spelling rule, and an arrow-notation replacement suggestion),
+# not "avoid this phrase" examples. Every FILLER_PHRASES/PERFORMATIVE
+# example in that same text is a real phrase (2+ words), so a word-count
+# floor removes exactly the false positives and none of the real signal.
+# BANNED_WORDS' own members never appear quoted in voice_core (they're
+# listed bare, comma-separated, after "- Avoid:") — that line is already
+# masked by `_mask_rubric_enumerations` above and, being a verbatim copy of
+# BANNED_WORDS itself, has nothing new to find anyway.
+_QUOTED_TERM_RE = re.compile(r'"([^"]+)"')
+
+
+def voice_core_gap_problems(voice_core_text: str) -> list[str]:
+    """Quoted 2+-word phrases in `voice_core_text` that `mechanical_findings`
+    would not catch if they appeared as real copy — i.e. the rubric cites an
+    example the machine doesn't actually enforce. Reuses `mechanical_findings`
+    itself as the "is this covered" oracle (run against the quoted term
+    alone) rather than reimplementing containment logic, so this can never
+    disagree with what real copy scanning actually does."""
+    seen: list[str] = []
+    problems: list[str] = []
+    for term in _QUOTED_TERM_RE.findall(voice_core_text):
+        if len(term.split()) < 2 or term in seen:
+            continue
+        seen.append(term)
+        if not mechanical_findings(term):
+            problems.append(
+                f'"{term}" is named in the voice guide but not enforced by '
+                f"BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE"
+            )
+    return problems
 
 
 # --- Typographic rules over UI copy in Python source ------------------------
@@ -247,25 +335,49 @@ def _copy_literals(source: str) -> list[tuple[int, str]]:
     return out
 
 
+def _typography_findings_in_literal(literal: str) -> list[tuple[str, str]]:
+    """(rule, excerpt) pairs for one already-extracted span of copy — no line
+    number, since that's a source-file concept. Shared by `typography_findings`
+    (Python source, one span per string literal) and `typography_findings_plain`
+    (a single plain-text value, e.g. a database column, one span total)."""
+    findings: list[tuple[str, str]] = []
+    if _LONE_ENTITY.match(literal.strip()):
+        return findings
+    copy = scannable_copy(literal)
+    for rule, rx in (("bare-ampersand", _BARE_AMPERSAND),
+                     ("spaced-em-dash", _SPACED_EM_DASH),
+                     ("spaced-em-dash", _SPACED_MDASH_ENTITY)):
+        for m in rx.finditer(copy):
+            start, end = max(0, m.start() - 40), m.end() + 40
+            excerpt = " ".join(literal[start:end].split())
+            findings.append((rule, excerpt))
+    return findings
+
+
 def typography_findings(source: str) -> list[tuple[str, int, str]]:
     """Bare ampersands and spaced em dashes in UI copy, as (rule, line, excerpt).
 
     `source` is Python source text (webapp/app.py in practice), not rendered
     HTML and not database content — see the scoping note above this function.
+    For a single plain-text value (a database column), use
+    `typography_findings_plain` instead — this one requires valid Python
+    syntax to extract string literals from via `ast.parse`.
     """
     findings: list[tuple[str, int, str]] = []
     for lineno, literal in _copy_literals(source):
-        if _LONE_ENTITY.match(literal.strip()):
-            continue
-        copy = scannable_copy(literal)
-        for rule, rx in (("bare-ampersand", _BARE_AMPERSAND),
-                         ("spaced-em-dash", _SPACED_EM_DASH),
-                         ("spaced-em-dash", _SPACED_MDASH_ENTITY)):
-            for m in rx.finditer(copy):
-                start, end = max(0, m.start() - 40), m.end() + 40
-                excerpt = " ".join(literal[start:end].split())
-                findings.append((rule, lineno, excerpt))
+        for rule, excerpt in _typography_findings_in_literal(literal):
+            findings.append((rule, lineno, excerpt))
     return findings
+
+
+def typography_findings_plain(text: str) -> list[tuple[str, str]]:
+    """Same bare-ampersand/spaced-em-dash rules as `typography_findings`, but
+    for a single already-plain-text value rather than Python source — the
+    shape a database column's content comes in. No `ast.parse`, no line
+    number: the whole `text` IS the copy, not something to extract a literal
+    from. Used by the DB-backed-copy scanner (see CLAUDE.md's "Database
+    content is scanned too" note) — never by anything reading Python source."""
+    return _typography_findings_in_literal(text)
 
 
 # --- Holistic tone review (Claude) ------------------------------------------

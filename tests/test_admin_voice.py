@@ -96,6 +96,25 @@ def test_seeded_page_shows_default_as_seeded_no_banner(env):
     assert _esc(matchmaker.VOICE_MATCHMAKER_DEFAULT) in html
 
 
+def test_page_mirrors_mechanical_lists_read_only(env):
+    """2026-09 voice-enforcement PR: BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE
+    stay in linklib/voice_review.py, permanently — the page renders them
+    live from that import for visibility only, marked source-managed, no
+    save mechanism of any kind for this section."""
+    html = _login_admin(env).get("/admin/voice").text
+    assert "Source-managed" in html
+    assert "Mechanical rules" in html
+    for w in voice_review.BANNED_WORDS:
+        assert _esc(w) in html
+    for p in voice_review.FILLER_PHRASES:
+        assert _esc(p) in html
+    for p in voice_review.PERFORMATIVE:
+        assert _esc(p) in html
+    # No save/reset wiring for this section — it's a plain render, not
+    # another instance of _voice_field's editable-textarea pattern.
+    assert "<textarea" not in html.split("Mechanical rules")[1].split("Check content against your voice")[0]
+
+
 def test_seeding_then_manual_clear_shows_partial_banner(env):
     """A deliberate clear-out of just one field must still show as blocked
     for that field alone, distinct from the other two seeded fields."""

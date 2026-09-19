@@ -5810,7 +5810,7 @@ class Library:
         cur = self.conn.execute(
             """INSERT INTO category_features (category_id, name, definition, pointer_note,
                sort_order, created_at) VALUES (?,?,?,?,?,?)""",
-            (category_id, name, definition.strip(), pointer_note.strip(), sort_order, _now()),
+            (category_id, name, _voice_fix(definition.strip()), _voice_fix(pointer_note.strip()), sort_order, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -5831,7 +5831,7 @@ class Library:
             raise ValueError(f'"{name}" already exists in this category.')
         self.conn.execute(
             "UPDATE category_features SET name=?, definition=?, pointer_note=?, sort_order=? WHERE id=?",
-            (name, definition.strip(), pointer_note.strip(), sort_order, feature_id),
+            (name, _voice_fix(definition.strip()), _voice_fix(pointer_note.strip()), sort_order, feature_id),
         )
         self.conn.commit()
 
