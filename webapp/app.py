@@ -25238,6 +25238,33 @@ def fpa_buddy_how_it_works(request: Request):
     exact CSS Grid failure class elsewhere (see CLAUDE.md's Overhead Spend
     fixes, round 4). The table itself still scrolls within its own
     `overflow-x:auto` wrapper on a narrow viewport, unaffected.
+
+    Second rider, raised during review of this same page: the tier table's
+    section (and, before this fix, every other section) was a SIBLING of
+    the intro `.tool-prose` div, not its descendant — the sections grid sat
+    directly inside `.page-standard`, so the table rendered at the full
+    1232px content width instead of matching the 760px reading column
+    above and below it. Measured directly (both this branch and
+    `origin/main` at 1280px) before touching anything: the grid-track fix
+    above didn't cause this and doesn't affect it — both branches produced
+    byte-identical widths, confirming the misalignment predates this PR
+    entirely and was only surfaced by this page's own review. `/how-this-
+    is-built` had the identical shape (its cards grid was a sibling of
+    `.tool-prose` too) and was already fixed there by merging the whole
+    page into one `.tool-prose` wrapper so the grid becomes its descendant
+    — see `how_this_is_built()`'s own docstring for that fix's full
+    reasoning. Applied the same treatment here rather than inventing a
+    narrower fix scoped only to the table: the whole `display:grid` sections
+    wrapper (with the mobile-safety `minmax(0,1fr)` from the first rider
+    above kept, since the table's own 680px min-width still needs it — the
+    `/how-this-is-built` precedent's plain `1fr` was safe there only because
+    its cards carry no min-width floor of their own) now lives inside the
+    single top-level `.tool-prose`, and the per-section `class="tool-prose"`
+    on each `<section>` (redundant now, and never present on `/how-this-
+    is-built`'s own cards) was dropped, along with the tier section's own
+    now-redundant nested `.tool-prose` div around its heading/intro
+    paragraph. BRAND.md §5 gained a standing rule for this exact failure
+    class, since it's now shown up on two separate pages.
     """
     from linklib.agent import EFFORT_SETTINGS
     lib = _lib()
@@ -25266,10 +25293,9 @@ def fpa_buddy_how_it_works(request: Request):
 <h1>How FP&amp;A Buddy works</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">Ask it a finance question and it answers from sources I picked, with citations you can check.</p>
 <p style="color:var(--ink-soft);margin:-16px 0 24px;font-size:15px;line-height:1.6;">That second part is the point. Most AI tools ask you to trust the answer. This one makes every claim traceable to a real passage in a real source, by a mechanism the model can't talk its way around.</p>
-</div>
 
 <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:20px;">
-<section class="tool-prose">
+<section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where the answers come from</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">Three places, and you can see all of them.</p>
 <ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
@@ -25280,7 +25306,7 @@ def fpa_buddy_how_it_works(request: Request):
 <p style="margin:10px 0 0;font-size:16px;color:var(--ink-soft);line-height:1.65;">My own writing is in there too, mirrored into the archive and labeled as mine when it gets cited. If the source is me, you should know that.</p>
 </section>
 
-<section class="tool-prose">
+<section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Why the citations hold up</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">Every source is handed to Claude as a document with Anthropic's citations turned on, not as text pasted into a prompt.</p>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The difference is the whole thing. When a model is asked to cite its sources, what you get back is something shaped like a citation. Here each numbered marker is tied to an actual passage in an actual document, and the link is checked by the system rather than reported by the model.</p>
@@ -25289,10 +25315,8 @@ def fpa_buddy_how_it_works(request: Request):
 </section>
 
 <section>
-<div class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">How much effort to spend</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The only choice you make is how hard to work the question. Each level pulls more sources and uses a more capable model.</p>
-</div>
 <div style="overflow-x:auto;">
 <table class="cc-table">
 <thead><tr style="background:var(--bg);">
@@ -25309,17 +25333,18 @@ def fpa_buddy_how_it_works(request: Request):
 </div>
 </section>
 
-<section class="tool-prose">
+<section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it costs</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">There's a monthly dollar cap per person (currently ${default_cap:.2f} by default), and you can see your own spend against it from the tool itself.</p>
 <p style="margin:0;font-size:16px;color:var(--ink-soft);line-height:1.65;">It's priced from real usage rather than a query count, so a short question costs what a short question costs. When you hit the cap, Buddy says so instead of answering, and it resets at the start of the month.</p>
 </section>
 
-<section class="tool-prose">
+<section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it won't do</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">If the sources don't cover your question well, it's instructed to say so rather than answer confidently anyway. That's a real limit and I'd rather it show than hide.</p>
 <p style="margin:0;font-size:16px;color:var(--ink-soft);line-height:1.65;">It also can't cite anything outside the three sources above. That's deliberate. A narrower tool that tells you where it got something beats a broader one that doesn't.</p>
 </section>
+</div>
 </div>
 
 <style>
