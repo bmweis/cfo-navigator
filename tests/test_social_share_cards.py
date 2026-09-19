@@ -447,3 +447,41 @@ def test_detector_wired_into_admin_checks():
     row = [r for r in checks.run_all() if r["name"] == "og:url threading"][0]
     assert row["ok"] is True
     assert row["where"] == "Live + CI"
+
+
+# -- Social share card publish gate: og_card_missing_problems() (2026-09) ----
+#
+# Defense in depth for the publish-time hard block (_oc_publish_gate_error,
+# tests/test_original_content_admin.py) — a card can still go missing AFTER
+# publish (a slug change, a deleted file, or a row that predates the gate),
+# so this is the mechanical check catching that, same shape as
+# original_content_mirror_problems() and wired into run_all() the same way.
+
+def test_og_card_missing_problems_flags_only_live_pieces_without_a_card(env, og_dir):
+    _write_png(og_dir / "has-card.png")
+    _add_oc(env, slug="missing-card", title="Missing", tag_label="Guide", teaser="t", status="live")
+    _add_oc(env, slug="has-card", title="Has Card", tag_label="Guide", teaser="t", status="live")
+    _add_oc(env, slug="draft-no-card", title="Draft Missing", tag_label="Guide", teaser="t", status="draft")
+
+    problems = env.og_card_missing_problems()
+    assert len(problems) == 1
+    assert "missing-card" in problems[0]
+
+
+def test_og_card_missing_problems_clean_when_every_live_piece_has_a_card(env, og_dir):
+    _write_png(og_dir / "covered.png")
+    _add_oc(env, slug="covered", title="Covered", tag_label="Guide", teaser="t", status="live")
+    assert env.og_card_missing_problems() == []
+
+
+def test_og_card_missing_problems_wired_into_admin_checks(env, og_dir):
+    """Mirrors test_detector_wired_into_admin_checks's own og:url pattern —
+    reused here for a check on a different concept, not a new mechanism."""
+    _write_png(og_dir / "missing-check-card.png")
+    _add_oc(env, slug="uncarded-for-check-test", title="Uncarded", tag_label="Guide",
+            teaser="t", status="live")
+    from webapp import checks
+    row = [r for r in checks.run_all() if r["name"] == "Every live piece has a share card"][0]
+    assert row["ok"] is False
+    assert row["where"] == "Live + CI"
+    assert "uncarded-for-check-test" in row["detail"]
