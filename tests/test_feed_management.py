@@ -575,6 +575,27 @@ def test_add_feed_rejects_a_duplicate_url(app_env):
     assert "already in your list" in resp.text
 
 
+def test_rejected_add_feed_error_banner_uses_the_alert_family_not_coral(app_env):
+    """A validation-error banner is a status/error state — BRAND.md reserves
+    that for --alert, never coral. Same fix as _oc_form_page's own error
+    banner (#581), applied here since _feed_form_page shared the identical
+    coral-wash+navy pattern."""
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            section_id = lib.list_feed_sections()[0]["id"]
+            existing = lib.list_feeds()[0]["xml_url"]
+        finally:
+            lib.close()
+        resp = client.post("/admin/reader/feeds/new",
+                           data={"name": "Dupe", "xml_url": existing,
+                                 "html_url": "", "section_id": str(section_id)})
+    assert resp.status_code == 400
+    assert "var(--alert-wash)" in resp.text
+    assert "var(--alert)" in resp.text
+    assert "var(--coral-wash)" not in resp.text
+
+
 def test_edit_feed_does_not_reprobe_when_the_url_is_unchanged(app_env, monkeypatch):
     """A rename or a section move shouldn't fail because the source happens to
     be down today."""
