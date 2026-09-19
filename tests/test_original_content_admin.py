@@ -38,6 +38,10 @@ VALID_FORM = {
     "slug": "a-test-piece",
     "teaser": "A teaser",
     "tag_label": "Guide",
+    # link_label is no longer a real form field (it's derived server-side
+    # from tag_label) — submitted here anyway, deliberately mismatched
+    # ("Read it" vs. Guide's real "Read the guide"), to prove a direct POST
+    # can't desync the two. See test_create_persists_and_reads_back.
     "link_label": "Read it",
     "date_label": "Jan 2027",
     "body_md": "# Hi\n\nBody.",
@@ -89,7 +93,9 @@ def test_create_persists_and_reads_back(env):
     assert row["title"] == "A Test Piece"
     assert row["teaser"] == "A teaser"
     assert row["tag_label"] == "Guide"
-    assert row["link_label"] == "Read it"
+    # Derived from the tag, not the submitted "Read it" — a direct POST
+    # attempting to set link_label is ignored and the derived value wins.
+    assert row["link_label"] == "Read the guide"
     assert row["body_md"] == "# Hi\n\nBody."
     assert row["status"] == "live"
     assert row["featured_home"] == 1
@@ -345,7 +351,7 @@ def test_edit_form_warns_about_slug_change_breaking_links(env):
 
 # -- Required-field validation ------------------------------------------------
 
-@pytest.mark.parametrize("missing_field", ["title", "teaser", "tag_label", "link_label"])
+@pytest.mark.parametrize("missing_field", ["title", "teaser", "tag_label"])
 def test_missing_required_field_rejected(env, missing_field):
     c = _admin_client(env)
     form = dict(VALID_FORM)
@@ -357,6 +363,74 @@ def test_missing_required_field_rejected(env, missing_field):
         assert lib.list_original_content() == []
     finally:
         lib.close()
+
+
+# -- Tag taxonomy (closed enum, derived link_label) ---------------------------
+
+def test_invalid_tag_label_rejected(env):
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["tag_label"] = "Essay"
+    r = c.post("/admin/thought-leadership/original/new", data=form)
+    assert r.status_code == 400
+    lib = env._lib()
+    try:
+        assert lib.list_original_content() == []
+    finally:
+        lib.close()
+
+
+@pytest.mark.parametrize("tag,expected_link_label", [
+    ("Guide", "Read the guide"),
+    ("Playbook", "Read the playbook"),
+    ("Framework", "Read the framework"),
+])
+def test_each_valid_tag_derives_its_link_label(env, tag, expected_link_label):
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["tag_label"] = tag
+    r = c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
+    assert r.status_code == 303
+    lib = env._lib()
+    try:
+        row = lib.get_original_content_by_slug("a-test-piece")
+    finally:
+        lib.close()
+    assert row["tag_label"] == tag
+    assert row["link_label"] == expected_link_label
+
+
+def test_link_label_is_not_a_submittable_form_field(env):
+    html = _admin_client(env).get("/admin/thought-leadership/original/new").text
+    assert 'name="link_label"' not in html
+    assert "Set automatically from the tag." in html
+
+
+def test_tag_dropdown_offers_exactly_three_options_with_no_default_selected(env):
+    """The Add form shouldn't preselect any of the three tags — a default
+    is how records get mislabeled by omission. The disabled placeholder
+    (never a submittable value) is what's initially shown instead."""
+    html = _admin_client(env).get("/admin/thought-leadership/original/new").text
+    assert 'name="tag_label"' in html
+    for tag in ("Guide", "Playbook", "Framework"):
+        assert f'<option value="{tag}">{tag}</option>' in html
+    assert '<option value="" disabled selected>' in html
+    assert "Setup Guide" not in html
+
+
+def test_edit_form_preselects_the_current_tag(env):
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["tag_label"] = "Framework"
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
+    lib = env._lib()
+    try:
+        item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
+    finally:
+        lib.close()
+    html = c.get(f"/admin/thought-leadership/original/{item_id}/edit").text
+    assert '<option value="Framework" selected>Framework</option>' in html
+    assert "Read the framework" in html
 
 
 def test_non_numeric_display_order_rejected(env):
