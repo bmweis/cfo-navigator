@@ -336,24 +336,35 @@ def test_typography_and_brand_checks_pass_on_new_code(env):
     assert not brand_check.outbound_link_problems(src)
 
 
-# -- The real committed images (webapp/static/og/, landed via a separate --
-# -- commit before this branch was rebased onto it) -----------------------
+# -- The real committed images (webapp/static/og/, not a temp-dir fixture) --
+#
+# Deliberately asserts the RELATIONSHIP between what's on disk and what the
+# route serves, not a hardcoded count or filename list — a hardcoded list
+# is exactly what broke here originally: chart-of-accounts.png was
+# committed after this test was written, and the test kept expecting only
+# four names. Adding a fifth (or Nth) card should require zero changes to
+# this test; only default.png's presence is asserted by name, since it's
+# the one card every route always falls back to (see _og_image_url's own
+# fallback logic) and losing it is a real regression no other assertion
+# here would catch.
 
-def test_the_four_real_committed_cards_exist_and_serve(env):
-    """Not a temp-dir fixture — the actual files Brian committed directly
-    to webapp/static/og/ (default.png, growth-engine-ratio.png,
-    ai-hackathon-playbook.png, netsuite-mcp.png). If this ever fails, the
-    directory's real contents changed — that's exactly what this test
-    exists to catch."""
+def test_default_og_card_exists_and_serves(env):
     real_dir = pathlib.Path(env._OG_DIR)
-    expected = {"default", "growth-engine-ratio", "ai-hackathon-playbook", "netsuite-mcp"}
-    on_disk = {p.stem for p in real_dir.glob("*.png")}
-    assert on_disk == expected, on_disk
+    assert (real_dir / "default.png").is_file()
+    r = _client(env).get("/static/og/default.png")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+
+
+def test_every_real_committed_og_card_serves_with_the_right_content_type(env):
+    real_dir = pathlib.Path(env._OG_DIR)
+    pngs = list(real_dir.glob("*.png"))
+    assert pngs, "expected at least one committed card (default.png) — found none"
     c = _client(env)
-    for slug in expected:
-        r = c.get(f"/static/og/{slug}.png")
-        assert r.status_code == 200
-        assert r.headers["content-type"] == "image/png"
+    for png in pngs:
+        r = c.get(f"/static/og/{png.name}")
+        assert r.status_code == 200, png.name
+        assert r.headers["content-type"] == "image/png", png.name
 
 
 def test_growth_engine_ratio_slug_resolves_to_its_real_committed_card(env):
