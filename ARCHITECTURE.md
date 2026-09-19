@@ -5314,6 +5314,13 @@ Details worth knowing:
   Future writes only — the already-stored live value is untouched, since
   this is exactly the kind of thing the new DB scanner surfaces for an
   ordinary human-reviewed edit, not something to auto-correct.
+- **Follow-up (same PR) — a broader audit found seven more write paths with
+  the identical omission**, including `Library.set_setting()` itself (the
+  one choke point every `/admin/copy/*` route writes through). All eight
+  fixed the same way; `scripts/fix_spaced_em_dashes.py` extended to cover
+  the same tables plus a settings pass for pre-existing content. See
+  CLAUDE.md's "Voice enforcement" section (the "Follow-up, same PR" bullet)
+  for the full list and the structural-enforcement feasibility assessment.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything

@@ -10560,9 +10560,83 @@ pattern exactly); the already-stored live value is untouched — it's exactly th
 finding the DB scanner above is for, surfaced there, fixed through the admin UI like any
 other copy edit, never auto-corrected.
 
+**Follow-up, same PR — the `_voice_fix()` omission wasn't unique to `category_features`,
+and the `/admin/checks` summary banner was separately broken the whole time.** A review
+pass on this PR pushed on two things the first round under-covered. (1) `admin_checks()`'s
+green/red summary banner compared `r["where"]` against the literal `"In-app"` — a value
+`run_all()` has never produced (every live row's `where` is `"Live + CI"`); the banner
+had been permanently blank regardless of pass/fail state, on a page this very PR was
+about to make a load-bearing surfacing mechanism for a new class of finding. Fixed to
+compare against `"Live + CI"`; verified live, both directions, via `TestClient` (green
+on a clean DB, red once a real `run_all()` check — `mechanical_findings`, monkeypatched —
+is forced to fail). (2) The `category_features` fix turned out to be one instance of a
+broader pattern, not an isolated miss: auditing every `Library` write method against the
+same (table, column) pairs `voice_db_scan._SCAN_TABLES`/`_SCAN_SETTINGS_KEYS` already
+treat as real copy found seven more write paths skipping `_voice_fix()` —
+`add_tool_category`/`rename_tool_category`, `add_community_category`/
+`rename_community_category`, `add_benchmark`/`update_benchmark`/`update_benchmark_content`,
+`add_thought_leadership`/`update_thought_leadership`, `add_original_content`/
+`update_original_content`, `add_ai_surface`/`update_ai_surface`, and — the single
+broadest gap — `Library.set_setting()` itself, the one choke point every `/admin/copy/*`
+route (homepage headline/subhead/teaser/expanded, about page, how-this-is-built) writes
+through directly with no wrapping of its own. All eight fixed the same way, in the same
+PR. `normalize_voice_mechanics` is confirmed safe applied unconditionally inside
+`set_setting()` — it's a no-op on any value without a spaced em dash, which every
+non-prose settings key (caps, flags, model ids, JSON blobs, tokens) always is; a
+dedicated test (`test_set_setting_is_a_no_op_on_non_prose_values`) round-trips a cap, a
+flag, a model id, and a JSON blob byte-for-byte to confirm it. `insert_mirrored_article`/
+`update_mirrored_article` needed no separate fix — `sync_original_content_article()` reads
+the already-normalized `original_content` row back via `get_original_content()`, so
+fixing the two source methods is the real root-cause fix there too. Deliberately left
+alone: `update_game_rank_settings`'s `label`/`difficulty_label` (short rank labels, not
+prose) and `rename_tag` (short keyword labels) — same reasoning as the entity-name
+typography exemption above, just for mechanical scope instead. `scripts/
+fix_spaced_em_dashes.py` (the existing one-off cleanup for content written before the
+backstop existed) is extended with the same seven tables plus a settings pass, so the
+already-confirmed live violation — `category_features` id 8's `definition` — and any
+sibling violations in these newly-covered columns can be cleaned up the same human-run
+way (preview by default, `--apply` to write, write-then-read-back verified per row) —
+reproduced against a faithful copy of that exact row before shipping and confirmed to
+produce the correct before/after text; running `--apply` against the real database is,
+per this repo's own standing rule, Brian's to do via `railway ssh`, not something this
+session can do itself (no production DB write path is available here — the `/mcp` tools
+this session can reach are read-only by design, see the MCP server bullet elsewhere in
+this doc).
+
+**Structural-enforcement assessment (asked, not built): can the `_voice_fix()` backstop
+be made impossible to skip, rather than opt-in by convention?** Two real options, not
+one obvious answer. (a) **Intercept at the SQL layer** — wrap `Library`'s own
+`conn.execute`/parameter-binding so every string parameter on every INSERT/UPDATE is
+run through `normalize_voice_mechanics` unconditionally, the same reasoning that makes
+the `set_setting()` fix above safe. Genuinely un-skippable — no method-level call to
+forget, ever, for any future write path — but the blast radius is the entire `Library`
+class, not just the ~15 prose-capable methods: every URL, id, date, JSON blob, and token
+column in the schema would flow through the same regex on every write, and the SQL text
+itself would need to be inspected (or every write funneled through a second choke-point
+method) to know which query is a write vs. a read. Low functional risk (the regex only
+ever touches a spaced em dash, which should never legitimately appear in a non-prose
+column), but a large, all-at-once change to verify, and a real precedent for "quiet
+magic happening underneath every write" that a future `Library` method's own author
+might not expect. (b) **A mechanical CI drift-detector**, the same shape as
+`hub_nav_orphans()`/`icon_fill_contract_problems()`/`og_url_threading_problems()`
+elsewhere in this codebase: an AST/regex-based test that finds every `linklib/db.py`
+method issuing an `INSERT INTO`/`UPDATE` against a table+column pair already listed in
+`voice_db_scan._SCAN_TABLES` and asserts `_voice_fix(` appears somewhere in that
+method's body (with an explicit, named allowlist for the few real exceptions — rank
+labels, tag names, the two mirror-sync methods that read already-normalized data).
+Lower risk, smaller diff, and reuses a pattern this codebase already trusts and tests —
+but it's a CI-time guard, not a runtime guarantee: a new write method still *can* ship
+without the backstop, it just fails loudly the moment this test runs rather than
+shipping silently. Given this repo's own established preference (every other "keep two
+things from drifting apart" problem here is solved with option (b)'s shape, never
+option (a)'s), (b) is the one worth building if this is worth closing further — roughly
+half a day including tests, reusing the exact AST-walk technique `hub_nav_orphans()`
+already uses. Not built in this PR; flagged for a decision, not assumed.
+
 See `linklib/voice_review.py`, `linklib/voice_db_scan.py`, `webapp/checks.py`'s
-`VOICE_SCANNED_FILES`, `tests/test_voice_standards.py`, and `tests/test_voice_db_scan.py`
-for the full implementation and regression coverage.
+`VOICE_SCANNED_FILES`, `scripts/fix_spaced_em_dashes.py`, `tests/test_voice_standards.py`,
+`tests/test_voice_db_scan.py`, `tests/test_checks.py`, and `tests/
+test_voice_fix_write_path_audit.py` for the full implementation and regression coverage.
 
 ## Voice — em dash policy
 
