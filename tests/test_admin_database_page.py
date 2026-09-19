@@ -125,11 +125,13 @@ def test_zoom_controls_present(env):
     assert "Fit to screen" in body
 
 
-def test_how_fpa_buddy_works_gets_pan_zoom_but_no_table_search(env):
-    """The shared lightbox helper is also used by the flowchart page — it
-    should get pan/zoom (generic to any Mermaid SVG) but not the table
-    search box, since a flowchart has no erDiagram entity nodes to find."""
+def test_how_fpa_buddy_works_no_longer_shares_the_diagram_lightbox(env):
+    """The FP&A Buddy explainer's Mermaid retrieval-flow diagram was removed
+    in the CFO-audience rewrite (2026-09) — it no longer uses the shared
+    lightbox helper or Mermaid at all. This page's own diagram, checked by
+    every other test in this file, is unaffected."""
     c = _admin_client(env)
     body = c.get("/tools/fpa-buddy/how-it-works").text
-    assert "svg-pan-zoom" in body
+    assert "svg-pan-zoom" not in body
+    assert "mermaid" not in body.lower()
     assert '<input type="text" class="diagram-lightbox-search"' not in body

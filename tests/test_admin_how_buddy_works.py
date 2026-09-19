@@ -4,6 +4,15 @@ made public and moved to /tools/fpa-buddy/how-it-works in the explainer-page
 follow-up round (public showcase content, reachable by anyone with the link,
 not required to be admin-gated). Docs/UI-only — no retrieval or citation
 logic changes.
+
+Rewritten (2026-09) for the site's actual standing audience — CFOs and
+finance leaders — cutting the page roughly in half and dropping the Mermaid
+retrieval-flow diagram, the "Which engine handled this answer?" callout
+(Exa-vs-native-fallback now belongs to /how-this-is-built/web-search), and
+the "Behind the archive" tool inventory. See the route's own docstring for
+the full account. Tests below were updated to match; the diagram/callout
+tests from the earlier round are replaced with tests confirming they're
+gone.
 """
 import pathlib
 import sys
@@ -70,11 +79,13 @@ def test_loads_with_expected_sections(env):
     resp = c.get("/tools/fpa-buddy/how-it-works")
     assert resp.status_code == 200
     body = resp.text
-    assert "Where an answer&#x27;s sources come from" in body or "Where an answer's sources come from" in body
-    assert "Quick, Standard, Deep" in body
-    assert "Every claim traces to a citation" in body
+    assert "Where the answers come from" in body
+    assert "Why the citations hold up" in body
+    assert "How much effort to spend" in body
     assert "What it costs" in body
-    assert "Web search powered by Exa" in body
+    assert "What it won&#x27;t do" in body or "What it won't do" in body
+    # The old Title Case heading is gone — sentence case now, per BRAND.md §3.2.
+    assert "Quick, Standard, Deep" not in body
 
 
 def test_public_audience_content_fixes(env):
@@ -127,55 +138,62 @@ def test_admin_hub_card_links_to_the_public_page(env):
     assert "How FP&amp;A Buddy works" in resp.text
 
 
-# --- Phase 5: simplified concept-level Mermaid flowchart ---------------------
+# --- CFO-audience rewrite (2026-09): diagram and engine-detail callout gone -
 
-def test_page_ships_a_simplified_flowchart_not_the_sequence_diagram(env):
-    """A concept-level flowchart (not the developer-grade sequence diagram
-    already in ARCHITECTURE.md) — no token counts, API names, or cost-guard
-    branches belong here; those stay in the prose/ARCHITECTURE.md."""
+def test_no_mermaid_flowchart_on_the_rewritten_page(env):
+    """The Phase 5 concept-level Mermaid flowchart (question -> library/
+    feed/web -> synthesis -> cited answer) was cut in the CFO-audience
+    rewrite — a pipeline diagram is exactly the kind of mechanism-forward
+    element the rewrite exists to remove. No Mermaid script, no flowchart
+    source, no diagram frame should be reachable on this page."""
     c = _client(env)
     body = c.get("/tools/fpa-buddy/how-it-works").text
-    assert "flowchart LR" in body
-    assert "sequenceDiagram" not in body
-    for label in ("Your question", "Library", "Feed", "Web", "synthesizes an answer", "numbered citations"):
-        assert label in body
-    # No implementation detail that belongs to the prose/ARCHITECTURE.md instead.
-    for leaky_term in ("claude-haiku", "claude-sonnet", "claude-opus", "input_tokens", "cache_read"):
-        assert leaky_term not in body.lower()
+    assert "flowchart LR" not in body
+    assert "mermaid" not in body.lower()
+    assert "fpa-flow-diagram-frame" not in body
+    assert "-.-> L" not in body
 
 
-def test_flowchart_mermaid_js_loads_on_this_page(env):
-    """Mermaid renders client-side via the same CDN script already used on
-    /admin/system/database — not a new dependency, just reused."""
+def test_which_engine_callout_moved_to_the_web_search_explainer(env):
+    """Exa-vs-native-fallback detail is no longer duplicated here — it
+    belongs to /how-this-is-built/web-search, which covers all four Exa
+    call sites, not just this one. This page links there instead of
+    re-explaining it."""
     c = _client(env)
     body = c.get("/tools/fpa-buddy/how-it-works").text
-    assert "cdnjs.cloudflare.com/ajax/libs/mermaid" in body
-    assert "mermaid.initialize(" in body
-    assert 'class="mermaid"' in body
+    assert "Which engine handled this answer?" not in body
+    assert "Exa is the default." not in body
+    assert '<a href="/how-this-is-built/web-search"' in body
 
 
-# --- Follow-up round: diagram tightened, T reconnected to the main flow -----
-
-def test_tier_annotation_connects_into_the_main_flow_not_just_claude(env):
-    """The Quick/Standard/Deep annotation node used to dangle off Claude
-    alone (T -.-> C), which Mermaid's layout rendered as a disconnected box
-    below the main flow. It now fans into Library/Feed/Web — the same three
-    tiers its label describes — so it lays out as a peer of the question
-    node instead of an orphan."""
+def test_behind_the_archive_tool_inventory_is_gone(env):
+    """The OpenAI-embedding/Wayback-Machine/structured-extraction/
+    self-checking inventory was real mechanism detail, not what a CFO
+    reader is on this page to learn — cut in the rewrite."""
     c = _client(env)
     body = c.get("/tools/fpa-buddy/how-it-works").text
-    assert "-.-> L" in body
-    assert "-.-> F" in body
-    assert "-.-> W" in body
-    assert "-.-> C" not in body
+    assert "Behind the archive" not in body
+    assert "text-embedding-3-small" not in body
+    assert "Wayback Machine" not in body
 
 
-def test_engine_and_citations_callouts_use_bullet_lists(env):
-    """Reformatted to match "Where an answer's sources come from" directly
-    above them — bold-lead-in bullets, not a dense paragraph."""
+def test_citations_section_still_names_the_mechanism(env):
+    """The rewrite folds the old two-callout citations explanation into one
+    "Why the citations hold up" section — still real, still verifiable,
+    just shorter."""
     c = _client(env)
     body = c.get("/tools/fpa-buddy/how-it-works").text
-    assert "Which engine handled this answer?" in body
-    assert "Why the citations can be trusted" in body
-    assert "<strong>Exa is the default.</strong>" in body
-    assert "<strong>Documents, not pasted text.</strong>" in body
+    assert "Why the citations hold up" in body
+    assert "Anthropic" in body
+    assert "citations turned on" in body
+
+
+def test_what_it_wont_do_section_states_real_limits(env):
+    """New in the rewrite: an explicit boundary section, replacing the
+    implied guarantee of the old copy — the model is instructed to say so
+    when sources don't cover a question, and can't cite outside the three
+    listed sources."""
+    c = _client(env)
+    body = c.get("/tools/fpa-buddy/how-it-works").text
+    assert "What it won" in body  # tolerate either quoting/escaping of the apostrophe
+    assert "sources don" in body

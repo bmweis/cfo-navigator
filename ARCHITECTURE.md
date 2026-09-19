@@ -818,6 +818,47 @@ three-tier collapse, then `.page-content` itself as of PR 14's two-tier
 collapse, 2026-09 — this page now renders on `.page-standard`, alongside
 the three articles it was matched against.)
 
+**CFO-audience rewrite (2026-09) — the page's copy, audience, and structure
+were rewritten wholesale, not polished.** A read-and-report investigation
+(before any copy was touched) confirmed the page's own opening sentence
+named its audience as "a PM, an engineer, or a technically comfortable
+CFO" — contradicting the site's standing audience decision (CFOs and
+finance leaders, full stop), which the page had been written against the
+wrong reader for since it shipped. Brian rewrote the copy himself; this
+entry records what the rewrite actually cut and kept, since most of the
+page's earlier build history above (the Mermaid flowchart's several
+tuning passes, the callout-formatting round) now describes content this
+page no longer carries. Cut entirely: the Mermaid retrieval-flow diagram
+and its CDN script/`_FPA_FLOW_DIAGRAM` constant (a pipeline flowchart is
+exactly the kind of mechanism-forward element a CFO-audience rewrite
+exists to remove — nothing else on the site shares that CDN include, so
+it left with no dependent); the "Which engine handled this answer?"
+callout (Exa-vs-native-fallback now belongs to
+`/how-this-is-built/web-search`, which covers all four Exa call sites, not
+just this one, and this page links there instead of re-explaining it);
+and the "Behind the archive" tool inventory (OpenAI's embedding model by
+name, the Wayback Machine recovery chain, structured extraction,
+self-checking at every layer — all real, none of it what a CFO reader is
+on the page to learn). Kept exactly as before: `.page-standard` +
+`article-atlantic`, the five-section `display:grid` container (content
+reshuffled to fill it differently, but the count is unchanged),
+per-tier source counts read live from `linklib.agent.EFFORT_SETTINGS`
+(only the three prose blurbs changed, from describing models to
+describing jobs — "a fast read on something you mostly already know"
+instead of "fastest and least expensive model"), and the live default cap
+read from `Library.get_default_ask_cap()` — **now printed inline again**
+in "What it costs" ("currently $X by default") rather than dropped from
+the copy silently, specifically so the DB call isn't a live read with
+nothing displaying its result. New: a closing "What it won't do" section,
+stating the citation-source limit and the model's instructed behavior
+when sources don't cover a question as an honest boundary rather than an
+implied guarantee. The old Title Case `### Quick, Standard, Deep` heading
+became sentence-case `### How much effort to spend`, per BRAND.md §3.2.
+Word count roughly halved (~1,400 to ~500). `tests/test_admin_how_buddy_works.py`
+was rewritten to match — the diagram/callout-formatting tests from the
+earlier rounds are replaced with tests confirming those elements are
+gone, not merely restyled.
+
 **The Exa kill switch** (Phase 7; originally its own `/admin/exa-settings`
 page, merged into `/admin/system/ai`'s Configuration section — PR 10): an
 `exa_enabled` toggle (`settings` table, `Library.get_exa_enabled`/
@@ -2249,9 +2290,12 @@ explainer for one of the other three is now an admin action at
 
 No diagram — considered and deliberately skipped: the four surfaces are
 independent mechanisms rendered as a list, not one branching/parallel flow
-a picture would show better than prose. The one diagram that does earn its
-place for this material (the FP&A Buddy retrieval-tier flowchart) already
-lives on `/tools/fpa-buddy/how-it-works`, linked from here. Zero coral
+a picture would show better than prose. (This page's own diagram-free
+stance predates and is independent of the 2026-09 CFO-audience rewrite of
+`/tools/fpa-buddy/how-it-works`, which cut that page's own retrieval-flow
+Mermaid diagram — an earlier version of this passage pointed here as "the
+one diagram that does earn its place for this material," a claim this
+rewrite makes false; corrected rather than left stale.) Zero coral
 moments on this page (the site's per-page coral budget is already spent by
 `/`'s and `/tools`' own `_mcp_callout_html`) — `coral_moment_problems()`
 still passes with none used, since it flags more than one, not fewer.

@@ -25189,59 +25189,55 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
     return HTMLResponse(_page("Page index—Admin", "Admin", body, authed=True))
 
 
-# Static Mermaid source for the page below — pulled out to a module constant
-# (rather than left inline in the f-string) so `_diagram_lightbox_html` can
-# take it as a plain argument the same way `admin_system_database` passes its
-# live-generated `diagram` string.
-_FPA_FLOW_DIAGRAM = """flowchart LR
-    T[Quick / Standard / Deep<br/>sets how much of each tier runs] -.-> L
-    T -.-> F
-    T -.-> W
-    Q[Your question] --> L[Library<br/>curated archive]
-    Q --> F[Feed<br/>recent RSS]
-    Q --> W[Web<br/>Exa search, trusted sites only]
-    L --> C[Claude<br/>synthesizes an answer]
-    F --> C
-    W --> C
-    C --> A[Answer<br/>numbered citations]
-
-    classDef annotation fill:#F5F4EF,stroke:#6F6A60,stroke-dasharray: 3 3,color:#6F6A60;
-    class T annotation;"""
-
-
 @app.get("/tools/fpa-buddy/how-it-works", response_class=HTMLResponse)
 def fpa_buddy_how_it_works(request: Request):
-    """A plain-language technical explainer for FP&A Buddy's mechanism (Exa
-    Phase 4; made public and moved off /admin/* in the explainer-page
-    follow-up round) — the same reference-doc role _COMMUNITIES_REFERENCE_HTML
-    plays for the Communities feature, but as its own page rather than a
-    collapsible block on a working admin page, since this page's whole
-    purpose IS the explanation (no other primary content to collapse under).
-    Written for a technically comfortable reader (PM, engineer, or CFO) who
-    wants the real mechanism, not marketing copy — public, reachable by
-    anyone with the link (not linked from primary public nav, same
-    discoverability tier as the thought-leadership sub-pages), no login
-    required. The admin dashboard's FP&A Buddy card links here now instead
-    of hosting a separate admin-only copy.
+    """A plain-language explainer for FP&A Buddy's mechanism, rewritten
+    (2026-09) for the site's actual standing audience — CFOs and finance
+    leaders, not "a PM, an engineer, or a technically comfortable CFO" as
+    the original copy framed it. The rewrite cuts the page roughly in half
+    (~1,400 words to ~500): the Mermaid retrieval-flow diagram, the
+    "Which engine handled this answer?" callout (Exa-vs-native-fallback
+    now belongs to /how-this-is-built/web-search, which covers all four
+    Exa call sites, not just this one), and the "Behind the archive" tool
+    inventory (OpenAI's embedding model by name, the Wayback Machine
+    recovery chain, structured extraction, self-checking at every layer)
+    are all gone — real mechanism, none of it what a CFO reader is on this
+    page to learn. A new closing section, "What it won't do," states the
+    citation-source limit and the model's instructed behavior when sources
+    don't cover a question, as an honest boundary rather than an implied
+    guarantee.
 
-    Public-audience content audit (flagged before this page went public):
-    the "← Admin" breadcrumb is gone (a public visitor has no admin access
-    to return to) in favor of "← FP&A Buddy", matching the back-link
-    convention every other public sub-page already uses; the inline
-    /admin/exa-settings and /admin/users references are de-linked to plain
-    prose ("the site admin") since a public reader would only ever hit a
-    login wall on either; and the ARCHITECTURE.md link is removed outright
-    — the repo is private, so that link 404s for exactly the outside
-    audience this page is now written for.
+    Still the same reference-doc role _COMMUNITIES_REFERENCE_HTML plays for
+    the Communities feature, but as its own page rather than a collapsible
+    block on a working admin page — public, reachable by anyone with the
+    link (not linked from primary public nav, same discoverability tier as
+    the thought-leadership sub-pages), no login required. The admin
+    dashboard's FP&A Buddy card links here instead of hosting a separate
+    admin-only copy.
 
     Per-tier source counts (max_library/max_feed/max_web) and the default
     monthly cap are read live from linklib.agent.EFFORT_SETTINGS and
     Library.get_default_ask_cap() rather than hardcoded, so this page can't
     silently drift out of sync with EFFORT_SETTINGS or an admin-adjusted
-    default cap the way a hand-typed number would. Model names are
-    deliberately described qualitatively (fastest/balanced/most capable),
-    not pinned to a canonical model ID — those rotate independently of this
-    page and a literal model name would go stale the moment one retires.
+    default cap the way a hand-typed number would — both mechanisms
+    preserved unchanged from the pre-rewrite version, including the dollar
+    figure printed inline in "What it costs" (a live DB read with nothing
+    displaying its result would be dead code — see the PR notes for the
+    rewrite's own account of this call).
+
+    Real, pre-existing mobile bug found and fixed during this rewrite's own
+    390px screenshot check, unrelated to the copy change itself: the
+    sections wrapper (a bare `display:grid;gap:20px`, no explicit column
+    sizing) shares one implicit grid track with the "How much effort to
+    spend" table (`.cc-table{min-width:680px}`), and a grid item's default
+    `min-width:auto` means that track — and therefore every section sharing
+    it — could never shrink below the table's own 680px minimum, forcing
+    the whole page to scroll horizontally on any viewport narrower than
+    that. `grid-template-columns:minmax(0,1fr)` sets the track's own
+    minimum to 0, the same fix this codebase has already applied to this
+    exact CSS Grid failure class elsewhere (see CLAUDE.md's Overhead Spend
+    fixes, round 4). The table itself still scrolls within its own
+    `overflow-x:auto` wrapper on a narrow viewport, unaffected.
     """
     from linklib.agent import EFFORT_SETTINGS
     lib = _lib()
@@ -25251,9 +25247,9 @@ def fpa_buddy_how_it_works(request: Request):
         lib.close()
 
     _TIER_BLURBS = {
-        "quick": "Fastest and least expensive model. Good for a quick lookup or a question you already mostly know the answer to.",
-        "standard": "A stronger general-purpose model with a wider source budget. The default for most questions.",
-        "deep": "The most capable model available, with the deepest source budget and the most thorough answers. Costs the most and takes the longest.",
+        "quick": "A fast read on something you mostly already know.",
+        "standard": "The default. Enough sources behind an answer to be worth citing.",
+        "deep": "For a question you're going to act on. Most sources, longest run.",
     }
     tier_rows = "".join(
         f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);font-weight:600;text-transform:capitalize;">{_esc(tier)}</td>'
@@ -25268,77 +25264,34 @@ def fpa_buddy_how_it_works(request: Request):
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>How FP&amp;A Buddy works</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">The real mechanism behind <a href="/tools/fpa-buddy" style="color:var(--accent);">FP&amp;A Buddy</a>, for anyone who wants more than the marketing description&mdash;a PM, an engineer, or a technically comfortable CFO. Retrieval-tier counts and the default cost cap below are read live from the code, so this page can't quietly drift out of date the way a hand-typed number would.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">Ask it a finance question and it answers from sources I picked, with citations you can check.</p>
+<p style="color:var(--ink-soft);margin:-16px 0 24px;font-size:15px;line-height:1.6;">That second part is the point. Most AI tools ask you to trust the answer. This one makes every claim traceable to a real passage in a real source, by a mechanism the model can't talk its way around.</p>
 </div>
 
-<div style="max-width:680px;margin:0 auto;">
-{_diagram_lightbox_html("fpa-flow-diagram-frame", _FPA_FLOW_DIAGRAM, "the retrieval flow diagram")}
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
-<script>
-mermaid.initialize({{
-  startOnLoad: true,
-  theme: 'base',
-  themeVariables: {{
-    primaryColor: '#EAF7F2',
-    primaryBorderColor: '#1F7A66',
-    primaryTextColor: '#002975',
-    lineColor: '#6F6A60',
-    tertiaryColor: '#F5F4EF'
-  }},
-  flowchart: {{
-    nodeSpacing: 24,
-    rankSpacing: 42,
-    padding: 8
-  }}
-}});
-</script>
-
-<div style="display:grid;gap:20px;">
+<div style="display:grid;grid-template-columns:minmax(0,1fr);gap:20px;">
 <section class="tool-prose">
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where an answer's sources come from</h3>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where the answers come from</h3>
+<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">Three places, and you can see all of them.</p>
 <ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
-<li><strong>Library</strong> (highest authority, always searched first): the curated archive of saved articles, retrieved by a hybrid of keyword search (FTS5) and semantic search (vector embeddings), merged by a rank-fusion algorithm so an article can surface even when the question's wording doesn't match the source's own.</li>
-<li><strong>Feed:</strong> recent items from the subscribed RSS/Atom feeds, matched to the question by keyword overlap. Optional&mdash;off by default.</li>
-<li><strong>Web:</strong> live web search, scoped only to the domains on <a href="/current-feed" style="color:var(--accent);">the trusted-sites list</a> (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list, whichever mechanism handles it. Exa's search API, called directly from the server, is the preferred mechanism, on by default.</li>
+<li><strong>The archive.</strong> Every article in it was saved by hand, by me, because I read it and thought it was worth keeping. That's the difference between this and a tool pointed at the whole internet: the judgment about what's worth reading happened before anyone asked a question. Keyword search and meaning-based search run against it together, so a relevant piece surfaces even when your wording doesn't match its own.</li>
+<li><strong>My feeds.</strong> Recent items from the blogs and newsletters I subscribe to. Off by default.</li>
+<li><strong>The web,</strong> restricted to a list of finance sources I trust rather than the open internet. It's the same list that fills my own reader, and you can see it: <a href="/current-feed" style="color:var(--accent);">the current feed</a>. More on how that search works: <a href="/how-this-is-built/web-search" style="color:var(--accent);">web search</a>.</li>
 </ul>
-<div class="article-callout" style="margin:16px 0;">
-<div class="article-callout-title">Which engine handled this answer?</div>
-<ul style="margin:0;padding-left:20px;">
-<li><strong>Exa is the default.</strong> Turning it off, or leaving <code>EXA_API_KEY</code> unset, switches to Claude's own web-search tool instead&mdash;web search itself is never unavailable, only which engine runs it changes. This is a setting the site admin controls.</li>
-<li><strong>Exactly one engine runs per question,</strong> never both.</li>
-<li><strong>Exa-sourced results are labeled.</strong> A result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</li>
-</ul>
-</div>
-<p style="margin:8px 0 0;font-size:16px;color:var(--ink-soft);line-height:1.65;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
-<div class="article-callout" style="margin:16px 0;">
-<div class="article-callout-title">Why the citations can be trusted</div>
-<ul style="margin:0;padding-left:20px;">
-<li><strong>Documents, not pasted text.</strong> Every retrieved source&mdash;library, feed, or web&mdash;is handed to Claude as a document block with Anthropic's Citations API turned on, not as plain text pasted into the prompt.</li>
-<li><strong>Mechanically verified, not self-reported.</strong> That API ties each cited span of the answer to an actual passage in one of those documents&mdash;the model can't produce a citation for something that isn't really in the source text, because the link between claim and passage is checked by the API itself.</li>
-<li><strong>A stronger guarantee.</strong> That's different from an AI saying it read something and believes it's accurate. Every <code>[n]</code> in an answer traces back to a real, verifiable passage, not a plausible-sounding paraphrase.</li>
-</ul>
-</div>
+<p style="margin:10px 0 0;font-size:16px;color:var(--ink-soft);line-height:1.65;">My own writing is in there too, mirrored into the archive and labeled as mine when it gets cited. If the source is me, you should know that.</p>
 </section>
 
 <section class="tool-prose">
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Behind the archive</h3>
-<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The Library isn't a scrape or an auto-import: every article starts with Brian actively reading and saving it, because human judgment about what's actually worth keeping is what makes FP&amp;A Buddy's answers useful rather than merely plausible. What runs on top of that curation is a genuinely automated content pipeline, built from a deliberate mix of tools chosen for what they're each best at:</p>
-<ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
-<li><strong>Claude (Anthropic)</strong> does the reasoning work throughout the pipeline: drafting per-article summaries and tags at save time, judging whether two saved articles are true near-duplicates before merging them, and synthesizing every FP&amp;A Buddy answer itself from the retrieved sources.</li>
-<li><strong>OpenAI's <code>text-embedding-3-small</code></strong> embeds every article&mdash;and every question asked of it&mdash;into the same vector space, so semantic search can surface a relevant article even when its wording doesn't match the question's. That's merged with traditional keyword search (FTS5) by reciprocal rank fusion, rather than picking one search strategy over the other.</li>
-<li><strong>Exa's search API</strong> is the default web-search tier for FP&amp;A Buddy's live citations, restricted to a curated allowlist of trusted finance sites. It's also repurposed inside the archive pipeline itself: when a saved article's original URL goes dead or gets blocked, Exa searches the same publisher for the piece by title, and the retrieved text is checked against the original before it's accepted as a replacement.</li>
-<li><strong>The Internet Archive's Wayback Machine</strong> is the last resort in that same recovery chain: when a source can't be reached directly and no better match turns up, the pipeline pulls a real historical snapshot from archive.org rather than losing the source outright.</li>
-<li><strong>Structured extraction, not flattened text.</strong> Articles are parsed into real HTML&mdash;headings, paragraphs, images, links intact&mdash;so both the human-facing Reader and the retrieval pipeline work from well-formed content, not a wall of run-together text.</li>
-<li><strong>Self-checking at every layer.</strong> Every fetch is graded against a content-quality check that catches a paywall wall or bot-challenge page masquerading as a successful fetch, every database backup runs an integrity check before it's kept, and every background job leaves a durable record of whether it actually finished. That makes archive health something to verify, not assume.</li>
-</ul>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Why the citations hold up</h3>
+<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">Every source is handed to Claude as a document with Anthropic's citations turned on, not as text pasted into a prompt.</p>
+<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The difference is the whole thing. When a model is asked to cite its sources, what you get back is something shaped like a citation. Here each numbered marker is tied to an actual passage in an actual document, and the link is checked by the system rather than reported by the model.</p>
+<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">A made-up citation isn't unlikely here. It isn't available.</p>
+<p style="margin:0;font-size:16px;color:var(--ink-soft);line-height:1.65;">Every source is also tagged by where it came from, so you can see whether an answer leaned on the archive, the feeds, or the web.</p>
 </section>
 
 <section>
 <div class="tool-prose">
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Quick, Standard, Deep</h3>
-<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The only choice a user makes is how much effort to spend&mdash;there's no separate model picker. Each tier maps to a model, how many sources get pulled from each tier, and how long the answer can run:</p>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">How much effort to spend</h3>
+<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The only choice you make is how hard to work the question. Each level pulls more sources and uses a more capable model.</p>
 </div>
 <div style="overflow-x:auto;">
 <table class="cc-table">
@@ -25357,21 +25310,15 @@ mermaid.initialize({{
 </section>
 
 <section class="tool-prose">
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Every claim traces to a citation</h3>
-<ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
-<li><strong>Verified, not self-reported.</strong> Sources are handed to the model as documents with citations turned on, and the numbered <code>[n]</code> markers in an answer come from the model's own verified citation data, not from the model being asked to remember to cite things.</li>
-<li><strong>Source-typed.</strong> Each citation is tagged library, feed, or web, and shown with a small icon so it's obvious which tier an answer drew from.</li>
-<li><strong>Names the gap instead of guessing.</strong> If the available sources don't cover a question well, the model is instructed to say so plainly rather than answer with unsupported confidence.</li>
-</ul>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it costs</h3>
+<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">There's a monthly dollar cap per person (currently ${default_cap:.2f} by default), and you can see your own spend against it from the tool itself.</p>
+<p style="margin:0;font-size:16px;color:var(--ink-soft);line-height:1.65;">It's priced from real usage rather than a query count, so a short question costs what a short question costs. When you hit the cap, Buddy says so instead of answering, and it resets at the start of the month.</p>
 </section>
 
 <section class="tool-prose">
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it costs</h3>
-<ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
-<li><strong>Priced from real usage, not a query count.</strong> Every answer, follow-up rewrite, and retrieval step is costed from its actual token usage against the model providers' published rates, so the number reflects what a question actually spent, not an estimate.</li>
-<li><strong>A monthly dollar cap per user,</strong> currently ${default_cap:.2f} by default and adjustable per user by the site admin. Once a user hits their cap for the month, Buddy tells them so instead of answering, and the cap resets at the start of the next month.</li>
-<li><strong>Visible to the user,</strong> not just to Admin&mdash;a member can see their own spend-to-date against their cap from the Ask page itself.</li>
-</ul>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it won't do</h3>
+<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">If the sources don't cover your question well, it's instructed to say so rather than answer confidently anyway. That's a real limit and I'd rather it show than hide.</p>
+<p style="margin:0;font-size:16px;color:var(--ink-soft);line-height:1.65;">It also can't cite anything outside the three sources above. That's deliberate. A narrower tool that tells you where it got something beats a broader one that doesn't.</p>
 </section>
 </div>
 

@@ -13,36 +13,54 @@ covers and what it doesn't, so a new page doesn't duplicate it.
 
 ## 1. FP&A Buddy
 
-**Already has a public page.** `webapp/app.py`'s `fpa_buddy_how_it_works()`
-route, at `/tools/fpa-buddy/how-it-works`. It already covers, in plain
-language, for a technically comfortable reader:
+**Already has a public page — rewritten for a CFO audience, 2026-09.**
+`webapp/app.py`'s `fpa_buddy_how_it_works()` route, at
+`/tools/fpa-buddy/how-it-works`. The page was originally written for "a PM,
+an engineer, or a technically comfortable CFO" and covered real mechanism
+detail this brief's earlier version listed in full. Brian rewrote it
+against the site's actual standing audience (CFOs and finance leaders) and
+cut it roughly in half; see ARCHITECTURE.md's "CFO-audience rewrite
+(2026-09)" bullet for the full before/after. It now covers, briefly:
 
-- The three retrieval tiers (Library/Feed/Web) and their relative authority.
-- Exa vs. Claude's native `web_search_20250305` as the web tier's two
-  interchangeable engines, and that exactly one runs per question.
-- Why citations can be trusted: real Citations-API document blocks, not
-  pasted text — a citation is mechanically verified against source text, not
-  self-reported.
-- The archive pipeline behind Library retrieval: Claude for summaries/tags/
-  dedupe judging, OpenAI `text-embedding-3-small` for semantic search merged
-  with FTS5 via reciprocal rank fusion, Exa's search API repurposed for
-  dead-link recovery, the Wayback Machine as a last resort, structured HTML
-  extraction, and per-fetch quality checks.
+- The three sources (archive/feeds/web) and that human curation, not a
+  scrape, is what makes the archive worth retrieving from.
+- That the web tier is restricted to a trusted-sites list, linked to
+  `/current-feed`, with a pointer to `/how-this-is-built/web-search` for
+  the Exa-vs-native-fallback engine detail (moved off this page — see
+  below).
+- Own-writing citations are labeled as Brian's own when cited.
+- Why citations can be trusted, in brief — real Citations-API document
+  blocks, mechanically verified, not self-reported.
 - The Quick/Standard/Deep effort tiers, read live from
-  `linklib.agent.EFFORT_SETTINGS` — model choice is described qualitatively
-  (fastest/balanced/most capable), never a literal model ID, because that
-  page can't be allowed to go stale the moment a model retires.
-- The cost model: priced from real token usage, a monthly dollar cap per
-  user (read live from `Library.get_default_ask_cap()`), visible to the user
-  themselves, not just an admin.
+  `linklib.agent.EFFORT_SETTINGS`, with each tier's blurb now describing
+  the job ("a fast read on something you mostly already know") rather than
+  the model.
+- The cost model: a monthly dollar cap per person (read live from
+  `Library.get_default_ask_cap()`, printed inline), priced from real usage
+  not a query count.
+- A new "What it won't do" section: the model says so when sources don't
+  cover a question, and can't cite outside the three listed sources.
 
-**What it doesn't cover, if a new page is drafted around it:**
+**Cut in the rewrite — now genuinely NOT covered here, so a new page CAN
+cover this without duplicating it:**
+- The archive's content pipeline in any implementation detail — Claude for
+  summaries/tags/dedupe judging, OpenAI `text-embedding-3-small` for
+  semantic search merged with FTS5 via reciprocal rank fusion, Exa's search
+  API repurposed for dead-link recovery, the Wayback Machine as a last
+  resort, structured HTML extraction, per-fetch quality checks. All real,
+  none of it retained after the rewrite — fair game for a future page.
+- Exa vs. Claude's native `web_search_20250305` as the web tier's two
+  interchangeable engines. This detail specifically now belongs to
+  `/how-this-is-built/web-search` (see "2. Exa across four call sites"
+  below), which this page links to rather than re-explains — **do not
+  duplicate it back into a redrafted FP&A Buddy page.**
 - Published-content ingestion (Brian's own writing joining retrieval) —
   `linklib.original_content_sync`, `articles.is_own_content`. Deliberately
   **not read by ranking at all** — `retrieve()`/`_rrf_merge()`/
   `Library.search()`/`Library.vector_search()` never touch the flag, so a
   mirrored article surfaces and ranks purely on merit; the flag only drives
-  a "(own writing)" citation label. See CLAUDE.md's "FP&A Buddy
+  a "(own writing)" citation label (now mentioned briefly on the rewritten
+  page, but not explained mechanically). See CLAUDE.md's "FP&A Buddy
   Published-Content Ingestion" bullet.
 - The hybrid-retrieval design rationale itself (why RRF over picking one
   search strategy) — see "Rejected decisions" below.
