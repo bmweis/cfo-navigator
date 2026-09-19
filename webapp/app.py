@@ -4952,7 +4952,11 @@ def _ai_surface_form_fields(values: dict) -> str:
 
 def _ai_surface_form_page(heading: str, action: str, values: dict, error: str, submit_label: str,
                            show_preview: bool = False) -> str:
-    error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+    # A validation-error banner is a status/error state — BRAND.md §2.2/§2.3
+    # reserve that for the --alert family (never coral, which is decorative
+    # and never signals status). See _oc_form_page's identical comment for
+    # the full reasoning; this is the same fix, applied here too.
+    error_html = (f'<p style="background:var(--alert-wash);color:var(--alert);border-radius:10px;'
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
     if show_preview:
@@ -16318,9 +16322,9 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
     # comment currently describes it as ".article-warn only," but that's a
     # description of today's sole caller, not an exclusivity rule; this is
     # the same alert/error meaning, just on an admin form rather than a
-    # public article. Scoped to this one form — _ai_surface_form_page and
-    # _feed_form_page share this identical (pre-existing, unrelated to this
-    # PR) coral-wash+navy error banner and were flagged, not fixed here.
+    # public article. _ai_surface_form_page and _feed_form_page shared this
+    # identical coral-wash+navy error banner — fixed the same way in a
+    # follow-up PR, so all three admin error banners now agree.
     error_html = (f'<p style="background:var(--alert-wash);color:var(--alert);border-radius:10px;'
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
@@ -27729,7 +27733,11 @@ def admin_feeds_new(request: Request):
 
 def _feed_form_page(heading: str, action: str, sections: list, values: dict,
                     error: str, submit_label: str, auth_status: dict | None = None) -> str:
-    error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+    # A validation-error banner is a status/error state — BRAND.md §2.2/§2.3
+    # reserve that for the --alert family (never coral, which is decorative
+    # and never signals status). See _oc_form_page's identical comment for
+    # the full reasoning; this is the same fix, applied here too.
+    error_html = (f'<p style="background:var(--alert-wash);color:var(--alert);border-radius:10px;'
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
     return f"""<div class="page page-form">

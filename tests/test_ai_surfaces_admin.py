@@ -229,6 +229,27 @@ def test_add_rejects_duplicate_slug(env):
     assert "already used by another explainer" in r.text
 
 
+def test_error_banner_uses_the_alert_family_not_coral(env):
+    """A validation-error banner is a status/error state — BRAND.md reserves
+    that for --alert, never coral. Same fix as _oc_form_page's own error
+    banner (#581), applied here since _ai_surface_form_page shared the
+    identical coral-wash+navy pattern."""
+    lib = env._lib()
+    try:
+        lib.add_ai_surface("taken", "Taken", "Teaser.", None, "", "draft", 0)
+    finally:
+        lib.close()
+    c = _client(env)
+    r = c.post("/admin/ai-surfaces/new", data={
+        "title": "Another", "slug": "taken", "teaser": "Teaser.",
+        "external_href": "", "body_md": "", "status": "draft", "display_order": "",
+    })
+    assert r.status_code == 400
+    assert "var(--alert-wash)" in r.text
+    assert "var(--alert)" in r.text
+    assert "var(--coral-wash)" not in r.text
+
+
 def test_reorder_via_display_order(env):
     c = _client(env)
     for i, slug in enumerate(("a", "b")):
