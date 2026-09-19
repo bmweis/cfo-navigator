@@ -3172,6 +3172,70 @@ guard) until a later edit fills in a body. The admin index's "Thought Leadership
 second item pointing here — `count_label` is `len(items)`, so the badge updated with no
 additional wiring.
 
+**Original Content — tag taxonomy, semantic colors, derived link label (2026-09).**
+`tag_label` moves from free text to a closed three-value enum (Guide/Playbook/
+Framework), and the flagship-card eyebrow color moves from a positional cycle to a
+per-tag binding — closing a real drift bug: `_OC_TAG_COLORS` cycled coral-deep/
+seafoam-deep/navy-light by the card's index in the row, so two cards sharing the
+same tag could render in different colors purely by slot, and nothing kept
+`tag_label`/`teaser`/`link_label` describing the same idea (`chart-of-accounts`
+shipped tagged "Setup Guide" with a "Read the playbook" link and a teaser opening
+"A playbook for…"). `_OC_TAG_INFO` (`webapp/app.py`) is the single dict every
+reader resolves through — `{tag: {color, link_label, definition}}` — so the form
+dropdown, the card's eyebrow color, and the derived link label can't drift apart,
+and adding a fourth tag is a one-line addition to it. Colors are semantic, not
+decorative: `--navy` (Guide — blue is something that stays), `--seafoam-deep`
+(Playbook — green is something you can run), `--coral-deep` (Framework — coral is
+meant to jump) — all three are the text-capable ramp shades this eyebrow already used
+(this is small uppercase text under 18px, where BRAND.md §2.3 bans plain
+`--coral`/`--seafoam`), though not identically: the old cycle's third shade was
+`--navy-light` (5.9:1), while Guide now binds to the darker `--navy` (12.1:1) — both
+existing tokens, so still no new palette entry and no contrast regression, but a
+substitution rather than a carry-forward. `--seafoam-deep` (4.7:1) and `--coral-deep`
+(4.9:1) are the two tightest contrast ratios in the whole palette, barely above the
+4.5:1 AA floor — see BRAND.md §2.3's own guardrail note against lightening either.
+`_oc_card_tuple` now looks up `_OC_TAG_INFO.get(row["tag_label"], {})["color"]`
+instead of `_OC_TAG_COLORS[idx % 3]`; `idx` is kept as an unused parameter so
+`_oc_featured_cards_html`'s `enumerate()` caller didn't need to change.
+
+The admin form's Tag label free-text `<input>` became a `<select name="tag_label">`
+with exactly the three values and a leading `<option value="" disabled selected>`
+placeholder — never submittable, so a fresh Add form can't default to whichever tag
+sorts first the way an ordinary pre-selected `<option>` would; `required` still
+blocks a submission that leaves the placeholder selected client-side, and both
+submit routes independently reject any `tag_label not in _OC_TAGS` server-side
+regardless of what the form allows. **Link label is no longer a form field at
+all** — the free-text input was replaced with static, non-editable text plus
+`Set automatically from the tag.`, and `_oc_values_from_form` computes
+`link_label` from `tag_label` on every save, never reading a `link_label` key
+from the submitted form at all — so a direct POST supplying a mismatched
+`link_label` is silently ignored and the derived value always wins, the same
+class of desync the taxonomy itself exists to close. No schema migration:
+`tag_label`/`link_label` were already TEXT columns with no CHECK constraint, and
+`Library.add_original_content`/`update_original_content` are unchanged (still
+plain string parameters) — the closed set is enforced at the form/route layer
+only. `_TL_FEATURED_CARDS` (the frozen rollback-reference tuple
+`scripts/archive/migrate_original_content.py` seeds from) is deliberately
+untouched — historical record of a completed migration, not live-rendering
+content, same precedent as every other frozen tuple in this codebase.
+
+`scripts/normalize_original_content_tags.py` (preview/`--apply`/write-then-
+read-back, not yet run against production or archived) is the one-off fix for
+the four rows already live: `growth-engine-ratio` → Framework and
+`ai-hackathon-playbook` → Playbook are a straight carry-forward; `chart-of-accounts`
+(previously "Setup Guide") and `netsuite-mcp` (previously "Setup Guide") are a
+genuine reclassification — chart-of-accounts is steps for designing and
+maintaining something, an action, so Playbook (its teaser/link label already
+agreed, only `tag_label` was out of step); netsuite-mcp is a setup manual you
+follow once and refer back to, so Guide. The script refuses to guess at a fifth
+slug it doesn't recognize in production rather than silently leaving it alone or
+misclassifying it.
+
+See CLAUDE.md's matching entry for the full incident write-up and
+`tests/test_original_content_admin.py`'s tag-taxonomy section (invalid-tag
+rejection, each tag's derived link label, the dropdown's no-default-selected
+state, the direct-POST-ignored-link_label proof) for the regression coverage.
+
 **Original Content Phase 4a (2026-08) — the first bespoke page (`netsuite-mcp`) ported to a real
 `body_md`; its Python route retired.** A read-only Phase 4 investigation (all three bespoke
 pages, reported to Brian before any code) found none of the three has images, JS, or interactivity

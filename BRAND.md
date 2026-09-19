@@ -104,6 +104,48 @@ grid cycles seafoam/navy only); the one deliberate coral use on `/tools` and the
 is the MCP capability callout (`_mcp_callout_html`), a non-clickable statement, never a
 button.
 
+**Original Content flagship-card eyebrow — semantic, not positional (2026-09).** A
+separate, unrelated cycle (`_OC_TAG_COLORS` — never shared code with `_CARD_ICON_STYLES`
+above) had the identical bug for the `/thought-leadership` flagship cards' small
+uppercase tag eyebrow: coral/seafoam-deep/navy-light rotated by the card's position in
+the row, so two cards sharing the same tag text could render in two different colors
+depending only on which slot they landed in, and nothing tied the tag's meaning to its
+color at all. Fixed by binding a fixed color to each of the three closed tag values
+instead (`_OC_TAG_INFO` in `webapp/app.py`), with the choice itself semantic rather than
+decorative:
+
+| Tag | Meaning | Color |
+|---|---|---|
+| Guide | Instruction manuals, reference material | `--navy` — blue is something that stays |
+| Playbook | Steps for how to do something, an action | `--seafoam-deep` — green is something you can run |
+| Framework | A model or metric for thinking about something | `--coral-deep` — coral is meant to jump |
+
+All three are the text-capable ramp shades (this is small uppercase text under 18px,
+the same reason `--coral`/`--seafoam` themselves are never used for it — see the
+"Never coral" list above) — though not the identical three the old positional cycle
+used: that cycle's third shade was `--navy-light` (5.9:1), while Guide binds to the
+darker `--navy` (12.1:1) instead. Both are existing tokens, so this is still no new
+palette entry, but it's a substitution, not a carry-forward.
+
+**Contrast headroom, worth guarding — do not lighten `--seafoam-deep` or `--coral-deep`.**
+At 4.7:1 and 4.9:1 against `--bg` respectively, these are the two tightest ratios
+anywhere in the palette — barely clearing the 4.5:1 AA floor for text — and they now
+carry the Playbook and Framework eyebrows on top of their existing uses. A future
+palette tweak that lightens either value for a different reason would silently drop
+these two tag eyebrows below AA with no warning from `linklib/brand_check.py` (which
+checks token *presence*, not contrast) — check both ratios again before touching
+either hex value.
+
+One practical consequence: coral frequency on this grid now
+tracks how many published pieces are tagged Framework, not card position — with a
+single Framework among the four pieces live at launch, that's a *better* fit with the
+one-coral-per-viewport rule than the old positional cycle was (which put two coral
+eyebrows on the live grid). `tag_label` is a closed three-value enum enforced at the
+admin form (a `<select>`, no free text) specifically so this binding can't drift the
+way the eyebrow *text* itself once did — see CLAUDE.md's "Original content — tag
+taxonomy" entry for the full incident (a piece tagged "Setup Guide" whose link label and
+teaser both described a Playbook) and the derived-`link_label` fix that closes it.
+
 **Sanctioned exception: social share cards (2026-09).** The committed 1200×630 Open
 Graph/Twitter Card PNGs (`webapp/static/og/`) carry **two** coral elements — a full-height
 left edge bar and an uppercase eyebrow — deliberately, not an oversight. Reasoning:

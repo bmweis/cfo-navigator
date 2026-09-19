@@ -15226,24 +15226,63 @@ def _tl_featured_cards_html(cards) -> str:
     return '<div class="tl-featured">' + "".join(_tl_fcard(*c) for c in cards) + '</div>'
 
 
-# Original Content (Phase 1) — _TL_FEATURED_CARDS above is no longer the live
-# source for the flagship row; it stays in the repo, unimported, purely as a
-# rollback reference (same precedent as webapp/thought_leadership_data.py).
-# scripts/archive/migrate_original_content.py is the one-time migration that seeded
-# the `original_content` table from it. tag_color was never promoted to a
-# stored column (see that table's schema comment in linklib/db.py) — cycled
-# instead from the same 3 established colors by card position, so the three
-# migrated pieces render with their exact original colors and any piece
-# added later still gets a sane one.
-_OC_TAG_COLORS = ("var(--coral-deep)", "var(--seafoam-deep)", "var(--navy-light)")
+# Original Content tag taxonomy (2026-09) — a closed, three-value set.
+# Previously tag_label was free text and the card's eyebrow color came from
+# a positional cycle (_OC_TAG_COLORS, coral/seafoam/navy-light by card
+# index) — meaning two cards sharing the same tag could render in different
+# colors depending only on which slot they landed in, and nothing kept
+# tag_label/teaser/link_label pointed at the same idea (chart-of-accounts
+# shipped tagged "Setup Guide" with a "Read the playbook" link and a
+# teaser opening "A playbook for…"). Fixed by binding color to the TAG
+# instead of position, and by deriving link_label from tag_label on save
+# (see _oc_values_from_form) so those two fields can never desync again.
+# Semantic color logic: blue is something that stays (Guide), green is
+# something you can run (Playbook), coral is meant to jump (Framework) —
+# BRAND.md §2.3 bans plain --coral/--seafoam TEXT under 18px, so this uses
+# only the text-capable ramp shades (--navy, --seafoam-deep, --coral-deep),
+# same as the eyebrow always has. Adding a fourth tag is a one-line change
+# to this dict — every reader (the form dropdown, the card color, the
+# derived link label) is driven from it, nothing else to touch.
+_OC_TAG_INFO = {
+    "Guide": {
+        "color": "var(--navy)",
+        "link_label": "Read the guide",
+        "definition": "Instruction manuals, reference material",
+    },
+    "Playbook": {
+        "color": "var(--seafoam-deep)",
+        "link_label": "Read the playbook",
+        "definition": "Steps for how to do something, an action",
+    },
+    "Framework": {
+        "color": "var(--coral-deep)",
+        "link_label": "Read the framework",
+        "definition": "A model or metric for thinking about something",
+    },
+}
+_OC_TAGS = tuple(_OC_TAG_INFO.keys())
+
+
+def _oc_link_caption(tag: str) -> str:
+    """The admin form's live-updating caption text under the Tag dropdown —
+    the one place (besides _OC_TAG_INFO itself) this wording lives, so both
+    the server-rendered initial paint and every <option>'s data-link
+    attribute (read verbatim by the page's one-line JS listener, no
+    fallback string duplicated there) come from here."""
+    info = _OC_TAG_INFO.get(tag)
+    return f"Link: {info['link_label']}" if info else "Link text is set from the tag."
 
 
 def _oc_card_tuple(row: dict, idx: int) -> tuple:
-    """Build a _tl_fcard()-shaped tuple from an original_content DB row."""
+    """Build a _tl_fcard()-shaped tuple from an original_content DB row.
+    `idx` is unused now that color comes from the tag rather than card
+    position — kept as a parameter so callers (_oc_featured_cards_html's
+    enumerate()) don't need to change."""
+    color = _OC_TAG_INFO.get(row["tag_label"], {}).get("color", "var(--navy)")
     return (
         f"/thought-leadership/{row['slug']}",
         row["tag_label"],
-        _OC_TAG_COLORS[idx % len(_OC_TAG_COLORS)],
+        color,
         row["title"],
         row["teaser"],
         row["link_label"],
@@ -16099,6 +16138,27 @@ def _oc_form_fields(values: dict) -> str:
         f'<option value="{s}"{" selected" if values.get("status") == s else ""}>{label}</option>'
         for s, label in (("draft", "Draft"), ("live", "Live"))
     )
+    # Closed enum — a leading disabled placeholder forces an explicit choice
+    # on a new record (it can never be submitted, so `required` still fires
+    # if it's left selected) rather than silently defaulting to whichever
+    # tag happens to be first. On edit, the current tag is preselected; a
+    # legacy value outside the three (pre-migration data) matches none of
+    # the options and the browser falls back to showing the placeholder —
+    # not a stored default, just a rendering quirk until the row is saved.
+    current_tag = values.get("tag_label", "")
+    # Each <option> carries its own already-formatted caption text as
+    # data-link — including the placeholder — so ocLinkCaption() below is a
+    # pure copy with no fallback string duplicated in JS; _oc_link_caption()
+    # is the one place (alongside _OC_TAG_INFO itself) this wording lives.
+    tag_opts = (
+        f'<option value="" disabled{" selected" if current_tag not in _OC_TAGS else ""} '
+        f'data-link="{_esc(_oc_link_caption(""))}">Choose a tag&hellip;</option>'
+    ) + "".join(
+        f'<option value="{t}"{" selected" if current_tag == t else ""} '
+        f'data-link="{_esc(_oc_link_caption(t))}">{t}</option>'
+        for t in _OC_TAGS
+    )
+    derived_caption = _esc(_oc_link_caption(current_tag))
     return f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Title *</label>
     <input name="title" required maxlength="300" value="{_esc(values.get('title', ''))}"
@@ -16123,16 +16183,12 @@ def _oc_form_fields(values: dict) -> str:
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;">
     <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tag label *</label>
-      <input name="tag_label" required maxlength="40" value="{_esc(values.get('tag_label', ''))}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="e.g. Framework, Playbook, Setup Guide">
-    </div>
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Link label *</label>
-      <input name="link_label" required maxlength="60" value="{_esc(values.get('link_label', ''))}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="e.g. Read the framework">
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tag *</label>
+      <select name="tag_label" required onchange="ocLinkCaption(this)"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {tag_opts}
+      </select>
+      <p id="oc-link-caption" style="margin:6px 0 0;font-size:12px;color:var(--muted);">{derived_caption}</p>
     </div>
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
@@ -16218,6 +16274,7 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
     {preview_html}
   </div>
 </form>
+<script>function ocLinkCaption(s){{document.getElementById('oc-link-caption').textContent=s.options[s.selectedIndex].dataset.link;}}</script>
 </div>"""
 
 
@@ -16234,6 +16291,7 @@ def _oc_values_from_form(form) -> dict:
     status = (form.get("status") or "draft").strip()
     if status not in ("draft", "live"):
         status = "draft"
+    tag_label = (form.get("tag_label") or "").strip()
     return {
         "title": (form.get("title") or "").strip(),
         # Not auto-lowercased — an uppercase or otherwise malformed slug is
@@ -16242,8 +16300,14 @@ def _oc_values_from_form(form) -> dict:
         # typed.
         "slug": (form.get("slug") or "").strip(),
         "teaser": (form.get("teaser") or "").strip(),
-        "tag_label": (form.get("tag_label") or "").strip(),
-        "link_label": (form.get("link_label") or "").strip(),
+        "tag_label": tag_label,
+        # Derived from tag_label, never read from the form payload — the
+        # form doesn't even submit a link_label field any more, but even a
+        # direct POST supplying one is ignored, so the two fields can never
+        # desync. An invalid/unrecognized tag_label (caught below by the
+        # submit routes' own _OC_TAGS check) derives an empty string here;
+        # the reject path never reaches a save with it.
+        "link_label": _OC_TAG_INFO.get(tag_label, {}).get("link_label", ""),
         "date_label": date_label,
         "sort_key": _sort_key_from_date_label(date_label),
         "body_md": (form.get("body_md") or "").strip() or None,
@@ -16365,10 +16429,8 @@ async def admin_original_content_new_submit(request: Request):
             return _reject("Title is required.")
         if not v["teaser"]:
             return _reject("Teaser is required.")
-        if not v["tag_label"]:
-            return _reject("Tag label is required.")
-        if not v["link_label"]:
-            return _reject("Link label is required.")
+        if v["tag_label"] not in _OC_TAGS:
+            return _reject("Choose a tag.")
         if v["display_order_raw"] and v["display_order"] is None:
             return _reject("Display order must be a number.")
         slug_error = _validate_oc_slug(v["slug"], lib)
@@ -16437,10 +16499,8 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
             return _reject("Title is required.")
         if not v["teaser"]:
             return _reject("Teaser is required.")
-        if not v["tag_label"]:
-            return _reject("Tag label is required.")
-        if not v["link_label"]:
-            return _reject("Link label is required.")
+        if v["tag_label"] not in _OC_TAGS:
+            return _reject("Choose a tag.")
         if v["display_order_raw"] and v["display_order"] is None:
             return _reject("Display order must be a number.")
         slug_error = _validate_oc_slug(v["slug"], lib, exclude_id=item_id)
