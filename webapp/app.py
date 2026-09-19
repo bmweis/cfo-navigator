@@ -25397,31 +25397,40 @@ def fpa_buddy_how_it_works(request: Request):
     Name/Email/Date/Status/Count columns on admin entity-list tables, not
     this page's own locally-scoped `.cc-table`, which — like every other
     `.cc-table` on the site — sizes its columns with inline literals, not
-    that constant family). Plain `table-layout:auto` made this genuinely
-    hard to get right: giving all three columns an identical `width` hint
-    plus `white-space:nowrap` (to stop the wrap) still let the browser
-    squeeze them to three DIFFERENT rendered widths, because each column's
-    own nowrap-forced min-content differs by header text length, and the
-    auto-layout squeeze algorithm shrinks a column in proportion to its own
-    slack (specified width minus its min-content) — the shortest headers
-    had the most slack and so were squeezed the smallest, exactly inverting
-    the intended "equal width" outcome. Fixed by switching the whole table
-    to `table-layout:fixed` and giving every column (Tier, the three
-    metric columns, and — implicitly, by leaving it unspecified — What
-    changes) an explicit pixel budget that sums to exactly 760px: Tier
+    that constant family). Plain `table-layout:auto` made "equal width"
+    genuinely hard to get right: giving all three columns an identical
+    `width` hint plus `white-space:nowrap` (an early attempt at stopping
+    the wrap, before "two-line wrap is fine" was confirmed as the actual
+    ask) still let the browser squeeze them to three DIFFERENT rendered
+    widths, because each column's own nowrap-forced min-content differs by
+    header text length, and the auto-layout squeeze algorithm shrinks a
+    column in proportion to its own slack (specified width minus its
+    min-content) — the shortest headers had the most slack and so were
+    squeezed the smallest, exactly inverting the intended "equal width"
+    outcome. Fixed by switching the whole table to `table-layout:fixed`
+    and giving every column an explicit pixel budget summing to exactly
+    760px. A first pass sized the three metric columns wide enough to
+    avoid wrapping at all (168px each, leaving "What changes" only 145px)
+    — corrected once Brian clarified the two-line wrap itself was never
+    the problem (his original "aren't cramped" complaint was about the
+    three columns being unequal widths, not about wrapping): the metric
+    columns only need to fit their WIDEST SINGLE WORD ("sources", ~68px
+    measured), not the whole unwrapped phrase, since a wrap between the
+    two words is an accepted outcome — 100px each (a ~24px margin over
+    that ~92px word-plus-padding floor) comfortably covers it. Tier stays
     110px (matches "Standard"'s own measured single-line width, its true
-    floor), the three metric columns 168px each (comfortably over "Archive
-    sources"'s measured 136px content need), leaving What changes 145px to
-    absorb the remainder, per the ask. Fixed layout is deterministic here
-    in a way auto layout's heuristic squeeze isn't — verified live: all
-    three metric columns render at a literal, identical 168px, the table
-    is exactly 760px wide (matching `.tool-prose`, no new desktop
-    horizontal scroll), and the 390px mobile view still scrolls only
-    inside the table's own `overflow-x:auto` wrapper, never the page. The
-    stale `min-width:200px` inline style on the "What changes" body `<td>`
-    (a leftover from before this rider, no longer meaningful under fixed
-    layout) was removed. Every `gap:20px` section spacing is unaffected by
-    this rider too — only the table's own internal column widths changed.
+    floor — Tier was never part of either complaint). What changes now
+    absorbs a much larger remainder, 350px (760 - 110 - 3*100), instead of
+    145px. Verified live: the three metric columns render at a literal,
+    identical 100px, each header wraps cleanly onto two lines ("Archive" /
+    "sources", etc.), the table is exactly 760px wide (matching
+    `.tool-prose`, no new desktop horizontal scroll), and the 390px mobile
+    view still scrolls only inside the table's own `overflow-x:auto`
+    wrapper, never the page. The stale `min-width:200px` inline style on
+    the "What changes" body `<td>` (a leftover from before this rider, no
+    longer meaningful under fixed layout) was removed. Every `gap:20px`
+    section spacing is unaffected by this rider too — only the table's own
+    internal column widths changed.
     """
     from linklib.agent import EFFORT_SETTINGS
     lib = _lib()
@@ -25478,9 +25487,9 @@ def fpa_buddy_how_it_works(request: Request):
 <table class="cc-table" style="table-layout:fixed;">
 <thead><tr style="background:var(--bg);">
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:110px;">Tier</th>
-<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:168px;">Archive sources</th>
-<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:168px;">Feed items</th>
-<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:168px;">Web results</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:100px;">Archive sources</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:100px;">Feed items</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:100px;">Web results</th>
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">What changes</th>
 </tr></thead>
 <tbody>
