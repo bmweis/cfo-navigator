@@ -25265,6 +25265,16 @@ def fpa_buddy_how_it_works(request: Request):
     now-redundant nested `.tool-prose` div around its heading/intro
     paragraph. BRAND.md §5 gained a standing rule for this exact failure
     class, since it's now shown up on two separate pages.
+
+    One real, reported, expected side effect of narrowing the table to
+    760px: its own "What changes" column now wraps onto two lines per row
+    (it fit on one line at the old 1232px width), growing that section by
+    79px and shifting every section below it down by the same amount.
+    Verified this isn't a spacing regression before shipping it: every
+    section-to-section gap measured exactly 20px both before and after —
+    the `gap:20px` rhythm is unaffected; only the one resized section's own
+    height changed, which is the direct, correct consequence of the table
+    now actually fitting its column instead of a spacing-rule change.
     """
     from linklib.agent import EFFORT_SETTINGS
     lib = _lib()

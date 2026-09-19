@@ -859,6 +859,45 @@ was rewritten to match — the diagram/callout-formatting tests from the
 earlier rounds are replaced with tests confirming those elements are
 gone, not merely restyled.
 
+**Reading-column fix (2026-09 rider) — amends the "kept exactly as
+before" claim above: the five-section `display:grid` container's
+structural relationship to `.tool-prose` changed, though its content and
+section count didn't.** Found during review of the rewrite above, not by
+this rider itself: the sections grid (and, inside it, the tier table) was
+a SIBLING of the intro `.tool-prose` div, not its descendant, so the whole
+grid rendered at the full `.page-standard` content width (1232px at
+1280px viewport) instead of the 760px reading column above and below it.
+Measured directly, both this branch and `origin/main`, before touching
+anything: byte-identical widths on both, confirming the misalignment
+predates the CFO-audience rewrite entirely and was only surfaced by
+review of this page — the same "found while reviewing something else"
+shape as the mobile grid-track fix two entries up. `/how-this-is-built`
+had the identical shape (its cards grid was a sibling of `.tool-prose`
+too, fixed by merging the whole page into one `.tool-prose` wrapper so
+the grid becomes its descendant — see `how_this_is_built()`'s own
+docstring) — applied the same treatment here rather than a narrower fix
+scoped only to the table, per the standing rule against unexplained
+one-off exceptions to a problem that already has a documented solution.
+The per-section `class="tool-prose"` on each `<section>` (redundant once
+one wrapper spans the whole page, and never present on `/how-this-is-
+built`'s own cards) was dropped, along with the tier section's own
+now-redundant nested `.tool-prose` div around its heading/intro
+paragraph. The mobile-safety `grid-template-columns:minmax(0,1fr)` from
+the rewrite's own first rider is kept, not reverted to `/how-this-is-
+built`'s plain `1fr` — that page's cards carry no `min-width` floor of
+their own, but this page's table still does (`.cc-table{min-width:680px}`),
+so the track-level fix is still load-bearing here. **One real, reported,
+expected side effect, not a spacing regression**: the tier table's own
+"What changes" column wraps onto two lines per row now that it's
+correctly constrained to 760px (it fit on one line at the old 1232px
+width), growing that section by 79px and shifting every section below it
+down by the same 79px — verified every section-to-section gap is still
+exactly 20px throughout, in both the pre- and post-fix layout, so the
+`gap:20px` rhythm itself is unaffected; only the one resized section's own
+height changed. See BRAND.md §5's new rule for the general standard this
+established, now that the same structural mistake has shown up on two
+separate pages.
+
 **The Exa kill switch** (Phase 7; originally its own `/admin/exa-settings`
 page, merged into `/admin/system/ai`'s Configuration section — PR 10): an
 `exa_enabled` toggle (`settings` table, `Library.get_exa_enabled`/

@@ -594,6 +594,13 @@ the public `/tools/fpa-buddy/how-it-works`; Database and Page Index render their
 copy as a bare `<p>` with no `.tool-prose` wrapper at all. Neither gained a wrapper as
 part of this correction — this is a doc fix, not a code change.)
 
+**A table or grid on a content page belongs inside the reading column.** When a page
+uses `.tool-prose`, every block a reader reads through—prose, tables, card
+grids—is a descendant of it, not a sibling. A sibling renders at full
+`.page-standard` width and breaks the column. Fixed on `/how-this-is-built`, and on
+`/tools/fpa-buddy/how-it-works` in #583. Pages with no reading column (compare
+tables, `/admin/system/page-index`) are unaffected: full width is correct there.
+
 The brand audit's Phase 4 also found four pages with *no* reading-width constraint at
 all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, and the
 since-retired `/library/past-questions` (folded into `/tools/fpa-buddy`'s "Search past
