@@ -311,6 +311,17 @@ def test_retrieve_does_not_boost_own_content_articles(lib, monkeypatch):
 
 # --- admin routes: create / edit / delete wire the sync hook ---------------
 
+class _AllSlugs:
+    """Always-true membership stand-in for the social-share-card publish
+    gate's own card-existence lookup. These tests are about the mirror sync
+    hook, not the card gate — without this override, VALID_FORM's
+    status="live" would be rejected outright since no real
+    webapp/static/og/a-test-piece.png exists in a test run."""
+
+    def __contains__(self, _slug):
+        return True
+
+
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     db = str(tmp_path / "app.db")
@@ -320,6 +331,7 @@ def env(monkeypatch, tmp_path):
     import importlib
     import webapp.app as appmod
     importlib.reload(appmod)
+    monkeypatch.setattr(appmod, "_og_image_slugs", lambda: _AllSlugs())
     yield appmod
 
 

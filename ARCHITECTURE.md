@@ -3106,7 +3106,7 @@ re-check before reviving this.
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership/third-party` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (originally "pin into the homepage teaser" — Phase 3 addendum; repurposed by the Homepage Restructure phase to mean "represents this type in the homepage's "Recent highlights" grid", see below; defaults to 0, no retroactive selection) |
-| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/archive/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4c, all three flagship pieces — `netsuite-mcp` (4a), `ai-hackathon-playbook` (4b), and `growth-engine-ratio` (4c) — have real `body_md` and are served by the catch-all, their bespoke routes all retired; `growth-engine-ratio`'s own JS calculator moved to a brand-new standalone bespoke route, `/thought-leadership/growth-engine-calculator`, which is not part of this table at all), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. `mirrored_article_id` (FP&A Buddy published-content ingestion, 2026-09, nullable — `NULL` before the first sync) tracks which `articles.id` currently mirrors this piece for retrieval; see "Published-content ingestion" under FP&A Buddy above. |
+| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/archive/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4c, all three flagship pieces — `netsuite-mcp` (4a), `ai-hackathon-playbook` (4b), and `growth-engine-ratio` (4c) — have real `body_md` and are served by the catch-all, their bespoke routes all retired; `growth-engine-ratio`'s own JS calculator moved to a brand-new standalone bespoke route, `/thought-leadership/growth-engine-calculator`, which is not part of this table at all), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` is not a stored column — as of the closed tag-taxonomy PR (2026-09), the small category-tag accent color on each card is derived semantically from `tag_label` via `webapp/app.py`'s `_OC_TAG_INFO` dict (Guide → `--navy`, Playbook → `--seafoam-deep`, Framework → `--coral-deep`), read by `_oc_card_tuple`. This superseded an earlier by-card-position color cycle (`--coral-deep`/`--seafoam-deep`/`--navy-light`, chosen by array index rather than the piece's own tag) — see BRAND.md §2.3 for the full write-up, including the contrast-headroom guardrail on `--seafoam-deep`/`--coral-deep`. `mirrored_article_id` (FP&A Buddy published-content ingestion, 2026-09, nullable — `NULL` before the first sync) tracks which `articles.id` currently mirrors this piece for retrieval; see "Published-content ingestion" under FP&A Buddy above. |
 
 **Original Content Phase 2 (2026-08) — markdown rendering + `GET /thought-leadership/{slug}`.**
 `_render_original_content_markdown` runs `body_md` through `python-markdown` with only
@@ -3235,6 +3235,70 @@ See CLAUDE.md's matching entry for the full incident write-up and
 `tests/test_original_content_admin.py`'s tag-taxonomy section (invalid-tag
 rejection, each tag's derived link label, the dropdown's no-default-selected
 state, the direct-POST-ignored-link_label proof) for the regression coverage.
+
+**Original Content — every live piece must have its own social share card,
+enforced at publish time (2026-09).** The OG-card system (Social share cards,
+above) shipped with every route falling back to `default.png` when a piece
+had no card of its own — a real gap once `original_content` pieces started
+publishing regularly, since a Live piece with no dedicated card silently
+shared the generic default rather than getting caught. Closed with a hard
+publish-time block, not a warning that can be bypassed: `_oc_publish_gate_error(status,
+slug)` (`webapp/app.py`) is the single shared validation function both
+`admin_original_content_new_submit` and `admin_original_content_edit_submit`
+call, immediately after their existing slug-uniqueness check — a save that
+would leave `status="live"` with no matching `webapp/static/og/<slug>.png`
+(checked via the same `_og_image_slugs()` cache the OG-rendering path
+already uses) is rejected with a specific, actionable error naming the
+expected file path and the only way through: save as Draft, commit the
+1200×630 PNG, wait for the deploy, then flip to Live. **There is no
+override** — Draft is the sole escape valve, deliberately, so a Live piece
+can never exist without its own card. Choosing one shared function over
+duplicating the check in each route was deliberate: the two submit routes
+already independently duplicate the tag-validity check (`tag_label not in
+_OC_TAGS`), and that duplication is exactly the kind of drift risk this
+whole publish-gate feature exists to prevent for cards — so the gate itself
+gets exactly one implementation, called from both places, rather than
+repeating the mistake it's meant to guard against.
+
+Three more pieces close the loop around the hard block, all reading the
+same `_og_image_slugs()` lookup so nothing can disagree with what the block
+itself checks: (1) `_oc_card_status_html(slug)` renders a small note
+directly under the form's Status field — "Share card found at
+static/og/&lt;slug&gt;.png." (muted) or "No share card yet. Commit a
+1200×630 PNG at static/og/&lt;slug&gt;.png before setting this to Live."
+(`--alert`) — computed server-side on every page load from the form's
+current slug value, deliberately not JS-driven: the slug can be edited
+before save, and a live client-side guess reading a stale value would be
+worse than a value that's simply accurate as of the last render. (2) The
+admin list at `/admin/thought-leadership/original` badges any Live row
+whose card is missing with a small `--alert`-colored "No share card" line
+under its status badge — investigated first for an existing problem-state
+precedent and found none that fit: `_review_status_pill_html` (Software/
+Communities' "needs review" tracking) is a heavier, unrelated mechanism
+built for human-reviewed content quality, not a binary file-exists check,
+so it wasn't reused; the plain muted-text treatment instead follows
+`/admin/system/page-index`'s own `_tier_cell` "⚠ No tier assigned"
+precedent, consistent with this codebase's standing rule that admin
+surfaces stay undecorated (no colored pill) for this class of flag.
+(3) `webapp.checks.og_card_missing_problems()` — a thin wrapper delegating
+to `webapp.app.og_card_missing_problems()` — is a new `/admin/checks` row
+("Every live piece has a share card"), following the exact shape
+`og_url_threading_problems()`/`original_content_mirror_problems()` already
+established, so a card that goes missing *after* publish (a file
+accidentally deleted, a bad merge) is still caught mechanically rather than
+only at the moment of the original save.
+
+`GET /static/og/{filename}`'s own `default.png`-fallback serving behavior
+is completely unchanged by this feature — the gate only decides whether a
+save is *allowed*, never how a missing card is served once one is (there is
+no live route where a card can be missing for a Live piece any more,
+short of a file deleted after publish, which the mechanical check above
+catches instead). See CLAUDE.md's matching entry for the full write-up and
+`tests/test_original_content_admin.py`'s publish-gate section (12 tests:
+the block on both add and edit, on a slug change, the Draft escape valve,
+the Status-field note's both states, and the admin-list badge's three
+states) plus `tests/test_social_share_cards.py`'s
+`og_card_missing_problems()` section for the mechanical-check coverage.
 
 **Original Content Phase 4a (2026-08) — the first bespoke page (`netsuite-mcp`) ported to a real
 `body_md`; its Python route retired.** A read-only Phase 4 investigation (all three bespoke

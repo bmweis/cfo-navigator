@@ -22,6 +22,27 @@ def env(monkeypatch):
         os.remove(db)
 
 
+class _AllSlugs:
+    """A container that reports every slug as present — stands in for
+    _og_image_slugs()'s real frozenset wherever a test doesn't care about
+    card state."""
+    def __contains__(self, _slug):
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _og_card_exists_by_default(env, monkeypatch):
+    """This file predates the social-share-card publish gate (see
+    _oc_publish_gate_error) and uses many synthetic slugs (a-test-piece,
+    second-piece, ...) with no real webapp/static/og/<slug>.png committed.
+    Default the gate's own card-existence lookup to "present for
+    everything" so the pre-existing CRUD/validation tests here don't each
+    need a fabricated file — the dedicated gate tests further down
+    override this per-test (to an empty frozenset, or one naming a
+    specific slug) to exercise the real missing/present states."""
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: _AllSlugs())
+
+
 def _client(appmod):
     from fastapi.testclient import TestClient
     return TestClient(appmod.app, raise_server_exceptions=True)
@@ -582,3 +603,257 @@ def test_body_md_filled_in_but_draft_404s_for_anonymous_and_200s_for_admin(env):
 
     admin_html = c.get("/thought-leadership/a-test-piece")
     assert admin_html.status_code == 200
+
+
+# -- Social share card publish gate (2026-09) ---------------------------------
+# Every test below explicitly overrides the file's own autouse
+# _og_card_exists_by_default fixture (a second monkeypatch.setattr call in
+# the test body — the last one wins) to exercise the gate's real
+# missing/present states; every other test in this file relies on that
+# fixture's blanket "card present" default instead.
+
+def test_publish_gate_blocks_live_with_no_card(env, monkeypatch):
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    r = c.post("/admin/thought-leadership/original/new", data=VALID_FORM)
+    assert r.status_code == 400
+    lib = env._lib()
+    try:
+        assert lib.list_original_content() == []
+    finally:
+        lib.close()
+
+
+def test_publish_gate_error_names_file_and_draft_sequence(env, monkeypatch):
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    r = c.post("/admin/thought-leadership/original/new", data=VALID_FORM)
+    assert r.status_code == 400
+    assert "needs its own share card before it can go live" in r.text
+    assert "1200" in r.text and "630" in r.text
+    assert "static/og/a-test-piece.png" in r.text
+    assert "Save as Draft" in r.text
+
+
+def test_publish_gate_allows_draft_with_no_card(env, monkeypatch):
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["status"] = "draft"
+    r = c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
+    assert r.status_code == 303
+    lib = env._lib()
+    try:
+        row = lib.get_original_content_by_slug("a-test-piece")
+    finally:
+        lib.close()
+    assert row is not None
+    assert row["status"] == "draft"
+
+
+def test_publish_gate_allows_live_once_card_exists(env, monkeypatch):
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset({"a-test-piece"}))
+    c = _admin_client(env)
+    r = c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
+    assert r.status_code == 303
+    lib = env._lib()
+    try:
+        row = lib.get_original_content_by_slug("a-test-piece")
+    finally:
+        lib.close()
+    assert row["status"] == "live"
+
+
+def test_publish_gate_applies_on_edit_too(env, monkeypatch):
+    """The block isn't add-only — flipping an existing Draft piece to Live
+    on edit is gated the same way."""
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["status"] = "draft"
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
+    lib = env._lib()
+    try:
+        item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
+    finally:
+        lib.close()
+    edit_form = dict(VALID_FORM)
+    edit_form["status"] = "live"
+    r = c.post(f"/admin/thought-leadership/original/{item_id}/edit", data=edit_form)
+    assert r.status_code == 400
+    lib = env._lib()
+    try:
+        assert lib.get_original_content(item_id)["status"] == "draft"
+    finally:
+        lib.close()
+
+
+def test_slug_change_to_uncarded_slug_blocked_on_live_piece(env, monkeypatch):
+    """Changing a live piece's slug is only safe if the NEW slug also has
+    a card — the lookup is slug-keyed, so a rename would otherwise orphan
+    the old card and silently fall back to default.png."""
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset({"a-test-piece"}))
+    c = _admin_client(env)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
+    lib = env._lib()
+    try:
+        item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
+    finally:
+        lib.close()
+
+    edit_form = dict(VALID_FORM)
+    edit_form["slug"] = "a-renamed-piece"  # still status=live; new slug has no card
+    r = c.post(f"/admin/thought-leadership/original/{item_id}/edit", data=edit_form)
+    assert r.status_code == 400
+    assert "static/og/a-renamed-piece.png" in r.text
+    lib = env._lib()
+    try:
+        assert lib.get_original_content(item_id)["slug"] == "a-test-piece"
+    finally:
+        lib.close()
+
+
+def test_status_helper_shows_missing_card_warning(env, monkeypatch):
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["status"] = "draft"
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
+    lib = env._lib()
+    try:
+        item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
+    finally:
+        lib.close()
+    html = c.get(f"/admin/thought-leadership/original/{item_id}/edit").text
+    assert ("No share card yet. Commit a 1200&times;630 PNG at static/og/a-test-piece.png "
+            "before setting this to Live.") in html
+
+
+def test_status_helper_shows_card_found_confirmation(env, monkeypatch):
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset({"a-test-piece"}))
+    c = _admin_client(env)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
+    lib = env._lib()
+    try:
+        item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
+    finally:
+        lib.close()
+    html = c.get(f"/admin/thought-leadership/original/{item_id}/edit").text
+    assert "Share card found at static/og/a-test-piece.png." in html
+    assert "No share card yet" not in html
+
+
+def test_status_helper_absent_on_fresh_add_form_with_no_slug_typed(env, monkeypatch):
+    """Neither message makes sense before a slug exists to check — the
+    line is simply absent, not a guess."""
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    html = _admin_client(env).get("/admin/thought-leadership/original/new").text
+    assert "No share card yet" not in html
+    assert "Share card found" not in html
+
+
+def test_admin_list_badges_live_row_missing_card(env, monkeypatch):
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset({"has-a-card"}))
+    c = _admin_client(env)
+    live_no_card = dict(VALID_FORM)
+    live_no_card["slug"] = "has-a-card"
+    live_no_card["title"] = "Has A Card"
+    c.post("/admin/thought-leadership/original/new", data=live_no_card, follow_redirects=False)
+
+    # Now simulate the card going missing after publish (a deleted file) —
+    # the gate only stops NEW occurrences, so this is reachable in
+    # production too, per the "defense in depth" framing.
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    html = c.get("/admin/thought-leadership/original").text
+    assert "No share card" in html
+
+
+def test_admin_list_does_not_badge_draft_row_missing_card(env, monkeypatch):
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["status"] = "draft"
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
+    html = c.get("/admin/thought-leadership/original").text
+    assert "No share card" not in html
+
+
+def test_admin_list_does_not_badge_live_row_with_a_card(env, monkeypatch):
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset({"a-test-piece"}))
+    c = _admin_client(env)
+    c.post("/admin/thought-leadership/original/new", data=VALID_FORM, follow_redirects=False)
+    html = c.get("/admin/thought-leadership/original").text
+    assert "No share card" not in html
+
+
+def test_status_helper_is_suppressed_when_the_gate_error_banner_shows_the_same_fact(env, monkeypatch):
+    """The banner and the helper read the identical fact off the same
+    lookup — showing both is the same sentence twice on one screen. When
+    THIS rejection is the gate error, the ambient helper line goes away;
+    the banner alone carries the message."""
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    r = c.post("/admin/thought-leadership/original/new", data=VALID_FORM)
+    assert r.status_code == 400
+    assert "needs its own share card before it can go live" in r.text  # the banner
+    assert "No share card yet" not in r.text  # the helper, suppressed
+
+
+def test_status_helper_still_shows_when_a_different_validation_error_fires(env, monkeypatch):
+    """A missing card and an unrelated validation failure (bad tag) can
+    coexist — the helper isn't repeating the banner in that case, so it
+    stays visible rather than being blanket-suppressed on any error."""
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["tag_label"] = "Not A Real Tag"
+    r = c.post("/admin/thought-leadership/original/new", data=form)
+    assert r.status_code == 400
+    assert "Choose a tag." in r.text  # the banner is a DIFFERENT message
+    assert "No share card yet" in r.text  # so the helper still carries its own fact
+
+
+def test_gate_error_banner_uses_the_alert_family_not_coral(env, monkeypatch):
+    """BRAND.md reserves coral for decorative use, never for a status/error
+    state — this banner is a rejected save, so it must use --alert/
+    --alert-wash, never --coral/--coral-wash."""
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    r = c.post("/admin/thought-leadership/original/new", data=VALID_FORM)
+    assert r.status_code == 400
+    assert "var(--alert-wash)" in r.text
+    assert "var(--alert)" in r.text
+    assert "var(--coral-wash)" not in r.text
+
+
+def test_rejected_edit_preserves_attempted_status_but_a_reload_confirms_draft(env, monkeypatch):
+    """The rejected response's own Status dropdown correctly shows the
+    attempted 'Live' (nothing was silently reset in the form) — but the
+    write itself never happened: the DB row stays Draft, and a completely
+    fresh GET (not the reject response) confirms Draft renders on reload,
+    not a half-applied Live."""
+    monkeypatch.setattr(env, "_og_image_slugs", lambda: frozenset())
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["status"] = "draft"
+    c.post("/admin/thought-leadership/original/new", data=form, follow_redirects=False)
+    lib = env._lib()
+    try:
+        item_id = lib.get_original_content_by_slug("a-test-piece")["id"]
+    finally:
+        lib.close()
+
+    edit_form = dict(VALID_FORM)
+    edit_form["status"] = "live"
+    reject_html = c.post(f"/admin/thought-leadership/original/{item_id}/edit", data=edit_form).text
+    assert '<option value="live" selected>Live</option>' in reject_html
+
+    lib = env._lib()
+    try:
+        assert lib.get_original_content(item_id)["status"] == "draft"
+    finally:
+        lib.close()
+
+    reload_html = c.get(f"/admin/thought-leadership/original/{item_id}/edit").text
+    assert '<option value="draft" selected>Draft</option>' in reload_html
+    assert '<option value="live" selected>' not in reload_html
