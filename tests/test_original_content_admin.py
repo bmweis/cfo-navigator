@@ -403,18 +403,24 @@ def test_each_valid_tag_derives_its_link_label(env, tag, expected_link_label):
 def test_link_label_is_not_a_submittable_form_field(env):
     html = _admin_client(env).get("/admin/thought-leadership/original/new").text
     assert 'name="link_label"' not in html
-    assert "Set automatically from the tag." in html
+    # No tag selected yet on a fresh Add form — the no-tag caption text,
+    # not a "no tag was selected" placeholder box.
+    assert 'id="oc-link-caption"' in html
+    assert "Link text is set from the tag." in html
 
 
 def test_tag_dropdown_offers_exactly_three_options_with_no_default_selected(env):
     """The Add form shouldn't preselect any of the three tags — a default
     is how records get mislabeled by omission. The disabled placeholder
-    (never a submittable value) is what's initially shown instead."""
+    (never a submittable value) is what's initially shown instead. Each
+    option also carries its own data-link caption text, read by the page's
+    one-line JS listener with no fallback string duplicated there."""
     html = _admin_client(env).get("/admin/thought-leadership/original/new").text
     assert 'name="tag_label"' in html
-    for tag in ("Guide", "Playbook", "Framework"):
-        assert f'<option value="{tag}">{tag}</option>' in html
-    assert '<option value="" disabled selected>' in html
+    for tag, link_label in (("Guide", "Read the guide"), ("Playbook", "Read the playbook"),
+                             ("Framework", "Read the framework")):
+        assert f'<option value="{tag}" data-link="Link: {link_label}">{tag}</option>' in html
+    assert '<option value="" disabled selected data-link="Link text is set from the tag.">' in html
     assert "Setup Guide" not in html
 
 
@@ -429,8 +435,19 @@ def test_edit_form_preselects_the_current_tag(env):
     finally:
         lib.close()
     html = c.get(f"/admin/thought-leadership/original/{item_id}/edit").text
-    assert '<option value="Framework" selected>Framework</option>' in html
-    assert "Read the framework" in html
+    assert '<option value="Framework" selected data-link="Link: Read the framework">Framework</option>' in html
+    # Server-rendered on first paint, before any JS runs.
+    assert '<p id="oc-link-caption" style="margin:6px 0 0;font-size:12px;color:var(--muted);">Link: Read the framework</p>' in html
+
+
+def test_live_update_listener_is_the_only_new_js_on_the_form(env):
+    """One small vanilla-JS function, wired via a plain onchange attribute
+    — no second copy of the tag->link mapping serialized into the page."""
+    html = _admin_client(env).get("/admin/thought-leadership/original/new").text
+    assert 'onchange="ocLinkCaption(this)"' in html
+    assert html.count("<script>") == 1
+    assert "function ocLinkCaption(s)" in html
+    assert "JSON" not in html.split("<script>", 1)[1]
 
 
 def test_non_numeric_display_order_rejected(env):

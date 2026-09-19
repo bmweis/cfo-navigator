@@ -122,7 +122,21 @@ decorative:
 
 All three are the text-capable ramp shades (this is small uppercase text under 18px,
 the same reason `--coral`/`--seafoam` themselves are never used for it — see the
-"Never coral" list above). One practical consequence: coral frequency on this grid now
+"Never coral" list above) — though not the identical three the old positional cycle
+used: that cycle's third shade was `--navy-light` (5.9:1), while Guide binds to the
+darker `--navy` (12.1:1) instead. Both are existing tokens, so this is still no new
+palette entry, but it's a substitution, not a carry-forward.
+
+**Contrast headroom, worth guarding — do not lighten `--seafoam-deep` or `--coral-deep`.**
+At 4.7:1 and 4.9:1 against `--bg` respectively, these are the two tightest ratios
+anywhere in the palette — barely clearing the 4.5:1 AA floor for text — and they now
+carry the Playbook and Framework eyebrows on top of their existing uses. A future
+palette tweak that lightens either value for a different reason would silently drop
+these two tag eyebrows below AA with no warning from `linklib/brand_check.py` (which
+checks token *presence*, not contrast) — check both ratios again before touching
+either hex value.
+
+One practical consequence: coral frequency on this grid now
 tracks how many published pieces are tagged Framework, not card position — with a
 single Framework among the four pieces live at launch, that's a *better* fit with the
 one-coral-per-viewport rule than the old positional cycle was (which put two coral

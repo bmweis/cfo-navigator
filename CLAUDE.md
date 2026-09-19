@@ -3510,9 +3510,14 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Semantic, not decorative — blue is something that stays, green is
   something you can run, coral is meant to jump. All three are the
   text-capable ramp shades (BRAND.md §2.3 bans plain `--coral`/`--seafoam`
-  text under 18px, and this is small uppercase eyebrow text), same shades
-  the old positional cycle already used, so no new palette entry and no
-  contrast regression. The admin form's free-text Tag label input became a
+  text under 18px, and this is small uppercase eyebrow text) — though
+  Guide is a substitution, not a carry-forward: the old positional cycle's
+  third shade was `--navy-light` (5.9:1), darker `--navy` (12.1:1) binds to
+  Guide now. Both are existing tokens, so still no new palette entry and no
+  contrast regression. `--seafoam-deep` (4.7:1) and `--coral-deep` (4.9:1),
+  now carrying Playbook and Framework, are the two tightest contrast
+  ratios in the whole palette — see BRAND.md §2.3's guardrail against
+  lightening either one for an unrelated reason. The admin form's free-text Tag label input became a
   `<select>` with exactly these three options and a leading disabled
   placeholder (`<option value="" disabled selected>`) — never submittable,
   so a fresh Add form can't silently default to whichever tag sorts first;

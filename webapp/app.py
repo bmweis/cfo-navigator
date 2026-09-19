@@ -15263,6 +15263,16 @@ _OC_TAG_INFO = {
 _OC_TAGS = tuple(_OC_TAG_INFO.keys())
 
 
+def _oc_link_caption(tag: str) -> str:
+    """The admin form's live-updating caption text under the Tag dropdown —
+    the one place (besides _OC_TAG_INFO itself) this wording lives, so both
+    the server-rendered initial paint and every <option>'s data-link
+    attribute (read verbatim by the page's one-line JS listener, no
+    fallback string duplicated there) come from here."""
+    info = _OC_TAG_INFO.get(tag)
+    return f"Link: {info['link_label']}" if info else "Link text is set from the tag."
+
+
 def _oc_card_tuple(row: dict, idx: int) -> tuple:
     """Build a _tl_fcard()-shaped tuple from an original_content DB row.
     `idx` is unused now that color comes from the tag rather than card
@@ -16136,14 +16146,19 @@ def _oc_form_fields(values: dict) -> str:
     # the options and the browser falls back to showing the placeholder —
     # not a stored default, just a rendering quirk until the row is saved.
     current_tag = values.get("tag_label", "")
-    tag_opts = f'<option value="" disabled{" selected" if current_tag not in _OC_TAGS else ""}>Choose a tag&hellip;</option>' + "".join(
-        f'<option value="{t}"{" selected" if current_tag == t else ""}>{t}</option>' for t in _OC_TAGS
+    # Each <option> carries its own already-formatted caption text as
+    # data-link — including the placeholder — so ocLinkCaption() below is a
+    # pure copy with no fallback string duplicated in JS; _oc_link_caption()
+    # is the one place (alongside _OC_TAG_INFO itself) this wording lives.
+    tag_opts = (
+        f'<option value="" disabled{" selected" if current_tag not in _OC_TAGS else ""} '
+        f'data-link="{_esc(_oc_link_caption(""))}">Choose a tag&hellip;</option>'
+    ) + "".join(
+        f'<option value="{t}"{" selected" if current_tag == t else ""} '
+        f'data-link="{_esc(_oc_link_caption(t))}">{t}</option>'
+        for t in _OC_TAGS
     )
-    tag_info = _OC_TAG_INFO.get(current_tag)
-    derived_link_label = (
-        _esc(tag_info["link_label"]) if tag_info
-        else '<span style="font-style:italic;">Choose a tag to see the link text.</span>'
-    )
+    derived_caption = _esc(_oc_link_caption(current_tag))
     return f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Title *</label>
     <input name="title" required maxlength="300" value="{_esc(values.get('title', ''))}"
@@ -16169,15 +16184,11 @@ def _oc_form_fields(values: dict) -> str:
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tag *</label>
-      <select name="tag_label" required
+      <select name="tag_label" required onchange="ocLinkCaption(this)"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
         {tag_opts}
       </select>
-    </div>
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Link label</label>
-      <p style="margin:0;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font-size:15px;color:var(--muted);background:var(--accent-light);">{derived_link_label}</p>
-      <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">Set automatically from the tag.</p>
+      <p id="oc-link-caption" style="margin:6px 0 0;font-size:12px;color:var(--muted);">{derived_caption}</p>
     </div>
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
@@ -16263,6 +16274,7 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
     {preview_html}
   </div>
 </form>
+<script>function ocLinkCaption(s){{document.getElementById('oc-link-caption').textContent=s.options[s.selectedIndex].dataset.link;}}</script>
 </div>"""
 
 

@@ -3186,9 +3186,14 @@ dropdown, the card's eyebrow color, and the derived link label can't drift apart
 and adding a fourth tag is a one-line addition to it. Colors are semantic, not
 decorative: `--navy` (Guide — blue is something that stays), `--seafoam-deep`
 (Playbook — green is something you can run), `--coral-deep` (Framework — coral is
-meant to jump) — all three already the text-capable ramp shades the old cycle used
-(this is small uppercase eyebrow text under 18px, where BRAND.md §2.3 bans plain
-`--coral`/`--seafoam`), so no new palette entry and no contrast regression.
+meant to jump) — all three are the text-capable ramp shades this eyebrow already used
+(this is small uppercase text under 18px, where BRAND.md §2.3 bans plain
+`--coral`/`--seafoam`), though not identically: the old cycle's third shade was
+`--navy-light` (5.9:1), while Guide now binds to the darker `--navy` (12.1:1) — both
+existing tokens, so still no new palette entry and no contrast regression, but a
+substitution rather than a carry-forward. `--seafoam-deep` (4.7:1) and `--coral-deep`
+(4.9:1) are the two tightest contrast ratios in the whole palette, barely above the
+4.5:1 AA floor — see BRAND.md §2.3's own guardrail note against lightening either.
 `_oc_card_tuple` now looks up `_OC_TAG_INFO.get(row["tag_label"], {})["color"]`
 instead of `_OC_TAG_COLORS[idx % 3]`; `idx` is kept as an unused parameter so
 `_oc_featured_cards_html`'s `enumerate()` caller didn't need to change.
