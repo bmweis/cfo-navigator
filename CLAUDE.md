@@ -3555,6 +3555,54 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   label, the dropdown's no-default-selected state, a direct POST
   attempting to set `link_label` being ignored).
 
+- **Original content — every live piece must have its own social share
+  card, enforced at publish (2026-09).** The OG-card system (see the Social
+  share cards bullet above) always falls back to `default.png` for a piece
+  with no card of its own — safe as a rendering default, but nothing
+  stopped a Live `original_content` piece from actually shipping without
+  one, which is exactly the gap this closes. `_oc_publish_gate_error(status,
+  slug)` (`webapp/app.py`) is the single function both
+  `admin_original_content_new_submit` and `admin_original_content_edit_submit`
+  call — one shared validation path, not duplicated per route, precisely
+  because this feature exists to stop the kind of drift a second copy of
+  the check would risk. It rejects a save that would leave `status="live"`
+  with no matching `webapp/static/og/<slug>.png` (checked via the same
+  `_og_image_slugs()` cache the OG-card system already uses), with an error
+  naming the exact expected path and the only way through: "This piece
+  needs its own share card before it can go live. Commit a 1200×630 PNG at
+  `static/og/<slug>.png`, wait for the deploy, then set this to Live. Save
+  as Draft in the meantime." **No override exists** — Draft is the sole
+  escape valve. The same check fires on an edit that changes a Live piece's
+  slug to one with no card, not just on first publish.
+
+  Three supporting pieces, all reading the identical `_og_image_slugs()`
+  lookup so nothing can disagree with the block itself: (1)
+  `_oc_card_status_html(slug)` renders a note directly under the form's
+  Status field — "Share card found at static/og/&lt;slug&gt;.png." or "No
+  share card yet. Commit a 1200×630 PNG at static/og/&lt;slug&gt;.png
+  before setting this to Live." — computed server-side from the form's
+  current slug on every page load, deliberately not JS: a slug can change
+  before save, and a JS guess reading a stale value would be worse than a
+  render-time-accurate one. (2) The admin list at
+  `/admin/thought-leadership/original` badges a Live row with no card —
+  investigated for an existing precedent first and found
+  `_review_status_pill_html` (Software/Communities' review tracking) is a
+  heavier, unrelated mechanism, so it wasn't reused; instead this follows
+  `/admin/system/page-index`'s own plain muted-text "⚠ No tier assigned"
+  treatment — a small `--alert`-colored "No share card" line, no colored
+  pill, matching this codebase's standing rule that admin surfaces stay
+  undecorated for this class of flag. (3)
+  `webapp.checks.og_card_missing_problems()` is a new `/admin/checks` row
+  ("Every live piece has a share card"), the same shape as
+  `og_url_threading_problems()`/`original_content_mirror_problems()`, so a
+  card deleted after publish is still caught mechanically, not only at the
+  moment of the original save. `GET /static/og/{filename}`'s own
+  `default.png` fallback is completely unchanged — this feature only ever
+  decides whether a *save* is allowed, never how a card is served. See
+  ARCHITECTURE.md's matching entry and `tests/test_original_content_admin.py`'s
+  publish-gate section (12 tests) plus `tests/test_social_share_cards.py`'s
+  `og_card_missing_problems()` section for the regression coverage.
+
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On
   `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat

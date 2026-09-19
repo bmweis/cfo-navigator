@@ -15273,6 +15273,76 @@ def _oc_link_caption(tag: str) -> str:
     return f"Link: {info['link_label']}" if info else "Link text is set from the tag."
 
 
+# Social share card publish gate (2026-09) — every LIVE original_content
+# piece must have its own committed webapp/static/og/<slug>.png. The
+# default.png runtime fallback (_og_image_url) stays exactly as-is and is
+# correct behavior for degrading gracefully; it is not permission to
+# publish without a real card. Publishing itself happens through the admin
+# panel (a plain DB write, no PR/CI in the loop), so this has to be
+# enforced at save time, not by a test — see og_card_missing_problems()
+# below for the defense-in-depth check that catches a card going missing
+# AFTER publish (a slug change, a deleted file, a pre-gate row).
+#
+# Both _oc_card_status_html (the Status-field helper line) and
+# _oc_publish_gate_error (the hard block) read the exact same
+# _og_image_slugs() lookup the /static/og/{filename} route itself uses —
+# one source of truth, so the warning and the block can never disagree.
+def _oc_card_status_html(slug: str) -> str:
+    """Server-rendered note under the Status field reflecting this piece's
+    OWN card — present or missing — as of page load. Deliberately no JS:
+    the slug can change in the form before save, and a stale client-side
+    guess would be worse than a value that's accurate as of render."""
+    slug = (slug or "").strip()
+    if not slug:
+        return ""
+    path = f"static/og/{slug}.png"
+    if slug in _og_image_slugs():
+        return f'<p style="margin:6px 0 0;font-size:12px;color:var(--muted);">Share card found at {_esc(path)}.</p>'
+    return (
+        f'<p style="margin:6px 0 0;font-size:12px;color:var(--alert);">'
+        f'No share card yet. Commit a 1200&times;630 PNG at {_esc(path)} before setting this to Live.</p>'
+    )
+
+
+def _oc_publish_gate_error(status: str, slug: str) -> str:
+    """The hard block itself — shared by both the add and edit submit
+    routes so the rule can't drift between them. Returns an empty string
+    when the save may proceed (status isn't 'live', or the slug's card is
+    committed); a non-empty string is the exact rejection message to show.
+    There is no override: Draft is the escape valve — write the piece,
+    save as Draft, commit the card, wait for the deploy, then flip to
+    Live."""
+    slug = (slug or "").strip()
+    if status != "live" or slug in _og_image_slugs():
+        return ""
+    return (
+        f"This piece needs its own share card before it can go live. Commit a "
+        f"1200×630 PNG at static/og/{slug}.png, wait for the deploy, then set this "
+        f"to Live. Save as Draft in the meantime."
+    )
+
+
+def og_card_missing_problems() -> list[str]:
+    """Every Live original_content row must have its own committed
+    webapp/static/og/<slug>.png. _oc_publish_gate_error stops a NEW
+    occurrence of this at save time, but a card can still go missing
+    afterward — a slug change, a deleted file, or a row that predates the
+    gate — so this is the defense-in-depth check, same shape as
+    original_content_mirror_problems() in webapp/checks.py (which this
+    mirrors: a live introspection query, no judgment call, wired into
+    run_all() the same way)."""
+    lib = _lib()
+    try:
+        live_rows = lib.list_original_content(status="live")
+    finally:
+        lib.close()
+    have_cards = _og_image_slugs()
+    return [
+        f"{r['slug']!r} (id {r['id']}) is live with no static/og/{r['slug']}.png"
+        for r in live_rows if r["slug"] not in have_cards
+    ]
+
+
 def _oc_card_tuple(row: dict, idx: int) -> tuple:
     """Build a _tl_fcard()-shaped tuple from an original_content DB row.
     `idx` is unused now that color comes from the tag rather than card
@@ -16133,7 +16203,7 @@ def _oc_parse_warning(values: dict) -> str:
     return ""
 
 
-def _oc_form_fields(values: dict) -> str:
+def _oc_form_fields(values: dict, suppress_card_status: bool = False) -> str:
     status_opts = "".join(
         f'<option value="{s}"{" selected" if values.get("status") == s else ""}>{label}</option>'
         for s, label in (("draft", "Draft"), ("live", "Live"))
@@ -16224,6 +16294,7 @@ def _oc_form_fields(values: dict) -> str:
       Draft renders only for a signed-in admin, at its own canonical URL. Live is public&mdash;on
       the site for anyone, and (if Body is filled in) reachable at /thought-leadership/&lt;slug&gt;.
     </p>
+    {'' if suppress_card_status else _oc_card_status_html(values.get('slug', ''))}
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--navy);">
@@ -16239,9 +16310,27 @@ def _oc_form_fields(values: dict) -> str:
 
 def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_label: str,
                    show_preview: bool = False) -> str:
-    error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+    # A validation-error banner is a status/error state — BRAND.md §2.2/§2.3
+    # reserve that for the --alert family (never coral, which is decorative
+    # and never signals status). --alert-wash is this same alert/error
+    # semantic's own soft-fill variant (paired with --alert text, mirroring
+    # how --coral-wash pairs with --coral/--coral-deep elsewhere) — its own
+    # comment currently describes it as ".article-warn only," but that's a
+    # description of today's sole caller, not an exclusivity rule; this is
+    # the same alert/error meaning, just on an admin form rather than a
+    # public article. Scoped to this one form — _ai_surface_form_page and
+    # _feed_form_page share this identical (pre-existing, unrelated to this
+    # PR) coral-wash+navy error banner and were flagged, not fixed here.
+    error_html = (f'<p style="background:var(--alert-wash);color:var(--alert);border-radius:10px;'
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
+    # The Status-field helper line and this banner read the identical
+    # _oc_publish_gate_error() fact — showing both at once repeats the same
+    # sentence twice on one screen. Suppress the ambient helper only when
+    # THIS error IS the gate error (not any other validation failure, which
+    # may coexist with a genuinely missing card and should still surface it).
+    suppress_card_status = bool(error) and error == _oc_publish_gate_error(
+        values.get("status", ""), values.get("slug", ""))
     # Preview links to the row's currently-persisted slug (values["slug"] is
     # sourced straight from the DB row on the normal GET-edit path) — never
     # an unsaved edit, and never shown on the Add form at all (show_preview
@@ -16267,7 +16356,7 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
 <h1>{_esc(heading)}</h1>
 {error_html}
 <form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
-{_oc_form_fields(values)}
+{_oc_form_fields(values, suppress_card_status=suppress_card_status)}
   <div>
     <button type="submit" class="btn">{_esc(submit_label)}</button>
     <a href="/admin/thought-leadership/original" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
@@ -16337,12 +16426,27 @@ def admin_original_content(request: Request, status: str = ""):
             '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;'
             'background:var(--accent-light);color:var(--muted);">Draft</span>'
         )
+        # Defense in depth — the publish gate (_oc_publish_gate_error) stops
+        # a NEW occurrence of this, but a card can still go missing after
+        # the fact (a slug change, a deleted file, or a row that predates
+        # the gate). No precedent on this page (or a directly analogous
+        # one) for flagging a single missing asset on an admin list row —
+        # the whole-record review-status pill elsewhere in this codebase is
+        # a heavier, semantically different "content reviewed" concept, not
+        # reused here — so this follows the plain-text convention
+        # /admin/system/page-index uses for its own row-level problem flag:
+        # muted --alert text, no colored pill, admin surfaces stay
+        # undecorated.
+        card_flag = (
+            '<br><span style="font-size:11px;color:var(--alert);">No share card</span>'
+            if it["status"] == "live" and it["slug"] not in _og_image_slugs() else ""
+        )
         page_link = (f' &middot; <a href="/thought-leadership/{_esc(it["slug"])}" target="_blank" rel="noopener" '
                      f'style="font-size:12px;">View &rarr;</a>') if it["body_md"] else ""
         return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}{page_link}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);font-family:ui-monospace,monospace;">{_esc(it['slug'])}</td>
-  <td style="padding:10px 12px;">{status_badge}</td>
+  <td style="padding:10px 12px;">{status_badge}{card_flag}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{"Yes" if it["featured_home"] else "—"}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{it['display_order']}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(_relative_age(it['updated_at'])) or '—'}</td>
@@ -16436,6 +16540,9 @@ async def admin_original_content_new_submit(request: Request):
         slug_error = _validate_oc_slug(v["slug"], lib)
         if slug_error:
             return _reject(slug_error)
+        gate_error = _oc_publish_gate_error(v["status"], v["slug"])
+        if gate_error:
+            return _reject(gate_error)
 
         new_id = lib.add_original_content(
             v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
@@ -16506,6 +16613,9 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
         slug_error = _validate_oc_slug(v["slug"], lib, exclude_id=item_id)
         if slug_error:
             return _reject(slug_error)
+        gate_error = _oc_publish_gate_error(v["status"], v["slug"])
+        if gate_error:
+            return _reject(gate_error)
 
         # The edit form always prefills display_order with the current
         # value, so a blank submission here is a deliberate clear — same

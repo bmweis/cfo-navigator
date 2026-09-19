@@ -127,6 +127,12 @@ def og_url_threading_problems() -> list[str]:
     return app.og_url_threading_problems()
 
 
+# --- Social share cards: every Live piece has its own card (2026-09) --------
+def og_card_missing_problems() -> list[str]:
+    from webapp import app
+    return app.og_card_missing_problems()
+
+
 # --- Original content mirroring invariant (2026-09) --------------------------
 # sync_original_content_article() only ever fires from the two admin save
 # routes (see linklib/original_content_sync.py) — a write via any other path
@@ -319,6 +325,12 @@ def run_all() -> list[dict]:
         "name": "Original content mirrored for retrieval", "where": "Live + CI", "ok": not om,
         "what": "Every original_content row with real body_md has a working articles mirror, so FP&A Buddy can find and cite it.",
         "detail": "; ".join(om) if om else "Every row with body_md has a valid mirror."})
+
+    og = og_card_missing_problems()
+    results.append({
+        "name": "Every live piece has a share card", "where": "Live + CI", "ok": not og,
+        "what": "Every Live original_content piece has its own committed webapp/static/og/<slug>.png—the publish gate stops new occurrences, this catches a card that goes missing afterward.",
+        "detail": "; ".join(og) if og else "Every Live piece has its own share card."})
 
     cm = coral_moment_problems()
     results.append({
