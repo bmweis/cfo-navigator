@@ -25389,6 +25389,39 @@ def fpa_buddy_how_it_works(request: Request):
     the `gap:20px` rhythm is unaffected; only the one resized section's own
     height changed, which is the direct, correct consequence of the table
     now actually fitting its column instead of a spacing-rule change.
+
+    Third rider: with the table narrowed to 760px, the three numeric
+    headers (Archive sources/Feed items/Web results) wrapped onto two lines
+    each, at three DIFFERENT widths — none of the shared `_COL_WIDTH_*`
+    admin-table-column constants applied (those are calibrated for
+    Name/Email/Date/Status/Count columns on admin entity-list tables, not
+    this page's own locally-scoped `.cc-table`, which — like every other
+    `.cc-table` on the site — sizes its columns with inline literals, not
+    that constant family). Plain `table-layout:auto` made this genuinely
+    hard to get right: giving all three columns an identical `width` hint
+    plus `white-space:nowrap` (to stop the wrap) still let the browser
+    squeeze them to three DIFFERENT rendered widths, because each column's
+    own nowrap-forced min-content differs by header text length, and the
+    auto-layout squeeze algorithm shrinks a column in proportion to its own
+    slack (specified width minus its min-content) — the shortest headers
+    had the most slack and so were squeezed the smallest, exactly inverting
+    the intended "equal width" outcome. Fixed by switching the whole table
+    to `table-layout:fixed` and giving every column (Tier, the three
+    metric columns, and — implicitly, by leaving it unspecified — What
+    changes) an explicit pixel budget that sums to exactly 760px: Tier
+    110px (matches "Standard"'s own measured single-line width, its true
+    floor), the three metric columns 168px each (comfortably over "Archive
+    sources"'s measured 136px content need), leaving What changes 145px to
+    absorb the remainder, per the ask. Fixed layout is deterministic here
+    in a way auto layout's heuristic squeeze isn't — verified live: all
+    three metric columns render at a literal, identical 168px, the table
+    is exactly 760px wide (matching `.tool-prose`, no new desktop
+    horizontal scroll), and the 390px mobile view still scrolls only
+    inside the table's own `overflow-x:auto` wrapper, never the page. The
+    stale `min-width:200px` inline style on the "What changes" body `<td>`
+    (a leftover from before this rider, no longer meaningful under fixed
+    layout) was removed. Every `gap:20px` section spacing is unaffected by
+    this rider too — only the table's own internal column widths changed.
     """
     from linklib.agent import EFFORT_SETTINGS
     lib = _lib()
@@ -25407,7 +25440,7 @@ def fpa_buddy_how_it_works(request: Request):
         f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{s["max_library"]}</td>'
         f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{s["max_feed"]}</td>'
         f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{s["max_web"]}</td>'
-        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px;color:var(--ink-soft);min-width:200px;">{_esc(_TIER_BLURBS.get(tier, ""))}</td></tr>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px;color:var(--ink-soft);">{_esc(_TIER_BLURBS.get(tier, ""))}</td></tr>'
         for tier, s in EFFORT_SETTINGS.items()
     )
 
@@ -25442,12 +25475,12 @@ def fpa_buddy_how_it_works(request: Request):
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">How much effort to spend</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The only choice you make is how hard to work the question. Each level pulls more sources and uses a more capable model.</p>
 <div style="overflow-x:auto;">
-<table class="cc-table">
+<table class="cc-table" style="table-layout:fixed;">
 <thead><tr style="background:var(--bg);">
-<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Tier</th>
-<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Archive sources</th>
-<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Feed items</th>
-<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Web results</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:110px;">Tier</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:168px;">Archive sources</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:168px;">Feed items</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:168px;">Web results</th>
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">What changes</th>
 </tr></thead>
 <tbody>
