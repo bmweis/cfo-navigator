@@ -3486,6 +3486,75 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   confirmed correct for a row with body content; the disabled state's `title`
   text confirmed correct for a row without.
 
+- **Original content — tag taxonomy, semantic colors, derived link label
+  (2026-09).** `tag_label` was free text and the flagship-card eyebrow color
+  came from a positional cycle (`_OC_TAG_COLORS`, cycling coral-deep/
+  seafoam-deep/navy-light by card index — a separate, unrelated cycle from
+  `_CARD_ICON_STYLES`, confirmed by direct inspection before changing
+  anything, so this fix never touched the Toolbox/Software/Communities card
+  grids' own icon-color cycle) — two cards tagged "Setup Guide" could render
+  in different colors purely by slot, and nothing kept `tag_label`/`teaser`/
+  `link_label` pointed at the same idea: `chart-of-accounts` shipped tagged
+  "Setup Guide" with a "Read the playbook" link and a teaser opening "A
+  playbook for…". Fixed with a closed three-value taxonomy
+  (`_OC_TAG_INFO` in `webapp/app.py` — the one dict every reader, the form
+  dropdown, the card color, and the derived link label, all resolve
+  through, so adding a fourth tag later is a one-line change to it):
+
+  | Tag | Meaning | Color |
+  |---|---|---|
+  | Guide | Instruction manuals, reference material | `--navy` |
+  | Playbook | Steps for how to do something, an action | `--seafoam-deep` |
+  | Framework | A model or metric for thinking about something | `--coral-deep` |
+
+  Semantic, not decorative — blue is something that stays, green is
+  something you can run, coral is meant to jump. All three are the
+  text-capable ramp shades (BRAND.md §2.3 bans plain `--coral`/`--seafoam`
+  text under 18px, and this is small uppercase eyebrow text) — though
+  Guide is a substitution, not a carry-forward: the old positional cycle's
+  third shade was `--navy-light` (5.9:1), darker `--navy` (12.1:1) binds to
+  Guide now. Both are existing tokens, so still no new palette entry and no
+  contrast regression. `--seafoam-deep` (4.7:1) and `--coral-deep` (4.9:1),
+  now carrying Playbook and Framework, are the two tightest contrast
+  ratios in the whole palette — see BRAND.md §2.3's guardrail against
+  lightening either one for an unrelated reason. The admin form's free-text Tag label input became a
+  `<select>` with exactly these three options and a leading disabled
+  placeholder (`<option value="" disabled selected>`) — never submittable,
+  so a fresh Add form can't silently default to whichever tag sorts first;
+  `required` still blocks a submission that leaves it selected, and the
+  server independently rejects any `tag_label` outside the three
+  (`v["tag_label"] not in _OC_TAGS`) regardless of what the form allows.
+  **Link label is no longer a form field at all** — the input was replaced
+  with static, non-editable text (`Set automatically from the tag.`) and
+  `_oc_values_from_form` derives `link_label` from `tag_label` server-side
+  on every save, ignoring whatever a raw POST might supply under that key
+  — the two fields can never desync again the way chart-of-accounts did.
+  `Library.add_original_content`/`update_original_content` are unchanged
+  (still take `tag_label`/`link_label` as plain strings; only the caller
+  changed) — no schema migration, since `tag_label`/`link_label` were
+  already TEXT columns and the closed set is enforced at the form/route
+  layer, not a DB constraint. `_TL_FEATURED_CARDS` (the frozen, unimported
+  rollback-reference tuple `scripts/archive/migrate_original_content.py`
+  seeds from) is deliberately untouched — it's historical record of what
+  was migrated once, not live-rendering content, same precedent as every
+  other frozen-tuple entry in this doc. **`scripts/normalize_original_content_tags.py`**
+  (preview/`--apply`/write-then-read-back, not yet run against production
+  or archived) is the one-off fix for the four already-live rows — two are
+  a straight carry-forward (`growth-engine-ratio` → Framework,
+  `ai-hackathon-playbook` → Playbook) and two are a genuine
+  reclassification, not a mechanical rename: `chart-of-accounts` is steps
+  for designing and maintaining a chart of accounts, an action, so it
+  becomes Playbook (its teaser and link label already said so — only
+  `tag_label` was out of step); `netsuite-mcp` is a setup manual you follow
+  once and refer back to, so it becomes Guide. The script refuses to guess
+  at a fifth slug if one turns up in production that it doesn't recognize,
+  rather than silently leaving it alone or normalizing it wrong. See
+  BRAND.md §2.3 for the full color-semantics write-up and
+  `tests/test_original_content_admin.py`'s tag-taxonomy section for the
+  regression coverage (invalid-tag rejection, each tag's derived link
+  label, the dropdown's no-default-selected state, a direct POST
+  attempting to set `link_label` being ignored).
+
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On
   `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat
