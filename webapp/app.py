@@ -26109,7 +26109,17 @@ def admin_checks(request: Request):
     exa_pricing_banner = _exa_pricing_freshness_banner(exa_pricing_last_verified)
     db_copy_banner = _db_copy_scan_banner(db_copy_violations)
 
-    live = [r for r in results if r["where"] == "In-app"]
+    # Fixed 2026-09 (voice-enforcement PR follow-up) — this compared against
+    # "In-app", a value run_all() has never actually produced (every live
+    # row's "where" is "Live + CI"; the only other value, "CI", marks a row
+    # that never runs here at all). The summary banner below was
+    # permanently blank as a result, regardless of whether every check was
+    # passing or several were failing — confirmed by reading run_all()'s
+    # own "where" values directly, not assumed. Real risk given this PR
+    # adds a third check that can genuinely fail (the semantic-contradiction
+    # row) on top of the two that could already fail: a broken headline
+    # indicator on the one page meant to surface exactly that.
+    live = [r for r in results if r["where"] == "Live + CI"]
     passing = sum(1 for r in live if r["ok"])
     failing = [r for r in live if r["ok"] is False]
 

@@ -55,6 +55,18 @@ from linklib.voice_mechanics import fix_spaced_em_dashes  # noqa: E402
 # normalize_voice_mechanics() in linklib/db.py (see that PR's diff) — the
 # same columns the backstop now guards going forward are the ones this
 # cleanup fixes for content written before it existed.
+#
+# Extended 2026-09 (voice-enforcement PR, item 3b audit): category_features,
+# tool_categories, community_categories, benchmarks, thought_leadership,
+# original_content, and ai_surfaces were all found to have skipped
+# normalize_voice_mechanics() on their own INSERT/UPDATE paths too — the
+# same shape as the original tools/communities/community_profiles gap this
+# script was built for, just discovered later, in a separate audit pass.
+# This is the confirmed real-world case this whole investigation started
+# from: production's category_features id=8 (Anomaly detection) has a
+# genuinely spaced em dash in `definition` right now — see the 2026-09
+# CLAUDE.md bullet and this script's own PR for the before/after this
+# specific row's fix is expected to produce.
 _TARGETS = [
     ("tools", "id", "name",
      ["description", "summary", "agent_taxonomy_note", "competitive_differentiation", "suite_note"]),
@@ -67,7 +79,23 @@ _TARGETS = [
       "primary_purpose", "cpe_eligible", "platform_type", "meeting_format",
       "event_style", "seniority_band", "resources_included", "stage_focus",
       "jobs_program", "team_or_individual"]),
+    ("category_features", "id", "name", ["definition", "pointer_note"]),
+    ("tool_categories", "id", "name", ["description"]),
+    ("community_categories", "id", "name", ["description"]),
+    ("benchmarks", "id", "name", ["description"]),
+    ("thought_leadership", "id", "title", ["title", "venue", "description"]),
+    ("original_content", "id", "title", ["title", "teaser", "body_md"]),
+    ("ai_surfaces", "id", "title", ["title", "teaser", "body_md"]),
 ]
+
+# settings.key values that hold real UI copy — same list voice_db_scan.py's
+# _SCAN_SETTINGS_KEYS uses, since set_setting() (the one choke point every
+# one of these is written through) also skipped normalize_voice_mechanics()
+# before this same audit pass.
+_SETTINGS_TARGETS = (
+    "homepage_headline_copy", "homepage_subhead_copy", "homepage_teaser_copy",
+    "homepage_expanded_copy", "about_page_copy", "htib_before_copy", "htib_after_copy",
+)
 
 
 def _row_label(table: str, row_id, conn: sqlite3.Connection, name_column: str | None) -> str:
@@ -137,6 +165,42 @@ def main() -> int:
                             f"{id_col}={row_id}: expected {fixed!r}, got {check!r}"
                         )
             if table_changed == 0:
+                print("  (no spaced em dashes found — clean)")
+            print()
+
+        # settings-backed copy (homepage/about/how-this-is-built) — a
+        # key/value table, not a fixed-columns one, so it gets its own
+        # small pass rather than forcing it through the same (table,
+        # id_column, columns) shape as everything above.
+        settings_table_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings'"
+        ).fetchone()
+        if settings_table_exists:
+            print(f"{'=' * 70}\nsettings ({len(_SETTINGS_TARGETS)} keys checked)\n{'=' * 70}")
+            settings_changed = 0
+            for key in _SETTINGS_TARGETS:
+                row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+                if row is None or not row[0]:
+                    continue
+                original = row[0]
+                fixed = fix_spaced_em_dashes(original)
+                if fixed == original:
+                    continue
+                settings_changed += 1
+                total_changed += 1
+                total_rows_touched.add(("settings", key))
+                print(f"  [settings key={key!r}]:")
+                print(f"    before: {original!r}")
+                print(f"    after:  {fixed!r}")
+                if args.apply:
+                    conn.execute("UPDATE settings SET value=? WHERE key=?", (fixed, key))
+                    conn.commit()
+                    check = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()[0]
+                    assert check == fixed, (
+                        f"Write-then-read-back FAILED for settings key={key!r}: "
+                        f"expected {fixed!r}, got {check!r}"
+                    )
+            if settings_changed == 0:
                 print("  (no spaced em dashes found — clean)")
             print()
 
