@@ -79,6 +79,28 @@ def _mask_rubric_enumerations(text: str) -> str:
     return _RUBRIC_ENUMERATION_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 
+# Invisible/zero-width Unicode characters that show up as paste garbage —
+# a copy-paste from Word/Google Docs/a web page can carry one of these with
+# nothing visible to flag it. Curated, not general (same "add a real one
+# when it turns up" discipline as AMPERSAND_NAMES/AMPERSAND_ACRONYMS above),
+# found via a real production example: `category_features` id 104's
+# `definition` ends with a zero-width space (U+200B) that em dashes,
+# ampersands, and BANNED_WORDS are all blind to, since none of them look
+# for a character with no visible glyph at all. Deliberately excludes
+# ordinary whitespace (space, tab, newline) and the em-dash/ampersand rules'
+# own territory — this is only characters that render as literally nothing.
+INVISIBLE_CHARS: dict[str, str] = {
+    "​": "zero-width space",
+    "‌": "zero-width non-joiner",
+    "‍": "zero-width joiner",
+    "﻿": "zero-width no-break space (BOM)",
+    "⁠": "word joiner",
+    "‎": "left-to-right mark",
+    "‏": "right-to-left mark",
+    "­": "soft hyphen",
+}
+
+
 def mechanical_findings(text: str) -> list[tuple[str, str]]:
     """Deterministic voice violations as (rule, matched_phrase). No API calls.
 
@@ -97,6 +119,14 @@ def mechanical_findings(text: str) -> list[tuple[str, str]]:
     for p in PERFORMATIVE:
         if p in low:
             findings.append(("performative", p))
+    # Invisible characters — checked against the raw, unmasked `text`, not
+    # `low`: masking/lowercasing is only ever about the banned-word rubric
+    # enumeration, and neither operation removes or alters a zero-width
+    # character anywhere else in the string, so there's nothing to lose by
+    # checking the original.
+    for ch, label in INVISIBLE_CHARS.items():
+        if ch in text:
+            findings.append(("invisible-character", f"U+{ord(ch):04X} ({label})"))
     return findings
 
 

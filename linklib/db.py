@@ -5274,6 +5274,8 @@ class Library:
             slug = f"{base}-{suffix}"
             suffix += 1
         now = _now()
+        description_before, summary_before = description.strip(), summary.strip()
+        description_fixed, summary_fixed = _voice_fix(description_before), _voice_fix(summary_before)
         cur = self.conn.execute(
             """INSERT INTO tools (name, slug, description, url, categories_json,
                approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email,
@@ -5281,14 +5283,25 @@ class Library:
                description_needs_verification, description_ai_confident, description_low_confidence,
                needs_review)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (name.strip(), slug, _voice_fix(description.strip()), url.strip(),
+            (name.strip(), slug, description_fixed, url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
              promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip(),
-             _voice_fix(summary.strip()), description_needs_verification, description_ai_confident,
+             summary_fixed, description_needs_verification, description_ai_confident,
              description_low_confidence, 1 if needs_review else 0),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — no id exists until
+        # the INSERT itself returns one (same reason add_original_content/
+        # add_category_feature do the same). A pre-existing gap from the
+        # original voice-review-queue PR — add_tool called bare
+        # _voice_fix() with no queue logging, never caught because that
+        # PR's own CI guard accepted a bare _voice_fix() call as
+        # sufficient; found and fixed here by the same tightened guard
+        # that closed the tool_categories/community_categories gap.
+        self.log_voice_correction("tools", new_id, "description", description_before, description_fixed)
+        self.log_voice_correction("tools", new_id, "summary", summary_before, summary_fixed)
+        return new_id
 
     def list_tools(self, approved_only: bool = True) -> list[dict]:
         if approved_only:
@@ -6393,12 +6406,18 @@ class Library:
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tool_categories"
         ).fetchone()[0]
+        description_fixed = _voice_fix(description)
         cur = self.conn.execute(
             "INSERT INTO tool_categories (name, description, sort_order) VALUES (?,?,?)",
-            (name, _voice_fix(description), next_order),
+            (name, description_fixed, next_order),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — no id exists until
+        # the INSERT itself returns one (same reason add_original_content/
+        # add_category_feature do the same).
+        self.log_voice_correction("tool_categories", new_id, "description", description, description_fixed)
+        return new_id
 
     def rename_tool_category(self, category_id: int, new_name: str, description: str = "") -> int:
         """Rename/re-describe a category, cascading the name change onto every
@@ -6425,7 +6444,7 @@ class Library:
                 raise ValueError(f'A category named "{new_name}" already exists.')
         self.conn.execute(
             "UPDATE tool_categories SET name=?, description=? WHERE id=?",
-            (new_name, _voice_fix(description), category_id),
+            (new_name, self._vf("tool_categories", category_id, "description", description), category_id),
         )
         changed = 0
         if new_name != old_name:
@@ -6498,18 +6517,26 @@ class Library:
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM benchmarks WHERE section=?", (section,)
         ).fetchone()[0]
+        description_before = description.strip()
+        description_fixed = _voice_fix(description_before)
         cur = self.conn.execute(
             "INSERT INTO benchmarks (name, url, description, coverage, pricing, sort_order, section) VALUES (?,?,?,?,?,?,?)",
-            (name.strip(), url.strip(), _voice_fix(description.strip()), coverage, pricing, next_order, section),
+            (name.strip(), url.strip(), description_fixed, coverage, pricing, next_order, section),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — no id exists until
+        # the INSERT itself returns one (same reason add_original_content/
+        # add_category_feature do the same).
+        self.log_voice_correction("benchmarks", new_id, "description", description_before, description_fixed)
+        return new_id
 
     def update_benchmark(self, benchmark_id: int, name: str, url: str, description: str,
                          coverage: str, pricing: str, section: str = "benchmarking") -> None:
         self.conn.execute(
             "UPDATE benchmarks SET name=?, url=?, description=?, coverage=?, pricing=?, section=? WHERE id=?",
-            (name.strip(), url.strip(), _voice_fix(description.strip()), coverage, pricing, section, benchmark_id),
+            (name.strip(), url.strip(), self._vf("benchmarks", benchmark_id, "description", description.strip()),
+             coverage, pricing, section, benchmark_id),
         )
         self.conn.commit()
 
@@ -6519,7 +6546,7 @@ class Library:
         directly on /admin/tools/resources survives a re-sync."""
         self.conn.execute(
             "UPDATE benchmarks SET name=?, description=? WHERE id=?",
-            (name.strip(), _voice_fix(description.strip()), benchmark_id),
+            (name.strip(), self._vf("benchmarks", benchmark_id, "description", description.strip()), benchmark_id),
         )
         self.conn.commit()
 
@@ -6590,17 +6617,28 @@ class Library:
                 (type,),
             ).fetchone()[0]
         now = _now()
+        title_before, venue_before, description_before = title.strip(), venue.strip(), description.strip()
+        title_fixed, venue_fixed, description_fixed = (
+            _voice_fix(title_before), _voice_fix(venue_before), _voice_fix(description_before),
+        )
         cur = self.conn.execute(
             "INSERT INTO thought_leadership "
             "(type, title, url, venue, date_label, sort_key, description, needs_synopsis, display_order, "
             "featured_home, created_at, updated_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (type, _voice_fix(title.strip()), url.strip(), _voice_fix(venue.strip()), date_label.strip(),
-             sort_key.strip(), _voice_fix(description.strip()), int(bool(needs_synopsis)), display_order,
+            (type, title_fixed, url.strip(), venue_fixed, date_label.strip(),
+             sort_key.strip(), description_fixed, int(bool(needs_synopsis)), display_order,
              int(bool(featured_home)), now, now),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — no id exists until
+        # the INSERT itself returns one (same reason add_original_content/
+        # add_category_feature do the same).
+        self.log_voice_correction("thought_leadership", new_id, "title", title_before, title_fixed)
+        self.log_voice_correction("thought_leadership", new_id, "venue", venue_before, venue_fixed)
+        self.log_voice_correction("thought_leadership", new_id, "description", description_before, description_fixed)
+        return new_id
 
     def update_thought_leadership(self, item_id: int, type: str, title: str, url: str, venue: str,
                                   date_label: str, sort_key: str, description: str,
@@ -6609,9 +6647,10 @@ class Library:
         self.conn.execute(
             "UPDATE thought_leadership SET type=?, title=?, url=?, venue=?, date_label=?, sort_key=?, "
             "description=?, needs_synopsis=?, display_order=?, featured_home=?, updated_at=? WHERE id=?",
-            (type, _voice_fix(title.strip()), url.strip(), _voice_fix(venue.strip()), date_label.strip(),
-             sort_key.strip(), _voice_fix(description.strip()), int(bool(needs_synopsis)), display_order,
-             int(bool(featured_home)), _now(), item_id),
+            (type, self._vf("thought_leadership", item_id, "title", title.strip()), url.strip(),
+             self._vf("thought_leadership", item_id, "venue", venue.strip()), date_label.strip(),
+             sort_key.strip(), self._vf("thought_leadership", item_id, "description", description.strip()),
+             int(bool(needs_synopsis)), display_order, int(bool(featured_home)), _now(), item_id),
         )
         self.conn.commit()
 
@@ -6743,15 +6782,25 @@ class Library:
                 "SELECT COALESCE(MAX(display_order), -1) + 1 FROM ai_surfaces"
             ).fetchone()[0]
         now = _now()
+        title_before, teaser_before = title.strip(), teaser.strip()
+        title_fixed, teaser_fixed = _voice_fix(title_before), _voice_fix(teaser_before)
+        body_fixed = _voice_fix(body_md) if body_md else body_md
         cur = self.conn.execute(
             "INSERT INTO ai_surfaces (slug, title, teaser, body_md, external_href, status, "
             "display_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()),
-             _voice_fix(body_md) if body_md else body_md, external_href.strip(),
+            (slug.strip(), title_fixed, teaser_fixed, body_fixed, external_href.strip(),
              status, display_order, now, now),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — same reason
+        # add_original_content/add_category_feature do the same: no id
+        # exists until the INSERT itself returns one.
+        self.log_voice_correction("ai_surfaces", new_id, "title", title_before, title_fixed)
+        self.log_voice_correction("ai_surfaces", new_id, "teaser", teaser_before, teaser_fixed)
+        if body_md:
+            self.log_voice_correction("ai_surfaces", new_id, "body_md", body_md, body_fixed)
+        return new_id
 
     def update_ai_surface(self, item_id: int, slug: str, title: str, teaser: str,
                            body_md: str | None, external_href: str, status: str,
@@ -6759,9 +6808,10 @@ class Library:
         self.conn.execute(
             "UPDATE ai_surfaces SET slug=?, title=?, teaser=?, body_md=?, external_href=?, "
             "status=?, display_order=?, updated_at=? WHERE id=?",
-            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()),
-             _voice_fix(body_md) if body_md else body_md, external_href.strip(),
-             status, display_order, _now(), item_id),
+            (slug.strip(), self._vf("ai_surfaces", item_id, "title", title.strip()),
+             self._vf("ai_surfaces", item_id, "teaser", teaser.strip()),
+             self._vf("ai_surfaces", item_id, "body_md", body_md) if body_md else body_md,
+             external_href.strip(), status, display_order, _now(), item_id),
         )
         self.conn.commit()
 
@@ -6884,20 +6934,32 @@ class Library:
             slug = f"{base}-{suffix}"
             suffix += 1
         now = _now()
+        demographic_before, cost_note_before = demographic.strip(), cost_note.strip()
+        notes_before, local_markets_before = notes.strip(), local_markets.strip()
+        demographic_fixed, cost_note_fixed = _voice_fix(demographic_before), _voice_fix(cost_note_before)
+        notes_fixed, local_markets_fixed = _voice_fix(notes_before), _voice_fix(local_markets_before)
         cur = self.conn.execute(
             """INSERT INTO communities (name, slug, url, demographic, cost_band,
                cost_note, sponsorship_type, sponsor_name, access, format, notes,
                categories_json, approved, submitted_by, created_at, updated_at,
                reach, local_markets, featured, advisor)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (name.strip(), slug, url.strip(), _voice_fix(demographic.strip()),
-             cost_band, _voice_fix(cost_note.strip()), sponsorship_type, sponsor_name.strip(),
-             access.strip(), format.strip(), _voice_fix(notes.strip()), json.dumps(categories),
+            (name.strip(), slug, url.strip(), demographic_fixed,
+             cost_band, cost_note_fixed, sponsorship_type, sponsor_name.strip(),
+             access.strip(), format.strip(), notes_fixed, json.dumps(categories),
              approved, submitted_by.strip(), now, now,
-             reach, _voice_fix(local_markets.strip()), featured, advisor),
+             reach, local_markets_fixed, featured, advisor),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — no id exists until
+        # the INSERT itself returns one (same reason add_original_content/
+        # add_category_feature do the same).
+        self.log_voice_correction("communities", new_id, "demographic", demographic_before, demographic_fixed)
+        self.log_voice_correction("communities", new_id, "cost_note", cost_note_before, cost_note_fixed)
+        self.log_voice_correction("communities", new_id, "notes", notes_before, notes_fixed)
+        self.log_voice_correction("communities", new_id, "local_markets", local_markets_before, local_markets_fixed)
+        return new_id
 
     def list_communities(self, approved_only: bool = True) -> list[dict]:
         if approved_only:
@@ -6941,10 +7003,13 @@ class Library:
                cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
                notes=?, categories_json=?, updated_at=?, reach=?, local_markets=?,
                featured=?, advisor=? WHERE id=?""",
-            (name.strip(), url.strip(), _voice_fix(demographic.strip()), cost_band,
-             _voice_fix(cost_note.strip()), sponsorship_type, sponsor_name.strip(), access.strip(),
-             format.strip(), _voice_fix(notes.strip()), json.dumps(categories), _now(),
-             reach, _voice_fix(local_markets.strip()), featured, advisor, community_id),
+            (name.strip(), url.strip(), self._vf("communities", community_id, "demographic", demographic.strip()),
+             cost_band, self._vf("communities", community_id, "cost_note", cost_note.strip()),
+             sponsorship_type, sponsor_name.strip(), access.strip(),
+             format.strip(), self._vf("communities", community_id, "notes", notes.strip()),
+             json.dumps(categories), _now(),
+             reach, self._vf("communities", community_id, "local_markets", local_markets.strip()),
+             featured, advisor, community_id),
         )
         self.conn.commit()
         # Manual logo override staleness — mirrors update_tool exactly.
@@ -6968,7 +7033,7 @@ class Library:
         would get silently reverted on the next deploy's re-sync."""
         self.conn.execute(
             "UPDATE communities SET name=?, notes=?, updated_at=? WHERE id=?",
-            (name.strip(), _voice_fix(notes.strip()), _now(), community_id),
+            (name.strip(), self._vf("communities", community_id, "notes", notes.strip()), _now(), community_id),
         )
         self.conn.commit()
 
@@ -7315,21 +7380,34 @@ class Library:
                  notable_members_ai_confident=excluded.notable_members_ai_confident,
                  public_criticism_ai_confident=excluded.public_criticism_ai_confident,
                  verdict_summary_ai_confident=excluded.verdict_summary_ai_confident""",
-            (community_id, _voice_fix(ideal_member.strip()), _voice_fix(anti_fit.strip()),
-             _voice_fix(value_prop.strip()),
-             _voice_fix(format_reality.strip()), _voice_fix(engagement_level.strip()),
-             _voice_fix(sponsor_relationship_note.strip()),
-             _voice_fix(application_friction.strip()), _voice_fix(cost_value_verdict.strip()),
-             _voice_fix(notable_members.strip()),
-             founded_year, _voice_fix(public_criticism.strip()), _voice_fix(verdict_summary.strip()),
-             low_confidence, _now(), _voice_fix(business_model.strip()),
-             _voice_fix(primary_purpose.strip()), _voice_fix(cpe_eligible.strip()),
-             _voice_fix(platform_type.strip()),
-             _voice_fix(meeting_format.strip()), _voice_fix(event_style.strip()),
-             _voice_fix(seniority_band.strip()),
-             _voice_fix(resources_included.strip()), needs_review,
-             _voice_fix(stage_focus.strip()), _voice_fix(jobs_program.strip()),
-             _voice_fix(team_or_individual.strip()),
+            (community_id,
+             self._vf("community_profiles", community_id, "ideal_member", ideal_member.strip()),
+             self._vf("community_profiles", community_id, "anti_fit", anti_fit.strip()),
+             self._vf("community_profiles", community_id, "value_prop", value_prop.strip()),
+             self._vf("community_profiles", community_id, "format_reality", format_reality.strip()),
+             self._vf("community_profiles", community_id, "engagement_level", engagement_level.strip()),
+             self._vf("community_profiles", community_id, "sponsor_relationship_note",
+                       sponsor_relationship_note.strip()),
+             self._vf("community_profiles", community_id, "application_friction",
+                       application_friction.strip()),
+             self._vf("community_profiles", community_id, "cost_value_verdict", cost_value_verdict.strip()),
+             self._vf("community_profiles", community_id, "notable_members", notable_members.strip()),
+             founded_year,
+             self._vf("community_profiles", community_id, "public_criticism", public_criticism.strip()),
+             self._vf("community_profiles", community_id, "verdict_summary", verdict_summary.strip()),
+             low_confidence, _now(),
+             self._vf("community_profiles", community_id, "business_model", business_model.strip()),
+             self._vf("community_profiles", community_id, "primary_purpose", primary_purpose.strip()),
+             self._vf("community_profiles", community_id, "cpe_eligible", cpe_eligible.strip()),
+             self._vf("community_profiles", community_id, "platform_type", platform_type.strip()),
+             self._vf("community_profiles", community_id, "meeting_format", meeting_format.strip()),
+             self._vf("community_profiles", community_id, "event_style", event_style.strip()),
+             self._vf("community_profiles", community_id, "seniority_band", seniority_band.strip()),
+             self._vf("community_profiles", community_id, "resources_included", resources_included.strip()),
+             needs_review,
+             self._vf("community_profiles", community_id, "stage_focus", stage_focus.strip()),
+             self._vf("community_profiles", community_id, "jobs_program", jobs_program.strip()),
+             self._vf("community_profiles", community_id, "team_or_individual", team_or_individual.strip()),
              *conf),
         )
         self.conn.commit()
@@ -7368,7 +7446,10 @@ class Library:
         if not fields:
             return
         set_clause = ", ".join(f"{col}=?" for col in fields)
-        values = [_voice_fix(v.strip()) if isinstance(v, str) else v for v in fields.values()]
+        values = [
+            self._vf("community_profiles", community_id, k, v.strip()) if isinstance(v, str) else v
+            for k, v in fields.items()
+        ]
         self.conn.execute(
             f"UPDATE community_profiles SET {set_clause}, updated_at=? WHERE community_id=?",
             (*values, _now(), community_id),
@@ -7654,12 +7735,18 @@ class Library:
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM community_categories"
         ).fetchone()[0]
+        description_fixed = _voice_fix(description)
         cur = self.conn.execute(
             "INSERT INTO community_categories (name, description, sort_order) VALUES (?,?,?)",
-            (name, _voice_fix(description), next_order),
+            (name, description_fixed, next_order),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — no id exists until
+        # the INSERT itself returns one (same reason add_original_content/
+        # add_category_feature do the same).
+        self.log_voice_correction("community_categories", new_id, "description", description, description_fixed)
+        return new_id
 
     def rename_community_category(self, category_id: int, new_name: str, description: str = "") -> int:
         """Rename/re-describe a category, cascading the name change onto every
@@ -7685,7 +7772,7 @@ class Library:
                 raise ValueError(f'A category named "{new_name}" already exists.')
         self.conn.execute(
             "UPDATE community_categories SET name=?, description=? WHERE id=?",
-            (new_name, _voice_fix(description), category_id),
+            (new_name, self._vf("community_categories", category_id, "description", description), category_id),
         )
         changed = 0
         if new_name != old_name:
