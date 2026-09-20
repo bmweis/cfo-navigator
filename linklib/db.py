@@ -4164,10 +4164,23 @@ class Library:
         return row[0] if row else default
 
     def set_setting(self, key: str, value: str) -> None:
+        # Fixed 2026-09 (voice-enforcement PR, item 3b audit) — `set_setting`
+        # is the one choke point every settings-backed copy field
+        # (homepage_headline_copy, about_page_copy, htib_before_copy/
+        # htib_after_copy, ...) is written through, from four separate
+        # /admin/copy/* route handlers that call it directly with no
+        # _voice_fix() of their own — a real, confirmed gap, the same shape
+        # as the category_features one this PR was built around, just at
+        # the route layer instead of a dedicated Library method. Fixing it
+        # HERE, once, closes it for those four fields and for any future
+        # settings-backed copy field with no new call site to remember.
+        # Safe for every non-prose settings key too (caps, flags, model ids,
+        # JSON blobs, tokens): normalize_voice_mechanics is a no-op on text
+        # with no spaced em dash, which is every one of those.
         self.conn.execute(
             "INSERT INTO settings (key, value) VALUES (?,?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, value),
+            (key, _voice_fix(value) if isinstance(value, str) else value),
         )
         self.conn.commit()
 
@@ -5810,7 +5823,7 @@ class Library:
         cur = self.conn.execute(
             """INSERT INTO category_features (category_id, name, definition, pointer_note,
                sort_order, created_at) VALUES (?,?,?,?,?,?)""",
-            (category_id, name, definition.strip(), pointer_note.strip(), sort_order, _now()),
+            (category_id, name, _voice_fix(definition.strip()), _voice_fix(pointer_note.strip()), sort_order, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -5831,7 +5844,7 @@ class Library:
             raise ValueError(f'"{name}" already exists in this category.')
         self.conn.execute(
             "UPDATE category_features SET name=?, definition=?, pointer_note=?, sort_order=? WHERE id=?",
-            (name, definition.strip(), pointer_note.strip(), sort_order, feature_id),
+            (name, _voice_fix(definition.strip()), _voice_fix(pointer_note.strip()), sort_order, feature_id),
         )
         self.conn.commit()
 
@@ -6190,7 +6203,7 @@ class Library:
         ).fetchone()[0]
         cur = self.conn.execute(
             "INSERT INTO tool_categories (name, description, sort_order) VALUES (?,?,?)",
-            (name, description, next_order),
+            (name, _voice_fix(description), next_order),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -6220,7 +6233,7 @@ class Library:
                 raise ValueError(f'A category named "{new_name}" already exists.')
         self.conn.execute(
             "UPDATE tool_categories SET name=?, description=? WHERE id=?",
-            (new_name, description, category_id),
+            (new_name, _voice_fix(description), category_id),
         )
         changed = 0
         if new_name != old_name:
@@ -6295,7 +6308,7 @@ class Library:
         ).fetchone()[0]
         cur = self.conn.execute(
             "INSERT INTO benchmarks (name, url, description, coverage, pricing, sort_order, section) VALUES (?,?,?,?,?,?,?)",
-            (name.strip(), url.strip(), description.strip(), coverage, pricing, next_order, section),
+            (name.strip(), url.strip(), _voice_fix(description.strip()), coverage, pricing, next_order, section),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -6304,7 +6317,7 @@ class Library:
                          coverage: str, pricing: str, section: str = "benchmarking") -> None:
         self.conn.execute(
             "UPDATE benchmarks SET name=?, url=?, description=?, coverage=?, pricing=?, section=? WHERE id=?",
-            (name.strip(), url.strip(), description.strip(), coverage, pricing, section, benchmark_id),
+            (name.strip(), url.strip(), _voice_fix(description.strip()), coverage, pricing, section, benchmark_id),
         )
         self.conn.commit()
 
@@ -6314,7 +6327,7 @@ class Library:
         directly on /admin/tools/resources survives a re-sync."""
         self.conn.execute(
             "UPDATE benchmarks SET name=?, description=? WHERE id=?",
-            (name.strip(), description.strip(), benchmark_id),
+            (name.strip(), _voice_fix(description.strip()), benchmark_id),
         )
         self.conn.commit()
 
@@ -6390,8 +6403,9 @@ class Library:
             "(type, title, url, venue, date_label, sort_key, description, needs_synopsis, display_order, "
             "featured_home, created_at, updated_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (type, title.strip(), url.strip(), venue.strip(), date_label.strip(), sort_key.strip(),
-             description.strip(), int(bool(needs_synopsis)), display_order, int(bool(featured_home)), now, now),
+            (type, _voice_fix(title.strip()), url.strip(), _voice_fix(venue.strip()), date_label.strip(),
+             sort_key.strip(), _voice_fix(description.strip()), int(bool(needs_synopsis)), display_order,
+             int(bool(featured_home)), now, now),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -6403,9 +6417,9 @@ class Library:
         self.conn.execute(
             "UPDATE thought_leadership SET type=?, title=?, url=?, venue=?, date_label=?, sort_key=?, "
             "description=?, needs_synopsis=?, display_order=?, featured_home=?, updated_at=? WHERE id=?",
-            (type, title.strip(), url.strip(), venue.strip(), date_label.strip(), sort_key.strip(),
-             description.strip(), int(bool(needs_synopsis)), display_order, int(bool(featured_home)),
-             _now(), item_id),
+            (type, _voice_fix(title.strip()), url.strip(), _voice_fix(venue.strip()), date_label.strip(),
+             sort_key.strip(), _voice_fix(description.strip()), int(bool(needs_synopsis)), display_order,
+             int(bool(featured_home)), _now(), item_id),
         )
         self.conn.commit()
 
@@ -6465,9 +6479,9 @@ class Library:
             "(slug, title, teaser, tag_label, link_label, body_md, status, featured_home, "
             "date_label, sort_key, display_order, created_at, updated_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (slug.strip(), title.strip(), teaser.strip(), tag_label.strip(), link_label.strip(),
-             body_md, status, int(bool(featured_home)), date_label.strip(), sort_key.strip(),
-             display_order, now, now),
+            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()), tag_label.strip(),
+             link_label.strip(), _voice_fix(body_md) if body_md else body_md, status,
+             int(bool(featured_home)), date_label.strip(), sort_key.strip(), display_order, now, now),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -6479,9 +6493,9 @@ class Library:
             "UPDATE original_content SET slug=?, title=?, teaser=?, tag_label=?, link_label=?, "
             "body_md=?, status=?, featured_home=?, date_label=?, sort_key=?, display_order=?, "
             "updated_at=? WHERE id=?",
-            (slug.strip(), title.strip(), teaser.strip(), tag_label.strip(), link_label.strip(),
-             body_md, status, int(bool(featured_home)), date_label.strip(), sort_key.strip(),
-             display_order, _now(), item_id),
+            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()), tag_label.strip(),
+             link_label.strip(), _voice_fix(body_md) if body_md else body_md, status,
+             int(bool(featured_home)), date_label.strip(), sort_key.strip(), display_order, _now(), item_id),
         )
         self.conn.commit()
 
@@ -6526,7 +6540,8 @@ class Library:
         cur = self.conn.execute(
             "INSERT INTO ai_surfaces (slug, title, teaser, body_md, external_href, status, "
             "display_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (slug.strip(), title.strip(), teaser.strip(), body_md, external_href.strip(),
+            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()),
+             _voice_fix(body_md) if body_md else body_md, external_href.strip(),
              status, display_order, now, now),
         )
         self.conn.commit()
@@ -6538,7 +6553,8 @@ class Library:
         self.conn.execute(
             "UPDATE ai_surfaces SET slug=?, title=?, teaser=?, body_md=?, external_href=?, "
             "status=?, display_order=?, updated_at=? WHERE id=?",
-            (slug.strip(), title.strip(), teaser.strip(), body_md, external_href.strip(),
+            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()),
+             _voice_fix(body_md) if body_md else body_md, external_href.strip(),
              status, display_order, _now(), item_id),
         )
         self.conn.commit()
@@ -7434,7 +7450,7 @@ class Library:
         ).fetchone()[0]
         cur = self.conn.execute(
             "INSERT INTO community_categories (name, description, sort_order) VALUES (?,?,?)",
-            (name, description, next_order),
+            (name, _voice_fix(description), next_order),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -7463,7 +7479,7 @@ class Library:
                 raise ValueError(f'A category named "{new_name}" already exists.')
         self.conn.execute(
             "UPDATE community_categories SET name=?, description=? WHERE id=?",
-            (new_name, description, category_id),
+            (new_name, _voice_fix(description), category_id),
         )
         changed = 0
         if new_name != old_name:

@@ -1167,12 +1167,37 @@ against your voice** rubric picker on the same page mirrors this three-way split
 Like color, voice has two kinds of rules:
 
 - **Mechanical** (deterministic) — banned buzzwords (*delve, robust, seamless, synergy, transformative,
-  game-changer*), filler (*"at the end of the day", "in order to", "needless to say"*), and performative
-  openers/closers (*"thrilled to", "Onward!", "excited for what's next"*). `tests/test_voice_standards.py`
-  scans the site copy in `webapp/app.py` for these and fails the build on a hit. The rules live in
-  `linklib/voice_review.py` (`BANNED_WORDS` / `FILLER_PHRASES` / `PERFORMATIVE`) as the single source
-  of truth. Context-dependent words (*leverage* the noun, *actually*/*honestly* as filler) are left to
+  game-changer*), filler (*"at the end of the day", "in order to", "needless to say", "there are many
+  factors to consider"*), and performative openers/closers (*"thrilled to", "Onward!", "excited for
+  what's next"*). The rules live in `linklib/voice_review.py` (`BANNED_WORDS` / `FILLER_PHRASES` /
+  `PERFORMATIVE`) as the single source of truth, **permanently** — decided and closed (2026-09
+  voice-enforcement PR): a DB-editable copy of these lists is what would let `voice_review.py`
+  contradict the rest of the voice guide, since a committed CI mirror can drift from a live settings
+  row and nothing in the running Railway container can push that drift back to git. `/admin/voice`
+  mirrors all three lists read-only, marked "changing them is a code change," so the full voice picture
+  — editable prose rubric, mechanical enforcement — lives on one page even though only one half is
+  DB-backed. Context-dependent words (*leverage* the noun, *actually*/*honestly* as filler) are left to
   the holistic review to avoid false positives.
+  - **`tests/test_voice_standards.py`** runs `mechanical_findings()` directly (not a separate
+    reimplementation — see that test file's own note on why `_hits()` was retired) against
+    `VOICE_SCANNED_FILES` (`webapp/app.py`, `linklib/enrich.py`, `linklib/feature_scan.py`) and fails
+    the build on a hit. A rubric line that cites a banned word as a "don't write this" example (e.g.
+    `enrich.py`'s "No marketing language: no 'powerful,' 'seamless,' …") is masked before scanning —
+    see `voice_review._mask_rubric_enumerations` — so stating the rule isn't itself a violation of it.
+  - **Semantic contradiction, checked separately**: does `VOICE_CORE_DEFAULT`'s own prose quote a
+    word/phrase as unwanted that the mechanical lists don't actually enforce? `voice_review.
+    voice_core_gap_problems` extracts every 2+-word quoted phrase and confirms each is really covered
+    (one direction only — a list entry the prose doesn't mention is fine). Source-only, same as the
+    lists themselves — an admin edit to the *live* `voice_core` setting isn't checked by this, only
+    the code default.
+  - **Database content is scanned too, but only live, never in CI** — `/admin/checks`' "Database-backed
+    copy" section (`linklib.voice_db_scan.scan_db_copy`) runs both mechanical and typography checks
+    against every DB column confirmed to render on a public page (original content, tool/community
+    profiles, saved homepage/about overrides, and more — see that module's own file for the exact
+    list). It reports; it never rewrites — any fix is an ordinary editorial change through whichever
+    admin page owns the record, reviewed by Brian before it ships, same as any other copy edit.
+    `category_features.definition`/`pointer_note` are deliberately excluded: confirmed neither renders
+    on any public page (the "Key features" card's own SQL doesn't even select them).
 - **Tone** (judgment) — "does this sound like me." Reviewed on demand by Claude, never in CI (it costs
   API and isn't deterministic). Use the **Check content against your voice** box on `/admin/voice`, or
   the CLI: `python -m scripts.voice_review draft.md` (reads a file or stdin; exits non-zero on any
@@ -1185,10 +1210,12 @@ dash" policy:
   unspaced (`point—not like this`, never `point — not like this`), used sparingly. New em dashes
   in fresh copy get flagged to Brian with full sentence context before shipping — see CLAUDE.md's
   "Voice — em dash policy" for the complete rule and the flagging workflow. The *unspaced* half is
-  mechanically enforced as of PR 9 (2026-09): `linklib.voice_review.typography_findings` fails CI
-  on a spaced em dash in `webapp/app.py`'s UI copy, in both its literal and `&mdash;` spellings.
-  The flagging workflow still applies to every new em dash, spaced or not — the lint checks
-  typography, not cadence.
+  mechanically enforced as of PR 9 (2026-09), widened in the 2026-09 voice-enforcement PR:
+  `linklib.voice_review.typography_findings` fails CI on a spaced em dash across `VOICE_SCANNED_FILES`
+  (`webapp/app.py`, `linklib/enrich.py`, `linklib/feature_scan.py`), in both its literal and `&mdash;`
+  spellings — plus, live only (never CI), across the DB-backed copy columns `/admin/checks`' "Database-
+  backed copy" section scans. The flagging workflow still applies to every new em dash, spaced or not
+  — the lint checks typography, not cadence.
 - **En dash (–)** is a numeric-range separator — `$1.10–$1.30`, `Q3–Q4`, `1–10 employees`. Also
   always unspaced, same discipline as the em dash, but it's a different character doing a
   different job (a range, not a sentence-level pause), not a second flavor of em dash. No flagging
@@ -1200,8 +1227,14 @@ abbreviation that carries `&` as part of the term itself (FP&A, R&D, Q&A, P&L, M
 D&A, T&E) or a proper name that genuinely contains one (Sales & Marketing and Research &
 Development as GAAP line items; a real company name like Bain & Company). Also mechanically
 enforced as of PR 9 — same `typography_findings` check, same allowlists, both living in
-`linklib/voice_review.py`. It scans Python source only, never database content: a vendor or
-community name legitimately containing an ampersand is real data, not a copy violation.
+`linklib/voice_review.py`. CI scans Python source only — never database content, which has no
+route from a GitHub Actions run (see the "Mechanical" bullet above). The live "Database-backed
+copy" scan on `/admin/checks` reaches DB content too, but deliberately exempts `tools.name`/
+`communities.name`/`benchmarks.name` from this specific rule: a real vendor/community/resource
+name can legitimately contain an ampersand (Bain & Company), same reasoning as the source-side
+exception — confirmed to reproduce for DB content, not just assumed, before that exemption was
+added. Every other scanned column, including Brian's own curated `category_features.name`/
+`tool_categories.name`/`community_categories.name`, stays in scope.
 
 **Standing disclosure lines.** A few claims on the site carry enough legal/editorial weight that
 they get a short, muted, footnote-style line placed right next to the claim rather than folded

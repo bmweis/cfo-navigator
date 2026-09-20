@@ -28,34 +28,54 @@ def _app_src() -> str:
     return _APP_PY.read_text(encoding="utf-8")
 
 
-# --- Typography lint file list (PR 10 rider; extended PR 15) ----------------
-# `typography_findings()`'s own scope is UI copy a reader sees rendered in
-# HTML — webapp/app.py is where that copy actually lives. PR 10's
-# investigation checked the other linklib/ modules (agent.py, matchmaker.py,
-# enrich.py, compare.py, feature_scan.py, dedupe.py, tagstyle.py) and found
-# every real hit there was LLM system-/generation-prompt assembly text —
-# instructions Claude reads, never HTML a person sees — so none were added
-# at the time.
+# --- Voice-copy scanned file list (PR 10 rider; extended PR 15; renamed and
+# --- shared with mechanical_findings in the voice-enforcement PR) -----------
+# `typography_findings()` and `mechanical_findings()`'s scope is both UI copy
+# a reader sees rendered in HTML — webapp/app.py is where that copy actually
+# lives — and LLM prompt-assembly text, since the model reads and imitates a
+# prompt's own wording (see below). PR 10's investigation checked the other
+# linklib/ modules (agent.py, matchmaker.py, enrich.py, compare.py,
+# feature_scan.py, dedupe.py, tagstyle.py) and found every real hit there was
+# LLM system-/generation-prompt assembly text — so none were added at the
+# time.
 #
 # PR 15 revisits that call for enrich.py and feature_scan.py specifically
-# (69 and 23 violations respectively), on the same reasoning that got
+# (69 and 23 typography violations respectively), on the reasoning that got
 # VOICE_CORE_DEFAULT/VOICE_FPA_BUDDY_DEFAULT held to this standard: prompt
-# text isn't ordinary code, it's text the model reads and imitates, so a
-# spaced em dash inside a prompt demonstrates the exact thing the prompt
-# forbids. Both files were swept and fixed (mechanical only — spaced em
-# dashes collapsed, no rewording) in the same PR; "CFOs & VP Finance" and
-# "Flux Analysis & Summaries" are real terms, not lazy "and"s, so they're
-# allowlisted in AMPERSAND_NAMES rather than rewritten. The rest of the
-# PR 10 module list (agent.py, matchmaker.py, compare.py, dedupe.py,
-# tagstyle.py) is unchanged — not swept as part of this PR.
+# text isn't ordinary code, a spaced em dash inside a prompt demonstrates the
+# exact thing the prompt forbids. Both files were swept and fixed (mechanical
+# only — spaced em dashes collapsed, no rewording) in that PR; "CFOs & VP
+# Finance" and "Flux Analysis & Summaries" are real terms, not lazy "and"s,
+# so they're allowlisted in AMPERSAND_NAMES rather than rewritten.
+#
+# The 2026-09 voice-enforcement PR renamed this from TYPOGRAPHY_SCANNED_FILES
+# — it was typography-only in name, but mechanical_findings (banned words/
+# filler/performative) belongs on the exact same file list for the same
+# reason: both rules are about UI/prompt copy, not code, and there's no
+# reason for the two rules to scan a different set of files. Its own prior
+# CI wiring only ever scanned webapp/app.py (via a separate, reimplemented
+# regex in tests/test_voice_standards.py, not mechanical_findings itself —
+# see that file's own note on why it's retired) — this closes that one-file
+# gap and the two-implementation drift risk together.
+#
+# The rest of the PR 10 module list (agent.py, matchmaker.py, compare.py,
+# dedupe.py, tagstyle.py) is still unchanged — not swept as part of this PR.
+# agent.py in particular has the identical "rubric enumerates its own banned
+# words" shape voice_review._mask_rubric_enumerations was built to handle
+# (VOICE_CORE_DEFAULT's own "- Avoid: ... delve, robust, seamless, ..."
+# line) — but two of its OTHER rubric lines ("No performative openers or
+# closers (...)", "No filler (...)") use a different marker shape the
+# current mask doesn't cover, so adding agent.py to this list today would
+# still need new markers, not just a one-line addition. Flagged here so a
+# future sweep doesn't have to rediscover it.
 #
 # Kept as a real list, not a single hardcoded path, so a future file that
 # DOES belong here is a one-line addition, not a refactor.
-TYPOGRAPHY_SCANNED_FILES = (_APP_PY, _ENRICH_PY, _FEATURE_SCAN_PY)
+VOICE_SCANNED_FILES = (_APP_PY, _ENRICH_PY, _FEATURE_SCAN_PY)
 
 
-def _typography_sources() -> list[tuple[pathlib.Path, str]]:
-    return [(p, p.read_text(encoding="utf-8")) for p in TYPOGRAPHY_SCANNED_FILES]
+def _voice_scanned_sources() -> list[tuple[pathlib.Path, str]]:
+    return [(p, p.read_text(encoding="utf-8")) for p in VOICE_SCANNED_FILES]
 
 
 # --- open-source showcase ↔ dependencies sync -------------------------------
@@ -256,7 +276,7 @@ def _pyflakes_problems() -> list[str] | None:
 
 
 def run_all() -> list[dict]:
-    """Each check as {name, what, where ('In-app'|'CI'), ok (bool|None), detail}."""
+    """Each check as {name, what, where ('Live + CI'|'CI'), ok (bool|None), detail}."""
     src = _app_src()
     from linklib import brand_check, voice_review
     results: list[dict] = []
@@ -267,14 +287,20 @@ def run_all() -> list[dict]:
         "what": "Every color is a brand token or a documented exception; only on-brand fonts.",
         "detail": "; ".join(bf) if bf else "All colors and fonts on palette."})
 
-    vf = voice_review.mechanical_findings(src)
+    # Both the buzzword/filler/performative sweep and the ampersand/em-dash
+    # sweep run over the identical VOICE_SCANNED_FILES list — see that
+    # tuple's own comment for why the two rules share one file scope.
+    vf = []
+    for _path, _src in _voice_scanned_sources():
+        vf.extend((_path.name, rule, phrase) for rule, phrase in voice_review.mechanical_findings(_src))
     results.append({
         "name": "Voice standards", "where": "Live + CI", "ok": not vf,
-        "what": "No banned buzzwords, filler, or performative phrases in the site copy.",
-        "detail": ", ".join(f"{rule}: “{phrase}”" for rule, phrase in vf) if vf else "Copy is on-voice."})
+        "what": "No banned buzzwords, filler, or performative phrases in the scanned source's UI/prompt copy.",
+        "detail": "; ".join(f"{fname} {rule}: “{phrase}”" for fname, rule, phrase in vf[:6])
+                  if vf else "Copy is on-voice."})
 
     tf = []
-    for _path, _src in _typography_sources():
+    for _path, _src in _voice_scanned_sources():
         tf.extend((_path.name, rule, line, excerpt)
                   for rule, line, excerpt in voice_review.typography_findings(_src))
     results.append({
@@ -282,6 +308,30 @@ def run_all() -> list[dict]:
         "what": "UI copy spells out \"and\" (except FP&A and friends) and never spaces an em dash.",
         "detail": "; ".join(f"{fname} {rule} (line {line}): {excerpt}" for fname, rule, line, excerpt in tf[:6])
                   if tf else "Copy follows both typographic rules."})
+
+    # Semantic contradiction: voice_core's own prose names a word/phrase as
+    # unwanted (quoted) that BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE don't
+    # actually enforce. Deliberately checks VOICE_CORE_DEFAULT (the code
+    # constant), not the live DB-backed `voice_core` setting — this stays a
+    # CI-safe, source-only check for the same reason the mechanical lists
+    # themselves stay source-only: CI has no route to the live database. An
+    # admin edit to the live voice_core prose that names a new example isn't
+    # caught by this row — only a drift in the code default is.
+    from linklib.agent import VOICE_CORE_DEFAULT
+    vg = voice_review.voice_core_gap_problems(VOICE_CORE_DEFAULT)
+    # State execution, not just findings (2026-09 follow-up, same fix as the
+    # DB scan's stats line below) — "0 gaps" and "this row never ran" must
+    # not read the same. quoted_voice_examples() is the exact candidate set
+    # voice_core_gap_problems() checks, so the count can't drift from what
+    # was actually checked.
+    _n_checked = len(voice_review.quoted_voice_examples(VOICE_CORE_DEFAULT))
+    results.append({
+        "name": "Voice guide names what it enforces", "where": "Live + CI", "ok": not vg,
+        "what": "Every 2+-word phrase VOICE_CORE_DEFAULT quotes as an example to avoid is actually "
+                "in BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE — the rubric never promises a rejection "
+                "the mechanical lists don't back up.",
+        "detail": (f"Checked {_n_checked} quoted example{'s' if _n_checked != 1 else ''} in "
+                   f"VOICE_CORE_DEFAULT. 0 gaps." if not vg else "; ".join(vg[:6]))})
 
     ol = brand_check.outbound_link_problems(src)
     results.append({

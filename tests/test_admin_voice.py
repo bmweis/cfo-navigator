@@ -96,6 +96,25 @@ def test_seeded_page_shows_default_as_seeded_no_banner(env):
     assert _esc(matchmaker.VOICE_MATCHMAKER_DEFAULT) in html
 
 
+def test_page_mirrors_mechanical_lists_read_only(env):
+    """2026-09 voice-enforcement PR: BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE
+    stay in linklib/voice_review.py, permanently — the page renders them
+    live from that import for visibility only, marked source-managed, no
+    save mechanism of any kind for this section."""
+    html = _login_admin(env).get("/admin/voice").text
+    assert "Source-managed" in html
+    assert "Mechanical rules" in html
+    for w in voice_review.BANNED_WORDS:
+        assert _esc(w) in html
+    for p in voice_review.FILLER_PHRASES:
+        assert _esc(p) in html
+    for p in voice_review.PERFORMATIVE:
+        assert _esc(p) in html
+    # No save/reset wiring for this section — it's a plain render, not
+    # another instance of _voice_field's editable-textarea pattern.
+    assert "<textarea" not in html.split("Mechanical rules")[1].split("Check content against your voice")[0]
+
+
 def test_seeding_then_manual_clear_shows_partial_banner(env):
     """A deliberate clear-out of just one field must still show as blocked
     for that field alone, distinct from the other two seeded fields."""
@@ -310,3 +329,26 @@ def test_review_rubric_reads_live_db_settings_not_just_defaults(env, monkeypatch
     c.post("/admin/voice/core", json={"voice_core": "CUSTOM CORE FOR REVIEW"})
     c.post("/admin/voice/review", json={"text": "copy", "rubric": "fpa_buddy"})
     assert captured["voice_prompt"] == f"CUSTOM CORE FOR REVIEW\n\n{agent.VOICE_FPA_BUDDY_DEFAULT}"
+
+
+def test_mechanical_card_states_its_own_scope(env):
+    """The Mechanical rules card must say what it's actually applied to —
+    which files, that DB copy is a separate live check on /admin/checks
+    (not fed through the holistic review here), that the review below is
+    on-demand/pasted-text only, and that voice_core/voice_fpa_buddy/
+    voice_matchmaker themselves are out of scope as Claude-facing rubric
+    text. Reading the page should tell you where the holes are."""
+    c = _login_admin(env)
+    r = c.get("/admin/voice")
+    assert r.status_code == 200
+    text = r.text
+    # Named source files, by name — not just "some files".
+    assert "app.py" in text and "enrich.py" in text and "feature_scan.py" in text
+    # DB copy is scanned elsewhere, and NOT through the review box here.
+    assert "/admin/checks" in text
+    assert "Database-backed copy" in text or "database" in text.lower()
+    # The review box is on-demand / pasted-text only.
+    assert "on-demand" in text.lower()
+    # The three rubric fields are named as out of scope, with a reason.
+    assert "voice_core" in text and "voice_fpa_buddy" in text and "voice_matchmaker" in text
+    assert "Claude-facing" in text or "rubric text" in text

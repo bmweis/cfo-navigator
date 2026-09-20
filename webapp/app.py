@@ -26063,24 +26063,103 @@ def _exa_pricing_freshness_banner(last_verified: str) -> str:
     return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-exa-pricing-reviewed")
 
 
+def _db_copy_scan_banner(report) -> str:
+    """Live-only (2026-09 voice-enforcement PR, Part 2) — unlike the three
+    freshness banners above, this is not a dated human attestation: it's a
+    fact computed fresh on every page load, so there's no "Mark reviewed"
+    action and no staleness window. It can only ever run here, never in CI
+    (see linklib/voice_db_scan.py's own module docstring for why), and it
+    only ever reports — nothing here rewrites a row. A flagged violation is
+    a normal editorial fix through whatever admin page owns that record,
+    same as any other copy edit, never auto-applied.
+
+    Fixed 2026-09 (same follow-up as the summary-banner fix above) — a
+    clean scan and a scan that silently skipped a table both used to
+    render as the identical green "no violations" message, since neither
+    said anything about what actually got checked. This always states
+    execution first (tables/columns/settings scanned), and a skipped table
+    renders amber — visibly distinct from a genuine clean pass — even
+    when zero violations were found, since "found nothing" and "checked
+    nothing" must never look the same."""
+    n_tables = len(report.tables_checked)
+    n_total_tables = n_tables + len(report.tables_skipped)
+    stats_line = (
+        f'Scanned {report.columns_checked} column{"s" if report.columns_checked != 1 else ""} across '
+        f'{n_tables} table{"s" if n_tables != 1 else ""}'
+        f'{f" of {n_total_tables} configured" if report.tables_skipped else ""} '
+        f'({report.rows_checked} row{"s" if report.rows_checked != 1 else ""}), plus '
+        f'{report.settings_checked} settings key{"s" if report.settings_checked != 1 else ""}.'
+    )
+    violations = list(report.violations)
+
+    skip_html = ""
+    if report.tables_skipped:
+        skip_items = "".join(
+            f'<li style="margin:0 0 4px;">{_esc(t)}&mdash;{_esc(err)}</li>'
+            for t, err in report.tables_skipped
+        )
+        skip_html = (
+            f'<p style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;'
+            f'padding:10px 16px;font-size:14px;margin:0 0 10px;">{len(report.tables_skipped)} table'
+            f'{"s" if len(report.tables_skipped) != 1 else ""} could not be scanned this pass&mdash;'
+            f'a stale scan, not a clean one:</p>'
+            f'<ul style="margin:0 0 10px;padding-left:20px;font-size:13px;color:var(--ink-soft);'
+            f'font-family:ui-monospace,monospace;">{skip_items}</ul>'
+        )
+
+    if not violations:
+        clean = ('<p style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;border-radius:10px;'
+                 'padding:10px 16px;font-size:14px;margin:0;">&#10003; No banned words, filler, performative '
+                 'phrases, bare ampersands, or spaced em dashes found in the scanned database columns.</p>')
+        return (f'<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;">{_esc(stats_line)}</p>'
+                f'{skip_html}{clean}')
+
+    by_table: dict[str, int] = {}
+    for v in violations:
+        by_table[v.table] = by_table.get(v.table, 0) + 1
+    table_summary = ", ".join(f"{t} ({n})" for t, n in sorted(by_table.items(), key=lambda kv: -kv[1]))
+    rows_html = "".join(f'<li style="margin:0 0 4px;">{_esc(str(v))}</li>' for v in violations[:20])
+    more = f'<p style="margin:8px 0 0;font-size:12.5px;color:var(--muted);">+ {len(violations) - 20} more.</p>' if len(violations) > 20 else ""
+    finding_html = (
+        f'<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
+        f'padding:10px 16px;font-size:14px;margin:0 0 10px;">{len(violations)} violation'
+        f'{"s" if len(violations) != 1 else ""} across the scanned database columns&mdash;{_esc(table_summary)}.</p>'
+        f'<ul style="margin:0;padding-left:20px;font-size:13px;color:var(--ink-soft);font-family:ui-monospace,monospace;">'
+        f'{rows_html}</ul>{more}')
+    return f'<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;">{_esc(stats_line)}</p>{skip_html}{finding_html}'
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     from webapp import checks as _checks
+    from linklib.voice_db_scan import scan_db_copy_report
     results = _checks.run_all()
     lib = _lib()
     try:
         pricing_last_verified = lib.get_setting("pricing_last_verified")
         models_last_reviewed = lib.get_setting("models_last_reviewed")
         exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
+        db_copy_report = scan_db_copy_report(lib)
     finally:
         lib.close()
     pricing_banner = _pricing_freshness_banner(pricing_last_verified)
     models_banner = _models_freshness_banner(models_last_reviewed)
     exa_pricing_banner = _exa_pricing_freshness_banner(exa_pricing_last_verified)
+    db_copy_banner = _db_copy_scan_banner(db_copy_report)
 
-    live = [r for r in results if r["where"] == "In-app"]
+    # Fixed 2026-09 (voice-enforcement PR follow-up) — this compared against
+    # "In-app", a value run_all() has never actually produced (every live
+    # row's "where" is "Live + CI"; the only other value, "CI", marks a row
+    # that never runs here at all). The summary banner below was
+    # permanently blank as a result, regardless of whether every check was
+    # passing or several were failing — confirmed by reading run_all()'s
+    # own "where" values directly, not assumed. Real risk given this PR
+    # adds a third check that can genuinely fail (the semantic-contradiction
+    # row) on top of the two that could already fail: a broken headline
+    # indicator on the one page meant to surface exactly that.
+    live = [r for r in results if r["where"] == "Live + CI"]
     passing = sum(1 for r in live if r["ok"])
     failing = [r for r in live if r["ok"] is False]
 
@@ -26124,6 +26203,9 @@ def admin_checks(request: Request):
 {summary}
 {rows}
 <p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
+<h2 id="db-copy-scan" style="margin:28px 0 4px;">Database-backed copy</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The checks above only ever scan Python source&mdash;CI has no route to the live database (see CLAUDE.md's "Voice enforcement" notes). A growing share of real user-facing copy lives in the database instead (original content, tool and community profiles, saved homepage/about overrides, and more). This runs live, right here, on every page load&mdash;no dated reminder, no CI equivalent, and no auto-fix: a flagged row is an ordinary editorial fix through whatever admin page owns that record.</p>
+{db_copy_banner}
 <p style="color:var(--ink-soft);margin:24px 0 -4px;font-size:14px;line-height:1.6;">None of the three sections below can be checked automatically&mdash;there&rsquo;s no pricing or model-catalog API to reconcile these tables against, so each is a dated reminder for a human re-check, not a pass/fail test.</p>
 <h2 id="pricing-freshness" style="margin:28px 0 4px;">Pricing freshness</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table still accurate against Anthropic&rsquo;s current published rates?</p>
@@ -33404,6 +33486,8 @@ def admin_voice_page(request: Request):
 
     from linklib.agent import VOICE_CORE_DEFAULT, VOICE_FPA_BUDDY_DEFAULT
     from linklib.matchmaker import VOICE_MATCHMAKER_DEFAULT
+    from linklib.voice_review import BANNED_WORDS, FILLER_PHRASES, PERFORMATIVE
+    from webapp.checks import VOICE_SCANNED_FILES
     from linklib.voice_settings import any_voice_setting_missing
 
     lib = _lib()
@@ -33487,6 +33571,45 @@ def admin_voice_page(request: Request):
         "Appended after the voice core for the Communities and Software matchmakers (/tools/communities/find, /tools/software/find)&mdash;first person plural, references what the visitor said, no invented experience with any listed community or vendor.",
         custom_matchmaker, VOICE_MATCHMAKER_DEFAULT, 8)
 
+    # Mechanical lists — read-only mirror (2026-09 voice-enforcement PR).
+    # BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE stay in linklib/voice_review.py,
+    # decided and closed: a DB-editable copy is what would let voice_review.py
+    # contradict this page (a committed CI mirror can drift from a live
+    # settings row, and nothing in the running container can push that drift
+    # back to git — see linklib/voice_review.py's own module docstring). This
+    # renders the three lists live from the import above, not a duplicate —
+    # so the page always shows exactly what the mechanical sweep actually
+    # enforces, with no way for the two to disagree.
+    def _mechanical_pills(items: list[str]) -> str:
+        return "".join(
+            f'<span style="display:inline-block;background:var(--bg);border:1px solid var(--line);'
+            f'border-radius:6px;padding:3px 10px;margin:0 6px 6px 0;font-size:13px;'
+            f'font-family:ui-monospace,monospace;color:var(--ink);">{_esc(w)}</span>'
+            for w in items
+        )
+
+    _scanned_file_names = ", ".join(f"<code>{_esc(p.name)}</code>" for p in VOICE_SCANNED_FILES)
+    mechanical_block = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">
+<span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Mechanical rules</span>
+<span style="font-size:12px;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 8px;margin-left:0;vertical-align:middle;">Source-managed</span>
+</div>
+<p style="color:var(--muted);margin:0 0 14px;font-size:14px;">These lists are what actually fails the build&mdash;deterministic, no judgment call. Changing them is a code change (<code>linklib/voice_review.py</code>), not something this page can edit; shown here read-only so the full voice picture&mdash;editable prose rubric above, mechanical enforcement below&mdash;lives in one place.</p>
+<p style="font-size:12px;color:var(--muted);margin:0 0 4px;font-weight:600;">Banned buzzwords</p>
+<div style="margin:0 0 12px;">{_mechanical_pills(BANNED_WORDS)}</div>
+<p style="font-size:12px;color:var(--muted);margin:0 0 4px;font-weight:600;">Filler phrases</p>
+<div style="margin:0 0 12px;">{_mechanical_pills(FILLER_PHRASES)}</div>
+<p style="font-size:12px;color:var(--muted);margin:0 0 4px;font-weight:600;">Performative openers/closers</p>
+<div style="margin:0 0 16px;">{_mechanical_pills(PERFORMATIVE)}</div>
+<p style="font-size:12px;color:var(--muted);margin:16px 0 6px;font-weight:600;border-top:1px solid var(--line);padding-top:14px;">Scope&mdash;what this actually covers</p>
+<ul style="margin:0;padding-left:18px;font-size:13px;color:var(--ink-soft);line-height:1.6;">
+<li><strong>Scanned:</strong> these three lists, plus the ampersand/spaced-em-dash rules, run against {_scanned_file_names}&mdash;the source files carrying real UI/prompt copy.</li>
+<li><strong>Database copy is scanned separately, live</strong>, by the &ldquo;Database-backed copy&rdquo; section on <a href="/admin/checks#db-copy-scan" style="color:inherit;text-decoration:underline;">/admin/checks</a> (original content, tool/community profiles, saved homepage/about/how-this-is-built overrides, and more). It is <strong>not</strong> run through the holistic review below&mdash;that box only ever checks what you paste into it.</li>
+<li>The <strong>holistic review below is on-demand only</strong>, against pasted text&mdash;it never runs automatically against anything, on this page or off it.</li>
+<li><strong>Out of scope, deliberately: <code>voice_core</code>, <code>voice_fpa_buddy</code>, and <code>voice_matchmaker</code></strong> themselves (the three fields above) are Claude-facing rubric text&mdash;system-prompt instructions the model reads, not copy a visitor sees&mdash;so none of the three source files above include them, and neither this mechanical sweep nor the database scanner checks their prose for buzzwords or em-dash spacing. A rubric telling Claude not to use a given buzzword necessarily contains that buzzword&mdash;scanning it the same way as UI copy would flag the rule itself. <code>voice_core</code> alone gets one separate, narrower check instead (&ldquo;Voice guide names what it enforces&rdquo; on /admin/checks): does every example it quotes actually appear in the three lists above, not whether its own prose is buzzword-free.</li>
+</ul>
+</div>"""
+
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Verbal identity</h1>
@@ -33496,6 +33619,7 @@ def admin_voice_page(request: Request):
 {core_block}
 {fpa_buddy_block}
 {matchmaker_block}
+{mechanical_block}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>
