@@ -52,21 +52,27 @@ _ALLOWLIST = {
     # CLAUDE.md's Published-Content Ingestion note.
     "insert_mirrored_article",
     "update_mirrored_article",
-    # Deliberately out of scope for THIS PR's write-path instrumentation
-    # pass (see CLAUDE.md's voice-review-queue write-up for the disclosed
-    # scope cut) — flagged here by name, not silently allowed forever.
-    # `original_content` was instrumented in this same PR's follow-up round
-    # (Brian's own published thought leadership — the single highest-value
-    # table for this whole feature) and is deliberately NOT in this list
-    # any more; see add_original_content/update_original_content in
-    # linklib/db.py for the actual _vf/log_voice_correction wiring.
-    "add_ai_surface", "update_ai_surface",
-    "add_benchmark", "update_benchmark", "update_benchmark_content",
-    "add_thought_leadership", "update_thought_leadership",
-    "add_community", "update_community", "update_community_content",
-    "upsert_community_profile", "update_community_profile_research_fields",
-    "add_community_category", "rename_community_category",
-    "add_tool_category", "rename_tool_category",
+    # `ai_surfaces`, `benchmarks`, `thought_leadership`, `communities`, and
+    # `community_profiles` were instrumented in the follow-up PR to the
+    # voice-review-queue PR — `add_ai_surface`/`update_ai_surface`,
+    # `add_benchmark`/`update_benchmark`/`update_benchmark_content`,
+    # `add_thought_leadership`/`update_thought_leadership`,
+    # `add_community`/`update_community`/`update_community_content`, and
+    # `upsert_community_profile`/`update_community_profile_research_fields`
+    # are all deliberately NOT in this list any more; see linklib/db.py for
+    # the actual _vf/log_voice_correction wiring on each.
+    #
+    # `tool_categories`/`community_categories` are a genuinely separate
+    # pair of tables from the five above — never named in that PR's scope,
+    # and still not instrumented here. Their write methods already call
+    # bare `_voice_fix(...)` (so this coarse guard already passes without
+    # needing them on this list at all — the mechanical spaced-em-dash fix
+    # already runs on every write to `name`/`description` on both tables);
+    # what's still missing is only the review-queue LOGGING half (`_vf`'s
+    # `log_voice_correction` call), same as every method below this
+    # comment. Left out of the allowlist (a no-op either way) rather than
+    # added back to it, since the guard doesn't require it — flagged here
+    # instead so it isn't silently forgotten as a real follow-up.
     # Confirmed false positives from the coarse whole-method-body scan
     # (read directly, not assumed): __init__ is the schema-migration list
     # (ALTER TABLE DDL mentioning column names, never a content write);

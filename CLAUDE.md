@@ -10730,12 +10730,17 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   `set_tool_suite_note`, `update_tool_agent_taxonomy`/
   `set_tool_agent_taxonomy_draft`, `add_category_feature`/
   `update_category_feature` (the exact confirmed-bug write path).
-  **Explicitly NOT instrumented in this PR — a disclosed scope cut, not a
-  silent gap**: the `communities`/`community_profiles`/`benchmarks`/
-  `thought_leadership`/`original_content`/`ai_surfaces` UPDATE/INSERT
-  methods still call bare `_voice_fix()` with no queue logging — named
-  explicitly in `tests/test_voice_fix_coverage_ci_guard.py`'s allowlist as
-  a follow-up, not silently left uncovered. A backfill script,
+  **Explicitly NOT instrumented in this PR's own first round — a disclosed
+  scope cut, not a silent gap**: the `communities`/`community_profiles`/
+  `benchmarks`/`thought_leadership`/`original_content`/`ai_surfaces`
+  UPDATE/INSERT methods still called bare `_voice_fix()` with no queue
+  logging — named explicitly in `tests/
+  test_voice_fix_coverage_ci_guard.py`'s allowlist as a follow-up, not
+  silently left uncovered. `original_content` was instrumented in this
+  same PR's own follow-up round (Brian's own published thought
+  leadership — the single highest-value table for this whole feature);
+  the other five were instrumented in a separate follow-up PR — see the
+  bullet directly below. A backfill script,
   `scripts/backfill_voice_review_queue.py` (preview/`--apply`, same
   convention as `scripts/fix_spaced_em_dashes.py`), populates the queue's
   `open` rows retroactively from `voice_db_scan.scan_db_copy_report()` —
@@ -10770,11 +10775,87 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   holistic (Claude-judged) review against a database record on demand
   (extending `/admin/voice`'s existing text-paste tester to accept a
   table/column/id instead), the cheap deterministic invisible-unicode-
-  character mechanical check, and a per-record "N open voice findings"
-  indicator on the tool/community edit forms — all real, all deferred to a
-  follow-up, not silently dropped. See `tests/test_voice_review_queue.py`
-  and `tests/test_voice_fix_coverage_ci_guard.py` for the regression
-  coverage.
+  character mechanical check (both instrumentation and this check shipped
+  in the follow-up PR directly below), and a per-record "N open voice
+  findings" indicator on the tool/community edit forms — all real,
+  deferred to a follow-up, not silently dropped. See `tests/
+  test_voice_review_queue.py` and `tests/test_voice_fix_coverage_ci_guard.py`
+  for the regression coverage.
+- **Voice review queue, remaining-tables follow-up (2026-09) — the five
+  tables disclosed and named as a scope cut in the bullet above
+  (`communities`, `community_profiles`, `benchmarks`, `thought_leadership`,
+  `ai_surfaces`) are now instrumented the same way, plus the deferred
+  invisible-unicode-character mechanical check.** Same pattern as before,
+  mechanically repeated: `add_ai_surface`/`update_ai_surface`,
+  `add_benchmark`/`update_benchmark`/`update_benchmark_content`,
+  `add_thought_leadership`/`update_thought_leadership`,
+  `add_community`/`update_community`/`update_community_content`, and
+  `upsert_community_profile`/`update_community_profile_research_fields`
+  all now call `self._vf(...)` (row id known — `update_community_profile_
+  research_fields`'s dynamic `fields` dict just needed `self._vf(table,
+  community_id, k, v)` inside its existing per-field loop, no structural
+  change) or the after-insert `log_voice_correction(...)` pattern
+  `add_original_content`/`add_category_feature` already established (row
+  id not known until `cur.lastrowid` — every `add_*` method above). No
+  table in this batch needed anything beyond that established shape —
+  every write method already had a real, known-or-derivable row id to log
+  against by the time `_voice_fix`/`self._vf` runs, so there was no case
+  here of the "what would it take" structural gap the original PR brief
+  flagged as a possibility. `tests/test_voice_fix_coverage_ci_guard.py`'s
+  allowlist drops all five tables' add/update methods; what remains
+  (`update_game_rank_settings`/`rename_tag` — not prose;
+  `insert_mirrored_article`/`update_mirrored_article` — read
+  already-normalized data back, never write fresh text; `__init__` — the
+  schema-migration DDL list; `_migrate_community_local_markets` — a
+  one-time backfill, not a live write path; `delete_tool_category`/
+  `delete_community_category` — confirmed false positives, they only ever
+  touch `categories_json` via an unrelated `SELECT` lookup line) is every
+  disclosed exception from the original PR, unchanged — none of it is new.
+  `tool_categories`/`community_categories`' own `add_*`/`rename_*` methods
+  were never named in either PR's scope (they were never on the five-table
+  list) and already call bare `_voice_fix()` today, so the CI guard already
+  passes for them with no allowlist entry needed either way — closing that
+  last gap (adding real `self._vf`/queue-logging to those two tables too)
+  is flagged as a genuine, still-open follow-up, not done here.
+  **Invisible/zero-width Unicode characters** — the mechanical check
+  deferred from the original PR, described there as cheap and
+  deterministic, motivated by a real production row
+  (`category_features` id 104's own `definition`, ending in a zero-width
+  space, U+200B) that every existing rule (banned words, filler,
+  performative, bare ampersands, spaced em dashes) is structurally blind
+  to, since none of them look for a character with no visible glyph at
+  all. Added directly to `linklib.voice_review.mechanical_findings` (a
+  small, curated `INVISIBLE_CHARS` dict — zero-width space/non-joiner/
+  joiner, the zero-width no-break space/BOM, word joiner, the
+  left-to-right/right-to-left marks, soft hyphen — same "add a real one
+  when it turns up" discipline as `AMPERSAND_NAMES`/`AMPERSAND_ACRONYMS`),
+  so it fires everywhere `mechanical_findings` already runs with zero new
+  wiring: every `VOICE_SCANNED_FILES` source file via
+  `webapp.checks`/`tests/test_voice_standards.py`, and every `_SCAN_TABLES`
+  column via `voice_db_scan._scan_value` (which already calls
+  `mechanical_findings` unconditionally for every scanned column, typography
+  exemptions aside). Deliberately checked against the RAW, unmasked text —
+  `_mask_rubric_enumerations`/lowercasing only ever matter for the
+  banned-word rubric enumeration and don't remove or alter a zero-width
+  character elsewhere in the string, so there's nothing to lose by
+  checking the original. **Detection only, no auto-fix, no backfill** —
+  `normalize_voice_mechanics` (the write-time backstop) is unchanged and
+  still only fixes a spaced em dash, so an already-stored invisible
+  character (including the real production row this item is built
+  around) surfaces as a live `open`-status finding the next time the
+  scanner/checks run, exactly like any other pre-existing scanner finding
+  — it is not swept into `voice_review_queue` by any backfill step this PR
+  runs, since the scanner itself already covers all `_SCAN_TABLES`
+  (including the five newly-instrumented ones) and `scripts/
+  backfill_voice_review_queue.py` already exists for that purpose,
+  unmodified, if a future pass wants to run it again. **Not verified
+  against the real production count** — this session has no production
+  database access (the standing limitation noted throughout this doc); the
+  count above is confirmed only against seeded test fixtures
+  (`tests/test_voice_db_scan.py`), reproducing the id-104 shape directly.
+  Getting a real production count is `scripts/backfill_voice_review_queue.py`'s
+  own preview-mode job (or a live `/admin/voice/review-queue` load), run by
+  someone with DB access — not fabricated here.
 
 ## Voice — em dash policy
 

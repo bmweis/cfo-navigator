@@ -96,6 +96,45 @@ def test_mechanical_findings_still_flags_a_performative_phrase():
     assert mechanical_findings("I'm excited to share this update.") == [("performative", "i'm excited to share")]
 
 
+# --- Invisible/zero-width Unicode characters (2026-09 follow-up) -----------
+# Deferred from the voice-review-queue PR, described there as "cheap and
+# deterministic" — a real live example (category_features id 104's own
+# `definition`, ending with a zero-width space) is what motivated it: em
+# dashes, bare ampersands, and every BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE
+# entry are all blind to a character with no visible glyph at all.
+def test_mechanical_findings_flags_a_zero_width_space():
+    """Reproduces the real production shape (category_features id 104) —
+    a definition that reads as perfectly clean copy, with an invisible
+    zero-width space pasted onto the end."""
+    text = "Patterns that don't look right—not necessarily a balance change​"
+    assert mechanical_findings(text) == [("invisible-character", "U+200B (zero-width space)")]
+
+
+@pytest.mark.parametrize("ch, label", [
+    ("​", "zero-width space"),
+    ("‌", "zero-width non-joiner"),
+    ("‍", "zero-width joiner"),
+    ("﻿", "zero-width no-break space (BOM)"),
+    ("⁠", "word joiner"),
+    ("‎", "left-to-right mark"),
+    ("‏", "right-to-left mark"),
+    ("­", "soft hyphen"),
+])
+def test_mechanical_findings_flags_every_registered_invisible_character(ch, label):
+    findings = mechanical_findings(f"Clean copy with a hidden character{ch} in it.")
+    assert findings == [("invisible-character", f"U+{ord(ch):04X} ({label})")]
+
+
+def test_mechanical_findings_ignores_ordinary_whitespace():
+    """A real space, tab, or newline is not paste garbage — only a
+    character with no visible glyph at all is in scope."""
+    assert mechanical_findings("Ordinary copy\twith a tab\nand a newline.") == []
+
+
+def test_mechanical_findings_ignores_clean_copy_with_no_invisible_characters():
+    assert mechanical_findings("This is perfectly ordinary, on-voice copy.") == []
+
+
 # --- The rubric-enumeration mask: a rubric citing its own banned words as --
 # --- "don't write this" examples is not itself a violation -----------------
 def test_mask_suppresses_the_real_enrich_py_false_positive():

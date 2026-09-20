@@ -278,3 +278,48 @@ def test_category_features_name_ampersand_is_no_longer_scanned(lib):
     violations = scan_db_copy(lib)
     assert not any(v.table == "category_features" and v.column == "name"
                    and v.rule == "bare-ampersand" for v in violations)
+
+
+# --- Invisible/zero-width Unicode characters (2026-09 follow-up) -----------
+# The exact real-production shape this whole item exists for:
+# category_features.definition (id 104 in production) ends with a zero-width
+# space that nothing before this pass could flag — the write-time backstop
+# (linklib.voice_mechanics.normalize_voice_mechanics) only ever fixes a
+# spaced em dash, so a zero-width character survives storage unchanged; this
+# is a read-time/scan-time finding, not something the backstop silently
+# corrects before it ever reaches the scanner.
+def test_category_features_definition_invisible_character_is_scanned(lib):
+    cat_id = lib.add_tool_category("Finance")
+    lib.add_category_feature(
+        cat_id, "Anomaly detection",
+        "Identifies unusual or erroneous items and patterns that don't look right"
+        "​",
+    )
+    violations = scan_db_copy(lib)
+    hits = [v for v in violations if v.table == "category_features" and v.column == "definition"]
+    assert len(hits) == 1
+    assert hits[0].rule == "invisible-character"
+    assert "U+200B" in hits[0].excerpt
+
+
+def test_invisible_character_is_scanned_on_a_newly_instrumented_table(lib):
+    """Confirms the invisible-character rule reaches the five tables this
+    PR instrumented too — added to `mechanical_findings` itself, so every
+    caller of `_scan_value` (every `_SCAN_TABLES` entry, unconditionally)
+    gets it automatically, with no per-table wiring needed."""
+    lib.add_community(
+        "Finance Leaders", "https://community.example", "VPs and directors​",
+        "Free", [],
+    )
+    violations = scan_db_copy(lib)
+    hits = [v for v in violations if v.table == "communities" and v.column == "demographic"]
+    assert len(hits) == 1
+    assert hits[0].rule == "invisible-character"
+
+
+def test_clean_copy_across_all_scan_tables_has_no_invisible_character_findings(lib):
+    """A normal, clean save through one of the newly-instrumented write
+    paths introduces no false positive."""
+    lib.add_benchmark("Clean Resource", "https://example.com", "A perfectly ordinary description.")
+    violations = scan_db_copy(lib)
+    assert not any(v.rule == "invisible-character" for v in violations)
