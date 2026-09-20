@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib.db import Library
-from linklib.voice_db_scan import scan_db_copy
+from linklib.voice_db_scan import _SCAN_SETTINGS_KEYS, _SCAN_TABLES, scan_db_copy, scan_db_copy_report
 
 
 @pytest.fixture
@@ -180,6 +180,50 @@ def test_missing_table_does_not_crash(lib, monkeypatch):
     import linklib.voice_db_scan as scan_mod
     monkeypatch.setattr(scan_mod, "_SCAN_TABLES", (("nonexistent_table", "id", ("name",), ()),))
     assert scan_db_copy(lib) == []
+
+
+# --- Execution reporting (2026-09 follow-up) --------------------------------
+# The whole point: a scan that skipped a table and a scan with nothing to
+# find must not look identical. scan_db_copy() alone (the flat violations
+# list) can't tell the two apart — scan_db_copy_report() has to.
+
+def test_report_states_execution_on_a_clean_scan(lib):
+    """A genuinely clean scan (every configured table queried successfully,
+    zero violations) reports that it actually ran every table/column/
+    settings key — not just that nothing was found."""
+    report = scan_db_copy_report(lib)
+    assert report.violations == ()
+    assert report.tables_skipped == ()
+    assert set(report.tables_checked) == {t for t, *_ in _SCAN_TABLES}
+    assert report.columns_checked == sum(len(cols) for _, _, cols, _ in _SCAN_TABLES)
+    assert report.settings_checked == len(_SCAN_SETTINGS_KEYS)
+
+
+def test_report_surfaces_a_skipped_table_distinctly_from_a_clean_one(lib, monkeypatch):
+    """The exact case the summary-banner-bug-one-layer-down fix is for: a
+    query that raises must show up as a named, explained skip — not
+    silently vanish into a report that reads identically to a clean pass."""
+    import linklib.voice_db_scan as scan_mod
+    monkeypatch.setattr(
+        scan_mod, "_SCAN_TABLES",
+        (("nonexistent_table", "id", ("name",), ()),) + tuple(_SCAN_TABLES[1:]),
+    )
+    report = scan_db_copy_report(lib)
+    assert report.violations == ()
+    assert len(report.tables_skipped) == 1
+    skipped_table, error = report.tables_skipped[0]
+    assert skipped_table == "nonexistent_table"
+    assert error  # a real error string, not blank
+    # every OTHER configured table still got checked — one bad table
+    # doesn't take the rest of the scan down with it.
+    assert set(report.tables_checked) == {t for t, *_ in _SCAN_TABLES[1:]}
+
+
+def test_scan_db_copy_thin_wrapper_matches_the_report(lib):
+    """scan_db_copy() (the back-compat flat list every existing caller/test
+    uses) must always equal report.violations — the two can never
+    disagree about what was found, only about how much is reported."""
+    assert scan_db_copy(lib) == list(scan_db_copy_report(lib).violations)
 
 
 # --- Entity names are exempt from typography, not mechanical rules --------

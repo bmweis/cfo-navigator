@@ -127,6 +127,23 @@ def mechanical_findings(text: str) -> list[tuple[str, str]]:
 _QUOTED_TERM_RE = re.compile(r'"([^"]+)"')
 
 
+def quoted_voice_examples(voice_core_text: str) -> list[str]:
+    """Deduped 2+-word quoted phrases in `voice_core_text` — the exact
+    candidate set `voice_core_gap_problems` below checks one by one.
+    Factored out (2026-09) so a caller reporting execution ("checked N
+    examples") can never drift from what was actually checked — the same
+    reasoning `linklib.voice_db_scan.scan_db_copy_report` uses to report
+    tables/columns scanned alongside violations found, not just the
+    violations. Public, not a leading-underscore private helper, precisely
+    because it's meant to be called from outside this module."""
+    seen: list[str] = []
+    for term in _QUOTED_TERM_RE.findall(voice_core_text):
+        if len(term.split()) < 2 or term in seen:
+            continue
+        seen.append(term)
+    return seen
+
+
 def voice_core_gap_problems(voice_core_text: str) -> list[str]:
     """Quoted 2+-word phrases in `voice_core_text` that `mechanical_findings`
     would not catch if they appeared as real copy — i.e. the rubric cites an
@@ -134,12 +151,8 @@ def voice_core_gap_problems(voice_core_text: str) -> list[str]:
     itself as the "is this covered" oracle (run against the quoted term
     alone) rather than reimplementing containment logic, so this can never
     disagree with what real copy scanning actually does."""
-    seen: list[str] = []
     problems: list[str] = []
-    for term in _QUOTED_TERM_RE.findall(voice_core_text):
-        if len(term.split()) < 2 or term in seen:
-            continue
-        seen.append(term)
+    for term in quoted_voice_examples(voice_core_text):
         if not mechanical_findings(term):
             problems.append(
                 f'"{term}" is named in the voice guide but not enforced by '

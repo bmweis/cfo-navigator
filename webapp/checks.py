@@ -319,12 +319,19 @@ def run_all() -> list[dict]:
     # caught by this row — only a drift in the code default is.
     from linklib.agent import VOICE_CORE_DEFAULT
     vg = voice_review.voice_core_gap_problems(VOICE_CORE_DEFAULT)
+    # State execution, not just findings (2026-09 follow-up, same fix as the
+    # DB scan's stats line below) — "0 gaps" and "this row never ran" must
+    # not read the same. quoted_voice_examples() is the exact candidate set
+    # voice_core_gap_problems() checks, so the count can't drift from what
+    # was actually checked.
+    _n_checked = len(voice_review.quoted_voice_examples(VOICE_CORE_DEFAULT))
     results.append({
         "name": "Voice guide names what it enforces", "where": "Live + CI", "ok": not vg,
         "what": "Every 2+-word phrase VOICE_CORE_DEFAULT quotes as an example to avoid is actually "
                 "in BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE — the rubric never promises a rejection "
                 "the mechanical lists don't back up.",
-        "detail": "; ".join(vg[:6]) if vg else "Every quoted example the rubric names is mechanically enforced."})
+        "detail": (f"Checked {_n_checked} quoted example{'s' if _n_checked != 1 else ''} in "
+                   f"VOICE_CORE_DEFAULT. 0 gaps." if not vg else "; ".join(vg[:6]))})
 
     ol = brand_check.outbound_link_problems(src)
     results.append({

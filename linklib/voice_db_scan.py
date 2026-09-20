@@ -113,25 +113,64 @@ def _scan_value(table: str, row_id: object, column: str, value: str, *,
     return out
 
 
-def scan_db_copy(lib) -> list[DbCopyViolation]:
-    """Every mechanical/typography violation across the DB-backed copy
-    columns enumerated above, as a flat list. Read-only — one query per
-    table, no writes, no auto-fix. `lib` is a live `linklib.db.Library`."""
+@dataclass(frozen=True)
+class DbScanReport:
+    """What the scan actually DID, not just what it found — the reason this
+    exists at all. A clean scan (0 violations, every configured table
+    successfully queried) and a scan that silently skipped a table (also 0
+    violations, by construction, since a skipped table is never checked)
+    used to render identically on /admin/checks: nothing. Same failure
+    class as the summary-banner bug fixed alongside this PR, one layer
+    down — a report has to say it ran before "0 findings" means anything.
+
+    `tables_checked`/`tables_skipped` account for every table in
+    `_SCAN_TABLES`, so `len(tables_checked) + len(tables_skipped) ==
+    len(_SCAN_TABLES)` always holds. `columns_checked`/`columns_configured`
+    are (table, column) pairs, not scanned rows — the same shape Brian's
+    own "Scanned N columns across M tables" phrasing describes. Settings
+    keys are counted separately (`settings_checked`, always all of
+    `_SCAN_SETTINGS_KEYS` — `get_setting` never raises) since they're a
+    key/value table, not a row-per-record one."""
+    violations: tuple[DbCopyViolation, ...]
+    tables_checked: tuple[str, ...]
+    tables_skipped: tuple[tuple[str, str], ...]  # (table_name, error_str)
+    columns_checked: int
+    columns_configured: int
+    settings_checked: int
+    rows_checked: int
+
+
+def scan_db_copy_report(lib) -> DbScanReport:
+    """The real scan — computes both the violations list and the execution
+    stats in one pass, so the two can never disagree about what was
+    actually checked. `scan_db_copy()` below is a thin backward-compatible
+    wrapper over this for every caller that only wants the flat list."""
     violations: list[DbCopyViolation] = []
 
     for key in _SCAN_SETTINGS_KEYS:
         violations.extend(_scan_value("settings", None, key, lib.get_setting(key)))
 
+    tables_checked: list[str] = []
+    tables_skipped: list[tuple[str, str]] = []
+    columns_checked = 0
+    rows_checked = 0
+
     for table, id_col, columns, typography_exempt in _SCAN_TABLES:
         cols_sql = ", ".join([id_col, *columns])
         try:
             rows = lib.conn.execute(f"SELECT {cols_sql} FROM {table}").fetchall()
-        except Exception:
+        except Exception as exc:
             # A table/column that doesn't exist yet on an older DB (a
             # migration not yet run) is a no-op here, not a crash — this
             # scanner is a live report, never something that should take
-            # /admin/checks down.
+            # /admin/checks down. But it's not a silent no-op any more:
+            # recorded here so the report can say so, rather than letting
+            # a skipped table look identical to a clean one.
+            tables_skipped.append((table, str(exc)))
             continue
+        tables_checked.append(table)
+        columns_checked += len(columns)
+        rows_checked += len(rows)
         for row in rows:
             d = dict(row)
             row_id = d[id_col]
@@ -139,4 +178,26 @@ def scan_db_copy(lib) -> list[DbCopyViolation]:
                 violations.extend(_scan_value(table, row_id, col, d.get(col) or "",
                                                check_typography=col not in typography_exempt))
 
-    return violations
+    columns_configured = sum(len(cols) for _, _, cols, _ in _SCAN_TABLES)
+
+    return DbScanReport(
+        violations=tuple(violations),
+        tables_checked=tuple(tables_checked),
+        tables_skipped=tuple(tables_skipped),
+        columns_checked=columns_checked,
+        columns_configured=columns_configured,
+        settings_checked=len(_SCAN_SETTINGS_KEYS),
+        rows_checked=rows_checked,
+    )
+
+
+def scan_db_copy(lib) -> list[DbCopyViolation]:
+    """Every mechanical/typography violation across the DB-backed copy
+    columns enumerated above, as a flat list. Read-only — one query per
+    table, no writes, no auto-fix. `lib` is a live `linklib.db.Library`.
+
+    Back-compat wrapper: every existing caller (and every test written
+    against it) wants just the violations. Use `scan_db_copy_report()`
+    directly for the execution stats — which tables/columns were actually
+    scanned, not just what was found."""
+    return list(scan_db_copy_report(lib).violations)
