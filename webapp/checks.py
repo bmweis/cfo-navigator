@@ -8,6 +8,7 @@ the page is a complete inventory either way. Same rules the GitHub QA workflow r
 from __future__ import annotations
 
 import io
+import os
 import pathlib
 import re
 import shutil
@@ -180,10 +181,88 @@ def original_content_mirror_problems() -> list[str]:
     return [f"{r['slug']!r} (id {r['id']}) has body_md but no working articles mirror" for r in rows]
 
 
+# --- Voice review queue (2026-09) --------------------------------------------
+# Informational, not pass/fail — an open queue count of >0 isn't a bug, it's
+# work waiting on Brian, the same reason the pricing/model-freshness banners
+# below the pass/fail list aren't rows in run_all() either. This IS a row
+# (ok=None always) rather than a banner, per the brief's own ask: "report the
+# open queue count... while still reporting that the check ran even at zero"
+# — the DbScanReport execution-stats lesson (a report has to say it ran
+# before "0 open" means anything) applies here too.
+def voice_review_queue_status() -> dict:
+    from webapp.app import _lib
+    lib = _lib()
+    try:
+        n = lib.count_open_voice_review_items()
+    finally:
+        lib.close()
+    return {"name": "Voice review queue", "where": "Live + CI", "ok": None,
+            "what": "Every _voice_fix correction and unresolved scanner finding, queued for human "
+                    "review at /admin/voice/review-queue rather than silently applied or reported "
+                    "only as a count.",
+            "detail": f"{n} open item{'s' if n != 1 else ''} awaiting review."
+                      if n else "0 open items — the queue ran and found nothing pending."}
+
+
 # --- coral discipline: at most one coral moment per public page (PR 16) -----
 def coral_moment_problems() -> list[str]:
     from webapp import app
     return app.coral_moment_problems()
+
+
+# --- disk space (2026-09) ----------------------------------------------------
+# Found via a real incident, not a hypothetical: a script copying library.db
+# ran out of space mid-copy ("No space left on device") on a volume that was
+# only 58% full — it tried to write a 243M copy into 171M of free space and
+# consumed the rest before failing. The volume itself was never the problem;
+# the problem was that nothing anywhere reported where it stood, so the
+# investigation spent an hour looking at the wrong thing before a manual
+# `df -h` over SSH finally showed the real numbers — the same silent-failure
+# pattern this whole voice/checks workstream exists to close, one layer below
+# the application. This closes it mechanically instead: read live via
+# shutil.disk_usage (never shell out to `df`), state the numbers plainly even
+# when everything is green (a green row that says nothing looks identical to
+# a row that never ran), and flag specifically whether there's room to run a
+# classic VACUUM in place (it needs roughly the database's own size again in
+# free scratch space — a real operational fact worth surfacing before a
+# VACUUM is attempted mid-incident, not discovered by it failing).
+_DISK_VOLUME_PATH = "/data"
+_DISK_WARN_PERCENT = 75
+_DISK_CRITICAL_PERCENT = 85
+
+
+def disk_space_status(db_path: str | None = None) -> dict | None:
+    """Volume + database-file disk usage, read live. Returns None (not a
+    failure) when _DISK_VOLUME_PATH doesn't exist on this host — the
+    documented Railway volume mount, present in production, absent in
+    dev/test/CI/this sandbox — same "can't run here" contract as
+    script_syntax_problems()/_pyflakes_problems() above, so a local dev
+    session or CI run degrades gracefully instead of crashing /admin/checks
+    or reporting bogus numbers for whatever local directory happens to
+    exist instead of the real volume."""
+    if not os.path.isdir(_DISK_VOLUME_PATH):
+        return None
+    total, used, free = shutil.disk_usage(_DISK_VOLUME_PATH)
+    percent_used = (used / total * 100.0) if total else 0.0
+    if db_path is None:
+        from webapp.app import DB_PATH
+        db_path = DB_PATH
+    db_size = os.path.getsize(db_path) if db_path and os.path.isfile(db_path) else 0
+    # A classic (non-incremental) VACUUM writes a full second copy of the
+    # database before swapping it in, so it needs roughly the DB's own size
+    # again in free space to run in place — not "some" free space, that much.
+    can_vacuum = free >= db_size if db_size else None
+    if percent_used >= _DISK_CRITICAL_PERCENT:
+        level = "critical"
+    elif percent_used >= _DISK_WARN_PERCENT:
+        level = "warn"
+    else:
+        level = "ok"
+    return {
+        "volume_path": _DISK_VOLUME_PATH, "total": total, "used": used, "free": free,
+        "percent_used": percent_used, "db_path": db_path, "db_size": db_size,
+        "can_vacuum": can_vacuum, "level": level,
+    }
 
 
 # --- shared <script> blocks parse as valid JS --------------------------------
@@ -381,6 +460,8 @@ def run_all() -> list[dict]:
         "name": "Every live piece has a share card", "where": "Live + CI", "ok": not og,
         "what": "Every Live original_content piece has its own committed webapp/static/og/<slug>.png—the publish gate stops new occurrences, this catches a card that goes missing afterward.",
         "detail": "; ".join(og) if og else "Every Live piece has its own share card."})
+
+    results.append(voice_review_queue_status())
 
     cm = coral_moment_problems()
     results.append({

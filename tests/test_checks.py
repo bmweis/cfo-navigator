@@ -153,3 +153,86 @@ def test_db_copy_scan_shows_a_skipped_table_as_amber_not_clean(env, monkeypatch)
         assert "nonexistent_table" in r.text
     finally:
         scan_mod._SCAN_TABLES = orig_tables
+
+
+# --- Disk space (2026-09 addendum) -------------------------------------------
+# webapp.checks.disk_space_status() reads live via shutil.disk_usage against
+# a hardcoded _DISK_VOLUME_PATH ("/data", the documented Railway volume mount)
+# — never shells out to `df`. Returns None (not a failure) when that path
+# doesn't exist, which is always true in this sandbox/CI, so most of these
+# tests monkeypatch the module-level path constant to a real temp directory
+# rather than trying to fake the actual Railway mount.
+
+def test_disk_space_status_none_when_volume_missing(env):
+    # The real assertion this sandbox always exercises for free: /data
+    # genuinely doesn't exist here, so this is the live, unfaked behavior.
+    assert env.disk_space_status() is None
+
+
+def test_disk_space_status_reports_real_numbers(env, monkeypatch, tmp_path):
+    monkeypatch.setattr(env, "_DISK_VOLUME_PATH", str(tmp_path))
+    db_file = tmp_path / "library.db"
+    db_file.write_bytes(b"x" * 1024)
+    status = env.disk_space_status(db_path=str(db_file))
+    assert status is not None
+    assert status["db_size"] == 1024
+    assert status["total"] > 0
+    assert status["level"] in ("ok", "warn", "critical")
+    assert status["can_vacuum"] is True  # a 1KB db needs no real scratch space
+
+
+def test_disk_space_status_can_vacuum_is_false_when_db_exceeds_free_space(env, monkeypatch, tmp_path):
+    monkeypatch.setattr(env, "_DISK_VOLUME_PATH", str(tmp_path))
+    total, used, free = env.shutil.disk_usage(str(tmp_path))
+    # A db bigger than the volume's own total can never fit in free space —
+    # exercises the "cannot VACUUM in place" branch without filling a real disk.
+    huge = total + 1
+    db_file = tmp_path / "library.db"
+    db_file.write_bytes(b"\0")
+    orig_getsize = env.os.path.getsize
+    monkeypatch.setattr(env.os.path, "getsize", lambda p: huge if p == str(db_file) else orig_getsize(p))
+    status = env.disk_space_status(db_path=str(db_file))
+    assert status["db_size"] == huge
+    assert status["can_vacuum"] is False
+
+
+def test_disk_space_status_thresholds(env):
+    assert env._DISK_WARN_PERCENT == 75
+    assert env._DISK_CRITICAL_PERCENT == 85
+    assert env._DISK_WARN_PERCENT < env._DISK_CRITICAL_PERCENT
+
+
+def test_admin_checks_shows_unavailable_disk_banner_when_no_volume(env, monkeypatch):
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    r = c.get("/admin/checks")
+    assert r.status_code == 200
+    assert "Disk space" in r.text
+    assert "/data" in r.text
+    assert "No" in r.text  # the "no volume on this host" state, not a fake healthy row
+
+
+def test_admin_checks_shows_real_disk_numbers_when_volume_present(env, monkeypatch):
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    import webapp.checks as checksmod
+    # Fixed, real-looking numbers from the actual production incident this
+    # feature closes — proves the banner renders exactly what it's given,
+    # independent of disk_space_status's own computation (covered above).
+    fixed = {
+        "volume_path": "/data", "total": 434 * 1024 * 1024, "used": 254 * 1024 * 1024,
+        "free": 171 * 1024 * 1024, "percent_used": 58.5, "db_path": "/data/library.db",
+        "db_size": 242 * 1024 * 1024, "can_vacuum": False, "level": "ok",
+    }
+    monkeypatch.setattr(checksmod, "disk_space_status", lambda *a, **k: fixed)
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    r = c.get("/admin/checks")
+    assert r.status_code == 200
+    assert "254M" in r.text
+    assert "434M" in r.text
+    assert "cannot" in r.text.lower()  # can_vacuum False → the "cannot run in place" note

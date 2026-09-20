@@ -453,3 +453,61 @@ def test_prune_old_backups_never_raises_on_failure(monkeypatch, configured_env):
     result = backup.prune_old_backups("unused.db")
     assert result["deleted"] == 0
     assert "token refresh failed" in result["error"]
+
+
+# --- maybe_backup's debounce reads backup_log, not a .last_backup marker
+# file (2026-09 fix — the marker went stale relative to the real daily
+# trigger and read like a health signal that wasn't one). --------------------
+
+def test_maybe_backup_writes_no_marker_file(lib, monkeypatch, configured_env):
+    called = []
+    monkeypatch.setattr(backup, "backup_now", lambda db_path: called.append(db_path) or
+                        {"name": "x.db", "bytes": 1})
+    backup.maybe_backup(lib.path)
+    assert called == [lib.path]
+    marker = os.path.join(os.path.dirname(os.path.abspath(lib.path)), ".last_backup")
+    assert not os.path.exists(marker)
+
+
+def test_maybe_backup_debounces_against_a_recent_backup_log_success(lib, monkeypatch, configured_env):
+    lib.record_backup_attempt(status="success", filename="library-x.db")
+    called = []
+    monkeypatch.setattr(backup, "backup_now", lambda db_path: called.append(db_path))
+    backup.maybe_backup(lib.path, min_interval_hours=168.0)
+    assert called == []  # a just-now success is well inside the debounce window
+
+
+def test_maybe_backup_ignores_failure_rows_when_debouncing(lib, monkeypatch, configured_env):
+    # A failure row is the most recent thing in backup_log, but there's no
+    # prior success at all — the debounce must not treat the failure as if
+    # it were a satisfied backup.
+    lib.record_backup_attempt(status="failure", error="401 Unauthorized")
+    called = []
+    monkeypatch.setattr(backup, "backup_now", lambda db_path: called.append(db_path) or
+                        {"name": "x.db", "bytes": 1})
+    backup.maybe_backup(lib.path, min_interval_hours=168.0)
+    assert called == [lib.path]
+
+
+def test_maybe_backup_fires_when_the_last_success_is_old(lib, monkeypatch, configured_env):
+    import sqlite3 as _sqlite3
+    lib.record_backup_attempt(status="success", filename="library-old.db")
+    # Backdate the row's created_at well outside the 168h debounce window.
+    old_ts = "2020-01-01T00:00:00+00:00"
+    lib.conn.execute("UPDATE backup_log SET created_at=?", (old_ts,))
+    lib.conn.commit()
+    called = []
+    monkeypatch.setattr(backup, "backup_now", lambda db_path: called.append(db_path) or
+                        {"name": "x.db", "bytes": 1})
+    backup.maybe_backup(lib.path, min_interval_hours=168.0)
+    assert called == [lib.path]
+
+
+def test_maybe_backup_noop_when_not_configured(lib, monkeypatch):
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GOOGLE_OAUTH_REFRESH_TOKEN", raising=False)
+    called = []
+    monkeypatch.setattr(backup, "backup_now", lambda db_path: called.append(db_path))
+    backup.maybe_backup(lib.path)
+    assert called == []

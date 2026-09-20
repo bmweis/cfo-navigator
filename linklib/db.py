@@ -1463,6 +1463,39 @@ CREATE TABLE IF NOT EXISTS feeds (
     display_order      INTEGER NOT NULL DEFAULT 0,
     created_at         TEXT NOT NULL DEFAULT ''
 );
+
+-- Voice review queue (2026-09) -- see linklib/voice_review_queue.py's module
+-- docstring for the full design. Every voice-rule finding, whether an
+-- `_voice_fix()` correction already applied at save time (status
+-- 'auto_corrected') or a mechanical/typography/holistic scanner finding
+-- that couldn't be auto-fixed (status 'open'), lands here for after-the-
+-- fact human review rather than being silently applied or silently
+-- reported as an aggregate count with no per-item action. row_id is
+-- nullable TEXT (a settings-key row has none, same convention
+-- voice_db_scan.DbCopyViolation already uses); rule is one of
+-- 'buzzword'|'filler'|'performative'|'bare-ampersand'|'spaced-em-dash'|
+-- 'invisible-character'|'holistic'. status: 'auto_corrected' (logged, not
+-- yet reviewed) -> 'resolved' (Accept/Revert/Edit) or 'open' (a scanner
+-- finding with nothing to auto-fix) -> 'resolved' or 'exception' (Accept
+-- as exception -- permanent, keyed to this exact table+row_id+column+rule,
+-- never a global rule change).
+CREATE TABLE IF NOT EXISTS voice_review_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name  TEXT NOT NULL,
+    row_id      TEXT,
+    column_name TEXT NOT NULL,
+    rule        TEXT NOT NULL,
+    excerpt     TEXT NOT NULL DEFAULT '',
+    before_text TEXT,
+    after_text  TEXT,
+    status      TEXT NOT NULL DEFAULT 'open',
+    created_at  TEXT NOT NULL,
+    reviewed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_review_queue_status ON voice_review_queue(status);
+CREATE INDEX IF NOT EXISTS idx_voice_review_queue_lookup
+    ON voice_review_queue(table_name, column_name, rule, row_id);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -4177,12 +4210,159 @@ class Library:
         # Safe for every non-prose settings key too (caps, flags, model ids,
         # JSON blobs, tokens): normalize_voice_mechanics is a no-op on text
         # with no spaced em dash, which is every one of those.
+        fixed = self._vf("settings", None, key, value) if isinstance(value, str) else value
         self.conn.execute(
             "INSERT INTO settings (key, value) VALUES (?,?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, _voice_fix(value) if isinstance(value, str) else value),
+            (key, fixed),
         )
         self.conn.commit()
+
+    # --- Voice review queue -------------------------------------------------
+    # See linklib/voice_review_queue.py's module docstring for the full
+    # design (why this is asynchronous/log-not-block). `_vf` is the
+    # instrumented replacement for a bare `_voice_fix(...)` call: it
+    # normalizes exactly the same way, and additionally logs an
+    # `auto_corrected` row when the text actually changed. row_id is
+    # nullable (a settings key has none, matching voice_db_scan's own
+    # DbCopyViolation.row_id=None convention for settings). Deliberately
+    # instrumented at a SUBSET of write paths, not every `_voice_fix(...)`
+    # call site in this file (see this PR's own report for the exact list
+    # and the reasoning) — `set_setting` (every /admin/copy/* field),
+    # every tool/community/community_profile/category_features write path,
+    # and `original_content` (added in this PR's own follow-up round,
+    # since it holds Brian's own published thought leadership — the
+    # single highest-value table for this whole feature) are covered.
+    # `communities`/`community_profiles`/`benchmarks`/`thought_leadership`/
+    # `ai_surfaces`' write methods still call bare `_voice_fix()` with no
+    # queue logging — named explicitly in `tests/
+    # test_voice_fix_coverage_ci_guard.py`'s allowlist as a disclosed
+    # follow-up, not silently left uncovered.
+    def _vf(self, table: str, row_id, column: str, value) -> str:
+        if not isinstance(value, str) or not value:
+            return value
+        fixed = _voice_fix(value)
+        if fixed != value:
+            self.log_voice_correction(table, row_id, column, value, fixed)
+        return fixed
+
+    def log_voice_correction(self, table: str, row_id, column: str,
+                              before: str, after: str) -> None:
+        """Record one `_voice_fix` correction as an `auto_corrected` review-
+        queue row. No-op when before==after (nothing actually changed) —
+        callers should still be free to call this unconditionally; see `_vf`
+        above for the guarded wrapper most `Library` methods should use."""
+        if before == after:
+            return
+        self.conn.execute(
+            "INSERT INTO voice_review_queue "
+            "(table_name, row_id, column_name, rule, excerpt, before_text, after_text, status, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (table, str(row_id) if row_id is not None else None, column,
+             "spaced-em-dash", after[:200], before, after, "auto_corrected", _now()),
+        )
+        self.conn.commit()
+
+    def is_voice_exception(self, table: str, row_id, column: str, rule: str) -> bool:
+        """True when a specific (table, row_id, column, rule) combination has
+        been marked 'Accept as exception' — this specific record/column/rule,
+        never a global allowlist (see linklib.voice_review.AMPERSAND_NAMES/
+        AMPERSAND_ACRONYMS for the global, source-side exceptions)."""
+        row = self.conn.execute(
+            "SELECT 1 FROM voice_review_queue WHERE table_name=? AND column_name=? AND rule=? "
+            "AND status='exception' AND row_id IS ? LIMIT 1",
+            (table, column, rule, str(row_id) if row_id is not None else None),
+        ).fetchone()
+        return row is not None
+
+    def add_voice_review_item(self, table: str, row_id, column: str, rule: str,
+                               excerpt: str) -> int:
+        """Insert an `open` review-queue row (a scanner finding that can't be
+        auto-corrected) — skipped when a matching exception already exists."""
+        if self.is_voice_exception(table, row_id, column, rule):
+            return 0
+        cur = self.conn.execute(
+            "INSERT INTO voice_review_queue "
+            "(table_name, row_id, column_name, rule, excerpt, status, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (table, str(row_id) if row_id is not None else None, column, rule,
+             excerpt, "open", _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_voice_review_queue(self, status: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM voice_review_queue"
+        params: tuple = ()
+        if status:
+            sql += " WHERE status=?"
+            params = (status,)
+        sql += " ORDER BY rule, table_name, column_name, id"
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def count_open_voice_review_items(self) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM voice_review_queue WHERE status IN ('open','auto_corrected')"
+        ).fetchone()
+        return row[0] if row else 0
+
+    def get_voice_review_item(self, item_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM voice_review_queue WHERE id=?", (item_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def resolve_voice_review_item(self, item_id: int, action: str,
+                                   edited_text: str | None = None) -> bool:
+        """`action` is one of: 'accept' (confirm an auto-corrected change),
+        'revert' (write `before_text` back to the live row), 'edit' (write
+        `edited_text` back to the live row), 'accept_exception' (mark this
+        specific record+column+rule as a deliberate, permanent exception —
+        never resurfaces as `open` again, tracked separately from the
+        global source-side ampersand allowlists). Returns False for an
+        unknown id or action; the caller (the admin route) is responsible
+        for actually writing `before_text`/`edited_text` back to the live
+        table/column — this method only updates the queue row's own state,
+        since it has no generic way to UPDATE an arbitrary table/column
+        safely without a real column allowlist per table."""
+        item = self.get_voice_review_item(item_id)
+        if not item or action not in ("accept", "revert", "edit", "accept_exception"):
+            return False
+        new_status = {"accept": "resolved", "revert": "resolved",
+                      "edit": "resolved", "accept_exception": "exception"}[action]
+        self.conn.execute(
+            "UPDATE voice_review_queue SET status=?, reviewed_at=? WHERE id=?",
+            (new_status, _now(), item_id),
+        )
+        self.conn.commit()
+        return True
+
+    def apply_voice_review_write(self, table: str, row_id, column: str, text: str) -> bool:
+        """Writes `text` back to the live `(table, row_id, column)` cell —
+        the generic counterpart `resolve_voice_review_item`'s docstring
+        says it deliberately doesn't do itself. Validated against
+        `linklib.voice_db_scan._SCAN_TABLES` (the same enumeration the
+        scanner reads from) plus the settings special case, so this can
+        never be pointed at an arbitrary table/column from outside that
+        known list — there is no free-text table/column parameter reaching
+        this from an admin form, only whatever the queue row itself
+        already recorded. Returns False for an unrecognized table/column
+        or a settings row with no key (row_id None but table != 'settings')."""
+        from .voice_db_scan import _SCAN_TABLES
+        if table == "settings":
+            self.conn.execute(
+                "UPDATE settings SET value=? WHERE key=?", (text, column)
+            )
+            self.conn.commit()
+            return True
+        for tname, id_col, columns, _exempt in _SCAN_TABLES:
+            if tname == table and column in columns and row_id is not None:
+                self.conn.execute(
+                    f"UPDATE {table} SET {column}=? WHERE {id_col}=?", (text, row_id)
+                )
+                self.conn.commit()
+                return True
+        return False
 
     # --- near-duplicate feedback ------------------------------------------
 
@@ -5193,9 +5373,9 @@ class Library:
                description_ai_confident=COALESCE(?, description_ai_confident),
                description_low_confidence=COALESCE(?, description_low_confidence),
                updated_at=? WHERE id=?""",
-            (name.strip(), _voice_fix(description.strip()), url.strip(),
+            (name.strip(), self._vf("tools", tool_id, "description", description.strip()), url.strip(),
              json.dumps(categories), advisor, promoted, vendor_email.strip(),
-             warm_intro_enabled, vendor_name.strip(), _voice_fix(summary.strip()),
+             warm_intro_enabled, vendor_name.strip(), self._vf("tools", tool_id, "summary", summary.strip()),
              description_needs_verification, description_ai_confident,
              description_low_confidence, _now(), tool_id),
         )
@@ -5221,7 +5401,7 @@ class Library:
         directly on the live site after seeding."""
         self.conn.execute(
             "UPDATE tools SET name=?, description=?, updated_at=? WHERE id=?",
-            (name.strip(), _voice_fix(description.strip()), _now(), tool_id),
+            (name.strip(), self._vf("tools", tool_id, "description", description.strip()), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -5235,8 +5415,8 @@ class Library:
         self.conn.execute(
             """UPDATE tools SET description=?, warm_intro_enabled=?, vendor_name=?,
                vendor_email=?, summary=?, updated_at=? WHERE id=?""",
-            (_voice_fix(description.strip()), warm_intro_enabled, vendor_name.strip(),
-             vendor_email.strip(), _voice_fix(summary.strip()), _now(), tool_id),
+            (self._vf("tools", tool_id, "description", description.strip()), warm_intro_enabled, vendor_name.strip(),
+             vendor_email.strip(), self._vf("tools", tool_id, "summary", summary.strip()), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -5361,7 +5541,8 @@ class Library:
             "competitive_differentiation_ai_confident=COALESCE(?, competitive_differentiation_ai_confident), "
             "competitive_differentiation_low_confidence=COALESCE(?, competitive_differentiation_low_confidence), "
             "updated_at=? WHERE id=?",
-            (_voice_fix(competitive_differentiation.strip()), needs_verification, ai_confident,
+            (self._vf("tools", tool_id, "competitive_differentiation", competitive_differentiation.strip()),
+             needs_verification, ai_confident,
              low_confidence, _now(), tool_id),
         )
         self.conn.commit()
@@ -5379,7 +5560,7 @@ class Library:
         never blank it out on an unrelated save."""
         self.conn.execute(
             "UPDATE tools SET suite_note=?, updated_at=? WHERE id=?",
-            (_voice_fix(suite_note.strip()), _now(), tool_id),
+            (self._vf("tools", tool_id, "suite_note", suite_note.strip()), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -5397,7 +5578,7 @@ class Library:
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
             "updated_at=? WHERE id=?",
-            (_voice_fix(agent_taxonomy_note.strip()), _now(), tool_id),
+            (self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip()), _now(), tool_id),
         )
         self.conn.commit()
         self.clear_entity_citations("tool", tool_id, "agent_taxonomy")
@@ -5435,7 +5616,8 @@ class Library:
             "agent_taxonomy_ai_confident=COALESCE(?, agent_taxonomy_ai_confident), "
             "agent_taxonomy_low_confidence=COALESCE(?, agent_taxonomy_low_confidence), "
             "updated_at=? WHERE id=?",
-            (_voice_fix(agent_taxonomy_note.strip()), needs_verification, ai_confident,
+            (self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip()),
+             needs_verification, ai_confident,
              low_confidence, _now(), tool_id),
         )
         self.conn.commit()
@@ -5820,13 +6002,21 @@ class Library:
                 "SELECT COALESCE(MAX(sort_order), 0) + 10 FROM category_features WHERE category_id=?",
                 (category_id,),
             ).fetchone()[0]
+        definition_before, pointer_note_before = definition.strip(), pointer_note.strip()
+        definition_fixed, pointer_note_fixed = _voice_fix(definition_before), _voice_fix(pointer_note_before)
         cur = self.conn.execute(
             """INSERT INTO category_features (category_id, name, definition, pointer_note,
                sort_order, created_at) VALUES (?,?,?,?,?,?)""",
-            (category_id, name, _voice_fix(definition.strip()), _voice_fix(pointer_note.strip()), sort_order, _now()),
+            (category_id, name, definition_fixed, pointer_note_fixed, sort_order, _now()),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — the one write path in
+        # this file where `_vf` can't be used directly (no id exists until
+        # the INSERT itself returns one).
+        self.log_voice_correction("category_features", new_id, "definition", definition_before, definition_fixed)
+        self.log_voice_correction("category_features", new_id, "pointer_note", pointer_note_before, pointer_note_fixed)
+        return new_id
 
     def update_category_feature(self, feature_id: int, name: str, definition: str,
                                  pointer_note: str, sort_order: int) -> None:
@@ -5844,7 +6034,9 @@ class Library:
             raise ValueError(f'"{name}" already exists in this category.')
         self.conn.execute(
             "UPDATE category_features SET name=?, definition=?, pointer_note=?, sort_order=? WHERE id=?",
-            (name, _voice_fix(definition.strip()), _voice_fix(pointer_note.strip()), sort_order, feature_id),
+            (name, self._vf("category_features", feature_id, "definition", definition.strip()),
+             self._vf("category_features", feature_id, "pointer_note", pointer_note.strip()),
+             sort_order, feature_id),
         )
         self.conn.commit()
 
@@ -6474,17 +6666,29 @@ class Library:
                 "SELECT COALESCE(MAX(display_order), -1) + 1 FROM original_content"
             ).fetchone()[0]
         now = _now()
+        title_before, teaser_before = title.strip(), teaser.strip()
+        title_fixed, teaser_fixed = _voice_fix(title_before), _voice_fix(teaser_before)
+        body_fixed = _voice_fix(body_md) if body_md else body_md
         cur = self.conn.execute(
             "INSERT INTO original_content "
             "(slug, title, teaser, tag_label, link_label, body_md, status, featured_home, "
             "date_label, sort_key, display_order, created_at, updated_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()), tag_label.strip(),
-             link_label.strip(), _voice_fix(body_md) if body_md else body_md, status,
+            (slug.strip(), title_fixed, teaser_fixed, tag_label.strip(),
+             link_label.strip(), body_fixed, status,
              int(bool(featured_home)), date_label.strip(), sort_key.strip(), display_order, now, now),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — same reason
+        # add_category_feature does the same: no id exists until the INSERT
+        # itself returns one, so _vf's inline "value already known, wrap it"
+        # shape can't be used here.
+        self.log_voice_correction("original_content", new_id, "title", title_before, title_fixed)
+        self.log_voice_correction("original_content", new_id, "teaser", teaser_before, teaser_fixed)
+        if body_md:
+            self.log_voice_correction("original_content", new_id, "body_md", body_md, body_fixed)
+        return new_id
 
     def update_original_content(self, item_id: int, slug: str, title: str, teaser: str, tag_label: str,
                                 link_label: str, body_md: str | None, status: str, featured_home: bool,
@@ -6493,8 +6697,10 @@ class Library:
             "UPDATE original_content SET slug=?, title=?, teaser=?, tag_label=?, link_label=?, "
             "body_md=?, status=?, featured_home=?, date_label=?, sort_key=?, display_order=?, "
             "updated_at=? WHERE id=?",
-            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()), tag_label.strip(),
-             link_label.strip(), _voice_fix(body_md) if body_md else body_md, status,
+            (slug.strip(), self._vf("original_content", item_id, "title", title.strip()),
+             self._vf("original_content", item_id, "teaser", teaser.strip()), tag_label.strip(),
+             link_label.strip(),
+             self._vf("original_content", item_id, "body_md", body_md) if body_md else body_md, status,
              int(bool(featured_home)), date_label.strip(), sort_key.strip(), display_order, _now(), item_id),
         )
         self.conn.commit()

@@ -197,7 +197,8 @@ def voice_core_gap_problems(voice_core_text: str) -> list[str]:
 # itself. Matches voice_core's own generalized carve-out (see the 2026-08
 # "T and E" fix): a stated principle with examples, not a closed list — add a
 # row when a real term turns up, don't spell the term out to satisfy the lint.
-AMPERSAND_ACRONYMS = ["FP&A", "R&D", "Q&A", "P&L", "M&A", "S&P", "S&M", "D&A", "T&E"]
+AMPERSAND_ACRONYMS = ["FP&A", "R&D", "Q&A", "P&L", "M&A", "S&P", "S&M", "D&A", "T&E",
+                       "G&A", "L&D"]
 
 # Proper nouns and standard line-item names where the ampersand is part of the
 # name, not a lazy stand-in for "and". Same "add a real one when it turns up"
