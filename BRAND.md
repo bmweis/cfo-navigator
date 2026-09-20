@@ -1196,8 +1196,19 @@ Like color, voice has two kinds of rules:
     profiles, saved homepage/about overrides, and more — see that module's own file for the exact
     list). It reports; it never rewrites — any fix is an ordinary editorial change through whichever
     admin page owns the record, reviewed by Brian before it ships, same as any other copy edit.
-    `category_features.definition`/`pointer_note` are deliberately excluded: confirmed neither renders
-    on any public page (the "Key features" card's own SQL doesn't even select them).
+    `category_features.definition`/`pointer_note` ARE scanned as of the 2026-09 voice-review-queue
+    PR — they don't render on any public page (the "Key features" card's own SQL doesn't even select
+    them), but `_voice_fix` already normalizes both at write time, so the scanner needs to be able to
+    catch the same thing the write-time corrector fixes.
+  - **A finding is a review-queue row, not a silently-applied correction or a bare count** — every
+    `_voice_fix` correction and every scanner finding lands in `voice_review_queue`
+    (`linklib/db.py`), reviewable at `/admin/voice/review-queue` (Accept/Revert/Edit/"Accept as
+    exception," grouped by rule). Asynchronous by design, not a save-time blocking gate. Row-scoped
+    exceptions here (`Library.is_voice_exception`) are a separate, visibly distinct mechanism from
+    the global, source-side `AMPERSAND_NAMES`/`AMPERSAND_ACRONYMS` allowlists above — accepting one
+    specific record's exception never changes a global rule. See CLAUDE.md's "Voice review queue"
+    bullet for the full write-up, including the disclosed scope cut on which write paths are
+    instrumented so far.
 - **Tone** (judgment) — "does this sound like me." Reviewed on demand by Claude, never in CI (it costs
   API and isn't deterministic). Use the **Check content against your voice** box on `/admin/voice`, or
   the CLI: `python -m scripts.voice_review draft.md` (reads a file or stdin; exits non-zero on any

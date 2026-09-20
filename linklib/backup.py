@@ -168,11 +168,6 @@ def known_folder_id(db_path: str) -> str:
         lib.close()
 
 
-def _marker_path(db_path: str) -> str:
-    d = os.path.dirname(os.path.abspath(db_path)) or "."
-    return os.path.join(d, ".last_backup")
-
-
 def snapshot_to_file(db_path: str) -> str:
     """Write a consistent copy of the database to a temp file; return its path.
 
@@ -475,20 +470,47 @@ def maybe_backup(db_path: str, min_interval_hours: float = 168.0) -> None:
     Defaults to once a week. Safe to call from a request path / background
     task: never raises — failures are logged and swallowed so they can't
     break a user action.
+
+    The debounce reads its "last success" time from ``backup_log`` — the
+    real, already-authoritative record every backup attempt (from any
+    trigger: this debounce, the daily Railway Cron hitting
+    ``POST /admin/backup-now``, or a manual click on
+    ``/admin/library-backup``) already writes to. This used to read a
+    standalone ``.last_backup`` marker file instead, written only by this
+    function's own successful runs — since the real trigger keeping backups
+    current is the daily cron, which never touched this file, the marker
+    went stale (confirmed in production: dated weeks after backups were
+    verifiably succeeding daily) while still looking exactly like a live
+    status signal. A file that reads like a health signal and isn't one is
+    worse than no file, so the marker and its write path are gone outright
+    rather than "fixed" to be refreshed by more triggers — ``backup_log`` is
+    already the single source of truth for this question and needn't be
+    duplicated.
     """
     if not is_configured():
         return
-    marker = _marker_path(db_path)
+    from linklib.db import Library
+    lib = Library(db_path)
     try:
-        last = float(open(marker).read().strip())
-    except Exception:
-        last = 0.0
-    if time.time() - last < min_interval_hours * 3600:
+        # list_backup_log is ordered newest-first regardless of status, so
+        # the most recent SUCCESS may not be row 0 (a debounce run right
+        # after a failed attempt shouldn't re-trigger immediately just
+        # because the newest row happens to be that failure).
+        rows = lib.list_backup_log(limit=20)
+    finally:
+        lib.close()
+    last_ts = 0.0
+    for row in rows:
+        if row.get("status") == "success":
+            try:
+                last_ts = datetime.fromisoformat(row["created_at"]).timestamp()
+            except Exception:
+                last_ts = 0.0
+            break
+    if time.time() - last_ts < min_interval_hours * 3600:
         return
     try:
         result = backup_now(db_path)
-        with open(marker, "w") as f:
-            f.write(str(time.time()))
         print(f"[backup] uploaded {result['name']} ({result['bytes']} bytes) to Google Drive")
     except Exception as e:  # pragma: no cover - network/credential issues
         print(f"[backup] failed: {e}")

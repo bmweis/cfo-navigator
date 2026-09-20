@@ -23826,6 +23826,7 @@ _ADMIN_GROUPS = [
     # either half cleanly.
     ("Brand, voice, and content", "How the site looks and sounds.", [
         ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
+        ("/admin/voice/review-queue", "Voice review queue", "Every automatic em-dash correction and unresolved scanner finding, grouped by rule, for a human review pass."),
         ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email (warm intro, welcome, password reset, and submission confirmations)—changes go live immediately."),
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
     ]),
@@ -24684,7 +24685,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
                                   "narrative_review_log", "entity_citations", "matchmaker_questions",
-                                  "compare_summary_cache", "compare_summary_feedback"]),
+                                  "compare_summary_cache", "compare_summary_feedback",
+                                  "voice_review_queue"]),
 ]
 
 
@@ -26129,6 +26131,65 @@ def _db_copy_scan_banner(report) -> str:
     return f'<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;">{_esc(stats_line)}</p>{skip_html}{finding_html}'
 
 
+def _disk_mb(n: int) -> str:
+    """Plain megabytes, no decimal — matches the register this whole row
+    is built to match ("254M of 434M used")."""
+    return f"{n // (1024 * 1024):,}M"
+
+
+def _disk_space_banner(status: dict | None) -> str:
+    """A plain status statement, matching /admin/library-backup's own
+    register (a sentence naming the state, the real numbers, a colored
+    box) rather than a dashboard widget — per the incident this closes
+    (see webapp.checks.disk_space_status's own docstring): nothing
+    anywhere reported where the volume stood, which is what let a script
+    run it out of space before anyone noticed. Mechanically computed on
+    every load, not a dated human attestation like the three freshness
+    banners above it, so there's no "Mark reviewed" button here — only
+    BRAND.md's status-color family (seafoam ok, amber warn, --alert
+    critical; never coral, which is a decorative accent, not a health
+    signal), and it always states the numbers plainly, including when
+    everything is green, so a healthy row can never read as "this check
+    never ran"."""
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+    alert_wash, alert = "var(--alert-wash)", "var(--alert)"
+
+    if status is None:
+        bg, border, color = "var(--surface-2)", "var(--line)", "var(--muted)"
+        html = ('No <code>/data</code> volume on this host&mdash;this check only runs where the '
+                'production Railway volume is actually mounted (production itself, not dev/CI/this '
+                'environment).')
+        return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+                f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
+
+    total, used, free, pct, db_size = (status["total"], status["used"], status["free"],
+                                        status["percent_used"], status["db_size"])
+    stats = (f'{_disk_mb(used)} of {_disk_mb(total)} used ({pct:.0f}%), {_disk_mb(free)} free. '
+             f'<code>{_esc(os.path.basename(status["db_path"]))}</code> is {_disk_mb(db_size)} of that.')
+    if status["can_vacuum"] is False:
+        vacuum_note = (f' A classic <code>VACUUM</code> needs roughly the database&rsquo;s own size again '
+                        f'in free scratch space to run in place&mdash;free space ({_disk_mb(free)}) is '
+                        f'currently less than the database ({_disk_mb(db_size)}), so a <code>VACUUM</code> '
+                        f'cannot run in place right now.')
+    elif status["can_vacuum"] is True:
+        vacuum_note = ' There&rsquo;s room for a classic <code>VACUUM</code> to run in place if one is ever needed.'
+    else:
+        vacuum_note = ''
+
+    if status["level"] == "critical":
+        bg, border, color = alert_wash, alert, alert
+        html = f'The <code>{_esc(status["volume_path"])}</code> volume is <strong>critically full</strong>: {stats}{vacuum_note}'
+    elif status["level"] == "warn":
+        bg, border, color = amber_wash, amber_border, amber_text
+        html = f'The <code>{_esc(status["volume_path"])}</code> volume is getting full: {stats}{vacuum_note}'
+    else:
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        html = f'The <code>{_esc(status["volume_path"])}</code> volume has room: {stats}{vacuum_note}'
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
@@ -26148,6 +26209,7 @@ def admin_checks(request: Request):
     models_banner = _models_freshness_banner(models_last_reviewed)
     exa_pricing_banner = _exa_pricing_freshness_banner(exa_pricing_last_verified)
     db_copy_banner = _db_copy_scan_banner(db_copy_report)
+    disk_banner = _disk_space_banner(_checks.disk_space_status())
 
     # Fixed 2026-09 (voice-enforcement PR follow-up) — this compared against
     # "In-app", a value run_all() has never actually produced (every live
@@ -26206,6 +26268,9 @@ def admin_checks(request: Request):
 <h2 id="db-copy-scan" style="margin:28px 0 4px;">Database-backed copy</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The checks above only ever scan Python source&mdash;CI has no route to the live database (see CLAUDE.md's "Voice enforcement" notes). A growing share of real user-facing copy lives in the database instead (original content, tool and community profiles, saved homepage/about overrides, and more). This runs live, right here, on every page load&mdash;no dated reminder, no CI equivalent, and no auto-fix: a flagged row is an ordinary editorial fix through whatever admin page owns that record.</p>
 {db_copy_banner}
+<h2 id="disk-space" style="margin:28px 0 4px;">Disk space</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Where the production volume actually stands&mdash;read live via <code>shutil.disk_usage</code>, never by shelling out to <code>df</code>. Mechanically computed on every load, same as the section above; a green row still states the real numbers, since a healthy check that says nothing looks identical to one that never ran.</p>
+{disk_banner}
 <p style="color:var(--ink-soft);margin:24px 0 -4px;font-size:14px;line-height:1.6;">None of the three sections below can be checked automatically&mdash;there&rsquo;s no pricing or model-catalog API to reconcile these tables against, so each is a dated reminder for a human re-check, not a pass/fail test.</p>
 <h2 id="pricing-freshness" style="margin:28px 0 4px;">Pricing freshness</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table still accurate against Anthropic&rsquo;s current published rates?</p>
@@ -33594,7 +33659,7 @@ def admin_voice_page(request: Request):
 <span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Mechanical rules</span>
 <span style="font-size:12px;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 8px;margin-left:0;vertical-align:middle;">Source-managed</span>
 </div>
-<p style="color:var(--muted);margin:0 0 14px;font-size:14px;">These lists are what actually fails the build&mdash;deterministic, no judgment call. Changing them is a code change (<code>linklib/voice_review.py</code>), not something this page can edit; shown here read-only so the full voice picture&mdash;editable prose rubric above, mechanical enforcement below&mdash;lives in one place.</p>
+<p style="color:var(--muted);margin:0 0 14px;font-size:14px;">These lists are what actually fails the build&mdash;deterministic, no judgment call. Changing them is a code change (<code>linklib/voice_review.py</code>), not something this page can edit; shown here read-only so the full voice picture&mdash;editable prose rubric above, mechanical enforcement below&mdash;lives in one place. A violation caught here or by the write-time correction backstop lands as a reviewable row in the <a href="/admin/voice/review-queue" style="color:var(--navy);font-weight:600;">Voice review queue</a>&mdash;never silently applied or reported only as a count.</p>
 <p style="font-size:12px;color:var(--muted);margin:0 0 4px;font-weight:600;">Banned buzzwords</p>
 <div style="margin:0 0 12px;">{_mechanical_pills(BANNED_WORDS)}</div>
 <p style="font-size:12px;color:var(--muted);margin:0 0 4px;font-weight:600;">Filler phrases</p>
@@ -33804,6 +33869,141 @@ async def admin_voice_review(request: Request):
     else:
         voice_prompt = voice_core
     return JSONResponse(review_text(text, voice_prompt=voice_prompt))
+
+
+def _voice_review_row_html(item: dict) -> str:
+    excerpt = _esc(item["excerpt"] or "")
+    row_id_txt = f"id={_esc(item['row_id'])}" if item["row_id"] is not None else "(setting)"
+    status = item["status"]
+    before_after = ""
+    if item["status"] == "auto_corrected" and item.get("before_text") is not None:
+        before_after = (
+            f'<div style="margin:6px 0;font-size:12px;color:var(--muted);">'
+            f'<div><strong>Before:</strong> {_esc(item["before_text"][:300])}</div>'
+            f'<div><strong>After:</strong> {_esc(item["after_text"][:300])}</div></div>'
+        )
+    actions = ""
+    if status in ("open", "auto_corrected"):
+        actions = f"""
+<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
+  <input type="hidden" name="action" value="{'accept' if status == 'auto_corrected' else 'edit'}">
+  {'<input type="hidden" name="edited_text" value="' + _esc(item.get('after_text') or item['excerpt']) + '">' if status == 'auto_corrected' else ''}
+  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Accept</button>
+</form>
+<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
+  <input type="hidden" name="action" value="revert">
+  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Revert</button>
+</form>
+<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline-flex;gap:4px;">
+  <input type="hidden" name="action" value="edit">
+  <input type="text" name="edited_text" value="{_esc(item.get('after_text') or item['excerpt'])}"
+         style="font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;width:220px;">
+  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save edit</button>
+</form>
+<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
+  <input type="hidden" name="action" value="accept_exception">
+  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;color:var(--muted);">Accept as exception</button>
+</form>"""
+    else:
+        actions = f'<span style="font-size:12px;color:var(--muted);">{_esc(status)}</span>'
+    return f"""
+<tr>
+  <td style="padding:8px 10px;font-size:13px;">{_esc(item['table_name'])}.{_esc(item['column_name'])} <span style="color:var(--muted);">{row_id_txt}</span></td>
+  <td style="padding:8px 10px;font-size:13px;">{excerpt}{before_after}</td>
+  <td style="padding:8px 10px;">{actions}</td>
+</tr>"""
+
+
+@app.get("/admin/voice/review-queue", response_class=HTMLResponse)
+async def admin_voice_review_queue(request: Request):
+    """Every voice-rule finding — an `_voice_fix` correction already applied
+    at save time, or a scanner finding with nothing to auto-fix — grouped by
+    rule so 22 near-identical ampersand findings in one column can be
+    reviewed as a group, not one at a time. Accept/Revert/Edit/Accept as
+    exception per row; see `Library.resolve_voice_review_item`'s docstring
+    for what each action means. Bulk "Accept all in this group" posts one
+    request per row client-side would be ideal, but per this PR's own scope
+    cut a single grouped bulk-accept endpoint is out — each row's own action
+    button is the built mechanism this phase ships."""
+    if not _is_authed(request):
+        return RedirectResponse("/login", status_code=302)
+    lib = _lib()
+    try:
+        items = lib.list_voice_review_queue()
+    finally:
+        lib.close()
+
+    open_items = [i for i in items if i["status"] in ("open", "auto_corrected")]
+    resolved_items = [i for i in items if i["status"] not in ("open", "auto_corrected")]
+
+    groups: dict[str, list[dict]] = {}
+    for it in open_items:
+        groups.setdefault(it["rule"], []).append(it)
+
+    group_html = ""
+    if not groups:
+        group_html = '<p style="color:var(--muted);">Nothing open. Auto-corrections are only logged going forward&mdash;an empty queue on a fresh deploy doesn\'t mean nothing was ever fixed, just that nothing has changed since this logging shipped.</p>'
+    for rule, rows in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        rows_html = "".join(_voice_review_row_html(r) for r in rows)
+        group_html += f"""
+<h2 style="margin-top:28px;">{_esc(rule)} <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(rows)})</span></h2>
+<div style="overflow-x:auto;"><table style="width:100%;min-width:640px;border-collapse:collapse;">
+<thead><tr style="text-align:left;border-bottom:1px solid var(--line);">
+<th style="padding:8px 10px;font-size:12px;">Field</th>
+<th style="padding:8px 10px;font-size:12px;">Excerpt</th>
+<th style="padding:8px 10px;font-size:12px;">Actions</th>
+</tr></thead><tbody>{rows_html}</tbody></table></div>"""
+
+    resolved_html = ""
+    if resolved_items:
+        rows_html = "".join(_voice_review_row_html(r) for r in resolved_items[:50])
+        resolved_html = f"""
+<h2 style="margin-top:36px;">Resolved / exceptions <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(resolved_items)})</span></h2>
+<div style="overflow-x:auto;"><table style="width:100%;min-width:640px;border-collapse:collapse;">
+<tbody>{rows_html}</tbody></table></div>"""
+
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Voice review queue</h1>
+<p style="color:var(--muted);max-width:760px;">Every voice-rule finding lands here for an explicit human review pass&mdash;
+auto-corrected content is never silently applied with no record, and a scanner finding with nothing to auto-fix is
+never left as just an aggregate count on /admin/checks. Auto-corrections (spaced em dashes) are logged going
+forward only, from the moment this shipped&mdash;an empty group here doesn't mean none were ever fixed before that.
+"Accept as exception" marks this one specific record/column/rule as a deliberate exception, permanently&mdash;it never
+changes a global rule (see /admin/voice for the source-managed mechanical rules and the ampersand allowlists in
+linklib/voice_review.py).</p>
+{group_html}
+{resolved_html}
+</div>"""
+    return HTMLResponse(_page("Voice review queue—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/voice/review-queue/{item_id}/resolve")
+async def admin_voice_review_resolve(item_id: int, request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    action = (form.get("action") or "").strip()
+    edited_text = form.get("edited_text")
+    lib = _lib()
+    try:
+        item = lib.get_voice_review_item(item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="not found")
+        if action == "revert" and item.get("before_text") is not None:
+            lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
+                                          item["before_text"])
+        elif action == "edit" and edited_text is not None:
+            lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
+                                          edited_text)
+        # "accept" writes nothing back — the corrected value is already what's
+        # live (that's what auto_corrected means); this just confirms it.
+        ok = lib.resolve_voice_review_item(item_id, action, edited_text)
+        if not ok:
+            raise HTTPException(status_code=400, detail="invalid action")
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/voice/review-queue", status_code=303)
 
 
 _ADMIN_COPY_PROSE_STYLE = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"

@@ -118,15 +118,17 @@ def test_content_tools_constant_has_the_four_expected_hrefs(env):
 
 
 def test_brand_voice_and_content_group_keeps_only_the_three_standards_cards(env):
-    """_ADMIN_GROUPS' own static tuple for this group should now list only
-    the three standards cards directly — the four content pages moved out
-    into _CONTENT_TOOLS, spliced back in as a nested sub-group at render
-    time inside admin_page() (same shape as _SOFTWARE_TOOLS/
-    _COMMUNITIES_TOOLS/_FPA_BUDDY_TOOLS), not left as static items here."""
+    """_ADMIN_GROUPS' own static tuple for this group should still list only
+    the three original standards cards plus the voice review queue directly
+    (the review queue, 2026-09, is a fourth genuine standards-adjacent page —
+    a distinct concern from _CONTENT_TOOLS' four content pages, which stay
+    out, spliced back in as a nested sub-group at render time inside
+    admin_page() (same shape as _SOFTWARE_TOOLS/_COMMUNITIES_TOOLS/
+    _FPA_BUDDY_TOOLS), not left as static items here)."""
     items = next(items for gname, _, items in env._ADMIN_GROUPS
                  if gname == "Brand, voice, and content")
     hrefs = [href for href, _, _ in items]
-    assert hrefs == ["/admin/voice", "/admin/emails", "/admin/brand"]
+    assert hrefs == ["/admin/voice", "/admin/voice/review-queue", "/admin/emails", "/admin/brand"]
 
 
 def test_hub_nav_orphans_clean_after_content_nesting(env):

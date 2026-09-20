@@ -21,8 +21,13 @@ snapshots in Google Drive, named `library-YYYYMMDD-HHMMSS.db`, retained per
 plus one per week for 8 further weeks, everything older deleted). The daily
 cadence comes from a Railway Cron Service in the same project (§7 below),
 the primary trigger — the in-app `linklib/backup.py::maybe_backup` bonus trigger
-is still separately debounced to once per 168 h, tracked by a
-`.last_backup` marker beside the DB. Every snapshot is produced via SQLite's
+is still separately debounced to once per 168 h, checked against the most
+recent success recorded in `backup_log` (2026-09: a standalone `.last_backup`
+marker file used to track this instead — retired because the file only
+updated on this debounce's own successful runs, not on the daily cron's, so
+it silently went stale relative to what was actually happening; `backup_log`
+is already the real record of every attempt, so the debounce now reads that
+directly). Every snapshot is produced via SQLite's
 online backup API, so it's a consistent, self-contained file — no WAL sidecar
 needed.
 They land in a Drive folder named **"CFO Navigator — Library Backups"**,
@@ -112,9 +117,10 @@ shell on the volume:
 - [ ] Trigger a fresh off-site snapshot: `POST /admin/backup-now`
       (admin cookie or `?token=`), so Drive holds a copy of the restored
       state. Note the in-app `maybe_backup` bonus trigger won't fire on its
-      own right away if the `.last_backup` marker on the volume is recent —
-      but the daily Railway Cron Service (§7, Phase O) bypasses that
-      debounce, so it isn't the only path back to a fresh snapshot.
+      own right away if `backup_log`'s most recent success is still within
+      its 168h debounce window — but the daily Railway Cron Service (§7,
+      Phase O) bypasses that debounce, so it isn't the only path back to a
+      fresh snapshot.
 - [ ] Confirm that snapshot on `/admin/library-backup` — the status banner
       should read green with this restore's timestamp, and the history table's
       top row should show `status=success` with a row count matching what you

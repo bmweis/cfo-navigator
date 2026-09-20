@@ -2628,6 +2628,38 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   merging into it, since "the backup succeeded" and "the DB is structurally
   sound" are two different facts. See ARCHITECTURE.md's `integrity_check_log`
   table row and `backup_now()`'s docstring for the full write-up.
+- **Disk-space visibility on `/admin/checks`, and a real stale-marker bug
+  fixed alongside it (2026-09) — a production incident (a script ran out of
+  space copying `library.db` on a volume that was only 58% full) traced to
+  nothing anywhere reporting where the volume actually stood.** Nothing in
+  the app had ever read `/data`'s own usage — the pre-backup integrity check
+  above validates the DB's structure, not the disk it lives on, and a
+  volume genuinely running low would have shown no symptom until a copy or
+  backup failed mid-write. `webapp.checks.disk_space_status()` reads
+  `/data`'s usage live via `shutil.disk_usage` (never shells to `df`) and
+  returns `None` — not a failure — when `/data` doesn't exist, so dev/CI
+  environments (which have no Railway volume) degrade cleanly instead of
+  erroring. A new "Disk space" section on `/admin/checks`
+  (`_disk_space_banner`) always states the real numbers when the volume
+  exists (green under 75%, amber at 75%, `var(--alert)` red at 85% —
+  never coral, matching every other health-signal banner on this page) and
+  says plainly that this check can't run outside the volume when it
+  doesn't, mirroring `/admin/library-backup`'s own plain-sentence-plus-
+  colored-box register rather than inventing a new one. **A related,
+  separately-confirmed bug fixed in the same pass**: `maybe_backup()`'s
+  debounce used to read a standalone `.last_backup` marker file, written
+  only by that function's own successful runs — but the real trigger
+  keeping backups current is the daily Railway Cron Service (see Phase O
+  above), which calls `backup_now()` directly and never touches this file,
+  so the marker had gone stale (confirmed 15 days out of date) and was
+  quietly misrepresenting how recently a backup actually ran. Fixed by
+  reading the debounce's "last success" straight from `backup_log` (via
+  `Library.list_backup_log`) instead — the same table the status banner
+  already treats as the single source of truth for backup history, so
+  there's nothing left to drift out of sync with it. The marker file and
+  its own `_marker_path()` helper are removed outright, not left dormant.
+  See `tests/test_checks.py`'s disk-space section and `tests/test_backup.py`'s
+  new `maybe_backup` tests for the regression coverage.
 - **Durability audit item 3 — a durable start/finish record for the three
   `_JOB_STATE`-backed background jobs (at the time — now two, see below), so
   a redeploy or crash doesn't erase whether re-enrich, Historical sweep, or
@@ -10637,6 +10669,100 @@ See `linklib/voice_review.py`, `linklib/voice_db_scan.py`, `webapp/checks.py`'s
 `VOICE_SCANNED_FILES`, `scripts/fix_spaced_em_dashes.py`, `tests/test_voice_standards.py`,
 `tests/test_voice_db_scan.py`, `tests/test_checks.py`, and `tests/
 test_voice_fix_write_path_audit.py` for the full implementation and regression coverage.
+
+- **Voice review queue (2026-09) — violations get a review queue, not
+  silent correction; asynchronous, never a save-time blocking gate.** Two
+  real gaps closed first, since they were blockers for everything else:
+  (1) the DB scanner and `_voice_fix` (the write-time spaced-em-dash
+  backstop) disagreed about `category_features.definition`/`pointer_note`
+  — the scanner never looked at those two columns at all (deemed
+  admin-only, not "user-facing copy"), so it could never report the exact
+  correction `_voice_fix` was already applying at write time (this is what
+  the confirmed production case, `category_features` id 8's `definition`,
+  actually was). Fixed by adding both columns to `voice_db_scan._SCAN_TABLES`
+  (typography-checked; `name` stays typography-scanned, unchanged) — the
+  two now agree.
+  (2) Part 2's ampersand allowlist gained `G&A`/`L&D` in
+  `AMPERSAND_ACRONYMS`, and the name-column typography exemption
+  (previously only `tools.name`/`communities.name`/`benchmarks.name`) was
+  extended to `thought_leadership.title` — a real curated title (an
+  externally-hosted event/piece name) can legitimately carry an ampersand
+  the same way a third-party entity name can, no conflicting test blocks
+  it. **`category_features.name` was deliberately NOT added to that same
+  exemption**, despite a real confirmed production finding motivating the
+  same question (22 feature names using "&" as a legitimate connector,
+  e.g. "Sales & Marketing"-shaped) — a pre-existing, committed test
+  (`test_category_features_name_ampersand_is_still_scanned`) encodes a
+  real prior design decision: this column is Brian's own curated feature
+  vocabulary, not a third-party name, so it stays in typography scope and
+  a legitimate ampersand is resolved via the shared `AMPERSAND_NAMES`/
+  `AMPERSAND_ACRONYMS` allowlists instead (the same mechanism that already
+  covers "Sales & Marketing" and now G&A/L&D) — exempting the whole column
+  would have silently let a genuinely lazy "X & Y" through unflagged,
+  which the allowlist approach doesn't.
+  A new `voice_review_queue` table (`linklib/db.py`) records every finding
+  — an `_voice_fix` correction already applied at save time
+  (`status='auto_corrected'`, before/after text logged) or a scanner
+  finding with nothing to auto-fix (`status='open'`) — for an explicit
+  human review pass at `/admin/voice/review-queue` (grouped by rule, one
+  table per group), rather than silently applying a correction or
+  reporting only an aggregate count. Deliberately asynchronous, not a
+  blocking gate — a save-time modal would be correct but unusable.
+  `Library._vf(table, row_id, column, value)` is the instrumented
+  replacement for a bare `_voice_fix(value)` call — normalizes identically,
+  and additionally logs an `auto_corrected` row when the text actually
+  changed. **Wired into `set_setting()` (every `/admin/copy/*` field, the
+  single broadest write path) and every `tools`/`category_features` write
+  method with a known row id** — `update_tool`/`update_tool_content`/
+  `quick_update_tool` (description/summary), `update_tool_differentiation`,
+  `set_tool_suite_note`, `update_tool_agent_taxonomy`/
+  `set_tool_agent_taxonomy_draft`, `add_category_feature`/
+  `update_category_feature` (the exact confirmed-bug write path).
+  **Explicitly NOT instrumented in this PR — a disclosed scope cut, not a
+  silent gap**: the `communities`/`community_profiles`/`benchmarks`/
+  `thought_leadership`/`original_content`/`ai_surfaces` UPDATE/INSERT
+  methods still call bare `_voice_fix()` with no queue logging — named
+  explicitly in `tests/test_voice_fix_coverage_ci_guard.py`'s allowlist as
+  a follow-up, not silently left uncovered. A backfill script,
+  `scripts/backfill_voice_review_queue.py` (preview/`--apply`, same
+  convention as `scripts/fix_spaced_em_dashes.py`), populates the queue's
+  `open` rows retroactively from `voice_db_scan.scan_db_copy_report()` —
+  the queue launches populated, not empty, since a scanner finding is a
+  live fact about content already in the database, unlike the
+  `auto_corrected` log, which only starts from the moment the per-write
+  logging shipped.
+  **Two exception mechanisms, kept visibly distinct**: the global,
+  source-side `AMPERSAND_NAMES`/`AMPERSAND_ACRONYMS` allowlists in
+  `linklib/voice_review.py` (a code change, reviewed like any other PR)
+  vs. `Library.is_voice_exception`/the "Accept as exception" queue action
+  (a database-backed, row-scoped exception — this ONE record+column+rule,
+  never a global rule; `resolve_voice_review_item(..., "accept_exception")`)
+  — accepting one never reads as changing the other.
+  **A CI-safe structural drift-detector** (`tests/
+  test_voice_fix_coverage_ci_guard.py`, option (b) from the assessment
+  above) parses `linklib/db.py` and asserts every `Library` method that
+  writes a scanned prose column also calls `_voice_fix`/`self._vf`
+  somewhere in its body, with a small, named allowlist (rank/tag labels,
+  the two mirror-sync methods, and this PR's own disclosed scope cut) — a
+  CI-time guard, not a runtime guarantee; a new write path that skips the
+  backstop fails this test the next time it runs, it isn't structurally
+  prevented from ever shipping (SQL-layer interception was assessed again
+  and rejected for the same reasons as before).
+  **`category_features.definition`/`pointer_note` remain a real, open
+  question, reported rather than resolved**: they now render nowhere
+  public (confirmed again in this pass) but ARE now scanned/queued for
+  correction-tracking purposes — whether they should ever be surfaced
+  publicly (making this dual-purpose) or dropped from user-facing-copy
+  framing entirely is still Brian's call, not decided here.
+  **Deliberately out of scope this PR, per its own priority-order cut**:
+  holistic (Claude-judged) review against a database record on demand
+  (extending `/admin/voice`'s existing text-paste tester to accept a
+  table/column/id instead), the cheap deterministic invisible-unicode-
+  character mechanical check, and a per-record "N open voice findings"
+  indicator on the tool/community edit forms — all real, all deferred to a
+  follow-up, not silently dropped. See `tests/test_voice_review_queue.py`
+  and `tests/test_voice_fix_coverage_ci_guard.py` for the regression
+  coverage.
 
 ## Voice — em dash policy
 

@@ -19,11 +19,19 @@ never rewrites anything. Any actual copy fix is a separate, human-reviewed
 change, per CLAUDE.md's standing "no copy rewritten without Brian seeing
 before and after" rule.
 
-``category_features.definition``/``pointer_note`` are deliberately NOT
-scanned here — they don't render on any public page (confirmed: the SQL
-read path both the public "Key features" card and the Software Matchmaker
-use never even SELECTs those two columns), so they're not "user-facing
-copy" in the sense this scanner is about. See CLAUDE.md for that finding.
+``category_features.definition``/``pointer_note`` ARE scanned here as of
+the 2026-09 voice-review-queue PR, even though they don't render on any
+public page (confirmed: the SQL read path both the public "Key features"
+card and the Software Matchmaker use never even SELECTs those two
+columns) — this was the exact gap behind the "scanner and auto-corrector
+disagree" finding: `Library.add_category_feature`/`update_category_feature`
+already run both columns through `normalize_voice_mechanics` (the
+spaced-em-dash write-time backstop) before storing, so a violation there
+is a real thing the corrector fixes and the review queue needs to be able
+to log/backfill, whether or not the text is public-facing. Whether they
+*should* ever be rendered publicly (so this scan doubles as user-facing-
+copy coverage too, not just correction-tracking) is a separate, open
+question — see CLAUDE.md's voice-enforcement section, item 3d.
 """
 from __future__ import annotations
 
@@ -50,13 +58,33 @@ from .voice_review import mechanical_findings, typography_findings_plain
 # name being "Robust Software Inc." is a risk with no real precedent.
 # `category_features.name`/`tool_categories.name`/`community_categories.name`
 # are Brian's OWN curated vocabulary (feature/category labels, not
-# third-party names), so they stay in typography scope like any other copy
+# third-party names), so mechanical rules still apply like any other copy
 # he writes — and "FP&A" as a category name is already handled by the
 # shared AMPERSAND_ACRONYMS allowlist `typography_findings_plain` reuses.
+#
+# Voice-review-queue PR (2026-09): `thought_leadership.title` (2 confirmed
+# production ampersand findings, title-shaped, e.g. an externally-hosted
+# event/piece name) is added to the typography-exempt set below, same
+# reasoning as the tools/communities/benchmarks name columns: a real
+# curated title can legitimately carry an ampersand or (in principle) a
+# dash the same way a third-party entity name can. Mechanical rules
+# (banned words/filler/performative) are UNCHANGED — they still apply.
+#
+# `category_features.name` is DELIBERATELY NOT added to this exempt set,
+# even though real production findings there (22, e.g. "Sales & Marketing"-
+# shaped feature names) motivated the same question — see the existing,
+# committed `test_category_features_name_ampersand_is_still_scanned`: this
+# column is Brian's own curated feature vocabulary, not a third-party name,
+# so the deliberate design (from the PR that first scanned this table) is
+# to keep it in typography scope and resolve a legitimate ampersand via the
+# shared AMPERSAND_NAMES/AMPERSAND_ACRONYMS allowlists instead — the same
+# mechanism that already covers "Sales & Marketing" and now G&A/L&D.
+# Exempting the whole column here would silently let a real "X and Y" typed
+# lazily as "X & Y" through unflagged, which the allowlist approach doesn't.
 _SCAN_TABLES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
     ("original_content", "id", ("title", "teaser", "tag_label", "link_label", "body_md"), ()),
     ("ai_surfaces", "id", ("title", "teaser", "body_md"), ()),
-    ("thought_leadership", "id", ("title", "venue", "date_label", "description"), ()),
+    ("thought_leadership", "id", ("title", "venue", "date_label", "description"), ("title",)),
     ("tools", "id", ("name", "description", "summary", "agent_taxonomy_note",
                       "competitive_differentiation", "suite_note"), ("name",)),
     ("communities", "id", ("name", "demographic", "cost_note", "notes", "local_markets"), ("name",)),
@@ -69,8 +97,12 @@ _SCAN_TABLES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
         "jobs_program", "team_or_individual",
     ), ()),
     # name is the public feature label on the "Key features" card;
-    # definition/pointer_note are deliberately excluded — see module docstring.
-    ("category_features", "id", ("name",), ()),
+    # definition/pointer_note are admin-only (see module docstring) but ARE
+    # scanned, since `_voice_fix` already runs against them at write time.
+    # name stays in typography scope (no exempt column) — see the comment
+    # above _SCAN_TABLES for why this differs from tools/communities/
+    # benchmarks/thought_leadership's own name/title exemptions.
+    ("category_features", "id", ("name", "definition", "pointer_note"), ()),
     ("benchmarks", "id", ("name", "description"), ("name",)),
     ("tool_categories", "id", ("name", "description"), ()),
     ("community_categories", "id", ("name", "description"), ()),
