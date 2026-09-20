@@ -5274,6 +5274,8 @@ class Library:
             slug = f"{base}-{suffix}"
             suffix += 1
         now = _now()
+        description_before, summary_before = description.strip(), summary.strip()
+        description_fixed, summary_fixed = _voice_fix(description_before), _voice_fix(summary_before)
         cur = self.conn.execute(
             """INSERT INTO tools (name, slug, description, url, categories_json,
                approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email,
@@ -5281,14 +5283,25 @@ class Library:
                description_needs_verification, description_ai_confident, description_low_confidence,
                needs_review)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (name.strip(), slug, _voice_fix(description.strip()), url.strip(),
+            (name.strip(), slug, description_fixed, url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
              promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip(),
-             _voice_fix(summary.strip()), description_needs_verification, description_ai_confident,
+             summary_fixed, description_needs_verification, description_ai_confident,
              description_low_confidence, 1 if needs_review else 0),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — no id exists until
+        # the INSERT itself returns one (same reason add_original_content/
+        # add_category_feature do the same). A pre-existing gap from the
+        # original voice-review-queue PR — add_tool called bare
+        # _voice_fix() with no queue logging, never caught because that
+        # PR's own CI guard accepted a bare _voice_fix() call as
+        # sufficient; found and fixed here by the same tightened guard
+        # that closed the tool_categories/community_categories gap.
+        self.log_voice_correction("tools", new_id, "description", description_before, description_fixed)
+        self.log_voice_correction("tools", new_id, "summary", summary_before, summary_fixed)
+        return new_id
 
     def list_tools(self, approved_only: bool = True) -> list[dict]:
         if approved_only:
@@ -6393,12 +6406,18 @@ class Library:
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tool_categories"
         ).fetchone()[0]
+        description_fixed = _voice_fix(description)
         cur = self.conn.execute(
             "INSERT INTO tool_categories (name, description, sort_order) VALUES (?,?,?)",
-            (name, _voice_fix(description), next_order),
+            (name, description_fixed, next_order),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — no id exists until
+        # the INSERT itself returns one (same reason add_original_content/
+        # add_category_feature do the same).
+        self.log_voice_correction("tool_categories", new_id, "description", description, description_fixed)
+        return new_id
 
     def rename_tool_category(self, category_id: int, new_name: str, description: str = "") -> int:
         """Rename/re-describe a category, cascading the name change onto every
@@ -6425,7 +6444,7 @@ class Library:
                 raise ValueError(f'A category named "{new_name}" already exists.')
         self.conn.execute(
             "UPDATE tool_categories SET name=?, description=? WHERE id=?",
-            (new_name, _voice_fix(description), category_id),
+            (new_name, self._vf("tool_categories", category_id, "description", description), category_id),
         )
         changed = 0
         if new_name != old_name:
@@ -7716,12 +7735,18 @@ class Library:
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM community_categories"
         ).fetchone()[0]
+        description_fixed = _voice_fix(description)
         cur = self.conn.execute(
             "INSERT INTO community_categories (name, description, sort_order) VALUES (?,?,?)",
-            (name, _voice_fix(description), next_order),
+            (name, description_fixed, next_order),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — no id exists until
+        # the INSERT itself returns one (same reason add_original_content/
+        # add_category_feature do the same).
+        self.log_voice_correction("community_categories", new_id, "description", description, description_fixed)
+        return new_id
 
     def rename_community_category(self, category_id: int, new_name: str, description: str = "") -> int:
         """Rename/re-describe a category, cascading the name change onto every
@@ -7747,7 +7772,7 @@ class Library:
                 raise ValueError(f'A category named "{new_name}" already exists.')
         self.conn.execute(
             "UPDATE community_categories SET name=?, description=? WHERE id=?",
-            (new_name, _voice_fix(description), category_id),
+            (new_name, self._vf("community_categories", category_id, "description", description), category_id),
         )
         changed = 0
         if new_name != old_name:

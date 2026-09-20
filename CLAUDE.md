@@ -10813,10 +10813,37 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   disclosed exception from the original PR, unchanged — none of it is new.
   `tool_categories`/`community_categories`' own `add_*`/`rename_*` methods
   were never named in either PR's scope (they were never on the five-table
-  list) and already call bare `_voice_fix()` today, so the CI guard already
-  passes for them with no allowlist entry needed either way — closing that
-  last gap (adding real `self._vf`/queue-logging to those two tables too)
-  is flagged as a genuine, still-open follow-up, not done here.
+  list) and, at the time this bullet was first written, already called
+  bare `_voice_fix()`, so the CI guard passed for them with no allowlist
+  entry needed either way — closing that gap (adding real `self._vf`/
+  queue-logging to those two tables too) was flagged as a genuine,
+  still-open follow-up, not done here.
+
+  **Coordinator review of this same PR caught the real problem that
+  reasoning was resting on, closed in the same PR rather than a third
+  one**: a bare `_voice_fix()` call was never actually equivalent to
+  `self._vf`/`log_voice_correction` — it normalizes the text but never
+  logs anything to `voice_review_queue`, so `add_tool_category`/
+  `rename_tool_category`/`add_community_category`/`rename_community_category`
+  were silently applying un-logged corrections the entire time, and the
+  guard's own "already passes" framing above was true only because the
+  guard's own check was too loose to catch it. Fixed two ways, together:
+  (1) `tests/test_voice_fix_coverage_ci_guard.py`'s check now requires
+  `self._vf(`/`self.log_voice_correction(` specifically — a bare
+  `_voice_fix()` call is no longer sufficient, closing the loophole for
+  good, not just for these four methods; (2) all four category methods
+  were wired to `self._vf(...)`/the after-insert `log_voice_correction(...)`
+  pattern, the same shape as every other method in this PR. **The
+  tightened check also caught one more real, pre-existing gap**: `add_tool`
+  itself — from the ORIGINAL voice-review-queue PR, not this one — called
+  bare `_voice_fix()` on `description`/`summary` with no queue logging,
+  never caught because the guard accepted a bare call as sufficient at the
+  time. Fixed the same way (post-insert `log_voice_correction`, row id
+  known via `cur.lastrowid`). None of `add_tool_category`/
+  `rename_tool_category`/`add_community_category`/`rename_community_category`/
+  `add_tool` remain in the allowlist — they were never legitimate
+  exceptions, they were unwired write paths, and the allowlist is
+  reserved for the former, never the latter.
   **Invisible/zero-width Unicode characters** — the mechanical check
   deferred from the original PR, described there as cheap and
   deterministic, motivated by a real production row

@@ -122,6 +122,61 @@ def test_update_tool_logs_a_correction(lib):
     assert any(i["table_name"] == "tools" and i["column_name"] == "description" for i in items)
 
 
+def test_add_tool_logs_a_correction(lib):
+    """No known row id exists until the INSERT returns one, same as
+    add_category_feature/add_original_content — logged AFTER insert, using
+    the real id. This was a real pre-existing gap: add_tool called bare
+    _voice_fix() with no queue logging, never caught until the guard was
+    tightened to require self._vf()/log_voice_correction() specifically."""
+    tid = lib.add_tool(
+        "Test Tool", "A tool that does X — and Y too", "https://example.com", [],
+        summary="Short and snappy — a bit too snappy",
+    )
+    items = lib.list_voice_review_queue()
+    hits = {i["column_name"]: i for i in items if i["table_name"] == "tools" and i["row_id"] == str(tid)}
+    assert "description" in hits and hits["description"]["after_text"] == "A tool that does X—and Y too"
+    assert "summary" in hits and hits["summary"]["after_text"] == "Short and snappy—a bit too snappy"
+
+
+# --- tool_categories/community_categories: instrumented in this same PR's
+# follow-up round (coordinator review) — the CI guard used to accept a bare
+# _voice_fix() call as sufficient, which is exactly what all four of these
+# methods had, with no queue logging at all. -----------------------------
+
+def test_add_tool_category_logs_a_correction(lib):
+    cid = lib.add_tool_category("Anomaly Detection", "Flags patterns — the odd ones")
+    items = lib.list_voice_review_queue()
+    hits = [i for i in items if i["table_name"] == "tool_categories"
+            and i["row_id"] == str(cid) and i["column_name"] == "description"]
+    assert hits and hits[0]["after_text"] == "Flags patterns—the odd ones"
+
+
+def test_rename_tool_category_logs_a_correction(lib):
+    cid = lib.add_tool_category("Anomaly Detection")
+    lib.rename_tool_category(cid, "Anomaly Detection", "Flags patterns — the odd ones")
+    items = lib.list_voice_review_queue()
+    hits = [i for i in items if i["table_name"] == "tool_categories"
+            and i["row_id"] == str(cid) and i["column_name"] == "description"]
+    assert hits and hits[0]["after_text"] == "Flags patterns—the odd ones"
+
+
+def test_add_community_category_logs_a_correction(lib):
+    cid = lib.add_community_category("Peer Groups", "Small cohorts — usually 8-10 people")
+    items = lib.list_voice_review_queue()
+    hits = [i for i in items if i["table_name"] == "community_categories"
+            and i["row_id"] == str(cid) and i["column_name"] == "description"]
+    assert hits and hits[0]["after_text"] == "Small cohorts—usually 8-10 people"
+
+
+def test_rename_community_category_logs_a_correction(lib):
+    cid = lib.add_community_category("Peer Groups")
+    lib.rename_community_category(cid, "Peer Groups", "Small cohorts — usually 8-10 people")
+    items = lib.list_voice_review_queue()
+    hits = [i for i in items if i["table_name"] == "community_categories"
+            and i["row_id"] == str(cid) and i["column_name"] == "description"]
+    assert hits and hits[0]["after_text"] == "Small cohorts—usually 8-10 people"
+
+
 # --- original_content: instrumented in this PR's own follow-up round,
 # since it holds Brian's own published thought leadership --------------------
 
