@@ -260,11 +260,21 @@ def test_tool_name_still_gets_mechanical_checks(lib):
     assert any(v.table == "tools" and v.column == "name" and v.rule == "buzzword" for v in violations)
 
 
-def test_category_features_name_ampersand_is_still_scanned(lib):
-    """Unlike tools/communities/benchmarks, category_features.name is
-    Brian's own curated feature label, not a third-party entity name — it
-    stays in typography scope like any other copy he writes."""
+def test_category_features_name_ampersand_is_no_longer_scanned(lib):
+    """REVERSAL (2026-09, Brian's explicit decision, voice-review-queue PR
+    follow-up): this test used to assert the opposite — that
+    category_features.name stayed in typography scope because it's Brian's
+    own curated vocabulary, not a third-party name. With 22 real production
+    ampersand findings on this one column, Brian reviewed that reasoning
+    and reversed it on purpose: he's choosing to own each category name's
+    ampersand usage directly rather than route every one of them through
+    the review queue to reach the same answer by hand. He explicitly
+    accepts the trade — the rule stops running on this column entirely, so
+    a genuinely-should-say-"and" name won't be flagged either. See the
+    comment above `_SCAN_TABLES` in linklib/voice_db_scan.py for the full
+    reversal write-up."""
     cat_id = lib.add_tool_category("Finance")
     lib.add_category_feature(cat_id, "Users & auth", "a definition")
     violations = scan_db_copy(lib)
-    assert any(v.table == "category_features" and v.rule == "bare-ampersand" for v in violations)
+    assert not any(v.table == "category_features" and v.column == "name"
+                   and v.rule == "bare-ampersand" for v in violations)

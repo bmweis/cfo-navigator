@@ -10688,18 +10688,30 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   extended to `thought_leadership.title` — a real curated title (an
   externally-hosted event/piece name) can legitimately carry an ampersand
   the same way a third-party entity name can, no conflicting test blocks
-  it. **`category_features.name` was deliberately NOT added to that same
-  exemption**, despite a real confirmed production finding motivating the
-  same question (22 feature names using "&" as a legitimate connector,
-  e.g. "Sales & Marketing"-shaped) — a pre-existing, committed test
-  (`test_category_features_name_ampersand_is_still_scanned`) encodes a
-  real prior design decision: this column is Brian's own curated feature
-  vocabulary, not a third-party name, so it stays in typography scope and
-  a legitimate ampersand is resolved via the shared `AMPERSAND_NAMES`/
-  `AMPERSAND_ACRONYMS` allowlists instead (the same mechanism that already
-  covers "Sales & Marketing" and now G&A/L&D) — exempting the whole column
-  would have silently let a genuinely lazy "X & Y" through unflagged,
-  which the allowlist approach doesn't.
+  it. `category_features.name` was initially left out of that same
+  exemption on the same PR's own reasoning: with 22 real confirmed
+  production findings on this one column ("Sales & Marketing"-shaped
+  feature names), the original call was that this is Brian's own curated
+  feature vocabulary, not a third-party name, so it should stay in
+  typography scope and a legitimate ampersand should resolve via the
+  shared `AMPERSAND_NAMES`/`AMPERSAND_ACRONYMS` allowlists instead — a
+  pre-existing, committed test (originally
+  `test_category_features_name_ampersand_is_still_scanned`) encoded that
+  decision. **Reversed, on purpose, by Brian himself in the same PR's
+  follow-up round**: he reviewed the reasoning and chose to own each
+  category name's ampersand usage directly rather than route 22 findings
+  through the review queue to reach the same answer he'd give by hand —
+  `category_features.name` now joins the same typography-exempt set as
+  `tools.name`/`communities.name`/`benchmarks.name`/
+  `thought_leadership.title`, and the test (renamed
+  `test_category_features_name_ampersand_is_no_longer_scanned`) now
+  asserts the new behavior, with its own docstring stating the reversal
+  and why — so a future session finds evidence of the decision, not a
+  mystery to re-litigate. He explicitly accepts the trade: mechanical
+  rules (banned words/filler/performative) still apply to this column, but
+  the typography rule no longer runs on it at all, so a genuinely-lazy
+  "X & Y" typed in place of "X and Y" won't be flagged there either — same
+  accepted risk as every other name-column exemption above.
   A new `voice_review_queue` table (`linklib/db.py`) records every finding
   — an `_voice_fix` correction already applied at save time
   (`status='auto_corrected'`, before/after text logged) or a scanner

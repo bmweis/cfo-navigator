@@ -55,7 +55,11 @@ _ALLOWLIST = {
     # Deliberately out of scope for THIS PR's write-path instrumentation
     # pass (see CLAUDE.md's voice-review-queue write-up for the disclosed
     # scope cut) — flagged here by name, not silently allowed forever.
-    "add_original_content", "update_original_content",
+    # `original_content` was instrumented in this same PR's follow-up round
+    # (Brian's own published thought leadership — the single highest-value
+    # table for this whole feature) and is deliberately NOT in this list
+    # any more; see add_original_content/update_original_content in
+    # linklib/db.py for the actual _vf/log_voice_correction wiring.
     "add_ai_surface", "update_ai_surface",
     "add_benchmark", "update_benchmark", "update_benchmark_content",
     "add_thought_leadership", "update_thought_leadership",

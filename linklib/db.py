@@ -4228,12 +4228,16 @@ class Library:
     # DbCopyViolation.row_id=None convention for settings). Deliberately
     # instrumented at a SUBSET of write paths, not every `_voice_fix(...)`
     # call site in this file (see this PR's own report for the exact list
-    # and the reasoning) — `set_setting` (every /admin/copy/* field) and
-    # every tool/community/community_profile/category_features write path
-    # that already had a known row id are covered; a handful of
-    # thought_leadership/benchmark/original_content UPDATE methods are not
-    # yet wired in, flagged as a follow-up rather than silently claimed
-    # complete.
+    # and the reasoning) — `set_setting` (every /admin/copy/* field),
+    # every tool/community/community_profile/category_features write path,
+    # and `original_content` (added in this PR's own follow-up round,
+    # since it holds Brian's own published thought leadership — the
+    # single highest-value table for this whole feature) are covered.
+    # `communities`/`community_profiles`/`benchmarks`/`thought_leadership`/
+    # `ai_surfaces`' write methods still call bare `_voice_fix()` with no
+    # queue logging — named explicitly in `tests/
+    # test_voice_fix_coverage_ci_guard.py`'s allowlist as a disclosed
+    # follow-up, not silently left uncovered.
     def _vf(self, table: str, row_id, column: str, value) -> str:
         if not isinstance(value, str) or not value:
             return value
@@ -6662,17 +6666,29 @@ class Library:
                 "SELECT COALESCE(MAX(display_order), -1) + 1 FROM original_content"
             ).fetchone()[0]
         now = _now()
+        title_before, teaser_before = title.strip(), teaser.strip()
+        title_fixed, teaser_fixed = _voice_fix(title_before), _voice_fix(teaser_before)
+        body_fixed = _voice_fix(body_md) if body_md else body_md
         cur = self.conn.execute(
             "INSERT INTO original_content "
             "(slug, title, teaser, tag_label, link_label, body_md, status, featured_home, "
             "date_label, sort_key, display_order, created_at, updated_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()), tag_label.strip(),
-             link_label.strip(), _voice_fix(body_md) if body_md else body_md, status,
+            (slug.strip(), title_fixed, teaser_fixed, tag_label.strip(),
+             link_label.strip(), body_fixed, status,
              int(bool(featured_home)), date_label.strip(), sort_key.strip(), display_order, now, now),
         )
         self.conn.commit()
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        # Logged AFTER insert, using the real row id — same reason
+        # add_category_feature does the same: no id exists until the INSERT
+        # itself returns one, so _vf's inline "value already known, wrap it"
+        # shape can't be used here.
+        self.log_voice_correction("original_content", new_id, "title", title_before, title_fixed)
+        self.log_voice_correction("original_content", new_id, "teaser", teaser_before, teaser_fixed)
+        if body_md:
+            self.log_voice_correction("original_content", new_id, "body_md", body_md, body_fixed)
+        return new_id
 
     def update_original_content(self, item_id: int, slug: str, title: str, teaser: str, tag_label: str,
                                 link_label: str, body_md: str | None, status: str, featured_home: bool,
@@ -6681,8 +6697,10 @@ class Library:
             "UPDATE original_content SET slug=?, title=?, teaser=?, tag_label=?, link_label=?, "
             "body_md=?, status=?, featured_home=?, date_label=?, sort_key=?, display_order=?, "
             "updated_at=? WHERE id=?",
-            (slug.strip(), _voice_fix(title.strip()), _voice_fix(teaser.strip()), tag_label.strip(),
-             link_label.strip(), _voice_fix(body_md) if body_md else body_md, status,
+            (slug.strip(), self._vf("original_content", item_id, "title", title.strip()),
+             self._vf("original_content", item_id, "teaser", teaser.strip()), tag_label.strip(),
+             link_label.strip(),
+             self._vf("original_content", item_id, "body_md", body_md) if body_md else body_md, status,
              int(bool(featured_home)), date_label.strip(), sort_key.strip(), display_order, _now(), item_id),
         )
         self.conn.commit()

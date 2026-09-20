@@ -122,6 +122,40 @@ def test_update_tool_logs_a_correction(lib):
     assert any(i["table_name"] == "tools" and i["column_name"] == "description" for i in items)
 
 
+# --- original_content: instrumented in this PR's own follow-up round,
+# since it holds Brian's own published thought leadership --------------------
+
+def test_add_original_content_logs_a_correction(lib):
+    """No known row id exists until the INSERT returns one, same as
+    add_category_feature — logged AFTER insert, using the real id."""
+    item_id = lib.add_original_content(
+        "test-slug", "A Piece — With A Correction", "A teaser — also with one",
+    )
+    items = lib.list_voice_review_queue()
+    hits = {i["column_name"]: i for i in items if i["table_name"] == "original_content"
+            and i["row_id"] == str(item_id)}
+    assert "title" in hits and hits["title"]["after_text"] == "A Piece—With A Correction"
+    assert "teaser" in hits and hits["teaser"]["after_text"] == "A teaser—also with one"
+
+
+def test_update_original_content_logs_a_correction(lib):
+    item_id = lib.add_original_content("test-slug-2", "Clean Title", "Clean teaser")
+    lib.update_original_content(
+        item_id, "test-slug-2", "Clean Title", "Clean teaser", "", "", None,
+        "draft", False, "", "", 0,
+    )
+    # No correction yet — resave with clean text logs nothing new.
+    assert lib.list_voice_review_queue() == []
+    lib.update_original_content(
+        item_id, "test-slug-2", "Clean Title", "Clean teaser", "", "",
+        "Some body text — with a spaced dash.", "draft", False, "", "", 0,
+    )
+    items = lib.list_voice_review_queue()
+    hits = [i for i in items if i["table_name"] == "original_content"
+            and i["row_id"] == str(item_id) and i["column_name"] == "body_md"]
+    assert hits and hits[0]["after_text"] == "Some body text—with a spaced dash."
+
+
 def test_add_voice_review_item_and_exception_flow(lib):
     item_id = lib.add_voice_review_item("communities", 5, "demographic", "bare-ampersand", "Bain & Company")
     assert item_id

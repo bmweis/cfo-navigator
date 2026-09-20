@@ -70,17 +70,23 @@ from .voice_review import mechanical_findings, typography_findings_plain
 # dash the same way a third-party entity name can. Mechanical rules
 # (banned words/filler/performative) are UNCHANGED — they still apply.
 #
-# `category_features.name` is DELIBERATELY NOT added to this exempt set,
-# even though real production findings there (22, e.g. "Sales & Marketing"-
-# shaped feature names) motivated the same question — see the existing,
-# committed `test_category_features_name_ampersand_is_still_scanned`: this
-# column is Brian's own curated feature vocabulary, not a third-party name,
-# so the deliberate design (from the PR that first scanned this table) is
-# to keep it in typography scope and resolve a legitimate ampersand via the
-# shared AMPERSAND_NAMES/AMPERSAND_ACRONYMS allowlists instead — the same
-# mechanism that already covers "Sales & Marketing" and now G&A/L&D.
-# Exempting the whole column here would silently let a real "X and Y" typed
-# lazily as "X & Y" through unflagged, which the allowlist approach doesn't.
+# `category_features.name` was ORIGINALLY left out of this exempt set on
+# purpose (see the now-superseded reasoning that used to live here, and
+# `tests/test_voice_db_scan.py`'s own `test_category_features_name_
+# ampersand_is_still_scanned`, whose docstring/assertions were rewritten in
+# this same PR to match): the argument was that this is Brian's own
+# curated vocabulary, not a third-party name, so it should stay in
+# typography scope and resolve a legitimate ampersand via the shared
+# AMPERSAND_NAMES/AMPERSAND_ACRONYMS allowlists instead. **Brian reviewed
+# that reasoning and reversed it, deliberately, in this same PR**: with 22
+# real production findings on this one column, he's choosing to own each
+# category name's ampersand usage directly rather than route every one of
+# them through the review queue to reach the same answer he'd give by
+# hand. He explicitly accepts the trade this makes: the typography rule
+# stops running on this column entirely, so a genuinely-should-say-"and"
+# category name (typed lazily as "X & Y") won't be flagged here either —
+# same accepted risk as the tools/communities/benchmarks/thought_leadership
+# name-column exemptions above.
 _SCAN_TABLES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
     ("original_content", "id", ("title", "teaser", "tag_label", "link_label", "body_md"), ()),
     ("ai_surfaces", "id", ("title", "teaser", "body_md"), ()),
@@ -99,10 +105,10 @@ _SCAN_TABLES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
     # name is the public feature label on the "Key features" card;
     # definition/pointer_note are admin-only (see module docstring) but ARE
     # scanned, since `_voice_fix` already runs against them at write time.
-    # name stays in typography scope (no exempt column) — see the comment
-    # above _SCAN_TABLES for why this differs from tools/communities/
-    # benchmarks/thought_leadership's own name/title exemptions.
-    ("category_features", "id", ("name", "definition", "pointer_note"), ()),
+    # name is now typography-exempt too (Brian's explicit reversal — see the
+    # comment above _SCAN_TABLES) — mechanical rules (banned words/filler/
+    # performative) still apply to it, same as every other name column here.
+    ("category_features", "id", ("name", "definition", "pointer_note"), ("name",)),
     ("benchmarks", "id", ("name", "description"), ("name",)),
     ("tool_categories", "id", ("name", "description"), ()),
     ("community_categories", "id", ("name", "description"), ()),
