@@ -1,6 +1,6 @@
 """Optional: use the Claude API to generate a clean summary + auto-tags.
 
-This replaces what Feedly used to do for you, but on a schema you control —
+This replaces what Feedly used to do for you, but on a schema you control—
 which is what makes the library more searchable than Feedly was.
 
 Requires the `anthropic` SDK and an API key:
@@ -31,7 +31,7 @@ DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-5")
 def _resolve_voice_core(voice_core: str) -> str:
     """The caller resolves ``lib.get_setting("voice_core")`` (via
     ``linklib.voice_settings.require_voice_setting``, which raises before
-    ever calling here if the setting is empty) and passes the result in —
+    ever calling here if the setting is empty) and passes the result in—
     enrich.py has no Library handle of its own, so it can't read the
     setting itself.
 
@@ -331,7 +331,7 @@ Follow these rules exactly:
    page content below wherever it supports a claim.
 3. No marketing language: no "powerful," "seamless," "game-changing," "best-in-class,"
    or similar adjective stacking. No exclamation points.
-4. Do not mention or guess whether the company has been acquired by another company —
+4. Do not mention or guess whether the company has been acquired by another company—
    leave that out entirely, even if you believe you know.
 5. Write directly to the CFO Toolbox reader. Never reference "the provided
    pages," "the page content," "the documents," or your own research
@@ -694,7 +694,7 @@ already pre-filtered by shared category tags—your job is to judge which of THO
 candidates are genuinely close competitors or alternatives, not to invent new ones.
 
 Follow these rules exactly:
-1. A true competitor solves substantially the same problem for a similar buyer —
+1. A true competitor solves substantially the same problem for a similar buyer—
    shared category tags alone are not enough (the tag taxonomy is broad).
 2. When in doubt, leave a candidate out—a false negative here just means Brian
    adds it by hand; a false positive misleads a reader comparing options.
@@ -933,7 +933,7 @@ Existing directory description: {description}
 class AgentTaxonomyResult:
     agent_taxonomy_note: str = ""
     agent_taxonomy_needs_verification: bool = True
-    confident: bool = False   # the model's own self-reported certainty (see prompt above) —
+    confident: bool = False   # the model's own self-reported certainty (see prompt above)—
                                # same raw signal agent_taxonomy_needs_verification is derived
                                # from (not confident), stored separately as of the 2026-08
                                # follow-up so the UI can show a genuine, permanent "Claude
@@ -1004,7 +1004,7 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     contract as generate_tool_description.
 
     Used to also draft standalone-vs-bundled tool_features rows in the same
-    call, before that table was retired (Feature Taxonomy Phase 1b PR 2 —
+    call, before that table was retired (Feature Taxonomy Phase 1b PR 2—
     see CLAUDE.md's "no dead data" note); this function keeps the real-crawl
     grounding mechanism, which is still worth it for the agent-taxonomy
     summary alone.
@@ -1077,7 +1077,7 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
             messages=[{"role": "user", "content": message_content}],
         )
         # inject_markers=True: real citations now surface as genuine [n]
-        # markers spliced into the note text by extract_citations itself —
+        # markers spliced into the note text by extract_citations itself—
         # see the docstring above. `citations` is collected the same way
         # regardless, already deduped by document_index (== deduped by url
         # in practice, since each fetched page has its own distinct URL).
@@ -1113,12 +1113,12 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
 
 
 # The fields generate_community_profile drafts (excludes low_confidence,
-# which is computed from the fetch, and updated_at, which is set on save) —
+# which is computed from the fetch, and updated_at, which is set on save)—
 # shared with webapp/app.py so the "existing draft as context" block and the
 # JSON response stay in lockstep with what the form actually submits.
 # seniority_band/primary_purpose/resources_included/platform_type/
 # meeting_format/event_style/cpe_eligible were originally hand-entry-only
-# (added after this list, alongside the Details-card short-field inputs) —
+# (added after this list, alongside the Details-card short-field inputs)—
 # folded into the same generate call here per the AI-first-pass-on-every-
 # field standing principle, rather than a second generate mechanism.
 COMMUNITY_PROFILE_FIELDS = [
@@ -1131,7 +1131,7 @@ COMMUNITY_PROFILE_FIELDS = [
 ]
 
 # The 12 long-form/narrative Community profile fields judged to carry real
-# fabrication risk (Phase 0 investigation + Brian's approval, 2026-08) —
+# fabrication risk (Phase 0 investigation + Brian's approval, 2026-08)—
 # deliberately a SUBSET of COMMUNITY_PROFILE_FIELDS above, not all 23:
 # excludes founded_year (a bare int, not prose) and the eleven short
 # factual/categorical fields (stage_focus/jobs_program/team_or_individual
@@ -1156,7 +1156,7 @@ Write about the community named below. Follow these rules exactly:
    "vibrant," "world-class," or similar adjective stacking. No exclamation points.
 2. Ground every claim in the page content provided below (or your own knowledge,
    if the page content is unavailable)—never invent specifics you can't support.
-3. FOUNDED_YEAR must be a four-digit integer, or the literal word "Unclear" —
+3. FOUNDED_YEAR must be a four-digit integer, or the literal word "Unclear"—
    only give a year if you're confident of it.
 4. NOTABLE_MEMBERS must be "None publicly reported" unless you know of
    PUBLICLY reported members or alumni—never guess or infer private
@@ -1173,7 +1173,7 @@ Write about the community named below. Follow these rules exactly:
    phrase, not a paragraph)—deliberately brief, distinct from the prose
    fields above.
 9. CPE_ELIGIBLE must be one of "Yes", "No", or "Unclear", optionally with a
-   short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)") —
+   short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)")—
    never guess "Yes" without a specific reason to believe it.
 10. In the CONFIDENCE: block at the very end, for EACH of its twelve lines,
     report true only if the page content (or your own knowledge) gave you a
@@ -1222,7 +1222,7 @@ VERDICT_SUMMARY: one short "best for X, not for Y" line.
 STAGE_FOCUS: whether the community targets growth-stage, late-stage, or
   public companies, or has no particular stage focus—or "Unclear."
 JOBS_PROGRAM: whether there's a FORMAL job-placement/transition program
-  (not just informal networking that happens to help with job searches) —
+  (not just informal networking that happens to help with job searches)—
   or "Unclear."
 TEAM_OR_INDIVIDUAL: whether membership is individual-only, team/company-
   based, or supports both—or "Unclear."
@@ -1354,7 +1354,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     block's body is then parsed *separately*, via `_split_trailing_sentinels`
     — safe once scoped to just that text. A response with literally no
     recognized field headers at all (e.g. the model reverting fully to a
-    JSON blob) parses to nothing and is treated as a hard failure —
+    JSON blob) parses to nothing and is treated as a hard failure—
     deliberately stricter than Description/Agent taxonomy's "some text
     beats none," since `upsert_community_profile` is a full replace of all
     23 columns: silently saving an all-empty draft wouldn't just carry
@@ -1526,7 +1526,7 @@ def _parse_community_confidence(raw) -> dict:
 # Sentinel drafted into a listing field the model isn't confident about,
 # instead of guessing — distinct from community_profiles.needs_review (a
 # whole-profile, human-toggled sign-off flag): this is a per-field, machine-set
-# gap marker on the basic directory listing. It reaches public pages —
+# gap marker on the basic directory listing. It reaches public pages—
 # webapp/app.py's _verify_html renders it as a visible "Needs verification"
 # flag rather than blanking it (the old choke point that used to strip it,
 # _public_community, was a confirmed no-op, retired in Gate-Extraction PR B).
@@ -1886,7 +1886,7 @@ class CompareSummaryDraft:
 
 _COMPARE_SUMMARY_PROMPT = """You are drafting a short orientation note that sits above a side-by-side
 comparison table on the CFO Toolbox, a directory read by finance leaders
-deciding between {noun}. The reader is about to scan the full table below —
+deciding between {noun}. The reader is about to scan the full table below—
 your job is a 1-3 sentence heads-up on the single most useful shape of the
 comparison, not a restatement of each entry's own description.
 
@@ -1928,7 +1928,7 @@ def generate_compare_summary(entity_type: str, entities: list[dict], model: str 
     Library.record_enrichment_cost, same never-auto-saved contract as every
     other generate_* function here.
 
-    `entities` is a list of plain dicts, not linklib.compare.CompareEntity —
+    `entities` is a list of plain dicts, not linklib.compare.CompareEntity—
     see the module comment above for why (avoiding a circular import).
     Each dict: {"name": str, "tags": list[str], "sections": list[(label,
     text, unverified)]}. A field with empty text should simply be omitted

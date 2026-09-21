@@ -5,7 +5,7 @@ Public routes (no auth):
     GET  /                     Bio homepage
     GET  /thought-leadership   Podcasts, writing, interviews
     GET  /thought-leadership/growth-engine-calculator  GER interactive calculator (standalone, Phase 4c)
-    GET  /thought-leadership/{slug}   Admin-authored Original Content piece (live only, unless admin) —
+    GET  /thought-leadership/{slug}   Admin-authored Original Content piece (live only, unless admin)—
                                        includes netsuite-mcp (Phase 4a), ai-hackathon-playbook (Phase 4b),
                                        and growth-engine-ratio (Phase 4c); all three bespoke routes were
                                        retired once their content was ported
@@ -109,7 +109,7 @@ _SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".",
 # type's screenshot with the other's.
 _COMMUNITY_SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "community_screenshots")
 
-# App screenshots (Phase E) reuse these exact same two directories/routes —
+# App screenshots (Phase E) reuse these exact same two directories/routes—
 # just a "-app" filename suffix ({slug}-app.png vs {slug}.png) — rather than
 # a third directory/route pair. Both the homepage and app slot for a given
 # entity type share one namespace already guarded by the traversal-safe
@@ -117,11 +117,11 @@ _COMMUNITY_SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH
 # needs.
 _APP_SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024  # 8MB — a manually uploaded screenshot, pre-crop, has more headroom than the 3MB avatar cap
 
-# Logo.dev-sourced logos (Phase D backfill, scripts/backfill_logos.py —
+# Logo.dev-sourced logos (Phase D backfill, scripts/backfill_logos.py—
 # Brandfetch through 2026-08, Logo.dev from 2026-09, see linklib/logodev.py)
 # live under a "logos/" directory next to library.db, split into tools/communities
 # subdirectories for the same reason as the screenshot dirs above (slugs are
-# separate namespaces per entity type but can collide on the same value —
+# separate namespaces per entity type but can collide on the same value—
 # e.g. airbase/datarails/rillet exist in both). tools.logo_path/
 # communities.logo_path store a path like "logos/tools/abacum.svg" relative
 # to the database's parent directory — i.e. exactly os.path.join(dirname(DB_PATH), logo_path).
@@ -148,7 +148,7 @@ CONTACT_TIME_TRAP_SECONDS = float(os.environ.get("LINKLIB_CONTACT_TIME_TRAP_SECO
 
 # Public Feature Taxonomy suggestion channel (FEATURE_TAXONOMY.md §9) reuses
 # /contact's exact spam-hardening shape (rate limit + honeypot + time-trap +
-# keyword auto-reject) but through its OWN endpoint-scoped rate-limit state —
+# keyword auto-reject) but through its OWN endpoint-scoped rate-limit state—
 # never sharing _CONTACT_RATE_LOCK/_CONTACT_SUBMIT_TIMES, so a flood against
 # one form can't burn the other's budget. The time-trap threshold and the
 # spam-phrase list/checker (_is_contact_spam) are already generic enough to
@@ -331,7 +331,7 @@ def _og_image_url(slug: str | None) -> str:
 
 def _esc_attr_normalize(s) -> str:
     """One shared rule for an og:description/twitter:description source,
-    regardless of which storage convention the field it came from uses —
+    regardless of which storage convention the field it came from uses—
     original_content.teaser (pre-encoded: real "&amp;"/"&mdash;" entities
     already in the string) or ai_surfaces.teaser/homepage_teaser (plain
     text). An earlier version of this function shipped as two separate
@@ -354,7 +354,7 @@ def _esc_attr_normalize(s) -> str:
     replaced, not just simpler: the old _esc_attr_quote_only() trusted a pre-encoded
     field's "&" completely, so a single un-pre-encoded ampersand slipping
     into original_content.teaser (an admin typo, not a hypothetical) would
-    have shipped as a literal, un-escaped "&" in the rendered attribute —
+    have shipped as a literal, un-escaped "&" in the rendered attribute—
     technically invalid markup. Decode-then-re-encode can't have that
     failure mode: every "&" in the output is guaranteed to be a real
     escaped entity, encoded exactly once, regardless of how the source
@@ -409,7 +409,7 @@ def og_url_threading_problems() -> list[str]:
     homepage to any scraper. A real, shipped gap: the original Phase 1
     build only threaded request through 5 hand-picked "the pages that
     matter" routes, leaving 44 other genuinely public _page() calls across
-    39 routes — including every individual tool/community profile page —
+    39 routes — including every individual tool/community profile page—
     silently reporting the homepage's URL. Found and fixed the same day,
     per an explicit review question asking for the full list rather than
     a spot check. This is that audit, made permanent and reusable rather
@@ -532,14 +532,14 @@ async def _canonical_host_redirect(request: Request, call_next):
     shadow mirror on the MCP subdomain.
 
     A third exemption, `/.well-known/oauth-*`, ALSO 404s directly on that
-    host — and, per the same reasoning, on the raw Railway origin too —
+    host — and, per the same reasoning, on the raw Railway origin too—
     rather than falling into the general redirect above (2026-09): an MCP
     client probes these paths (RFC 8414/9728 OAuth discovery) before
     concluding a server has no OAuth layer — this server doesn't (see
     mcp_server.py's auth-model docstring: a plain bearer token, not
     FastMCP's OAuth framework), so the honest, cheap answer is a direct
     404. Left as a 301 to the apex, the client would instead chase the
-    redirect onto bmweis.com, straight into Cloudflare's Bot Fight Mode —
+    redirect onto bmweis.com, straight into Cloudflare's Bot Fight Mode—
     which either 403s it outright or, best case, serves the apex's own
     unrelated 404, neither of which reads as "no OAuth here" the way a
     same-origin 404 does. Scoped narrowly to this one path prefix on these
@@ -627,9 +627,19 @@ async def _save_cors(request: Request, call_next):
 @app.on_event("startup")
 def _seed_toolbox():
     """Seed the tool_categories/community_categories vocabulary on first run,
-    and keep the advisor flag and name/description (communities) or
-    name/description (benchmarks) in sync with their seed lists on every
-    restart/deploy. categories_json is NOT re-synced from the seed list for
+    and keep the advisor flag in sync with the seed lists on every
+    restart/deploy (booleans, no voice-review implications).
+
+    2026-09 fix — name (tools)/name+notes (communities)/name+description
+    (benchmarks) are NO LONGER silently overwritten when they diverge from
+    the seed source. Each divergence is instead queued at
+    /admin/voice/review-queue (rule='seed-disagreement') for an explicit
+    "Use seed version"/"Keep mine" decision — see `Library.
+    add_seed_disagreement_item`'s own docstring for the full mechanism and
+    why (a real production incident: this hook re-syncing
+    communities.notes against scripts/seed_communities.py's raw,
+    pre-`_voice_fix` source text against an already-corrected DB value, on
+    every single deploy). categories_json is NOT re-synced from the seed list for
     tools/communities that already exist — once seeded, categories are
     owned by the DB and edited at /admin/tools/software/categories or
     /admin/tools/communities, so this must not clobber changes made there.
@@ -673,7 +683,7 @@ def _seed_toolbox():
     have the identical bug class, one level up: a deleted category row has no
     soft-delete column either, so "name missing from the DB" was
     indistinguishable from "never seeded" there too. The tools-category loop
-    already had the right guard (only seed when the whole table is empty —
+    already had the right guard (only seed when the whole table is empty—
     i.e. a fresh DB); the community-category loop didn't, and unconditionally
     re-added any seed-list category missing from the DB on every restart,
     silently undoing a deliberate deletion at /admin/tools/communities. Both
@@ -710,8 +720,20 @@ def _seed_toolbox():
                 )
                 lib.conn.commit()
             notes = c.get("notes", "")
-            if crow["name"] != c["name"] or crow["notes"] != notes:
-                lib.update_community_content(crow["id"], c["name"], notes, source="startup-sync")
+            # 2026-09 fix — a divergence no longer overwrites the stored
+            # value on every boot (that was the exact mechanism behind the
+            # seed-sync infinite-loop investigation, re-syncing raw
+            # pre-`_voice_fix` seed text against an already-corrected DB
+            # value every single deploy). Each column's own divergence is
+            # queued separately at /admin/voice/review-queue for an explicit
+            # "Use seed version"/"Keep mine" decision instead — see
+            # `Library.add_seed_disagreement_item`'s own docstring.
+            if crow["name"] != c["name"]:
+                lib.add_seed_disagreement_item("communities", crow["id"], "name",
+                                                crow["name"], c["name"], source="startup-sync")
+            if crow["notes"] != notes:
+                lib.add_seed_disagreement_item("communities", crow["id"], "notes",
+                                                crow["notes"], notes, source="startup-sync")
         for b in _DEFAULT_BENCHMARKS:
             brow = lib.conn.execute(
                 "SELECT id, name, description FROM benchmarks WHERE url = ?", (b["url"],)
@@ -721,8 +743,14 @@ def _seed_toolbox():
                 # benchmark row might be a deliberate admin delete, not an
                 # unseeded one. Skip, never insert.
                 continue
-            if brow["name"] != b["name"] or brow["description"] != b["description"]:
-                lib.update_benchmark_content(brow["id"], b["name"], b["description"], source="startup-sync")
+            # Same 2026-09 fix as the communities loop above — queue each
+            # column's divergence for review instead of overwriting it.
+            if brow["name"] != b["name"]:
+                lib.add_seed_disagreement_item("benchmarks", brow["id"], "name",
+                                                brow["name"], b["name"], source="startup-sync")
+            if brow["description"] != b["description"]:
+                lib.add_seed_disagreement_item("benchmarks", brow["id"], "description",
+                                                brow["description"], b["description"], source="startup-sync")
         lib.seed_game_rank_settings()
         # Same normalized-URL fix as the communities loop above (and
         # scripts/seed_tools.py) — exact-string WHERE url = ? can miss an
@@ -748,12 +776,16 @@ def _seed_toolbox():
                 lib.conn.commit()
             # description is deliberately NOT synced here — see the docstring's
             # 2026-08 incident note above. name-only, name never AI-drafted.
+            # 2026-09 fix — this used to be a raw UPDATE, silently
+            # overwriting a hand-edited name on every boot and never
+            # logged anywhere (not even to voice_review_queue, since it
+            # bypassed every Library write method). Now routed through the
+            # same seed-disagreement review queue as communities.name/
+            # notes and benchmarks.name/description, via a real Library
+            # method — see `Library.add_seed_disagreement_item`.
             if row["name"] != t["name"]:
-                lib.conn.execute(
-                    "UPDATE tools SET name=? WHERE id=?",
-                    (t["name"], row["id"]),
-                )
-                lib.conn.commit()
+                lib.add_seed_disagreement_item("tools", row["id"], "name",
+                                                row["name"], t["name"], source="startup-sync")
     finally:
         lib.close()
 
@@ -889,7 +921,7 @@ def _contact_rate_limited(ip: str) -> bool:
     return limited
 
 
-# Own rate-limit state for the public Feature Taxonomy suggestion channel —
+# Own rate-limit state for the public Feature Taxonomy suggestion channel—
 # same shape as _CONTACT_RATE_LOCK/_CONTACT_SUBMIT_TIMES above, deliberately
 # a separate dict/lock rather than sharing /contact's, so the two forms'
 # budgets can't starve each other.
@@ -1133,13 +1165,13 @@ def _narrative_verify_widget(needs_verification: bool, verify_form_id: str, veri
     widget too (button+line half only); the 2026-08 Review-status
     consolidation moved both onto the shared _review_status_pill_html/
     _review_status_action_html/_review_status_block_html components
-    instead (a real pill, not a badge, plus a self-contained action) —
+    instead (a real pill, not a badge, plus a self-contained action)—
     this widget is now Agent taxonomy/Description/Differentiation-only.
 
     Returns (badge_html, action_html, hidden_form_html, review_line_html).
     Every rendering site lives inside a <form> of its own (#tool-edit-form
     or #community-edit-form), so the verify action is always a bare button
-    pointing at a hidden, empty <form> placed elsewhere on the page —
+    pointing at a hidden, empty <form> placed elsewhere on the page—
     never a <form> nested inside the enclosing one. A nested <form>'s
     closing tag pops the *outer* form off the browser's parse stack early,
     silently orphaning every field/button after that point (Save changes
@@ -1295,7 +1327,7 @@ def _citations_list_html(citations: list, cap: int | None = None, empty_note: st
     adapted here with inline styles since that CSS class is scoped to the
     Ask page's own `<style>` block, not sitewide.
 
-    `citations` is the FULL list from Library.get_entity_citations —
+    `citations` is the FULL list from Library.get_entity_citations—
     already deduped by url and in first-use order. `cap`, when given,
     slices to the first N entries for public display (decision: 5 sources,
     drop the rest, no "+N more" indicator) — the admin view passes no cap,
@@ -1310,7 +1342,7 @@ def _citations_list_html(citations: list, cap: int | None = None, empty_note: st
     "no citations recorded" is more useful than silence.
 
     Shared across every field this grounding fix extends to (Agent
-    taxonomy first; Description and Community profile in later phases) —
+    taxonomy first; Description and Community profile in later phases)—
     not agent-taxonomy-specific despite shipping alongside it first."""
     shown = citations[:cap] if cap is not None else citations
     if not shown:
@@ -1521,7 +1553,7 @@ _CSS = """
 }
 *{box-sizing:border-box;}
 /* Phase F8: mobile browsers (WebKit and Chromium alike) auto-boost font
-   size on a per-text-block basis when a page has no explicit opinion here —
+   size on a per-text-block basis when a page has no explicit opinion here—
    the heuristic weighs a block's rendered width against the viewport, so it
    fires inconsistently block-to-block rather than uniformly. That's the
    likely cause of a landscape-only bug where one card's body text grows
@@ -1612,7 +1644,7 @@ p{margin:0 0 16px;color:var(--ink-soft);}
                                     GER-calculator/Sail Don't Row
                                     "functional tool" pages (whose own
                                     .tool-inner already caps at this same
-                                    1300px regardless of the outer shell —
+                                    1300px regardless of the outer shell—
                                     FP&A Buddy used to be in this group too,
                                     until PR 17 removed its own .tool-inner
                                     wrapper as a dead no-op now that both
@@ -1702,7 +1734,7 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .btn-ghost{background:transparent;color:var(--navy);border:1px solid var(--navy);}
 .btn-ghost:hover{background:var(--accent-light);color:var(--navy);}
 
-/* Edit-page footer action row (primary save / stay-on-page save / cancel) —
+/* Edit-page footer action row (primary save / stay-on-page save / cancel)—
    shared by the Software and Community edit pages. A plain inline-block row
    wraps unpredictably at narrow widths (the first button lands alone on its
    own line, the other two size themselves off their own text, so the row
@@ -1813,7 +1845,7 @@ details[open] > summary .disclosure-caret{transform:rotate(90deg);}
 # by default. The point is a rule someone can follow going forward: "does
 # adding a column cross a bucket boundary?" is answerable; "is 760 still
 # right for this table?" wasn't. See BRAND.md §5 ("Admin table width
-# floors") for the full table and the documented per-table exceptions —
+# floors") for the full table and the documented per-table exceptions—
 # a handful of tables (the Software/Communities column-picker lists' own
 # sticky Name column + 3-button Actions grid; three Reader-backfill tables
 # built around a fixed 420px Article column) genuinely need a floor above
@@ -1833,7 +1865,7 @@ _TABLE_FLOOR_XWIDE = 960     # 8+ columns
 # instead of being clipped — they're a shared starting point, not a hard
 # cap. Applied wherever a column's header literally names one of these
 # field types; a column holding something else (a description, a reason, a
-# URL, a free-text note) stays unwidthed and absorbs the remaining space —
+# URL, a free-text note) stays unwidthed and absorbs the remaining space—
 # every table needs at least one such column. See BRAND.md §5 for the full
 # table, including the handful of documented per-table exceptions (a
 # fixed-layout percentage table, a deliberately wider Article column
@@ -2528,7 +2560,7 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .cmp-full-link{{display:block;margin-top:4px;font-size:12.5px;font-weight:600;color:var(--navy);text-decoration:none;}}
 .cmp-full-link:hover{{text-decoration:underline;}}
 /* Mobile follow-up: sticky section labels + swipe hint. This table has no
-   separate per-row label COLUMN the way a flat label/value table would —
+   separate per-row label COLUMN the way a flat label/value table would—
    every row's "label" is a full-width .cc-section band (colspan across
    every column), not a narrow leftmost cell, so a first pass that made
    .cc-label sticky pinned nothing (those cells are blank; the real text
@@ -2773,7 +2805,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
                                    standalone_form_id: str = "") -> tuple[str, str]:
     """Renders the admin edit page's "App screenshot" section (Phase E).
     Returns (in_form_html, after_form_html):
-      - in_form_html goes inside the main #tool-edit-form/#comm-edit-form —
+      - in_form_html goes inside the main #tool-edit-form/#comm-edit-form—
         the source URL input needs to submit with the rest of the form's
         fields via the normal Save changes button, same as the homepage
         Screenshot URL field beside it.
@@ -2817,7 +2849,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
         )
     recapture_disabled = "" if source_url else ' disabled title="Enter a source URL above, then Save changes, first."'
     # Phase Q: confirmDiscardsUnsavedEdits checks a specific form's dirty
-    # state, so the shared helper needs the right form id per entity type —
+    # state, so the shared helper needs the right form id per entity type—
     # the Software edit page's own 'tool-edit-form' isn't the Community edit
     # page's 'comm-edit-form' (see confirmDiscardsUnsavedEdits's own comment
     # for how this was generalized).
@@ -2882,7 +2914,7 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     at via `form=` — always rendered OUTSIDE any other <form>, since a
     <form> can't nest inside another <form>: a nested <form>'s closing tag
     pops the *outer* form off the browser's parse stack early, silently
-    orphaning every field/button after that point (Save changes included) —
+    orphaning every field/button after that point (Save changes included)—
     see _narrative_verify_widget's own comment for the "Save changes does
     nothing" incident that taught this. Before the field-order pass, this
     section rendered outside every <form> entirely, so the "Fetch from URL"
@@ -3165,7 +3197,7 @@ def _logo_box(name: str, logo_url: str, size: int, radius: int = 10) -> str:
     cards (F3), and the Competitors table (F6) so there's exactly one
     fallback treatment across the whole feature.
 
-    Two renderings, picked by `size` rather than a caller-supplied flag —
+    Two renderings, picked by `size` rather than a caller-supplied flag—
     every call site already sizes for its context (56px header vs. 28-32px
     card/table slot), so the same threshold that decides visual weight also
     decides which fallback fits: the full phrase at header size, a small
@@ -3318,7 +3350,7 @@ def _software_key_features_card(feature_links: list[dict]) -> str:
 # feature) — FEATURE_TAXONOMY.md §9: "the UI surfaces a plain-language
 # summary of the guidelines (§3-§5 ...) and requires the submitter to
 # articulate why their suggestion adheres and is worth a slot." Never shown
-# for a bare Flag, which requires no articulation at all. DRAFT COPY —
+# for a bare Flag, which requires no articulation at all. DRAFT COPY—
 # flagged for Brian's sign-off before merge, see the PR description.
 _FEATURE_SUGGEST_GUIDELINES_HTML = (
     '<div class="tp-fs-guidelines">'
@@ -3495,7 +3527,7 @@ def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -
 
 
 def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
-    """Wrap the last word of `text` (raw, unescaped) in a marker-underline —
+    """Wrap the last word of `text` (raw, unescaped) in a marker-underline—
     the safe way to accent one word of arbitrary/admin-edited heading copy,
     since it doesn't require knowing the word in advance. The word and its
     underline are stacked in a single-column `display:inline-grid` (not
@@ -4083,7 +4115,7 @@ def homepage(request: Request):
 /* Mobile (default): plain stacked flow, DOM order = hero -> photo card ->
    Thought Leadership section -> Toolbox/Reader sidebar rest. That specific
    order (photo card between the hero and Thought Leadership, not at the very
-   bottom with the rest of the sidebar) is a deliberate mobile-only ask —
+   bottom with the rest of the sidebar) is a deliberate mobile-only ask—
    see CLAUDE.md's Homepage Restructure mobile-order note. Desktop restores
    the two-column layout via explicit grid placement below, independent of
    this DOM order. */
@@ -4126,7 +4158,7 @@ def homepage(request: Request):
 .home-tl-highlights-wrap{{border-top:1px solid var(--line);padding-top:28px;}}
 .home-tl-highlights-label{{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin-bottom:20px;}}
 .home-tl-highlights{{display:grid;grid-template-columns:1fr;gap:32px 40px;}}
-/* 1024px, not the sitewide-standard 900px other sections on this page use —
+/* 1024px, not the sitewide-standard 900px other sections on this page use—
    deliberately wider so the mobile stacked order (and its photo-card
    placement above) holds through phone landscape too, not just portrait.
    The largest common phones land around 930px wide in landscape, which
@@ -4399,7 +4431,7 @@ _HTIB_AFTER_DEFAULT = (
 # explainers-collection Phase 2, ALSO renders through this same trusted
 # function (About's own body is plain prose plus one hardcoded link, so it
 # needed no split marker). The raw-HTML/markdown rule itself is stated once,
-# in this page's own intro paragraph (admin_copy_how_this_is_built_page) —
+# in this page's own intro paragraph (admin_copy_how_this_is_built_page)—
 # it used to be repeated a third time in each section's own "desc" below,
 # which meant a reader hit the identical sentence three times before
 # reaching a textarea. Each section's "desc" now says only what's actually
@@ -4455,7 +4487,7 @@ def _ai_surface_card_html(row: dict) -> str:
     """Renders one /how-this-is-built card from an ai_surfaces row.
 
     Href resolution, in order: a Draft row never links anywhere (unlinked
-    "Explainer coming soon.", same treatment as an empty href always had —
+    "Explainer coming soon.", same treatment as an empty href always had—
     the hub should show what's planned, not hide it). A Live row with
     external_href links straight there (the FP&A Buddy case — its own
     explainer lives outside this collection entirely). A Live row with a
@@ -4500,7 +4532,7 @@ def how_this_is_built(request: Request):
     render unlinked ("Explainer coming soon.") until their own body_md is
     written and the row flipped to status='live', per the standing rule
     that a visitor who finds three placeholders learns less than one who
-    finds one real page. No diagram on this page —
+    finds one real page. No diagram on this page—
     considered and deliberately skipped, since the four surfaces are
     independent mechanisms, not one branching/parallel flow a picture
     would show better than this list does; the one diagram that earns its
@@ -4526,7 +4558,7 @@ def how_this_is_built(request: Request):
     as they did before this PR.
 
     The four surface cards render as a single nested `<div>` INSIDE this
-    same `.tool-prose` wrapper, not as a sibling of it (fixed post-merge —
+    same `.tool-prose` wrapper, not as a sibling of it (fixed post-merge—
     the explainers-collection PR had split the page into three separate
     `.tool-prose` divs with the cards grid sitting between them as its own
     unwrapped div, so it rendered at the full `.page-standard` width,
@@ -4599,7 +4631,7 @@ def _ai_surface_article_body(row: dict) -> str:
 
 @app.get("/how-this-is-built/{slug}", response_class=HTMLResponse)
 def ai_surface_article(request: Request, slug: str):
-    """The explainer page behind an ai_surfaces card with a real body_md —
+    """The explainer page behind an ai_surfaces card with a real body_md—
     same live/draft/404 contract as GET /thought-leadership/{slug}: a Live
     row is public, a Draft renders only for a signed-in admin at its own
     canonical URL, and a row with no body_md (or an unknown slug) 404s for
@@ -4668,7 +4700,7 @@ def _current_feed_hidden_footnote(feeds: list) -> str:
     of names or sections, so it can't go stale as feeds are added, removed,
     or reassigned. Returns "" when nothing is hidden (every feed marked
     shown), since there's nothing to disclose. Restructured (2026-09) from
-    one run-on sentence into a lead sentence plus a real bulleted list —
+    one run-on sentence into a lead sentence plus a real bulleted list—
     only the framing changed, the per-section groups are exactly the same
     data-derived {section}: {names} pairs as before."""
     hidden = [f for f in feeds if not f["show_on_current_feed"]]
@@ -5095,7 +5127,7 @@ def admin_ai_surfaces(request: Request, status: str = ""):
             destination = (f'<a href="{_esc(dest_url)}" target="_blank" rel="noopener" '
                             f'style="font-size:13px;">{_esc(dest_url)}</a>')
         else:
-            destination = '<span style="color:var(--muted);">&mdash; (coming soon)</span>'
+            destination = '<span style="color:var(--muted);">&mdash;(coming soon)</span>'
         return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}</td>
   <td style="padding:10px 12px;font-family:ui-monospace,monospace;">{destination}</td>
@@ -5433,14 +5465,14 @@ def growth_engine_ratio_redirect(request: Request):
 # through GET /thought-leadership/{slug} (see
 # scripts/archive/migrate_growth_engine_ratio_content.py), but the calculator is
 # genuinely interactive (live inputs, on-demand JS computation, two
-# dynamically-generated SVG charts) — not markdown-representable content —
+# dynamically-generated SVG charts) — not markdown-representable content—
 # so it stays a hand-built Python route, same as before, just at its own
 # URL and with the article's prose/table/CTA content removed.
 #
 # Extraction discipline: the calculator's own markup, CSS, and ~380 lines
 # of JS below are copied byte-for-byte from the retired route — no logic,
 # input, or chart-generation change. Only new content on this page is the
-# back-link, the eyebrow/H1, and the intro blurb immediately below —
+# back-link, the eyebrow/H1, and the intro blurb immediately below—
 # flagged for Brian's review per the process note in this PR (new copy, not
 # ported copy).
 @app.get("/thought-leadership/growth-engine-calculator", response_class=HTMLResponse)
@@ -6418,7 +6450,7 @@ _SDR_CSS = """
   text-shadow:0 1px 2px rgba(255,255,255,0.7);}
 
 .sdr-steer-zone{position:absolute;top:0;left:0;width:60%;height:100%;z-index:5;cursor:grab;}
-/* Mobile row button (rowboat + touch only, toggled via inline style in JS —
+/* Mobile row button (rowboat + touch only, toggled via inline style in JS—
    see startRun/backToRankSelect). Anchored bottom-right in the untouched 40%
    of the stage the steer-zone doesn't cover, so it never competes with the
    ↑/↓ drag gesture in either orientation. bottom:34px (not the corner) keeps
@@ -6511,7 +6543,7 @@ _SDR_BOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
 # is now a single oar that sweeps right-to-left on every completed stroke
 # (see the JS's #sdrOar / sdr-stroke class, driven by row()), resting on the
 # right between strokes. Motion carries the "rowing" read instead of a
-# static twin-oar pose. Drawn LAST (after the hull) so it paints on top —
+# static twin-oar pose. Drawn LAST (after the hull) so it paints on top—
 # drawing it first had the hull's fill covering the oar near the pivot,
 # reading as "behind the boat" rather than held out in front of it. The
 # blade uses the seafoam accent (the sailboat's identifying color is its
@@ -7672,7 +7704,7 @@ async def play_submit_score(request: Request):
     """Member-tier write: a signed-in player's run is saved automatically on
     finish/game-over (see submitScore() in the game JS). Score/distance/time/
     hits are client-reported — this is a client-authoritative DOM+CSS
-    game with no server-side simulation, same trust model used throughout —
+    game with no server-side simulation, same trust model used throughout—
     but rank/course-week/difficulty are always computed server-side, never
     trusted from the client."""
     _require_member(request)
@@ -8190,7 +8222,7 @@ def _toolbox_tile(index: int, href: str, title: str, desc: str, icon_svg: str, *
 
 
 def _toolbox_mini_tile(index: int, title: str, one_liner: str, icon_svg: str) -> str:
-    """Homepage Toolbox-panel tile row (Homepage Restructure design file) —
+    """Homepage Toolbox-panel tile row (Homepage Restructure design file)—
     icon badge to the left, title + one-liner stacked to the right, no link
     (the panel links out once via the "See the full toolbox" line below it,
     not per-tile). Badge is built directly (.home-toolbox-icon), not via the
@@ -9414,7 +9446,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # buried italic sub-paragraph inside the Description card so the
     # differentiation note actually reads as the scannable takeaway it is.
     # Radical-transparency review standard: `competitive_differentiation_
-    # needs_verification` previously had NO gate at all on this surface —
+    # needs_verification` previously had NO gate at all on this surface—
     # an unreviewed draft rendered identically to a verified one, with no
     # badge for either viewer. Now brought in line with Description/Agent
     # taxonomy below: content always renders, with a trailing review-state
@@ -9688,7 +9720,7 @@ function submitIntroForm() {{
     # built, so it can be spliced in right after the header row (name/tags/
     # subhead) and before the action row, rather than buried under
     # everything else. Category tags moved out of this same hero flow in
-    # the Sidebar Consolidation pass (now directly under the name instead —
+    # the Sidebar Consolidation pass (now directly under the name instead—
     # see the cats_html/hero_text comments below), so this no longer sits
     # "above tp-hero-cats" the way it once did.
     review_status_html = ""
@@ -9727,7 +9759,7 @@ function submitIntroForm() {{
     # tags move to sit directly under the name, above the subhead — mirroring
     # where Compare places entity tags (see the cats_html comment above).
     # The hero itself is now full-width, holding only identity (name, tags,
-    # subhead) and actions (review status, Visit/Warm intro/Compare/Edit) —
+    # subhead) and actions (review status, Visit/Warm intro/Compare/Edit)—
     # screenshot no longer sits beside it (that was the *hero*/hero pairing;
     # it now opens the sidebar instead, alongside Key features and
     # Competitors, per Brian's approved Step 0 proposal).
@@ -9855,7 +9887,7 @@ function submitIntroForm() {{
 }}
 .tp-feature-list{{list-style:none;margin:0;padding:0;font-size:14px;}}
 /* padding-right (item 3, empty-state visual QA pass): reserves room for
-   .tp-feature-flag-btn, now position:absolute rather than a flex item —
+   .tp-feature-flag-btn, now position:absolute rather than a flex item—
    see that rule's own comment for why. */
 .tp-feature-list li{{position:relative;padding:8px 28px 8px 0;border-bottom:1px solid var(--line);color:var(--ink-soft);
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;}}
@@ -10211,7 +10243,7 @@ def tools_resources(request: Request):
        underlying text actually is.
      - .bench-card gets a matching min-height, so a short name/description
        still reserves the same space a clamped-to-the-max one would use
-       (verified against the tallest real combination in this data set —
+       (verified against the tallest real combination in this data set—
        a 2-line name + a full 3-line description — not picked by eye).
    Height is now driven by these fixed budgets, not by which row a card's
    own content happens to land in. */
@@ -10236,7 +10268,7 @@ def _visitor_session_id(request: Request) -> str:
 
 
 def _set_visitor_cookie(request: Request, resp, session_id: str) -> None:
-    """Sets cfo_visitor only when the visitor doesn't already have one —
+    """Sets cfo_visitor only when the visitor doesn't already have one—
     avoids resetting the 30-day TTL (and sending a Set-Cookie header) on
     every single page view."""
     if request.cookies.get(VISITOR_COOKIE_NAME):
@@ -11198,7 +11230,7 @@ async def compare_summary_feedback_submit(request: Request):
 
 def _reviewed_toggle_html(is_reviewed: bool, toggle_url: str, *, one_way: bool = False,
                            reviewed_at: str = "", form_style: str = "") -> tuple[str, str]:
-    """Shared rendering for the "has a human confirmed this row" idiom —
+    """Shared rendering for the "has a human confirmed this row" idiom—
     a badge (or, in one_way mode, plain text) plus a "Mark reviewed" action.
     See all callers of _reviewed_toggle_html for the current call sites.
 
@@ -11216,7 +11248,7 @@ def _reviewed_toggle_html(is_reviewed: bool, toggle_url: str, *, one_way: bool =
     row layout requires (each of the three current call sites uses a
     different one) without baking a specific layout choice into the shared
     helper. Returns (badge_html, action_html) so a caller can place the two
-    pieces independently, exactly where its own row already puts them —
+    pieces independently, exactly where its own row already puts them—
     badge_html is "" in one_way mode, since that shape has no separate
     badge at all."""
     style_attr = f' style="{form_style}"' if form_style else ""
@@ -11648,7 +11680,7 @@ def tools_community_profile(request: Request, slug: str):
     # drafted yet has nothing to review or flag, same no-op precedent
     # flag_community_profile_needs_review already applies. Placement
     # (2026-08 follow-up, per Brian's review of the first draft): moved
-    # from the bottom of the page to the hero, above the Categories card —
+    # from the bottom of the page to the hero, above the Categories card—
     # Communities have no hero-level category pills the way Software does,
     # so this is placed right after the name/subhead, above everything
     # else on the page (including the Categories card, further down in the
@@ -11685,7 +11717,7 @@ def tools_community_profile(request: Request, slug: str):
     # build) — root cause was this page's own pre-Sidebar-Consolidation
     # layout: hero_text and screenshot_block used to sit side by side in
     # their own two-column `.tp-band` (top_band), so the Bottom line
-    # callout below it couldn't start until that whole grid ROW finished —
+    # callout below it couldn't start until that whole grid ROW finished—
     # gated behind the screenshot column's height, not the (much shorter)
     # hero column's. Software's own Sidebar Consolidation pass (see that
     # CLAUDE.md bullet) already solved this exact problem by making the
@@ -11736,7 +11768,7 @@ def tools_community_profile(request: Request, slug: str):
     # every viewer (an admin's placeholder adds a "go fill this in" prompt).
     # A field empty within a card that DOES have other populated fields is a
     # different case (Tier 2 below): shown to everyone as muted "No details
-    # available" text, an honest "doesn't apply here," not a research gap —
+    # available" text, an honest "doesn't apply here," not a research gap—
     # unchanged by this standard, since it was already visitor-visible.
     verdict_block = ""
     if (_display_profile.get("verdict_summary") or "").strip():
@@ -12179,7 +12211,7 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
       }
     }
     // A hand-edit to the description after this Generate call means its
-    // text no longer matches what the citations above actually ground —
+    // text no longer matches what the citations above actually ground—
     // clear the AI-drafted-this-session flag and the citations together the
     // moment the admin types, so a save right after doesn't ship stale
     // citations against edited text. One-time listener: re-attached on the
@@ -12229,7 +12261,7 @@ _COMMUNITY_PROFILE_FIELD_IDS = [
 # one Generate click, so it shares description's flag rather than being
 # left tracked nowhere. Everything else that calls markAiDrafted
 # (the Community listing "Auto-fill from URL" fields, competitor-match
-# suggestions on both entity types) is deliberately NOT in this set —
+# suggestions on both entity types) is deliberately NOT in this set—
 # field_reviews keeps tracking those exactly as before.
 _RETIRED_FIELD_REVIEW_FIELDS = (
     {("tool", "description"), ("tool", "summary"), ("tool", "competitive_differentiation")}
@@ -12272,7 +12304,7 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
     var lowConf = document.getElementById('cp-low_confidence');
     if (lowConf) lowConf.checked = !!d.low_confidence;
     markAiCitations(d.citations || [], d.model || '');
-    // One shared citation set grounds all 23 fields (decision 5, Phase 0) —
+    // One shared citation set grounds all 23 fields (decision 5, Phase 0)—
     // a hand-edit to ANY of them after this Generate call means the set may
     // no longer describe what's on the form, so every field gets the same
     // one-time clear-on-edit guard generateDescription() uses for its single
@@ -12462,7 +12494,7 @@ def admin_contacts(request: Request):
     finally:
         lib.close()
     def _contact_message_cell(message: str) -> str:
-        """A long or multi-line submission otherwise dominates the row —
+        """A long or multi-line submission otherwise dominates the row—
         show a short single-line preview, expandable to the full message,
         so the table stays scannable."""
         PREVIEW_LEN = 140
@@ -13079,7 +13111,7 @@ def _review_status_pill_html(reviewed: bool, breakdown: tuple[int, int] | None =
     consolidation, not relocated).
 
     "Reviewed" when the whole-record needs_review flag is false; "Needs
-    review" when true, with an optional "(n/total)" fraction alongside —
+    review" when true, with an optional "(n/total)" fraction alongside—
     Communities' Claude-self-reported low-confidence count
     (unconfident_count/12, the one dataset explicitly named to carry over
     into this component) or Software's own count of how many of its 3
@@ -13193,7 +13225,7 @@ def _admin_row_data_attrs(fields: dict[str, str]) -> str:
 # Admin completeness filter (2026-09) — "Missing something" scalar filter on
 # both /admin/tools/software and /admin/tools/communities, reusing
 # linklib.gates' EMPTY state purely as a signal (via the same
-# strip-then-check emptiness test gates.field_state already applies —
+# strip-then-check emptiness test gates.field_state already applies—
 # CLAUDE.md's "consume only, no new gating concept" scope for this feature)
 # plus a direct check of the homepage screenshot column. Deliberately checks
 # only screenshot_url, never app_screenshot_url — the app/product screenshot
@@ -13212,7 +13244,7 @@ def _tool_completeness(t: dict, n_competitors: int) -> str:
     if Description, Agent taxonomy, Bottom line, the homepage screenshot, or
     at least one curated Competitor is absent; "complete" otherwise. Mirrors
     exactly the field set linklib.compare.build_software_compare tracks for
-    this entity type (Description/Agent taxonomy/Bottom line/Competitors) —
+    this entity type (Description/Agent taxonomy/Bottom line/Competitors)—
     see that module's own field list, not re-derived here."""
     if not (t.get("summary") or t.get("description") or "").strip():
         return _COMPLETENESS_MISSING
@@ -13284,7 +13316,7 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
             f'<input type="checkbox" value="{_esc(c["name"])}" onchange="applySortFilter(\'{table_key}\')"> {_esc(c["name"])}</label>'
             for c in category_options
         )
-        # "Uncategorized" is a hygiene filter (Phase J3), not a real category —
+        # "Uncategorized" is a hygiene filter (Phase J3), not a real category—
         # a reserved sentinel value the JS OR-matches against an empty
         # data-categories attribute instead of a category name (see
         # applySortFilter in _ADMIN_SORT_FILTER_JS).
@@ -13508,7 +13540,7 @@ def admin_software(request: Request, filter: str = ""):
     # different). Cost: Software now scrolls slightly sooner at tablet
     # widths than its old precisely-computed 820px floor needed — accepted.
     # This is the first instance of a larger, separately-scoped job (one
-    # field, one width, everywhere it appears across every admin table) —
+    # field, one width, everywhere it appears across every admin table)—
     # see BRAND.md §5 "Admin table width floors".
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}{_ADMIN_SCROLL_HINT_JS}</script>
 <div class="page page-standard">
@@ -13606,7 +13638,7 @@ initAdminScrollHint();
    tracks to their content size instead of letting them fill the row,
    the opposite of what 3-across mobile needs; a bare page-level
    document.body.scrollWidth check missed this entirely, since the
-   overflow was contained inside the card and never widened the page —
+   overflow was contained inside the card and never widened the page—
    only measuring .admin-table-actions-grid's own clientWidth vs
    scrollWidth caught it. (2) once that was fixed, the grid's real
    available width at a 390px card (~316px, after the row's own 6px/12px
@@ -13655,7 +13687,7 @@ initAdminScrollHint();
 .admin-table-actions-grid form button{{width:100%;}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
-  /* min-width:0!important cancels the desktop-only floor (PR 12, 2026-09 —
+  /* min-width:0!important cancels the desktop-only floor (PR 12, 2026-09—
      an inline min-width on the <table> itself, added so the desktop table
      view scrolls instead of squishing, otherwise survives into card mode
      here unchanged: a non-!important media-query rule can never beat an
@@ -13714,7 +13746,7 @@ initAdminScrollHint();
    works around) — same class names, same #cmp-scroll-wrap id, so both
    admin tables behave identically rather than drifting into two
    near-duplicate implementations. (PR 32, 2026-09: both tables now DO
-   carry a scroll affordance after all — see _ADMIN_SCROLL_HINT_HTML/_JS —
+   carry a scroll affordance after all — see _ADMIN_SCROLL_HINT_HTML/_JS—
    reversing the "why neither table carries a swipe-hint affordance" this
    comment used to claim; that was true when written, but at ~900-1000px
    (well above the 700px card-stacking breakpoint) these tables really do
@@ -14024,7 +14056,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
             t = lib.get_tool(tool_id)
             tool_name_filter = t["name"] if t else f"Tool #{tool_id}"
         else:
-            # Only the unfiltered "all leads" view counts as having seen everything —
+            # Only the unfiltered "all leads" view counts as having seen everything—
             # a single tool's filtered view shouldn't silently clear the whole badge.
             lib.set_setting("admin_viewed_tool_leads", datetime.now(timezone.utc).isoformat())
     finally:
@@ -14077,7 +14109,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
                      f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
 
-    # Add-a-category is its own row at the top of the table (PR 11, 2026-09) —
+    # Add-a-category is its own row at the top of the table (PR 11, 2026-09)—
     # matching the table's own Name/Description/Tools columns exactly, rather
     # than a separate oversized stacked-label card below it. Same
     # first-input-owns-the-form, later-inputs-reference-it-via-form="" pattern
@@ -14219,7 +14251,7 @@ def admin_tools_categories_delete(request: Request, category_id: int):
 # (itself modeled on /admin/tools/software/categories); the per-row
 # inline-edit mechanic carries over unchanged, just grouped under one
 # collapsible <details> per category instead of split across N pages. No
-# redirect from the old /admin/tools/software/features/{category_id} URL —
+# redirect from the old /admin/tools/software/features/{category_id} URL—
 # it was never bookmarked/linked externally (Brian's explicit call,
 # Phase 1c) — the two internal links that pointed at Manage Features
 # already targeted the base /admin/tools/software/features URL, unchanged
@@ -14332,7 +14364,7 @@ def _feature_row(f: dict, category_id: int) -> str:
 
 
 def _pending_feature_row(item: dict, tools_by_id: dict) -> str:
-    """A read-only row for a feature_review_queue proposal in this category —
+    """A read-only row for a feature_review_queue proposal in this category—
     Phase 0's low-cost proposal (5c), approved: pending proposals surface
     right inside the group they'd land in, rather than only on the separate
     review-queue page. No approve/deny here — that stays exclusively on
@@ -15275,7 +15307,7 @@ def _tl_featured_cards_html(cards) -> str:
 # instead of position, and by deriving link_label from tag_label on save
 # (see _oc_values_from_form) so those two fields can never desync again.
 # Semantic color logic: blue is something that stays (Guide), green is
-# something you can run (Playbook), coral is meant to jump (Framework) —
+# something you can run (Playbook), coral is meant to jump (Framework)—
 # BRAND.md §2.3 bans plain --coral/--seafoam TEXT under 18px, so this uses
 # only the text-capable ramp shades (--navy, --seafoam-deep, --coral-deep),
 # same as the eyebrow always has. Adding a fourth tag is a one-line change
@@ -15302,7 +15334,7 @@ _OC_TAGS = tuple(_OC_TAG_INFO.keys())
 
 
 def _oc_link_caption(tag: str) -> str:
-    """The admin form's live-updating caption text under the Tag dropdown —
+    """The admin form's live-updating caption text under the Tag dropdown—
     the one place (besides _OC_TAG_INFO itself) this wording lives, so both
     the server-rendered initial paint and every <option>'s data-link
     attribute (read verbatim by the page's one-line JS listener, no
@@ -15323,7 +15355,7 @@ def _oc_link_caption(tag: str) -> str:
 #
 # Both _oc_card_status_html (the Status-field helper line) and
 # _oc_publish_gate_error (the hard block) read the exact same
-# _og_image_slugs() lookup the /static/og/{filename} route itself uses —
+# _og_image_slugs() lookup the /static/og/{filename} route itself uses—
 # one source of truth, so the warning and the block can never disagree.
 def _oc_card_status_html(slug: str) -> str:
     """Server-rendered note under the Status field reflecting this piece's
@@ -15435,7 +15467,7 @@ def _render_original_content_markdown(body_md: str) -> str:
     )
 
 
-# Scoped to .oc-body (the div wrapping the rendered markdown output only —
+# Scoped to .oc-body (the div wrapping the rendered markdown output only—
 # not the eyebrow/title/byline lines above it, which already render through
 # the sitewide bare h1/p rules the three bespoke pages themselves use).
 # Values mirror the Reader's own .reader-body treatment (webapp/app.py's
@@ -15559,7 +15591,7 @@ _OC_NETSUITE_MCP_CSS = (
 # in-card h3s ever inherited. _OC_ARTICLE_CSS's shared
 # ".oc-body h1,h2,h3...{line-height:1.3}" rule (written for real prose
 # section headings) matches these same h3 tags too and, being an explicit
-# declaration, wins over the inherited 1.65 regardless of specificity —
+# declaration, wins over the inherited 1.65 regardless of specificity—
 # collapsing each step/field card's title down 6px and letting the whole
 # .fah-track/.fah-template stack drift ~30-110px shorter than the original
 # over enough repeated cards. Fixed by restating the original 1.65 directly
@@ -15697,7 +15729,7 @@ _OC_HACKATHON_CSS = (
 _OC_GER_CSS = (
     '.oc-body .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}'
     # Post-merge follow-up bug, found live: the wrapper's own inline style
-    # (background:#fff;border:1px solid var(--line);border-radius:12px —
+    # (background:#fff;border:1px solid var(--line);border-radius:12px—
     # copied verbatim from the retired bespoke page) bounds a white
     # bordered card with zero padding, meant to fit the table flush against
     # its edges—but _OC_ARTICLE_CSS's generic `.oc-body table{margin:1.5em
@@ -16251,7 +16283,7 @@ def _oc_form_fields(values: dict, suppress_card_status: bool = False) -> str:
     # if it's left selected) rather than silently defaulting to whichever
     # tag happens to be first. On edit, the current tag is preselected; a
     # legacy value outside the three (pre-migration data) matches none of
-    # the options and the browser falls back to showing the placeholder —
+    # the options and the browser falls back to showing the placeholder—
     # not a stored default, just a rendering quirk until the row is saved.
     current_tag = values.get("tag_label", "")
     # Each <option> carries its own already-formatted caption text as
@@ -16468,7 +16500,7 @@ def admin_original_content(request: Request, status: str = ""):
         # a NEW occurrence of this, but a card can still go missing after
         # the fact (a slug change, a deleted file, or a row that predates
         # the gate). No precedent on this page (or a directly analogous
-        # one) for flagging a single missing asset on an admin list row —
+        # one) for flagging a single missing asset on an admin list row—
         # the whole-record review-status pill elsewhere in this codebase is
         # a heavier, semantically different "content reviewed" concept, not
         # reused here — so this follows the plain-text convention
@@ -17148,7 +17180,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 
 # Reference content for the "How this works" block on /admin/tools/communities
 # (added after Brian noticed the Communities feature's prompts/CTAs were
-# scattered across build history with no durable, in-app record). Static —
+# scattered across build history with no durable, in-app record). Static—
 # this documents what the code does rather than an editable setting, so
 # unlike /admin/voice it's plain HTML, not DB-backed.
 #
@@ -17292,7 +17324,7 @@ def admin_communities(request: Request, filter: str = ""):
         # blank by "Auto-fill from URL", not a review-status fact; that
         # information isn't lost, it's still visible per-field on the
         # profile edit view, just no longer duplicated here), and the
-        # separate "N/12 fields low-confidence" badge (unconfident_badge —
+        # separate "N/12 fields low-confidence" badge (unconfident_badge—
         # its count IS the breakdown this pill now shows, in parens,
         # alongside the coral state). `low_conf_badge` below (the
         # whole-profile-drafted-without-a-fetch signal, a third, distinct
@@ -17511,7 +17543,7 @@ initAdminScrollHint();
    tracks to their content size instead of letting them fill the row,
    the opposite of what 3-across mobile needs; a bare page-level
    document.body.scrollWidth check missed this entirely, since the
-   overflow was contained inside the card and never widened the page —
+   overflow was contained inside the card and never widened the page—
    only measuring .admin-table-actions-grid's own clientWidth vs
    scrollWidth caught it. (2) once that was fixed, the grid's real
    available width at a 390px card (~316px, after the row's own 6px/12px
@@ -17533,7 +17565,7 @@ initAdminScrollHint();
 .admin-table-actions-grid form button{{width:100%;}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
-  /* min-width:0!important cancels the desktop-only floor (PR 12, 2026-09 —
+  /* min-width:0!important cancels the desktop-only floor (PR 12, 2026-09—
      an inline min-width on the <table> itself, added so the desktop table
      view scrolls instead of squishing, otherwise survives into card mode
      here unchanged: a non-!important media-query rule can never beat an
@@ -17618,7 +17650,7 @@ initAdminScrollHint();
    rounded-card look) — but `overflow:hidden` on the <table> registers
    IT as a scroll container too, so a sticky <td> inside it sticks
    relative to the (non-scrolling) table box instead of #cmp-scroll-wrap,
-   and silently stops tracking the wrap's real horizontal scroll —
+   and silently stops tracking the wrap's real horizontal scroll—
    confirmed with a live scrollLeft test (position:sticky computed
    correctly, but the element's bounding rect still moved off-screen).
    Fixed by moving background/border/border-radius onto #cmp-scroll-wrap
@@ -18114,7 +18146,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # same trick Warm Intro already used on the Software page).
     #
     # Admin intake form layout pass: Software's Company Details / Warm Intro
-    # two-column split (.tool-form-cols, 2fr/1fr) was NOT reused at first —
+    # two-column split (.tool-form-cols, 2fr/1fr) was NOT reused at first—
     # Communities genuinely has no Warm-Intro-equivalent (no vendor_name/
     # vendor_email/warm_intro_enabled columns, no contact fields, no button
     # anywhere on a community profile), so there was nothing for a right
@@ -18567,7 +18599,7 @@ async def admin_communities_mark_reviewed(request: Request, community_id: int):
         community = lib.get_community(community_id)
         # Called from the admin list row (no redirect_to — stay on the
         # list, its original behavior), the profile edit page (Phase G PR 2),
-        # and now the public profile VIEW page too (2026-08 consolidation —
+        # and now the public profile VIEW page too (2026-08 consolidation—
         # the same "Review status" component's action button) — validated
         # against an allowlist since it echoes into a redirect, same
         # convention as admin_tools_delete.
@@ -19214,7 +19246,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             if t["id"] != tool_id and t["id"] not in {c["id"] for c in competitors}
         ] if tool else []
         # Feature Taxonomy (governed model): one section per category this
-        # tool belongs to that actually has a curated feature list yet —
+        # tool belongs to that actually has a curated feature list yet—
         # category_has_features gates it (see that method's docstring). A
         # tool in an unseeded category (most of them, today) simply shows no
         # governed section — there's no other editor for it, since the
@@ -19301,7 +19333,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     )
 
     # (The legacy per-tool free-text Features section — _feature_row,
-    # _features_list_html, the "N features / N need verification" badge —
+    # _features_list_html, the "N features / N need verification" badge—
     # was removed outright in the Feature Taxonomy Phase 1b PR 2. The
     # governed Feature Taxonomy checklist below, _governed_feature_row, is
     # the only tool-feature editor now.)
@@ -19514,7 +19546,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     # added after the column already existed; the one-time migration that
     # introduced the column (see linklib/db.py's summary-backfill comment)
     # copied the full, uncapped `description` into any empty `summary`, and
-    # neither add_tool nor update_tool enforce a length limit server-side —
+    # neither add_tool nor update_tool enforce a length limit server-side—
     # so a tool whose summary was never redrafted since can still carry a
     # legacy value well over 400 chars, permanently locking out typing in
     # the browser. Only render the attribute when the stored value already
@@ -20240,7 +20272,7 @@ def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
 
 @app.post("/admin/tools/software/{tool_id}/description/verify")
 def admin_tools_description_verify(request: Request, tool_id: int):
-    """One-click "Mark verified" for the Description field (Phase G PR 2) —
+    """One-click "Mark verified" for the Description field (Phase G PR 2)—
     same shape as admin_tools_agent_taxonomy_verify. Covers `summary` too
     (drafted together, not tracked separately — see
     _RETIRED_FIELD_REVIEW_FIELDS)."""
@@ -20753,7 +20785,7 @@ def _resolve_reader_content(id: int = 0, url: str = "", user_id: int | None = No
     # Only the plain-text `content` cache is skipped for a url-matched row:
     # using it there would silently downgrade a Feed item that currently reads
     # with images and links intact, whereas an explicit by-id open (an Archive-view
-    # click) accepts it. Phase 5b's `content_html` is deliberately NOT skipped —
+    # click) accepts it. Phase 5b's `content_html` is deliberately NOT skipped—
     # it's real structured HTML, so it's a strict upgrade over both the
     # plain-text cache and a live re-fetch, however the row was reached.
     cached_content = "" if matched_by_url else (article or {}).get("content", "")
@@ -20851,7 +20883,7 @@ def _resolve_reader_content(id: int = 0, url: str = "", user_id: int | None = No
                         title = recovered["title"]
 
         if not content:
-            # Direct fetch failed outright (bot-block, dead link, timeout —
+            # Direct fetch failed outright (bot-block, dead link, timeout—
             # any reason) — last-resort Wayback fallback, same mechanism the
             # backfill tool uses (linklib.wayback). Best-effort: any Wayback
             # failure (including the 429 rate-limiting the Phase 5b follow-up
@@ -20938,7 +20970,7 @@ def api_read_article(request: Request, id: int = 0, url: str = ""):
 
 
 _READER_CSS = """
-/* 2026-09: Source Serif 4 removed sitewide, this page's last holdout —
+/* 2026-09: Source Serif 4 removed sitewide, this page's last holdout—
    Brian's standing rule is Outfit or DM Sans only, ever, for content/
    reading typography (Caveat/Permanent Marker's decorative sticker/wordmark
    use is a separate, out-of-scope layer). Body now DM Sans, matching the
@@ -21254,7 +21286,7 @@ _READER_SHELL_CSS = """
    handles too), and .rr-reader-pane's flex:1 (declared above) fills the
    freed width on its own with no extra rule needed here. The existing
    #rr-reader-expand button in .rr-reader-header (sticky, so it's still
-   visible with the rail/list gone) doubles as the collapse-back affordance —
+   visible with the rail/list gone) doubles as the collapse-back affordance—
    it already swaps between an expand and a collapse icon on toggle, so no
    separate button was needed to reach the reference's top-left arrow. */
 .rr-shell.rr-focus-mode .rr-rail,
@@ -21374,7 +21406,7 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
 .rr-reader-category{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
   color:var(--seafoam-deep);margin-bottom:12px;}
 /* Title uses Outfit, matching BRAND.md's "Page title (H1)" row (30px/600/
-   -0.02em) and the standalone /read/{id} reader's own .reader-meta h1 —
+   -0.02em) and the standalone /read/{id} reader's own .reader-meta h1—
    this used to fall through to 'Source Serif 4',Georgia,serif with no
    letter-spacing, a leftover that never got updated when the two readers'
    heading treatments were established. */
@@ -21734,7 +21766,7 @@ function rrToggleCat(el) {{
   el.classList.toggle('rr-open');
   el.closest('.rr-cat').nextElementSibling.classList.toggle('rr-open');
 }}
-// Category/source selection are sticky filter state, not one-shot args —
+// Category/source selection are sticky filter state, not one-shot args—
 // rrApplyFilter() re-reads them (plus the search box) on every call, so a
 // search-input keystroke can re-run the same combination without needing
 // to know which category/source is currently active.
@@ -22435,7 +22467,7 @@ def api_search(request: Request, q: str = "", limit: int = 50, token: str | None
     # articles behind Brian's own paid subscriptions — see _is_authed's
     # docstring). Previously _require_member (any signed-in user), a
     # likely-unintentional survivor of the Phase 1 restructure that moved
-    # the Reader itself to admin-only without revisiting this API route —
+    # the Reader itself to admin-only without revisiting this API route—
     # see ARCHITECTURE.md's MCP-server Phase 4 note (now corrected to match).
     _require_api(request, token)
     lib = _lib()
@@ -22784,11 +22816,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
    chips — including "Web search (trusted sites)", deliberately NOT
    shortened, since the trusted-sites qualifier is doing real work — fit on
    one line. The row-gap this produces (20px, .ask-controls' own default)
-   already matches the ~20px spacing used elsewhere in this control stack —
+   already matches the ~20px spacing used elsewhere in this control stack—
    no override needed beyond the column count. */
 .fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;}}
 
-/* Chips are natural width, left-aligned, NOT stretched to fill the row —
+/* Chips are natural width, left-aligned, NOT stretched to fill the row—
    .ask-tags' own default flex-wrap row already does this with zero
    override needed (each .ask-tag sizes to its own label by default).
    Equal width WITHIN each group (Sources' three match each other, sized
@@ -22828,7 +22860,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-example-label{{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:3px 10px;margin-bottom:12px;}}
 .ask-example-caption{{margin:12px 0 0;font-size:12px;color:var(--muted);}}
 
-/* Scoped scale-down for the example inside the intro's right column only —
+/* Scoped scale-down for the example inside the intro's right column only—
    .ask-q-bubble/.ask-answer are shared with the real, live-rendered
    question/answer thread below, so these overrides must not leak there. */
 .fpa-intro-area-example .ask-example{{margin:0;padding:16px 18px;}}
@@ -23043,7 +23075,7 @@ function mdToHtml(raw) {{
 // Below-answer list: only the sources the answer actually cited, numbered to
 // match the inline [n] markers. Zero citations -> no list (silently allowed).
 // A "Web search powered by Exa" caption follows the list, but only when this
-// turn's web tier was actually handled by Exa (c.provider === 'exa') —
+// turn's web tier was actually handled by Exa (c.provider === 'exa')—
 // gating on citation type alone isn't enough since Phase 7: the native
 // web_search_20250305 fallback also produces type "web" citations when Exa
 // is toggled off or EXA_API_KEY is missing, and those get no caption at all
@@ -23727,7 +23759,7 @@ async def read_later_refresh(request: Request):
 # "Historical sweep" and "Archive queue" are both gone outright (2026-09,
 # PR 3) — the Archive Queue mechanism they belonged to (linklib/queue.py,
 # the library_queue table) was retired: a production query found 5,508 rows,
-# all dismissed, 0 pending, 0 member submissions ever, dormant for months —
+# all dismissed, 0 pending, 0 member submissions ever, dormant for months—
 # the archive now grows by a couple articles a week via the bookmarklet,
 # which doesn't justify an AI-enriched proposal/review pipeline. See
 # CLAUDE.md's Archive Queue retirement note. This list backs BOTH the Reader
@@ -23781,14 +23813,14 @@ _COMMUNITIES_TOOLS = [
 # with it rather than leaving a CFO Toolbox card pointing at a Thought
 # leadership URL. The four Software-directory cards moved out of this flat
 # list into _SOFTWARE_TOOLS above (Phase 1c); Communities and Community
-# categories moved out the same way into _COMMUNITIES_TOOLS above (PR 11) —
+# categories moved out the same way into _COMMUNITIES_TOOLS above (PR 11)—
 # see the CFO Toolbox special-case note further down for how both nested
 # sub-groups get spliced back in.
 _TOOLBOX_TOOLS = [
     ("/admin/tools/resources", "Resources", "Add, edit, or remove the sources listed in the Resources section—name, URL, description, coverage, and pricing."),
 ]
 
-# FP&A Buddy's own admin pages, consolidated into one section (Phase 6) —
+# FP&A Buddy's own admin pages, consolidated into one section (Phase 6)—
 # previously split between System ("How FP&A Buddy works") and the old
 # Features catch-all (report, feedback). Same three routes, same content,
 # only the section grouping changed. Exa web search settings (Phase 7) used
@@ -24371,7 +24403,7 @@ _DB_RELATIONSHIPS = [
 
 def _db_schema_snapshot() -> dict:
     """Introspect the live library.db schema at request time: table names,
-    columns, and row counts, straight from sqlite_master/PRAGMA table_info —
+    columns, and row counts, straight from sqlite_master/PRAGMA table_info—
     never from ARCHITECTURE.md or any other doc, and never cached, so this
     can't go stale. Filters out the shadow tables SQLite generates for a
     virtual table (FTS5's articles_fts_data/_idx/_docsize/_config, sqlite-vec's
@@ -24528,7 +24560,7 @@ function _diagramCenterOn(pz, g) {
   var cx = tx + bbox.x + bbox.width / 2, cy = ty + bbox.y + bbox.height / 2;
 
   // svg-pan-zoom's `zoom(value)` is relative to its own fit baseline
-  // (value 1 == whatever "fit" computed), not an absolute screen scale —
+  // (value 1 == whatever "fit" computed), not an absolute screen scale—
   // confirmed against real output: a fixed `zoom(2)` looked great on a
   // small diagram (fit realZoom already near 1) but barely moved the
   // needle on the full ~39-table diagram (fit realZoom ~0.18, so zoom(2)
@@ -24641,7 +24673,7 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
     matching lightbox overlay, with real pan/zoom (svg-pan-zoom) inside the
     expanded view. `frame_id` must be unique per page (a page with more
     than one diagram needs a distinct id per diagram). Pass `table_names`
-    (the ER diagram's entity names) to get the search-and-highlight box —
+    (the ER diagram's entity names) to get the search-and-highlight box—
     omit it for a diagram with no "find a table" concept (e.g. the FP&A
     Buddy flowchart), which then gets pan/zoom only."""
     overlay_id = f"{frame_id}-lightbox"
@@ -24700,7 +24732,7 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 #     log; dedupe_decisions (no "tool_name_" prefix) is the unrelated
 #     Library archive-dedupe log and stays under Library/Archive.
 #   - field_reviews, narrative_review_log, entity_citations, and
-#     matchmaker_questions are all genuinely shared between Toolbox —
+#     matchmaker_questions are all genuinely shared between Toolbox—
 #     Software and Toolbox — Communities (field_reviews/narrative_review_log
 #     track AI-drafted narrative fields on both entity types;
 #     entity_citations holds their API-verified citations the same way,
@@ -24940,7 +24972,7 @@ def _page_index_snapshot() -> list[dict]:
 #      per-record detail/edit page reached from its own list page's rows,
 #      never a fixed hub-nav destination in its own right.
 #   3. A `.../new` creation-form route whose own parent path (everything
-#      before the trailing `/new`) is ITSELF already a hub-nav href —
+#      before the trailing `/new`) is ITSELF already a hub-nav href—
 #      reached via an "Add new" button on that already-carded page. A
 #      general rule, not a maintained list: any future `.../new` route
 #      added under an already-carded page is covered automatically, with no
@@ -25036,7 +25068,7 @@ def hub_nav_orphans() -> list[str]:
 # Inverted, per the brief: instead of asserting nothing is editable HERE,
 # assert nothing AI-related is editable ANYWHERE ELSE. Reuses the exact live
 # `app.routes` introspection technique hub_nav_orphans()/page-index already
-# use, rather than a hand-maintained list of "routes that must not exist" —
+# use, rather than a hand-maintained list of "routes that must not exist"—
 # same "sibling, not a parallel implementation" discipline as those two.
 #
 # HONEST LIMITATION, stated rather than overclaimed: this can only catch a
@@ -25181,7 +25213,7 @@ def _coral_moments_on_page(html: str) -> int:
 # actual infinite recursion (confirmed to at least depth 3 before being
 # killed) via coral_moment_problems() -> renders "/" -> _page() (role=
 # "admin") -> _admin_nav_badge() -> checks.run_all() ->
-# coral_moment_problems() again. (2026-09: a background refresher —
+# coral_moment_problems() again. (2026-09: a background refresher—
 # webapp.tasks.start_background_checks_refresher() — now keeps
 # _checks_cache warm on its own schedule, so in real production this
 # synchronous fallback path, and therefore this whole reentrant chain,
@@ -25210,7 +25242,7 @@ def _coral_moments_on_page(html: str) -> int:
 #
 # `threading.local()` looks like the fix and ISN'T: it was built, measured,
 # and rejected in the same session. The re-entrant case this guard exists
-# for is NOT confined to one OS thread the way that name suggests —
+# for is NOT confined to one OS thread the way that name suggests—
 # `coral_moment_problems()` calls `TestClient(app).get(path)` in a loop,
 # and EACH of those calls dispatches through Starlette's own
 # `run_in_threadpool` again, onto a THREADPOOL WORKER THREAD that may well
@@ -25222,7 +25254,7 @@ def _coral_moments_on_page(html: str) -> int:
 # those nested calls landed on a genuinely different OS thread (confirmed
 # via `threading.get_ident()` at 5+ levels deep before the probe was
 # killed), so each one saw its OWN thread-local `in_progress=False` and
-# happily started a brand-new, real, unbounded pass over every route —
+# happily started a brand-new, real, unbounded pass over every route—
 # turning the old module-global's ~18s bounded recursion into indefinite
 # threadpool growth (anyio's worker pool has a capacity limit, so this
 # risks an outright deadlock in production, not just slowness). A
@@ -25441,7 +25473,7 @@ def fpa_buddy_how_it_works(request: Request):
     (it fit on one line at the old 1232px width), growing that section by
     79px and shifting every section below it down by the same amount.
     Verified this isn't a spacing regression before shipping it: every
-    section-to-section gap measured exactly 20px both before and after —
+    section-to-section gap measured exactly 20px both before and after—
     the `gap:20px` rhythm is unaffected; only the one resized section's own
     height changed, which is the direct, correct consequence of the table
     now actually fitting its column instead of a spacing-rule change.
@@ -25599,7 +25631,7 @@ def _ai_model_config_html(current: str) -> str:
 
     PR 28 (2026-09): the <select>'s option text used to be the LONG "enrich"
     blurb ("Opus 5—Deepest summaries. The one to standardize the archive
-    on."), which truncated mid-word inside the select's own max-width —
+    on."), which truncated mid-word inside the select's own max-width—
     a <select> can't be widened past its container the way a block of text
     can. Options now show the model name plus the SHORT qualifier already
     in the registry (the same one every other picker on the site uses,
@@ -25980,7 +26012,7 @@ def admin_system_ai_exa_test_connection(request: Request):
 
 
 def _reviewed_freshness_banner(is_stale: bool, message_html: str, mark_url: str) -> str:
-    """Shared rendering for a dated, human-attestation "freshness" banner —
+    """Shared rendering for a dated, human-attestation "freshness" banner—
     the mechanical part (colors, layout, the "Mark reviewed" button) that
     _pricing_freshness_banner/_models_freshness_banner/
     _exa_pricing_freshness_banner below all share byte-for-byte. Each of
@@ -26075,8 +26107,8 @@ def _models_freshness_banner(last_reviewed: str) -> str:
     if stale:
         if last_reviewed:
             when = _relative_age(last_reviewed)
-            html = (f'Anthropic&rsquo;s model lineup was last manually checked <strong>{_esc(when) or "a while ago"}</strong> '
-                    f'&mdash; that&rsquo;s past the {MODELS_REVIEW_STALE_DAYS}-day review window. Check '
+            html = (f'Anthropic&rsquo;s model lineup was last manually checked <strong>{_esc(when) or "a while ago"}</strong>'
+                    f'&mdash;that&rsquo;s past the {MODELS_REVIEW_STALE_DAYS}-day review window. Check '
                     f'<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
                     f'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s current model docs</a> '
                     f'for anything new, add it to <code>linklib/models.py</code>&rsquo;s registry if it belongs in the curated '
@@ -26257,7 +26289,7 @@ def _disk_space_banner(status: dict | None) -> str:
 
 def _epoch_relative_age(epoch: float | None) -> str:
     """_relative_age()'s own "3h ago" phrasing, for the background
-    refresher's plain time.time() floats rather than a stored ISO string —
+    refresher's plain time.time() floats rather than a stored ISO string—
     converts once, then reuses that exact wording so this reads like every
     other freshness line on this page, not a second phrasing."""
     if epoch is None:
@@ -26500,7 +26532,7 @@ def _relative_age(iso: str) -> str:
 
 def _ai_usage_freshness_dot(label: str, last_value: str, stale: bool, anchor: str) -> str:
     """A compact read-only status line for one of the three /admin/checks
-    freshness reminders (Pricing, New-model awareness, Exa pricing) —
+    freshness reminders (Pricing, New-model awareness, Exa pricing)—
     AI usage/config dashboard, Step 0 decision 2. Deliberately NOT the full
     banner (no "Mark reviewed" button, no long explanatory copy) — this
     page only ever reads the three settings values and reuses each
@@ -26531,7 +26563,7 @@ def _job_run_banner(job_name: str) -> str:
     on a deliberate stop or "never run", coral on failure — loud, not
     routine. A row stuck at status='running' with no finished_at is what a
     crash mid-run looks like, called out explicitly rather than shown as a
-    normal in-progress state (this banner never reflects LIVE progress —
+    normal in-progress state (this banner never reflects LIVE progress—
     that's still _JOB_STATE/the poll endpoint each page already has).
 
     2026-08 wrap-up sprint item 3 fix: that "never finished — likely
@@ -26792,7 +26824,7 @@ def admin_page(request: Request):
         # standing practice for this). That earlier rule was itself a
         # deliberate fix for a real incident: a pending name-duplicate pair
         # went unnoticed inside a collapsed sub-group, with nothing but a
-        # small aggregate number on the parent's summary to hint at it —
+        # small aggregate number on the parent's summary to hint at it—
         # see CLAUDE.md's LiveFlow/Runway note. Reversing it does NOT bring
         # that failure mode back: `.admin-group[open] > summary .group-badge
         # {display:none;}` only ever hides a GROUP'S OWN badge once THAT
@@ -26810,7 +26842,7 @@ def admin_page(request: Request):
         # `.admin-group` — not just that group's own. Opening CFO Toolbox
         # (which nests Software/Community/FP&A Buddy/Reader as sub-groups,
         # each still individually collapsed) hid every one of those child
-        # groups' own badges too, even though they were still closed —
+        # groups' own badges too, even though they were still closed—
         # exactly the "a real pending item silently disappears" failure this
         # whole mechanism exists to prevent. `> summary` scopes the rule to
         # the group's own summary row: a nested sub-group's `<details>` (and
@@ -26838,7 +26870,7 @@ def admin_page(request: Request):
     # instead, as a nested group beside the Software sub-group. Same aggregate
     # badge over the same hrefs, just covering content that's now inline.
     #
-    # "Open Reader" is a ghost button in this group's own description line —
+    # "Open Reader" is a ghost button in this group's own description line—
     # the first thing inside the box, above the three quadrants. It was a
     # header action beside the old page's <h1>; with no page left to head, the
     # group's description is the equivalent spot, and `.btn.btn-ghost` is
@@ -27006,7 +27038,7 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
     # workflow list. Archive backup used to be a card here too (first in
     # "Archive additions & backup"), but the Reader route moves (PR 6,
     # 2026-09) relocated it to the System hub-nav group entirely — a
-    # whole-DB snapshot is accounts/health/plumbing, not archive-specific —
+    # whole-DB snapshot is accounts/health/plumbing, not archive-specific—
     # so it's gone from this page's cards and quadrants outright, not just
     # relinked. Enrich archive stays in "Tagging" (the other genuinely
     # ambiguous placement from the Phase 6 brief) even though it also drafts
@@ -27260,7 +27292,7 @@ def _cookie_env_var_name(domain: str) -> str:
     return _cookie_env_var(domain)
 
 
-# Single control for both show_on_current_feed and current_feed_side —
+# Single control for both show_on_current_feed and current_feed_side—
 # one dropdown, not a checkbox plus a separate select, so "shown but no
 # side picked" can't happen as an intermediate state. "" means hidden;
 # any other value is a real current_feed_side and implies shown=True.
@@ -27294,7 +27326,7 @@ def _current_feed_select_options(current_value: str) -> str:
 
 
 def _next_current_feed_order(lib, side: str, exclude_feed_id: int | None = None) -> int:
-    """Order value for a feed newly joining `side` on /current-feed —
+    """Order value for a feed newly joining `side` on /current-feed—
     appended to the end, dense 0..N-1. Always correct as "the count of
     what's already shown on this side" because admin_feeds_move_order keeps
     every side densely numbered as a side effect of every up/down move, so
@@ -27649,7 +27681,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
    regardless. */
 .ff-table thead th,.fs-table thead th{{padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);
   font-weight:600;text-transform:uppercase;letter-spacing:.06em;background:var(--bg);vertical-align:top;}}
-/* Sortable headers (Name/Section/Cookie/Subscriber/Current Feed/Order) —
+/* Sortable headers (Name/Section/Cookie/Subscriber/Current Feed/Order)—
    URL and Actions have nothing worth sorting by, so they stay plain <th>s
    with no click affordance. */
 .ff-table thead th[data-sort]{{cursor:pointer;user-select:none;}}
@@ -28066,7 +28098,7 @@ async def admin_feeds_new_submit(request: Request):
     values = {
         "name": (form.get("name") or "").strip(),
         # .strip() removes surrounding whitespace only. The URL is otherwise
-        # stored byte for byte — no normalization, no query-string handling —
+        # stored byte for byte — no normalization, no query-string handling—
         # because a feed URL can carry a subscriber token.
         "xml_url": (form.get("xml_url") or "").strip(),
         "html_url": (form.get("html_url") or "").strip(),
@@ -28197,7 +28229,7 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
                 return _reject(probe.error)
             html_url = values["html_url"] or probe.html_url
 
-        # A feed keeping the same side keeps its existing order untouched —
+        # A feed keeping the same side keeps its existing order untouched—
         # reordering is the up/down arrows' job now. A feed newly joining a
         # side (from Hidden, or from the other side) is appended to the end.
         if values["current_feed_side"] == feed["current_feed_side"]:
@@ -28693,7 +28725,7 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
             _game_settings_num_field("Speed ramp", "speed_ramp_per_sec", r["speed_ramp_per_sec"], step="0.01", suffix="u/sec per sec elapsed"),
             _game_settings_num_field("Gust boost", "sail_speed", r["sail_speed"], suffix="u/sec bonus in a gust"),
         ])
-        # Shark fields get their own grid, not appended onto `fields`' own —
+        # Shark fields get their own grid, not appended onto `fields`' own—
         # `auto-fit` only collapses a track with ZERO items across the WHOLE
         # grid, not a track that's merely empty on one row. With 7 base
         # fields + 4 shark fields sharing one grid, the browser fits 8
@@ -29146,7 +29178,7 @@ def admin_ask_report(request: Request, user: str = ""):
         from datetime import timezone as _tz
         rows = lib.list_ask_questions(user_id=filter_user_id, limit=500)
         total_n = lib.count_ask_questions(user_id=filter_user_id)
-        # Direct SQL aggregates, not a Python-side sum over a page of rows —
+        # Direct SQL aggregates, not a Python-side sum over a page of rows—
         # correct regardless of total volume, and doesn't pull every answer's
         # full text into memory just to add up a number.
         total_cost = lib.ask_cost_total(user_id=filter_user_id)
@@ -29181,7 +29213,7 @@ def admin_ask_report(request: Request, user: str = ""):
 </tr>"""
 
     def _rollup_row(turns: list[dict], gid: str) -> str:
-        # One conversation: rollup keeps this view's job front and center —
+        # One conversation: rollup keeps this view's job front and center—
         # total turns, total cost across turns, models used — with the
         # per-turn rows expandable beneath.
         first = turns[0]
@@ -29494,7 +29526,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     Section 1, "Vendor totals" (manual_overhead) — every real charge for
     running the site, typed in from receipts: Railway, Cloudflare, Google
     Workspace, domain registration, Anthropic, OpenAI, Exa, anything else.
-    Tax-inclusive, actual dollars paid. This is THE total cost of the site —
+    Tax-inclusive, actual dollars paid. This is THE total cost of the site—
     a plain sum, always correct because it's literally what got paid.
 
     Section 2, "Toolbox usage" (article_embeddings, enrichment_cost,
@@ -29621,7 +29653,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
            (any element with a genuinely large intrinsic minimum blows out
            a `1fr` track the same way, regardless of what CSS is set on it,
            as long as the ancestor GRID ITEM itself has no min-width:0).
-           `.oh-grid-2` now uses `minmax(0,1fr)` instead of a bare `1fr` —
+           `.oh-grid-2` now uses `minmax(0,1fr)` instead of a bare `1fr`—
            this fixes the TRACK itself, once, so it can't be re-broken by a
            future field that wraps its input in a div without knowing
            this history (2026-09, Round 5) — a real fix, kept, but not the
@@ -29638,7 +29670,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
            max-width:100%;min-width:0` — this strips the native picker
            chrome (and the intrinsic width it demands) entirely, rather
            than trying to constrain a box the browser won't constrain.
-           iOS still opens the native date picker on tap regardless —
+           iOS still opens the native date picker on tap regardless—
            that's platform tap behavior, not CSS-controlled — so this
            only changes the field's own visual chrome, not the picker.
            (2026-09, Round 6). Round 7: appearance:none also strips
@@ -30068,7 +30100,7 @@ async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = 
 async def admin_overhead_spend_csv_commit(request: Request):
     """Inserts the rows the preview step showed. Re-validates each one via
     the same Library.add_manual_overhead path the manual form uses, rather
-    than trusting the hidden fields round-tripped from the preview page —
+    than trusting the hidden fields round-tripped from the preview page—
     one bad row is skipped and counted, not allowed to abort the batch."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -30123,7 +30155,7 @@ _FEEDBACK_RATINGS = {
 @app.get("/admin/fpa-buddy/feedback", response_class=HTMLResponse)
 def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     """Triage view for member feedback on FP&A Buddy answers: every rating,
-    newest first, with the full context needed to judge a flagged answer —
+    newest first, with the full context needed to judge a flagged answer—
     the question, the answer, and the sources it actually cited (persisted
     per turn in ask_questions.citations_json). Capture + triage only: nothing
     here feeds back into prompts or retrieval automatically.
@@ -31908,7 +31940,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         # Cloudflare fingerprint block that stops ours, so a fresh Save Page
         # Now snapshot gives the next backfill run a copy our fetcher can
         # retrieve) was proving out by hand today, one URL at a time. This
-        # just opens the same Save Page Now URL Brian was already typing —
+        # just opens the same Save Page Now URL Brian was already typing—
         # nothing here tracks whether it was clicked or whether a snapshot
         # actually resulted; the next backfill run (or a manual re-check) is
         # still what tells you that.
@@ -32324,7 +32356,7 @@ def admin_backfill_content_wayback_429_start(request: Request):
     """Admin-triggered only, deliberately not scheduled — see
     Library._wayback_429_retry_ids's docstring and _wayback_429_retry_job's
     docstring for why. This is a real network operation against an
-    external service (archive.org) plus, on any success, a real DB write —
+    external service (archive.org) plus, on any success, a real DB write—
     the same reasoning every other admin-triggered fetch/backfill action on
     this page already follows."""
     if not _is_authed(request):
@@ -32431,7 +32463,7 @@ def admin_backfill_content_manual_review_export(request: Request):
 
 @app.post("/admin/reader/backfill-content/manual-review/import/preview")
 async def admin_backfill_content_manual_review_import_preview(request: Request, file: UploadFile = File(...)):
-    """Parses the uploaded corrections CSV and shows what would change —
+    """Parses the uploaded corrections CSV and shows what would change—
     nothing is written to the DB here. Valid corrections are round-tripped
     as hidden fields in a confirm form (same state-carry convention as
     /admin/overhead-spend/csv/preview — this app has no server-side session
@@ -33775,7 +33807,7 @@ def admin_voice_page(request: Request):
     # contradict this page (a committed CI mirror can drift from a live
     # settings row, and nothing in the running container can push that drift
     # back to git — see linklib/voice_review.py's own module docstring). This
-    # renders the three lists live from the import above, not a duplicate —
+    # renders the three lists live from the import above, not a duplicate—
     # so the page always shows exactly what the mechanical sweep actually
     # enforces, with no way for the two to disagree.
     def _mechanical_pills(items: list[str]) -> str:
@@ -33808,6 +33840,37 @@ def admin_voice_page(request: Request):
 </ul>
 </div>"""
 
+    # Approved bare-ampersand terms (Addition 2, 2026-09) — DB-backed, unlike
+    # the source-managed AMPERSAND_NAMES/AMPERSAND_ACRONYMS allowlists above,
+    # since CI never scans database copy at all (see linklib/voice_review.py's
+    # own module docstring for that boundary), so nothing needs a code deploy
+    # to change here. Approving a term here immediately resolves every open
+    # queue row currently containing it — see Library.approve_voice_term.
+    _vlib = _lib()
+    try:
+        approved_terms = _vlib.list_approved_voice_terms("bare-ampersand")
+    finally:
+        _vlib.close()
+    approved_rows_html = "".join(
+        f'<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);">'
+        f'<span style="flex:1;font-family:ui-monospace,monospace;font-size:13px;">{_esc(t["term"])}</span>'
+        f'<form method="post" action="/admin/voice/approved-terms/{t["id"]}/remove" style="display:inline;">'
+        f'<button type="submit" class="btn btn-ghost" style="font-size:11px;padding:3px 9px;color:var(--muted);">Remove</button></form></div>'
+        for t in approved_terms
+    ) or '<p style="color:var(--muted);font-size:13px;margin:0;">No terms approved yet.</p>'
+    approved_terms_block = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">
+<span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Approved ampersand terms</span>
+<span style="font-size:12px;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 8px;">Database-backed</span>
+</div>
+<p style="color:var(--muted);margin:0 0 12px;font-size:13px;">A GLOBAL, permanent whitelist&mdash;each exact term here is always fine, everywhere, in every scanned column. This is what the Voice review queue's &ldquo;Approve term&rdquo; action writes to. Distinct from the source-managed <code>AMPERSAND_NAMES</code>/<code>AMPERSAND_ACRONYMS</code> lists above: those govern the CI-only source-code scan (which never sees this database), and this table has no bearing on them&mdash;the two can never disagree, since they check different things (source literals vs. live database columns). Removing a term here makes it flaggable again on the next scan.</p>
+{approved_rows_html}
+<form method="post" action="/admin/voice/approved-terms/add" style="display:flex;gap:8px;margin-top:12px;">
+<input type="text" name="term" placeholder="e.g. Bain &amp; Company" required style="flex:1;font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;">
+<button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Add</button>
+</form>
+</div>"""
+
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Verbal identity</h1>
@@ -33818,6 +33881,7 @@ def admin_voice_page(request: Request):
 {fpa_buddy_block}
 {matchmaker_block}
 {mechanical_block}
+{approved_terms_block}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>
@@ -33968,6 +34032,42 @@ async def admin_voice_save_matchmaker(request: Request):
     return JSONResponse({"ok": True, "custom": bool(prompt), "value": prompt})
 
 
+@app.post("/admin/voice/approved-terms/add")
+async def admin_voice_approved_terms_add(request: Request):
+    """Manually add a globally-approved bare-ampersand term from /admin/voice
+    itself, outside the review-queue's own per-row "Approve term" flow—
+    e.g. adding a term nobody has flagged yet. Same
+    `Library.approve_voice_term`, so it also resolves any already-open queue
+    rows containing this exact term."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    term = (form.get("term") or "").strip()
+    if term:
+        lib = _lib()
+        try:
+            lib.approve_voice_term(term, rule="bare-ampersand")
+        finally:
+            lib.close()
+    return RedirectResponse("/admin/voice", status_code=303)
+
+
+@app.post("/admin/voice/approved-terms/{term_id}/remove")
+async def admin_voice_approved_terms_remove(term_id: int, request: Request):
+    """Remove a globally-approved term — it becomes flaggable again on the
+    next scan. Never resolves/reopens any queue row on its own; a removed
+    term's past approvals stay resolved unless the same text is re-flagged
+    by a fresh scan."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.remove_approved_voice_term(term_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/voice", status_code=303)
+
+
 @app.post("/admin/voice/review")
 async def admin_voice_review(request: Request):
     """Review pasted content against a voice rubric (mechanical lint + Claude
@@ -34004,50 +34104,211 @@ async def admin_voice_review(request: Request):
     return JSONResponse(review_text(text, voice_prompt=voice_prompt))
 
 
-def _voice_review_row_html(item: dict) -> str:
-    excerpt = _esc(item["excerpt"] or "")
+# Sentence-case, human-readable group headings for the review-queue page—
+# a raw rule string ("bare-ampersand") is fine as a dict key but reads as
+# code, not a heading a reviewer should scan. Falls back to a
+# title-cased version of the raw rule for anything not listed, so a future
+# rule added to voice_review.py never renders blank.
+_VOICE_RULE_LABELS: dict[str, str] = {
+    "buzzword": "Banned words",
+    "filler": "Filler phrases",
+    "performative": "Performative language",
+    "bare-ampersand": "Ampersands",
+    "spaced-em-dash": "Spaced em dashes",
+    "invisible-character": "Invisible characters",
+    "holistic": "Holistic review findings",
+    "seed-disagreement": "Seed vs. stored disagreements",
+}
+
+
+def _voice_rule_label(rule: str) -> str:
+    return _VOICE_RULE_LABELS.get(rule, rule.replace("-", " ").replace("_", " ").capitalize())
+
+
+# Admin edit-page URL per scanned table, for the review-queue's "Field"
+# column — resolvable only for tables with a real per-record edit page; a
+# table with none (settings, tool_categories, community_categories,
+# category_features, community_profiles' own bare id) just renders plain
+# text with no link, rather than guessing at a URL that might not exist.
+def _voice_admin_edit_link(lib, table: str, row_id) -> tuple[str, str]:
+    """Returns (display_name, edit_url) for a voice_review_queue row's
+    (table, row_id) — display_name is the record's own name/title when
+    resolvable, else a generic "{table} #{row_id}" fallback; edit_url is ""
+    when no admin edit page is known for this table. Never raises — a
+    since-deleted row (the record was removed after the finding was
+    logged) falls back to the generic name with no link."""
+    if row_id is None:
+        return ("(site setting)", "")
+    try:
+        if table == "tools":
+            row = lib.get_tool(row_id)
+            if row:
+                return (row["name"], f"/tools/software/{row['slug']}/edit")
+        elif table == "communities":
+            row = lib.get_community(row_id)
+            if row:
+                return (row["name"], f"/tools/communities/{row['slug']}/edit")
+        elif table == "community_profiles":
+            row = lib.get_community(row_id)
+            if row:
+                return (row["name"], f"/admin/tools/communities/{row_id}/profile")
+        elif table == "benchmarks":
+            row = lib.get_benchmark(row_id)
+            if row:
+                return (row["name"], f"/admin/tools/resources/{row_id}/edit")
+        elif table == "thought_leadership":
+            row = lib.get_thought_leadership(row_id)
+            if row:
+                return (row["title"], f"/admin/thought-leadership/third-party/{row_id}/edit")
+        elif table == "original_content":
+            row = lib.get_original_content(row_id)
+            if row:
+                return (row["title"], f"/admin/thought-leadership/original/{row_id}/edit")
+        elif table == "ai_surfaces":
+            row = lib.get_ai_surface(row_id)
+            if row:
+                return (row["title"], f"/admin/ai-surfaces/{row_id}/edit")
+    except Exception:
+        pass
+    return (f"{table} #{row_id}", "")
+
+
+def _voice_field_cell_html(lib, item: dict) -> str:
+    """The review-queue table's "Field" column: the record's own name,
+    linked to its admin edit page where one is known, with the table/column
+    name as quieter secondary text — replacing the old raw
+    "communities.demographic id=2" format."""
+    name, url = _voice_admin_edit_link(lib, item["table_name"], item["row_id"])
+    primary = (f'<a href="{_esc(url)}" style="color:var(--navy);font-weight:600;text-decoration:none;">{_esc(name)}</a>'
+               if url else f'<span style="font-weight:600;">{_esc(name)}</span>')
+    return (f'<div style="font-size:13px;">{primary}</div>'
+            f'<div style="font-size:11px;color:var(--muted);">{_esc(item["table_name"])}.{_esc(item["column_name"])}</div>')
+
+
+def _voice_char_diff_html(before: str, after: str) -> str:
+    """A cheap character-level diff between an auto_corrected row's before/
+    after text, using difflib (already a stdlib import in this file)—
+    highlights only what actually changed rather than making a reviewer
+    re-read two full, mostly-identical strings side by side. Falls back to
+    plain Before/After lines when the two are long enough that a full diff
+    would be noisy (over ~400 chars combined) or identical (nothing to
+    diff)."""
+    if before == after or len(before) + len(after) > 400:
+        return (f'<div><strong>Before:</strong> {_esc(before[:300])}</div>'
+                f'<div><strong>After:</strong> {_esc(after[:300])}</div>')
+    sm = difflib.SequenceMatcher(None, before, after)
+    out = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            out.append(_esc(after[j1:j2]))
+        elif tag in ("replace", "insert"):
+            out.append(f'<mark style="background:var(--seafoam-wash);padding:0 1px;">{_esc(after[j1:j2])}</mark>')
+        elif tag == "delete":
+            out.append(f'<del style="color:var(--alert);background:var(--coral-wash);padding:0 1px;">{_esc(before[i1:i2])}</del>')
+    return f'<div>{"".join(out)}</div>'
+
+
+def _voice_review_row_html(lib, item: dict) -> str:
     row_id_txt = f"id={_esc(item['row_id'])}" if item["row_id"] is not None else "(setting)"
     status = item["status"]
-    before_after = ""
-    if item["status"] == "auto_corrected" and item.get("before_text") is not None:
-        before_after = (
-            f'<div style="margin:6px 0;font-size:12px;color:var(--muted);">'
-            f'<div><strong>Before:</strong> {_esc(item["before_text"][:300])}</div>'
-            f'<div><strong>After:</strong> {_esc(item["after_text"][:300])}</div></div>'
-        )
-    actions = ""
-    if status in ("open", "auto_corrected"):
+    rule = item["rule"]
+    checkbox = (f'<input type="checkbox" class="voice-item-cb" data-group="{_esc(rule)}" value="{item["id"]}">'
+                if status in ("open", "auto_corrected") else "")
+
+    if rule == "seed-disagreement" and status in ("open",):
+        # Distinct per-row-type actions (Part 3/Part 1): "Use seed version"
+        # writes the seed's own text (after_text) back to the live row;
+        # "Keep mine" leaves the stored value untouched and marks this
+        # exact location a permanent exception so it never reopens.
+        detail = (f'<div style="margin:6px 0;font-size:12px;">'
+                  f'<div><strong>Currently stored:</strong> {_esc((item.get("before_text") or "")[:300])}</div>'
+                  f'<div><strong>Seed proposes:</strong> {_esc((item.get("after_text") or "")[:300])}</div></div>')
         actions = f"""
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
-  <input type="hidden" name="action" value="{'accept' if status == 'auto_corrected' else 'edit'}">
-  {'<input type="hidden" name="edited_text" value="' + _esc(item.get('after_text') or item['excerpt']) + '">' if status == 'auto_corrected' else ''}
+  <input type="hidden" name="action" value="use_seed">
+  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Use seed version</button>
+</form>
+<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
+  <input type="hidden" name="action" value="keep_mine">
+  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;color:var(--muted);">Keep mine</button>
+</form>"""
+    elif status == "auto_corrected":
+        diff = _voice_char_diff_html(item.get("before_text") or "", item.get("after_text") or "")
+        detail = f'<div style="margin:6px 0;font-size:12px;color:var(--muted);">{diff}</div>'
+        actions = f"""
+<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
+  <input type="hidden" name="action" value="accept">
   <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Accept</button>
 </form>
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="revert">
   <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Revert</button>
-</form>
-<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline-flex;gap:4px;">
-  <input type="hidden" name="action" value="edit">
-  <input type="text" name="edited_text" value="{_esc(item.get('after_text') or item['excerpt'])}"
-         style="font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;width:220px;">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save edit</button>
-</form>
-<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
-  <input type="hidden" name="action" value="accept_exception">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;color:var(--muted);">Accept as exception</button>
 </form>"""
+    elif status == "open":
+        # Part 4 fix — pre-filled with the FULL, CURRENT column value
+        # (fetched fresh, never the row's own `excerpt`, which is a
+        # mid-text snippet or, for an invisible-character finding, a
+        # display label like "U+200B (zero-width space)" — neither is real
+        # text safe to write back as the whole column value). A textarea,
+        # not a single-line input, since the full value can be long.
+        current = lib.get_voice_review_current_value(item["table_name"], item["row_id"], item["column_name"])
+        if current is None:
+            current = item.get("after_text") or item["excerpt"]
+        excerpt_hint = (f'<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">'
+                        f'Flagged text: {_esc((item["excerpt"] or "")[:200])}</div>')
+        detail = excerpt_hint
+        # Addition 2 (2026-09 coordinator amendment) — "Mark as exception" is
+        # replaced with two visually and functionally distinct actions.
+        # "Allow here" (renamed/rescoped from accept_exception) is scoped to
+        # exactly this one record+column+finding — never global, always
+        # reversible only by manually clearing the DB row. "Approve term" is
+        # the opposite: a GLOBAL, permanent whitelist entry (this exact
+        # matched term is fine everywhere) — shown ONLY for bare-ampersand
+        # findings, since a banned word/filler/performative phrase staying
+        # permanently banned (with case-by-case exceptions via Allow here
+        # only) is Brian's own explicit, stated policy. The two are styled
+        # with a deliberately unmistakable visual difference — a solid navy
+        # "Approve term" button vs. a plain muted-outline "Allow here" one—
+        # plus a one-line caption under each, since a misclick here has real
+        # consequences (silently un-banning a term everywhere vs. a scoped,
+        # reversible exception).
+        approve_term_html = ""
+        if rule == "bare-ampersand":
+            guess = (item.get("excerpt") or "").strip()[:120]
+            approve_term_html = f"""
+<div style="border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--surface);">
+  <form method="post" action="/admin/voice/review-queue/{item['id']}/approve-term" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+    <input type="text" name="term" value="{_esc(guess)}"
+           style="font-size:12px;padding:5px 7px;border:1px solid var(--line);border-radius:5px;flex:1;min-width:140px;font-family:inherit;">
+    <button type="submit" class="btn" style="font-size:12px;padding:6px 12px;background:var(--navy);color:#fff;border:none;">Approve term</button>
+  </form>
+  <div style="font-size:10.5px;color:var(--muted);margin-top:3px;">Adjust the exact words first&mdash;this makes the term fine EVERYWHERE, permanently, once approved.</div>
+</div>"""
+        actions = f"""
+<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:flex;flex-direction:column;gap:6px;">
+  <input type="hidden" name="action" value="edit">
+  <textarea name="edited_text" rows="3"
+         style="font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:100%;min-width:260px;font-family:inherit;">{_esc(current)}</textarea>
+  <div>
+    <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save edit</button>
+    <button type="submit" formaction="/admin/voice/review-queue/{item['id']}/resolve" name="action" value="accept_exception"
+            class="btn btn-ghost" style="font-size:12px;padding:5px 10px;border:1px dashed var(--line);color:var(--muted);">Allow here</button>
+  </div>
+  <div style="font-size:10.5px;color:var(--muted);">"Allow here" only exempts THIS one spot&mdash;never global, always reversible.</div>
+</form>
+{approve_term_html}"""
     else:
+        detail = ""
         actions = f'<span style="font-size:12px;color:var(--muted);">{_esc(status)}</span>'
+
     # Voice-review-queue trigger taxonomy (2026-09): a small badge naming
     # which mechanism produced this row — 'admin-edit' (a human editing via
     # an /admin/* submit route), 'startup-sync' (_seed_toolbox()'s per-boot
-    # re-sync against static seed data — the exact mechanism behind the
-    # seed-sync infinite-loop investigation this taxonomy exists to make
-    # visible), or 'script' (a one-off backfill/fix/migration script). A
-    # row logged before this column existed has source=NULL — rendered
-    # plainly as "unknown" rather than a blank cell that could read as a
-    # rendering bug.
+    # re-sync against static seed data), 'script' (a one-off backfill/fix/
+    # migration script), or 'submission' (a public, member-gated submission
+    # route). A row logged before this column existed has source=NULL—
+    # rendered plainly as "unknown" rather than a blank cell that could
+    # read as a rendering bug.
     source_val = item.get("source")
     source_label = _esc(source_val) if source_val else "unknown"
     source_badge = (
@@ -34055,78 +34316,146 @@ def _voice_review_row_html(item: dict) -> str:
         f'border:1px solid var(--line);border-radius:5px;padding:2px 7px;'
         f'white-space:nowrap;">{source_label}</span>'
     )
+    field_cell = _voice_field_cell_html(lib, item)
     return f"""
 <tr>
-  <td style="padding:8px 10px;font-size:13px;">{_esc(item['table_name'])}.{_esc(item['column_name'])} <span style="color:var(--muted);">{row_id_txt}</span></td>
-  <td style="padding:8px 10px;font-size:13px;">{excerpt}{before_after}</td>
+  <td style="padding:8px 10px;">{checkbox}</td>
+  <td style="padding:8px 10px;">{field_cell}<div style="font-size:11px;color:var(--muted);">{row_id_txt}</div></td>
+  <td style="padding:8px 10px;font-size:13px;">{detail}</td>
   <td style="padding:8px 10px;">{source_badge}</td>
-  <td style="padding:8px 10px;">{actions}</td>
+  <td style="padding:8px 10px;white-space:nowrap;">{actions}</td>
 </tr>"""
+
+
+def _voice_review_group_bulk_actions_html(rule: str) -> str:
+    """Group-level bulk actions, matching the per-row-type action sets:
+    'seed-disagreement' groups get "Use seed selected"/"Keep mine
+    selected"; every other group gets "Accept selected"/"Mark selected as
+    exception" — mirroring /admin/tools/software's own bulk "Edit
+    selected"/"Delete selected" pattern."""
+    if rule == "seed-disagreement":
+        buttons = [("use_seed", "Use seed selected", ""), ("keep_mine", "Keep mine selected", "color:var(--muted);")]
+    else:
+        buttons = [("accept", "Accept selected", ""), ("accept_exception", "Allow selected here", "color:var(--muted);")]
+    btn_html = "".join(
+        f'<button type="button" onclick="voiceBulkResolve(\'{_esc(rule)}\',\'{action}\')" '
+        f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;{style}">{label}</button>'
+        for action, label, style in buttons
+    )
+    return (f'<div style="display:flex;gap:8px;align-items:center;margin:8px 0;">'
+            f'<label style="font-size:12px;color:var(--muted);">'
+            f'<input type="checkbox" onclick="voiceToggleAll(\'{_esc(rule)}\',this.checked)"> Select all</label>'
+            f'{btn_html}</div>')
+
+
+_VOICE_BULK_JS = """
+function voiceToggleAll(group, checked) {
+  document.querySelectorAll('.voice-item-cb[data-group="' + group + '"]').forEach(function(cb) { cb.checked = checked; });
+}
+function voiceBulkResolve(group, action) {
+  var ids = Array.from(document.querySelectorAll('.voice-item-cb[data-group="' + group + '"]:checked')).map(function(cb) { return cb.value; });
+  if (!ids.length) { alert('Select at least one row first.'); return; }
+  var form = document.createElement('form');
+  form.method = 'post';
+  form.action = '/admin/voice/review-queue/bulk-resolve';
+  var a = document.createElement('input'); a.type = 'hidden'; a.name = 'action'; a.value = action;
+  form.appendChild(a);
+  ids.forEach(function(id) {
+    var i = document.createElement('input'); i.type = 'hidden'; i.name = 'item_ids'; i.value = id;
+    form.appendChild(i);
+  });
+  document.body.appendChild(form);
+  form.submit();
+}
+"""
 
 
 @app.get("/admin/voice/review-queue", response_class=HTMLResponse)
 async def admin_voice_review_queue(request: Request):
     """Every voice-rule finding — an `_voice_fix` correction already applied
-    at save time, or a scanner finding with nothing to auto-fix — grouped by
-    rule so 22 near-identical ampersand findings in one column can be
-    reviewed as a group, not one at a time. Accept/Revert/Edit/Accept as
-    exception per row; see `Library.resolve_voice_review_item`'s docstring
-    for what each action means. Bulk "Accept all in this group" posts one
-    request per row client-side would be ideal, but per this PR's own scope
-    cut a single grouped bulk-accept endpoint is out — each row's own action
-    button is the built mechanism this phase ships."""
+    at save time, a scanner finding with nothing to auto-fix, or a
+    seed-vs-stored disagreement `_seed_toolbox()` found on its last boot—
+    grouped by rule so many near-identical findings in one column can be
+    reviewed as a group, not one at a time. See `Library.
+    resolve_voice_review_item`'s docstring for what each per-row-type
+    action means; `_voice_review_group_bulk_actions_html` for the matching
+    group-level bulk actions."""
     if not _is_authed(request):
         return RedirectResponse("/login", status_code=302)
     lib = _lib()
     try:
         items = lib.list_voice_review_queue()
-    finally:
-        lib.close()
 
-    open_items = [i for i in items if i["status"] in ("open", "auto_corrected")]
-    resolved_items = [i for i in items if i["status"] not in ("open", "auto_corrected")]
+        open_items = [i for i in items if i["status"] in ("open", "auto_corrected")]
+        resolved_items = [i for i in items if i["status"] not in ("open", "auto_corrected")]
 
-    groups: dict[str, list[dict]] = {}
-    for it in open_items:
-        groups.setdefault(it["rule"], []).append(it)
+        groups: dict[str, list[dict]] = {}
+        for it in open_items:
+            groups.setdefault(it["rule"], []).append(it)
 
-    group_html = ""
-    if not groups:
-        group_html = '<p style="color:var(--muted);">Nothing open. Auto-corrections are only logged going forward&mdash;an empty queue on a fresh deploy doesn\'t mean nothing was ever fixed, just that nothing has changed since this logging shipped.</p>'
-    for rule, rows in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        rows_html = "".join(_voice_review_row_html(r) for r in rows)
-        group_html += f"""
-<h2 style="margin-top:28px;">{_esc(rule)} <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(rows)})</span></h2>
-<div style="overflow-x:auto;"><table style="width:100%;min-width:640px;border-collapse:collapse;">
-<thead><tr style="text-align:left;border-bottom:1px solid var(--line);">
+        group_html = ""
+        if not groups:
+            group_html = '<p style="color:var(--muted);">Nothing open. Auto-corrections are only logged going forward&mdash;an empty queue on a fresh deploy doesn\'t mean nothing was ever fixed, just that nothing has changed since this logging shipped.</p>'
+        for rule, rows in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            rows_html = "".join(_voice_review_row_html(lib, r) for r in rows)
+            bulk_html = _voice_review_group_bulk_actions_html(rule) if len(rows) > 1 else ""
+            group_html += f"""
+<h2 style="margin-top:28px;">{_esc(_voice_rule_label(rule))} <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(rows)})</span></h2>
+{bulk_html}
+<div style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+<table style="width:100%;min-width:760px;border-collapse:collapse;">
+<thead><tr style="text-align:left;border-bottom:1px solid var(--line);background:var(--bg);">
+<th style="padding:8px 10px;"></th>
 <th style="padding:8px 10px;font-size:12px;">Field</th>
-<th style="padding:8px 10px;font-size:12px;">Excerpt</th>
+<th style="padding:8px 10px;font-size:12px;">Detail</th>
 <th style="padding:8px 10px;font-size:12px;">Source</th>
 <th style="padding:8px 10px;font-size:12px;">Actions</th>
 </tr></thead><tbody>{rows_html}</tbody></table></div>"""
 
-    resolved_html = ""
-    if resolved_items:
-        rows_html = "".join(_voice_review_row_html(r) for r in resolved_items[:50])
-        resolved_html = f"""
-<h2 style="margin-top:36px;">Resolved / exceptions <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(resolved_items)})</span></h2>
-<div style="overflow-x:auto;"><table style="width:100%;min-width:640px;border-collapse:collapse;">
+        resolved_html = ""
+        if resolved_items:
+            rows_html = "".join(_voice_review_row_html(lib, r) for r in resolved_items[:50])
+            resolved_html = f"""
+<h2 style="margin-top:36px;">Resolved and exceptions <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(resolved_items)})</span></h2>
+<div style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+<table style="width:100%;min-width:760px;border-collapse:collapse;">
 <tbody>{rows_html}</tbody></table></div>"""
+    finally:
+        lib.close()
 
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Voice review queue</h1>
-<p style="color:var(--muted);max-width:760px;">Every voice-rule finding lands here for an explicit human review pass&mdash;
-auto-corrected content is never silently applied with no record, and a scanner finding with nothing to auto-fix is
-never left as just an aggregate count on /admin/checks. Auto-corrections (spaced em dashes) are logged going
-forward only, from the moment this shipped&mdash;an empty group here doesn't mean none were ever fixed before that.
-"Accept as exception" marks this one specific record/column/rule as a deliberate exception, permanently&mdash;it never
-changes a global rule (see /admin/voice for the source-managed mechanical rules and the ampersand allowlists in
-linklib/voice_review.py).</p>
+<p style="color:var(--muted);max-width:760px;">Every voice-rule finding lands here for review&mdash;nothing is
+ever silently applied or silently overwritten. See /admin/voice for the source-managed mechanical rules and the
+ampersand allowlists in linklib/voice_review.py.</p>
 {group_html}
 {resolved_html}
-</div>"""
+</div>
+<script>
+{_VOICE_BULK_JS}
+</script>"""
     return HTMLResponse(_page("Voice review queue—Admin", "Admin", body, authed=True))
+
+
+def _resolve_voice_item_action(lib, item: dict, action: str, edited_text: str | None = None) -> bool:
+    """Shared per-item resolution logic used by both the single-item and
+    bulk-resolve routes, so the two can never drift apart. Returns True on
+    success, False for an invalid action or a stale item (already
+    resolved)."""
+    if action == "revert" and item.get("before_text") is not None:
+        lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
+                                      item["before_text"])
+    elif action == "edit" and edited_text is not None:
+        lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
+                                      edited_text)
+    elif action == "use_seed" and item.get("after_text") is not None:
+        lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
+                                      item["after_text"])
+    # "accept"/"accept_exception"/"keep_mine" write nothing back — the
+    # corrected/stored value is already what's live; these only confirm
+    # or exempt it.
+    return lib.resolve_voice_review_item(item["id"], action, edited_text)
 
 
 @app.post("/admin/voice/review-queue/{item_id}/resolve")
@@ -34141,17 +34470,74 @@ async def admin_voice_review_resolve(item_id: int, request: Request):
         item = lib.get_voice_review_item(item_id)
         if not item:
             raise HTTPException(status_code=404, detail="not found")
-        if action == "revert" and item.get("before_text") is not None:
-            lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
-                                          item["before_text"])
-        elif action == "edit" and edited_text is not None:
-            lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
-                                          edited_text)
-        # "accept" writes nothing back — the corrected value is already what's
-        # live (that's what auto_corrected means); this just confirms it.
-        ok = lib.resolve_voice_review_item(item_id, action, edited_text)
+        ok = _resolve_voice_item_action(lib, item, action, edited_text)
         if not ok:
             raise HTTPException(status_code=400, detail="invalid action")
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/voice/review-queue", status_code=303)
+
+
+@app.post("/admin/voice/review-queue/{item_id}/approve-term")
+async def admin_voice_review_approve_term(item_id: int, request: Request):
+    """Addition 2 (2026-09) — globally, permanently approve one exact
+    ampersand term (e.g. "Bain & Company"). Deliberately distinct from
+    /resolve's accept_exception ("Allow here"): this writes a row to
+    `voice_approved_terms` via `Library.approve_voice_term`, which also
+    resolves EVERY currently-open queue row (any table/column/row_id)
+    whose excerpt/before/after text contains this exact term, case-
+    insensitively — not just this one item_id. The submitted `term` is
+    whatever the admin typed/adjusted in the form, never a mechanically-
+    derived boundary — a bare-ampersand match has no reliable way to know
+    where a "term" starts/ends (e.g. "Finance & Operations leaders" vs.
+    "Finance & Operations"), so the human draws that line here."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    term = (form.get("term") or "").strip()
+    lib = _lib()
+    try:
+        item = lib.get_voice_review_item(item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="not found")
+        if term:
+            lib.approve_voice_term(term, rule="bare-ampersand")
+        else:
+            # A blank submission still resolves this one row via the
+            # ordinary "Allow here" path, rather than silently no-op-ing—
+            # an admin who clears the field and submits anyway almost
+            # certainly meant "just this one," not "do nothing."
+            lib.resolve_voice_review_item(item_id, "accept_exception")
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/voice/review-queue", status_code=303)
+
+
+@app.post("/admin/voice/review-queue/bulk-resolve")
+async def admin_voice_review_bulk_resolve(request: Request):
+    """Bulk counterpart of the single-item resolve route above — applies the
+    same action to every posted item_id, via the identical shared
+    `_resolve_voice_item_action` helper so the two routes can't behave
+    differently. `edited_text`/`use_seed` never apply in bulk (there's no
+    single edited value for N rows) — bulk only ever supports
+    accept/accept_exception/use_seed(seed's own after_text)/keep_mine,
+    matching `_voice_review_group_bulk_actions_html`'s own button set."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    action = (form.get("action") or "").strip()
+    item_ids = form.getlist("item_ids")
+    lib = _lib()
+    try:
+        for raw_id in item_ids:
+            try:
+                item_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            item = lib.get_voice_review_item(item_id)
+            if not item:
+                continue
+            _resolve_voice_item_action(lib, item, action, None)
     finally:
         lib.close()
     return RedirectResponse("/admin/voice/review-queue", status_code=303)
@@ -34168,7 +34554,7 @@ _ADMIN_COPY_PROSE_STYLE = ("width:100%;padding:10px 14px;border:1px solid var(--
 # actually changed. `/admin/copy` itself is deliberately NOT an index page:
 # every other admin group prefix on this site (/admin/thought-leadership,
 # /admin/system, /admin/tools, /admin/inbox) is a bare grouping with no route
-# of its own — the hub-nav cards are the real entry point, not the prefix —
+# of its own — the hub-nav cards are the real entry point, not the prefix—
 # so this follows that same precedent rather than inventing a landing page
 # nothing else on the site has. No compatibility redirect either, per the
 # standing "admin-only, no redirect on a rename" rule (Admin URL restructure
@@ -34491,7 +34877,7 @@ async def admin_copy_preview(request: Request):
 async def admin_copy_save_how_this_is_built(request: Request):
     """Save one /how-this-is-built combined prose field.
 
-    One route for both fields rather than two near-identical ones —
+    One route for both fields rather than two near-identical ones—
     the section is named in the payload and validated against
     _HTIB_COPY_KEYS, so an unknown key is rejected outright rather than
     writing an arbitrary settings row. Rejects blank content, same as every
@@ -34517,7 +34903,7 @@ async def admin_copy_save_how_this_is_built(request: Request):
 
 def _email_template_registry() -> list[dict]:
     """One row per admin-editable email. Single source of truth for the
-    /admin/emails sections, the index table, and the generic save route —
+    /admin/emails sections, the index table, and the generic save route—
     add a new outbound template here and all three pick it up."""
     from linklib import email_utils as eu
     return [
@@ -34874,7 +35260,7 @@ def download_db(request: Request):
 @app.post("/admin/backup-now", response_class=HTMLResponse)
 def backup_now_route(request: Request, token: str | None = None):
     """Force an immediate off-site backup, bypassing the debounce.
-    Also the target of the daily Railway Cron Service (RUNBOOK.md §7 —
+    Also the target of the daily Railway Cron Service (RUNBOOK.md §7—
     migrated off a GitHub Actions schedule, 2026-08, after a GitHub billing
     outage silently stopped that schedule firing) — the status code below
     is not decorative: it's how the cron service (and any future
@@ -34910,7 +35296,7 @@ def bookmarklet(request: Request):
     module-level global on every request — it's already re-populated from
     LINKLIB_SAVE_TOKEN at process start, so a token rotation is already
     reflected here as soon as the app restarts with the new env var (see
-    CLAUDE.md: "if you rotate LINKLIB_SAVE_TOKEN, re-grab the bookmarklet" —
+    CLAUDE.md: "if you rotate LINKLIB_SAVE_TOKEN, re-grab the bookmarklet"—
     what that note is guarding against is a stale COPY sitting in someone's
     bookmarks bar, not this page serving a stale value).
 
@@ -35265,7 +35651,7 @@ from webapp import mcp_server as _mcp_server  # noqa: E402
 # hardcoded literal, so this can't silently drift from the redirect logic
 # it has to match. www.bmweis.com never serves /mcp (it only ever redirects
 # to the apex), so it's excluded. See mcp_server.build_mcp's own docstring
-# for the incident (a real 421 in production) this list exists to prevent —
+# for the incident (a real 421 in production) this list exists to prevent—
 # FastMCP's DNS-rebinding-protection allowlist defaults to localhost only.
 _mcp_production_hosts = [_MCP_HOST] + [h for h in _LEGACY_HOSTS if h != "www.bmweis.com"]
 
@@ -35332,7 +35718,7 @@ async def _mcp_auth_gate(request: Request, call_next):
     authorization decision, and it fails closed: any problem resolving a
     caller is a 401, never a pass-through.
 
-    Token parsing goes through `_mcp_server.bearer_token_candidates` —
+    Token parsing goes through `_mcp_server.bearer_token_candidates`—
     tolerant of a missing "Bearer " scheme and of the scheme/token space
     going missing in transit (see that function's docstring for the real
     2026-09 production reports that motivated it, and for why nothing here

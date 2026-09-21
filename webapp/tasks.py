@@ -237,6 +237,33 @@ _checks_last_attempt_at: float | None = None
 _checks_last_error: str | None = None
 
 
+def _reconcile_voice_review_queue_once() -> None:
+    """One pass of `Library.reconcile_voice_review_queue()` — the
+    bidirectional-sync fix (2026-09): the live DB scan and the review queue
+    used to be able to disagree in both directions (a new can't-auto-fix
+    finding entering the DB via an ordinary save never reached the queue;
+    fixing a violation directly on a record's own edit page never closed
+    its stale open queue row). Run from this same background refresher
+    loop rather than a request path, for the identical reason run_all()
+    itself is TTL-cached/background-refreshed — a full DB scan is real
+    work no page render should pay for inline. Opens its own Library
+    connection (own thread, own connection — see this module's own
+    connection-safety comment above) and never raises past this function;
+    a failure here is logged, not propagated, so it can never take the
+    checks refresher itself down."""
+    import os as _os
+    from linklib.db import Library as _Library
+    db_path = _os.environ.get("LINKLIB_DB", "library.db")
+    try:
+        lib = _Library(db_path)
+        try:
+            lib.reconcile_voice_review_queue()
+        finally:
+            lib.close()
+    except Exception:
+        _logger.exception("Voice review queue reconciliation pass failed")
+
+
 def _run_one_refresh_iteration() -> None:
     """One pass: compute + cache on success, log + record on failure — never
     raises. Pulled out of the sleep loop below so a test can call this
@@ -267,6 +294,7 @@ def _run_one_refresh_iteration() -> None:
 def _checks_refresher_loop() -> None:
     while True:
         _run_one_refresh_iteration()
+        _reconcile_voice_review_queue_once()
         time.sleep(_CHECKS_CACHE_TTL)
 
 

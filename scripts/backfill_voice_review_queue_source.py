@@ -41,8 +41,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 
-from linklib.db import Library, resolve_db_path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from linklib.db import Library, resolve_db_path  # noqa: E402
 
 # The two specific rows this script targets — matched on
 # (table_name, column_name, a substring of the logged excerpt), not a

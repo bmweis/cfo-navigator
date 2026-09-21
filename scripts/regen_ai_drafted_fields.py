@@ -189,11 +189,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
 
-from linklib.db import Library, resolve_db_path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from linklib.db import Library, resolve_db_path  # noqa: E402
 from linklib.enrich import (
     COMMUNITY_PROFILE_FIELDS,
     generate_tool_description,

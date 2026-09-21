@@ -140,14 +140,15 @@ class DbCopyViolation:
 
 
 def _scan_value(table: str, row_id: object, column: str, value: str, *,
-                 check_typography: bool = True) -> list[DbCopyViolation]:
+                 check_typography: bool = True, approved_ampersand_terms=()) -> list[DbCopyViolation]:
     if not value:
         return []
     out = [DbCopyViolation(table, row_id, column, rule, phrase)
            for rule, phrase in mechanical_findings(value)]
     if check_typography:
         out += [DbCopyViolation(table, row_id, column, rule, excerpt)
-                for rule, excerpt in typography_findings_plain(value)]
+                for rule, excerpt in typography_findings_plain(
+                    value, approved_ampersand_terms=approved_ampersand_terms)]
     return out
 
 
@@ -184,9 +185,17 @@ def scan_db_copy_report(lib) -> DbScanReport:
     actually checked. `scan_db_copy()` below is a thin backward-compatible
     wrapper over this for every caller that only wants the flat list."""
     violations: list[DbCopyViolation] = []
+    # Read once per scan, not once per value — globally-approved bare-
+    # ampersand terms (2026-09, "Approve term") mask their own ampersand
+    # out of every scanned column so an approved term can't be re-flagged
+    # on the very next pass. See Library.approve_voice_term's own docstring.
+    approved_ampersand_terms = tuple(
+        row["term"] for row in lib.list_approved_voice_terms("bare-ampersand")
+    )
 
     for key in _SCAN_SETTINGS_KEYS:
-        violations.extend(_scan_value("settings", None, key, lib.get_setting(key)))
+        violations.extend(_scan_value("settings", None, key, lib.get_setting(key),
+                                       approved_ampersand_terms=approved_ampersand_terms))
 
     tables_checked: list[str] = []
     tables_skipped: list[tuple[str, str]] = []
@@ -214,7 +223,8 @@ def scan_db_copy_report(lib) -> DbScanReport:
             row_id = d[id_col]
             for col in columns:
                 violations.extend(_scan_value(table, row_id, col, d.get(col) or "",
-                                               check_typography=col not in typography_exempt))
+                                               check_typography=col not in typography_exempt,
+                                               approved_ampersand_terms=approved_ampersand_terms))
 
     columns_configured = sum(len(cols) for _, _, cols, _ in _SCAN_TABLES)
 
