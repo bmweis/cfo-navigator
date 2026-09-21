@@ -10895,10 +10895,12 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   UI. Fixed with a new `voice_review_queue.source TEXT` column (a plain
   idempotent migration, no backfill for pre-existing rows — they read
   `source=NULL`, rendered as "unknown," never a blank cell) taking one of
-  three values: `'admin-edit'` (a human editing through an `/admin/*`, or an
+  four values: `'admin-edit'` (a human editing through an `/admin/*`, or an
   admin-gated public-looking, submit route), `'startup-sync'`
   (`_seed_toolbox()`'s own per-boot re-sync — the exact mechanism behind
-  the incident), or `'script'` (a one-off backfill/fix/migration script).
+  the incident), `'script'` (a one-off backfill/fix/migration script), or
+  `'submission'` (a public, member-gated submission route, where the
+  origin is known but is neither an admin edit nor a script/sync run).
   `Library._vf`/`log_voice_correction` both grew an optional `source`
   parameter threaded straight into the INSERT; all 28 `Library` write
   methods that already call either grew a matching `source: str | None =
@@ -10913,12 +10915,15 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   enrich_agent_taxonomy.py`, `scripts/enrich_community_profiles.py`,
   `scripts/seed_tools.py`, `scripts/seed_communities.py`, `scripts/
   seed_feature_taxonomy.py`, and the various one-off content-fix scripts)
-  passes `source="script"`. **Two public, member-gated (not admin)
-  submission routes are deliberately left unwired**
-  (`POST /tools/submit`, `POST /tools/communities/submit`) — neither is an
-  admin-edit or a script/sync context, and the 3-value taxonomy has no
-  bucket for an anonymous/member visitor's own submission; a 4th value was
-  considered and rejected as unneeded scope. `/admin/voice/review-queue`
+  passes `source="script"`. **The two public, member-gated (not admin)
+  submission routes — `POST /tools/submit`, `POST /tools/communities/submit`
+  — pass `source="submission"`**, the fourth taxonomy value: an earlier
+  draft of this feature left them unwired (`source=None`), reasoning
+  neither is an admin-edit or a script/sync context and that a 4th value
+  was unneeded scope — reversed on review, since `source=None` renders as
+  "unknown" in the review-queue UI, indistinguishable from a genuine gap in
+  coverage, when the provenance here is actually known and is exactly the
+  content Brian most wants to review closely. `/admin/voice/review-queue`
   shows the source as a small muted badge per row (both the open/
   auto-corrected groups and the resolved/exceptions table share the same
   `_voice_review_row_html` renderer, so both get it for free).

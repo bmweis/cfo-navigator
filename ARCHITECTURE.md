@@ -10151,7 +10151,7 @@ mechanism produced a given queue row.
 
 **`voice_review_queue.source TEXT`** (a plain idempotent `ALTER TABLE ADD
 COLUMN` migration, no backfill for existing rows — they read `source=NULL`,
-rendered as "unknown" rather than a blank cell) records one of three values:
+rendered as "unknown" rather than a blank cell) records one of four values:
 
 - `'admin-edit'` — a human editing through an `/admin/*` (or an admin-gated
   public-looking, e.g. `/tools/communities/{slug}/edit`) submit route.
@@ -10166,6 +10166,9 @@ rendered as "unknown" rather than a blank cell) records one of three values:
   one-off `scripts/migrate_*`/`scripts/normalize_*`/`scripts/
   retire_*`/`scripts/add_current_feed_link_to_web_search_explainer.py`
   content-fix scripts).
+- `'submission'` — a public, member-gated submission route (`POST
+  /tools/submit`, `POST /tools/communities/submit`) — the content's origin is
+  known, but it's neither an admin edit nor a script/sync run.
 
 `Library._vf(table, row_id, column, value, source=None)`/`log_voice_correction(
 ..., source=None)` both grew an optional `source` parameter threaded straight
@@ -10176,13 +10179,14 @@ into the INSERT, and every `Library` write method that already called either
 `source: str | None = None` parameter and passes it straight through — every
 call site in `webapp/app.py` and every script above now supplies the correct
 value for its own calling context. `Library.set_setting()` also grew the
-parameter (every `/admin/copy/*` field write goes through it). Two public,
-member-gated (not admin) submission routes — `POST /tools/submit`,
-`POST /tools/communities/submit` — are deliberately left with `source=None`:
-neither `add_tool`/`add_community` call sits inside an admin-edit or a
-script/sync context, and the 3-value taxonomy has no bucket for "an
-anonymous/member visitor's own submission" (a 4th value was considered and
-rejected as unneeded scope for this PR).
+parameter (every `/admin/copy/*` field write goes through it).
+**The two public, member-gated submission routes were initially left with
+`source=None`, then reversed on review**: `add_tool`/`add_community`'s calls
+from `POST /tools/submit`/`POST /tools/communities/submit` now both pass
+`source="submission"` — leaving them as `None` would have rendered as
+"unknown" in the review-queue UI, indistinguishable from a genuine coverage
+gap, when the provenance is in fact known and this is exactly the content
+Brian most wants to review closely (a public submission, pre-approval).
 
 **`/admin/voice/review-queue`** shows the source as a small muted badge per
 row (both open/auto-corrected groups and the resolved/exceptions table share

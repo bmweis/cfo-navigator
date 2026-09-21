@@ -2517,9 +2517,13 @@ class Library:
             # voice_review_queue row: 'admin-edit' (a human editing a record
             # through an /admin/* submit route), 'startup-sync' (_seed_toolbox's
             # per-boot re-sync of a tools/communities/benchmarks row against its
-            # static seed-source value), or 'script' (a one-off backfill/fix
+            # static seed-source value), 'script' (a one-off backfill/fix
             # script, e.g. scripts/backfill_voice_review_queue.py,
-            # scripts/fix_spaced_em_dashes.py, scripts/regen_ai_drafted_fields.py).
+            # scripts/fix_spaced_em_dashes.py, scripts/regen_ai_drafted_fields.py),
+            # or 'submission' (a public, member-gated submission route —
+            # POST /tools/submit, POST /tools/communities/submit — where the
+            # content's origin is known but it's neither an admin edit nor a
+            # script/sync run).
             # NULL for every pre-existing row (deliberately not backfilled —
             # see Library._vf's own call sites for which value each caller now
             # passes) and for any future caller that doesn't yet pass one;
@@ -4278,9 +4282,11 @@ class Library:
         `source` (2026-09, seed-sync infinite-loop investigation) is one of
         'admin-edit' (an /admin/* submit route saving a human's edit),
         'startup-sync' (_seed_toolbox's per-boot re-sync against a static
-        seed source), or 'script' (a one-off backfill/fix script) — or None
-        when the caller doesn't yet pass one (every write path predating
-        this parameter). Purely descriptive: it changes nothing about
+        seed source), 'script' (a one-off backfill/fix script), or
+        'submission' (a public, member-gated submission route — the content's
+        origin is known but it's neither an admin edit nor a script/sync run)
+        — or None when the caller doesn't yet pass one (every write path
+        predating this parameter). Purely descriptive: it changes nothing about
         whether/how the correction is logged, only what's recorded about
         who/what triggered it, so a reviewer at /admin/voice/review-queue
         can tell "an admin typed this" from "the seed sync did this again"

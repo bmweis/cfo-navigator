@@ -10938,7 +10938,7 @@ async def tools_communities_submit(request: Request):
     lib = _lib()
     try:
         lib.add_community(name=name, url=url, demographic="", cost_band="Undisclosed dues",
-                           categories=[], submitted_by=submitted_by, approved=0)
+                           categories=[], submitted_by=submitted_by, approved=0, source="submission")
         notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
         if notify_to:
             _send_email_safely(
@@ -12391,7 +12391,7 @@ async def tools_submit(request: Request, background_tasks: BackgroundTasks):
         # the right shape for the directory card) until an admin reviews and
         # regenerates a fuller description/summary from the edit page before approving.
         tool_id = lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0,
-                                summary=description)
+                                summary=description, source="submission")
         notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
         if notify_to:
             _send_email_safely(
