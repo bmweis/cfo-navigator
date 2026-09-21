@@ -14,6 +14,16 @@ so `import linklib` always succeeds inside a test process regardless of
 whether the *script itself* would resolve it correctly when run standalone.
 Only a real subprocess, launched from the repo root with a clean environment
 (no inherited `PYTHONPATH`), can prove the fix.
+
+Widened (Phase 2, PR #590 verification) to cover every scripts/*.py added
+or touched across both #588 and #590, not just the two that had a
+confirmed bug — the original PR fixed the two known-broken scripts but
+never added a test proving the other ~10 files #588 touched also run
+cleanly standalone. All of them already carry their own sys.path shim
+(confirmed by direct inspection before writing this list), so this is
+expected to pass for every entry — its job is to keep it that way, the
+same way the original two entries exist to keep *their* fix from
+regressing.
 """
 from __future__ import annotations
 
@@ -29,6 +39,19 @@ AFFECTED_SCRIPTS = [
     "scripts/backfill_voice_review_queue.py",
     "scripts/backfill_voice_review_queue_source.py",
     "scripts/regen_ai_drafted_fields.py",
+    # The rest of #588's touched scripts (PR #590 Phase 2 widening) — each
+    # already had its own sys.path shim, so this locks that in rather than
+    # fixing a live bug.
+    "scripts/add_current_feed_link_to_web_search_explainer.py",
+    "scripts/enrich_agent_taxonomy.py",
+    "scripts/enrich_community_profiles.py",
+    "scripts/migrate_ai_surfaces.py",
+    "scripts/normalize_original_content_tags.py",
+    "scripts/retire_comp_benchmarking_features.py",
+    "scripts/seed_book_recommendations.py",
+    "scripts/seed_communities.py",
+    "scripts/seed_feature_taxonomy.py",
+    "scripts/seed_tools.py",
 ]
 
 

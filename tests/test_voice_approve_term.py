@@ -133,6 +133,37 @@ def test_admin_voice_page_shows_approved_terms_section(env):
     assert "Dun &amp; Bradstreet" in r.text or "Dun & Bradstreet" in r.text
 
 
+def test_approving_a_term_stops_the_live_db_scanner_from_reflagging_it(env):
+    """PR #590 Phase 2 verification (F6) — this scanner-suppression path
+    was verified manually during Phase 1 review but had no committed
+    regression test: does approving a term actually make
+    `voice_db_scan.scan_db_copy` stop reporting it as a live finding, not
+    just resolve the already-queued rows? Uses a term that is NOT in the
+    source-side AMPERSAND_NAMES/AMPERSAND_ACRONYMS allowlist, so a false
+    pass from that unrelated mechanism can't hide a real failure here."""
+    from linklib.voice_db_scan import scan_db_copy
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    try:
+        cid = lib.add_tool_category("Test Cat")
+        lib.add_category_feature(
+            cid, "Ops Feature",
+            "Handles wombats & platypuses budget work across many quarters "
+            "without fail every year for finance",
+        )
+        before = [v for v in scan_db_copy(lib)
+                  if v.table == "category_features" and v.column == "definition"]
+        assert before, "sanity check: the phrase must actually be flagged before approval"
+
+        lib.approve_voice_term("Wombats & Platypuses", rule="bare-ampersand")
+
+        after = [v for v in scan_db_copy(lib)
+                 if v.table == "category_features" and v.column == "definition"]
+        assert after == [], "approving the term must stop the live scanner from reflagging it"
+    finally:
+        lib.close()
+
+
 def test_add_and_remove_approved_term_via_admin_voice_routes(env):
     c = _login_admin(env)
     r = c.post("/admin/voice/approved-terms/add", data={"term": "Sales & Marketing"},

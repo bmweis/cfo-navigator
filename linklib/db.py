@@ -4570,11 +4570,17 @@ class Library:
 
     def is_approved_voice_term(self, rule: str, text: str) -> bool:
         """True when `text` contains (case-insensitively) any term already
-        approved for `rule`. Used by the live DB scanner
-        (`voice_db_scan.py`) to mask an approved term out of a bare-
-        ampersand scan before it can be re-flagged — never by the CI-only
-        source-code scan in `linklib.voice_review.typography_findings`,
-        which has no database to read this table from."""
+        approved for `rule`. A standalone, ad-hoc "has this term already
+        been approved" check — NOT the mechanism the live DB scanner
+        actually uses to mask approved terms out of a bare-ampersand scan
+        (that's `voice_review.mask_approved_ampersand_terms`, called from
+        `voice_db_scan.scan_db_copy_report` with the full approved-terms
+        list read once per scan via `list_approved_voice_terms`, not this
+        per-value method). Confirmed by inspection: this method currently
+        has no live caller anywhere in the app — kept as a small, tested,
+        directly-usable primitive for a future call site (e.g. an admin UI
+        that wants to show "already approved" before offering the Approve
+        action), not because anything reads it today."""
         if not text:
             return False
         low = text.lower()

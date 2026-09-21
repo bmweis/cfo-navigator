@@ -34208,12 +34208,37 @@ def _voice_char_diff_html(before: str, after: str) -> str:
     return f'<div>{"".join(out)}</div>'
 
 
+# Column widths for /admin/voice/review-queue's per-rule tables (PR #590
+# Phase 2 — C2 fix). Every group renders its own separate <table>, so
+# without `table-layout:fixed` + these declared widths, the browser
+# auto-sizes each one independently based on that group's own content —
+# measured live before this fix: Actions alone ranged 221-651px across
+# groups, Field 153-220px, with no consistency at all. `table-layout:fixed`
+# makes a `<th>`'s declared width authoritative regardless of content, so
+# every group's table now renders with byte-identical column proportions.
+_VOICE_COL_WIDTH_CHECKBOX = 30
+_VOICE_COL_WIDTH_FIELD = _COL_WIDTH_NAME  # same "record name + secondary line" shape as every other admin table's Name column
+_VOICE_COL_WIDTH_SOURCE = _COL_WIDTH_STATUS  # a small provenance badge, same shape as any other status badge
+_VOICE_COL_WIDTH_ACTIONS = 320  # wide enough for the edit textarea/Approve-term input, narrower than the pre-fix 221-651px range this replaces
+
+
 def _voice_review_row_html(lib, item: dict) -> str:
     row_id_txt = f"id={_esc(item['row_id'])}" if item["row_id"] is not None else "(setting)"
     status = item["status"]
     rule = item["rule"]
     checkbox = (f'<input type="checkbox" class="voice-item-cb" data-group="{_esc(rule)}" value="{item["id"]}">'
                 if status in ("open", "auto_corrected") else "")
+    # C5 fix (PR #590 Phase 2): every row type's actions render inside one
+    # right-aligned, single-line flex row by default — an "open" row's
+    # edit textarea is the one exception, since it genuinely can't fit on
+    # one line; it's collapsed behind an Edit button instead (see the
+    # `status == "open"` branch below), so the DEFAULT state for every row
+    # is one line, right-aligned, matching the spec even though it departs
+    # from `.admin-table-actions-grid`'s own site-wide `justify-content:
+    # start` convention elsewhere — a deliberate, page-scoped choice, not
+    # an oversight (see CLAUDE.md's own note on this).
+    actions_row_open = '<div style="display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap;">'
+    actions_row_close = '</div>'
 
     if rule == "seed-disagreement" and status in ("open",):
         # Distinct per-row-type actions (Part 3/Part 1): "Use seed version"
@@ -34223,7 +34248,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
         detail = (f'<div style="margin:6px 0;font-size:12px;">'
                   f'<div><strong>Currently stored:</strong> {_esc((item.get("before_text") or "")[:300])}</div>'
                   f'<div><strong>Seed proposes:</strong> {_esc((item.get("after_text") or "")[:300])}</div></div>')
-        actions = f"""
+        actions = actions_row_open + f"""
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="use_seed">
   <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Use seed version</button>
@@ -34231,11 +34256,11 @@ def _voice_review_row_html(lib, item: dict) -> str:
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="keep_mine">
   <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;color:var(--muted);">Keep mine</button>
-</form>"""
+</form>""" + actions_row_close
     elif status == "auto_corrected":
         diff = _voice_char_diff_html(item.get("before_text") or "", item.get("after_text") or "")
         detail = f'<div style="margin:6px 0;font-size:12px;color:var(--muted);">{diff}</div>'
-        actions = f"""
+        actions = actions_row_open + f"""
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="accept">
   <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Accept</button>
@@ -34243,7 +34268,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="revert">
   <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Revert</button>
-</form>"""
+</form>""" + actions_row_close
     elif status == "open":
         # Part 4 fix — pre-filled with the FULL, CURRENT column value
         # (fetched fresh, never the row's own `excerpt`, which is a
@@ -34272,34 +34297,59 @@ def _voice_review_row_html(lib, item: dict) -> str:
         # plus a one-line caption under each, since a misclick here has real
         # consequences (silently un-banning a term everywhere vs. a scoped,
         # reversible exception).
+        # C3/C4 fix (PR #590 Phase 2) — Approve term stays a compact,
+        # ALWAYS-visible mini-form (its own bordered box, solid navy
+        # button) exactly as originally designed — C4's "behind a button
+        # reveal" requirement is specifically about the bulky full-width
+        # edit textarea below, not this small term-only input. So the
+        # default row for every "open" finding is Edit / Allow here
+        # (+ this Approve-term box for bare-ampersand rows), matching C3's
+        # "Edit / Approve term / Allow here as applicable" default set.
         approve_term_html = ""
         if rule == "bare-ampersand":
             guess = (item.get("excerpt") or "").strip()[:120]
             approve_term_html = f"""
-<div style="border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--surface);">
-  <form method="post" action="/admin/voice/review-queue/{item['id']}/approve-term" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+<div style="border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--surface);margin-top:8px;">
+  <form method="post" action="/admin/voice/review-queue/{item['id']}/approve-term" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
     <input type="text" name="term" value="{_esc(guess)}"
            style="font-size:12px;padding:5px 7px;border:1px solid var(--line);border-radius:5px;flex:1;min-width:140px;font-family:inherit;">
     <button type="submit" class="btn" style="font-size:12px;padding:6px 12px;background:var(--navy);color:#fff;border:none;">Approve term</button>
   </form>
-  <div style="font-size:10.5px;color:var(--muted);margin-top:3px;">Adjust the exact words first&mdash;this makes the term fine EVERYWHERE, permanently, once approved.</div>
+  <div style="font-size:10.5px;color:var(--muted);margin-top:3px;text-align:right;">Adjust the exact words first&mdash;this makes the term fine EVERYWHERE, permanently, once approved.</div>
 </div>"""
+        # C4 fix (PR #590 Phase 2) — the EDIT field (the bulky full-width
+        # textarea) used to render always-visible for every open row. It's
+        # now collapsed behind an "Edit" button (`voiceToggleEditField`, in
+        # _VOICE_BULK_JS below): the default, one-line, right-aligned
+        # state shows Edit / Allow here; clicking Edit reveals the
+        # full-width textarea + Save edit / Cancel underneath, and Cancel
+        # collapses it back without submitting anything.
+        edit_field_id = f"voice-edit-field-{item['id']}"
+        collapsed_row = actions_row_open + f"""
+<button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;"
+        onclick="voiceToggleEditField('{item['id']}', true)">Edit</button>
+<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
+  <input type="hidden" name="action" value="accept_exception">
+  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;border:1px dashed var(--line);color:var(--muted);">Allow here</button>
+</form>""" + actions_row_close + approve_term_html
         actions = f"""
-<form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:flex;flex-direction:column;gap:6px;">
-  <input type="hidden" name="action" value="edit">
-  <textarea name="edited_text" rows="3"
-         style="font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:100%;min-width:260px;font-family:inherit;">{_esc(current)}</textarea>
-  <div>
-    <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save edit</button>
-    <button type="submit" formaction="/admin/voice/review-queue/{item['id']}/resolve" name="action" value="accept_exception"
-            class="btn btn-ghost" style="font-size:12px;padding:5px 10px;border:1px dashed var(--line);color:var(--muted);">Allow here</button>
-  </div>
-  <div style="font-size:10.5px;color:var(--muted);">"Allow here" only exempts THIS one spot&mdash;never global, always reversible.</div>
-</form>
-{approve_term_html}"""
+<div id="{edit_field_id}-collapsed">{collapsed_row}</div>
+<div id="{edit_field_id}-expanded" style="display:none;">
+  <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:flex;flex-direction:column;gap:6px;">
+    <input type="hidden" name="action" value="edit">
+    <textarea name="edited_text" rows="3"
+           style="font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:100%;min-width:260px;font-family:inherit;box-sizing:border-box;">{_esc(current)}</textarea>
+    <div style="display:flex;gap:6px;justify-content:flex-end;">
+      <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;color:var(--muted);"
+              onclick="voiceToggleEditField('{item['id']}', false)">Cancel</button>
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save edit</button>
+    </div>
+    <div style="font-size:10.5px;color:var(--muted);">Editing the full value directly&mdash;"Allow here" (collapse this first) only exempts THIS one spot, never global, always reversible.</div>
+  </form>
+</div>"""
     else:
         detail = ""
-        actions = f'<span style="font-size:12px;color:var(--muted);">{_esc(status)}</span>'
+        actions = actions_row_open + f'<span style="font-size:12px;color:var(--muted);">{_esc(status)}</span>' + actions_row_close
 
     # Voice-review-queue trigger taxonomy (2026-09): a small badge naming
     # which mechanism produced this row — 'admin-edit' (a human editing via
@@ -34323,7 +34373,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
   <td style="padding:8px 10px;">{field_cell}<div style="font-size:11px;color:var(--muted);">{row_id_txt}</div></td>
   <td style="padding:8px 10px;font-size:13px;">{detail}</td>
   <td style="padding:8px 10px;">{source_badge}</td>
-  <td style="padding:8px 10px;white-space:nowrap;">{actions}</td>
+  <td style="padding:8px 10px;">{actions}</td>
 </tr>"""
 
 
@@ -34367,6 +34417,62 @@ function voiceBulkResolve(group, action) {
   document.body.appendChild(form);
   form.submit();
 }
+function voiceToggleEditField(itemId, expand) {
+  var collapsed = document.getElementById('voice-edit-field-' + itemId + '-collapsed');
+  var expanded = document.getElementById('voice-edit-field-' + itemId + '-expanded');
+  if (!collapsed || !expanded) return;
+  collapsed.style.display = expand ? 'none' : 'block';
+  expanded.style.display = expand ? 'block' : 'none';
+}
+"""
+
+# C1 fix (PR #590 Phase 2) — a page-specific variant of
+# _ADMIN_SCROLL_HINT_HTML/_ADMIN_SCROLL_HINT_JS: this page can render N
+# rule-group tables, not one, so the shared single-id mechanism
+# (`#cmp-scroll-wrap`/`#admin-scroll-hint`) doesn't fit — this operates on
+# every `.voice-scroll-wrap`/`.voice-scroll-hint` PAIR by DOM adjacency
+# instead of a fixed id, reusing the exact same `.admin-scroll-hint` CSS
+# class (and therefore the exact same look) for the hint itself. Same
+# behavior as the shared version: shown only when a wrap's content
+# genuinely overflows, dismissed (and remembered via localStorage) on the
+# viewer's first scroll of ANY one of them.
+_VOICE_SCROLL_HINT_ITEM_HTML = (
+    '<div class="admin-scroll-hint voice-scroll-hint">'
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round"><polyline points="18 8 22 12 18 16"/>'
+    '<polyline points="6 8 2 12 6 16"/><line x1="2" y1="12" x2="22" y2="12"/></svg>'
+    '<span>Scroll for more</span></div>'
+)
+
+_VOICE_SCROLL_HINT_JS = """
+function initVoiceScrollHints() {
+  var KEY = 'admin_scroll_hint_seen';
+  var seen = false;
+  try { seen = !!localStorage.getItem(KEY); } catch (e) {}
+  var wraps = document.querySelectorAll('.voice-scroll-wrap');
+  wraps.forEach(function(wrap) {
+    var hint = wrap.previousElementSibling;
+    if (!hint || !hint.classList.contains('voice-scroll-hint')) return;
+    function check() {
+      if (seen) { hint.style.display = 'none'; return; }
+      hint.style.display = (wrap.scrollWidth > wrap.clientWidth + 1) ? 'flex' : 'none';
+    }
+    function dismiss() {
+      if (seen) return;
+      seen = true;
+      wraps.forEach(function(w) {
+        var h = w.previousElementSibling;
+        if (h && h.classList.contains('voice-scroll-hint')) h.style.display = 'none';
+      });
+      try { localStorage.setItem(KEY, '1'); } catch (e) {}
+    }
+    wrap.addEventListener('scroll', dismiss, {passive: true});
+    window.addEventListener('resize', check);
+    check();
+  });
+}
+document.addEventListener('DOMContentLoaded', initVoiceScrollHints);
+if (document.readyState !== 'loading') { initVoiceScrollHints(); }
 """
 
 
@@ -34396,29 +34502,44 @@ async def admin_voice_review_queue(request: Request):
         group_html = ""
         if not groups:
             group_html = '<p style="color:var(--muted);">Nothing open. Auto-corrections are only logged going forward&mdash;an empty queue on a fresh deploy doesn\'t mean nothing was ever fixed, just that nothing has changed since this logging shipped.</p>'
+        # C2 fix (PR #590 Phase 2): table-layout:fixed + explicit per-column
+        # widths make every group's table render identical column
+        # proportions regardless of that group's own content — see
+        # _VOICE_COL_WIDTH_* above for the reasoning and the pre-fix
+        # measured inconsistency. C1 fix (bonus, same pass): each wrap now
+        # carries the shared `.admin-scroll-hint`/`.voice-scroll-wrap`
+        # affordance (see `_VOICE_SCROLL_HINT_JS` below) so a mobile admin
+        # sees a "Scroll for more" cue instead of the Actions column
+        # silently scrolling off-screen with no indication anything's
+        # there.
+        _voice_thead = f"""<thead><tr style="text-align:left;border-bottom:1px solid var(--line);background:var(--bg);">
+<th style="padding:8px 10px;width:{_VOICE_COL_WIDTH_CHECKBOX}px;"></th>
+<th style="padding:8px 10px;font-size:12px;width:{_VOICE_COL_WIDTH_FIELD}px;">Field</th>
+<th style="padding:8px 10px;font-size:12px;">Detail</th>
+<th style="padding:8px 10px;font-size:12px;width:{_VOICE_COL_WIDTH_SOURCE}px;">Source</th>
+<th style="padding:8px 10px;font-size:12px;width:{_VOICE_COL_WIDTH_ACTIONS}px;">Actions</th>
+</tr></thead>"""
         for rule, rows in sorted(groups.items(), key=lambda kv: -len(kv[1])):
             rows_html = "".join(_voice_review_row_html(lib, r) for r in rows)
             bulk_html = _voice_review_group_bulk_actions_html(rule) if len(rows) > 1 else ""
             group_html += f"""
 <h2 style="margin-top:28px;">{_esc(_voice_rule_label(rule))} <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(rows)})</span></h2>
 {bulk_html}
-<div style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-<table style="width:100%;min-width:760px;border-collapse:collapse;">
-<thead><tr style="text-align:left;border-bottom:1px solid var(--line);background:var(--bg);">
-<th style="padding:8px 10px;"></th>
-<th style="padding:8px 10px;font-size:12px;">Field</th>
-<th style="padding:8px 10px;font-size:12px;">Detail</th>
-<th style="padding:8px 10px;font-size:12px;">Source</th>
-<th style="padding:8px 10px;font-size:12px;">Actions</th>
-</tr></thead><tbody>{rows_html}</tbody></table></div>"""
+{_VOICE_SCROLL_HINT_ITEM_HTML}
+<div class="voice-scroll-wrap" style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+<table style="width:100%;min-width:760px;table-layout:fixed;border-collapse:collapse;">
+{_voice_thead}
+<tbody>{rows_html}</tbody></table></div>"""
 
         resolved_html = ""
         if resolved_items:
             rows_html = "".join(_voice_review_row_html(lib, r) for r in resolved_items[:50])
             resolved_html = f"""
 <h2 style="margin-top:36px;">Resolved and exceptions <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(resolved_items)})</span></h2>
-<div style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-<table style="width:100%;min-width:760px;border-collapse:collapse;">
+{_VOICE_SCROLL_HINT_ITEM_HTML}
+<div class="voice-scroll-wrap" style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+<table style="width:100%;min-width:760px;table-layout:fixed;border-collapse:collapse;">
+{_voice_thead}
 <tbody>{rows_html}</tbody></table></div>"""
     finally:
         lib.close()
@@ -34434,6 +34555,7 @@ ampersand allowlists in linklib/voice_review.py.</p>
 </div>
 <script>
 {_VOICE_BULK_JS}
+{_VOICE_SCROLL_HINT_JS}
 </script>"""
     return HTMLResponse(_page("Voice review queue—Admin", "Admin", body, authed=True))
 

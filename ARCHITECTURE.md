@@ -10256,14 +10256,22 @@ real consequences in opposite directions:
   a no-op insert) and immediately sweeps every currently-`open` row of the
   same rule whose stored excerpt/before/after text contains the term
   (case-insensitive), resolving each with a `resolution_note` recording the
-  term. `Library.is_approved_voice_term(rule, text)` is read by the live DB
-  scanner (`voice_db_scan.py`) to mask an approved term out of a bare-
-  ampersand scan before it can be re-flagged — **never** by the CI-only
+  term. The live DB scanner (`voice_db_scan.scan_db_copy_report`) masks an
+  approved term out of a bare-ampersand scan via
+  `linklib.voice_review.mask_approved_ampersand_terms`, given the full
+  approved-terms list (`list_approved_voice_terms`, read once per scan) —
+  **not** `Library.is_approved_voice_term`, a separate per-value helper
+  with no live caller today (corrected 2026-09 — an earlier version of
+  this section named the wrong method). **Never** by the CI-only
   source-code scan (`linklib.voice_review.typography_findings`), which has no
   database to read this table from; the source-side `AMPERSAND_NAMES`/
   `AMPERSAND_ACRONYMS` allowlists remain the only mechanism for a source-code
   ampersand, and the two allowlists are deliberately kept visibly distinct in
-  the UI so approving one is never confused with editing the other.
+  the UI so approving one is never confused with editing the other. Note
+  that `typography_findings_plain` checks the source-side allowlist and
+  the DB-backed one together, so a term added to `AMPERSAND_NAMES` for CI
+  purposes also silently suppresses that phrase in the live DB scan — the
+  two mechanisms aren't fully independent in effect.
   `Library.remove_approved_voice_term(term_id)` makes the term flaggable
   again on the *next* scan pass — it does not retroactively reopen queue rows
   already resolved by the earlier approval; that history stays in

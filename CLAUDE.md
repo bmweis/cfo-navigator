@@ -10846,14 +10846,26 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
      excerpt as an editable starting guess. Approving a term is idempotent
      and immediately sweeps every currently-`open` row of the same rule
      whose text contains the term, resolving each with a `resolution_note`.
-     `Library.is_approved_voice_term(rule, text)` is read by the live DB
-     scanner to mask an approved term out of future bare-ampersand scans —
-     **never** by the CI-only source-code scan
-     (`linklib.voice_review.typography_findings`), which has no database
-     to read this table from; the source-side `AMPERSAND_NAMES`/
-     `AMPERSAND_ACRONYMS` allowlists remain the only mechanism for a
-     source-code ampersand, kept visibly distinct in the UI so approving
-     one is never confused with editing the other.
+     The live DB scanner masks an approved term out of future bare-
+     ampersand scans via `linklib.voice_review.mask_approved_ampersand_terms`,
+     called from `voice_db_scan.scan_db_copy_report` with the full
+     approved-terms list (`list_approved_voice_terms`) read once per scan
+     — **not** `Library.is_approved_voice_term`, a separate, smaller
+     per-value helper kept for a possible future call site but with no
+     live caller today (corrected 2026-09; an earlier version of this
+     bullet named the wrong method). **Never** read by the CI-only
+     source-code scan (`linklib.voice_review.typography_findings`), which
+     has no database to read this table from; the source-side
+     `AMPERSAND_NAMES`/`AMPERSAND_ACRONYMS` allowlists remain the only
+     mechanism for a source-code ampersand, kept visibly distinct in the
+     UI so approving one is never confused with editing the other. One
+     nuance worth knowing: `mask_approved_ampersand_terms`'s masking is
+     layered ON TOP OF the source-level `AMPERSAND_NAMES`/
+     `AMPERSAND_ACRONYMS` allowlist inside `typography_findings_plain`
+     (both are checked before a bare-ampersand finding is reported), so a
+     term added to the source allowlist for CI purposes also silently
+     suppresses that phrase in the live DB scan — the two lists aren't
+     fully independent in effect, even though they serve different scans.
      `Library.remove_approved_voice_term(term_id)` makes the term
      flaggable again on the next scan pass only — it never retroactively
      reopens already-resolved rows. New routes: `POST /admin/voice/
