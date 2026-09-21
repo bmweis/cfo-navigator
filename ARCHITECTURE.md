@@ -10288,6 +10288,35 @@ removed proactively, not only from a flagged row's own action panel. See
 per-rule action-set gating, the bulk-resolve sweep on approval, removal
 re-enabling future flagging, and both admin routes).
 
+**Independent-verification follow-up (2026-09)** — a second session verified
+this PR against the actual code rather than its own summary and found (and
+fixed) three real `/admin/voice/review-queue` rendering gaps — inconsistent
+column widths across rule groups (now `table-layout:fixed` + shared
+`_VOICE_COL_WIDTH_*` constants), the edit textarea rendering always-visible
+instead of behind a button reveal (now collapsed behind `voiceToggleEditField`,
+full-width only once expanded), and actions not being right-aligned/one-line
+by default (now a `justify-content:flex-end` row per status, a deliberate,
+page-scoped departure from `.admin-table-actions-grid`'s sitewide
+`justify-content:start`) — plus a mobile scroll-affordance gap (a page-scoped
+`_VOICE_SCROLL_HINT_ITEM_HTML`/`_VOICE_SCROLL_HINT_JS` pair, since this page
+can render more than one wide table, unlike the shared single-id
+`_ADMIN_SCROLL_HINT_JS` mechanism). Also closed: no script tagged legacy
+`open` rows with `source IS NULL` as `'script'` (extended
+`scripts/backfill_voice_review_queue_source.py` with a second phase, reasoned
+from `add_voice_review_item`'s own always-'script' default rather than a
+blanket guess); the write-time invisible-character strip never retroactively
+fixed already-stored data, including the real production row this whole
+feature was framed around (new `scripts/fix_invisible_characters.py`,
+structured identically to `scripts/fix_spaced_em_dashes.py`); and a docstring
+inaccuracy where `Library.is_approved_voice_term` was credited with masking
+approved terms out of the live DB scan when the actual path is
+`voice_review.mask_approved_ampersand_terms` (`is_approved_voice_term` has
+no live caller — kept, not deleted, as a tested primitive for a possible
+future use). See CLAUDE.md's matching "independent-verification follow-up"
+bullet for the full per-item write-up, and
+`tests/test_backfill_voice_review_queue_source.py`/
+`tests/test_fix_invisible_characters.py` for the two new scripts' coverage.
+
 ### Voice review queue: source/trigger taxonomy, and a column-aware seed-source scan (2026-09)
 
 Follow-up to the seed-sync infinite-loop investigation (see `scripts/

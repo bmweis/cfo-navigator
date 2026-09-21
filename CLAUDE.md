@@ -10879,6 +10879,100 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
      ARCHITECTURE.md's "Voice review queue: the base mechanism, and
      Addition 2's `voice_approved_terms` split" section for the full
      write-up.
+- **Voice review queue, independent-verification follow-up (2026-09) —
+  a second session verified the PR above requirement-by-requirement
+  against the actual code (not the PR's own summary), found four real UI
+  gaps on `/admin/voice/review-queue` and three real content gaps, and
+  fixed all seven in one pass.**
+  1. **Column widths were never actually consistent across rule
+     groups** — each rule renders its own separate `<table>` with no
+     shared width constants, so the browser auto-sized each independently
+     based on that group's own content; measured live before the fix,
+     Actions alone ranged 221-651px across groups. Fixed with
+     `table-layout:fixed` plus shared `_VOICE_COL_WIDTH_*` constants
+     (Field reuses `_COL_WIDTH_NAME`, Source reuses `_COL_WIDTH_STATUS`,
+     Actions gets its own 320px) — every group's table now renders
+     byte-identical column proportions, confirmed via live
+     `getBoundingClientRect()` measurement, not just a screenshot glance.
+  2. **The `open`-row edit textarea rendered always-visible, not behind a
+     button reveal.** Collapsed behind a new "Edit" button
+     (`voiceToggleEditField`, plain `style.display` toggle by item id — no
+     new CSS classes) — the default row shows Edit/Allow here (plus the
+     Approve-term mini-form for bare-ampersand rows, kept always-visible
+     since it's a small compact field, not the bulky textarea C4 was
+     actually about); clicking Edit reveals the full-width textarea +
+     Save edit/Cancel underneath, Cancel collapsing it back without
+     submitting anything. Confirmed live: clicking Edit on one row
+     expands only that row, leaves sibling rows collapsed.
+  3. **Row actions weren't right-aligned or reliably one-line** — every
+     row type's actions now render inside a `justify-content:flex-end`
+     flex row by default, a deliberate, page-scoped departure from
+     `.admin-table-actions-grid`'s own sitewide `justify-content:start`
+     convention (confirmed by inspection before diverging — this page's
+     content genuinely calls for the opposite alignment, it isn't a
+     mistake replicated from elsewhere).
+  4. **Mobile had no scroll affordance** — at 390px, every group's table
+     had real horizontal overflow (`scrollWidth` up to 905px vs. a 340px
+     `clientWidth`) with the entire Actions column scrolled off-screen and
+     zero visual cue. A page-scoped `_VOICE_SCROLL_HINT_ITEM_HTML`/
+     `_VOICE_SCROLL_HINT_JS` reuses the sitewide `.admin-scroll-hint` CSS
+     class (shared look) but operates on N wrap/hint pairs by DOM
+     adjacency rather than the shared single-id `_ADMIN_SCROLL_HINT_JS`
+     mechanism, since this page can render more than one wide table.
+  5. **No script tagged the legacy `open` rows with `source IS NULL` as
+     `'script'`.** `scripts/backfill_voice_review_queue_source.py` gained
+     a second phase, reasoned independently of its original two-row
+     target: `Library.add_voice_review_item` is the only method that has
+     ever created an `open` row (the new `add_seed_disagreement_item` is
+     the only other creator, and it's brand-new in this same PR and
+     always sets a real `source`), and `add_voice_review_item`'s `source`
+     parameter has always defaulted to `'script'` — so any `open` row
+     still showing `source IS NULL` must predate the column's own
+     migration and must have come from `scripts/backfill_voice_review_queue.py`.
+     Deliberately does NOT touch an `auto_corrected` row with
+     `source IS NULL` outside the original two hand-identified rows — that
+     row's origin is genuinely ambiguous pre-migration, so guessing would
+     violate this same file's own "never a blanket sweep on an ambiguous
+     case" rule.
+  6. **The write-time invisible-character strip (Part 5 above) never
+     retroactively fixed already-stored data** — including the exact
+     production row (`category_features` id 104's trailing zero-width
+     space) the whole feature was framed around. New
+     `scripts/fix_invisible_characters.py` is the retroactive counterpart
+     to `scripts/fix_spaced_em_dashes.py` for this half of
+     `normalize_voice_mechanics` — same structure, same `_TARGETS`/
+     `_SETTINGS_TARGETS` table (imported from the sibling script, not
+     duplicated), same preview/`--apply`/write-then-read-back discipline,
+     only strips the three auto-strip-safe characters (never the
+     flag-only ones). Not yet run against production — reserved for
+     Brian via `railway ssh`, same as every other one-off fix script here.
+  7. **A doc/docstring inaccuracy**: `Library.is_approved_voice_term`'s
+     docstring and this file's own Addition 2 writeup both claimed the
+     live DB scanner reads approved terms through that method — it
+     doesn't (confirmed: zero live callers). The actual masking path is
+     `voice_db_scan.scan_db_copy_report` → `linklib.voice_review.
+     mask_approved_ampersand_terms`, given the full list from
+     `list_approved_voice_terms` once per scan. `is_approved_voice_term`
+     is kept as a small, tested, currently-uncalled primitive for a
+     possible future use, not deleted — both docstrings corrected to
+     describe the real mechanism instead. Also documented in the same
+     pass: `mask_approved_ampersand_terms` checks the source-side
+     `AMPERSAND_NAMES`/`AMPERSAND_ACRONYMS` allowlist too, not just the DB
+     table, so a term added to the source allowlist for CI purposes also
+     silently suppresses that phrase in the live DB scan — the two lists
+     aren't fully independent in effect, even though they govern
+     different scans.
+
+  Also widened `tests/test_script_syspath_fix.py` from 3 scripts to all
+  ~13 scripts touched across #588/#590 (the other 10 already had their own
+  sys.path shim — this closes the gap between "manually verified working"
+  and "has a committed regression test"), and added a regression test
+  proving `approve_voice_term` actually stops the live scanner from
+  reflagging a term, not just resolving already-queued rows. See
+  `tests/test_backfill_voice_review_queue_source.py`,
+  `tests/test_fix_invisible_characters.py`, and the updated
+  `tests/test_voice_approve_term.py`/`tests/test_script_syspath_fix.py`
+  for the full regression coverage.
 - **Voice review queue, remaining-tables follow-up (2026-09) — the five
   tables disclosed and named as a scope cut in the bullet above
   (`communities`, `community_profiles`, `benchmarks`, `thought_leadership`,
