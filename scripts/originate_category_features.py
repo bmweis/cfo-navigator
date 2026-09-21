@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib.db import Library, resolve_db_path
 from linklib.feature_scan import DEFAULT_MODEL, originate_category_features
+from linklib.voice_settings import VoicePromptMissing, require_voice_setting
 
 
 def _tool_roster_for_category(lib: Library, category_name: str) -> list[dict]:
@@ -78,6 +79,12 @@ def main() -> int:
 
     lib = Library(db_path)
     try:
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+
         category_id = lib.get_tool_category_id(args.category)
         if category_id is None:
             print(f"No tool_categories row named {args.category!r}. Check "
@@ -103,6 +110,7 @@ def main() -> int:
         summary = originate_category_features(
             lib, category_id, args.category, roster,
             existing_feature_names=existing_names, model=args.model, dry_run=not args.apply,
+            voice_core=voice_core,
         )
     finally:
         lib.close()

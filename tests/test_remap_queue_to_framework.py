@@ -48,6 +48,10 @@ def _mock_anthropic_sequence(monkeypatch, payloads):
 def temp_lib():
     db_path = tempfile.mktemp(suffix=".db")
     lib = Library(db_path)
+    # scripts/remap_queue_to_framework.py now resolves voice_core via
+    # require_voice_setting before running — same convention as
+    # tests/test_community_profile_citations.py's app_module fixture.
+    lib.seed_voice_prompts()
     yield lib
     lib.close()
     if os.path.exists(db_path):
@@ -125,6 +129,7 @@ def test_synthesize_bucket_definition_returns_model_text(monkeypatch):
     _mock_anthropic_sequence(monkeypatch, ['{"definition": "Synthesized outcome-oriented text."}'])
     definition, cost = feature_scan.synthesize_bucket_definition(
         "Business bank accounts", ["Def A", "Def B"], "Neobanking",
+        voice_core="Test voice guide.",
     )
     assert definition == "Synthesized outcome-oriented text."
     assert cost > 0
@@ -133,6 +138,26 @@ def test_synthesize_bucket_definition_returns_model_text(monkeypatch):
 def test_synthesize_bucket_definition_falls_back_without_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delitem(sys.modules, "anthropic", raising=False)
+    definition, cost = feature_scan.synthesize_bucket_definition(
+        "Business bank accounts", ["short", "a much longer definition here"], "Neobanking",
+    )
+    assert definition == "a much longer definition here"
+    assert cost == 0.0
+
+
+def test_synthesize_bucket_definition_falls_back_without_voice_core(monkeypatch):
+    # This function's own established "never block the run" contract means
+    # an empty voice_core degrades the same way a missing key does — the
+    # existing longest-contributing-definition fallback, zero cost, no
+    # call — rather than the hard None every other generate_* function
+    # returns. Confirms the guard runs BEFORE the real Claude call: a
+    # mocked client that would otherwise succeed must never be reached.
+    def _create(**kw):
+        raise AssertionError("Claude must not be called when voice_core is empty")
+    fake = types.SimpleNamespace(Anthropic=lambda *a, **k: types.SimpleNamespace(
+        messages=types.SimpleNamespace(create=lambda **kw: _create(**kw))))
+    monkeypatch.setitem(sys.modules, "anthropic", fake)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     definition, cost = feature_scan.synthesize_bucket_definition(
         "Business bank accounts", ["short", "a much longer definition here"], "Neobanking",
     )
@@ -149,6 +174,7 @@ def test_synthesize_bucket_definition_falls_back_on_call_failure(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     definition, cost = feature_scan.synthesize_bucket_definition(
         "Business bank accounts", ["only one"], "Neobanking",
+        voice_core="Test voice guide.",
     )
     assert definition == "only one"
     assert cost == 0.0

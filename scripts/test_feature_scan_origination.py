@@ -35,11 +35,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from linklib.db import Library, resolve_db_path
 from linklib.feature_scan import draft_tool_features_for_category
+from linklib.voice_settings import VoicePromptMissing, require_voice_setting
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB) — "
+                     "read-only, only used to resolve the live voice_core setting")
     ap.add_argument("--tool", required=True, help="vendor/tool name")
     ap.add_argument("--url", required=True, help="vendor homepage URL")
     ap.add_argument("--category", required=True, help="tool_categories name, e.g. Neobanking")
@@ -56,6 +60,17 @@ def main() -> int:
         print("Note: EXA_API_KEY is not set — this run will ground on the model's own "
               "knowledge only (low_confidence will read True).", file=sys.stderr)
 
+    db_path = resolve_db_path(args.db)
+    lib = Library(db_path)
+    try:
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+    finally:
+        lib.close()
+
     existing = [n.strip() for n in args.existing.split(",") if n.strip()]
 
     print(f"Researching {args.tool} ({args.url}) for category '{args.category}' "
@@ -64,6 +79,7 @@ def main() -> int:
     draft = draft_tool_features_for_category(
         args.tool, args.url, args.category,
         existing_feature_names=existing, roster_size=args.roster_size, model=args.model,
+        voice_core=voice_core,
     )
 
     if draft is None:

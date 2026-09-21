@@ -128,6 +128,21 @@ def test_draft_returns_none_without_anthropic_key(monkeypatch):
     assert draft is None
 
 
+def test_draft_aborts_without_voice_core(monkeypatch):
+    # Same "(a) injected, hard-fail if empty" contract as every other
+    # generate_* helper — and confirms the guard runs BEFORE the real-money
+    # Exa search, not after (the whole point of placing it first).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setenv("EXA_API_KEY", "x")
+
+    def _post(*a, **kw):
+        raise AssertionError("Exa must not be called when voice_core is empty")
+
+    monkeypatch.setattr(feature_scan.requests, "post", _post)
+    draft = feature_scan.draft_tool_features_for_category("Mercury", "https://mercury.com", "Neobanking")
+    assert draft is None
+
+
 def test_draft_parses_features_and_tags_source_tier(monkeypatch):
     _mock_exa(monkeypatch, [
         [{"url": "https://mercury.com/changelog", "title": "Changelog",
@@ -142,6 +157,7 @@ def test_draft_parses_features_and_tags_source_tier(monkeypatch):
 
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", roster_size=10,
+        voice_core="Test voice guide.",
     )
     assert draft is not None
     assert draft.low_confidence is False
@@ -176,7 +192,7 @@ def test_uncited_source_url_resolves_to_uncited_tier_with_label(monkeypatch):
         '{"name": "Some feature", "source_url": "https://mercury.com/some-other-page"}'
         ']}')
     draft = feature_scan.draft_tool_features_for_category(
-        "Mercury", "https://mercury.com", "Neobanking",
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
     )
     f = draft.features[0]
     assert f.source_tier == feature_scan.UNCITED_TIER == 0
@@ -197,7 +213,7 @@ def test_source_url_trailing_slash_mismatch_still_resolves_real_tier(monkeypatch
         '{"name": "Some feature", "source_url": "https://mercury.com/changelog/"}'
         ']}')
     draft = feature_scan.draft_tool_features_for_category(
-        "Mercury", "https://mercury.com", "Neobanking",
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
     )
     f = draft.features[0]
     assert f.source_tier == 1
@@ -208,7 +224,7 @@ def test_no_source_url_resolves_to_uncited_tier(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     _mock_anthropic(monkeypatch, '{"features": [{"name": "Some feature"}]}')
     draft = feature_scan.draft_tool_features_for_category(
-        "Mercury", "https://mercury.com", "Neobanking",
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
     )
     assert draft.features[0].source_tier == feature_scan.UNCITED_TIER
 
@@ -217,7 +233,7 @@ def test_draft_is_low_confidence_with_no_grounding(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     _mock_anthropic(monkeypatch, '{"features": []}')
     draft = feature_scan.draft_tool_features_for_category(
-        "Mercury", "https://mercury.com", "Neobanking",
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
     )
     assert draft is not None
     assert draft.low_confidence is True
@@ -230,7 +246,7 @@ def test_draft_defaults_unknown_availability_to_native(monkeypatch):
         '{"name": "Some feature", "availability": "bogus_value"}'
         ']}')
     draft = feature_scan.draft_tool_features_for_category(
-        "Mercury", "https://mercury.com", "Neobanking",
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
     )
     assert draft.features[0].availability == "native"
 
@@ -239,7 +255,7 @@ def test_draft_skips_features_with_no_name(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     _mock_anthropic(monkeypatch, '{"features": [{"name": ""}, {"name": "Real feature"}]}')
     draft = feature_scan.draft_tool_features_for_category(
-        "Mercury", "https://mercury.com", "Neobanking",
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
     )
     assert [f.name for f in draft.features] == ["Real feature"]
 
@@ -271,6 +287,7 @@ def test_thin_roster_note_reflected_in_prompt(monkeypatch, roster_size, expect_t
 
     feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", roster_size=roster_size,
+        voice_core="Test voice guide.",
     )
     assert ("SKIP the differentiator criterion" in captured["prompt"]) is expect_thin_language
 
@@ -350,7 +367,7 @@ def test_draft_retries_once_on_truncation_and_uses_full_retry_result(monkeypatch
     calls = _mock_anthropic_sequence(monkeypatch, [truncated_payload, full_payload])
 
     draft = feature_scan.draft_tool_features_for_category(
-        "Mercury", "https://mercury.com", "Neobanking",
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
     )
     assert calls["n"] == 2   # confirms the retry actually happened, not just returned early
     assert draft is not None
@@ -369,7 +386,7 @@ def test_draft_never_hard_crashes_when_both_attempts_truncate(monkeypatch):
     calls = _mock_anthropic_sequence(monkeypatch, [truncated_payload, truncated_payload])
 
     draft = feature_scan.draft_tool_features_for_category(
-        "Mercury", "https://mercury.com", "Neobanking",
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
     )
     assert calls["n"] == 2
     assert draft is not None   # never falls into the generic except-Exception -> None path
@@ -383,7 +400,7 @@ def test_draft_does_not_retry_when_first_response_parses_cleanly(monkeypatch):
     calls = _mock_anthropic_sequence(monkeypatch, [clean_payload])
 
     draft = feature_scan.draft_tool_features_for_category(
-        "Mercury", "https://mercury.com", "Neobanking",
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
     )
     assert calls["n"] == 1   # no wasted retry call when the first response was fine
     assert draft.truncated is False
@@ -608,7 +625,8 @@ def test_originate_category_features_merges_across_tools_and_writes_queue(monkey
     calls = _mock_anthropic_sequence(monkeypatch, payloads)
 
     summary = feature_scan.originate_category_features(temp_lib, category_id=7,
-                                                         category_name="Neobanking", tool_roster=roster)
+                                                         category_name="Neobanking", tool_roster=roster,
+                                                         voice_core="Test voice guide.")
 
     assert calls["n"] == 4
     assert summary is not None
@@ -647,7 +665,8 @@ def test_originate_category_features_split_candidates_queue_separately(monkeypat
     calls = _mock_anthropic_sequence(monkeypatch, payloads)
 
     summary = feature_scan.originate_category_features(temp_lib, category_id=7,
-                                                         category_name="Neobanking", tool_roster=roster)
+                                                         category_name="Neobanking", tool_roster=roster,
+                                                         voice_core="Test voice guide.")
 
     assert calls["n"] == 3   # 2 drafts + 1 match call; no judge call for either singleton cluster
     assert summary.features_queued == 2
@@ -683,7 +702,8 @@ def test_originate_category_features_partial_tool_failure_still_queues(monkeypat
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
 
     summary = feature_scan.originate_category_features(temp_lib, category_id=1,
-                                                         category_name="Neobanking", tool_roster=roster)
+                                                         category_name="Neobanking", tool_roster=roster,
+                                                         voice_core="Test voice guide.")
     assert summary is not None
     assert summary.tools_researched == 1
     assert summary.tools_failed == 1
@@ -729,7 +749,8 @@ def test_originate_category_features_clustering_failure_falls_back_and_is_flagge
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
 
     summary = feature_scan.originate_category_features(temp_lib, category_id=1,
-                                                         category_name="Neobanking", tool_roster=roster)
+                                                         category_name="Neobanking", tool_roster=roster,
+                                                         voice_core="Test voice guide.")
     assert summary.candidates_total == 2
     assert summary.features_queued == 2
     assert summary.features_merged == 0
@@ -745,7 +766,8 @@ def test_originate_category_features_no_degradation_when_clustering_succeeds(mon
     roster = [{"id": 1, "name": "Mercury", "url": "https://mercury.com"}]
     _mock_anthropic(monkeypatch, '{"features": [{"name": "Checking accounts"}]}')
     summary = feature_scan.originate_category_features(temp_lib, category_id=1,
-                                                         category_name="Neobanking", tool_roster=roster)
+                                                         category_name="Neobanking", tool_roster=roster,
+                                                         voice_core="Test voice guide.")
     assert summary.clustering_degraded is False
     assert summary.clustering_degraded_tools == []
 
@@ -768,6 +790,7 @@ def test_originate_category_features_dry_run_writes_nothing(monkeypatch, temp_li
 
     summary = feature_scan.originate_category_features(
         temp_lib, category_id=9, category_name="Neobanking", tool_roster=roster, dry_run=True,
+        voice_core="Test voice guide.",
     )
 
     assert summary.features_queued == 1   # counted from queued_payloads, not the (empty) queue_item_ids
@@ -849,6 +872,7 @@ def test_originate_category_features_large_roster_merges_correctly_and_stays_bou
 
     summary = feature_scan.originate_category_features(
         temp_lib, category_id=1, category_name="Neobanking", tool_roster=roster,
+        voice_core="Test voice guide.",
     )
 
     assert summary is not None

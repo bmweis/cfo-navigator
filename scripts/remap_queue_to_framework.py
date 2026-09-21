@@ -61,6 +61,7 @@ from linklib.feature_scan import (
     match_items_to_framework,
     synthesize_bucket_definition,
 )
+from linklib.voice_settings import VoicePromptMissing, require_voice_setting
 
 _CONSOLIDATION_REASON_TMPL = "Consolidated into '{name}' during framework remap 8/24"
 _OUT_OF_SCOPE_REASON = "Out of scope for confirmed Neobanking framework (8/24) — not CFO-relevant"
@@ -149,6 +150,11 @@ def main() -> int:
             return 1
 
         model = args.model or lib.get_enrich_model()
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
         print(f"Category: {category_name} (id={category_id})")
         print(f"Model: {model}")
         print(f"Mode: {'APPLY (writing for real)' if args.apply else 'PREVIEW (no writes)'}\n")
@@ -221,6 +227,7 @@ def main() -> int:
             if len(items) > 1:
                 definition, synth_cost = synthesize_bucket_definition(
                     bucket.name, contributing_defs, category_name, model=model,
+                    voice_core=voice_core,
                 )
                 synth_cost_total += synth_cost
             else:

@@ -71,7 +71,7 @@ def test_generate_listing_fills_confident_fields(monkeypatch):
         "Test Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
         sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
-        category_options=CATEGORIES,
+        category_options=CATEGORIES, voice_core="Test voice guide.",
     )
     assert draft is not None
     assert draft.demographic == "CFOs at Series B+ SaaS companies"
@@ -103,7 +103,7 @@ def test_generate_listing_uses_needs_verification_sentinel_for_unclear_fields(mo
         "Obscure Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
         sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
-        category_options=CATEGORIES,
+        category_options=CATEGORIES, voice_core="Test voice guide.",
     )
     assert draft is not None
     assert draft.reach == enrich.NEEDS_VERIFICATION
@@ -139,7 +139,7 @@ def test_generate_listing_rejects_hallucinated_enum_values(monkeypatch):
         "Test Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
         sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
-        category_options=CATEGORIES,
+        category_options=CATEGORIES, voice_core="Test voice guide.",
     )
     assert draft is not None
     assert draft.reach == ""
@@ -160,7 +160,7 @@ def test_generate_listing_low_confidence_when_fetch_fails(monkeypatch):
         "Test Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
         sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
-        category_options=CATEGORIES,
+        category_options=CATEGORIES, voice_core="Test voice guide.",
     )
     assert draft is not None
     assert draft.low_confidence is True
@@ -168,6 +168,23 @@ def test_generate_listing_low_confidence_when_fetch_fails(monkeypatch):
 
 def test_generate_listing_without_api_key_returns_none(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    draft = enrich.generate_community_listing(
+        "Test Community", "https://example.com",
+        reach_options=REACH, cost_band_options=COST_BANDS,
+        sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
+        category_options=CATEGORIES, voice_core="Test voice guide.",
+    )
+    assert draft is None
+
+
+def test_generate_listing_aborts_when_voice_core_empty(monkeypatch):
+    # Same "(a) injected, hard-fail if empty" contract as every other
+    # generate_* helper — a direct caller that skips require_voice_setting
+    # (bypassing the normal webapp/app.py resolution) must not silently
+    # draft with no voice guidance, and must not pay for a page fetch it's
+    # about to discard.
+    _mock_fetch_page(monkeypatch)
+    _mock_anthropic(monkeypatch, "{}")
     draft = enrich.generate_community_listing(
         "Test Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
@@ -185,6 +202,13 @@ def env(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", db)
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    # The generate-listing route now refuses (require_voice_setting) unless
+    # voice_core is seeded — same convention as
+    # tests/test_community_profile_citations.py's app_module fixture.
+    from linklib.db import Library
+    _seed_lib = Library(db)
+    _seed_lib.seed_voice_prompts()
+    _seed_lib.close()
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     yield appmod

@@ -1577,6 +1577,9 @@ Return STRICT JSON only (no prose, no markdown fences) with exactly these
 keys: demographic, reach, local_markets, cost_band, cost_note, sponsorship_type,
 sponsor_name, access, format, categories.
 
+Voice guide—write any free-text fields (demographic, cost_note) in this voice:
+{voice_core}
+
 Community name: {name}
 Community URL: {url}
 
@@ -1607,7 +1610,8 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
                                 cost_band_options: list[str], sponsorship_options: list[str],
                                 access_options: list[str], format_options: list[str],
                                 category_options: list[str],
-                                model: str = DEFAULT_MODEL) -> CommunityListingDraft | None:
+                                model: str = DEFAULT_MODEL,
+                                voice_core: str = "") -> CommunityListingDraft | None:
     """Draft the basic directory-listing fields (distinct from the deeper
     generate_community_profile above) for a community from its name + URL,
     mirroring generate_tool_description's fetch/prompt/cost-tracking pattern.
@@ -1621,12 +1625,29 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
     about is drafted as the literal NEEDS_VERIFICATION sentinel (or left
     empty for list fields) instead of a guess. Never auto-saved — same
     review contract as the other generate_* helpers. Returns None if the
-    SDK/key is unavailable or the call fails."""
+    SDK/key is unavailable or the call fails.
+
+    Voice enforcement (closing a real, previously-undocumented gap — see
+    CLAUDE.md's #589 investigation): this function had no voice_core
+    parameter at all until this change, unlike every other generate_*
+    helper in this module. Same `_resolve_voice_core`-with-empty-guard
+    contract as generate_tool_description/generate_community_profile: the
+    caller resolves `lib.get_setting("voice_core")` (via
+    `linklib.voice_settings.require_voice_setting`, which refuses before
+    ever calling here if the setting is empty) and passes it in."""
     try:
         from anthropic import Anthropic
     except ImportError:
         return None
     if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    resolved_voice_core = _resolve_voice_core(voice_core)
+    if not resolved_voice_core:
+        # Defense in depth — see generate_tool_description's identical guard.
+        # Real callers now resolve voice_core via require_voice_setting before
+        # ever calling here.
+        _logger.warning("generate_community_listing() aborted: voice_core is empty")
         return None
 
     from . import extract
@@ -1647,6 +1668,7 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
         format_options=json.dumps(format_options),
         category_options=json.dumps(category_options),
         name=name, url=url, content_block=content_block,
+        voice_core=resolved_voice_core,
     )
 
     try:

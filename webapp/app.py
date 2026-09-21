@@ -18895,10 +18895,15 @@ async def admin_communities_generate_listing(request: Request):
     if not (name and url):
         return JSONResponse({"ok": False, "error": "Name and URL are required."}, status_code=400)
 
+    from linklib.voice_settings import VoicePromptMissing, require_voice_setting
     lib = _lib()
     try:
         category_names = [cat["name"] for cat in lib.list_community_categories()]
         model = lib.get_enrich_model()
+        try:
+            voice_core = require_voice_setting(lib, "voice_core")
+        except VoicePromptMissing as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
     finally:
         lib.close()
 
@@ -18909,7 +18914,7 @@ async def admin_communities_generate_listing(request: Request):
         sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES,
         access_options=_COMMUNITY_ACCESS, format_options=_COMMUNITY_FORMAT,
         category_options=category_names,
-        model=model,
+        model=model, voice_core=voice_core,
     )
     if draft is None:
         return JSONResponse({"ok": False, "error": "Listing generation is unavailable right now "

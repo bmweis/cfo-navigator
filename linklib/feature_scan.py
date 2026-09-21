@@ -43,7 +43,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from .enrich import DEFAULT_MODEL, _checked_max_tokens
+from .enrich import DEFAULT_MODEL, _checked_max_tokens, _resolve_voice_core
 from .pricing import compute_cost, compute_exa_cost
 
 _logger = logging.getLogger(__name__)
@@ -265,6 +265,9 @@ or invent a URL. If the content only weakly supports a claim, or you are
 inferring rather than reading it directly, set that feature's "confident"
 to false.
 
+Voice guide—write "definition" and "note" in this voice:
+{voice_core}
+
 Vendor: {tool_name} ({tool_url})
 
 --- Vendor content ---
@@ -479,10 +482,21 @@ def draft_tool_features_for_category(
     existing_feature_names: list[str] | None = None,
     roster_size: int = 0,
     model: str = DEFAULT_MODEL,
+    voice_core: str = "",
 ) -> ToolOriginationDraft | None:
     """Origination-mode research + drafting for ONE tool in ONE category
     (docs/FEATURE_TAXONOMY.md §10). Returns None if the SDK/key is
     unavailable or the Claude call fails outright — never raises.
+
+    Voice enforcement (closing a real, previously-undocumented gap — see
+    CLAUDE.md's #589 investigation, and the confirmed production incident
+    it traces to: category_features id 8's definition, written with a
+    spaced em dash and British spelling, was drafted by this exact
+    function before this fix). Same `_resolve_voice_core`-with-empty-guard
+    contract as generate_tool_description/generate_community_profile: the
+    caller resolves `lib.get_setting("voice_core")` (via
+    `linklib.voice_settings.require_voice_setting`, which refuses before
+    ever calling here if the setting is empty) and passes it in.
 
     Grounds on research_vendor_domain()'s vendor-domain-scoped Exa search
     (§8 sourcing hierarchy tiers 1-4 — see module docstring for why tiers
@@ -508,6 +522,17 @@ def draft_tool_features_for_category(
     if not _anthropic_available():
         return None
     if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    resolved_voice_core = _resolve_voice_core(voice_core)
+    if not resolved_voice_core:
+        # Defense in depth — see generate_tool_description's identical
+        # guard. Real callers now resolve voice_core via require_voice_setting
+        # before ever calling here, so this should be unreachable in
+        # production — but a direct caller that skips that resolution must
+        # not silently draft with no voice guidance, and must not pay for
+        # a real-money Exa search it's about to discard.
+        _logger.warning("draft_tool_features_for_category() aborted: voice_core is empty")
         return None
 
     hits, exa_cost = research_vendor_domain(tool_name, tool_url)
@@ -544,6 +569,7 @@ def draft_tool_features_for_category(
         category=category_name, rules_excerpt=_RULES_EXCERPT,
         existing_names=existing_names, roster_note=roster_note,
         tool_name=tool_name, tool_url=tool_url, content_block=content_block,
+        voice_core=resolved_voice_core,
     )
 
     try:
@@ -945,7 +971,7 @@ class OriginationSummary:
 def originate_category_features(
     lib, category_id: int, category_name: str, tool_roster: list[dict],
     existing_feature_names: list[str] | None = None, model: str = DEFAULT_MODEL,
-    dry_run: bool = False,
+    dry_run: bool = False, voice_core: str = "",
 ) -> OriginationSummary | None:
     """Phase 3 orchestration (docs/FEATURE_TAXONOMY.md §10, origination
     mode): runs Phase 2's per-tool drafting across a category's WHOLE
@@ -986,6 +1012,7 @@ def originate_category_features(
         draft = draft_tool_features_for_category(
             tool["name"], tool["url"], category_name,
             existing_feature_names=existing_feature_names, roster_size=roster_size, model=model,
+            voice_core=voice_core,
         )
         if draft is None:
             tools_failed += 1
@@ -1300,6 +1327,9 @@ docs/FEATURE_TAXONOMY.md §3: outcome-oriented, plain language, never the
 word "AI" in any form, no vendor branding or product names. Do not just
 copy one vendor's wording verbatim—genuinely synthesize.
 
+Voice guide—write the definition in this voice:
+{voice_core}
+
 Candidate definitions being merged into this one bucket:
 {definition_list}
 
@@ -1315,6 +1345,7 @@ _DEFINITION_SYNTH_MAX_TOKENS = 1200   # MIN_GENERATE_MAX_TOKENS floor (_checked_
 def synthesize_bucket_definition(
     bucket_name: str, contributing_definitions: list[str], category_name: str,
     model: str = DEFAULT_MODEL,
+    voice_core: str = "",
 ) -> tuple[str, float]:
     """Best-effort synthesis of one merged bucket's definition text from
     every contributing item's own definition — the bucket NAME is always the
@@ -1325,11 +1356,27 @@ def synthesize_bucket_definition(
     the call fails outright — same conservative "never block the run on a
     synthesis-step failure" degrade as every other best-effort call in this
     module; a slightly-less-polished definition is a far smaller cost than
-    losing the whole remap to a transient API error."""
+    losing the whole remap to a transient API error.
+
+    Voice enforcement (closing a real, previously-undocumented gap — see
+    CLAUDE.md's #589 investigation): an empty voice_core degrades the same
+    way as a missing SDK/key — the existing longest-contributing-definition
+    fallback, zero cost, no call — rather than a hard raise, since that's
+    this function's own established "never block the run" contract; every
+    OTHER generate_* function in this codebase hard-fails to None on an
+    empty voice_core, but this one has never returned None at all (its
+    return type is a plain tuple), so folding the guard into the existing
+    fallback branch is the (a)-pattern's intent applied to this function's
+    actual shape, not a new failure mode grafted on top of it."""
     fallback = max(
         (d.strip() for d in contributing_definitions if d and d.strip()), key=len, default="",
     )
     if not _anthropic_available() or not os.environ.get("ANTHROPIC_API_KEY"):
+        return fallback, 0.0
+    resolved_voice_core = _resolve_voice_core(voice_core)
+    if not resolved_voice_core:
+        _logger.warning("synthesize_bucket_definition() voice_core is empty—falling back to the "
+                         "longest contributing definition rather than drafting without voice guidance")
         return fallback, 0.0
     definition_list = "\n".join(f"- {d.strip()}" for d in contributing_definitions if d and d.strip())
     if not definition_list:
@@ -1337,6 +1384,7 @@ def synthesize_bucket_definition(
 
     prompt = _DEFINITION_SYNTH_PROMPT.format(
         category=category_name, bucket_name=bucket_name, definition_list=definition_list,
+        voice_core=resolved_voice_core,
     )
     try:
         raw, in_tok, out_tok, cache_w, cache_r = _call_claude(prompt, model, _DEFINITION_SYNTH_MAX_TOKENS)
