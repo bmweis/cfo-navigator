@@ -1,9 +1,33 @@
-"""Open-task badge counts for the admin hub's coral notification badges.
+"""Open-task badge counts for the admin hub's notification badges — recolored
+from coral to `--alert` in the 2026-09 "count everything that needs
+attention" pass (see below): a needs-attention signal is a status, and per
+BRAND.md status belongs to the `--good`/`--caution`/`--alert` family, coral
+is a rare accent. Flagging the reversal explicitly, same as every other
+documented color-token change in this codebase — `.task-dot`/`.task-badge`
+had used coral since the original admin-hub badge build, and CLAUDE.md once
+described that as a sanctioned exception; it no longer is.
 
 Each entry in `open_task_counts` is keyed by the admin href it badges — the
 hub page sums the hrefs belonging to a group for the collapsed section badge,
 and looks up individual hrefs for the expanded sub-item badges. A href with
-no entry (or a zero count) shows no badge.
+no entry (or a zero count) shows no badge. The top nav's own `.task-dot`
+(`_has_open_admin_tasks()`) is now a real number too, not a presence dot —
+`sum(open_task_counts(lib).values())`, rendered via
+`webapp.app._admin_nav_badge()` — since "something needs attention" and "12
+things need attention" are a different decision to make, the same reasoning
+PR 28 (2026-09) already applied to every admin-page badge below.
+
+2026-09 coverage pass: three sources that were computed live on /admin/checks
+but never reached ANY badge are folded in here — the failing "Live + CI"
+run_all() rows already did (`_failing_checks_count()`), but the three dated
+freshness reminders (Pricing, New-model awareness, Exa pricing) and backup
+staleness did not. The "Database-backed copy" scan on /admin/checks
+deliberately does NOT get its own separate count here — see
+`_stale_admin_checks_reminders`'s own docstring for why: those findings are
+the same underlying violations `/admin/voice/review-queue` already counts
+(the backfill script populates the queue FROM that scan, and every write
+since logs new findings there directly), and double-counting them under two
+different hrefs would inflate the total past what's actually pending.
 
 Deliberately reads from data that already exists (queue/flagged counts,
 unapproved tools, failing checks) rather than a new task-tracking table —
@@ -21,20 +45,30 @@ to work on next, and a real count there is strictly more useful than a dot
 even for an all-or-none source — "4 new messages" and "1 new message" are a
 different decision to make, whatever the drill-down looks like once you get
 there. Every admin-page badge (`webapp.app._badge_for_href`/`_group_badge`)
-is a plain numeric count now, with no exceptions. The top NAV BAR's own
-presence dot (`.task-dot`, `_has_open_admin_tasks()`) is unaffected — it was
-never driven by DOT_ONLY_HREFS in the first place: it's a pure "is anything
-at all pending" boolean (`bool(open_task_counts(lib))`), so "dot only, no
-count" was already its whole design for every source, not something this
-reversal changes. See CLAUDE.md's PR 28 note for the full write-up.
+is a plain numeric count now, with no exceptions. **The top nav bar's own
+`.task-dot` is no longer exempt either (2026-09 follow-up)** — it read as a
+pure presence boolean up through PR 28, deliberately unlike every other
+badge on the site; Brian's own ask ("show a number, not just a dot") ends
+that distinction, so `_has_open_admin_tasks()` stays (still used for the
+occasional pure-boolean check) but the nav itself now renders the same
+`sum(open_task_counts(lib).values())` total every other aggregate badge on
+this page already computes. See CLAUDE.md's PR 28 note for the DOT_ONLY_HREFS
+history and the "logged-in slowness"/badge-coverage investigation note for
+this follow-up.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
+from linklib import backup as _backup
 from linklib.db import Library
+from linklib.models import models_review_is_stale
+from linklib.pricing import exa_pricing_review_is_stale, pricing_review_is_stale
 from webapp import checks as _checks
+
+_logger = logging.getLogger(__name__)
 
 # _failing_checks_count() badges /admin and /admin/library with the same
 # in-app check results /admin/checks itself computes live — but
@@ -99,6 +133,13 @@ _checks_cache: tuple[float, int] | None = None
 _checks_computing = False
 
 
+def _compute_failing_checks_count() -> int:
+    """The actual run_all() pass + count. Pulled out of _failing_checks_count()
+    so the background refresher (below) and the synchronous fallback path
+    share one implementation rather than two copies that could drift."""
+    return sum(1 for r in _checks.run_all() if r["where"] == "In-app" and r["ok"] is False)
+
+
 def _failing_checks_count() -> int:
     global _checks_cache, _checks_computing
     now = time.time()
@@ -109,12 +150,197 @@ def _failing_checks_count() -> int:
             return _checks_cache[1] if _checks_cache is not None else 0
         _checks_computing = True
     try:
-        count = sum(1 for r in _checks.run_all() if r["where"] == "In-app" and r["ok"] is False)
+        count = _compute_failing_checks_count()
     finally:
         with _checks_cache_lock:
             _checks_cache = (time.time(), count)
             _checks_computing = False
     return count
+
+
+# --- Background refresher (2026-09) ------------------------------------------
+# The TTL-cache-plus-sentinel above still means the FIRST admin page render
+# after each 120s window pays the full run_all() cost inline, blocking that
+# one request (measured: several seconds in production even after the
+# typography-scan perf fix in linklib/voice_review.py — see CLAUDE.md's
+# "logged-in slowness" investigation). That's the real fix this closes: a
+# daemon thread recomputes the cache on its own schedule, independent of any
+# page render, so in ordinary operation _failing_checks_count() above almost
+# always just reads an already-warm cache (a microsecond dict/tuple read)
+# rather than ever triggering the compute path itself.
+#
+# The synchronous fallback in _failing_checks_count() is deliberately left
+# completely unchanged, not replaced — it's still correct, still needed (a
+# worker that just restarted, or a refresher thread that failed to start,
+# has no warm cache to fall back on), and every test in
+# tests/test_task_badges.py exercises exactly that fallback path directly,
+# with no FastAPI startup event involved (this codebase's tests construct
+# TestClient(app) directly, without `with`, which — confirmed empirically,
+# not assumed — never fires an @app.on_event("startup") hook; only
+# tests/test_seed_toolbox_startup.py opts into that via `with TestClient`).
+# So this refresher is purely additive: it changes normal production
+# behavior (the cache is usually warm before anyone needs it) without
+# changing what happens when it isn't (the exact, already-tested fallback).
+#
+# Staleness bound: at most one refresh interval (_CHECKS_CACHE_TTL, 120s)
+# plus however long one run_all() pass takes to finish (a few seconds) —
+# so the badge can be up to roughly 2 minutes behind the true state in the
+# worst case, the same order of staleness the TTL cache already promised,
+# just no longer paid for by whichever request happens to land first.
+#
+# Connection safety (2026-09 follow-up, confirmed rather than assumed): this
+# thread never shares a sqlite3 connection with any other thread. Every
+# check in run_all() that touches the DB (original_content_mirror_problems,
+# voice_review_queue_status, and every route coral_moment_problems() renders
+# via TestClient) does so through webapp.app._lib(), which always opens a
+# brand-new Library(DB_PATH) — and therefore a brand-new sqlite3.connect()
+# call — and closes it before returning, entirely within whichever thread
+# is currently executing. sqlite3 connections default to check_same_thread=
+# True (this codebase never overrides that — grepped linklib/db.py), so a
+# shared connection touched from two threads would raise immediately rather
+# than silently corrupt anything; the fact that nothing here has ever hit
+# that error is a real confirmation this thread opens its own connections,
+# not just an absence of evidence.
+#
+# Worker-process count (2026-09 follow-up): production runs uvicorn with no
+# --workers flag (Dockerfile CMD / Procfile both start `uvicorn
+# webapp.app:app` bare) — uvicorn's own default is a single worker process,
+# matching this codebase's existing single-process assumption elsewhere
+# (see _JOB_STATE's own comment above). So today there is exactly one of
+# these threads running in production. If that ever changed to N>1 worker
+# processes, each is a separate OS process with its own Python interpreter
+# and its own copy of every module-level global here (_checks_cache,
+# _checks_refresher_started, ...) — nothing in this module is shared across
+# processes. Each worker would start and run its own independent refresher,
+# computing run_all() on its own schedule against the same underlying
+# database. That's safe (no shared-state hazard, no corruption risk — each
+# process's cache is self-consistent) but wasteful (N redundant run_all()
+# passes every interval instead of one) and can let the badge value
+# genuinely differ by request depending on which worker answers it, if two
+# workers' refresh cycles drift out of phase. Worth revisiting (e.g. moving
+# the schedule into a single cron-style trigger, or accepting the
+# redundancy as cheap enough to ignore) only if/when a real multi-worker
+# deploy is adopted — not a concern under the current single-process setup.
+_checks_refresher_started = False
+_checks_refresher_lock = threading.Lock()
+
+# Per-attempt state (2026-09, health-visibility follow-up) — deliberately
+# separate from _checks_cache, which only ever holds the last SUCCESSFUL
+# result. A refresher that's alive but failing every pass would otherwise
+# look identical, from the outside, to one that died outright: the cache
+# just sits there, unrefreshed, either way. Tracking every attempt (not
+# just successes) is what lets /admin/checks tell those two states apart —
+# "last successful refresh 6 minutes ago, last attempt 4 seconds ago" is a
+# live-but-failing refresher; "last successful refresh 6 minutes ago, last
+# attempt 6 minutes ago" is a dead one.
+_checks_last_attempt_at: float | None = None
+_checks_last_error: str | None = None
+
+
+def _run_one_refresh_iteration() -> None:
+    """One pass: compute + cache on success, log + record on failure — never
+    raises. Pulled out of the sleep loop below so a test can call this
+    directly, synchronously, without spinning up a thread or waiting on
+    time.sleep(_CHECKS_CACHE_TTL) — this is the one code path that actually
+    makes production fast, and before this it had no direct test coverage
+    at all (only the request-triggered synchronous fallback in
+    _failing_checks_count() did)."""
+    global _checks_cache, _checks_last_attempt_at, _checks_last_error
+    with _checks_cache_lock:
+        _checks_last_attempt_at = time.time()
+    try:
+        count = _compute_failing_checks_count()
+    except Exception as exc:
+        # Never let one bad pass kill the loop — leave whatever's cached
+        # (possibly nothing yet) and try again next interval. Logged, not
+        # silently swallowed, so a persistently failing refresher shows up
+        # in Railway's own logs even before anyone looks at /admin/checks.
+        _logger.exception("Background checks refresher iteration failed")
+        with _checks_cache_lock:
+            _checks_last_error = f"{type(exc).__name__}: {exc}"
+    else:
+        with _checks_cache_lock:
+            _checks_cache = (time.time(), count)
+            _checks_last_error = None
+
+
+def _checks_refresher_loop() -> None:
+    while True:
+        _run_one_refresh_iteration()
+        time.sleep(_CHECKS_CACHE_TTL)
+
+
+def start_background_checks_refresher() -> None:
+    """Start the daemon thread that keeps _checks_cache warm on a schedule.
+    Called once from webapp.app's own startup hook — idempotent (a second
+    call, e.g. from a hot-reload, is a no-op) so nothing here needs its own
+    process-level guard beyond this module's own flag."""
+    global _checks_refresher_started
+    with _checks_refresher_lock:
+        if _checks_refresher_started:
+            return
+        _checks_refresher_started = True
+    threading.Thread(target=_checks_refresher_loop, daemon=True).start()
+
+
+def refresher_status() -> dict:
+    """What /admin/checks renders so a dead or failing refresher is visible
+    on the page itself, not inferred from a slow load — the same standing
+    rule that section's own copy already states for the disk-space check
+    ("a healthy check that says nothing looks identical to one that never
+    ran"). Returns last_success_at/last_attempt_at (epoch seconds, or None
+    if it hasn't happened yet) and last_error (the most recent exception
+    message, or None if the last attempt succeeded or none has run)."""
+    with _checks_cache_lock:
+        last_success_at = _checks_cache[0] if _checks_cache is not None else None
+        return {
+            "started": _checks_refresher_started,
+            "last_success_at": last_success_at,
+            "last_attempt_at": _checks_last_attempt_at,
+            "last_error": _checks_last_error,
+        }
+
+
+def _stale_admin_checks_reminders(lib: Library) -> int:
+    """0-3 — how many of /admin/checks' three dated manual-attestation
+    banners (Pricing freshness, New-model awareness, Exa pricing freshness)
+    currently read stale/never-reviewed. These are computed live in the
+    admin_checks() route but never fed into run_all()'s "In-app" list (they
+    aren't pass/fail checks — see webapp.checks.run_all's own comment above
+    the three banners), which is exactly why _failing_checks_count() above
+    has never counted them: nothing in run_all()'s return value represents
+    them at all. Each `_stale()` call is three settings reads plus a date
+    comparison — cheap, no reason to route it through the same TTL-cached/
+    background-refreshed path run_all() needs.
+
+    Deliberately does NOT also add /admin/checks' "Database-backed copy"
+    scan violation count here — those are the same underlying findings
+    /admin/voice/review-queue already counts (scripts/backfill_voice_
+    review_queue.py populates the queue FROM that exact scan, and every
+    Library write since logs new findings into the queue directly via
+    Library._vf/log_voice_correction — see CLAUDE.md's "Voice review queue"
+    section), so adding a second count for the identical violations under
+    the /admin/checks href would double the total past what's actually
+    pending, which is precisely what was flagged as a real risk here."""
+    return sum([
+        pricing_review_is_stale(lib.get_setting("pricing_last_verified")),
+        models_review_is_stale(lib.get_setting("models_last_reviewed")),
+        exa_pricing_review_is_stale(lib.get_setting("exa_pricing_last_verified")),
+    ])
+
+
+def _backup_stale_count(lib: Library) -> int:
+    """1 if backups are configured but the most recent successful backup_log
+    row is older than linklib.backup.BACKUP_STALE_HOURS (or there's never
+    been one), else 0. Gated on backup.is_configured() so a dev/test
+    environment with no Drive credentials at all (which will never have a
+    successful row) doesn't permanently badge itself — that's a
+    configuration choice, not a "something broke" signal, and
+    /admin/library-backup's own status banner already covers "backups are
+    off" separately."""
+    if not _backup.is_configured():
+        return 0
+    return int(_backup.backup_is_stale(lib.most_recent_successful_backup_at()))
 
 
 def open_task_counts(lib: Library) -> dict[str, int]:
@@ -144,7 +370,15 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/inbox/toolbox-intros": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
         "/admin/tools/communities": lib.count_communities_needing_attention(),
         "/admin/inbox/community-gaps": lib.community_gap_counts()["unreviewed"],
-        "/admin/checks": _failing_checks_count(),
+        # _failing_checks_count() is the failing "Live + CI" run_all() rows
+        # (Brand standards, Voice standards, Typography, Hub-nav orphans,
+        # ...) — the amber "never reviewed" freshness reminders below it on
+        # the page are a genuinely separate signal (see
+        # _stale_admin_checks_reminders' own docstring for why the "33 DB
+        # voice violations" section is deliberately NOT a third addend
+        # here).
+        "/admin/checks": _failing_checks_count() + _stale_admin_checks_reminders(lib),
+        "/admin/library-backup": _backup_stale_count(lib),
         "/admin/users": lib.count_pending_password_resets(),
         "/admin/inbox/email-failures": lib.count_pending_email_failures(),
         # 2026-09 (Phase 3): ask-feedback is no longer deferred — it has the

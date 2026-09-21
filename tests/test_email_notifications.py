@@ -348,7 +348,9 @@ def test_admin_email_failures_requires_admin(env):
     assert r.status_code == 303 and "/login" in r.headers["location"]
 
 
-def test_admin_nav_shows_task_dot_for_email_failure(env):
+def test_admin_nav_shows_task_badge_for_email_failure(env):
+    # 2026-09: the nav's .task-dot presence-only dot is retired in favor of
+    # a real numeric .task-badge — see webapp/tasks.py's module docstring.
     lib = env._lib()
     try:
         lib.log_email_failure("contact", "boom")
@@ -356,4 +358,4 @@ def test_admin_nav_shows_task_dot_for_email_failure(env):
         lib.close()
     admin = _admin_client(env)
     r = admin.get("/")
-    assert 'class="task-dot"' in r.text
+    assert 'class="task-badge"' in r.text

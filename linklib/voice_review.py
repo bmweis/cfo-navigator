@@ -270,7 +270,30 @@ _BARE_AMPERSAND = re.compile(r"&amp;|(?<=[\s>])&(?=[\s<])")
 # The entity spelling of a spaced em dash. `_SPACED_EM_DASH` (imported from
 # voice_mechanics) covers the literal character; HTML source can also write the
 # identical rendered result as `&mdash;` with `&nbsp;`/space on both sides.
-_SPACED_MDASH_ENTITY = re.compile(r"(?:\s|&nbsp;)+&mdash;(?:\s|&nbsp;)+")
+# Bounded quantifier ({1,N}, not unbounded +) — this is not just a style
+# preference, it's the actual fix for a real quadratic-blowup bug. A plain
+# `(?:\s|&nbsp;)+` is O(run_length²) on a long run of whitespace with no
+# `&mdash;` in it: `finditer` retries the match at every position inside the
+# run, and each attempt greedily walks to the end of the (still-long)
+# remaining run before failing on the required literal. Measured directly:
+# this line alone cost ~2.1s scanning webapp/app.py's ~9,000 string literals
+# (some CSS/JS blocks run 15-38KB with long whitespace stretches) — by far
+# the dominant cost of a typography_findings() call, and the main
+# contributor to the admin nav badge's worst-case first-render latency
+# after its 120s cache expires (see webapp.tasks._failing_checks_count()'s
+# own module comment). A possessive quantifier (`++`, Python 3.11+) was
+# tried first and only helped partially (~2.1s -> ~1.5s): it removes
+# backtracking WITHIN one match attempt, but finditer still re-attempts at
+# every position in the run, and each possessive attempt still walks the
+# full remaining run once before failing — still O(run_length²) across all
+# attempts, just with a smaller constant. Bounding the repeat count caps
+# that per-attempt walk at a constant (measured: ~258ms, a ~9x further
+# improvement over possessive alone) — 80 is comfortably more whitespace
+# than any real "spaced dash" needs to demonstrate; a genuinely pathological
+# 80+-character run around a real dash would just miss detection on that
+# one occurrence (a false negative on an already-absurd edge case), never a
+# false positive or a correctness change for normal copy.
+_SPACED_MDASH_ENTITY = re.compile(r"(?:\s|&nbsp;){1,80}&mdash;(?:\s|&nbsp;){1,80}")
 
 _EMBEDDED_COMMENTS = [
     re.compile(r"/\*.*?\*/", re.S),      # CSS and JS block comments
@@ -298,6 +321,39 @@ def _mask(text: str, patterns) -> str:
     return text
 
 
+def _term_pattern(term: str) -> re.Pattern:
+    """Compile one allowlisted ampersand term into a regex, token by token
+    (not a single re.escape + substitute pass) so the space BETWEEN tokens
+    becomes \\s+ rather than a literal single space — a triple-quoted prompt
+    string can line-wrap mid-term (e.g. "...Flux Analysis\\n  & Summaries...")
+    with no change in rendered meaning, and a literal-space pattern would
+    miss that."""
+    def _tok(tok: str) -> str:
+        if tok == "&":
+            return r"(?:&amp;|&)"
+        # An acronym token can carry the '&' embedded with no surrounding
+        # whitespace (e.g. "FP&A") — re.escape() turns a literal '&' into
+        # '\&', so a straight substring replace still finds it here.
+        return re.escape(tok).replace(r"\&", r"(?:&amp;|&)")
+
+    parts = [_tok(tok) for tok in re.split(r"\s+", term)]
+    return re.compile(r"\s+".join(parts), re.IGNORECASE)
+
+
+# Compiled once at import time, not per literal — AMPERSAND_NAMES/
+# AMPERSAND_ACRONYMS are static module-level lists, so there's nothing
+# literal-specific about this list. Previously rebuilt inside
+# scannable_copy() on every call: with ~9,000 string literals in
+# webapp/app.py and 15 allowlist terms, that was ~135,000 regex
+# compilations per typography_findings() call — the dominant cost of a
+# ~3.2s scan (measured via cProfile), most of it in _term_pattern rather
+# than the actual matching. Hoisting this fixed the 120s-cached admin nav
+# badge's worst-case first-render cost (webapp.tasks._failing_checks_count())
+# without changing what gets matched — see that function's own module
+# comment for the badge-caching mechanism this feeds.
+_AMPERSAND_ALLOW_PATTERNS = [_term_pattern(t) for t in AMPERSAND_NAMES + AMPERSAND_ACRONYMS]
+
+
 def scannable_copy(literal: str) -> str:
     """One string literal reduced to just the parts that are real UI copy.
 
@@ -307,25 +363,7 @@ def scannable_copy(literal: str) -> str:
     """
     text = strip_embedded_comments(literal)
     text = _mask(text, _AMP_CODE_PATTERNS)
-    # Built token-by-token (not a single re.escape + substitute pass) so the
-    # space BETWEEN tokens becomes \s+ rather than a literal single space —
-    # a triple-quoted prompt string can line-wrap mid-term (e.g. "...Flux
-    # Analysis\n  & Summaries...") with no change in rendered meaning, and a
-    # literal-space pattern would miss that.
-    def _term_pattern(term: str) -> re.Pattern:
-        def _tok(tok: str) -> str:
-            if tok == "&":
-                return r"(?:&amp;|&)"
-            # An acronym token can carry the '&' embedded with no surrounding
-            # whitespace (e.g. "FP&A") — re.escape() turns a literal '&' into
-            # '\&', so a straight substring replace still finds it here.
-            return re.escape(tok).replace(r"\&", r"(?:&amp;|&)")
-
-        parts = [_tok(tok) for tok in re.split(r"\s+", term)]
-        return re.compile(r"\s+".join(parts), re.IGNORECASE)
-
-    allow = [_term_pattern(t) for t in AMPERSAND_NAMES + AMPERSAND_ACRONYMS]
-    return _mask(text, allow)
+    return _mask(text, _AMPERSAND_ALLOW_PATTERNS)
 
 
 def _copy_literals(source: str) -> list[tuple[int, str]]:

@@ -4794,6 +4794,21 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def most_recent_successful_backup_at(self) -> str:
+        """created_at of the most recent status='success' backup_log row, or
+        '' if there has never been one. One indexed query (idx_backup_log_
+        created), cheap enough for the admin nav badge's own open_task_counts
+        pass — see webapp.tasks.open_task_counts' "stale backup" entry, which
+        is what this exists for: the daily Railway Cron Service hits
+        POST /admin/backup-now roughly once every 24h, so no successful row
+        in ~26h means either that cron stopped firing or every recent
+        attempt has been failing — either way, worth a badge, not silence."""
+        row = self.conn.execute(
+            "SELECT created_at FROM backup_log WHERE status='success' "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        return row["created_at"] if row else ""
+
     # -- integrity checks (durability audit item 2) --------------------------
 
     def record_integrity_check(self, status: str, detail: str = "") -> int:
