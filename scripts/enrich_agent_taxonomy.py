@@ -130,6 +130,7 @@ def main() -> int:
                     lib.set_tool_agent_taxonomy_draft(
                         t["id"], result.agent_taxonomy_note,
                         needs_verification=int(result.agent_taxonomy_needs_verification),
+                        source="script",
                     )
                 total_taxonomy += 1
 

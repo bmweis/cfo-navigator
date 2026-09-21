@@ -2512,6 +2512,28 @@ class Library:
             # rows are seeded once, from the render order they already had,
             # by Library.seed_current_feed_order() — see its own docstring.
             "ALTER TABLE feeds ADD COLUMN current_feed_order INTEGER NOT NULL DEFAULT 0",
+            # Voice review queue trigger taxonomy (2026-09, seed-sync infinite-
+            # loop investigation) — records WHICH mechanism produced a given
+            # voice_review_queue row: 'admin-edit' (a human editing a record
+            # through an /admin/* submit route), 'startup-sync' (_seed_toolbox's
+            # per-boot re-sync of a tools/communities/benchmarks row against its
+            # static seed-source value), or 'script' (a one-off backfill/fix
+            # script, e.g. scripts/backfill_voice_review_queue.py,
+            # scripts/fix_spaced_em_dashes.py, scripts/regen_ai_drafted_fields.py).
+            # NULL for every pre-existing row (deliberately not backfilled —
+            # see Library._vf's own call sites for which value each caller now
+            # passes) and for any future caller that doesn't yet pass one;
+            # rendered as "unknown" on /admin/voice/review-queue rather than a
+            # blank cell. Built specifically because a silent infinite loop was
+            # found: _seed_toolbox re-syncs a community's `notes` field from
+            # scripts/seed_communities.py's raw (spaced-em-dash) text on EVERY
+            # boot, since the live DB value is already voice-fixed (unspaced)
+            # by a prior save — the write-then-normalize-then-log cycle repeats
+            # forever, invisibly, because a DB-only scan always finds the
+            # already-corrected text. Tagging the source lets a reviewer tell
+            # "an admin typed this" from "the seed sync did this again" at a
+            # glance, without having to reverse-engineer it from the excerpt.
+            "ALTER TABLE voice_review_queue ADD COLUMN source TEXT",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4196,7 +4218,7 @@ class Library:
         row = self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
         return row[0] if row else default
 
-    def set_setting(self, key: str, value: str) -> None:
+    def set_setting(self, key: str, value: str, source: str | None = None) -> None:
         # Fixed 2026-09 (voice-enforcement PR, item 3b audit) — `set_setting`
         # is the one choke point every settings-backed copy field
         # (homepage_headline_copy, about_page_copy, htib_before_copy/
@@ -4210,7 +4232,7 @@ class Library:
         # Safe for every non-prose settings key too (caps, flags, model ids,
         # JSON blobs, tokens): normalize_voice_mechanics is a no-op on text
         # with no spaced em dash, which is every one of those.
-        fixed = self._vf("settings", None, key, value) if isinstance(value, str) else value
+        fixed = self._vf("settings", None, key, value, source=source) if isinstance(value, str) else value
         self.conn.execute(
             "INSERT INTO settings (key, value) VALUES (?,?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -4238,28 +4260,39 @@ class Library:
     # queue logging — named explicitly in `tests/
     # test_voice_fix_coverage_ci_guard.py`'s allowlist as a disclosed
     # follow-up, not silently left uncovered.
-    def _vf(self, table: str, row_id, column: str, value) -> str:
+    def _vf(self, table: str, row_id, column: str, value, source: str | None = None) -> str:
         if not isinstance(value, str) or not value:
             return value
         fixed = _voice_fix(value)
         if fixed != value:
-            self.log_voice_correction(table, row_id, column, value, fixed)
+            self.log_voice_correction(table, row_id, column, value, fixed, source=source)
         return fixed
 
     def log_voice_correction(self, table: str, row_id, column: str,
-                              before: str, after: str) -> None:
+                              before: str, after: str, source: str | None = None) -> None:
         """Record one `_voice_fix` correction as an `auto_corrected` review-
         queue row. No-op when before==after (nothing actually changed) —
         callers should still be free to call this unconditionally; see `_vf`
-        above for the guarded wrapper most `Library` methods should use."""
+        above for the guarded wrapper most `Library` methods should use.
+
+        `source` (2026-09, seed-sync infinite-loop investigation) is one of
+        'admin-edit' (an /admin/* submit route saving a human's edit),
+        'startup-sync' (_seed_toolbox's per-boot re-sync against a static
+        seed source), or 'script' (a one-off backfill/fix script) — or None
+        when the caller doesn't yet pass one (every write path predating
+        this parameter). Purely descriptive: it changes nothing about
+        whether/how the correction is logged, only what's recorded about
+        who/what triggered it, so a reviewer at /admin/voice/review-queue
+        can tell "an admin typed this" from "the seed sync did this again"
+        without reverse-engineering it from the excerpt."""
         if before == after:
             return
         self.conn.execute(
             "INSERT INTO voice_review_queue "
-            "(table_name, row_id, column_name, rule, excerpt, before_text, after_text, status, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "(table_name, row_id, column_name, rule, excerpt, before_text, after_text, status, created_at, source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (table, str(row_id) if row_id is not None else None, column,
-             "spaced-em-dash", after[:200], before, after, "auto_corrected", _now()),
+             "spaced-em-dash", after[:200], before, after, "auto_corrected", _now(), source),
         )
         self.conn.commit()
 
@@ -4301,22 +4334,26 @@ class Library:
         return row is not None
 
     def add_voice_review_item(self, table: str, row_id, column: str, rule: str,
-                               excerpt: str) -> int:
+                               excerpt: str, source: str | None = "script") -> int:
         """Insert an `open` review-queue row (a scanner finding that can't be
         auto-corrected) — skipped when a matching exception already exists
         OR an open row for this exact location already exists (see
         `has_open_voice_review_item`'s own docstring for why both checks
-        matter)."""
+        matter). `source` defaults to 'script' since the only current
+        caller is scripts/backfill_voice_review_queue.py, driven by
+        voice_db_scan's live scan of the database — not an admin edit or a
+        startup sync (see `log_voice_correction`'s own docstring for the
+        full taxonomy)."""
         if self.is_voice_exception(table, row_id, column, rule):
             return 0
         if self.has_open_voice_review_item(table, row_id, column, rule):
             return 0
         cur = self.conn.execute(
             "INSERT INTO voice_review_queue "
-            "(table_name, row_id, column_name, rule, excerpt, status, created_at) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "(table_name, row_id, column_name, rule, excerpt, status, created_at, source) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (table, str(row_id) if row_id is not None else None, column, rule,
-             excerpt, "open", _now()),
+             excerpt, "open", _now(), source),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -5269,7 +5306,7 @@ class Library:
                  description_needs_verification: int = 0,
                  description_ai_confident: Optional[int] = None,
                  description_low_confidence: Optional[int] = None,
-                 needs_review: int = 1) -> int:
+                 needs_review: int = 1, source: str | None = None) -> int:
         # needs_review defaults to 1 (not the column's own SQL default of 0)
         # — a brand-new tool's profile should read as "needs review" until
         # someone actually signs off on it, not "already reviewed" by
@@ -5329,8 +5366,8 @@ class Library:
         # PR's own CI guard accepted a bare _voice_fix() call as
         # sufficient; found and fixed here by the same tightened guard
         # that closed the tool_categories/community_categories gap.
-        self.log_voice_correction("tools", new_id, "description", description_before, description_fixed)
-        self.log_voice_correction("tools", new_id, "summary", summary_before, summary_fixed)
+        self.log_voice_correction("tools", new_id, "description", description_before, description_fixed, source=source)
+        self.log_voice_correction("tools", new_id, "summary", summary_before, summary_fixed, source=source)
         return new_id
 
     def list_tools(self, approved_only: bool = True) -> list[dict]:
@@ -5376,7 +5413,7 @@ class Library:
                     description_needs_verification: Optional[int] = None,
                     description_ai_confident: Optional[int] = None,
                     description_low_confidence: Optional[int] = None,
-                    clear_description_verification_stamp: bool = False) -> None:
+                    clear_description_verification_stamp: bool = False, source: str | None = None) -> None:
         # description_needs_verification defaults to None ("leave the column
         # alone") rather than 0/1, because update_tool is also the bulk-edit
         # panel's write path (every row resaved at once) and
@@ -5416,9 +5453,9 @@ class Library:
                description_ai_confident=COALESCE(?, description_ai_confident),
                description_low_confidence=COALESCE(?, description_low_confidence),
                updated_at=? WHERE id=?""",
-            (name.strip(), self._vf("tools", tool_id, "description", description.strip()), url.strip(),
+            (name.strip(), self._vf("tools", tool_id, "description", description.strip(), source=source), url.strip(),
              json.dumps(categories), advisor, promoted, vendor_email.strip(),
-             warm_intro_enabled, vendor_name.strip(), self._vf("tools", tool_id, "summary", summary.strip()),
+             warm_intro_enabled, vendor_name.strip(), self._vf("tools", tool_id, "summary", summary.strip(), source=source),
              description_needs_verification, description_ai_confident,
              description_low_confidence, _now(), tool_id),
         )
@@ -5437,20 +5474,20 @@ class Library:
             )
             self.conn.commit()
 
-    def update_tool_content(self, tool_id: int, name: str, description: str) -> None:
+    def update_tool_content(self, tool_id: int, name: str, description: str, source: str | None = None) -> None:
         """Narrow update for scripts/seed_tools.py's re-sync pass (#113): touches only
         name and description, leaving categories/advisor/promoted/vendor/warm-intro
         fields untouched so a content refresh can never clobber admin edits made
         directly on the live site after seeding."""
         self.conn.execute(
             "UPDATE tools SET name=?, description=?, updated_at=? WHERE id=?",
-            (name.strip(), self._vf("tools", tool_id, "description", description.strip()), _now(), tool_id),
+            (name.strip(), self._vf("tools", tool_id, "description", description.strip(), source=source), _now(), tool_id),
         )
         self.conn.commit()
 
     def quick_update_tool(self, tool_id: int, description: str,
                           warm_intro_enabled: int, vendor_name: str,
-                          vendor_email: str, summary: str = "") -> None:
+                          vendor_email: str, summary: str = "", source: str | None = None) -> None:
         """Partial update for the /tools inline "Quick edit" panel — touches
         only description/summary and warm-intro fields, leaving name/url/
         categories/advisor/promoted untouched (those still require the full
@@ -5458,8 +5495,8 @@ class Library:
         self.conn.execute(
             """UPDATE tools SET description=?, warm_intro_enabled=?, vendor_name=?,
                vendor_email=?, summary=?, updated_at=? WHERE id=?""",
-            (self._vf("tools", tool_id, "description", description.strip()), warm_intro_enabled, vendor_name.strip(),
-             vendor_email.strip(), self._vf("tools", tool_id, "summary", summary.strip()), _now(), tool_id),
+            (self._vf("tools", tool_id, "description", description.strip(), source=source), warm_intro_enabled, vendor_name.strip(),
+             vendor_email.strip(), self._vf("tools", tool_id, "summary", summary.strip(), source=source), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -5546,7 +5583,7 @@ class Library:
                                      needs_verification: int = 0,
                                      ai_confident: Optional[int] = None,
                                      low_confidence: Optional[int] = None,
-                                     clear_verification_stamp: bool = False) -> None:
+                                     clear_verification_stamp: bool = False, source: str | None = None) -> None:
         """Narrow update for the admin full-edit form's "How this differs from
         the competition" field (Phase 3) — same reasoning as
         quick_update_tool: kept separate from update_tool so the Software
@@ -5584,7 +5621,7 @@ class Library:
             "competitive_differentiation_ai_confident=COALESCE(?, competitive_differentiation_ai_confident), "
             "competitive_differentiation_low_confidence=COALESCE(?, competitive_differentiation_low_confidence), "
             "updated_at=? WHERE id=?",
-            (self._vf("tools", tool_id, "competitive_differentiation", competitive_differentiation.strip()),
+            (self._vf("tools", tool_id, "competitive_differentiation", competitive_differentiation.strip(), source=source),
              needs_verification, ai_confident,
              low_confidence, _now(), tool_id),
         )
@@ -5592,7 +5629,7 @@ class Library:
         if clear_verification_stamp:
             self._supersede_narrative_review("tool", "differentiation", tool_id)
 
-    def set_tool_suite_note(self, tool_id: int, suite_note: str) -> None:
+    def set_tool_suite_note(self, tool_id: int, suite_note: str, source: str | None = None) -> None:
         """Narrow update for tools.suite_note (Feature Taxonomy rules doc §5's
         "beyond the office of the CFO" case — a standard, reusable notation
         that a vendor offers a broader suite of operational solutions, e.g.
@@ -5603,11 +5640,11 @@ class Library:
         never blank it out on an unrelated save."""
         self.conn.execute(
             "UPDATE tools SET suite_note=?, updated_at=? WHERE id=?",
-            (self._vf("tools", tool_id, "suite_note", suite_note.strip()), _now(), tool_id),
+            (self._vf("tools", tool_id, "suite_note", suite_note.strip(), source=source), _now(), tool_id),
         )
         self.conn.commit()
 
-    def update_tool_agent_taxonomy(self, tool_id: int, agent_taxonomy_note: str) -> None:
+    def update_tool_agent_taxonomy(self, tool_id: int, agent_taxonomy_note: str, source: str | None = None) -> None:
         """Narrow update for the admin full-edit form's agent-taxonomy field
         (Phase 5) — same bulk-edit-safety reasoning as update_tool_differentiation.
         A human editing/saving this field is itself a confirmation, so this
@@ -5621,7 +5658,7 @@ class Library:
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
             "updated_at=? WHERE id=?",
-            (self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip()), _now(), tool_id),
+            (self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip(), source=source), _now(), tool_id),
         )
         self.conn.commit()
         self.clear_entity_citations("tool", tool_id, "agent_taxonomy")
@@ -5629,7 +5666,7 @@ class Library:
     def set_tool_agent_taxonomy_draft(self, tool_id: int, agent_taxonomy_note: str,
                                       needs_verification: int = 1,
                                       ai_confident: Optional[int] = None,
-                                      low_confidence: Optional[int] = None) -> None:
+                                      low_confidence: Optional[int] = None, source: str | None = None) -> None:
         """Records an LLM-drafted agent-taxonomy summary (automated research —
         either the auto-run-on-add background task or the on-demand refresh)
         as unconfirmed by default. Only writes when the tool doesn't already
@@ -5659,7 +5696,7 @@ class Library:
             "agent_taxonomy_ai_confident=COALESCE(?, agent_taxonomy_ai_confident), "
             "agent_taxonomy_low_confidence=COALESCE(?, agent_taxonomy_low_confidence), "
             "updated_at=? WHERE id=?",
-            (self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip()),
+            (self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip(), source=source),
              needs_verification, ai_confident,
              low_confidence, _now(), tool_id),
         )
@@ -6030,7 +6067,7 @@ class Library:
         return dict(row) if row else None
 
     def add_category_feature(self, category_id: int, name: str, definition: str = "",
-                              pointer_note: str = "", sort_order: int | None = None) -> int:
+                              pointer_note: str = "", sort_order: int | None = None, source: str | None = None) -> int:
         name = name.strip()
         if not name:
             raise ValueError("Feature name is required.")
@@ -6057,12 +6094,12 @@ class Library:
         # Logged AFTER insert, using the real row id — the one write path in
         # this file where `_vf` can't be used directly (no id exists until
         # the INSERT itself returns one).
-        self.log_voice_correction("category_features", new_id, "definition", definition_before, definition_fixed)
-        self.log_voice_correction("category_features", new_id, "pointer_note", pointer_note_before, pointer_note_fixed)
+        self.log_voice_correction("category_features", new_id, "definition", definition_before, definition_fixed, source=source)
+        self.log_voice_correction("category_features", new_id, "pointer_note", pointer_note_before, pointer_note_fixed, source=source)
         return new_id
 
     def update_category_feature(self, feature_id: int, name: str, definition: str,
-                                 pointer_note: str, sort_order: int) -> None:
+                                 pointer_note: str, sort_order: int, source: str | None = None) -> None:
         name = name.strip()
         if not name:
             raise ValueError("Feature name is required.")
@@ -6077,8 +6114,8 @@ class Library:
             raise ValueError(f'"{name}" already exists in this category.')
         self.conn.execute(
             "UPDATE category_features SET name=?, definition=?, pointer_note=?, sort_order=? WHERE id=?",
-            (name, self._vf("category_features", feature_id, "definition", definition.strip()),
-             self._vf("category_features", feature_id, "pointer_note", pointer_note.strip()),
+            (name, self._vf("category_features", feature_id, "definition", definition.strip(), source=source),
+             self._vf("category_features", feature_id, "pointer_note", pointer_note.strip(), source=source),
              sort_order, feature_id),
         )
         self.conn.commit()
@@ -6422,7 +6459,7 @@ class Library:
             result.append(d)
         return result
 
-    def add_tool_category(self, name: str, description: str = "") -> int:
+    def add_tool_category(self, name: str, description: str = "", source: str | None = None) -> int:
         name, description = name.strip(), description.strip()
         if not name:
             raise ValueError("Category name is required.")
@@ -6446,10 +6483,10 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("tool_categories", new_id, "description", description, description_fixed)
+        self.log_voice_correction("tool_categories", new_id, "description", description, description_fixed, source=source)
         return new_id
 
-    def rename_tool_category(self, category_id: int, new_name: str, description: str = "") -> int:
+    def rename_tool_category(self, category_id: int, new_name: str, description: str = "", source: str | None = None) -> int:
         """Rename/re-describe a category, cascading the name change onto every
         tool that has it. Returns the number of tools whose categories_json
         changed. Raises ValueError if the new name collides with a different
@@ -6474,7 +6511,7 @@ class Library:
                 raise ValueError(f'A category named "{new_name}" already exists.')
         self.conn.execute(
             "UPDATE tool_categories SET name=?, description=? WHERE id=?",
-            (new_name, self._vf("tool_categories", category_id, "description", description), category_id),
+            (new_name, self._vf("tool_categories", category_id, "description", description, source=source), category_id),
         )
         changed = 0
         if new_name != old_name:
@@ -6543,7 +6580,7 @@ class Library:
 
     def add_benchmark(self, name: str, url: str, description: str,
                       coverage: str = "Private", pricing: str = "free",
-                      section: str = "benchmarking") -> int:
+                      section: str = "benchmarking", source: str | None = None) -> int:
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM benchmarks WHERE section=?", (section,)
         ).fetchone()[0]
@@ -6558,25 +6595,25 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("benchmarks", new_id, "description", description_before, description_fixed)
+        self.log_voice_correction("benchmarks", new_id, "description", description_before, description_fixed, source=source)
         return new_id
 
     def update_benchmark(self, benchmark_id: int, name: str, url: str, description: str,
-                         coverage: str, pricing: str, section: str = "benchmarking") -> None:
+                         coverage: str, pricing: str, section: str = "benchmarking", source: str | None = None) -> None:
         self.conn.execute(
             "UPDATE benchmarks SET name=?, url=?, description=?, coverage=?, pricing=?, section=? WHERE id=?",
-            (name.strip(), url.strip(), self._vf("benchmarks", benchmark_id, "description", description.strip()),
+            (name.strip(), url.strip(), self._vf("benchmarks", benchmark_id, "description", description.strip(), source=source),
              coverage, pricing, section, benchmark_id),
         )
         self.conn.commit()
 
-    def update_benchmark_content(self, benchmark_id: int, name: str, description: str) -> None:
+    def update_benchmark_content(self, benchmark_id: int, name: str, description: str, source: str | None = None) -> None:
         """Narrow update for the startup seed-sync pass: touches only name and
         description, leaving coverage/pricing untouched so an admin edit made
         directly on /admin/tools/resources survives a re-sync."""
         self.conn.execute(
             "UPDATE benchmarks SET name=?, description=? WHERE id=?",
-            (name.strip(), self._vf("benchmarks", benchmark_id, "description", description.strip()), benchmark_id),
+            (name.strip(), self._vf("benchmarks", benchmark_id, "description", description.strip(), source=source), benchmark_id),
         )
         self.conn.commit()
 
@@ -6640,7 +6677,7 @@ class Library:
     def add_thought_leadership(self, type: str, title: str, url: str = "", venue: str = "",
                                date_label: str = "", sort_key: str = "", description: str = "",
                                needs_synopsis: bool = False, display_order: int | None = None,
-                               featured_home: bool = False) -> int:
+                               featured_home: bool = False, source: str | None = None) -> int:
         if display_order is None:
             display_order = self.conn.execute(
                 "SELECT COALESCE(MAX(display_order), -1) + 1 FROM thought_leadership WHERE type = ?",
@@ -6665,21 +6702,21 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("thought_leadership", new_id, "title", title_before, title_fixed)
-        self.log_voice_correction("thought_leadership", new_id, "venue", venue_before, venue_fixed)
-        self.log_voice_correction("thought_leadership", new_id, "description", description_before, description_fixed)
+        self.log_voice_correction("thought_leadership", new_id, "title", title_before, title_fixed, source=source)
+        self.log_voice_correction("thought_leadership", new_id, "venue", venue_before, venue_fixed, source=source)
+        self.log_voice_correction("thought_leadership", new_id, "description", description_before, description_fixed, source=source)
         return new_id
 
     def update_thought_leadership(self, item_id: int, type: str, title: str, url: str, venue: str,
                                   date_label: str, sort_key: str, description: str,
                                   needs_synopsis: bool, display_order: int,
-                                  featured_home: bool = False) -> None:
+                                  featured_home: bool = False, source: str | None = None) -> None:
         self.conn.execute(
             "UPDATE thought_leadership SET type=?, title=?, url=?, venue=?, date_label=?, sort_key=?, "
             "description=?, needs_synopsis=?, display_order=?, featured_home=?, updated_at=? WHERE id=?",
-            (type, self._vf("thought_leadership", item_id, "title", title.strip()), url.strip(),
-             self._vf("thought_leadership", item_id, "venue", venue.strip()), date_label.strip(),
-             sort_key.strip(), self._vf("thought_leadership", item_id, "description", description.strip()),
+            (type, self._vf("thought_leadership", item_id, "title", title.strip(), source=source), url.strip(),
+             self._vf("thought_leadership", item_id, "venue", venue.strip(), source=source), date_label.strip(),
+             sort_key.strip(), self._vf("thought_leadership", item_id, "description", description.strip(), source=source),
              int(bool(needs_synopsis)), display_order, int(bool(featured_home)), _now(), item_id),
         )
         self.conn.commit()
@@ -6729,7 +6766,7 @@ class Library:
     def add_original_content(self, slug: str, title: str, teaser: str = "", tag_label: str = "",
                              link_label: str = "", body_md: str | None = None, status: str = "draft",
                              featured_home: bool = False, date_label: str = "", sort_key: str = "",
-                             display_order: int | None = None) -> int:
+                             display_order: int | None = None, source: str | None = None) -> int:
         if display_order is None:
             display_order = self.conn.execute(
                 "SELECT COALESCE(MAX(display_order), -1) + 1 FROM original_content"
@@ -6753,23 +6790,23 @@ class Library:
         # add_category_feature does the same: no id exists until the INSERT
         # itself returns one, so _vf's inline "value already known, wrap it"
         # shape can't be used here.
-        self.log_voice_correction("original_content", new_id, "title", title_before, title_fixed)
-        self.log_voice_correction("original_content", new_id, "teaser", teaser_before, teaser_fixed)
+        self.log_voice_correction("original_content", new_id, "title", title_before, title_fixed, source=source)
+        self.log_voice_correction("original_content", new_id, "teaser", teaser_before, teaser_fixed, source=source)
         if body_md:
-            self.log_voice_correction("original_content", new_id, "body_md", body_md, body_fixed)
+            self.log_voice_correction("original_content", new_id, "body_md", body_md, body_fixed, source=source)
         return new_id
 
     def update_original_content(self, item_id: int, slug: str, title: str, teaser: str, tag_label: str,
                                 link_label: str, body_md: str | None, status: str, featured_home: bool,
-                                date_label: str, sort_key: str, display_order: int) -> None:
+                                date_label: str, sort_key: str, display_order: int, source: str | None = None) -> None:
         self.conn.execute(
             "UPDATE original_content SET slug=?, title=?, teaser=?, tag_label=?, link_label=?, "
             "body_md=?, status=?, featured_home=?, date_label=?, sort_key=?, display_order=?, "
             "updated_at=? WHERE id=?",
-            (slug.strip(), self._vf("original_content", item_id, "title", title.strip()),
-             self._vf("original_content", item_id, "teaser", teaser.strip()), tag_label.strip(),
+            (slug.strip(), self._vf("original_content", item_id, "title", title.strip(), source=source),
+             self._vf("original_content", item_id, "teaser", teaser.strip(), source=source), tag_label.strip(),
              link_label.strip(),
-             self._vf("original_content", item_id, "body_md", body_md) if body_md else body_md, status,
+             self._vf("original_content", item_id, "body_md", body_md, source=source) if body_md else body_md, status,
              int(bool(featured_home)), date_label.strip(), sort_key.strip(), display_order, _now(), item_id),
         )
         self.conn.commit()
@@ -6806,7 +6843,7 @@ class Library:
 
     def add_ai_surface(self, slug: str, title: str, teaser: str = "", body_md: str | None = None,
                         external_href: str = "", status: str = "draft",
-                        display_order: int | None = None) -> int:
+                        display_order: int | None = None, source: str | None = None) -> int:
         if display_order is None:
             display_order = self.conn.execute(
                 "SELECT COALESCE(MAX(display_order), -1) + 1 FROM ai_surfaces"
@@ -6826,21 +6863,21 @@ class Library:
         # Logged AFTER insert, using the real row id — same reason
         # add_original_content/add_category_feature do the same: no id
         # exists until the INSERT itself returns one.
-        self.log_voice_correction("ai_surfaces", new_id, "title", title_before, title_fixed)
-        self.log_voice_correction("ai_surfaces", new_id, "teaser", teaser_before, teaser_fixed)
+        self.log_voice_correction("ai_surfaces", new_id, "title", title_before, title_fixed, source=source)
+        self.log_voice_correction("ai_surfaces", new_id, "teaser", teaser_before, teaser_fixed, source=source)
         if body_md:
-            self.log_voice_correction("ai_surfaces", new_id, "body_md", body_md, body_fixed)
+            self.log_voice_correction("ai_surfaces", new_id, "body_md", body_md, body_fixed, source=source)
         return new_id
 
     def update_ai_surface(self, item_id: int, slug: str, title: str, teaser: str,
                            body_md: str | None, external_href: str, status: str,
-                           display_order: int) -> None:
+                           display_order: int, source: str | None = None) -> None:
         self.conn.execute(
             "UPDATE ai_surfaces SET slug=?, title=?, teaser=?, body_md=?, external_href=?, "
             "status=?, display_order=?, updated_at=? WHERE id=?",
-            (slug.strip(), self._vf("ai_surfaces", item_id, "title", title.strip()),
-             self._vf("ai_surfaces", item_id, "teaser", teaser.strip()),
-             self._vf("ai_surfaces", item_id, "body_md", body_md) if body_md else body_md,
+            (slug.strip(), self._vf("ai_surfaces", item_id, "title", title.strip(), source=source),
+             self._vf("ai_surfaces", item_id, "teaser", teaser.strip(), source=source),
+             self._vf("ai_surfaces", item_id, "body_md", body_md, source=source) if body_md else body_md,
              external_href.strip(), status, display_order, _now(), item_id),
         )
         self.conn.commit()
@@ -6946,7 +6983,7 @@ class Library:
                       access: str = "", format: str = "", notes: str = "",
                       submitted_by: str = "", approved: int = 0,
                       reach: str = "National", local_markets: str = "",
-                      featured: int = 0, advisor: int = 0) -> int:
+                      featured: int = 0, advisor: int = 0, source: str | None = None) -> int:
         dup = self._find_community_by_normalized_url(url)
         if dup:
             raise DuplicateURLError("community", dup["id"], dup["name"], dup["slug"])
@@ -6985,10 +7022,10 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("communities", new_id, "demographic", demographic_before, demographic_fixed)
-        self.log_voice_correction("communities", new_id, "cost_note", cost_note_before, cost_note_fixed)
-        self.log_voice_correction("communities", new_id, "notes", notes_before, notes_fixed)
-        self.log_voice_correction("communities", new_id, "local_markets", local_markets_before, local_markets_fixed)
+        self.log_voice_correction("communities", new_id, "demographic", demographic_before, demographic_fixed, source=source)
+        self.log_voice_correction("communities", new_id, "cost_note", cost_note_before, cost_note_fixed, source=source)
+        self.log_voice_correction("communities", new_id, "notes", notes_before, notes_fixed, source=source)
+        self.log_voice_correction("communities", new_id, "local_markets", local_markets_before, local_markets_fixed, source=source)
         return new_id
 
     def list_communities(self, approved_only: bool = True) -> list[dict]:
@@ -7021,7 +7058,7 @@ class Library:
                          sponsor_name: str = "", access: str = "", format: str = "",
                          notes: str = "", reach: str = "National",
                          local_markets: str = "", featured: int = 0,
-                         advisor: int = 0) -> None:
+                         advisor: int = 0, source: str | None = None) -> None:
         # Only check when the URL is actually changing — see update_tool for why.
         current = self.get_community(community_id)
         if current and normalize_url(url) != normalize_url(current["url"]):
@@ -7033,12 +7070,12 @@ class Library:
                cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
                notes=?, categories_json=?, updated_at=?, reach=?, local_markets=?,
                featured=?, advisor=? WHERE id=?""",
-            (name.strip(), url.strip(), self._vf("communities", community_id, "demographic", demographic.strip()),
-             cost_band, self._vf("communities", community_id, "cost_note", cost_note.strip()),
+            (name.strip(), url.strip(), self._vf("communities", community_id, "demographic", demographic.strip(), source=source),
+             cost_band, self._vf("communities", community_id, "cost_note", cost_note.strip(), source=source),
              sponsorship_type, sponsor_name.strip(), access.strip(),
-             format.strip(), self._vf("communities", community_id, "notes", notes.strip()),
+             format.strip(), self._vf("communities", community_id, "notes", notes.strip(), source=source),
              json.dumps(categories), _now(),
-             reach, self._vf("communities", community_id, "local_markets", local_markets.strip()),
+             reach, self._vf("communities", community_id, "local_markets", local_markets.strip(), source=source),
              featured, advisor, community_id),
         )
         self.conn.commit()
@@ -7049,7 +7086,7 @@ class Library:
             )
             self.conn.commit()
 
-    def update_community_content(self, community_id: int, name: str, notes: str = "") -> None:
+    def update_community_content(self, community_id: int, name: str, notes: str = "", source: str | None = None) -> None:
         """Narrow update for scripts/seed_communities.py's re-sync pass (and the startup
         seeder): touches only name and notes — the two fields sourced straight from the
         underlying research, same role as name/description for tools and benchmarks.
@@ -7063,7 +7100,7 @@ class Library:
         would get silently reverted on the next deploy's re-sync."""
         self.conn.execute(
             "UPDATE communities SET name=?, notes=?, updated_at=? WHERE id=?",
-            (name.strip(), self._vf("communities", community_id, "notes", notes.strip()), _now(), community_id),
+            (name.strip(), self._vf("communities", community_id, "notes", notes.strip(), source=source), _now(), community_id),
         )
         self.conn.commit()
 
@@ -7315,7 +7352,7 @@ class Library:
                                  stage_focus: str = "", jobs_program: str = "",
                                  team_or_individual: str = "",
                                  confidence: Optional[dict] = None,
-                                 clear_verification_stamp: bool = False) -> None:
+                                 clear_verification_stamp: bool = False, source: str | None = None) -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
         edit form always submits every field, generated or hand-written.
@@ -7411,33 +7448,33 @@ class Library:
                  public_criticism_ai_confident=excluded.public_criticism_ai_confident,
                  verdict_summary_ai_confident=excluded.verdict_summary_ai_confident""",
             (community_id,
-             self._vf("community_profiles", community_id, "ideal_member", ideal_member.strip()),
-             self._vf("community_profiles", community_id, "anti_fit", anti_fit.strip()),
-             self._vf("community_profiles", community_id, "value_prop", value_prop.strip()),
-             self._vf("community_profiles", community_id, "format_reality", format_reality.strip()),
-             self._vf("community_profiles", community_id, "engagement_level", engagement_level.strip()),
+             self._vf("community_profiles", community_id, "ideal_member", ideal_member.strip(), source=source),
+             self._vf("community_profiles", community_id, "anti_fit", anti_fit.strip(), source=source),
+             self._vf("community_profiles", community_id, "value_prop", value_prop.strip(), source=source),
+             self._vf("community_profiles", community_id, "format_reality", format_reality.strip(), source=source),
+             self._vf("community_profiles", community_id, "engagement_level", engagement_level.strip(), source=source),
              self._vf("community_profiles", community_id, "sponsor_relationship_note",
-                       sponsor_relationship_note.strip()),
+                       sponsor_relationship_note.strip(), source=source),
              self._vf("community_profiles", community_id, "application_friction",
-                       application_friction.strip()),
-             self._vf("community_profiles", community_id, "cost_value_verdict", cost_value_verdict.strip()),
-             self._vf("community_profiles", community_id, "notable_members", notable_members.strip()),
+                       application_friction.strip(), source=source),
+             self._vf("community_profiles", community_id, "cost_value_verdict", cost_value_verdict.strip(), source=source),
+             self._vf("community_profiles", community_id, "notable_members", notable_members.strip(), source=source),
              founded_year,
-             self._vf("community_profiles", community_id, "public_criticism", public_criticism.strip()),
-             self._vf("community_profiles", community_id, "verdict_summary", verdict_summary.strip()),
+             self._vf("community_profiles", community_id, "public_criticism", public_criticism.strip(), source=source),
+             self._vf("community_profiles", community_id, "verdict_summary", verdict_summary.strip(), source=source),
              low_confidence, _now(),
-             self._vf("community_profiles", community_id, "business_model", business_model.strip()),
-             self._vf("community_profiles", community_id, "primary_purpose", primary_purpose.strip()),
-             self._vf("community_profiles", community_id, "cpe_eligible", cpe_eligible.strip()),
-             self._vf("community_profiles", community_id, "platform_type", platform_type.strip()),
-             self._vf("community_profiles", community_id, "meeting_format", meeting_format.strip()),
-             self._vf("community_profiles", community_id, "event_style", event_style.strip()),
-             self._vf("community_profiles", community_id, "seniority_band", seniority_band.strip()),
-             self._vf("community_profiles", community_id, "resources_included", resources_included.strip()),
+             self._vf("community_profiles", community_id, "business_model", business_model.strip(), source=source),
+             self._vf("community_profiles", community_id, "primary_purpose", primary_purpose.strip(), source=source),
+             self._vf("community_profiles", community_id, "cpe_eligible", cpe_eligible.strip(), source=source),
+             self._vf("community_profiles", community_id, "platform_type", platform_type.strip(), source=source),
+             self._vf("community_profiles", community_id, "meeting_format", meeting_format.strip(), source=source),
+             self._vf("community_profiles", community_id, "event_style", event_style.strip(), source=source),
+             self._vf("community_profiles", community_id, "seniority_band", seniority_band.strip(), source=source),
+             self._vf("community_profiles", community_id, "resources_included", resources_included.strip(), source=source),
              needs_review,
-             self._vf("community_profiles", community_id, "stage_focus", stage_focus.strip()),
-             self._vf("community_profiles", community_id, "jobs_program", jobs_program.strip()),
-             self._vf("community_profiles", community_id, "team_or_individual", team_or_individual.strip()),
+             self._vf("community_profiles", community_id, "stage_focus", stage_focus.strip(), source=source),
+             self._vf("community_profiles", community_id, "jobs_program", jobs_program.strip(), source=source),
+             self._vf("community_profiles", community_id, "team_or_individual", team_or_individual.strip(), source=source),
              *conf),
         )
         self.conn.commit()
@@ -7451,6 +7488,7 @@ class Library:
         public_criticism: Optional[str] = None, needs_review: Optional[int] = None,
         stage_focus: Optional[str] = None, jobs_program: Optional[str] = None,
         team_or_individual: Optional[str] = None,
+        source: str | None = None,
     ) -> None:
         """Narrow, partial update for a deepened-research pass on a subset of
         fields (e.g. a later research round that only re-covers a few fields
@@ -7477,7 +7515,7 @@ class Library:
             return
         set_clause = ", ".join(f"{col}=?" for col in fields)
         values = [
-            self._vf("community_profiles", community_id, k, v.strip()) if isinstance(v, str) else v
+            self._vf("community_profiles", community_id, k, v.strip(), source=source) if isinstance(v, str) else v
             for k, v in fields.items()
         ]
         self.conn.execute(
@@ -7751,7 +7789,7 @@ class Library:
             result.append(d)
         return result
 
-    def add_community_category(self, name: str, description: str = "") -> int:
+    def add_community_category(self, name: str, description: str = "", source: str | None = None) -> int:
         name, description = name.strip(), description.strip()
         if not name:
             raise ValueError("Category name is required.")
@@ -7775,10 +7813,10 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("community_categories", new_id, "description", description, description_fixed)
+        self.log_voice_correction("community_categories", new_id, "description", description, description_fixed, source=source)
         return new_id
 
-    def rename_community_category(self, category_id: int, new_name: str, description: str = "") -> int:
+    def rename_community_category(self, category_id: int, new_name: str, description: str = "", source: str | None = None) -> int:
         """Rename/re-describe a category, cascading the name change onto every
         community that has it. Returns the number of communities whose
         categories_json changed. Raises ValueError on a name collision."""
@@ -7802,7 +7840,7 @@ class Library:
                 raise ValueError(f'A category named "{new_name}" already exists.')
         self.conn.execute(
             "UPDATE community_categories SET name=?, description=? WHERE id=?",
-            (new_name, self._vf("community_categories", category_id, "description", description), category_id),
+            (new_name, self._vf("community_categories", category_id, "description", description, source=source), category_id),
         )
         changed = 0
         if new_name != old_name:

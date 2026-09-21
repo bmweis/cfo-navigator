@@ -82,7 +82,7 @@ def main() -> int:
 
         lib.update_ai_surface(
             row["id"], row["slug"], row["title"], row["teaser"], new_body,
-            row["external_href"], row["status"], row["display_order"],
+            row["external_href"], row["status"], row["display_order"], source="script",
         )
         print("\nApplied.")
 

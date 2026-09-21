@@ -118,7 +118,8 @@ def main():
         if rename_target is not None:
             row = lib.get_category_feature(rename_target)
             lib.update_category_feature(
-                rename_target, NEW_NAME, row["definition"], row["pointer_note"], row["sort_order"]
+                rename_target, NEW_NAME, row["definition"], row["pointer_note"], row["sort_order"],
+                source="script",
             )
         for fid in retire_ids:
             lib.retire_category_feature(fid)

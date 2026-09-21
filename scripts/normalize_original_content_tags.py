@@ -106,7 +106,7 @@ def main() -> int:
             lib.update_original_content(
                 row["id"], row["slug"], row["title"], row["teaser"], new_tag, new_link,
                 row["body_md"], row["status"], bool(row["featured_home"]), row["date_label"],
-                row["sort_key"], row["display_order"],
+                row["sort_key"], row["display_order"], source="script",
             )
         print(f"\nApplied — updated {len(to_change)} row(s).\n")
 

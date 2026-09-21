@@ -140,7 +140,7 @@ def main() -> int:
 
         for b in planned:
             lib.add_benchmark(b["name"], b["url"], b["description"],
-                              coverage="Private", pricing="free", section="books")
+                              coverage="Private", pricing="free", section="books", source="script")
         print(f"\nApplied — {len(planned)} book(s) inserted.\n")
 
         # Write-then-read-back: re-list the 'books' section and confirm the

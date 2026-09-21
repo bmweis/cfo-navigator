@@ -981,6 +981,7 @@ def main():
                     categories=t["categories"],
                     approved=1,
                     advisor=int(t.get("advisor", False)),
+                    source="script",
                 )
             except DuplicateURLError as e:
                 # Defense in depth — the existing_by_url lookup above should already

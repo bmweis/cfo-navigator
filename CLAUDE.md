@@ -10883,6 +10883,142 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   Getting a real production count is `scripts/backfill_voice_review_queue.py`'s
   own preview-mode job (or a live `/admin/voice/review-queue` load), run by
   someone with DB access — not fabricated here.
+- **Voice review queue — a source/trigger taxonomy, and the seed-sync
+  infinite-loop's fix (2026-09).** Investigation into a live production
+  incident — `_seed_toolbox()`'s per-boot re-sync of `communities.notes`
+  against `scripts/seed_communities.py`'s raw (pre-fix) spaced-em-dash
+  source text, repeating a correction against an already-`_voice_fix`'d DB
+  value on every single deploy — found the deeper problem: nothing on
+  `voice_review_queue` recorded WHICH mechanism produced a given row, so an
+  `auto_corrected` row from a genuine one-time admin typo and one from a
+  silently-repeating startup-sync bug were indistinguishable in the review
+  UI. Fixed with a new `voice_review_queue.source TEXT` column (a plain
+  idempotent migration, no backfill for pre-existing rows — they read
+  `source=NULL`, rendered as "unknown," never a blank cell) taking one of
+  three values: `'admin-edit'` (a human editing through an `/admin/*`, or an
+  admin-gated public-looking, submit route), `'startup-sync'`
+  (`_seed_toolbox()`'s own per-boot re-sync — the exact mechanism behind
+  the incident), or `'script'` (a one-off backfill/fix/migration script).
+  `Library._vf`/`log_voice_correction` both grew an optional `source`
+  parameter threaded straight into the INSERT; all 28 `Library` write
+  methods that already call either grew a matching `source: str | None =
+  None` param (including `set_setting()`, since every `/admin/copy/*` field
+  goes through it), and every real call site across `webapp/app.py` and
+  every script that writes a voice-scanned column now supplies the correct
+  value for its own calling context — `_seed_toolbox()`'s two re-sync calls
+  (`update_community_content`, `update_benchmark_content`) and its
+  one-time-per-empty-table category seeding pass `source="startup-sync"`;
+  every `/admin/*` submit route passes `source="admin-edit"`; every
+  one-off/backfill script (`scripts/regen_ai_drafted_fields.py`, `scripts/
+  enrich_agent_taxonomy.py`, `scripts/enrich_community_profiles.py`,
+  `scripts/seed_tools.py`, `scripts/seed_communities.py`, `scripts/
+  seed_feature_taxonomy.py`, and the various one-off content-fix scripts)
+  passes `source="script"`. **Two public, member-gated (not admin)
+  submission routes are deliberately left unwired**
+  (`POST /tools/submit`, `POST /tools/communities/submit`) — neither is an
+  admin-edit or a script/sync context, and the 3-value taxonomy has no
+  bucket for an anonymous/member visitor's own submission; a 4th value was
+  considered and rejected as unneeded scope. `/admin/voice/review-queue`
+  shows the source as a small muted badge per row (both the open/
+  auto-corrected groups and the resolved/exceptions table share the same
+  `_voice_review_row_html` renderer, so both get it for free).
+  `scripts/backfill_voice_review_queue_source.py` (preview/`--apply`,
+  write-then-read-back verified) is the one-off backfill for the two
+  specific pre-existing rows this investigation started from — matched by
+  `(table_name, column_name, an excerpt substring)`, never a blanket
+  "every row with `source IS NULL`" sweep, since a genuinely different row
+  logged before this column existed could have `source=NULL` for an
+  unrelated, legitimate reason; not run against production as part of this
+  PR, reserved for Brian via `railway ssh`. **A new, column-aware CI test**
+  (`tests/test_seed_source_voice_scan.py`) closes the structural blind spot
+  that let the original incident go undetected for as long as it did: the
+  live `/admin/checks` DB scanner (`linklib/voice_db_scan.py`) only ever
+  sees already-normalized text, since every write path runs `_voice_fix`
+  before storing, so a violation sitting in a raw SEED SOURCE FILE (synced
+  into the DB on every boot) was invisible to it forever. The new test
+  reuses `voice_db_scan`'s own `_scan_value`/`_SCAN_TABLES` column-aware
+  machinery directly against every seed source found in a full search
+  (`scripts/seed_communities.py`'s `COMMUNITIES`/`CATEGORIES`, `scripts/
+  seed_tools.py`'s `TOOLS`, `webapp/app.py`'s `_DEFAULT_BENCHMARKS`/
+  `_DEFAULT_TOOL_CATEGORIES`, `scripts/seed_book_recommendations.py`'s
+  `BOOKS`, and `scripts/seed_data/seed_category_features.csv`) —
+  deliberately NOT folded into `linklib.voice_review.VOICE_SCANNED_FILES`,
+  which treats a whole file as undifferentiated text with no per-column
+  exemption and would flag a legitimate third-party-name ampersand (e.g.
+  "Finance & Accounting for Bioscience") as a violation. **The scan found
+  real, pre-existing violations well beyond the two rows this PR fixes** —
+  19 in `COMMUNITIES` (mostly `&` in `demographic`), 19 in `TOOLS` (spaced
+  em dashes in `description`), 1 in `BOOKS`, 4 in the category-features
+  CSV — none in scope for this PR to fix (a mass unreviewed content rewrite
+  is exactly what CLAUDE.md's "no copy rewritten without Brian seeing
+  before and after" rule exists to prevent), so the test is a
+  **baseline-regression guard**: each source's current count is a named
+  constant, the test only fails on a future INCREASE, and every violation
+  is printed on every run so the outstanding list stays visible for a
+  future, human-reviewed cleanup pass. `scripts/seed_data/
+  seed_review_queue.csv`/`seed_tool_feature_links.csv` and the two
+  feature-framework JSON files feed tables (`feature_review_queue`,
+  `tool_feature_links`) that aren't in `voice_db_scan._SCAN_TABLES` at all,
+  so they're out of scope for this scan with no corresponding config to map
+  a column-aware check onto — reported, not silently force-included or
+  dropped. See ARCHITECTURE.md's matching section for the full write-up.
+- **`_seed_toolbox()`'s sync loops have no manual-override guard — the
+  exact class of bug the incident above surfaced, generalized (2026-09
+  investigation, report-only, not fixed here).** Reading `_seed_toolbox()`
+  directly (see its own docstring and body in `webapp/app.py`) confirms
+  three sync loops, none guarded by anything like `logo_manual_override`:
+  (1) `tools.name` — synced via a raw `UPDATE tools SET name=? WHERE id=?`
+  (not routed through `Library`, so never logged to `voice_review_queue`
+  either) whenever the live name differs from `scripts/seed_tools.py`'s
+  `TOOLS` entry for that URL; `tools.description` was deliberately retired
+  from this sync entirely after the 2026-08 incident (81/148 tools'
+  AI-drafted descriptions silently reverted) and is NOT vulnerable. (2)
+  `communities.name`/`communities.notes` — synced via
+  `update_community_content()` whenever either differs from `scripts/
+  seed_communities.py`'s `COMMUNITIES` entry for that URL (this is the
+  exact mechanism the whole investigation started from). (3)
+  `benchmarks.name`/`benchmarks.description` — synced via
+  `update_benchmark_content()` whenever either differs from `webapp/app.py`'s
+  `_DEFAULT_BENCHMARKS` entry for that URL (`scripts/
+  seed_book_recommendations.py`'s `BOOKS` entries are NOT re-synced by
+  `_seed_toolbox()` at all — only `_DEFAULT_BENCHMARKS` is). **The
+  practical consequence, stated plainly**: for a tool/community/benchmark
+  whose URL is present in the relevant seed-source file, `name` (all
+  three tables), `communities.notes`, and `benchmarks.description` are
+  effectively READ-ONLY from the admin UI's perspective — an admin's own
+  hand-edit to any of these fields, made through `/admin/tools/software/edit`,
+  `/tools/communities/{slug}/edit`, or `/admin/tools/resources/{id}/edit`,
+  is silently reverted back to the seed-source text on the very next
+  deploy/restart, with no warning anywhere in the UI that this will
+  happen. `advisor` (tools and communities) is a narrower, one-directional
+  variant of the same shape — only ever bumped `True` to match the seed
+  list, never demoted, so a manual "turn advisor off" edit against a
+  seed-listed True entry reverts too, just not in a full round trip.
+  **No guard exists anywhere in `_seed_toolbox()` analogous to
+  `tools.logo_manual_override`/`logo_override_stale`** (confirmed by
+  reading the full function body — no check of any `*_manual_override`-
+  style flag before any of the three sync loops' overwrite calls). The two
+  category-vocabulary loops (`tool_categories`, `community_categories`) are
+  NOT vulnerable to this — both are gated on "only seed when the whole
+  table is empty," so they run exactly once, ever, on a fresh DB, and never
+  re-touch a category's name/description again regardless of what the seed
+  list says. **Compared against CLAUDE.md's own documented "intended"
+  behavior** (the "CFO Toolbox startup sync" bullet above): the mechanism
+  itself is described accurately there — `_seed_toolbox()` re-syncing
+  `name`/`description`/`advisor` on every restart is stated as deliberate,
+  explicitly framed around Brian occasionally renaming a seed-listed tool
+  by editing `scripts/seed_tools.py` directly rather than through the admin
+  UI. What that bullet does NOT say, and what this investigation surfaces
+  as the real gap, is that the reverse path — an admin hand-editing one of
+  these fields through the admin UI for a URL that's ALSO in the seed
+  source — is silently unsafe, with no warning callout anywhere a person
+  editing that form would see it. This is a documentation/UX gap, not a
+  code contradiction: the doc isn't wrong about what the code does, it just
+  never states the corollary risk. Not fixed as part of this investigation,
+  per its own report-only scope — flagged for a future decision (a warning
+  banner on the affected admin edit forms, or a `logo_manual_override`-style
+  guard extended to these fields, are both real options, neither built
+  here).
 
 ## Voice — em dash policy
 
