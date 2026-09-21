@@ -290,7 +290,7 @@ COMMUNITIES = [
         "sponsor_name": "Informa TechTarget",
         "access": "Open",
         "format": "Online Q&A forum + webinars",
-        "notes": "No longer an independent community — acquired by Argyle Executive Forum in 2016, now operated by Informa TechTarget; content now channels to CFO Dive. Historically 600,000+ registered members.",
+        "notes": "No longer an independent community—acquired by Argyle Executive Forum in 2016, now operated by Informa TechTarget; content now channels to CFO Dive. Historically 600,000+ registered members.",
         "categories": ["Free vendor-sponsored"],
     },
     # Tier 4 — Women/DEI-focused finance communities
@@ -411,7 +411,7 @@ COMMUNITIES = [
         "sponsor_name": "Informa Connect",
         "access": "Open (registration)",
         "format": "In-person annual conference (CPE-accredited)",
-        "notes": "Annual event, part of Biotech Week Boston — not a standing community.",
+        "notes": "Annual event, part of Biotech Week Boston—not a standing community.",
         "categories": ["Industry-specific"],
     },
     # Fractional CFO communities
@@ -484,7 +484,7 @@ def main():
                 "SELECT 1 FROM community_categories WHERE name = ? COLLATE NOCASE", (cat_name,)
             ).fetchone()
             if not existing:
-                lib.add_community_category(cat_name, cat_desc)
+                lib.add_community_category(cat_name, cat_desc, source="script")
                 print(f"  ADDED category: {cat_name}")
 
         # Normalized comparison (not exact string) so a trailing-slash/www/http
@@ -512,7 +512,7 @@ def main():
                     lib.conn.commit()
                     print(f"  UPDATED advisor flag: {c['name']}")
                 if existing["name"] != fields["name"] or existing["notes"] != fields["notes"]:
-                    lib.update_community_content(existing["id"], fields["name"], fields["notes"])
+                    lib.update_community_content(existing["id"], fields["name"], fields["notes"], source="script")
                     print(f"  UPDATED: {c['name']}")
                     updated += 1
                 else:
@@ -520,7 +520,7 @@ def main():
                 skipped += 1
                 continue
             try:
-                community_id = lib.add_community(**fields, approved=1, advisor=int(c.get("advisor", False)))
+                community_id = lib.add_community(**fields, approved=1, advisor=int(c.get("advisor", False)), source="script")
             except DuplicateURLError as e:
                 # Defense in depth — the existing_by_url lookup above should already
                 # catch this, so this only fires if two COMMUNITIES entries themselves

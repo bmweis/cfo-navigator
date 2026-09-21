@@ -10139,6 +10139,113 @@ recorded anywhere, it's flagged rather than invented.
   Phase 1 explicitly deferred cleanup here since this phase already
   touches that code) is gone now too.
 
+### Voice review queue: source/trigger taxonomy, and a column-aware seed-source scan (2026-09)
+
+Follow-up to the seed-sync infinite-loop investigation (see `scripts/
+seed_communities.py`'s Proformative/Bioscience `notes` fields, fixed in the
+same PR): `_seed_toolbox()`'s per-boot re-sync of `communities.notes` against
+raw, pre-`_voice_fix` seed-source text was creating an invisible, repeating
+`auto_corrected` row in `voice_review_queue` on every deploy, indistinguishable
+in the UI from an ordinary human-edit correction — nothing recorded WHICH
+mechanism produced a given queue row.
+
+**`voice_review_queue.source TEXT`** (a plain idempotent `ALTER TABLE ADD
+COLUMN` migration, no backfill for existing rows — they read `source=NULL`,
+rendered as "unknown" rather than a blank cell) records one of four values:
+
+- `'admin-edit'` — a human editing through an `/admin/*` (or an admin-gated
+  public-looking, e.g. `/tools/communities/{slug}/edit`) submit route.
+- `'startup-sync'` — `_seed_toolbox()`'s own per-boot re-sync (`communities.
+  name`/`notes` via `update_community_content`, `benchmarks.name`/
+  `description` via `update_benchmark_content`, and the one-time-per-empty-
+  table category seeding) — the exact mechanism behind the incident above.
+- `'script'` — a one-off backfill/fix/migration script (`scripts/
+  regen_ai_drafted_fields.py`, `scripts/enrich_agent_taxonomy.py`,
+  `scripts/enrich_community_profiles.py`, `scripts/seed_tools.py`, `scripts/
+  seed_communities.py`, `scripts/seed_feature_taxonomy.py`, and the various
+  one-off `scripts/migrate_*`/`scripts/normalize_*`/`scripts/
+  retire_*`/`scripts/add_current_feed_link_to_web_search_explainer.py`
+  content-fix scripts).
+- `'submission'` — a public, member-gated submission route (`POST
+  /tools/submit`, `POST /tools/communities/submit`) — the content's origin is
+  known, but it's neither an admin edit nor a script/sync run.
+
+`Library._vf(table, row_id, column, value, source=None)`/`log_voice_correction(
+..., source=None)` both grew an optional `source` parameter threaded straight
+into the INSERT, and every `Library` write method that already called either
+(28 methods total, spanning `tools`/`communities`/`community_profiles`/
+`benchmarks`/`thought_leadership`/`original_content`/`ai_surfaces`/
+`category_features`/`tool_categories`/`community_categories`) grew a matching
+`source: str | None = None` parameter and passes it straight through — every
+call site in `webapp/app.py` and every script above now supplies the correct
+value for its own calling context. `Library.set_setting()` also grew the
+parameter (every `/admin/copy/*` field write goes through it).
+**The two public, member-gated submission routes were initially left with
+`source=None`, then reversed on review**: `add_tool`/`add_community`'s calls
+from `POST /tools/submit`/`POST /tools/communities/submit` now both pass
+`source="submission"` — leaving them as `None` would have rendered as
+"unknown" in the review-queue UI, indistinguishable from a genuine coverage
+gap, when the provenance is in fact known and this is exactly the content
+Brian most wants to review closely (a public submission, pre-approval).
+
+**`/admin/voice/review-queue`** shows the source as a small muted badge per
+row (both open/auto-corrected groups and the resolved/exceptions table share
+the same `_voice_review_row_html` renderer, so both get it for free) — a
+plain "unknown" for a `NULL` value, never a blank cell that could read as a
+rendering bug.
+
+**`scripts/backfill_voice_review_queue_source.py`** (preview/`--apply`,
+write-then-read-back verified, matching `scripts/fix_spaced_em_dashes.py`'s
+own convention) is the one-off backfill for the two specific pre-existing
+rows this whole investigation started from — matched by
+`(table_name, column_name, an excerpt substring)`, not a blanket
+"every `communities.notes` row with `source IS NULL`" sweep, since a
+genuinely different `communities.notes` row logged before this column
+existed could have `source=NULL` for an unrelated, legitimate reason. Not
+run against production as part of this PR — Brian runs it via `railway ssh`.
+
+**A CI-safe, column-aware voice/typography scan over static seed sources**
+(`tests/test_seed_source_voice_scan.py`) closes a real, structural blind
+spot in the existing `/admin/checks` DB scanner (`linklib/voice_db_scan.py`):
+that scanner only ever sees already-`_voice_fix`-normalized text, since
+every `Library` write path runs the backstop before storing — so a
+violation sitting in a SEED SOURCE FILE (raw, pre-write text, re-synced
+into the DB by `_seed_toolbox()`/a one-time script on every boot) is
+invisible to it forever, which is exactly how the Proformative/Bioscience
+bug went undetected. The new test reuses `voice_db_scan`'s own
+`_scan_value`/`_SCAN_TABLES` column-aware machinery directly (never a
+second, independent notion of what's typography-exempt) against every seed
+source found in a full search: `scripts/seed_communities.py`'s `COMMUNITIES`
+(table `communities`) and `CATEGORIES` (table `community_categories`),
+`scripts/seed_tools.py`'s `TOOLS` (table `tools`), `webapp/app.py`'s
+`_DEFAULT_BENCHMARKS` (table `benchmarks`) and `_DEFAULT_TOOL_CATEGORIES`/
+`_DEFAULT_CATEGORY_DESCRIPTIONS` (table `tool_categories`), `scripts/
+seed_book_recommendations.py`'s `BOOKS` (table `benchmarks`), and `scripts/
+seed_data/seed_category_features.csv` (table `category_features`).
+Deliberately NOT folded into `linklib.voice_review.VOICE_SCANNED_FILES` —
+that scanner treats a whole file as undifferentiated source text with no
+per-column exemption, so scanning these files that way would flag every
+legitimate third-party-name ampersand (e.g. "Finance & Accounting for
+Bioscience") as a bare-ampersand violation, the exact false-positive class
+`voice_db_scan.py`'s own column-exemption design exists to avoid.
+
+**The scan found real, pre-existing violations well beyond the two rows this
+PR fixes** — 19 in `seed_communities.py`'s `COMMUNITIES` (mostly a lazy `&`
+in `demographic`, e.g. "CFOs & senior finance leaders"), 19 in `seed_tools.py`'s
+`TOOLS` (spaced em dashes in `description`), 1 in `seed_book_recommendations.py`'s
+`BOOKS`, and 4 in the category-features CSV — none of them part of the
+two-fix scope this PR was asked to make, and fixing them all would mean an
+unreviewed mass rewrite of real seed content with no human sign-off, exactly
+what CLAUDE.md's "no copy rewritten without Brian seeing before and after"
+rule exists to prevent. The test is therefore a **baseline-regression
+guard**, not a zero-tolerance gate: each source's current violation count is
+recorded as a named constant, the test fails only if a FUTURE change
+increases that count, and every violation is printed on every run regardless
+of pass/fail so the outstanding list stays visible. A future cleanup pass
+(mirroring `scripts/fix_spaced_em_dashes.py`'s own preview/apply/
+write-then-read-back convention) can lower a baseline once real content is
+fixed and reviewed.
+
 ## 5. Directory map
 
 ```

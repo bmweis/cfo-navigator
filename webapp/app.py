@@ -685,10 +685,10 @@ def _seed_toolbox():
     try:
         if not lib.list_tool_categories():
             for name in _DEFAULT_TOOL_CATEGORIES:
-                lib.add_tool_category(name, _DEFAULT_CATEGORY_DESCRIPTIONS.get(name, ""))
+                lib.add_tool_category(name, _DEFAULT_CATEGORY_DESCRIPTIONS.get(name, ""), source="startup-sync")
         if not lib.list_community_categories():
             for cat_name, cat_desc in COMMUNITY_CATEGORIES:
-                lib.add_community_category(cat_name, cat_desc)
+                lib.add_community_category(cat_name, cat_desc, source="startup-sync")
         # Normalized comparison (not exact string), same fix as scripts/seed_tools.py
         # and scripts/seed_communities.py (see pull request 197) — a trailing-slash/www/http
         # variant of an already-seeded URL must be recognized as the same row.
@@ -711,7 +711,7 @@ def _seed_toolbox():
                 lib.conn.commit()
             notes = c.get("notes", "")
             if crow["name"] != c["name"] or crow["notes"] != notes:
-                lib.update_community_content(crow["id"], c["name"], notes)
+                lib.update_community_content(crow["id"], c["name"], notes, source="startup-sync")
         for b in _DEFAULT_BENCHMARKS:
             brow = lib.conn.execute(
                 "SELECT id, name, description FROM benchmarks WHERE url = ?", (b["url"],)
@@ -722,7 +722,7 @@ def _seed_toolbox():
                 # unseeded one. Skip, never insert.
                 continue
             if brow["name"] != b["name"] or brow["description"] != b["description"]:
-                lib.update_benchmark_content(brow["id"], b["name"], b["description"])
+                lib.update_benchmark_content(brow["id"], b["name"], b["description"], source="startup-sync")
         lib.seed_game_rank_settings()
         # Same normalized-URL fix as the communities loop above (and
         # scripts/seed_tools.py) — exact-string WHERE url = ? can miss an
@@ -5157,7 +5157,7 @@ async def admin_ai_surfaces_new_submit(request: Request):
 
         lib.add_ai_surface(
             v["slug"], v["title"], v["teaser"], v["body_md"], v["external_href"],
-            v["status"], v["display_order"],
+            v["status"], v["display_order"], source="admin-edit",
         )
     finally:
         lib.close()
@@ -5213,7 +5213,7 @@ async def admin_ai_surfaces_edit_submit(request: Request, item_id: int):
 
         lib.update_ai_surface(
             item_id, v["slug"], v["title"], v["teaser"], v["body_md"], v["external_href"],
-            v["status"], v["display_order"] or 0,
+            v["status"], v["display_order"] or 0, source="admin-edit",
         )
     finally:
         lib.close()
@@ -10938,7 +10938,7 @@ async def tools_communities_submit(request: Request):
     lib = _lib()
     try:
         lib.add_community(name=name, url=url, demographic="", cost_band="Undisclosed dues",
-                           categories=[], submitted_by=submitted_by, approved=0)
+                           categories=[], submitted_by=submitted_by, approved=0, source="submission")
         notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
         if notify_to:
             _send_email_safely(
@@ -12391,7 +12391,7 @@ async def tools_submit(request: Request, background_tasks: BackgroundTasks):
         # the right shape for the directory card) until an admin reviews and
         # regenerates a fuller description/summary from the edit page before approving.
         tool_id = lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0,
-                                summary=description)
+                                summary=description, source="submission")
         notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
         if notify_to:
             _send_email_safely(
@@ -13903,6 +13903,7 @@ async def admin_software_bulk_edit(request: Request):
                 categories=t["categories"], advisor=t["advisor"], promoted=t["promoted"],
                 vendor_email=t["vendor_email"], warm_intro_enabled=t["warm_intro_enabled"],
                 vendor_name=t["vendor_name"], summary=t.get("summary") or "",
+                source="admin-edit",
             )
             if field == "categories":
                 kwargs["categories"] = value if isinstance(value, list) else []
@@ -14136,7 +14137,7 @@ async def admin_tools_categories_new(request: Request):
     description = (form.get("description") or "").strip()
     lib = _lib()
     try:
-        lib.add_tool_category(name, description)
+        lib.add_tool_category(name, description, source="admin-edit")
     except ValueError as e:
         return RedirectResponse(f"/admin/tools/software/categories?error={quote(str(e))}", status_code=303)
     finally:
@@ -14154,7 +14155,7 @@ async def admin_tools_categories_edit(request: Request, category_id: int):
     description = (form.get("description") or "").strip()
     lib = _lib()
     try:
-        n = lib.rename_tool_category(category_id, name, description)
+        n = lib.rename_tool_category(category_id, name, description, source="admin-edit")
     except ValueError as e:
         return RedirectResponse(f"/admin/tools/software/categories?error={quote(str(e))}", status_code=303)
     finally:
@@ -14473,7 +14474,7 @@ async def admin_tools_features_new(request: Request):
             _feature_page_url(state_category, state_open, error="Choose a category."), status_code=303)
     lib = _lib()
     try:
-        lib.add_category_feature(category_id, name, definition, pointer_note)
+        lib.add_category_feature(category_id, name, definition, pointer_note, source="admin-edit")
     except ValueError as e:
         return RedirectResponse(_feature_page_url(state_category, state_open, error=str(e)), status_code=303)
     finally:
@@ -14499,7 +14500,7 @@ async def admin_category_features_edit(request: Request, feature_id: int):
         sort_order = 0
     lib = _lib()
     try:
-        lib.update_category_feature(feature_id, name, definition, pointer_note, sort_order)
+        lib.update_category_feature(feature_id, name, definition, pointer_note, sort_order, source="admin-edit")
     except ValueError as e:
         return RedirectResponse(_feature_page_url(state_category, state_open, error=str(e)), status_code=303)
     finally:
@@ -15085,7 +15086,7 @@ async def admin_resources_new_submit(request: Request):
         raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
     try:
-        lib.add_benchmark(name, url, description, coverage, pricing, section)
+        lib.add_benchmark(name, url, description, coverage, pricing, section, source="admin-edit")
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/resources", status_code=303)
@@ -15132,7 +15133,7 @@ async def admin_resources_edit_submit(request: Request, benchmark_id: int):
         raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
     try:
-        lib.update_benchmark(benchmark_id, name, url, description, coverage, pricing, section)
+        lib.update_benchmark(benchmark_id, name, url, description, coverage, pricing, section, source="admin-edit")
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/resources", status_code=303)
@@ -16072,7 +16073,7 @@ async def admin_thought_leadership_new_submit(request: Request):
         # the next value for this type — see Library.add_thought_leadership.
         lib.add_thought_leadership(v["type"], v["title"], v["url"], v["venue"], v["date_label"],
                                    v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"],
-                                   v["featured_home"])
+                                   v["featured_home"], source="admin-edit")
     finally:
         lib.close()
     return RedirectResponse("/admin/thought-leadership/third-party", status_code=303)
@@ -16119,7 +16120,7 @@ async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
         # it as 0 rather than re-triggering the add-only auto-assign.
         lib.update_thought_leadership(item_id, v["type"], v["title"], v["url"], v["venue"], v["date_label"],
                                       v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"] or 0,
-                                      v["featured_home"])
+                                      v["featured_home"], source="admin-edit")
     finally:
         lib.close()
     return RedirectResponse("/admin/thought-leadership/third-party", status_code=303)
@@ -16551,7 +16552,7 @@ async def admin_original_content_new_submit(request: Request):
         new_id = lib.add_original_content(
             v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
             v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
-            v["display_order"],
+            v["display_order"], source="admin-edit",
         )
         # Mirror into articles for FP&A Buddy retrieval — synchronous, at the
         # mutation point, same convention as write_opml() on feed mutation.
@@ -16628,7 +16629,7 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
         lib.update_original_content(
             item_id, v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
             v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
-            v["display_order"] or 0,
+            v["display_order"] or 0, source="admin-edit",
         )
         # Re-sync the mirrored articles row — overwrites in place (never
         # merges), so an edit always wins. See linklib/original_content_sync.py.
@@ -17652,7 +17653,7 @@ async def admin_communities_bulk_edit(request: Request):
                 kwargs[field] = 1 if value == "1" else 0
             else:
                 kwargs[field] = value
-            lib.update_community(community_id, **kwargs)
+            lib.update_community(community_id, source="admin-edit", **kwargs)
     finally:
         lib.close()
     return JSONResponse({"ok": True})
@@ -17816,7 +17817,7 @@ async def admin_communities_categories_new(request: Request):
     description = (form.get("description") or "").strip()
     lib = _lib()
     try:
-        lib.add_community_category(name, description)
+        lib.add_community_category(name, description, source="admin-edit")
     except ValueError as e:
         return RedirectResponse(f"/admin/tools/communities/categories?error={quote(str(e))}", status_code=303)
     finally:
@@ -17834,7 +17835,7 @@ async def admin_communities_categories_edit(request: Request, category_id: int):
     description = (form.get("description") or "").strip()
     lib = _lib()
     try:
-        n = lib.rename_community_category(category_id, name, description)
+        n = lib.rename_community_category(category_id, name, description, source="admin-edit")
     except ValueError as e:
         return RedirectResponse(f"/admin/tools/communities/categories?error={quote(str(e))}", status_code=303)
     finally:
@@ -17919,7 +17920,8 @@ async def admin_communities_new_submit(request: Request):
                           cost_band=cost_band, categories=categories, cost_note=cost_note,
                           sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                           access=access, format=format_, notes=notes, approved=1,
-                          reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
+                          reach=reach, local_markets=local_markets, featured=featured, advisor=advisor,
+                          source="admin-edit")
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/communities/{e.slug}/edit"))
     finally:
@@ -18217,7 +18219,8 @@ async def admin_communities_edit_submit(request: Request, slug: str):
                              cost_band=cost_band, categories=categories, cost_note=cost_note,
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                              access=access, format=format_, notes=notes,
-                             reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
+                             reach=reach, local_markets=local_markets, featured=featured, advisor=advisor,
+                             source="admin-edit")
         lib.update_community_screenshot_url(community_id, screenshot_url)
         lib.update_community_app_screenshot_source(community_id, app_screenshot_source_url)
         _record_ai_drafted_reviews(lib, request, "community", community_id, form)
@@ -18762,6 +18765,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             team_or_individual=(form.get("team_or_individual") or "").strip(),
             confidence=confidence,
             clear_verification_stamp=profile_ai_drafted,
+            source="admin-edit",
         )
         if profile_citations:
             lib.set_entity_citations("community", community_id, "community_profile",
@@ -19040,6 +19044,7 @@ def _run_tool_research(tool_id: int) -> bool:
                 needs_verification=int(result.agent_taxonomy_needs_verification),
                 ai_confident=int(result.confident),
                 low_confidence=int(result.low_confidence),
+                source="admin-edit",
             )
             lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
                                      result.citations, model=result.model)
@@ -19114,7 +19119,8 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
                                 summary=summary,
                                 description_needs_verification=description_needs_verification,
                                 description_ai_confident=description_confident,
-                                description_low_confidence=description_low_confidence)
+                                description_low_confidence=description_low_confidence,
+                                source="admin-edit")
         if description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
     except DuplicateURLError as e:
@@ -19930,7 +19936,8 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         description_needs_verification=description_needs_verification,
                         description_ai_confident=description_confident,
                         description_low_confidence=description_low_confidence,
-                        clear_description_verification_stamp=bool(description_needs_verification))
+                        clear_description_verification_stamp=bool(description_needs_verification),
+                        source="admin-edit")
         if "description" in ai_drafted and description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
         else:
@@ -19939,8 +19946,9 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                                         needs_verification=competitive_differentiation_needs_verification,
                                         ai_confident=differentiation_confident,
                                         low_confidence=differentiation_low_confidence,
-                                        clear_verification_stamp=bool(competitive_differentiation_needs_verification))
-        lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
+                                        clear_verification_stamp=bool(competitive_differentiation_needs_verification),
+                                        source="admin-edit")
+        lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note, source="admin-edit")
         lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
         lib.set_tool_needs_review(tool_id, needs_review)
@@ -20420,7 +20428,8 @@ async def admin_tools_quick_edit(request: Request, tool_id: int):
     try:
         if not lib.get_tool(tool_id):
             return JSONResponse({"ok": False, "error": "Tool not found"}, status_code=404)
-        lib.quick_update_tool(tool_id, description, warm_intro_enabled, vendor_name, vendor_email, summary=summary)
+        lib.quick_update_tool(tool_id, description, warm_intro_enabled, vendor_name, vendor_email, summary=summary,
+                              source="admin-edit")
     finally:
         lib.close()
     return JSONResponse({"ok": True, "tool": {
@@ -33788,7 +33797,7 @@ async def admin_voice_save_core(request: Request):
         prompt = (payload.get("voice_core") or "").strip()
     lib = _lib()
     try:
-        lib.set_setting("voice_core", prompt)
+        lib.set_setting("voice_core", prompt, source="admin-edit")
     finally:
         lib.close()
     return JSONResponse({"ok": True, "custom": bool(prompt), "value": prompt})
@@ -33808,7 +33817,7 @@ async def admin_voice_save_fpa_buddy(request: Request):
         prompt = (payload.get("voice_fpa_buddy") or "").strip()
     lib = _lib()
     try:
-        lib.set_setting("voice_fpa_buddy", prompt)
+        lib.set_setting("voice_fpa_buddy", prompt, source="admin-edit")
     finally:
         lib.close()
     return JSONResponse({"ok": True, "custom": bool(prompt), "value": prompt})
@@ -33829,7 +33838,7 @@ async def admin_voice_save_matchmaker(request: Request):
         prompt = (payload.get("voice_matchmaker") or "").strip()
     lib = _lib()
     try:
-        lib.set_setting("voice_matchmaker", prompt)
+        lib.set_setting("voice_matchmaker", prompt, source="admin-edit")
     finally:
         lib.close()
     return JSONResponse({"ok": True, "custom": bool(prompt), "value": prompt})
@@ -33906,10 +33915,27 @@ def _voice_review_row_html(item: dict) -> str:
 </form>"""
     else:
         actions = f'<span style="font-size:12px;color:var(--muted);">{_esc(status)}</span>'
+    # Voice-review-queue trigger taxonomy (2026-09): a small badge naming
+    # which mechanism produced this row — 'admin-edit' (a human editing via
+    # an /admin/* submit route), 'startup-sync' (_seed_toolbox()'s per-boot
+    # re-sync against static seed data — the exact mechanism behind the
+    # seed-sync infinite-loop investigation this taxonomy exists to make
+    # visible), or 'script' (a one-off backfill/fix/migration script). A
+    # row logged before this column existed has source=NULL — rendered
+    # plainly as "unknown" rather than a blank cell that could read as a
+    # rendering bug.
+    source_val = item.get("source")
+    source_label = _esc(source_val) if source_val else "unknown"
+    source_badge = (
+        f'<span style="font-size:11px;color:var(--muted);background:var(--bg);'
+        f'border:1px solid var(--line);border-radius:5px;padding:2px 7px;'
+        f'white-space:nowrap;">{source_label}</span>'
+    )
     return f"""
 <tr>
   <td style="padding:8px 10px;font-size:13px;">{_esc(item['table_name'])}.{_esc(item['column_name'])} <span style="color:var(--muted);">{row_id_txt}</span></td>
   <td style="padding:8px 10px;font-size:13px;">{excerpt}{before_after}</td>
+  <td style="padding:8px 10px;">{source_badge}</td>
   <td style="padding:8px 10px;">{actions}</td>
 </tr>"""
 
@@ -33951,6 +33977,7 @@ async def admin_voice_review_queue(request: Request):
 <thead><tr style="text-align:left;border-bottom:1px solid var(--line);">
 <th style="padding:8px 10px;font-size:12px;">Field</th>
 <th style="padding:8px 10px;font-size:12px;">Excerpt</th>
+<th style="padding:8px 10px;font-size:12px;">Source</th>
 <th style="padding:8px 10px;font-size:12px;">Actions</th>
 </tr></thead><tbody>{rows_html}</tbody></table></div>"""
 
@@ -34273,8 +34300,8 @@ async def admin_copy_save_headline(request: Request):
         raise HTTPException(status_code=400, detail="homepage_headline_copy and homepage_subhead_copy required")
     lib = _lib()
     try:
-        lib.set_setting("homepage_headline_copy", headline)
-        lib.set_setting("homepage_subhead_copy", subhead)
+        lib.set_setting("homepage_headline_copy", headline, source="admin-edit")
+        lib.set_setting("homepage_subhead_copy", subhead, source="admin-edit")
     finally:
         lib.close()
     return JSONResponse({"ok": True})
@@ -34292,7 +34319,7 @@ async def admin_copy_save_about(request: Request):
         raise HTTPException(status_code=400, detail="about_page_copy required")
     lib = _lib()
     try:
-        lib.set_setting("about_page_copy", text)
+        lib.set_setting("about_page_copy", text, source="admin-edit")
     finally:
         lib.close()
     return JSONResponse({"ok": True})
@@ -34311,8 +34338,8 @@ async def admin_copy_save_homepage(request: Request):
         raise HTTPException(status_code=400, detail="homepage_teaser_copy and homepage_expanded_copy required")
     lib = _lib()
     try:
-        lib.set_setting("homepage_teaser_copy", teaser)
-        lib.set_setting("homepage_expanded_copy", expanded)
+        lib.set_setting("homepage_teaser_copy", teaser, source="admin-edit")
+        lib.set_setting("homepage_expanded_copy", expanded, source="admin-edit")
     finally:
         lib.close()
     return JSONResponse({"ok": True})
@@ -34358,7 +34385,7 @@ async def admin_copy_save_how_this_is_built(request: Request):
         raise HTTPException(status_code=400, detail="text required")
     lib = _lib()
     try:
-        lib.set_setting(key, text)
+        lib.set_setting(key, text, source="admin-edit")
     finally:
         lib.close()
     return JSONResponse({"ok": True})

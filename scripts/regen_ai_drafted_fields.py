@@ -378,6 +378,7 @@ def _regen_tool_description(lib: Library, tool: dict, model: str, voice_core: st
         # content is still a fresh, not-yet-human-reviewed draft — the old
         # "Verified by X on Y" stamp must not go on showing against it.
         clear_description_verification_stamp=True,
+        source="script",
     )
     # Citations-validation parity (hardening item 6).
     validated_citations = _validated_citations(draft.citations)
@@ -451,6 +452,7 @@ def _regen_tool_agent_taxonomy(lib: Library, tool: dict, model: str, voice_core:
     lib.set_tool_agent_taxonomy_draft(
         tool_id, result.agent_taxonomy_note,
         needs_verification=0, ai_confident=int(bool(result.confident)),
+        source="script",
     )
     # Citations parity: kept as a DIRECT write here, matching the live
     # _run_tool_research background job exactly — Agent taxonomy's
@@ -532,6 +534,7 @@ def _regen_tool_differentiation(lib: Library, tool: dict, model: str, voice_core
         # is still a fresh draft, so any old "Verified by X on Y" stamp must
         # be cleared.
         clear_verification_stamp=True,
+        source="script",
     )
     # No entity_citations mechanism for this field — ToolDifferentiationDraft
     # carries no `citations` attribute at all, confirmed by reading enrich.py.
@@ -609,6 +612,7 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
         # still a fresh draft, so any old "Reviewed by X on Y" stamp must be
         # cleared.
         clear_verification_stamp=True,
+        source="script",
     )
     # Citations-validation parity (hardening item 6) — same reasoning as
     # Description above: the Community profile's Generate call is also

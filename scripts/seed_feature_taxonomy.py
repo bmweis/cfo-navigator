@@ -74,7 +74,7 @@ def seed_suite_notes(lib: Library) -> bool:
     if (tool.get("suite_note") or "").strip():
         print(f'  SKIP  suite_note for "{_NETSUITE_TOOL_NAME}" (already set)')
         return False
-    lib.set_tool_suite_note(tool["id"], _NETSUITE_SUITE_NOTE)
+    lib.set_tool_suite_note(tool["id"], _NETSUITE_SUITE_NOTE, source="script")
     print(f'  SET   suite_note for "{_NETSUITE_TOOL_NAME}"')
     return True
 
@@ -100,7 +100,7 @@ def _resolve_categories(lib: Library, category_names: set[str]) -> dict[str, int
             resolved[name] = cid
             continue
         if name == _NEW_CATEGORY:
-            cid = lib.add_tool_category(_NEW_CATEGORY)
+            cid = lib.add_tool_category(_NEW_CATEGORY, source="script")
             print(f'  CREATED new category pill: "{_NEW_CATEGORY}" (id={cid})')
             resolved[name] = cid
             continue
@@ -136,6 +136,7 @@ def seed_category_features(lib: Library, categories: dict[str, int]) -> tuple[in
             definition=row.get("definition", ""),
             pointer_note=row.get("pointer_note", ""),
             sort_order=int(row["sort_order"]),
+            source="script",
         )
         print(f'  ADDED category_feature "{row["category"]}" / "{name}"')
         added += 1

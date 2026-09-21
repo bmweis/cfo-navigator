@@ -143,7 +143,7 @@ def main() -> int:
                 # doesn't produce must be echoed back from the existing row —
                 # it fully replaces the row, it doesn't partially patch it.
                 lib.upsert_community_profile(
-                    c["id"],
+                    c["id"], source="script",
                     ideal_member=draft.ideal_member, anti_fit=draft.anti_fit,
                     value_prop=draft.value_prop, format_reality=draft.format_reality,
                     engagement_level=draft.engagement_level,

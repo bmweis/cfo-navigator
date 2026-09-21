@@ -100,7 +100,7 @@ def main() -> int:
         for r in planned:
             lib.add_ai_surface(
                 r["slug"], r["title"], r["teaser"], r["body_md"], r["external_href"],
-                r["status"], r["display_order"],
+                r["status"], r["display_order"], source="script",
             )
         print(f"\nApplied — {len(planned)} row(s) inserted.\n")
 
