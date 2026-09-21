@@ -288,27 +288,45 @@ def test_category_features_name_ampersand_is_no_longer_scanned(lib):
 # spaced em dash, so a zero-width character survives storage unchanged; this
 # is a read-time/scan-time finding, not something the backstop silently
 # corrects before it ever reaches the scanner.
-def test_category_features_definition_invisible_character_is_scanned(lib):
+def test_category_features_definition_zero_width_space_is_auto_corrected_not_scanned(lib):
+    """Part 5 (2026-09 voice review queue safety PR): U+200B (zero-width
+    space) joined `_AUTO_STRIP_INVISIBLE_CHARS` — it's now stripped at
+    WRITE TIME by `Library._vf`/`normalize_voice_mechanics`, the same
+    backstop that already collapses a spaced em dash, and logged as an
+    `auto_corrected` row in `voice_review_queue` (never left in the stored
+    column for the scanner to find). This supersedes the pre-Part-5 test of
+    the same name, which asserted the OLD behavior (the character survived
+    in the DB and the scanner flagged it as an open finding)."""
     cat_id = lib.add_tool_category("Finance")
-    lib.add_category_feature(
+    fid = lib.add_category_feature(
         cat_id, "Anomaly detection",
         "Identifies unusual or erroneous items and patterns that don't look right"
         "​",
     )
+    row = lib.conn.execute("SELECT definition FROM category_features WHERE id=?", (fid,)).fetchone()
+    assert "​" not in row["definition"]
     violations = scan_db_copy(lib)
     hits = [v for v in violations if v.table == "category_features" and v.column == "definition"]
-    assert len(hits) == 1
-    assert hits[0].rule == "invisible-character"
-    assert "U+200B" in hits[0].excerpt
+    assert not hits, "the zero-width space should have been auto-corrected at write time, not left for the scanner"
+    corrections = [
+        r for r in lib.list_voice_review_queue()
+        if r["table_name"] == "category_features" and str(r["row_id"]) == str(fid) and r["column_name"] == "definition"
+    ]
+    assert corrections
+    assert corrections[0]["status"] == "auto_corrected"
+    assert corrections[0]["rule"] == "invisible-character"
 
 
-def test_invisible_character_is_scanned_on_a_newly_instrumented_table(lib):
+def test_invisible_character_is_scanned_on_a_newly_instrumented_table_when_not_auto_correctable(lib):
     """Confirms the invisible-character rule reaches the five tables this
     PR instrumented too — added to `mechanical_findings` itself, so every
     caller of `_scan_value` (every `_SCAN_TABLES` entry, unconditionally)
-    gets it automatically, with no per-table wiring needed."""
+    gets it automatically, with no per-table wiring needed. Uses the zero-
+    width JOINER (U+200D), which stays flag-only (Part 5's own verdict —
+    it's load-bearing inside real emoji sequences), so it's still visible
+    to the scanner rather than silently auto-corrected away like U+200B."""
     lib.add_community(
-        "Finance Leaders", "https://community.example", "VPs and directors​",
+        "Finance Leaders", "https://community.example", "VPs and directors‍",
         "Free", [],
     )
     violations = scan_db_copy(lib)

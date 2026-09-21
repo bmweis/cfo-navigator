@@ -210,14 +210,14 @@ _RULES_EXCERPT = """- A feature names the job done from the BUYER's perspective,
 - availability is exactly "native" (included in the standard offering) or
   "add_on" (costs more: paid module, upgrade, or higher-tier gating).
 - ai_enabled is true only when the capability is delivered via an
-  intelligent/learning/agentic approach rather than deterministic rules —
+  intelligent/learning/agentic approach rather than deterministic rules—
   a buyer-relevant "smart vs. rules-based" signal, deliberately coarse.
 - Ground every claim in the vendor content provided below. A claim you
   cannot point to a specific line/section for should be marked
   confident=false, not asserted as true."""
 
 
-# §7's don't-collapse/unify test, verbatim from docs/FEATURE_TAXONOMY.md —
+# §7's don't-collapse/unify test, verbatim from docs/FEATURE_TAXONOMY.md—
 # used as few-shot grounding for BOTH Phase 3 prompts below (clustering and
 # per-cluster judgment), rather than a paraphrase, so the model reasons off
 # the same worked examples a human reviewer would be checking against.
@@ -242,7 +242,7 @@ _ORIGINATION_PROMPT = """You are researching a vendor for the CFO Toolbox's Feat
 ORIGINATION MODE: the "{category}" category has no curated feature list
 yet, so you are proposing candidate features grounded in this ONE vendor's
 real content below. A later step reconciles your proposals against every
-other vendor's in the same category before anything reaches human review —
+other vendor's in the same category before anything reaches human review—
 your job here is just this one vendor's honest, well-sourced draft.
 
 Rules (follow exactly):
@@ -290,7 +290,7 @@ this vendor, return {{"features": []}}."""
 # generate_community_profile's 6000 (23 fields drafted in one call) even
 # though this call drafts fewer named fields per feature, since an
 # uncapped-length array is the whole point here. _RETRY_MAX_TOKENS is the
-# one-shot retry ceiling used only when the first attempt still truncated —
+# one-shot retry ceiling used only when the first attempt still truncated—
 # see _salvage_feature_objects and the retry logic in
 # draft_tool_features_for_category below.
 _ORIGINATION_MAX_TOKENS = 8000
@@ -463,7 +463,7 @@ class ToolOriginationDraft:
     low_confidence: bool = False   # no vendor-domain content could be found/fetched at all
     truncated: bool = False        # the response was cut off mid-generation (even after the
                                     # one retry) and features were recovered via
-                                    # _salvage_feature_objects rather than a clean full parse —
+                                    # _salvage_feature_objects rather than a clean full parse—
                                     # the recovered list may be missing whatever the model
                                     # would have proposed after the cutoff point
     model: str = ""
@@ -623,12 +623,12 @@ def draft_tool_features_for_category(
 # don't-collapse/unify merge across the FULL accumulated set, and the
 # feature_review_queue write. Approved shape (2026-08, Brian's sign-off):
 #
-# - Clustering is INCREMENTAL, folded into the per-tool research loop —
+# - Clustering is INCREMENTAL, folded into the per-tool research loop—
 #   NOT one Claude call over the whole roster's candidate list (that
 #   design shipped first and broke on the first real live run; see the
 #   "Incremental clustering" section below for the full post-mortem and
 #   why a bigger max_tokens ceiling wasn't the right fix). Still not
-#   embeddings-similarity (would judge on surface wording — exactly what
+#   embeddings-similarity (would judge on surface wording —exactly what
 #   §7 warns against: "never match on shared buzzwords") and still not
 #   full pairwise comparison. Each incremental step is still a LOOSE
 #   grouping pass — a candidate is matched to an existing representative
@@ -689,7 +689,7 @@ def _validate_partition(groups: list, n: int) -> list[list[int]]:
 
 @dataclass
 class CandidateFeature:
-    """One ProposedFeature accumulated across a category's whole roster —
+    """One ProposedFeature accumulated across a category's whole roster—
     the input unit for clustering and judgment. verified_as_of is carried
     down from the ToolOriginationDraft it came from (Phase 2 stamps it
     per-tool, not per-feature), since a merged feature's queue payload
@@ -711,7 +711,7 @@ class CandidateFeature:
 # with TOTAL roster candidate count — a fundamentally harder single-shot
 # reasoning task than any per-tool drafting call (which only ever reasons
 # about one vendor's own content in isolation). The first attempt's
-# _salvage_json_array recovered ZERO items (not "some, then a cutoff" —
+# _salvage_json_array recovered ZERO items (not "some, then a cutoff"—
 # the "clusters" key/array was never even reached), meaning Opus 5's
 # on-by-default adaptive thinking consumed the ENTIRE max_tokens budget
 # just reasoning about 364 items, before writing a single output token.
@@ -757,7 +757,7 @@ link note where it's much harder to catch.
 
 Return STRICT JSON only (no prose, no markdown fences):
 {{"matches": [2, null, null, 0]}}
-— exactly {n_new} entries, one per new candidate above, in the same order.
+—exactly {n_new} entries, one per new candidate above, in the same order.
 Each entry is either an integer index into the existing-capabilities list,
 or null if genuinely new."""
 
@@ -883,7 +883,7 @@ class FeatureGroupDecision:
 def judge_cluster(category_name: str, cluster_candidates: list[CandidateFeature],
                    model: str = DEFAULT_MODEL) -> tuple[list[FeatureGroupDecision] | None, float]:
     """Per-cluster merge-or-split judgment (§7). A cluster of 0-1
-    candidates short-circuits to a free (no API call) unmerged decision —
+    candidates short-circuits to a free (no API call) unmerged decision—
     there's nothing to judge. Conservative bias is instructed directly in
     the prompt, not just implied, per the approved Phase 3 design.
 
@@ -954,7 +954,7 @@ class OriginationSummary:
     features_merged: int = 0   # queued features backed by >1 tool's link
     features_split: int = 0    # queued features backed by exactly 1 tool's link
     queue_item_ids: list[int] = field(default_factory=list)   # empty when dry_run=True — nothing written
-    queued_payloads: list[dict] = field(default_factory=list)   # always populated, dry_run or not —
+    queued_payloads: list[dict] = field(default_factory=list)   # always populated, dry_run or not—
                                                                   # what WAS (or WOULD BE) queued, for
                                                                   # the caller to print/inspect either way
     clustering_degraded: bool = False   # True if ANY per-tool clustering match call structurally
@@ -1245,7 +1245,7 @@ Proposals to map (0-indexed, SEPARATELY from the bucket list above):
 
 Return STRICT JSON only (no prose, no markdown fences):
 {{"matches": [4, null, 12, 4]}}
-— exactly {n_items} entries, one per proposal above, in the same order.
+—exactly {n_items} entries, one per proposal above, in the same order.
 Each entry is either an integer index into the target-buckets list, or null
 if the proposal genuinely belongs to none of them."""
 
@@ -1280,7 +1280,7 @@ def match_items_to_framework(
 
     Returns (matches, total_cost_usd) where matches is a list parallel to
     `items`, each entry an index into `buckets` or None. Returns (None, 0.0)
-    only if the SDK/key is unavailable OR any batch's call fails outright —
+    only if the SDK/key is unavailable OR any batch's call fails outright—
     a partial result (some batches succeeded, one didn't) is deliberately
     NOT returned as a mix of real matches and silent Nones, since a caller
     can't tell "genuinely no match" from "this batch's call errored" in

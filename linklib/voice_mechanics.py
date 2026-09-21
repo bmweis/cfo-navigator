@@ -52,9 +52,47 @@ _SPACE_CLASS = "[  ]"
 # runs on every Library write (`Library._vf`), so the same hardening
 # applies here even though no single production text field has hit the
 # pathological case yet.
-_SPACED_EM_DASH = re.compile(_SPACE_CLASS + r"{1,80}" + _EM_DASH + _SPACE_CLASS + r"{1,80}")
+# One-sided-spacing gap, found and fixed (2026-09): the original pattern
+# above required a space on BOTH sides (`SPACE{1,80} DASH SPACE{1,80}`), so
+# "pass— auto-corrected" (space only after) or "pass —auto" (space only
+# before) never matched at all — confirmed live against this exact review
+# queue page's own intro copy, which had this precise one-sided shape.
+# Fixed with an alternation: either side alone having 1-80 spaces is
+# sufficient, with the other side allowed 0-80 — every quantifier stays
+# individually bounded ({1,80}/{0,80}, never unbounded `+`), so this keeps
+# the same per-attempt complexity ceiling the bounding comment above
+# documents, just tried twice instead of once at each position.
+_SPACED_EM_DASH = re.compile(
+    r"(?:" + _SPACE_CLASS + r"{1,80}" + _EM_DASH + _SPACE_CLASS + r"{0,80})"
+    r"|"
+    r"(?:" + _SPACE_CLASS + r"{0,80}" + _EM_DASH + _SPACE_CLASS + r"{1,80})"
+)
 _SPACED_DOUBLE_HYPHEN_DASH = re.compile(
     r"(?<=\w)" + _SPACE_CLASS + r"{1,80}--" + _SPACE_CLASS + r"{1,80}(?=\w)"
+)
+
+# Invisible/zero-width Unicode characters safe to silently strip at write
+# time — a curated SUBSET of `linklib.voice_review.INVISIBLE_CHARS` (kept as
+# a separate, smaller literal here rather than importing it: voice_review
+# already imports FROM this module, so importing back would be circular).
+# Per-character verdict (see CLAUDE.md's Part 5 writeup for the full
+# reasoning): these three never carry meaning in a plain-text field, so
+# stripping them can never lose information a reader could see —
+# zero-width space and the zero-width no-break space/BOM are pure paste
+# garbage with no legitimate use inside a saved field value, and a word
+# joiner conveys no information in plain text either (its one real job,
+# suppressing a line break at a specific point, isn't something this
+# codebase's rendering ever depends on). Everything else in voice_review's
+# INVISIBLE_CHARS stays flag-only, on purpose: the zero-width joiner is
+# load-bearing inside real emoji sequences; the zero-width non-joiner and
+# both bidi marks (LTR/RTL) can be genuinely load-bearing for correct
+# rendering of non-Latin/mixed-direction text; and a soft hyphen is a real,
+# if rare, intentional hyphenation hint a word processor can produce on
+# purpose. None of those four is safe to silently delete.
+_AUTO_STRIP_INVISIBLE_CHARS: tuple[str, ...] = (
+    "​",  # zero-width space
+    "﻿",  # zero-width no-break space (BOM)
+    "⁠",  # word joiner
 )
 
 
@@ -69,11 +107,39 @@ def fix_spaced_em_dashes(text: str) -> str:
     return text
 
 
+def strip_safe_invisible_chars(text: str) -> str:
+    """Remove every character in `_AUTO_STRIP_INVISIBLE_CHARS` from `text`.
+    Idempotent, safe on empty/None-ish input, a no-op when none are
+    present."""
+    if not text:
+        return text
+    for ch in _AUTO_STRIP_INVISIBLE_CHARS:
+        if ch in text:
+            text = text.replace(ch, "")
+    return text
+
+
+def correction_rule_for(before: str) -> str:
+    """Which `voice_review_queue.rule` an auto-correction of `before`
+    should be logged under. `normalize_voice_mechanics` can fix more than
+    one kind of violation in a single call; this inspects the PRE-fix text
+    to say which one actually fired, so `Library._vf`'s logged row names
+    the real rule instead of always assuming spaced-em-dash. Checked in a
+    fixed order (invisible-character first) since the two are independent
+    signals — a real production row could in principle carry both, and
+    which one gets reported first doesn't change what got fixed."""
+    if any(ch in before for ch in _AUTO_STRIP_INVISIBLE_CHARS):
+        return "invisible-character"
+    return "spaced-em-dash"
+
+
 def normalize_voice_mechanics(text: str) -> str:
     """The single entry point every Library write method calls on a
-    prose-capable field before it's persisted. Currently applies
-    `fix_spaced_em_dashes` only; extend this function (not each call site)
-    if a future HARD MECHANICAL RULES violation also turns out to need a
-    deterministic backstop, so every existing call site picks up the fix
-    for free."""
-    return fix_spaced_em_dashes(text)
+    prose-capable field before it's persisted. Applies
+    `fix_spaced_em_dashes` and `strip_safe_invisible_chars`; extend this
+    function (not each call site) if a future HARD MECHANICAL RULES
+    violation also turns out to need a deterministic backstop, so every
+    existing call site picks up the fix for free."""
+    text = fix_spaced_em_dashes(text)
+    text = strip_safe_invisible_chars(text)
+    return text

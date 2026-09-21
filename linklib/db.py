@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Iterator, Optional
 
 from .voice_mechanics import normalize_voice_mechanics as _voice_fix
+from .voice_mechanics import correction_rule_for as _voice_fix_rule
 
 
 def resolve_db_path(cli_db: Optional[str], *, allow_missing: bool = False) -> str:
@@ -1496,6 +1497,29 @@ CREATE TABLE IF NOT EXISTS voice_review_queue (
 CREATE INDEX IF NOT EXISTS idx_voice_review_queue_status ON voice_review_queue(status);
 CREATE INDEX IF NOT EXISTS idx_voice_review_queue_lookup
     ON voice_review_queue(table_name, column_name, rule, row_id);
+
+-- Globally-approved voice terms (2026-09) — "Approve term" on the review
+-- queue. Scoped to `rule='bare-ampersand'` only, on purpose: an ampersand
+-- violation is usually a real defined term/name ("Bain & Company"), which
+-- is exactly what a global, permanent approval is for; a banned word
+-- (`rule='buzzword'`) never gets a global approval from this table at
+-- all — Brian's own explicit call ("seamless" stays banned everywhere;
+-- allowing it in one specific spot is the row-scoped "Allow here"
+-- exception on voice_review_queue, `status='exception'`, not a change to
+-- what's banned). DB-backed, not source-code, since CI has no route to a
+-- live database anyway (same boundary voice_db_scan.py's own module
+-- docstring already states) — so this table is read only by the LIVE
+-- DB scan (`voice_db_scan.py`), never by the CI-only source-code scan in
+-- linklib/voice_review.py's `typography_findings`.
+CREATE TABLE IF NOT EXISTS voice_approved_terms (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    term       TEXT NOT NULL,
+    rule       TEXT NOT NULL DEFAULT 'bare-ampersand',
+    created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_approved_terms_unique
+    ON voice_approved_terms(rule, term COLLATE NOCASE);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -2538,6 +2562,14 @@ class Library:
             # "an admin typed this" from "the seed sync did this again" at a
             # glance, without having to reverse-engineer it from the excerpt.
             "ALTER TABLE voice_review_queue ADD COLUMN source TEXT",
+            # 2026-09 bidirectional-sync + approve-term follow-up: a plain
+            # note explaining an automatic resolution not driven by one of
+            # the queue's own per-row actions — set only by
+            # `reconcile_voice_review_queue()` ("resolved outside the
+            # queue — no longer found on the last scan") and
+            # `approve_voice_term()` ("approved as a global term"). NULL
+            # for every row resolved through an ordinary per-row action.
+            "ALTER TABLE voice_review_queue ADD COLUMN resolution_note TEXT",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4269,11 +4301,18 @@ class Library:
             return value
         fixed = _voice_fix(value)
         if fixed != value:
-            self.log_voice_correction(table, row_id, column, value, fixed, source=source)
+            # Which rule actually fired (spaced-em-dash vs. invisible-
+            # character) is derived from the PRE-fix text, since
+            # normalize_voice_mechanics can apply more than one correction
+            # in a single call — see voice_mechanics.correction_rule_for's
+            # own docstring for why invisible-character is checked first.
+            self.log_voice_correction(table, row_id, column, value, fixed,
+                                       source=source, rule=_voice_fix_rule(value))
         return fixed
 
     def log_voice_correction(self, table: str, row_id, column: str,
-                              before: str, after: str, source: str | None = None) -> None:
+                              before: str, after: str, source: str | None = None,
+                              rule: str = "spaced-em-dash") -> None:
         """Record one `_voice_fix` correction as an `auto_corrected` review-
         queue row. No-op when before==after (nothing actually changed) —
         callers should still be free to call this unconditionally; see `_vf`
@@ -4290,7 +4329,14 @@ class Library:
         whether/how the correction is logged, only what's recorded about
         who/what triggered it, so a reviewer at /admin/voice/review-queue
         can tell "an admin typed this" from "the seed sync did this again"
-        without reverse-engineering it from the excerpt."""
+        without reverse-engineering it from the excerpt.
+
+        `rule` (2026-09, invisible-character auto-strip) defaults to
+        'spaced-em-dash' for every pre-existing caller that never passed it
+        — `_vf` above passes the real rule explicitly, derived from the
+        pre-fix text via `voice_mechanics.correction_rule_for`, since
+        `normalize_voice_mechanics` can now apply more than one kind of
+        correction in a single call."""
         if before == after:
             return
         self.conn.execute(
@@ -4298,7 +4344,7 @@ class Library:
             "(table_name, row_id, column_name, rule, excerpt, before_text, after_text, status, created_at, source) "
             "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (table, str(row_id) if row_id is not None else None, column,
-             "spaced-em-dash", after[:200], before, after, "auto_corrected", _now(), source),
+             rule, after[:200], before, after, "auto_corrected", _now(), source),
         )
         self.conn.commit()
 
@@ -4392,17 +4438,25 @@ class Library:
         `edited_text` back to the live row), 'accept_exception' (mark this
         specific record+column+rule as a deliberate, permanent exception —
         never resurfaces as `open` again, tracked separately from the
-        global source-side ampersand allowlists). Returns False for an
-        unknown id or action; the caller (the admin route) is responsible
-        for actually writing `before_text`/`edited_text` back to the live
-        table/column — this method only updates the queue row's own state,
-        since it has no generic way to UPDATE an arbitrary table/column
-        safely without a real column allowlist per table."""
+        global source-side ampersand allowlists), 'use_seed' (a
+        'seed-disagreement' row only — write the seed's own text, i.e.
+        `after_text`, back to the live row and resolve), or 'keep_mine' (a
+        'seed-disagreement' row only — keep the currently-stored value
+        untouched and mark this exact location a permanent exception, so
+        the same divergence never reopens on a future sync). Returns False
+        for an unknown id or action; the caller (the admin route) is
+        responsible for actually writing `before_text`/`edited_text`/
+        `after_text` back to the live table/column — this method only
+        updates the queue row's own state, since it has no generic way to
+        UPDATE an arbitrary table/column safely without a real column
+        allowlist per table."""
         item = self.get_voice_review_item(item_id)
-        if not item or action not in ("accept", "revert", "edit", "accept_exception"):
+        valid_actions = ("accept", "revert", "edit", "accept_exception", "use_seed", "keep_mine")
+        if not item or action not in valid_actions:
             return False
         new_status = {"accept": "resolved", "revert": "resolved",
-                      "edit": "resolved", "accept_exception": "exception"}[action]
+                      "edit": "resolved", "accept_exception": "exception",
+                      "use_seed": "resolved", "keep_mine": "exception"}[action]
         self.conn.execute(
             "UPDATE voice_review_queue SET status=?, reviewed_at=? WHERE id=?",
             (new_status, _now(), item_id),
@@ -4436,6 +4490,218 @@ class Library:
                 self.conn.commit()
                 return True
         return False
+
+    def get_voice_review_current_value(self, table: str, row_id, column: str) -> str | None:
+        """The FULL, CURRENT live value of `(table, row_id, column)` — the
+        read-side counterpart of `apply_voice_review_write`, validated the
+        identical way (against `linklib.voice_db_scan._SCAN_TABLES` plus
+        the settings special case). Exists specifically so the review-queue
+        UI's "Edit" action can pre-fill with the real current column value
+        instead of the row's own `excerpt` (a mid-text snippet on a real
+        scanner finding, or a display label like "U+200B (zero-width
+        space)" on an invisible-character finding — neither is the full
+        column value, and saving either back verbatim would truncate or
+        replace real published copy with a fragment or a label; see
+        CLAUDE.md's Part 4 writeup for the incident this closes). Returns
+        None when the table/column isn't recognized or the row no longer
+        exists — the caller falls back to the queue row's own stored text
+        in that case, since there's nothing live left to read."""
+        from .voice_db_scan import _SCAN_TABLES
+        if table == "settings":
+            row = self.conn.execute("SELECT value FROM settings WHERE key=?", (column,)).fetchone()
+            return row[0] if row else None
+        for tname, id_col, columns, _exempt in _SCAN_TABLES:
+            if tname == table and column in columns and row_id is not None:
+                row = self.conn.execute(
+                    f"SELECT {column} FROM {table} WHERE {id_col}=?", (row_id,)
+                ).fetchone()
+                return row[0] if row else None
+        return None
+
+    def add_seed_disagreement_item(self, table: str, row_id, column: str,
+                                    stored_value: str, seed_value: str,
+                                    source: str | None = "startup-sync") -> int:
+        """Record a divergence between a live stored value and what a static
+        seed source (scripts/seed_tools.py, scripts/seed_communities.py,
+        webapp/app.py's _DEFAULT_BENCHMARKS) says it should be — the
+        replacement for `_seed_toolbox()`'s old behavior of silently
+        overwriting the stored value on every boot (see CLAUDE.md's Part 1
+        writeup, the seed-sync-overwrite fix). Rule is always
+        'seed-disagreement', a distinct rule from every mechanical/
+        typography finding, with its own pair of resolution actions
+        ('use_seed'/'keep_mine' — see `resolve_voice_review_item`).
+        `before_text` is the CURRENTLY STORED value, `after_text` is the
+        SEED's proposed value — "use seed version" applies `after_text`;
+        "keep mine" leaves the stored value untouched and marks this exact
+        (table, row_id, column) a permanent exception.
+
+        Deduplicated exactly like `add_voice_review_item`: skipped when this
+        exact (table, row_id, column) is already a permanent exception
+        (an admin already said "keep mine" — never reopens), or when an
+        `open` row already exists for it (repeated boots must not queue the
+        same divergence twice — the seed-sync infinite-loop bug this whole
+        mechanism replaces). Returns 0 when skipped for either reason, else
+        the new row's id."""
+        rule = "seed-disagreement"
+        if self.is_voice_exception(table, row_id, column, rule):
+            return 0
+        if self.has_open_voice_review_item(table, row_id, column, rule):
+            return 0
+        cur = self.conn.execute(
+            "INSERT INTO voice_review_queue "
+            "(table_name, row_id, column_name, rule, excerpt, before_text, after_text, status, created_at, source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (table, str(row_id) if row_id is not None else None, column, rule,
+             seed_value[:200], stored_value, seed_value, "open", _now(), source),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    # --- Voice review queue: globally-approved terms ("Approve term") ------
+
+    def list_approved_voice_terms(self, rule: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM voice_approved_terms"
+        params: tuple = ()
+        if rule:
+            sql += " WHERE rule=?"
+            params = (rule,)
+        sql += " ORDER BY term COLLATE NOCASE"
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def is_approved_voice_term(self, rule: str, text: str) -> bool:
+        """True when `text` contains (case-insensitively) any term already
+        approved for `rule`. A standalone, ad-hoc "has this term already
+        been approved" check — NOT the mechanism the live DB scanner
+        actually uses to mask approved terms out of a bare-ampersand scan
+        (that's `voice_review.mask_approved_ampersand_terms`, called from
+        `voice_db_scan.scan_db_copy_report` with the full approved-terms
+        list read once per scan via `list_approved_voice_terms`, not this
+        per-value method). Confirmed by inspection: this method currently
+        has no live caller anywhere in the app — kept as a small, tested,
+        directly-usable primitive for a future call site (e.g. an admin UI
+        that wants to show "already approved" before offering the Approve
+        action), not because anything reads it today."""
+        if not text:
+            return False
+        low = text.lower()
+        for row in self.list_approved_voice_terms(rule):
+            if row["term"].lower() in low:
+                return True
+        return False
+
+    def approve_voice_term(self, term: str, rule: str = "bare-ampersand") -> int:
+        """Globally, permanently approve `term` for `rule` — "this specific
+        matched term is always fine, everywhere." Resolves every currently
+        OPEN queue row of the same `rule` whose stored excerpt/before/after
+        text contains `term` (case-insensitive), all at once, with a
+        `resolution_note` saying so. Idempotent on the term itself (a
+        second approval of the identical term is a no-op insert, still
+        re-sweeps open rows in case one was queued since). Returns the new
+        (or existing) row's id."""
+        term = (term or "").strip()
+        if not term:
+            raise ValueError("A term to approve is required.")
+        existing = self.conn.execute(
+            "SELECT id FROM voice_approved_terms WHERE rule=? AND term=? COLLATE NOCASE",
+            (rule, term),
+        ).fetchone()
+        if existing:
+            term_id = existing[0]
+        else:
+            cur = self.conn.execute(
+                "INSERT INTO voice_approved_terms (term, rule, created_at) VALUES (?,?,?)",
+                (term, rule, _now()),
+            )
+            self.conn.commit()
+            term_id = cur.lastrowid
+        low_term = term.lower()
+        note = f'Approved as a global term ("{term}").'
+        for item in self.list_voice_review_queue(status="open"):
+            if item["rule"] != rule:
+                continue
+            haystack = " ".join(filter(None, [item.get("excerpt"), item.get("before_text"), item.get("after_text")])).lower()
+            if low_term in haystack:
+                self.conn.execute(
+                    "UPDATE voice_review_queue SET status='resolved', reviewed_at=?, resolution_note=? WHERE id=?",
+                    (_now(), note, item["id"]),
+                )
+        self.conn.commit()
+        return term_id
+
+    def remove_approved_voice_term(self, term_id: int) -> None:
+        """Removing an approved term makes it flaggable again on the NEXT
+        scan/reconciliation pass — it does not retroactively reopen queue
+        rows already resolved by the earlier approval; that history stays
+        (see `voice_review_queue.resolution_note`)."""
+        self.conn.execute("DELETE FROM voice_approved_terms WHERE id=?", (term_id,))
+        self.conn.commit()
+
+    def reconcile_voice_review_queue(self) -> dict:
+        """Bidirectional sync between the live DB scan
+        (`voice_db_scan.scan_db_copy`) and `voice_review_queue` — closes a
+        real 2026-09 gap in both directions, found when /admin/checks'
+        scan count and the review queue's open count disagreed:
+
+        1. Write-time logging (`Library._vf`/`log_voice_correction`) only
+           ever captures AUTO-CORRECTIONS (things `normalize_voice_mechanics`
+           can fix mechanically, like a spaced em dash). It never captures a
+           finding that needs human judgment (a bare ampersand, a banned
+           word) — nothing writes those to the queue except a scan. A new
+           violation of that kind entering the DB via an ordinary admin save
+           sat invisible in the live scan but never reached the queue until
+           someone manually re-ran the backfill script.
+        2. The reverse was also broken: fixing an ampersand/banned-word
+           violation directly on a record's own admin edit page (bypassing
+           the queue's own resolution actions) makes it disappear from the
+           scan, but its OPEN queue row stayed open forever, since nothing
+           closed it.
+
+        Run periodically from the background checks refresher
+        (`webapp.tasks`), not on every request — a full DB scan is real
+        work, the same reasoning `run_all()`'s own TTL cache already uses.
+        Never touches 'seed-disagreement' rows (those come from
+        `_seed_toolbox()`'s own sync pass, not this scanner, and have their
+        own separate lifecycle) or already-resolved/exception rows.
+        Returns {"added": n, "closed": n} for the caller to log/report."""
+        from . import voice_db_scan
+
+        live = voice_db_scan.scan_db_copy(self)
+        live_keys = {
+            (v.table, str(v.row_id) if v.row_id is not None else None, v.column, v.rule)
+            for v in live
+        }
+
+        added = 0
+        for v in live:
+            # add_voice_review_item already dedupes internally against both
+            # an existing exception and an existing open row (see its own
+            # docstring) — it returns 0, never inserting, in either case, so
+            # a truthy return here always means a genuinely new row.
+            new_id = self.add_voice_review_item(v.table, v.row_id, v.column, v.rule, v.excerpt, source="script")
+            if new_id:
+                added += 1
+
+        closed = 0
+        # Every rule the live DB scan can actually produce (mechanical_findings'
+        # four rules plus typography_findings_plain's two) — deliberately
+        # excludes 'seed-disagreement' (a different mechanism, _seed_toolbox's
+        # own sync pass, not this scanner) and 'holistic' (Claude-judged, never
+        # scanned automatically), so this reconciliation only ever closes a
+        # row this exact scan could have produced or reproduced.
+        scanned_rules = {"buzzword", "filler", "performative", "invisible-character",
+                         "bare-ampersand", "spaced-em-dash"}
+        for item in self.list_voice_review_queue(status="open"):
+            if item["rule"] not in scanned_rules:
+                continue
+            key = (item["table_name"], item["row_id"], item["column_name"], item["rule"])
+            if key not in live_keys:
+                self.conn.execute(
+                    "UPDATE voice_review_queue SET status='resolved', reviewed_at=?, resolution_note=? WHERE id=?",
+                    (_now(), "Resolved outside the queue — no longer found on the last scan.", item["id"]),
+                )
+                closed += 1
+        self.conn.commit()
+        return {"added": added, "closed": closed}
 
     # --- near-duplicate feedback ------------------------------------------
 
@@ -5387,8 +5653,8 @@ class Library:
         # PR's own CI guard accepted a bare _voice_fix() call as
         # sufficient; found and fixed here by the same tightened guard
         # that closed the tool_categories/community_categories gap.
-        self.log_voice_correction("tools", new_id, "description", description_before, description_fixed, source=source)
-        self.log_voice_correction("tools", new_id, "summary", summary_before, summary_fixed, source=source)
+        self.log_voice_correction("tools", new_id, "description", description_before, description_fixed, source=source, rule=_voice_fix_rule(description_before))
+        self.log_voice_correction("tools", new_id, "summary", summary_before, summary_fixed, source=source, rule=_voice_fix_rule(summary_before))
         return new_id
 
     def list_tools(self, approved_only: bool = True) -> list[dict]:
@@ -6115,8 +6381,8 @@ class Library:
         # Logged AFTER insert, using the real row id — the one write path in
         # this file where `_vf` can't be used directly (no id exists until
         # the INSERT itself returns one).
-        self.log_voice_correction("category_features", new_id, "definition", definition_before, definition_fixed, source=source)
-        self.log_voice_correction("category_features", new_id, "pointer_note", pointer_note_before, pointer_note_fixed, source=source)
+        self.log_voice_correction("category_features", new_id, "definition", definition_before, definition_fixed, source=source, rule=_voice_fix_rule(definition_before))
+        self.log_voice_correction("category_features", new_id, "pointer_note", pointer_note_before, pointer_note_fixed, source=source, rule=_voice_fix_rule(pointer_note_before))
         return new_id
 
     def update_category_feature(self, feature_id: int, name: str, definition: str,
@@ -6504,7 +6770,7 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("tool_categories", new_id, "description", description, description_fixed, source=source)
+        self.log_voice_correction("tool_categories", new_id, "description", description, description_fixed, source=source, rule=_voice_fix_rule(description))
         return new_id
 
     def rename_tool_category(self, category_id: int, new_name: str, description: str = "", source: str | None = None) -> int:
@@ -6616,7 +6882,7 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("benchmarks", new_id, "description", description_before, description_fixed, source=source)
+        self.log_voice_correction("benchmarks", new_id, "description", description_before, description_fixed, source=source, rule=_voice_fix_rule(description_before))
         return new_id
 
     def update_benchmark(self, benchmark_id: int, name: str, url: str, description: str,
@@ -6723,9 +6989,9 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("thought_leadership", new_id, "title", title_before, title_fixed, source=source)
-        self.log_voice_correction("thought_leadership", new_id, "venue", venue_before, venue_fixed, source=source)
-        self.log_voice_correction("thought_leadership", new_id, "description", description_before, description_fixed, source=source)
+        self.log_voice_correction("thought_leadership", new_id, "title", title_before, title_fixed, source=source, rule=_voice_fix_rule(title_before))
+        self.log_voice_correction("thought_leadership", new_id, "venue", venue_before, venue_fixed, source=source, rule=_voice_fix_rule(venue_before))
+        self.log_voice_correction("thought_leadership", new_id, "description", description_before, description_fixed, source=source, rule=_voice_fix_rule(description_before))
         return new_id
 
     def update_thought_leadership(self, item_id: int, type: str, title: str, url: str, venue: str,
@@ -6811,10 +7077,10 @@ class Library:
         # add_category_feature does the same: no id exists until the INSERT
         # itself returns one, so _vf's inline "value already known, wrap it"
         # shape can't be used here.
-        self.log_voice_correction("original_content", new_id, "title", title_before, title_fixed, source=source)
-        self.log_voice_correction("original_content", new_id, "teaser", teaser_before, teaser_fixed, source=source)
+        self.log_voice_correction("original_content", new_id, "title", title_before, title_fixed, source=source, rule=_voice_fix_rule(title_before))
+        self.log_voice_correction("original_content", new_id, "teaser", teaser_before, teaser_fixed, source=source, rule=_voice_fix_rule(teaser_before))
         if body_md:
-            self.log_voice_correction("original_content", new_id, "body_md", body_md, body_fixed, source=source)
+            self.log_voice_correction("original_content", new_id, "body_md", body_md, body_fixed, source=source, rule=_voice_fix_rule(body_md))
         return new_id
 
     def update_original_content(self, item_id: int, slug: str, title: str, teaser: str, tag_label: str,
@@ -6884,10 +7150,10 @@ class Library:
         # Logged AFTER insert, using the real row id — same reason
         # add_original_content/add_category_feature do the same: no id
         # exists until the INSERT itself returns one.
-        self.log_voice_correction("ai_surfaces", new_id, "title", title_before, title_fixed, source=source)
-        self.log_voice_correction("ai_surfaces", new_id, "teaser", teaser_before, teaser_fixed, source=source)
+        self.log_voice_correction("ai_surfaces", new_id, "title", title_before, title_fixed, source=source, rule=_voice_fix_rule(title_before))
+        self.log_voice_correction("ai_surfaces", new_id, "teaser", teaser_before, teaser_fixed, source=source, rule=_voice_fix_rule(teaser_before))
         if body_md:
-            self.log_voice_correction("ai_surfaces", new_id, "body_md", body_md, body_fixed, source=source)
+            self.log_voice_correction("ai_surfaces", new_id, "body_md", body_md, body_fixed, source=source, rule=_voice_fix_rule(body_md))
         return new_id
 
     def update_ai_surface(self, item_id: int, slug: str, title: str, teaser: str,
@@ -7043,10 +7309,10 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("communities", new_id, "demographic", demographic_before, demographic_fixed, source=source)
-        self.log_voice_correction("communities", new_id, "cost_note", cost_note_before, cost_note_fixed, source=source)
-        self.log_voice_correction("communities", new_id, "notes", notes_before, notes_fixed, source=source)
-        self.log_voice_correction("communities", new_id, "local_markets", local_markets_before, local_markets_fixed, source=source)
+        self.log_voice_correction("communities", new_id, "demographic", demographic_before, demographic_fixed, source=source, rule=_voice_fix_rule(demographic_before))
+        self.log_voice_correction("communities", new_id, "cost_note", cost_note_before, cost_note_fixed, source=source, rule=_voice_fix_rule(cost_note_before))
+        self.log_voice_correction("communities", new_id, "notes", notes_before, notes_fixed, source=source, rule=_voice_fix_rule(notes_before))
+        self.log_voice_correction("communities", new_id, "local_markets", local_markets_before, local_markets_fixed, source=source, rule=_voice_fix_rule(local_markets_before))
         return new_id
 
     def list_communities(self, approved_only: bool = True) -> list[dict]:
@@ -7834,7 +8100,7 @@ class Library:
         # Logged AFTER insert, using the real row id — no id exists until
         # the INSERT itself returns one (same reason add_original_content/
         # add_category_feature do the same).
-        self.log_voice_correction("community_categories", new_id, "description", description, description_fixed, source=source)
+        self.log_voice_correction("community_categories", new_id, "description", description, description_fixed, source=source, rule=_voice_fix_rule(description))
         return new_id
 
     def rename_community_category(self, category_id: int, new_name: str, description: str = "", source: str | None = None) -> int:

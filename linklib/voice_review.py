@@ -238,6 +238,7 @@ AMPERSAND_NAMES = [
     "Research & Development",  # ditto
     "CFOs & VP Finance",       # linklib/enrich.py community-profile prompt example, per Brian
     "Flux Analysis & Summaries",  # linklib/feature_scan.py few-shot example, per Brian
+    "Bain & Company",  # webapp/app.py's "Approve term" placeholder example (2026-09)
 ]
 
 # Code that legitimately contains an ampersand inside a string literal, removed
@@ -293,12 +294,36 @@ _BARE_AMPERSAND = re.compile(r"&amp;|(?<=[\s>])&(?=[\s<])")
 # 80+-character run around a real dash would just miss detection on that
 # one occurrence (a false negative on an already-absurd edge case), never a
 # false positive or a correctness change for normal copy.
-_SPACED_MDASH_ENTITY = re.compile(r"(?:\s|&nbsp;){1,80}&mdash;(?:\s|&nbsp;){1,80}")
+# One-sided-spacing gap, found and fixed (2026-09): this pattern used to
+# require whitespace on BOTH sides of the entity, so a one-sided case like
+# `pass&mdash;\nauto-corrected` (no space before the entity, a newline
+# after it) never matched — confirmed live against this exact review-queue
+# page's own intro copy, which had precisely this shape (see linklib/
+# voice_mechanics.py's matching `_SPACED_EM_DASH` fix for the sibling gap
+# in the write-time backstop's own unicode-em-dash check). Fixed the same
+# way: an alternation requiring 1-80 on either side alone (the other side
+# 0-80), every quantifier still individually bounded so the {1,80} bounding
+# discipline documented above is unchanged, just tried twice per position
+# instead of once.
+_SPACED_MDASH_ENTITY = re.compile(
+    r"(?:(?:\s|&nbsp;){1,80}&mdash;(?:\s|&nbsp;){0,80})"
+    r"|"
+    r"(?:(?:\s|&nbsp;){0,80}&mdash;(?:\s|&nbsp;){1,80})"
+)
 
 _EMBEDDED_COMMENTS = [
     re.compile(r"/\*.*?\*/", re.S),      # CSS and JS block comments
     re.compile(r"<!--.*?-->", re.S),     # HTML comments
     re.compile(r"(?m)^[ \t]*//.*$"),     # whole-line JS comments
+    # A whole-line Python `#` comment — reachable inside a "literal" span
+    # only via implicit adjacent-string-literal concatenation, where a
+    # comment sits physically between two literal parts with nothing else
+    # on its own line (see `_copy_literals`'s own docstring on why the
+    # SOURCE SEGMENT, comment included, is what gets scanned in the first
+    # place). Found by the em-dash-widening PR (2026-09): a real Python
+    # comment's own prose can contain a spaced em dash that has nothing to
+    # do with rendered UI copy, and nothing here was stripping it.
+    re.compile(r"(?m)^[ \t]*#.*$"),
 ]
 
 
@@ -315,9 +340,20 @@ def strip_embedded_comments(text: str) -> str:
 
 
 def _mask(text: str, patterns) -> str:
-    """Same length-preserving blanking, for the allowlisted spans."""
+    """Same length-preserving blanking, for the allowlisted spans.
+
+    Uses a non-whitespace filler ("_"), NOT a space — found and fixed
+    (2026-09, the em-dash widening PR): a plain-space filler here creates a
+    false positive once the widened spaced-em-dash regex only requires
+    whitespace on ONE side of a dash (the other side is allowed zero). An
+    allowlisted ampersand term (e.g. "FP&A") sitting immediately, unspaced,
+    next to an em dash ("more&mdash;FP&A Buddy") gets masked to same-length
+    SPACES, which the widened regex then reads as real whitespace adjacent
+    to the dash — a spurious "spaced em dash" finding on text that was
+    genuinely unspaced. An underscore can never satisfy `_SPACE_CLASS`/`\\s`,
+    so this can't happen regardless of what's masked."""
     for rx in patterns:
-        text = rx.sub(lambda m: " " * len(m.group(0)), text)
+        text = rx.sub(lambda m: "_" * len(m.group(0)), text)
     return text
 
 
@@ -452,13 +488,47 @@ def typography_findings(source: str) -> list[tuple[str, int, str]]:
     return findings
 
 
-def typography_findings_plain(text: str) -> list[tuple[str, str]]:
+def mask_approved_ampersand_terms(text: str, approved_terms) -> str:
+    """Blank out every case-insensitive occurrence of an approved bare-
+    ampersand term (e.g. "Bain & Company") before scanning, the same
+    masking technique `_mask_rubric_enumerations` already uses — a real,
+    global "Approve term" decision (see `Library.approve_voice_term`) has
+    to stop the term's own ampersand from being re-flagged on the very next
+    scan, not just resolve the queue row that already exists for it.
+    Replaced with same-length UNDERSCORES, not deleted outright and not
+    spaces — same "_mask" fix and same reason (2026-09 em-dash widening PR):
+    a term sitting unspaced next to a real em dash would mask to spaces and
+    read as a spaced em dash to the widened, one-side-suffices regex. An
+    underscore preserves the surrounding character offsets (used by the
+    excerpt-window logic below) without that risk. DB-scan-only: never
+    called from `typography_findings` (the CI-only source-code scanner),
+    which has no database to read an approved-terms list from in the first
+    place."""
+    if not approved_terms:
+        return text
+    for term in approved_terms:
+        if not term:
+            continue
+        pattern = re.compile(re.escape(term), re.IGNORECASE)
+        text = pattern.sub(lambda m: "_" * len(m.group(0)), text)
+    return text
+
+
+def typography_findings_plain(text: str, approved_ampersand_terms=()) -> list[tuple[str, str]]:
     """Same bare-ampersand/spaced-em-dash rules as `typography_findings`, but
     for a single already-plain-text value rather than Python source — the
     shape a database column's content comes in. No `ast.parse`, no line
     number: the whole `text` IS the copy, not something to extract a literal
     from. Used by the DB-backed-copy scanner (see CLAUDE.md's "Database
-    content is scanned too" note) — never by anything reading Python source."""
+    content is scanned too" note) — never by anything reading Python source.
+
+    `approved_ampersand_terms` (2026-09, "Approve term") is an optional
+    iterable of globally-approved bare-ampersand terms, masked out of `text`
+    before scanning via `mask_approved_ampersand_terms` — omitted by every
+    caller that has no database to read the approved-terms list from
+    (i.e. `typography_findings` itself never passes this)."""
+    if approved_ampersand_terms:
+        text = mask_approved_ampersand_terms(text, approved_ampersand_terms)
     return _typography_findings_in_literal(text)
 
 

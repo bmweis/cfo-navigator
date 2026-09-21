@@ -205,11 +205,17 @@ def test_seed_toolbox_never_reverts_a_regenerated_description(app_client):
 
 
 def test_seed_toolbox_still_syncs_name(app_client):
-    """name sync is unaffected by the description-sync retirement above —
-    nothing ever AI-drafts a tool's name, so it carries none of the same
-    risk, and Brian still occasionally renames a seed-listed tool by
+    """name divergence is still detected on every boot, but — per the
+    2026-09 seed-sync-overwrite fix (CLAUDE.md's Part 1 writeup) — it no
+    longer silently overwrites the live value the way it used to. The live
+    name stays exactly what an admin set it to; the divergence is queued
+    as a 'seed-disagreement' review item (via
+    Library.add_seed_disagreement_item, routed through a real Library
+    method, not a raw unlogged UPDATE) for an explicit human resolution
+    instead. Brian still occasionally renames a seed-listed tool by
     editing scripts/seed_tools.py directly (e.g. an "(acquired by ...)"
-    suffix)."""
+    suffix) — that divergence now surfaces at /admin/voice/review-queue
+    rather than applying itself."""
     from linklib.db import Library
     from scripts.seed_tools import TOOLS
 
@@ -227,5 +233,18 @@ def test_seed_toolbox_still_syncs_name(app_client):
 
     lib = Library(app_client)
     row = lib.get_tool(tool_id)
+    items = lib.list_voice_review_queue()
     lib.close()
-    assert row["name"] == seed_entry["name"]
+
+    # The live name is untouched — no silent overwrite.
+    assert row["name"] == "Old Name Before A Rename"
+    assert row["name"] != seed_entry["name"]
+
+    # The divergence is queued instead, with the seed's own proposed name.
+    hits = [i for i in items if i["table_name"] == "tools"
+            and i["row_id"] == str(tool_id) and i["column_name"] == "name"
+            and i["rule"] == "seed-disagreement"]
+    assert hits, "expected a queued seed-disagreement item for the diverged tool name"
+    assert hits[0]["before_text"] == "Old Name Before A Rename"
+    assert hits[0]["after_text"] == seed_entry["name"]
+    assert hits[0]["source"] == "startup-sync"
