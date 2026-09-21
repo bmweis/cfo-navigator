@@ -58,6 +58,7 @@ this follow-up.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
@@ -66,6 +67,8 @@ from linklib.db import Library
 from linklib.models import models_review_is_stale
 from linklib.pricing import exa_pricing_review_is_stale, pricing_review_is_stale
 from webapp import checks as _checks
+
+_logger = logging.getLogger(__name__)
 
 # _failing_checks_count() badges /admin and /admin/library with the same
 # in-app check results /admin/checks itself computes live — but
@@ -184,22 +187,86 @@ def _failing_checks_count() -> int:
 # so the badge can be up to roughly 2 minutes behind the true state in the
 # worst case, the same order of staleness the TTL cache already promised,
 # just no longer paid for by whichever request happens to land first.
+#
+# Connection safety (2026-09 follow-up, confirmed rather than assumed): this
+# thread never shares a sqlite3 connection with any other thread. Every
+# check in run_all() that touches the DB (original_content_mirror_problems,
+# voice_review_queue_status, and every route coral_moment_problems() renders
+# via TestClient) does so through webapp.app._lib(), which always opens a
+# brand-new Library(DB_PATH) — and therefore a brand-new sqlite3.connect()
+# call — and closes it before returning, entirely within whichever thread
+# is currently executing. sqlite3 connections default to check_same_thread=
+# True (this codebase never overrides that — grepped linklib/db.py), so a
+# shared connection touched from two threads would raise immediately rather
+# than silently corrupt anything; the fact that nothing here has ever hit
+# that error is a real confirmation this thread opens its own connections,
+# not just an absence of evidence.
+#
+# Worker-process count (2026-09 follow-up): production runs uvicorn with no
+# --workers flag (Dockerfile CMD / Procfile both start `uvicorn
+# webapp.app:app` bare) — uvicorn's own default is a single worker process,
+# matching this codebase's existing single-process assumption elsewhere
+# (see _JOB_STATE's own comment above). So today there is exactly one of
+# these threads running in production. If that ever changed to N>1 worker
+# processes, each is a separate OS process with its own Python interpreter
+# and its own copy of every module-level global here (_checks_cache,
+# _checks_refresher_started, ...) — nothing in this module is shared across
+# processes. Each worker would start and run its own independent refresher,
+# computing run_all() on its own schedule against the same underlying
+# database. That's safe (no shared-state hazard, no corruption risk — each
+# process's cache is self-consistent) but wasteful (N redundant run_all()
+# passes every interval instead of one) and can let the badge value
+# genuinely differ by request depending on which worker answers it, if two
+# workers' refresh cycles drift out of phase. Worth revisiting (e.g. moving
+# the schedule into a single cron-style trigger, or accepting the
+# redundancy as cheap enough to ignore) only if/when a real multi-worker
+# deploy is adopted — not a concern under the current single-process setup.
 _checks_refresher_started = False
 _checks_refresher_lock = threading.Lock()
+
+# Per-attempt state (2026-09, health-visibility follow-up) — deliberately
+# separate from _checks_cache, which only ever holds the last SUCCESSFUL
+# result. A refresher that's alive but failing every pass would otherwise
+# look identical, from the outside, to one that died outright: the cache
+# just sits there, unrefreshed, either way. Tracking every attempt (not
+# just successes) is what lets /admin/checks tell those two states apart —
+# "last successful refresh 6 minutes ago, last attempt 4 seconds ago" is a
+# live-but-failing refresher; "last successful refresh 6 minutes ago, last
+# attempt 6 minutes ago" is a dead one.
+_checks_last_attempt_at: float | None = None
+_checks_last_error: str | None = None
+
+
+def _run_one_refresh_iteration() -> None:
+    """One pass: compute + cache on success, log + record on failure — never
+    raises. Pulled out of the sleep loop below so a test can call this
+    directly, synchronously, without spinning up a thread or waiting on
+    time.sleep(_CHECKS_CACHE_TTL) — this is the one code path that actually
+    makes production fast, and before this it had no direct test coverage
+    at all (only the request-triggered synchronous fallback in
+    _failing_checks_count() did)."""
+    global _checks_cache, _checks_last_attempt_at, _checks_last_error
+    with _checks_cache_lock:
+        _checks_last_attempt_at = time.time()
+    try:
+        count = _compute_failing_checks_count()
+    except Exception as exc:
+        # Never let one bad pass kill the loop — leave whatever's cached
+        # (possibly nothing yet) and try again next interval. Logged, not
+        # silently swallowed, so a persistently failing refresher shows up
+        # in Railway's own logs even before anyone looks at /admin/checks.
+        _logger.exception("Background checks refresher iteration failed")
+        with _checks_cache_lock:
+            _checks_last_error = f"{type(exc).__name__}: {exc}"
+    else:
+        with _checks_cache_lock:
+            _checks_cache = (time.time(), count)
+            _checks_last_error = None
 
 
 def _checks_refresher_loop() -> None:
     while True:
-        try:
-            count = _compute_failing_checks_count()
-        except Exception:
-            # Never let one bad pass kill the loop — leave whatever's
-            # cached (possibly nothing yet) and try again next interval.
-            pass
-        else:
-            with _checks_cache_lock:
-                global _checks_cache
-                _checks_cache = (time.time(), count)
+        _run_one_refresh_iteration()
         time.sleep(_CHECKS_CACHE_TTL)
 
 
@@ -214,6 +281,24 @@ def start_background_checks_refresher() -> None:
             return
         _checks_refresher_started = True
     threading.Thread(target=_checks_refresher_loop, daemon=True).start()
+
+
+def refresher_status() -> dict:
+    """What /admin/checks renders so a dead or failing refresher is visible
+    on the page itself, not inferred from a slow load — the same standing
+    rule that section's own copy already states for the disk-space check
+    ("a healthy check that says nothing looks identical to one that never
+    ran"). Returns last_success_at/last_attempt_at (epoch seconds, or None
+    if it hasn't happened yet) and last_error (the most recent exception
+    message, or None if the last attempt succeeded or none has run)."""
+    with _checks_cache_lock:
+        last_success_at = _checks_cache[0] if _checks_cache is not None else None
+        return {
+            "started": _checks_refresher_started,
+            "last_success_at": last_success_at,
+            "last_attempt_at": _checks_last_attempt_at,
+            "last_error": _checks_last_error,
+        }
 
 
 def _stale_admin_checks_reminders(lib: Library) -> int:

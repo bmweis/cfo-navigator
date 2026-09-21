@@ -851,3 +851,123 @@ def test_reentrant_call_skips_recomputation_entirely(no_password_env):
         )
     finally:
         taskmod._checks.run_all = orig_run_all
+
+
+# --- Background checks refresher: single-iteration + health visibility -----
+# (2026-09 follow-up) — before this, the one code path that actually makes
+# production fast (webapp.tasks._run_one_refresh_iteration, driven on a
+# schedule by _checks_refresher_loop) had no direct test coverage at all;
+# only the request-triggered synchronous fallback in _failing_checks_count()
+# did. These call it directly and synchronously — no thread, no
+# time.sleep(_CHECKS_CACHE_TTL) — so they run in a fraction of a second.
+
+@pytest.fixture
+def refresher_state_reset():
+    """Isolates each test in this section from whatever _checks_cache/
+    _checks_last_attempt_at/_checks_last_error a previous test in this same
+    process left behind — same reset discipline as the re-entrancy tests
+    above."""
+    from webapp import tasks as taskmod
+    taskmod._checks_cache = None
+    taskmod._checks_computing = False
+    taskmod._checks_last_attempt_at = None
+    taskmod._checks_last_error = None
+    yield taskmod
+    taskmod._checks_cache = None
+    taskmod._checks_computing = False
+    taskmod._checks_last_attempt_at = None
+    taskmod._checks_last_error = None
+
+
+def test_run_one_refresh_iteration_updates_cache_on_success(refresher_state_reset, monkeypatch):
+    taskmod = refresher_state_reset
+    monkeypatch.setattr(taskmod._checks, "run_all", lambda: [
+        {"where": "In-app", "ok": False}, {"where": "In-app", "ok": True},
+    ])
+
+    assert taskmod._checks_cache is None
+    assert taskmod.refresher_status()["last_success_at"] is None
+
+    taskmod._run_one_refresh_iteration()
+
+    assert taskmod._checks_cache is not None
+    assert taskmod._checks_cache[1] == 1   # one failing In-app row
+    status = taskmod.refresher_status()
+    assert status["last_success_at"] is not None
+    assert status["last_attempt_at"] is not None
+    assert status["last_error"] is None
+
+
+def test_run_one_refresh_iteration_catches_and_records_exceptions(refresher_state_reset, monkeypatch, caplog):
+    """The core ask: one bad pass must not propagate, must not corrupt the
+    cache, and must be visible afterward (both logged, per the standing
+    "never silently fail" rule, and recorded in refresher_status() for
+    /admin/checks to render)."""
+    taskmod = refresher_state_reset
+
+    def boom():
+        raise RuntimeError("simulated run_all() failure")
+
+    monkeypatch.setattr(taskmod._checks, "run_all", boom)
+
+    import logging
+    with caplog.at_level(logging.ERROR, logger="webapp.tasks"):
+        taskmod._run_one_refresh_iteration()   # must not raise
+
+    assert taskmod._checks_cache is None   # nothing bogus written on failure
+    status = taskmod.refresher_status()
+    assert status["last_attempt_at"] is not None   # the attempt itself is still recorded
+    assert status["last_error"] is not None
+    assert "RuntimeError" in status["last_error"]
+    assert "simulated run_all() failure" in status["last_error"]
+    assert any("refresher" in r.message.lower() for r in caplog.records), (
+        "a failed iteration must be logged, not silently swallowed"
+    )
+
+    # And the loop keeps working on the next call — one bad pass doesn't
+    # wedge the refresher permanently.
+    monkeypatch.setattr(taskmod._checks, "run_all", lambda: [{"where": "In-app", "ok": True}])
+    taskmod._run_one_refresh_iteration()
+    assert taskmod._checks_cache is not None
+    assert taskmod._checks_cache[1] == 0
+    assert taskmod.refresher_status()["last_error"] is None   # a later success clears the error
+
+
+def test_refresher_status_reflects_started_flag(refresher_state_reset):
+    taskmod = refresher_state_reset
+    taskmod._checks_refresher_started = False
+    assert taskmod.refresher_status()["started"] is False
+    taskmod._checks_refresher_started = True
+    assert taskmod.refresher_status()["started"] is True
+    taskmod._checks_refresher_started = False   # don't leak into other tests
+
+
+def test_checks_refresher_banner_renders_all_three_states(refresher_state_reset):
+    """Direct coverage for webapp.app._checks_refresher_banner — never
+    started (red), started-but-no-success-yet (amber), and healthy
+    (green) — matching what admin_checks() actually feeds it via
+    webapp.tasks.refresher_status()."""
+    import time
+    import webapp.app as appmod
+
+    not_started = appmod._checks_refresher_banner(
+        {"started": False, "last_success_at": None, "last_attempt_at": None, "last_error": None})
+    assert "not started" in not_started
+    assert "var(--alert)" in not_started
+
+    starting_up = appmod._checks_refresher_banner(
+        {"started": True, "last_success_at": None, "last_attempt_at": time.time(), "last_error": None})
+    assert "hasn" in starting_up and "completed its first pass" in starting_up
+    assert "#92400e" in starting_up   # amber text color
+
+    healthy = appmod._checks_refresher_banner(
+        {"started": True, "last_success_at": time.time(), "last_attempt_at": time.time(), "last_error": None})
+    assert "last refreshed" in healthy
+    assert "var(--seafoam)" in healthy
+
+    failing = appmod._checks_refresher_banner(
+        {"started": True, "last_success_at": time.time() - 999, "last_attempt_at": time.time(),
+         "last_error": "RuntimeError: boom"})
+    assert "failing" in failing
+    assert "boom" in failing
+    assert "var(--alert)" in failing

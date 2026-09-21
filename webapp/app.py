@@ -26250,11 +26250,75 @@ def _disk_space_banner(status: dict | None) -> str:
             f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
 
 
+def _epoch_relative_age(epoch: float | None) -> str:
+    """_relative_age()'s own "3h ago" phrasing, for the background
+    refresher's plain time.time() floats rather than a stored ISO string —
+    converts once, then reuses that exact wording so this reads like every
+    other freshness line on this page, not a second phrasing."""
+    if epoch is None:
+        return ""
+    return _relative_age(datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat())
+
+
+def _checks_refresher_banner(status: dict) -> str:
+    """"Badge counts last refreshed at <time>" — makes the background
+    refresher (webapp.tasks.start_background_checks_refresher) that keeps
+    the admin nav/hub badge counts warm visible on the one page a dead or
+    failing refresher would otherwise be invisible from: without this, the
+    only symptom is the badge quietly going stale, indistinguishable from
+    "nothing's changed" until someone happens to notice a number is wrong.
+    Same "a healthy check states the real numbers, not just green" register
+    as the disk-space banner above.
+
+    Three states, not two: never started (red — the startup hook itself
+    didn't run, or start_background_checks_refresher() failed before
+    spawning the thread); started but failing (red — last_error is set, or
+    the most recent attempt is stale by more than one full refresh
+    interval past due, meaning at least one whole cycle was silently
+    skipped or is stuck); healthy (green — recent success, no error)."""
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+    alert_wash, alert = "var(--alert-wash)", "var(--alert)"
+    from webapp import tasks as _tasks
+
+    if not status["started"]:
+        bg, border, color = alert_wash, alert, alert
+        html = ('The background badge refresher has <strong>not started</strong>&mdash;the admin nav '
+                'and hub badge counts are running entirely on the synchronous fallback (computed inline '
+                'on whichever page render happens to hit a stale cache first).')
+        return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+                f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
+
+    last_success_age = _epoch_relative_age(status["last_success_at"])
+    last_attempt_age = _epoch_relative_age(status["last_attempt_at"])
+
+    if status["last_success_at"] is None:
+        bg, border, color = "#fef3c7", "#fde68a", "#92400e"
+        html = (f'The background badge refresher started but hasn&rsquo;t completed its first pass yet '
+                f'(last attempt {last_attempt_age or "just now"}). Normal for the first '
+                f'{_tasks._CHECKS_CACHE_TTL}s or so after a deploy&mdash;the synchronous fallback covers '
+                f'any page render that lands before it finishes.')
+    elif (status["last_error"]
+          # More than one full interval overdue for a fresh success means at
+          # least one whole scheduled pass was skipped, stuck, or failing.
+          or time.time() - status["last_success_at"] > 2 * _tasks._CHECKS_CACHE_TTL):
+        bg, border, color = alert_wash, alert, alert
+        error_note = f' Last error: <code>{_esc(status["last_error"])}</code>.' if status["last_error"] else ''
+        html = (f'The background badge refresher is <strong>failing</strong>&mdash;badge counts last '
+                f'refreshed successfully {last_success_age}, but the most recent attempt was '
+                f'{last_attempt_age}.{error_note}')
+    else:
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        html = f'Badge counts last refreshed {last_success_age}.'
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     from webapp import checks as _checks
+    from webapp import tasks as _tasks
     from linklib.voice_db_scan import scan_db_copy_report
     results = _checks.run_all()
     lib = _lib()
@@ -26265,6 +26329,7 @@ def admin_checks(request: Request):
         db_copy_report = scan_db_copy_report(lib)
     finally:
         lib.close()
+    refresher_banner = _checks_refresher_banner(_tasks.refresher_status())
     pricing_banner = _pricing_freshness_banner(pricing_last_verified)
     models_banner = _models_freshness_banner(models_last_reviewed)
     exa_pricing_banner = _exa_pricing_freshness_banner(exa_pricing_last_verified)
@@ -26331,6 +26396,9 @@ def admin_checks(request: Request):
 <h2 id="disk-space" style="margin:28px 0 4px;">Disk space</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Where the production volume actually stands&mdash;read live via <code>shutil.disk_usage</code>, never by shelling out to <code>df</code>. Mechanically computed on every load, same as the section above; a green row still states the real numbers, since a healthy check that says nothing looks identical to one that never ran.</p>
 {disk_banner}
+<h2 id="badge-refresh" style="margin:28px 0 4px;">Badge refresh</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The admin nav and hub badge counts above are kept warm by a background thread on its own schedule, not computed inline on whatever page render happens to land next&mdash;see CLAUDE.md's "logged-in slowness" investigation. Shown here so a dead or failing refresher is visible on the page itself, same as the two sections above: a healthy state that says nothing looks identical to one that never ran.</p>
+{refresher_banner}
 <p style="color:var(--ink-soft);margin:24px 0 -4px;font-size:14px;line-height:1.6;">None of the three sections below can be checked automatically&mdash;there&rsquo;s no pricing or model-catalog API to reconcile these tables against, so each is a dated reminder for a human re-check, not a pass/fail test.</p>
 <h2 id="pricing-freshness" style="margin:28px 0 4px;">Pricing freshness</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table still accurate against Anthropic&rsquo;s current published rates?</p>
