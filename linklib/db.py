@@ -4275,11 +4275,41 @@ class Library:
         ).fetchone()
         return row is not None
 
+    def has_open_voice_review_item(self, table: str, row_id, column: str, rule: str) -> bool:
+        """True when an `open` review-queue row already exists for this exact
+        (table, row_id, column, rule) location — regardless of the excerpt
+        text, since the same underlying violation at the same location only
+        needs reviewing once. A distinct check from `is_voice_exception`:
+        this is an unresolved PENDING review, not a permanent accepted
+        exception, and the two are tracked separately (see 2026-09's
+        double-insert incident — `scripts/backfill_voice_review_queue.py`
+        used to dedupe against accepted exceptions only, so a re-scan after
+        an unrelated rule change re-proposed every already-queued finding as
+        if it were new). Matching drops the excerpt deliberately: a finding
+        that's still open at this location shouldn't be re-queued a second
+        time just because a scan re-run produced a slightly different
+        excerpt for it (e.g. from an unrelated nearby edit) — it's the same
+        review item either way. Once resolved (any status other than
+        'open'), the same finding CAN legitimately be re-queued if it
+        reappears — this only ever suppresses a duplicate of a still-open
+        row."""
+        row = self.conn.execute(
+            "SELECT 1 FROM voice_review_queue WHERE table_name=? AND column_name=? AND rule=? "
+            "AND status='open' AND row_id IS ? LIMIT 1",
+            (table, column, rule, str(row_id) if row_id is not None else None),
+        ).fetchone()
+        return row is not None
+
     def add_voice_review_item(self, table: str, row_id, column: str, rule: str,
                                excerpt: str) -> int:
         """Insert an `open` review-queue row (a scanner finding that can't be
-        auto-corrected) — skipped when a matching exception already exists."""
+        auto-corrected) — skipped when a matching exception already exists
+        OR an open row for this exact location already exists (see
+        `has_open_voice_review_item`'s own docstring for why both checks
+        matter)."""
         if self.is_voice_exception(table, row_id, column, rule):
+            return 0
+        if self.has_open_voice_review_item(table, row_id, column, rule):
             return 0
         cur = self.conn.execute(
             "INSERT INTO voice_review_queue "
