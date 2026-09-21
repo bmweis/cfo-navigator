@@ -10139,6 +10139,147 @@ recorded anywhere, it's flagged rather than invented.
   Phase 1 explicitly deferred cleanup here since this phase already
   touches that code) is gone now too.
 
+### Voice review queue: the base mechanism, and Addition 2's `voice_approved_terms` split (2026-09)
+
+Closes a real, previously-documented gap: violations found by the DB scanner
+(`linklib/voice_db_scan.py`) or corrected mechanically at write time
+(`normalize_voice_mechanics`) either landed silently (an `_voice_fix` correction
+applied and forgotten) or were only ever aggregated into a count on
+`/admin/checks`, with no per-row human review path. `voice_review_queue`
+(`linklib/db.py`) is the table both feed: one row per (table, row_id, column,
+rule) finding, with a `status` of `open` (a scanner finding with nothing
+auto-correctable — banned word, filler, performative phrase, bare ampersand,
+invisible character), `auto_corrected` (the write-time backstop already fixed
+it — `before_text`/`after_text` both recorded for the diff view),
+`resolved` (an admin confirmed/accepted/edited it), or `exception` (a
+permanent, row-scoped "never flag this exact location again"). A distinct
+`seed-disagreement` rule (see the Part 1 write-up below) shares the same table
+with its own pair of resolution actions.
+
+`/admin/voice/review-queue` is the review UI: rows grouped by rule, each with
+a per-type action set (`_voice_review_row_html`) — Accept/Revert for an
+`auto_corrected` row; a pre-filled edit textarea + Save edit/Allow here for an
+`open` row (see the Part 4 fix below for what it's pre-filled with); Use seed
+version/Keep mine for a `seed-disagreement` row. A bulk-resolve action lets a
+whole rule-group be Accept-all/Revert-all in one submit
+(`POST /admin/voice/review-queue/bulk-resolve`), sharing the same per-item
+resolution logic (`_resolve_voice_item_action`) the single-item route uses, so
+the two can never drift apart.
+
+**Part 1 — the seed-sync overwrite fix.** `_seed_toolbox()` used to silently
+`UPDATE` `tools.name`/`communities.name`/`communities.notes`/
+`benchmarks.name`/`benchmarks.description` back to whatever the static seed
+source (`scripts/seed_tools.py`, `scripts/seed_communities.py`, `webapp/
+app.py`'s `_DEFAULT_BENCHMARKS`) said, on every process boot, with no logging
+anywhere — an admin's own hand-edit to any of those fields was reverted on
+the very next deploy with no trace. `Library.add_seed_disagreement_item(table,
+row_id, column, stored_value, seed_value, source="startup-sync")` replaces the
+overwrite: it queues an `open`, `seed-disagreement`-rule row instead of
+touching the live value at all, deduplicated against both an existing
+exception and an existing open row for the exact same location (so repeated
+boots proposing the identical divergence never queue a duplicate — the exact
+infinite-loop shape the incident exposed). `tools.name`'s sync was routed
+through this same method (not a raw, unlogged `UPDATE tools SET name=?`), the
+same fix already applied to `communities`/`benchmarks`. Two resolution
+actions exist only for this rule: `use_seed` (writes the seed's proposed text,
+`after_text`, back to the live row via `apply_voice_review_write`, then
+resolves) and `keep_mine` (writes nothing back — the stored value stays
+exactly as it was — and marks the location a permanent exception, so the same
+divergence can never reopen on a future boot).
+
+**Part 4 (URGENT) — edit-safety.** The `open`-row edit textarea used to be
+pre-filled from the queue row's own `excerpt` — a mid-text SNIPPET, capped at
+200 characters (`log_voice_correction`'s `after[:200]`) — so saving it back
+unchanged would truncate real, live, published copy down to a 200-char
+fragment. Fixed with `Library.get_voice_review_current_value(table, row_id,
+column)`, which fetches the FULL, CURRENT live value (validated against the
+same `voice_db_scan._SCAN_TABLES` enumeration `apply_voice_review_write` uses,
+so it can't be pointed at an arbitrary column) and pre-fills the textarea with
+that instead — the excerpt now renders only as a small "Flagged text:" hint
+above the field, never as the editable value itself. See
+`tests/test_voice_review_queue.py::
+test_review_queue_edit_prefill_uses_full_value_not_truncated_excerpt` for the
+regression coverage (a long stored value, a short flagged excerpt, a
+byte-identical full-value round trip through the real submit path).
+
+**Part 5 — the write-time backstop auto-strips safe invisible characters**
+(`normalize_voice_mechanics`), the same choke point that already collapses a
+spaced em dash, so a genuinely invisible, non-semantic character (zero-width
+space, BOM, direction marks, soft hyphen — see `INVISIBLE_CHARS` in
+`linklib/voice_review.py`) never needs a human review pass at all when it's
+mechanically safe to strip; the scanner's own `invisible-character` rule still
+catches anything the write-time strip missed on an already-stored row.
+
+**Addition 1 — bidirectional sync** (`Library.reconcile_voice_review_queue()`,
+run periodically from the background checks refresher, not per-request)
+closes two real gaps a single scanner pass or a single write-time hook can't:
+(1) a violation that needs human judgment (a bare ampersand, a banned word —
+nothing `_voice_fix` can auto-correct) entering the DB via an ordinary write
+sat invisible in the live `/admin/checks` scan count but never reached the
+queue until someone manually re-ran the backfill script; (2) fixing a
+violation directly on a record's own admin edit page — bypassing the queue's
+resolve actions entirely — made it disappear from the scan, but its `open`
+queue row stayed open forever, since nothing closed it. `reconcile_voice_
+review_queue()` walks the live scan (`voice_db_scan.scan_db_copy`) and, in one
+pass: adds an `open` row for every live finding not already queued (via
+`add_voice_review_item`'s existing dedup, so this can never double-insert),
+and resolves (with a `"Resolved outside the queue — no longer found on the
+last scan."` note) every currently-open row, among the rules this scan can
+actually produce (`buzzword`/`filler`/`performative`/`invisible-character`/
+`bare-ampersand`/`spaced-em-dash` — deliberately excluding `seed-disagreement`,
+which is `_seed_toolbox()`'s own separate lifecycle, and `holistic`, which is
+never scanned automatically), that the live scan no longer reproduces. Returns
+`{"added": n, "closed": n}` for the caller to log.
+
+**Addition 2 — a new `voice_approved_terms` table splits two visually and
+functionally distinct exception mechanisms that used to be a single "Mark as
+exception" action, per the coordinator's own explicit amendment.** The two
+are deliberately styled to be unmistakably different, since a misclick has
+real consequences in opposite directions:
+
+- **"Allow here"** (`resolve_voice_review_item(..., "accept_exception")`,
+  unchanged from Part 1's original per-row exception) — scoped to exactly one
+  (table, row_id, column, rule) location, reversible only by manually clearing
+  that queue row's status back to `open`. Rendered as a plain, muted,
+  dashed-border button. Available on every `open`-row's action set,
+  regardless of rule.
+- **"Approve term"** (`Library.approve_voice_term(term, rule="bare-ampersand")`
+  / `voice_approved_terms` — a new table, `id`/`term`/`rule`/`created_at`,
+  unique per `(rule, term)` case-insensitively) — a GLOBAL, PERMANENT
+  allowlist entry: "this exact matched term is fine everywhere, forever."
+  Shown ONLY on a `bare-ampersand` finding (never on a banned-word/filler/
+  performative finding — staying permanently banned, with only per-row
+  "Allow here" exceptions, is Brian's own explicit, stated policy for those
+  three rules), pre-filled with the row's own flagged excerpt as an editable
+  starting guess, since the exact wording of the approved term matters.
+  Approving a term is idempotent (a second approval of the identical term is
+  a no-op insert) and immediately sweeps every currently-`open` row of the
+  same rule whose stored excerpt/before/after text contains the term
+  (case-insensitive), resolving each with a `resolution_note` recording the
+  term. `Library.is_approved_voice_term(rule, text)` is read by the live DB
+  scanner (`voice_db_scan.py`) to mask an approved term out of a bare-
+  ampersand scan before it can be re-flagged — **never** by the CI-only
+  source-code scan (`linklib.voice_review.typography_findings`), which has no
+  database to read this table from; the source-side `AMPERSAND_NAMES`/
+  `AMPERSAND_ACRONYMS` allowlists remain the only mechanism for a source-code
+  ampersand, and the two allowlists are deliberately kept visibly distinct in
+  the UI so approving one is never confused with editing the other.
+  `Library.remove_approved_voice_term(term_id)` makes the term flaggable
+  again on the *next* scan pass — it does not retroactively reopen queue rows
+  already resolved by the earlier approval; that history stays in
+  `resolution_note`.
+
+New routes: `POST /admin/voice/review-queue/{item_id}/approve-term` (reads
+the posted `term`, calls `approve_voice_term`, redirects back to the queue)
+and, on `/admin/voice` itself, `POST /admin/voice/approved-terms/add` /
+`POST /admin/voice/approved-terms/{term_id}/remove` — a standalone management
+section listing every currently-approved term per rule, independent of
+whether any queue row currently references it, so a term can be added or
+removed proactively, not only from a flagged row's own action panel. See
+`tests/test_voice_approve_term.py` for the full regression coverage (the
+per-rule action-set gating, the bulk-resolve sweep on approval, removal
+re-enabling future flagging, and both admin routes).
+
 ### Voice review queue: source/trigger taxonomy, and a column-aware seed-source scan (2026-09)
 
 Follow-up to the seed-sync infinite-loop investigation (see `scripts/
