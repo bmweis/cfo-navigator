@@ -24,6 +24,29 @@ def lib(tmp_path):
         db.close()
 
 
+def _mark_all_freshness_reviewed(db_path: str) -> None:
+    """A fresh Library starts with pricing_last_verified/models_last_reviewed/
+    exa_pricing_last_verified all empty — which is honest (nobody has
+    reviewed them yet) but means every never-touched test DB now
+    contributes 3 to the /admin/checks badge (2026-09: see
+    webapp.tasks._stale_admin_checks_reminders). Real and correct in
+    production — a genuinely never-reviewed table SHOULD show as pending —
+    but noise in a test asserting an otherwise-clean badge baseline that
+    has nothing to do with pricing/model freshness. Tests that care about
+    an exact badge count/absence call this in setup to establish "already
+    reviewed" as the clean baseline, same as a real admin clicking "Mark
+    reviewed" three times on day one would."""
+    from datetime import datetime, timezone
+    lib = Library(db_path)
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        lib.set_setting("pricing_last_verified", now)
+        lib.set_setting("models_last_reviewed", now)
+        lib.set_setting("exa_pricing_last_verified", now)
+    finally:
+        lib.close()
+
+
 def test_count_pending_tools(lib):
     assert lib.count_pending_tools() == 0
     lib.add_tool("A", "desc", "https://a.example", [], approved=0)
@@ -307,24 +330,29 @@ def test_admin_pages_are_never_cached(admin_client):
 
 def test_contacts_badge_clears_after_viewing_at_every_level(admin_client):
     client, appmod, db = admin_client
+    _mark_all_freshness_reviewed(db)   # isolate this test from the /admin/checks reminders
     from linklib.db import Library
     lib = Library(db)
     lib.save_contact("Jane", "jane@x.com", "hi there")
     lib.close()
 
     r1 = client.get("/admin")
-    assert '<span class="task-dot"' in r1.text                      # nav dot (presence only, unaffected)
+    # 2026-09: the nav badge is a real number now, not a presence dot (see
+    # webapp/tasks.py's module docstring) — with exactly one open task in
+    # play here, both the nav total and the card read "1".
+    assert r1.text.count('<span class="task-badge">1</span>') >= 2  # nav + card
     assert '<span class="task-badge">1</span>' in r1.text           # card shows a real count now (PR 28)
 
     client.get("/admin/inbox/contact-submissions")   # visiting clears the read-state
 
     r2 = client.get("/admin")
-    assert '<span class="task-dot"' not in r2.text
     assert '<span class="task-badge">1</span>' not in r2.text
+    assert 'class="task-badge"' not in r2.text   # nav total is also 0 now — no badge renders at all
 
 
 def test_tool_leads_badge_clears_after_viewing(admin_client):
     client, appmod, db = admin_client
+    _mark_all_freshness_reviewed(db)   # isolate this test from the /admin/checks reminders
     from linklib.db import Library
     lib = Library(db)
     # needs_review=0 (a brand-new tool otherwise defaults to 1, per add_tool's
@@ -342,7 +370,7 @@ def test_tool_leads_badge_clears_after_viewing(admin_client):
     client.get("/admin/inbox/toolbox-intros")   # unfiltered view clears it
 
     r2 = client.get("/admin")
-    assert '<span class="task-dot"' not in r2.text
+    assert 'class="task-badge"' not in r2.text   # .task-dot is retired — no badge at all once clean
 
 
 def test_pending_tool_badge_only_clears_on_approval_not_view(admin_client):

@@ -40,9 +40,21 @@ import re
 # mistake this rule exists to catch, just with a different character.
 _EM_DASH = "—"
 _SPACE_CLASS = "[  ]"
-_SPACED_EM_DASH = re.compile(_SPACE_CLASS + r"+" + _EM_DASH + _SPACE_CLASS + r"+")
+# Bounded quantifier ({1,N}, not unbounded +): a plain `+` here is
+# quadratic on a long non-matching whitespace/nbsp run — finditer retries
+# the match at every position in the run, and each attempt walks the full
+# remaining run before failing. A possessive quantifier (`++`) only
+# partially helps (it still re-attempts at every position, just without
+# intra-attempt backtracking); bounding the repeat count actually caps the
+# per-attempt work. See linklib/voice_review.py's `_SPACED_MDASH_ENTITY`
+# comment for the measured ~2.1s (unbounded) -> ~1.5s (possessive) ->
+# ~260ms (bounded) progression on the identical pattern shape. This module
+# runs on every Library write (`Library._vf`), so the same hardening
+# applies here even though no single production text field has hit the
+# pathological case yet.
+_SPACED_EM_DASH = re.compile(_SPACE_CLASS + r"{1,80}" + _EM_DASH + _SPACE_CLASS + r"{1,80}")
 _SPACED_DOUBLE_HYPHEN_DASH = re.compile(
-    r"(?<=\w)" + _SPACE_CLASS + r"+--" + _SPACE_CLASS + r"+(?=\w)"
+    r"(?<=\w)" + _SPACE_CLASS + r"{1,80}--" + _SPACE_CLASS + r"{1,80}(?=\w)"
 )
 
 

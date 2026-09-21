@@ -106,12 +106,15 @@ def test_admin_dismiss_reset_request(env):
         lib.close()
 
 
-def test_admin_nav_shows_task_dot_when_reset_pending(env):
+def test_admin_nav_shows_task_badge_when_reset_pending(env):
+    # 2026-09: the nav's .task-dot presence-only dot is retired — the nav
+    # now shows the same real numeric .task-badge every other admin badge
+    # uses (see webapp/tasks.py's module docstring).
     c = _client(env)
     c.post("/forgot-password", data={"username": "jane"})
     admin = _admin_client(env)
     r = admin.get("/")
-    assert 'class="task-dot"' in r.text   # dot renders sitewide, not just on /admin
+    assert 'class="task-badge"' in r.text   # badge renders sitewide, not just on /admin
 
 
 # --- self-service reset link (token-based) ----------------------------------

@@ -819,6 +819,17 @@ def _seed_voice_prompts():
         lib.close()
 
 
+@app.on_event("startup")
+def _start_checks_cache_refresher():
+    """Keep the admin nav badge's /admin/checks count warm on a schedule,
+    independent of any page render — see webapp.tasks.
+    start_background_checks_refresher's own docstring for the full
+    reasoning (2026-09 "logged-in slowness" fix). Never blocks boot: this
+    only starts a daemon thread, it doesn't wait on it."""
+    from webapp import tasks as _tasks
+    _tasks.start_background_checks_refresher()
+
+
 def _lib() -> Library:
     return Library(DB_PATH)
 
@@ -1539,18 +1550,23 @@ a:hover{text-decoration:underline;}
 /* "Sign in" reads as a distinct pill CTA, not just another nav link */
 .site-nav a.nav-cta{background:var(--navy);color:#fff;padding:9px 18px;border-radius:10px;font-weight:600;}
 .site-nav a.nav-cta:hover{background:var(--navy-deep);color:#fff;text-decoration:none;}
-/* iOS-style presence dot — no count, just "something needs you" */
-.task-dot{position:absolute;top:-3px;right:-9px;width:8px;height:8px;border-radius:50%;background:var(--coral);border:1.5px solid var(--bg);}
-
-/* Admin hub: coral count badges, white text on coral fill. (PR 28, 2026-09:
-   the admin page always shows a real count now, even for an "all-or-none"
-   source like Contact Submissions — Brian's explicit call. The nav bar's
-   own presence-only .task-dot above is unrelated and unchanged: it never
-   read DOT_ONLY_HREFS, since it's already a pure "is anything pending at
-   all" boolean, not a per-source count. .task-badge-dot is retired with
-   DOT_ONLY_HREFS itself — see webapp/tasks.py.) */
+/* Admin nav/hub count badges — white text on --alert fill. Recolored from
+   coral (2026-09): a needs-attention count is a status signal, and per
+   BRAND.md status belongs to the --good/--caution/--alert family, coral is
+   reserved as a rare accent — see webapp/tasks.py's own module docstring
+   for the full reversal writeup (an earlier PR had documented the coral
+   version of these two classes as a sanctioned exception; it no longer is).
+   The nav bar's own badge (`.task-dot` is retired — see webapp/tasks.py)
+   now shares this exact class and renders a real total, not a presence
+   dot, same as every other admin badge on the site (PR 28, 2026-09).
+   .task-badge-dot was retired earlier, with DOT_ONLY_HREFS itself. */
 .task-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;
-  padding:0 5px;border-radius:9px;background:var(--coral);color:#fff;font-size:11px;font-weight:700;line-height:1;}
+  padding:0 5px;border-radius:9px;background:var(--alert);color:#fff;font-size:11px;font-weight:700;line-height:1;}
+/* Every existing .task-badge call site already sits inside a flex row with
+   its own gap (card/group headers) — the nav link has no such wrapper, so
+   it alone needs its own left margin rather than baking one into the
+   shared class, which would double-space every card/group badge. */
+.site-nav a .task-badge{margin-left:6px;}
 .nav-toggle{display:none;background:none;border:1px solid var(--line-strong);border-radius:9px;width:40px;height:40px;color:var(--navy);font-size:18px;cursor:pointer;align-items:center;justify-content:center;}
 
 /* Headings */
@@ -1994,6 +2010,24 @@ def _has_open_admin_tasks() -> bool:
         lib.close()
 
 
+def _admin_nav_badge() -> str:
+    """The top nav's "Admin" link badge — a real total, not a presence dot
+    (2026-09, per Brian's own ask). Same underlying open_task_counts() the
+    admin hub's own per-card/per-group badges already sum from, so the nav
+    total and the hub's own breakdown can never disagree about what's
+    pending. Renders via the same `.task-badge` component every other
+    admin-page badge uses (`_task_badge`) rather than the retired
+    `.task-dot`, so clicking it lands on /admin, which already lists every
+    contributing source by name — satisfying "clicking it should lead
+    somewhere that lists what it is counting" with no new page."""
+    from webapp import tasks as _tasks
+    lib = _lib()
+    try:
+        return _task_badge(sum(_tasks.open_task_counts(lib).values()))
+    finally:
+        lib.close()
+
+
 def _page(title: str, active: str, body: str, authed: bool = False,
           role: str | None = None, *, request: Request | None = None,
           og_description: str | None = None, og_image_slug: str | None = None) -> str:
@@ -2038,8 +2072,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     if role == "admin":
         # Admin sees exactly what a member sees, plus the Admin hub (which holds
         # the admin-only tools). Keeps the top nav uncluttered.
-        dot = '<span class="task-dot" aria-label="Open admin tasks"></span>' if _has_open_admin_tasks() else ""
-        nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin{dot}</a>'
+        nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin{_admin_nav_badge()}</a>'
         nav += '<a href="/logout">Log out</a>'
     elif role == "user":
         nav += '<a href="/logout">Log out</a>'
@@ -25130,8 +25163,9 @@ def _coral_moments_on_page(html: str) -> int:
 # Re-entrancy guard for coral_moment_problems() below. This check is the
 # first entry in webapp.checks.run_all() that makes a real HTTP request
 # (every other live check is pure route/tuple introspection) — and
-# _page()'s admin-nav badge computation (`_has_open_admin_tasks()` ->
-# `webapp.tasks._failing_checks_count()`) calls that exact same run_all()
+# _page()'s admin-nav badge computation (`_admin_nav_badge()` ->
+# `webapp.tasks.open_task_counts()` -> `webapp.tasks._failing_checks_count()`)
+# calls that exact same run_all()
 # on every page render for an admin-role visitor, to badge /admin's own
 # nav link. In the ordinary case (a real LINKLIB_PASSWORD/LINKLIB_SAVE_TOKEN
 # configured) a signed-out TestClient request here renders role="guest",
@@ -25141,8 +25175,14 @@ def _coral_moments_on_page(html: str) -> int:
 # theorized: a fresh, password-less `Library`/`TestClient` reproduces an
 # actual infinite recursion (confirmed to at least depth 3 before being
 # killed) via coral_moment_problems() -> renders "/" -> _page() (role=
-# "admin") -> _has_open_admin_tasks() -> checks.run_all() ->
-# coral_moment_problems() again.
+# "admin") -> _admin_nav_badge() -> checks.run_all() ->
+# coral_moment_problems() again. (2026-09: a background refresher —
+# webapp.tasks.start_background_checks_refresher() — now keeps
+# _checks_cache warm on its own schedule, so in real production this
+# synchronous fallback path, and therefore this whole reentrant chain,
+# is normally never reached at all; it still is during the brief
+# startup window before the refresher's first pass completes, or if it
+# ever fails to start, which is exactly why this guard stays.)
 #
 # CALL-CHAIN-SCOPED STATE, VIA contextvars.ContextVar — deliberately NOT a
 # plain module-level bool, and NOT threading.local() either (2026-09
@@ -25172,7 +25212,7 @@ def _coral_moments_on_page(html: str) -> int:
 # be a different OS thread than the one already running this function.
 # Measured directly: a single signed-out GET "/" in open-auth (admin) mode
 # recurses `coral_moment_problems()` -> renders "/" -> `_page()` (role=
-# "admin") -> `_has_open_admin_tasks()` -> `run_all()` ->
+# "admin") -> `_admin_nav_badge()` -> `run_all()` ->
 # `coral_moment_problems()` again — and with `threading.local()`, each of
 # those nested calls landed on a genuinely different OS thread (confirmed
 # via `threading.get_ident()` at 5+ levels deep before the probe was
@@ -25948,11 +25988,22 @@ def _reviewed_freshness_banner(is_stale: bool, message_html: str, mark_url: str)
     amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
     seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
     bg, border, color = (amber_wash, amber_border, amber_text) if is_stale else (seafoam_wash, seafoam, "inherit")
+    # `justify-content:space-between` only right-aligns the button while
+    # BOTH items share one flex line. New-model awareness's longer copy
+    # wraps onto its own line at ordinary widths, and a wrapped item is the
+    # sole occupant of its line — space-between then has nothing to space
+    # it FROM on that line, so it renders flush left instead (the reported
+    # bug: right-aligned for Pricing/Exa, left-aligned-and-dropped-below for
+    # New-model awareness). `margin-left:auto` on the button fixes this for
+    # every wrap state at once: it consumes all remaining space on whichever
+    # line the button ends up on, pushing it to that line's right edge
+    # whether it's sharing a line with the message or standing alone on its
+    # own wrapped line.
     return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
             f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;'
-            f'display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">'
+            f'display:flex;align-items:center;gap:16px;flex-wrap:wrap;">'
             f'<span>{message_html}</span>'
-            f'<form method="post" action="{mark_url}" style="margin:0;flex-shrink:0;">'
+            f'<form method="post" action="{mark_url}" style="margin:0 0 0 auto;flex-shrink:0;">'
             f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;white-space:nowrap;">Mark reviewed</button>'
             f'</form></div>')
 

@@ -103,6 +103,38 @@ def is_configured() -> bool:
     )
 
 
+# The daily Railway Cron Service hits POST /admin/backup-now roughly once
+# every 24h — 26h gives a couple hours of slack for the cron's own timing
+# jitter before treating a missing successful row as genuinely stale, same
+# "dated reminder threshold" shape as linklib.pricing.PRICING_REVIEW_STALE_DAYS,
+# just for something an admin badge can flag live rather than something only
+# a human re-check can answer (backup_log's own created_at timestamps are a
+# real, mechanically-checkable fact, not a manual attestation). Feeds
+# webapp.tasks.open_task_counts()'s "stale backup" badge entry.
+BACKUP_STALE_HOURS = 26
+
+
+def backup_is_stale(last_success_iso: str, *, now: datetime | None = None) -> bool:
+    """True when `last_success_iso` (Library.most_recent_successful_backup_at()'s
+    return value, "" if there has never been a successful backup) is older
+    than BACKUP_STALE_HOURS — or missing entirely, same "flag it" signal as
+    genuinely stale. Deliberately ignores whether backups are configured at
+    all (is_configured()) — that's a separate, existing signal on
+    /admin/library-backup's own status banner; this only answers "is the
+    most recent successful row old," which is exactly what a badge needs to
+    catch a cron that silently stopped firing or a string of failures."""
+    if not last_success_iso:
+        return True
+    try:
+        then = datetime.fromisoformat(last_success_iso)
+    except ValueError:
+        return True
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (now - then).total_seconds() >= BACKUP_STALE_HOURS * 3600
+
+
 FOLDER_NAME = "CFO Navigator — Library Backups"
 _FOLDER_SETTING_KEY = "backup_drive_folder_id"
 _FILES_URL = "https://www.googleapis.com/drive/v3/files"
