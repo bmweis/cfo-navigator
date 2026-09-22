@@ -626,9 +626,7 @@ async def _save_cors(request: Request, call_next):
 
 @app.on_event("startup")
 def _seed_toolbox():
-    """Seed the tool_categories/community_categories vocabulary on first run,
-    and keep the advisor flag in sync with the seed lists on every
-    restart/deploy (booleans, no voice-review implications).
+    """Seed the tool_categories/community_categories vocabulary on first run.
 
     2026-09 fix — name (tools)/name+notes (communities)/name+description
     (benchmarks) are NO LONGER silently overwritten when they diverge from
@@ -688,7 +686,21 @@ def _seed_toolbox():
     re-added any seed-list category missing from the DB on every restart,
     silently undoing a deliberate deletion at /admin/tools/communities. Both
     loops are now gated the same way: seed once, on an empty table, never
-    again."""
+    again.
+
+    2026-09 follow-up (issue #592, item 1) — tools.advisor/
+    communities.advisor had the identical silent-revert bug as the text
+    fields above, just for a boolean: a raw, unlogged `UPDATE` on every
+    boot, bumping the stored value back to whatever the seed list said
+    regardless of a deliberate admin edit. Confirmed bidirectional (it
+    already re-synced True->False as readily as False->True, contrary to
+    an earlier comment here claiming it was one-directional) — there's no
+    reason to treat one direction differently from the other, so both are
+    now queued through the identical seed-disagreement mechanism as
+    name/notes/description, via `Library._SEED_BOOLEAN_COLUMNS` (the
+    boolean counterpart of the text-column allowlist
+    `apply_voice_review_write`/`get_voice_review_current_value` already
+    read from `linklib.voice_db_scan._SCAN_TABLES`)."""
     from scripts.seed_tools import TOOLS
     from scripts.seed_communities import CATEGORIES as COMMUNITY_CATEGORIES, COMMUNITIES
     lib = _lib()
@@ -713,12 +725,24 @@ def _seed_toolbox():
                 # admin. Either way: skip, never insert.
                 continue
             new_adv = int(c.get("advisor", False))
+            # 2026-09 follow-up (issue #592, item 1) — this used to be a raw,
+            # unlogged UPDATE, silently re-syncing advisor to the seed's
+            # value on every boot even after an admin deliberately unchecked
+            # it. Same silent-revert shape as the original text-field
+            # incident, just for a boolean — routed through the identical
+            # seed-disagreement review queue as communities.name/notes
+            # above, via `_SEED_BOOLEAN_COLUMNS`. Confirmed bidirectional
+            # (matches the seed value in either direction), not
+            # one-directional as an older comment here once claimed — see
+            # CLAUDE.md's PR #590 Phase 1/2 writeup — so both directions of
+            # disagreement are queued the same way, same as every text field.
             if crow["advisor"] != new_adv:
-                lib.conn.execute(
-                    "UPDATE communities SET advisor=? WHERE id=?",
-                    (new_adv, crow["id"]),
+                lib.add_seed_disagreement_item(
+                    "communities", crow["id"], "advisor",
+                    "True" if crow["advisor"] else "False",
+                    "True" if new_adv else "False",
+                    source="startup-sync",
                 )
-                lib.conn.commit()
             notes = c.get("notes", "")
             # 2026-09 fix — a divergence no longer overwrites the stored
             # value on every boot (that was the exact mechanism behind the
@@ -768,12 +792,19 @@ def _seed_toolbox():
                 # admin. Either way: skip, never insert.
                 continue
             new_adv = int(t.get("advisor", False))
+            # 2026-09 follow-up (issue #592, item 1) — same fix as the
+            # communities.advisor block above: this used to be a raw,
+            # unlogged UPDATE, silently re-checking advisor on every boot
+            # even after an admin deliberately unchecked it. Routed through
+            # the same seed-disagreement queue as every other seed-synced
+            # field, via `_SEED_BOOLEAN_COLUMNS`.
             if row["advisor"] != new_adv:
-                lib.conn.execute(
-                    "UPDATE tools SET advisor=? WHERE id=?",
-                    (new_adv, row["id"]),
+                lib.add_seed_disagreement_item(
+                    "tools", row["id"], "advisor",
+                    "True" if row["advisor"] else "False",
+                    "True" if new_adv else "False",
+                    source="startup-sync",
                 )
-                lib.conn.commit()
             # description is deliberately NOT synced here — see the docstring's
             # 2026-08 incident note above. name-only, name never AI-drafted.
             # 2026-09 fix — this used to be a raw UPDATE, silently
@@ -34351,12 +34382,15 @@ def _voice_review_row_html(lib, item: dict) -> str:
         detail = ""
         actions = actions_row_open + f'<span style="font-size:12px;color:var(--muted);">{_esc(status)}</span>' + actions_row_close
 
-    # Voice-review-queue trigger taxonomy (2026-09): a small badge naming
-    # which mechanism produced this row — 'admin-edit' (a human editing via
-    # an /admin/* submit route), 'startup-sync' (_seed_toolbox()'s per-boot
-    # re-sync against static seed data), 'script' (a one-off backfill/fix/
-    # migration script), or 'submission' (a public, member-gated submission
-    # route). A row logged before this column existed has source=NULL—
+    # Voice-review-queue trigger taxonomy (2026-09, extended for issue #592
+    # item 3): a small badge naming which mechanism produced this row —
+    # 'admin-edit' (a human editing via an /admin/* submit route),
+    # 'startup-sync' (_seed_toolbox()'s per-boot re-sync against static seed
+    # data), 'script' (a one-off, human-run backfill/fix/migration script),
+    # 'submission' (a public, member-gated submission route), or 'scan' (a
+    # periodic background pass — reconcile_voice_review_queue(), never a
+    # human-run script, even though it shares the same insertion path as
+    # one). A row logged before this column existed has source=NULL —
     # rendered plainly as "unknown" rather than a blank cell that could
     # read as a rendering bug.
     source_val = item.get("source")
@@ -34382,7 +34416,15 @@ def _voice_review_group_bulk_actions_html(rule: str) -> str:
     'seed-disagreement' groups get "Use seed selected"/"Keep mine
     selected"; every other group gets "Accept selected"/"Mark selected as
     exception" — mirroring /admin/tools/software's own bulk "Edit
-    selected"/"Delete selected" pattern."""
+    selected"/"Delete selected" pattern.
+
+    'bare-ampersand' (issue #592 item 4) additionally gets a "Replace &
+    with and" button — a real, separate mechanism from the other buttons
+    here (which all POST straight to /bulk-resolve via voiceBulkResolve):
+    this one submits to a dedicated PREVIEW route first
+    (voiceBulkReplaceAmpersandPreview), since the whole point of the
+    action is showing before/after for every selected row before writing
+    anything, not resolving on click."""
     if rule == "seed-disagreement":
         buttons = [("use_seed", "Use seed selected", ""), ("keep_mine", "Keep mine selected", "color:var(--muted);")]
     else:
@@ -34392,6 +34434,11 @@ def _voice_review_group_bulk_actions_html(rule: str) -> str:
         f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;{style}">{label}</button>'
         for action, label, style in buttons
     )
+    if rule == "bare-ampersand":
+        btn_html += (
+            f'<button type="button" onclick="voiceBulkReplaceAmpersandPreview(\'{_esc(rule)}\')" '
+            f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Replace &amp; with and</button>'
+        )
     return (f'<div style="display:flex;gap:8px;align-items:center;margin:8px 0;">'
             f'<label style="font-size:12px;color:var(--muted);">'
             f'<input type="checkbox" onclick="voiceToggleAll(\'{_esc(rule)}\',this.checked)"> Select all</label>'
@@ -34423,6 +34470,19 @@ function voiceToggleEditField(itemId, expand) {
   if (!collapsed || !expanded) return;
   collapsed.style.display = expand ? 'none' : 'block';
   expanded.style.display = expand ? 'block' : 'none';
+}
+function voiceBulkReplaceAmpersandPreview(group) {
+  var ids = Array.from(document.querySelectorAll('.voice-item-cb[data-group="' + group + '"]:checked')).map(function(cb) { return cb.value; });
+  if (!ids.length) { alert('Select at least one row first.'); return; }
+  var form = document.createElement('form');
+  form.method = 'post';
+  form.action = '/admin/voice/review-queue/bulk-replace-ampersand/preview';
+  ids.forEach(function(id) {
+    var i = document.createElement('input'); i.type = 'hidden'; i.name = 'item_ids'; i.value = id;
+    form.appendChild(i);
+  });
+  document.body.appendChild(form);
+  form.submit();
 }
 """
 
@@ -34477,7 +34537,7 @@ if (document.readyState !== 'loading') { initVoiceScrollHints(); }
 
 
 @app.get("/admin/voice/review-queue", response_class=HTMLResponse)
-async def admin_voice_review_queue(request: Request):
+async def admin_voice_review_queue(request: Request, error: str = ""):
     """Every voice-rule finding — an `_voice_fix` correction already applied
     at save time, a scanner finding with nothing to auto-fix, or a
     seed-vs-stored disagreement `_seed_toolbox()` found on its last boot—
@@ -34544,12 +34604,16 @@ async def admin_voice_review_queue(request: Request):
     finally:
         lib.close()
 
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
+                     f'font-size:14px;margin:0 0 16px;">{_esc(error)}</p>' if error else '')
+
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Voice review queue</h1>
 <p style="color:var(--muted);max-width:760px;">Every voice-rule finding lands here for review&mdash;nothing is
 ever silently applied or silently overwritten. See /admin/voice for the source-managed mechanical rules and the
 ampersand allowlists in linklib/voice_review.py.</p>
+{error_banner}
 {group_html}
 {resolved_html}
 </div>
@@ -34660,6 +34724,139 @@ async def admin_voice_review_bulk_resolve(request: Request):
             if not item:
                 continue
             _resolve_voice_item_action(lib, item, action, None)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/voice/review-queue", status_code=303)
+
+
+@app.post("/admin/voice/review-queue/bulk-replace-ampersand/preview")
+async def admin_voice_review_bulk_replace_ampersand_preview(request: Request):
+    """Issue #592 item 4 — the Ampersands group's own "Replace & with and"
+    bulk action, PREVIEW half. Nothing is written here: every selected row
+    is run through `Library.preview_ampersand_replacement` (full current
+    value in, would-be replacement out, never touching an unspaced
+    ampersand or one inside an approved term) and shown as a before/after
+    diff, split into "will be replaced" (changed=True, carried forward as
+    hidden fields to the confirm form) and "left as-is" (changed=False —
+    still listed, so an admin can see WHY a row they selected won't move,
+    not just that it silently didn't) — same preview-then-confirm shape as
+    /admin/reader/bulk-delete's own CSV-driven preview."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    raw_ids = form.getlist("item_ids")
+    lib = _lib()
+    try:
+        previews = []
+        for raw_id in raw_ids:
+            try:
+                item_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            p = lib.preview_ampersand_replacement(item_id)
+            if p is not None:
+                previews.append(p)
+    finally:
+        lib.close()
+
+    will_change = [p for p in previews if p["changed"]]
+    unchanged = [p for p in previews if not p["changed"]]
+
+    if not previews:
+        return RedirectResponse(
+            "/admin/voice/review-queue?error=" + quote("Select at least one row first."), status_code=303)
+
+    hidden_fields = "".join(
+        f'<input type="hidden" name="item_ids" value="{p["item_id"]}">' for p in will_change
+    )
+    will_change_rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:12px;color:var(--muted);">{_esc(p['table'])}.{_esc(p['column'])} id={_esc(p['row_id'])}</td>
+  <td style="padding:8px 10px;font-size:13px;">{_voice_char_diff_html(p['before'], p['after'])}</td>
+</tr>""" for p in will_change) or (
+        '<tr><td colspan="2" style="padding:16px;text-align:center;color:var(--muted);">Nothing eligible&mdash;see below.</td></tr>')
+
+    unchanged_section = ""
+    if unchanged:
+        unchanged_rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:12px;color:var(--muted);">{_esc(p['table'])}.{_esc(p['column'])} id={_esc(p['row_id'])}</td>
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{_esc(p['before'][:300])}</td>
+</tr>""" for p in unchanged)
+        unchanged_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Left as-is ({len(unchanged)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">No eligible spaced ampersand&mdash;either every "&amp;" here is
+unspaced (e.g. "S&amp;M", left for a manual decision) or it's inside an already-approved term. Not included in the write below.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:480px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_VOICE_COL_WIDTH_FIELD}px;">Field</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Current text</th>
+    </tr></thead>
+    <tbody>{unchanged_rows}</tbody>
+  </table>
+</div>"""
+
+    n = len(will_change)
+    confirm_button = (
+        f'<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Replace {n} field{"s" if n != 1 else ""}</button>'
+        if will_change else
+        '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to replace</button>'
+    )
+
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/voice/review-queue" style="font-size:13px;color:var(--muted);">&larr; Voice review queue</a></p>
+<h1>Preview: replace &amp; with and</h1>
+<p style="color:var(--muted);margin:0 0 18px;">Nothing has been written yet. Only a spaced ampersand (" &amp; " or the
+HTML-escaped " &amp;amp; ") is ever replaced&mdash;an unspaced form like "S&amp;M" or text inside an already-approved
+term is always left for a manual decision.</p>
+
+<h3 style="font-size:14px;margin:0 0 10px;">Will be replaced ({len(will_change)})</h3>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+  <table style="width:100%;border-collapse:collapse;min-width:480px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_VOICE_COL_WIDTH_FIELD}px;">Field</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Before / after</th>
+    </tr></thead>
+    <tbody>{will_change_rows}</tbody>
+  </table>
+</div>
+
+<form method="post" action="/admin/voice/review-queue/bulk-replace-ampersand/apply" style="margin:14px 0 8px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+  {hidden_fields}
+  {confirm_button}
+  <a href="/admin/voice/review-queue" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+</form>
+{unchanged_section}
+</div>"""
+    # Title passed to _page() must be PLAIN text — _page() runs it through
+    # _esc() itself for both <title> and og:title, so an already-escaped
+    # "&amp;" here would double-encode to "&amp;amp;" (the same class of
+    # bug CLAUDE.md documents more than once elsewhere). "Ampersands," not
+    # a literal "&", sidesteps that entirely.
+    return HTMLResponse(_page("Preview: replace ampersands—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/voice/review-queue/bulk-replace-ampersand/apply")
+async def admin_voice_review_bulk_replace_ampersand_apply(request: Request):
+    """Commit half of item 4's bulk ampersand replacement. Re-derives each
+    replacement fresh against the CURRENT live value via
+    `Library.apply_ampersand_replacement` — never trusting the preview
+    step's own before/after snapshot, the same TOCTOU discipline
+    /admin/reader/bulk-delete's own commit route already uses — so a row
+    edited or already resolved between preview and this submit is simply
+    skipped (apply_ampersand_replacement returns False), not force-applied
+    against stale text."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    raw_ids = form.getlist("item_ids")
+    lib = _lib()
+    try:
+        for raw_id in raw_ids:
+            try:
+                item_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            lib.apply_ampersand_replacement(item_id)
     finally:
         lib.close()
     return RedirectResponse("/admin/voice/review-queue", status_code=303)

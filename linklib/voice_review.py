@@ -514,6 +514,51 @@ def mask_approved_ampersand_terms(text: str, approved_terms) -> str:
     return text
 
 
+_SPACED_AMPERSAND_RE = re.compile(r' (?:&amp;|&) ')
+
+
+def replace_spaced_ampersands(text: str, approved_terms=()) -> tuple[str, bool]:
+    """Issue #592 item 4 — the bulk "Replace & with and" review-queue
+    action's actual replacement logic, kept here (not in linklib/db.py)
+    since it reuses `mask_approved_ampersand_terms`'s exact masking
+    mechanism and belongs with the rest of this module's ampersand
+    handling. Replaces every SPACED raw ampersand (" & ") or spaced
+    HTML-escaped ampersand (" &amp; ") with " and " — deliberately not a
+    bare "&"->"and" substitution, which would turn " &amp; " into the
+    stray " andamp; " instead of " and ". An UNSPACED ampersand ("S&M",
+    "P&L") never matches this pattern at all — those are always left for
+    a human to decide, per policy, not just skipped by the approved-term
+    check below.
+
+    `approved_terms` (an iterable of globally-approved bare-ampersand
+    terms, e.g. from `Library.list_approved_voice_terms("bare-ampersand")`)
+    protects any spaced ampersand that's part of one of those terms — a
+    field containing both "Bain & Company" (approved) and "finance &
+    operations" (not) only has the second replaced. Implemented by reusing
+    `mask_approved_ampersand_terms`'s own length-preserving underscore
+    mask: a candidate match is protected exactly when its own span in the
+    masked text is entirely underscores, i.e. it fell inside an approved
+    term's own occurrence.
+
+    Returns `(new_text, changed)` — `changed` is False when nothing in
+    `text` actually matched an eligible (spaced, unprotected) ampersand,
+    so a caller can leave that row open for a manual decision rather than
+    writing back and resolving a no-op."""
+    masked = mask_approved_ampersand_terms(text, approved_terms) if approved_terms else text
+    changed = False
+
+    def _sub(m: re.Match) -> str:
+        nonlocal changed
+        s, e = m.span()
+        if masked[s:e] == "_" * (e - s):
+            return m.group(0)  # protected — fell inside an approved term
+        changed = True
+        return " and "
+
+    new_text = _SPACED_AMPERSAND_RE.sub(_sub, text)
+    return new_text, changed
+
+
 def typography_findings_plain(text: str, approved_ampersand_terms=()) -> list[tuple[str, str]]:
     """Same bare-ampersand/spaced-em-dash rules as `typography_findings`, but
     for a single already-plain-text value rather than Python source — the

@@ -1,7 +1,7 @@
 """Regression coverage for webapp.app._seed_toolbox — the
 @app.on_event("startup") hook that seeds/re-syncs the CFO Toolbox
 (tools/communities/benchmarks + their category vocabularies) on every
-process boot. Three separate bugs found in this hook over time, all
+process boot. Several separate bugs found in this hook over time, all
 covered here rather than split across files since they're all "boot the
 app for real and check what _seed_toolbox actually did" tests:
 
@@ -38,6 +38,14 @@ app for real and check what _seed_toolbox actually did" tests:
    the DB on every restart — silently undoing a deliberate admin deletion
    at /admin/tools/communities. Both category loops are now gated the same
    way: seed once, on a genuinely empty table, never again.
+
+4. Advisor boolean silently reverting on boot (issue #592 item 1, last
+   four tests): tools.advisor/communities.advisor had the identical
+   silent-revert shape as name/notes/description above, just for a
+   boolean — a raw, unlogged UPDATE re-syncing to the seed's value on
+   every boot regardless of a deliberate admin edit. Now routed through
+   the same seed-disagreement queue (`Library._SEED_BOOLEAN_COLUMNS`),
+   with the identical "queue it, don't reopen after keep_mine" contract.
 """
 import os
 import tempfile
@@ -248,3 +256,155 @@ def test_seed_toolbox_still_syncs_name(app_client):
     assert hits[0]["before_text"] == "Old Name Before A Rename"
     assert hits[0]["after_text"] == seed_entry["name"]
     assert hits[0]["source"] == "startup-sync"
+
+
+def test_seed_toolbox_no_longer_silently_flips_tool_advisor(app_client):
+    """Issue #592 item 1 — advisor used to be a raw, unlogged UPDATE that
+    silently re-synced to the seed's value on every boot, the same
+    silent-revert shape as name/notes/description above, just for a
+    boolean. TOOLS[0] ("Sequence") has advisor=False in the seed list;
+    stored as True (as if an admin had deliberately checked it), a boot
+    must NOT flip it back — it must queue a seed-disagreement item
+    instead, exactly like a text-field divergence."""
+    from linklib.db import Library
+    from scripts.seed_tools import TOOLS
+
+    seed_entry = TOOLS[0]
+    assert seed_entry.get("advisor", False) is False  # sanity: seed says False
+    lib = Library(app_client)
+    tool_id = lib.add_tool(seed_entry["name"], seed_entry["description"],
+                            seed_entry["url"], seed_entry["categories"],
+                            approved=1, advisor=1)  # stored as True, disagreeing with seed
+    lib.close()
+
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    with TestClient(appmod.app):
+        pass
+
+    lib = Library(app_client)
+    row = lib.get_tool(tool_id)
+    items = lib.list_voice_review_queue()
+    lib.close()
+
+    # The live value is untouched — no silent overwrite.
+    assert row["advisor"] == 1
+
+    hits = [i for i in items if i["table_name"] == "tools"
+            and i["row_id"] == str(tool_id) and i["column_name"] == "advisor"
+            and i["rule"] == "seed-disagreement"]
+    assert hits, "expected a queued seed-disagreement item for the diverged advisor flag"
+    assert hits[0]["before_text"] == "True"
+    assert hits[0]["after_text"] == "False"
+    assert hits[0]["source"] == "startup-sync"
+
+
+def test_seed_toolbox_no_longer_silently_flips_community_advisor(app_client):
+    """Same fix, communities side. COMMUNITIES[0] ("The F Suite") has
+    advisor=True in the seed list; stored as False, a boot must queue a
+    seed-disagreement item rather than silently re-checking it."""
+    from linklib.db import Library
+    from scripts.seed_communities import COMMUNITIES
+
+    seed_entry = COMMUNITIES[0]
+    assert seed_entry.get("advisor", False) is True  # sanity: seed says True
+    lib = Library(app_client)
+    community_id = lib.add_community(
+        name=seed_entry["name"], url=seed_entry["url"], demographic=seed_entry["demographic"],
+        cost_band=seed_entry["cost_band"], categories=seed_entry["categories"],
+        approved=1, advisor=0,  # stored as False, disagreeing with seed
+    )
+    lib.close()
+
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    with TestClient(appmod.app):
+        pass
+
+    lib = Library(app_client)
+    row = lib.get_community(community_id)
+    items = lib.list_voice_review_queue()
+    lib.close()
+
+    assert row["advisor"] == 0
+
+    hits = [i for i in items if i["table_name"] == "communities"
+            and i["row_id"] == str(community_id) and i["column_name"] == "advisor"
+            and i["rule"] == "seed-disagreement"]
+    assert hits, "expected a queued seed-disagreement item for the diverged advisor flag"
+    assert hits[0]["before_text"] == "False"
+    assert hits[0]["after_text"] == "True"
+    assert hits[0]["source"] == "startup-sync"
+
+
+def test_seed_toolbox_advisor_disagreement_does_not_reopen_after_keep_mine(app_client):
+    """The whole point of routing advisor through the seed-disagreement
+    queue: once an admin resolves a divergence with "Keep mine," the next
+    boot must not queue it again — the exact infinite-loop shape the
+    original text-field incident was about, now guarded against for a
+    boolean too."""
+    from linklib.db import Library
+    from scripts.seed_tools import TOOLS
+
+    seed_entry = TOOLS[0]
+    lib = Library(app_client)
+    tool_id = lib.add_tool(seed_entry["name"], seed_entry["description"],
+                            seed_entry["url"], seed_entry["categories"],
+                            approved=1, advisor=1)
+    lib.close()
+
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    with TestClient(appmod.app):
+        pass
+
+    lib = Library(app_client)
+    items = lib.list_voice_review_queue()
+    hit = [i for i in items if i["table_name"] == "tools"
+           and i["row_id"] == str(tool_id) and i["column_name"] == "advisor"][0]
+    ok = lib.resolve_voice_review_item(hit["id"], "keep_mine")
+    assert ok
+    lib.close()
+
+    # Second boot: must not reopen the same divergence.
+    importlib.reload(appmod)
+    with TestClient(appmod.app):
+        pass
+
+    lib = Library(app_client)
+    row = lib.get_tool(tool_id)
+    items_after = lib.list_voice_review_queue(status="open")
+    lib.close()
+
+    assert row["advisor"] == 1  # still untouched
+    reopened = [i for i in items_after if i["table_name"] == "tools"
+                and i["row_id"] == str(tool_id) and i["column_name"] == "advisor"]
+    assert reopened == [], "keep_mine must permanently suppress this exact divergence"
+
+
+def test_apply_voice_review_write_use_seed_flips_advisor(app_client):
+    """The 'use_seed' resolution path actually flips the live boolean
+    column, not just the queue row's own status — the write side of the
+    mechanism, exercised directly against Library rather than through a
+    full boot."""
+    from linklib.db import Library
+
+    lib = Library(app_client)
+    cid = lib.add_tool_category("Test Cat")
+    tool_id = lib.add_tool("Testco", "A test tool.", "https://testco.example",
+                            [], approved=1, advisor=0)
+    item_id = lib.add_seed_disagreement_item(
+        "tools", tool_id, "advisor", "False", "True", source="startup-sync",
+    )
+    assert item_id
+    ok = lib.apply_voice_review_write("tools", tool_id, "advisor", "True")
+    assert ok
+    resolved = lib.resolve_voice_review_item(item_id, "use_seed")
+    assert resolved
+
+    row = lib.get_tool(tool_id)
+    lib.close()
+    assert row["advisor"] == 1

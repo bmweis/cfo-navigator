@@ -10973,6 +10973,128 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   `tests/test_fix_invisible_characters.py`, and the updated
   `tests/test_voice_approve_term.py`/`tests/test_script_syspath_fix.py`
   for the full regression coverage.
+- **Voice review queue, issue #592 follow-ups (2026-09) — the four items
+  logged from #590's own merge review: the advisor boolean's silent
+  revert, the background refresher wandering between test databases, a
+  mislabeled `source` value, and a bulk ampersand-replacement action.**
+  1. **`tools.advisor`/`communities.advisor` had the identical
+     silent-revert shape** as name/notes/description before #590 fixed
+     those — a raw, unlogged `UPDATE` in `_seed_toolbox()` re-syncing to
+     the seed list's value on every boot, regardless of a deliberate admin
+     edit. Confirmed bidirectional first (it already re-synced True->False
+     as readily as False->True, contrary to an earlier code comment
+     claiming otherwise) — no reason found to treat one direction
+     differently, so both now queue through the identical
+     seed-disagreement mechanism as the text fields, via a new
+     `Library._SEED_BOOLEAN_COLUMNS` allowlist (`tools.advisor`,
+     `communities.advisor`) that `apply_voice_review_write`/
+     `get_voice_review_current_value` both recognize alongside their
+     existing `_SCAN_TABLES`-driven text-column handling — a boolean is
+     stored/read as the literal string `"True"`/`"False"`, never mixed
+     into the prose-only `_SCAN_TABLES` enumeration (which also drives the
+     voice-typography scanner, and a boolean isn't prose). "Use seed
+     version"/"Keep mine" both work unmodified for these rows, same as any
+     other seed-disagreement item.
+  2. **The background checks refresher (`webapp/tasks.py`) re-read
+     `LINKLIB_DB` on every single iteration**, a latent "wander between
+     test databases" risk once a leftover thread from one test kept
+     looping in the background against a since-monkeypatched-and-deleted
+     DB path — a real risk, not hypothetical, since the one test file that
+     triggers the FastAPI startup event
+     (`tests/test_seed_toolbox_startup.py`, via `with TestClient`) started
+     this thread on every one of its tests. Fixed two ways: the DB path is
+     now resolved exactly once, in `start_background_checks_refresher()`,
+     and threaded through to `_checks_refresher_loop`/
+     `_reconcile_voice_review_queue_once` as a plain argument instead of
+     each iteration re-reading the environment; and
+     `start_background_checks_refresher()` is now a no-op under the test
+     suite by DEFAULT (detected via `"PYTEST_CURRENT_TEST" in os.environ`
+     — pytest's own standard, reliable signal that a test is currently
+     running, with no pytest import needed), closing the wandering risk at
+     its source rather than only narrowing the window. A test that
+     deliberately wants the real thread can still get it via
+     `force=True`. Production is unaffected either way — `LINKLIB_DB`
+     never changes after boot there, and it isn't running under pytest.
+  3. **`reconcile_voice_review_queue()` tagged its own inserted rows
+     `source="script"`**, indistinguishable from a genuinely one-off,
+     human-run backfill script (`scripts/backfill_voice_review_queue.py`,
+     which shares the exact same `add_voice_review_item` insertion path
+     via its own `source` default) — but a periodic BACKGROUND pass isn't
+     a script. Fixed by passing `source="scan"` explicitly at that one
+     call site; `add_voice_review_item`'s own default stays `"script"`
+     for the actual one-off script, unaffected. **The taxonomy is six
+     concepts across two different columns, worth stating precisely
+     rather than folding into one list**: `voice_review_queue.source`
+     recognizes five values — `admin-edit`, `startup-sync`, `script`,
+     `submission`, and now `scan` — describing which MECHANISM wrote a
+     given row. `rule='seed-disagreement'` (set by
+     `add_seed_disagreement_item`) is a genuinely different dimension —
+     the RULE that matched, not a `source` value — and a
+     seed-disagreement row's own `source` is always `'startup-sync'`, the
+     mechanism that found the divergence; the two are easy to conflate
+     since both are string tags on the same table, so every taxonomy
+     comment in `linklib/db.py`/`webapp/app.py` now says this explicitly.
+     **Relabeling already-existing rows was investigated and found not
+     reliably possible, not skipped**: every `open`-status row tagged
+     `source='script'` before this fix could only have come from either
+     the one-off backfill script's own run or this reconciliation pass
+     (both share the identical insertion path, both wrote the identical
+     `'script'` value, and no other column on this table records which
+     literal code path produced a row) — there's no reliable per-row
+     signal to split them by after the fact, so none were reclassified;
+     this is stated here rather than guessed past.
+  4. **A group-level "Replace & with and" bulk action on the Ampersands
+     group** (`/admin/voice/review-queue`), for cases like the ~20
+     `communities.demographic` bare-ampersand findings the live DB scan
+     surfaced (see the "Database content is scanned too" section above) —
+     almost certainly all legitimate mechanical fixes, not judgment calls.
+     `linklib.voice_review.replace_spaced_ampersands(text, approved_terms)`
+     is the pure function underneath it: replaces every SPACED raw
+     ampersand (`" & "`) or spaced HTML-escaped ampersand (`" &amp; "`)
+     with `" and "` — deliberately never a bare `"&"`->`"and"`
+     substitution, which would turn `" &amp; "` into the stray
+     `" andamp; "` instead. An UNSPACED ampersand (`"S&M"`, `"AT&T"`)
+     never matches the pattern at all, so it's always left for a manual
+     decision — replacing those would produce `"SandM"`. Protects any
+     spaced ampersand that's part of an already-approved bare-ampersand
+     term (`Library.list_approved_voice_terms`) by reusing
+     `mask_approved_ampersand_terms`'s own length-preserving underscore
+     mask rather than a second implementation — a candidate match is
+     protected exactly when its own span in the masked text is entirely
+     underscores, i.e. it fell inside an approved term's own occurrence;
+     verified with the exact scenario named in the spec, a field
+     containing both "Bain & Company" (approved) and "finance &
+     operations" (not) — only the second moves. `Library.
+     preview_ampersand_replacement(item_id)`/`apply_ampersand_replacement
+     (item_id)` are the review-queue-aware wrappers: preview reads the
+     FULL CURRENT live value (never the queue row's own excerpt, same
+     Part-4 discipline as every other write-back path here) and computes
+     what would change with nothing written; apply re-derives the
+     replacement fresh against the current value (never trusting an
+     earlier preview call — the same TOCTOU discipline
+     `/admin/reader/bulk-delete`'s own preview-then-commit flow already
+     uses) and only writes+resolves a row that actually has something
+     eligible to change, via `apply_voice_review_write` (so the write is
+     logged exactly like any other resolution) — a no-op selection (only
+     unspaced/approved-term ampersands) is left untouched and open, never
+     silently resolved. Two new routes,
+     `POST /admin/voice/review-queue/bulk-replace-ampersand/preview` and
+     `.../apply`, follow the same preview-page-then-confirm-form shape as
+     `/admin/reader/bulk-delete`'s own CSV-driven preview — nothing is
+     written until the admin reviews a before/after diff per row (via the
+     same `_voice_char_diff_html` helper the `auto_corrected` rows already
+     use) and clicks confirm; a "Left as-is" section lists every selected
+     row that wouldn't change, and why, rather than silently dropping it
+     from the result. The button (`_voice_review_group_bulk_actions_html`)
+     renders only on the `bare-ampersand` group, alongside the existing
+     Accept/Allow-here buttons, not in place of them. See
+     `linklib/voice_review.py`'s `replace_spaced_ampersands` docstring,
+     `tests/test_voice_review_queue.py`'s "Issue #592 item 4" section
+     (the pure-function unit tests plus the Library-level preview/apply
+     tests, including the mixed-approved-term and escaped-`&amp;`-in-
+     `body_md` edge cases), and `tests/test_voice_bulk_replace_ampersand.py`
+     for the two routes' own coverage (diff rendering, no-write-on-preview,
+     empty-selection redirect, TOCTOU-safe apply, auth).
 - **Voice review queue, remaining-tables follow-up (2026-09) — the five
   tables disclosed and named as a scope cut in the bullet above
   (`communities`, `community_profiles`, `benchmarks`, `thought_leadership`,
@@ -11087,12 +11209,15 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   UI. Fixed with a new `voice_review_queue.source TEXT` column (a plain
   idempotent migration, no backfill for pre-existing rows — they read
   `source=NULL`, rendered as "unknown," never a blank cell) taking one of
-  four values: `'admin-edit'` (a human editing through an `/admin/*`, or an
-  admin-gated public-looking, submit route), `'startup-sync'`
-  (`_seed_toolbox()`'s own per-boot re-sync — the exact mechanism behind
-  the incident), `'script'` (a one-off backfill/fix/migration script), or
-  `'submission'` (a public, member-gated submission route, where the
-  origin is known but is neither an admin edit nor a script/sync run).
+  four values (extended to five in 2026-09, issue #592 item 3, which added
+  `'scan'` for `reconcile_voice_review_queue()`'s own periodic background
+  pass — see that bullet below for the full write-up): `'admin-edit'` (a
+  human editing through an `/admin/*`, or an admin-gated public-looking,
+  submit route), `'startup-sync'` (`_seed_toolbox()`'s own per-boot
+  re-sync — the exact mechanism behind the incident), `'script'` (a
+  one-off backfill/fix/migration script), or `'submission'` (a public,
+  member-gated submission route, where the origin is known but is neither
+  an admin edit nor a script/sync run).
   `Library._vf`/`log_voice_correction` both grew an optional `source`
   parameter threaded straight into the INSERT; all 28 `Library` write
   methods that already call either grew a matching `source: str | None =
