@@ -1149,8 +1149,8 @@ is about keeping it out of the *data layer*; it says nothing about which
 route-layer caller may invoke `sync_original_content_article()` — these
 three review-queue handlers live in the identical `webapp/app.py` layer
 as the two admin save routes, so calling the same function from here is
-the intended shape, not an exception to it. The "Allow everywhere"
-(approve-term) action is confirmed to never write to `original_content`
+the intended shape, not an exception to it. The "Always allow" (renamed
+from "Allow everywhere") action is confirmed to never write to `original_content`
 at all (it only inserts into `voice_approved_terms` and resolves matching
 queue rows without touching the underlying stored text), so it needs no
 sync call — documented inline at that route rather than left as a silent
@@ -10232,7 +10232,8 @@ with its own pair of resolution actions.
 
 `/admin/voice/review-queue` is the review UI: rows grouped by rule, each with
 a per-type action set (`_voice_review_row_html`) — Accept/Revert for an
-`auto_corrected` row; a pre-filled edit textarea + Save edit/Allow here for an
+`auto_corrected` row; a pre-filled edit textarea + Save edit/Allow once (renamed
+from "Allow here") for an
 `open` row (see the Part 4 fix below for what it's pre-filled with); Use seed
 version/Keep mine for a `seed-disagreement` row. A bulk-resolve action lets a
 whole rule-group be Accept-all/Revert-all in one submit
@@ -10311,19 +10312,23 @@ exception" action, per the coordinator's own explicit amendment.** The two
 are deliberately styled to be unmistakably different, since a misclick has
 real consequences in opposite directions:
 
-- **"Allow here"** (`resolve_voice_review_item(..., "accept_exception")`,
-  unchanged from Part 1's original per-row exception) — scoped to exactly one
+- **"Allow once"** (renamed from "Allow here" — `resolve_voice_review_item(...,
+  "accept_exception")`, unchanged from Part 1's original per-row exception) —
+  scoped to exactly one
   (table, row_id, column, rule) location, reversible only by manually clearing
   that queue row's status back to `open`. Rendered as a plain, muted,
   dashed-border button. Available on every `open`-row's action set,
-  regardless of rule.
-- **"Approve term"** (`Library.approve_voice_term(term, rule="bare-ampersand")`
+  regardless of rule. The panel caption under the row's edit action states
+  plainly that it holds for that one spot until it's removed, not "just this
+  one time."
+- **"Always allow"** (renamed from "Approve term", then again from "Allow
+  everywhere" — `Library.approve_voice_term(term, rule="bare-ampersand")`
   / `voice_approved_terms` — a new table, `id`/`term`/`rule`/`created_at`,
   unique per `(rule, term)` case-insensitively) — a GLOBAL, PERMANENT
   allowlist entry: "this exact matched term is fine everywhere, forever."
   Shown ONLY on a `bare-ampersand` finding (never on a banned-word/filler/
   performative finding — staying permanently banned, with only per-row
-  "Allow here" exceptions, is Brian's own explicit, stated policy for those
+  "Allow once" exceptions, is Brian's own explicit, stated policy for those
   three rules), pre-filled with the row's own flagged excerpt as an editable
   starting guess, since the exact wording of the approved term matters.
   Approving a term is idempotent (a second approval of the identical term is
@@ -10456,10 +10461,10 @@ as a follow-up), all closed in one PR:
    default, left-aligned to match `.admin-table-actions-grid`'s sitewide
    convention (reversing the earlier page-scoped `flex-end` choice), with
    every button — filled or outlined — sharing one style string and the
-   `.btn`/`.btn-ghost` classes (the filled "Approve term" button no
+   `.btn`/`.btn-ghost` classes (the filled "Always allow" button no
    longer overrides `.btn`'s own border with `border:none`, which had
-   broken its height parity with the outlined buttons beside it). Approve
-   term moved out of the Actions cell into its own full-width reveal
+   broken its height parity with the outlined buttons beside it). Always
+   allow moved out of the Actions cell into its own full-width reveal
    panel — a second `<tr>` with a `colspan="5"` cell, toggled by
    `voiceToggleApproveTerm` mirroring the existing Edit-field pattern —
    holding a full-width input, a shortened caption ("Trim to the exact
