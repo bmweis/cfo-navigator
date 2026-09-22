@@ -577,3 +577,104 @@ def test_admin_checks_surfaces_an_unmirrored_row(monkeypatch, tmp_path):
     row = next(r for r in results if r["name"] == "Original content mirrored for retrieval")
     assert row["ok"] is False
     assert "bypassed-piece" in row["detail"]
+
+
+# --- list_drifted_original_content_mirrors: catches a stale mirror, not --
+# --- just a missing one (2026-09 durability follow-up) -------------------
+
+def test_list_drifted_finds_nothing_on_a_freshly_synced_row(lib):
+    item_id = lib.add_original_content(
+        "fresh-piece", "Title", "Teaser", "Guide", "Read it",
+        body_md="Real body.", status="live",
+    )
+    sync_original_content_article(lib, item_id)
+    assert lib.list_drifted_original_content_mirrors() == []
+
+
+def test_list_drifted_flags_a_mirror_that_never_resynced_after_an_edit(lib):
+    """The real gap: a mirror exists and once matched, but body_md was
+    edited via a path that skips sync_original_content_article() (any
+    future non-route write) — the mirror is present but stale, which
+    list_unmirrored_original_content() alone can't see."""
+    item_id = lib.add_original_content(
+        "stale-piece", "Title", "Teaser", "Guide", "Read it",
+        body_md="Original body.", status="live",
+    )
+    sync_original_content_article(lib, item_id)
+    row = lib.get_original_content(item_id)
+    # Edit body_md directly, bypassing the sync — the mirror is now stale.
+    lib.update_original_content(
+        item_id, row["slug"], row["title"], row["teaser"], row["tag_label"],
+        row["link_label"], "Completely different body now.", "live",
+        row["featured_home"], row["date_label"], row["sort_key"], row["display_order"],
+    )
+    drifted = lib.list_drifted_original_content_mirrors()
+    assert len(drifted) == 1
+    assert drifted[0]["slug"] == "stale-piece"
+    # A missing-mirror check alone would report nothing wrong here — the
+    # mirrored_article_id is still valid, just pointing at stale content.
+    assert lib.list_unmirrored_original_content() == []
+
+
+def test_list_drifted_is_a_no_op_for_a_tag_only_edit(lib):
+    """The exact false-positive risk a timestamp-based check would have
+    hit: scripts/normalize_original_content_tags.py calls update_original_
+    content() with body_md UNCHANGED (only tag_label/link_label differ),
+    but update_original_content() still bumps updated_at on every call.
+    A content-comparison check must not flag this."""
+    item_id = lib.add_original_content(
+        "tag-only-edit-piece", "Title", "Teaser", "Guide", "Read it",
+        body_md="Stable body, never changes.", status="live",
+    )
+    sync_original_content_article(lib, item_id)
+    row = lib.get_original_content(item_id)
+    lib.update_original_content(
+        item_id, row["slug"], row["title"], row["teaser"],
+        "Playbook", "Read the playbook",  # tag_label/link_label change only
+        row["body_md"], "live",
+        row["featured_home"], row["date_label"], row["sort_key"], row["display_order"],
+    )
+    assert lib.list_drifted_original_content_mirrors() == []
+
+
+def test_list_drifted_ignores_a_body_less_row(lib):
+    lib.add_original_content(
+        "metadata-only-piece-2", "Title", "Teaser", "Guide", "Read it",
+        body_md=None, status="live",
+    )
+    assert lib.list_drifted_original_content_mirrors() == []
+
+
+def test_admin_checks_surfaces_a_drifted_row_with_an_edit_page_link(monkeypatch, tmp_path):
+    """End-to-end: a drifted (not missing) mirror shows up on /admin/checks,
+    and the detail names the exact fix — open the edit page and click Save."""
+    import importlib
+    monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "checks2.db"))
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import webapp.app as appmod
+    importlib.reload(appmod)
+    import webapp.checks as checksmod
+    importlib.reload(checksmod)
+
+    db_lib = appmod._lib()
+    try:
+        item_id = db_lib.add_original_content(
+            "drifted-piece", "Title", "Teaser", "Guide", "Read it",
+            body_md="Original body.", status="live",
+        )
+        sync_original_content_article(db_lib, item_id)
+        row = db_lib.get_original_content(item_id)
+        db_lib.update_original_content(
+            item_id, row["slug"], row["title"], row["teaser"], row["tag_label"],
+            row["link_label"], "A different body, never resynced.", "live",
+            row["featured_home"], row["date_label"], row["sort_key"], row["display_order"],
+        )
+    finally:
+        db_lib.close()
+
+    results = checksmod.run_all()
+    row = next(r for r in results if r["name"] == "Original content mirrored for retrieval")
+    assert row["ok"] is False
+    assert "drifted-piece" in row["detail"]
+    assert f"/admin/thought-leadership/original/{item_id}/edit" in row["detail"]

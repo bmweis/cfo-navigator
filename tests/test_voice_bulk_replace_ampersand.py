@@ -222,14 +222,19 @@ def test_approve_term_input_not_rendered_in_actions_cell_on_first_load(env):
     assert r.status_code == 200
 
     # The trigger button is on the page, in the default one-line action row.
-    assert "Approve term</button>" in r.text
+    # Renamed "Approve term" -> "Allow everywhere" (voice-queue-durability
+    # fix, Part C item 4).
+    assert "Allow everywhere</button>" in r.text
 
     # But the actual term input lives ONLY inside a panel `<tr>` that starts
     # collapsed. There must be exactly one `name="term"` input on the page
-    # for this one row, and it must sit inside the hidden panel row, not
-    # loose in the Actions `<td>` the way the old boxed mini-form did.
+    # for this one row (one ampersand phrase seeded -> one guessed term), and
+    # it must sit inside the hidden panel row, not loose in the Actions `<td>`
+    # the way the old boxed mini-form did. Panel ids are suffixed by guess
+    # index (-0, -1, ...) to support multiple distinct ampersand candidates
+    # in the same field (Part A item 4).
     assert r.text.count('name="term"') == 1
-    panel_marker = f'<tr id="voice-approve-term-{item_id}" style="display:none;">'
+    panel_marker = f'<tr id="voice-approve-term-{item_id}-0" style="display:none;">'
     assert panel_marker in r.text
     panel_pos = r.text.index(panel_marker)
     term_input_pos = r.text.index('name="term"')
@@ -255,7 +260,7 @@ def test_approve_term_panel_is_full_width_and_only_appears_there(env):
     assert r.status_code == 200
 
     panel_re = re.search(
-        r'<tr id="voice-approve-term-%s" style="display:none;">(.*?)</tr>' % item_id,
+        r'<tr id="voice-approve-term-%s-0" style="display:none;">(.*?)</tr>' % item_id,
         r.text, re.DOTALL,
     )
     assert panel_re, "expected a dedicated panel <tr> for this item"

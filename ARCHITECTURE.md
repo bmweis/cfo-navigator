@@ -1078,6 +1078,35 @@ unmirrored row, but it can no longer do so silently — the next
 _failing_checks_count()`) shows it, and the fix is always the same:
 open the piece in `/admin/thought-leadership/original` and click Save.
 
+**Follow-up (2026-09, durability audit): the invariant now also catches
+DRIFT, not just a missing mirror.** `list_unmirrored_original_content()`
+only ever asked "does a mirror exist at all" — a mirror that exists but
+went stale (its `mirrored_article_id` still points at a real `articles`
+row, but that row's `content` no longer reflects the current `body_md`)
+passed the check silently. A future write path that bypasses the two
+admin save routes — any script calling `Library.update_original_content()`
+directly without also calling `sync_original_content_article()` — is
+exactly the shape that produces this. `Library.
+list_drifted_original_content_mirrors()` closes the gap: it re-derives
+the expected indexed text via `plain_text_from_body_md(body_md)` (the
+same function the sync itself calls) and compares it directly against
+the stored `articles.content`, rather than comparing `updated_at`
+timestamps. **Timestamps were deliberately rejected as the comparison
+basis**: `scripts/normalize_original_content_tags.py` calls `update_
+original_content()` with `body_md` UNCHANGED (only `tag_label`/
+`link_label` differ), but `update_original_content()` bumps `updated_at`
+on every call regardless — a timestamp-based drift check would false-
+positive on that exact, already-shipping script. A content comparison
+can't have that failure mode: no drift is reported unless the indexed
+text has genuinely diverged. `original_content_mirror_problems()` now
+reports both missing and drifted rows in one list, each naming the exact
+fix (`/admin/thought-leadership/original/{id}/edit`, click Save — the
+identical remedy either failure mode needs, since both self-heal on any
+save). See `tests/test_original_content_ingestion.py`'s
+`test_list_drifted_*`/`test_admin_checks_surfaces_a_drifted_row_with_an_
+edit_page_link` for the regression coverage, including the tag-only-edit
+false-positive guard.
+
 **A separate, informational finding surfaced during this investigation,
 deliberately not fixed here**: a no-op admin save on `netsuite-mcp` (no
 field actually edited) changed `body_md` from 18,527 to 18,766 characters
