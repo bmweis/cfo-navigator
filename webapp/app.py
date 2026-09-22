@@ -1603,6 +1603,12 @@ html,body{height:100%;}
 body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;
   min-height:100vh;display:flex;flex-direction:column;}
 .site-main{flex:1 0 auto;display:flex;flex-direction:column;}
+/* Admin tables: the rows under a header sit on white (checks-page
+   follow-ups, 2026-09). The header keeps its --accent-light band; a row
+   with its own background (inline style, or a header row made of th cells)
+   is untouched. Scoped to admin pages via .admin-main, set by _page() when
+   active == "Admin" — public tables keep their own treatment. */
+.admin-main tbody>tr:not(:has(>th)){background:var(--surface);}
 a{color:var(--navy);text-decoration:none;}
 a:hover{text-decoration:underline;}
 
@@ -2179,7 +2185,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
   <button class="nav-toggle" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">&#9776;</button>
   <nav class="site-nav" id="nav">{nav}</nav>
 </header>
-<main class="site-main">{body}</main>
+<main class="site-main{" admin-main" if active == "Admin" else ""}">{body}</main>
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
@@ -14151,7 +14157,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     # every edit row already uses (see the per-row comment below), so a plain
     # HTML association carries the two fields into one POST with no JS.
     add_form_id = "cat-add"
-    add_row = f"""<tr style="border-top:1px solid var(--line);background:var(--bg);">
+    add_row = f"""<tr style="border-top:1px solid var(--line);background:var(--surface);">
   <td style="padding:9px 12px;">
     <form id="{add_form_id}" method="post" action="/admin/tools/software/categories/new" style="margin:0;">
       <input type="text" name="name" required maxlength="80" placeholder="e.g. Payroll"
@@ -17836,7 +17842,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
     # Name/Description/Communities columns (PR 11, 2026-09) — same treatment
     # as /admin/tools/software/categories.
     add_form_id = "commcat-add"
-    add_row = f"""<tr style="border-top:1px solid var(--line);background:var(--bg);">
+    add_row = f"""<tr style="border-top:1px solid var(--line);background:var(--surface);">
   <td style="padding:9px 12px;">
     <form id="{add_form_id}" method="post" action="/admin/tools/communities/categories/new" style="margin:0;">
       <input type="text" name="name" required maxlength="80" placeholder="e.g. Treasury"
@@ -26196,6 +26202,40 @@ def _exa_pricing_freshness_banner(last_verified: str) -> str:
     return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-exa-pricing-reviewed")
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _db_copy_decisions_text(report) -> str:
+    """The decisions half of the Database copy count — "2 allowed once, 6
+    always allowed." Findings a person already decided on in the review
+    queue are not violations, and they're not hidden either: they're
+    stated on their own line. Shared, byte for byte, by the /admin/checks
+    summary row and the section body so the two can't disagree."""
+    return (f"{len(report.allowed_once)} allowed once, "
+            f"{report.always_allowed_count} always allowed.")
+
+
+def _db_copy_count_text(report) -> str:
+    """"0 violations. 2 allowed once, 6 always allowed." — the single
+    sentence both the summary row's Details and the section body lead
+    with. See _db_copy_decisions_text."""
+    return f"{_plural(len(report.violations), 'violation')}. {_db_copy_decisions_text(report)}"
+
+
+def _db_copy_decisions_html(report) -> str:
+    """The decisions line with each count linked to where that decision is
+    managed: Allow once lives on individual rows in the review queue,
+    Always allow is the approved-terms list on /admin/voice."""
+    n_once = len(report.allowed_once)
+    n_always = report.always_allowed_count
+    link = "color:var(--accent);"
+    return (f'<p style="font-size:13px;color:var(--ink-soft);margin:8px 0 0;">Decisions: '
+            f'<a href="/admin/voice/review-queue#voice-resolved" style="{link}">{n_once} allowed once</a>, '
+            f'<a href="/admin/voice#approved-terms" style="{link}">{n_always} always allowed</a>. '
+            f'Not counted as violations; removing a decision puts the finding back on the next pass.</p>')
+
+
 def _db_copy_scan_banner(report) -> str:
     """Live-only (2026-09 voice-enforcement PR, Part 2) — unlike the three
     freshness banners above, this is not a dated human attestation: it's a
@@ -26240,12 +26280,15 @@ def _db_copy_scan_banner(report) -> str:
             f'font-family:ui-monospace,monospace;">{skip_items}</ul>'
         )
 
+    count_text = _esc(_db_copy_count_text(report))
+    decisions_html = _db_copy_decisions_html(report)
     if not violations:
         clean = ('<p style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;border-radius:10px;'
-                 'padding:10px 16px;font-size:14px;margin:0;">&#10003; No banned words, filler, performative '
-                 'phrases, bare ampersands, or spaced em dashes found in the scanned database columns.</p>')
+                 f'padding:10px 16px;font-size:14px;margin:0;">&#10003; {count_text} No banned words, filler, '
+                 'performative phrases, bare ampersands, or spaced em dashes left undecided in the scanned '
+                 'database columns.</p>')
         return (f'<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;">{_esc(stats_line)}</p>'
-                f'{skip_html}{clean}')
+                f'{skip_html}{clean}{decisions_html}')
 
     by_table: dict[str, int] = {}
     for v in violations:
@@ -26255,11 +26298,12 @@ def _db_copy_scan_banner(report) -> str:
     more = f'<p style="margin:8px 0 0;font-size:12.5px;color:var(--muted);">+ {len(violations) - 20} more.</p>' if len(violations) > 20 else ""
     finding_html = (
         f'<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
-        f'padding:10px 16px;font-size:14px;margin:0 0 10px;">{len(violations)} violation'
-        f'{"s" if len(violations) != 1 else ""} across the scanned database columns&mdash;{_esc(table_summary)}.</p>'
+        f'padding:10px 16px;font-size:14px;margin:0 0 10px;">{count_text} Violations by table: '
+        f'{_esc(table_summary)}.</p>'
         f'<ul style="margin:0;padding-left:20px;font-size:13px;color:var(--ink-soft);font-family:ui-monospace,monospace;">'
         f'{rows_html}</ul>{more}')
-    return f'<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;">{_esc(stats_line)}</p>{skip_html}{finding_html}'
+    return (f'<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;">{_esc(stats_line)}</p>'
+            f'{skip_html}{finding_html}{decisions_html}')
 
 
 def _disk_mb(n: int) -> str:
@@ -26442,6 +26486,24 @@ _SUMMARY_COL_WIDTH_STATUS = "56px"
 # summary row in both tables — there's nowhere left for the two to drift
 # apart, since there's only one thing to edit.
 _SUMMARY_ROW_COLUMNS = ("check", "status", "details")
+
+# Collapsed-by-default sections still need to be linkable: when the URL's
+# fragment names an element inside a closed <details> (or the <details>'s
+# own wrapper), open every enclosing one and scroll to it.
+_OPEN_DETAILS_FOR_HASH_JS = (
+    '(function(){function o(){var h=location.hash.slice(1);if(!h)return;'
+    'var t=document.getElementById(h);if(!t)return;'
+    'var inner=t.querySelector(":scope > details");if(inner)inner.open=true;'
+    'var d=t.closest("details");'
+    'while(d){d.open=true;d=d.parentElement&&d.parentElement.closest("details");}'
+    't.scrollIntoView();}window.addEventListener("hashchange",o);'
+    'if(document.readyState!=="loading")o();else document.addEventListener("DOMContentLoaded",o);})();'
+)
+
+# How many columns the Live checks cards lay out in at desktop width. Below
+# 760px it's always one. Brian picks between 2 and 3 from screenshots; this
+# is the one line that changes.
+_LIVE_CHECKS_COLUMNS = 2
 
 
 def _checks_summary_cell_html(column: str, row: dict) -> str:
@@ -26632,16 +26694,19 @@ def admin_checks(request: Request):
         live_status, live_href = "ok", None
     live_row = {"check": "Live checks", "href": live_href, "status": live_status, "details": live_details}
 
+    # Same sentence the section body leads with (_db_copy_count_text), so
+    # the summary and the section can never report different numbers.
+    # Findings covered by a review-queue decision aren't violations.
     n_violations = len(db_copy_report.violations)
+    db_details = _db_copy_count_text(db_copy_report)
     if n_violations:
-        db_details = f"{n_violations} finding{'s' if n_violations != 1 else ''}"
         db_status = "critical"
     elif db_copy_report.tables_skipped:
         n_skipped = len(db_copy_report.tables_skipped)
-        db_details = f"stale scan—{n_skipped} table{'s' if n_skipped != 1 else ''} skipped"
+        db_details += f" Stale scan: {_plural(n_skipped, 'table')} skipped."
         db_status = "warning"
     else:
-        db_details, db_status = "No findings", "ok"
+        db_status = "ok"
     db_row = {"check": "Database copy", "href": "/admin/voice/review-queue",
               "status": db_status, "details": db_details}
 
@@ -26764,7 +26829,7 @@ def admin_checks(request: Request):
         rows += (
             f'<div id="{_check_row_slug(r["name"])}" style="border-left:3px solid {bar};background:var(--bg);'
             f'border:1px solid var(--line);border-left-width:3px;border-radius:10px;padding:12px 16px;'
-            f'margin-bottom:10px;scroll-margin-top:16px;">'
+            f'scroll-margin-top:16px;">'
             f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
             f'<span style="font-weight:600;font-size:15px;color:var(--navy);">{_esc(r["name"])}</span>'
             f'<span style="display:flex;gap:12px;align-items:baseline;">{where}{badge}</span></div>'
@@ -26772,17 +26837,78 @@ def admin_checks(request: Request):
             f'<p style="margin:3px 0 0;font-size:12px;color:var(--muted);line-height:1.45;">{_esc(r["detail"])}</p>'
             f'</div>')
 
+    # CI quota switch (checks-page follow-ups, 2026-09) — a real on/off
+    # control at the top of the page, next to the summary, instead of a link
+    # at the bottom of a long list. Flipping it posts the opposite state and
+    # carries the current PR link along, so the link is never lost by a
+    # toggle. The collapsed form below it stays for setting that link.
+    _pr_link_html = (f'<a href="{_esc(ci_quota_pr_url)}" target="_blank" rel="noopener" '
+                     f'style="color:var(--accent);">{_esc(ci_quota_pr_url)} &#8599;</a>'
+                     if ci_quota_pr_url else
+                     '<span style="color:#92400e;">no PR link set yet&mdash;add one below</span>')
+    _switch_state_html = (
+        f'<span style="font-size:13px;color:var(--ink-soft);">On. CI-only checks point at {_pr_link_html}</span>'
+        if ci_quota_exhausted else
+        '<span style="font-size:13px;color:var(--muted);">Off. CI-only checks link to the latest GitHub Actions run.</span>'
+    )
+    _on_input = '<input type="hidden" name="exhausted" value="on">'
+    _flip_input = "" if ci_quota_exhausted else _on_input
+    _keep_input = _on_input if ci_quota_exhausted else ""
+    _knob_x = "18px" if ci_quota_exhausted else "2px"
+    _track = "var(--navy)" if ci_quota_exhausted else "var(--line-strong)"
     ci_quota_form = (
-        f'<details style="margin:16px 0 0;">'
-        f'<summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">GitHub Actions quota exhausted right now? &rarr;</summary>'
+        f'<div id="ci-quota" style="margin:0 0 24px;scroll-margin-top:16px;">'
+        f'<form method="post" action="/admin/checks/ci-quota" style="margin:0;display:flex;'
+        f'align-items:center;gap:12px;flex-wrap:wrap;">'
+        f'{_flip_input}'
+        f'<input type="hidden" name="pr_url" value="{_esc(ci_quota_pr_url)}">'
+        f'<button type="submit" role="switch" aria-checked="{"true" if ci_quota_exhausted else "false"}" '
+        f'aria-label="GitHub Actions quota exhausted" '
+        f'style="position:relative;width:38px;height:22px;border-radius:11px;border:none;padding:0;'
+        f'cursor:pointer;background:{_track};flex-shrink:0;">'
+        f'<span style="position:absolute;top:2px;left:{_knob_x};width:18px;height:18px;border-radius:50%;'
+        f'background:#fff;"></span></button>'
+        f'<span style="font-size:14px;font-weight:600;color:var(--navy);">GitHub Actions quota exhausted</span>'
+        f'{_switch_state_html}'
+        f'</form>'
+        f'<details style="margin:8px 0 0;">'
+        f'<summary style="cursor:pointer;font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;">'
+        f'Set the PR link <span class="disclosure-caret" style="font-size:11px;">&#9654;</span></summary>'
         f'<form method="post" action="/admin/checks/ci-quota" style="margin:10px 0 0;display:flex;'
         f'gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;">'
-        f'<label style="display:flex;align-items:center;gap:6px;color:var(--ink-soft);">'
-        f'<input type="checkbox" name="exhausted" {"checked" if ci_quota_exhausted else ""}> Quota exhausted</label>'
+        f'{_keep_input}'
         f'<input type="url" name="pr_url" placeholder="Most recently merged PR URL" value="{_esc(ci_quota_pr_url)}" '
         f'style="flex:1;min-width:220px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;">'
-        f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save</button>'
-        f'</form></details>'
+        f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save link</button>'
+        f'</form></details></div>'
+    )
+
+    # Live checks: collapsed on load (it's the longest section, and the
+    # summary above already reports its status), laid out as a responsive
+    # grid that stacks to one column on mobile. Column count lives in one
+    # constant, _LIVE_CHECKS_COLUMNS.
+    _live_dot_color, _live_word = _SUMMARY_STATUS_META[live_status]
+    _live_count_label = (
+        f'<span role="img" title="{_esc(_live_word)}" aria-label="{_esc(_live_word)}" '
+        f'style="display:inline-block;width:9px;height:9px;border-radius:50%;background:{_live_dot_color};'
+        f'margin-right:6px;"></span>{_esc(live_details)} &middot; {len(results)} checks in all'
+    )
+    live_checks_html = (
+        '<div id="live-checks" style="scroll-margin-top:16px;">'
+        + _disclosure_group(
+            "Live checks",
+            f'<div class="checks-live-grid">{rows}</div>'
+            f'<p style="margin:14px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including '
+            f'the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" '
+            f'style="color:var(--accent);">view the latest QA run &rarr;</a></p>',
+            count_label=_live_count_label, extra_class="checks-live-group")
+        + '</div>'
+        f'<style>.checks-live-grid{{display:grid;grid-template-columns:repeat({_LIVE_CHECKS_COLUMNS},minmax(0,1fr));'
+        f'gap:10px;align-items:stretch;}}'
+        f'@media(max-width:760px){{.checks-live-grid{{grid-template-columns:minmax(0,1fr);}}}}</style>'
+        # A summary row links to a failing check's own card inside the
+        # collapsed group; open the group when a fragment lands inside it.
+        + f'<script>{_OPEN_DETAILS_FOR_HASH_JS}</script>'
     )
 
     body = f"""<div class="page page-standard">
@@ -26790,10 +26916,8 @@ def admin_checks(request: Request):
 <h1>Checks</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. Every check runs automatically on every code change; the ones marked <em>Live + CI</em> also run right here, so you don't have to wait to see the result.</p>
 {summary_box}
-<h2 id="live-checks" style="margin:8px 0 4px;">Live checks</h2>
-{rows}
-<p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
 {ci_quota_form}
+{live_checks_html}
 <h2 id="db-copy-scan" style="margin:28px 0 4px;">Database-backed copy</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The checks above only ever scan Python source&mdash;CI has no route to the live database (see CLAUDE.md's "Voice enforcement" notes). A growing share of real user-facing copy lives in the database instead (original content, tool and community profiles, saved homepage/about overrides, and more). This runs live, right here, on every page load&mdash;no dated reminder, no CI equivalent, and no auto-fix: a flagged row is an ordinary editorial fix through whatever admin page owns that record, triaged from <a href="/admin/voice/review-queue" style="color:var(--accent);">the voice review queue &rarr;</a>.</p>
 {db_copy_banner}
@@ -34268,7 +34392,7 @@ def admin_voice_page(request: Request):
         f'<button type="submit" class="btn btn-ghost" style="font-size:11px;padding:3px 9px;color:var(--muted);">Remove</button></form></div>'
         for t in approved_terms
     ) or '<p style="color:var(--muted);font-size:13px;margin:0;">No terms approved yet.</p>'
-    approved_terms_block = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+    approved_terms_block = f"""<div id="approved-terms" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;scroll-margin-top:16px;">
 <div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">
 <span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Approved ampersand terms</span>
 <span style="font-size:12px;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 8px;">Database-backed</span>
@@ -34607,6 +34731,152 @@ def _voice_field_cell_html(lib, item: dict) -> str:
             f'<div title="{_esc(path)}" style="font-size:11px;color:var(--muted);{trunc}">{_esc(path)}</div>')
 
 
+# --- Review-queue Detail, shown in context (checks-page follow-ups, 2026-09) --
+# An open finding's Detail used to show only the flagged phrase ("Flagged
+# text: <phrase>"), and an auto-fixed row's Before/After showed the first
+# ~200 characters of the field, so a change deeper in the text read as a
+# no-op (it happened twice in production: a spaced em dash deep in
+# settings.voice_core, and a zero-width space at the very end of an
+# 838-character definition). These helpers center both on what matters.
+_VOICE_CONTEXT_RADIUS = 60  # ~120 characters around the match
+
+
+def _voice_visible(text: str) -> str:
+    """Escape `text` for HTML, naming any invisible character in brackets
+    ("[U+200B zero-width space]") so it can be seen at all."""
+    from linklib.voice_review import INVISIBLE_CHARS
+    out = []
+    for ch in text:
+        if ch in INVISIBLE_CHARS:
+            out.append(f'<span style="font-size:11px;color:var(--muted);">[U+{ord(ch):04X} '
+                       f'{_esc(INVISIBLE_CHARS[ch])}]</span>')
+        else:
+            out.append(_esc(ch))
+    return "".join(out)
+
+
+def _voice_match_spans(text: str, rule: str, excerpt: str, approved_terms=()) -> tuple[list, int]:
+    """Every (start, end) in `text` the given rule matches, plus the index of
+    the one this queue row is about (the span whose surrounding window
+    reproduces the row's own excerpt; the first one otherwise). Returns
+    ([], -1) when the flagged text is no longer in the field."""
+    from linklib import voice_review as vr
+    spans: list[tuple[int, int]] = []
+    excerpt = excerpt or ""
+    if rule in ("bare-ampersand", "spaced-em-dash"):
+        masked = vr.mask_approved_ampersand_terms(text, approved_terms) if rule == "bare-ampersand" else text
+        copy = vr.scannable_copy(masked)
+        rxs = ((vr._BARE_AMPERSAND,) if rule == "bare-ampersand"
+               else (vr._SPACED_EM_DASH, vr._SPACED_MDASH_ENTITY))
+        for rx in rxs:
+            spans += [(m.start(), m.end()) for m in rx.finditer(copy)]
+        spans.sort()
+        for i, (a, b) in enumerate(spans):
+            window = " ".join(text[max(0, a - 40):b + 40].split())
+            if window == excerpt:
+                return spans, i
+        return spans, (0 if spans else -1)
+    if rule == "invisible-character":
+        m = re.match(r"U\+([0-9A-Fa-f]{4,6})", excerpt)
+        chars = {chr(int(m.group(1), 16))} if m else set(vr.INVISIBLE_CHARS)
+        spans = [(i, i + 1) for i, ch in enumerate(text) if ch in chars]
+        return spans, (0 if spans else -1)
+    phrase = excerpt.strip()
+    if phrase:
+        spans = [(m.start(), m.end()) for m in
+                 re.finditer(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", text, re.IGNORECASE)]
+    return spans, (0 if spans else -1)
+
+
+def _voice_context_html(text: str, span: tuple[int, int], radius: int = _VOICE_CONTEXT_RADIUS) -> str:
+    """~120 characters of `text` around `span`, the match highlighted."""
+    a, b = span
+    lo, hi = max(0, a - radius), min(len(text), b + radius)
+    pre = ("&hellip;" if lo > 0 else "") + _voice_visible(text[lo:a])
+    post = _voice_visible(text[b:hi]) + ("&hellip;" if hi < len(text) else "")
+    return (f'{pre}<mark style="background:var(--seafoam-wash);padding:0 1px;font-weight:600;">'
+            f'{_voice_visible(text[a:b]) or "&nbsp;"}</mark>{post}')
+
+
+def _voice_open_detail_html(current: str | None, item: dict, approved_terms=()) -> tuple[str, int]:
+    """Detail for an open finding: the surrounding text with the match
+    marked, plus how many other spots in the field match the same rule.
+    Returns (html, match_start) — match_start is where the editor puts the
+    cursor, or -1."""
+    excerpt = item.get("excerpt") or ""
+    if current is None:
+        return (f'<div style="font-size:12px;color:var(--muted);">Flagged text: {_voice_visible(excerpt[:200])}. '
+                f'The record behind this row no longer exists.</div>', -1)
+    spans, idx = _voice_match_spans(current, item["rule"], excerpt, approved_terms)
+    if idx < 0:
+        return (f'<div style="font-size:12px;color:var(--ink-soft);">The flagged text '
+                f'(&ldquo;{_voice_visible(excerpt[:120])}&rdquo;) is no longer in this field. It was '
+                f'probably fixed outside the queue; the next scan closes this row.</div>', -1)
+    html = f'<div style="font-size:12.5px;line-height:1.5;">{_voice_context_html(current, spans[idx])}</div>'
+    if len(spans) > 1:
+        html += (f'<div style="font-size:11px;color:var(--muted);margin-top:4px;">Spot {idx + 1} of {len(spans)} '
+                 f'in this field matching this rule. This row covers all of them: an edit should fix each, '
+                 f'and Allow once exempts them all.</div>')
+    return html, spans[idx][0]
+
+
+def _voice_describe_invisible_fix(before: str, after: str) -> str | None:
+    """"Removed a zero-width space (U+200B) at the end of the field." when
+    the whole change is invisible characters being removed; else None."""
+    from linklib.voice_review import INVISIBLE_CHARS
+    sm = difflib.SequenceMatcher(None, before, after, autojunk=False)
+    removed = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag != "delete" or any(ch not in INVISIBLE_CHARS for ch in before[i1:i2]):
+            return None
+        removed.append((i1, i2))
+    if not removed:
+        return None
+    parts = []
+    for i1, i2 in removed:
+        chars = before[i1:i2]
+        names = ", ".join(f"a {INVISIBLE_CHARS[ch]} (U+{ord(ch):04X})" for ch in chars)
+        if i2 == len(before):
+            where = "at the end of the field"
+        elif i1 == 0:
+            where = "at the start of the field"
+        else:
+            where = f"after &ldquo;{_esc(before[max(0, i1 - 30):i1].lstrip())}&rdquo;"
+        parts.append(f"{names} {where}")
+    return "Removed " + "; ".join(parts) + "."
+
+
+def _voice_centered_diff_html(before: str, after: str, radius: int = _VOICE_CONTEXT_RADIUS) -> str:
+    """Before/After for an auto-fixed row, both centered on the region that
+    actually changed and highlighted — never the first N characters of the
+    field, which made a change deep in the text look like a no-op."""
+    invisible = _voice_describe_invisible_fix(before, after)
+    if invisible:
+        return f'<div style="color:var(--ink-soft);">{invisible}</div>'
+    p = 0
+    while p < min(len(before), len(after)) and before[p] == after[p]:
+        p += 1
+    s = 0
+    while (s < min(len(before), len(after)) - p and before[-1 - s] == after[-1 - s]):
+        s += 1
+    b_end, a_end = len(before) - s, len(after) - s
+    lo = max(0, p - radius)
+
+    def side(text, end, style, tag):
+        hi = min(len(text), end + radius)
+        return (("&hellip;" if lo > 0 else "") + _voice_visible(text[lo:p])
+                + f'<{tag} style="{style}">{_voice_visible(text[p:end]) or "&nbsp;"}</{tag}>'
+                + _voice_visible(text[end:hi]) + ("&hellip;" if hi < len(text) else ""))
+
+    where = f" (character {p + 1} of {len(before)})" if len(before) > 2 * radius else ""
+    return (f'<div><strong>Before{where}:</strong> '
+            f'{side(before, b_end, "color:var(--alert);background:var(--coral-wash);padding:0 1px;text-decoration:none;white-space:pre-wrap;", "del")}</div>'
+            f'<div><strong>After:</strong> '
+            f'{side(after, a_end, "background:var(--seafoam-wash);padding:0 1px;white-space:pre-wrap;", "mark")}</div>')
+
+
 def _voice_char_diff_html(before: str, after: str) -> str:
     """A cheap character-level diff between an auto_corrected row's before/
     after text, using difflib (already a stdlib import in this file)—
@@ -34687,6 +34957,19 @@ _VOICE_COL_WIDTH_ACTIONS = 300
 _VOICE_TABLE_FLOOR = _TABLE_FLOOR_XWIDE
 
 
+def _voice_outcome_text(item: dict) -> str:
+    """How a resolved/exception row ended, in words. Every resolution
+    records a note as of 2026-09; older rows predate that, so fall back on
+    what the status alone can honestly say."""
+    note = (item.get("resolution_note") or "").strip()
+    if note:
+        return note
+    if item["status"] == "exception":
+        return ("Kept the stored value; seed version declined." if item["rule"] == "seed-disagreement"
+                else "Allowed once.")
+    return "Resolved (logged before outcomes were recorded)."
+
+
 def _voice_review_row_html(lib, item: dict) -> str:
     status = item["status"]
     rule = item["rule"]
@@ -34749,7 +35032,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
   <button type="submit" class="btn btn-ghost" style="{btn_style}">Keep mine</button>
 </form>""" + actions_row_close
     elif status == "auto_corrected":
-        diff = _voice_char_diff_html(item.get("before_text") or "", item.get("after_text") or "")
+        diff = _voice_centered_diff_html(item.get("before_text") or "", item.get("after_text") or "")
         detail = f'<div style="margin:6px 0;font-size:12px;color:var(--muted);">{diff}</div>'
         actions = actions_row_open + f"""
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
@@ -34768,11 +35051,9 @@ def _voice_review_row_html(lib, item: dict) -> str:
         # text safe to write back as the whole column value). A textarea,
         # not a single-line input, since the full value can be long.
         current = lib.get_voice_review_current_value(item["table_name"], item["row_id"], item["column_name"])
-        if current is None:
-            current = item.get("after_text") or item["excerpt"]
-        excerpt_hint = (f'<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">'
-                        f'Flagged text: {_esc((item["excerpt"] or "")[:200])}</div>')
-        detail = excerpt_hint
+        approved_terms = [t["term"] for t in lib.list_approved_voice_terms("bare-ampersand")]
+        context_html, match_start = _voice_open_detail_html(current, item, approved_terms)
+        editable = current is not None
         # Addition 2 (2026-09 coordinator amendment) — "Mark as exception" is
         # replaced with two visually and functionally distinct actions.
         # "Allow once" (renamed from "Allow here"/rescoped from
@@ -34806,8 +35087,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
             # with two unrelated ampersands ("Bain & Company, Dun &
             # Bradstreet") gets two separate buttons/panels, so the second
             # one is never hidden behind the first.
-            approved_terms = [t["term"] for t in lib.list_approved_voice_terms("bare-ampersand")]
-            guesses = _voice_guess_ampersand_terms(current, approved_terms)
+            guesses = _voice_guess_ampersand_terms(current or "", approved_terms)
             if not guesses:
                 guesses = [(item.get("excerpt") or "").strip()[:120]]
             panels = []
@@ -34850,32 +35130,55 @@ def _voice_review_row_html(lib, item: dict) -> str:
         # button on this page (no dashed border, no grey text) — they
         # differ only in SCOPE, named plainly: "once" (this one spot) vs.
         # "always" (a global term).
+        # Edit in place (checks-page follow-ups, 2026-09): clicking Edit
+        # turns the DETAIL cell into the editor (the Actions column is too
+        # narrow for it) and hides the Actions buttons while editing. The
+        # textarea holds the FULL stored value, never the context excerpt
+        # (PR #590's truncation fix), auto-sizes up to a max height, and puts
+        # the cursor on the flagged text. `original_value` carries what the
+        # page loaded, so a save against a field that changed since is
+        # refused rather than silently overwriting it.
         edit_field_id = f"voice-edit-field-{item['id']}"
+        _item_id = item["id"]
+        edit_btn = (f'<button type="button" class="btn btn-ghost" style="{btn_style}" '
+                    f'onclick="voiceToggleEditField(\'{_item_id}\', true)">Edit</button>'
+                    if editable else "")
         collapsed_row = actions_row_open + f"""
-<button type="button" class="btn btn-ghost" style="{btn_style}"
-        onclick="voiceToggleEditField('{item['id']}', true)">Edit</button>
+{edit_btn}
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="accept_exception">
-  <button type="submit" class="btn btn-ghost" style="{btn_style}">Allow once</button>
+  <button type="submit" class="btn btn-ghost" style="{btn_style}" title="Exempts only this one spot, and it holds until someone removes it. Never global.">Allow once</button>
 </form>
 {approve_term_btn}""" + actions_row_close
-        actions = f"""
-<div id="{edit_field_id}-collapsed">{collapsed_row}</div>
+        actions = f'<div id="{edit_field_id}-collapsed">{collapsed_row}</div>'
+        editor = ""
+        if editable:
+            editor = f"""
 <div id="{edit_field_id}-expanded" style="display:none;">
-  <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:flex;flex-direction:column;gap:6px;">
+  <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:flex;flex-direction:column;gap:6px;margin:0;">
     <input type="hidden" name="action" value="edit">
-    <textarea name="edited_text" rows="3"
-           style="font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:100%;min-width:260px;font-family:inherit;box-sizing:border-box;">{_esc(current)}</textarea>
+    <textarea name="original_value" hidden>{_esc(current)}</textarea>
+    <textarea name="edited_text" class="voice-editor" data-match-start="{match_start}" rows="4"
+           oninput="voiceAutosize(this)"
+           style="font-size:12.5px;line-height:1.5;padding:7px 9px;border:1px solid var(--line);border-radius:6px;width:100%;font-family:inherit;box-sizing:border-box;max-height:420px;overflow-y:auto;resize:vertical;">{_esc(current)}</textarea>
     <div style="display:flex;gap:6px;justify-content:flex-start;">
+      <button type="submit" class="btn" style="{btn_style}">Save edit</button>
       <button type="button" class="btn btn-ghost" style="{btn_style}"
               onclick="voiceToggleEditField('{item['id']}', false)">Cancel</button>
-      <button type="submit" class="btn" style="{btn_style}">Save edit</button>
     </div>
-    <div style="font-size:10.5px;color:var(--muted);">Editing the full value directly&mdash;"Allow once" (collapse this first) exempts only THIS one spot, and it holds until it's removed, not just once. Never global, always reversible.</div>
+    <div style="font-size:11px;color:var(--muted);">Saving replaces the whole field. To keep the text as it is, cancel and use Allow once.</div>
   </form>
 </div>"""
+        detail = f'<div id="{edit_field_id}-detail">{context_html}</div>{editor}'
     else:
-        detail = ""
+        # History row: what was flagged (or changed), and how it ended.
+        if item.get("before_text") is not None and item.get("after_text") is not None:
+            shown = _voice_centered_diff_html(item["before_text"], item["after_text"])
+        else:
+            shown = f'Flagged: &ldquo;{_voice_visible((item.get("excerpt") or "")[:200])}&rdquo;'
+        detail = (f'<div style="font-size:12px;color:var(--muted);">{shown}</div>'
+                  f'<div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px;">'
+                  f'<strong>Outcome:</strong> {_esc(_voice_outcome_text(item))}</div>')
         actions = actions_row_open + f'<span style="font-size:12px;color:var(--muted);">{_esc(status)}</span>' + actions_row_close
 
     # Voice-review-queue trigger taxonomy (2026-09, extended for issue #592
@@ -34972,12 +35275,38 @@ function voiceBulkResolve(group, action) {
   document.body.appendChild(form);
   form.submit();
 }
+function voiceAutosize(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight + 2, 420) + 'px';
+}
 function voiceToggleEditField(itemId, expand) {
-  var collapsed = document.getElementById('voice-edit-field-' + itemId + '-collapsed');
-  var expanded = document.getElementById('voice-edit-field-' + itemId + '-expanded');
+  var base = 'voice-edit-field-' + itemId;
+  var collapsed = document.getElementById(base + '-collapsed');
+  var expanded = document.getElementById(base + '-expanded');
+  var detail = document.getElementById(base + '-detail');
   if (!collapsed || !expanded) return;
   collapsed.style.display = expand ? 'none' : 'block';
   expanded.style.display = expand ? 'block' : 'none';
+  if (detail) detail.style.display = expand ? 'none' : 'block';
+  if (!expand) return;
+  var ta = expanded.querySelector('textarea.voice-editor');
+  if (!ta) return;
+  voiceAutosize(ta);
+  var at = parseInt(ta.getAttribute('data-match-start'), 10);
+  ta.focus({preventScroll: true});
+  if (at >= 0) {
+    ta.setSelectionRange(at, at);
+    // Scroll the textarea so the flagged text sits near the top of view.
+    var probe = document.createElement('textarea');
+    probe.style.cssText = getComputedStyle(ta).cssText;
+    probe.style.height = '0'; probe.style.position = 'absolute'; probe.style.visibility = 'hidden';
+    probe.style.width = ta.clientWidth + 'px';
+    probe.value = ta.value.slice(0, at);
+    document.body.appendChild(probe);
+    ta.scrollTop = Math.max(0, probe.scrollHeight - 40);
+    document.body.removeChild(probe);
+  }
+  expanded.scrollIntoView({block: 'nearest'});
 }
 function voiceToggleApproveTerm(itemId, expand) {
   var panel = document.getElementById('voice-approve-term-' + itemId);
@@ -35116,16 +35445,21 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
 {_voice_thead}
 <tbody>{rows_html}</tbody></table></div>"""
 
+        # History: every row, duplicates included (they're the record),
+        # collapsed on load with its count in the header.
         resolved_html = ""
         if resolved_items:
-            rows_html = "".join(_voice_review_row_html(lib, r) for r in resolved_items[:50])
-            resolved_html = f"""
-<h2 style="margin-top:36px;">Resolved and exceptions <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(resolved_items)})</span></h2>
-{_VOICE_SCROLL_HINT_ITEM_HTML}
+            rows_html = "".join(_voice_review_row_html(lib, r) for r in resolved_items)
+            resolved_body = f"""{_VOICE_SCROLL_HINT_ITEM_HTML}
 <div class="voice-scroll-wrap" style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
 <table style="width:100%;min-width:{_VOICE_TABLE_FLOOR}px;table-layout:fixed;border-collapse:collapse;">
 {_voice_thead}
 <tbody>{rows_html}</tbody></table></div>"""
+            resolved_html = (
+                '<div id="voice-resolved" style="margin-top:36px;scroll-margin-top:16px;">'
+                + _disclosure_group("Resolved and exceptions", resolved_body,
+                                    count_label=_plural(len(resolved_items), "row"))
+                + '</div>')
     finally:
         lib.close()
 
@@ -35155,6 +35489,7 @@ here. Fixes apply right away, and none happen without a record here. Rules and a
 <script>
 {_VOICE_BULK_JS}
 {_VOICE_SCROLL_HINT_JS}
+{_OPEN_DETAILS_FOR_HASH_JS}
 </script>"""
     return HTMLResponse(_page("Voice review queue—Admin", "Admin", body, authed=True))
 
@@ -35225,6 +35560,18 @@ async def admin_voice_review_resolve(item_id: int, request: Request):
         item = lib.get_voice_review_item(item_id)
         if not item:
             raise HTTPException(status_code=404, detail="not found")
+        # Stale-value check: the editor posts back the value it loaded. If
+        # the live field changed since (another tab, an admin edit page, a
+        # script), refuse rather than overwrite that change with an older
+        # copy of the whole field.
+        original_value = form.get("original_value")
+        if action == "edit" and original_value is not None:
+            live = lib.get_voice_review_current_value(item["table_name"], item["row_id"], item["column_name"])
+            if live is not None and live.replace("\r\n", "\n") != str(original_value).replace("\r\n", "\n"):
+                return RedirectResponse(
+                    "/admin/voice/review-queue?error=" + quote(
+                        "Not saved: that field changed since this page loaded. Reload and edit again."),
+                    status_code=303)
         ok = _resolve_voice_item_action(lib, item, action, edited_text)
         if not ok:
             raise HTTPException(status_code=400, detail="invalid action")

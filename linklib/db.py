@@ -4472,6 +4472,15 @@ class Library:
         ).fetchone()
         return dict(row) if row else None
 
+    _VOICE_RESOLUTION_NOTES = {
+        "accept": "Auto-fix accepted.",
+        "revert": "Auto-fix reverted to the original text.",
+        "edit": "Edited.",
+        "accept_exception": "Allowed once.",
+        "use_seed": "Replaced with the seed version.",
+        "keep_mine": "Kept the stored value; seed version declined.",
+    }
+
     def resolve_voice_review_item(self, item_id: int, action: str,
                                    edited_text: str | None = None) -> bool:
         """`action` is one of: 'accept' (confirm an auto-corrected change),
@@ -4523,21 +4532,17 @@ class Library:
         new_status = {"accept": "resolved", "revert": "resolved",
                       "edit": "resolved", "accept_exception": "exception",
                       "use_seed": "resolved", "keep_mine": "exception"}[action]
-        if action == "accept_exception":
-            # "Allow once" — a real resolution note, matching "Always
-            # allowed as <term>." below in tense/shape (voice-queue-
-            # durability fix, Part C). Every other action's own note (if
-            # any) is written elsewhere — this is the one write path that
-            # previously left resolution_note blank on every exception.
-            self.conn.execute(
-                "UPDATE voice_review_queue SET status=?, reviewed_at=?, resolution_note=? WHERE id=?",
-                (new_status, _now(), "Allowed once.", item_id),
-            )
-        else:
-            self.conn.execute(
-                "UPDATE voice_review_queue SET status=?, reviewed_at=? WHERE id=?",
-                (new_status, _now(), item_id),
-            )
+        # Every action records how the row ended (checks-page follow-ups,
+        # 2026-09), so the queue's "Resolved and exceptions" history reads
+        # as what happened rather than a bare status. "Allow once" matches
+        # "Always allowed as <term>." (approve_voice_term) in tense/shape.
+        # A caller with a more specific note (the bulk ampersand replace)
+        # overwrites this one right after.
+        note = self._VOICE_RESOLUTION_NOTES[action]
+        self.conn.execute(
+            "UPDATE voice_review_queue SET status=?, reviewed_at=?, resolution_note=? WHERE id=?",
+            (new_status, _now(), note, item_id),
+        )
         self.conn.commit()
         return True
 
@@ -4691,7 +4696,7 @@ class Library:
         self.resolve_voice_review_item(item_id, "edit", preview["after"])
         self.conn.execute(
             "UPDATE voice_review_queue SET resolution_note=? WHERE id=?",
-            ('Bulk "Replace & with and"—spaced ampersand(s) replaced; any '
+            ('Replaced: spaced ampersand(s) changed to "and" in bulk; any '
              "unspaced or approved-term ampersand in the same field was left untouched.",
              item_id),
         )

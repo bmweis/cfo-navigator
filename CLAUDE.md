@@ -10272,6 +10272,36 @@ System used to occupy. See `tests/test_hub_nav_orphans.py` for the
 regression coverage (updated to patch `_COMMUNITIES_TOOLS` directly, since
 the category-CRUD card it exercises moved out of `_TOOLBOX_TOOLS`).
 
+## Checks-page follow-ups (2026-09)
+
+- **The Database-backed copy count honors review-queue decisions.** A
+  finding covered by a row-level "Allow once" exception or an "Always
+  allow" term is not a violation. It isn't hidden either: `/admin/checks`
+  states the decisions on their own line ("0 violations. 2 allowed once, 6
+  always allowed."), and the summary row and the section body are built
+  from the same sentence so they can't disagree. Removing the decision
+  brings the finding back on the next pass. A red status nobody can clear
+  by deciding trains the reader to ignore the page, so the two surfaces
+  may differ in what they show but never contradict each other.
+- **Admin table rows sit on white.** The header keeps its band; the rows
+  under it are `--surface`, enforced by one scoped `_CSS` rule
+  (`.admin-main`). BRAND.md's table line was stale (it described the public
+  article-table style only) and now names both conventions.
+- **Mechanical guard: production script examples use an absolute `--db`.**
+  `webapp.checks.db_path_example_problems()`, a `/admin/checks` row and CI
+  test (`tests/test_db_path_examples.py`). It scans the script registry,
+  every `scripts/*.py` docstring, and CLAUDE.md/README.md/RUNBOOK.md. The
+  allowlist (`DB_PATH_ALLOWLIST`) is explicit, one reason per entry; add to
+  it only for a genuinely local-only example. So don't write a relative
+  `--db` path in any of those files, prose included, unless it's allowlisted.
+- **`/admin/checks` layout:** the CI-quota control is a switch near the
+  top; Live checks loads collapsed and lays out in a grid whose column
+  count is `_LIVE_CHECKS_COLUMNS` (placeholder pending Brian's pick).
+- **Voice review queue:** Detail shows findings and fixes in context,
+  editing happens in the Detail cell on the full stored value with a
+  stale-value check, every resolution records its outcome, and the
+  history section loads collapsed with every row.
+
 ## Freshness-Banner & Reviewed-Toggle Consolidation
 
 An admin-sprawl review (2026-09-08) found two duplication patterns on `/admin/checks`

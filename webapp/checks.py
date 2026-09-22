@@ -79,6 +79,119 @@ def _voice_scanned_sources() -> list[tuple[pathlib.Path, str]]:
     return [(p, p.read_text(encoding="utf-8")) for p in VOICE_SCANNED_FILES]
 
 
+# --- Relative --db paths in production script examples (2026-09) -----------
+# Production's database is /data/library.db, on the Railway volume. A script
+# run with a relative `--db library.db` from the wrong directory used to have
+# SQLite create an empty database and report a clean result — the Corpay
+# incident's failure shape. `resolve_db_path` now refuses a missing path, and
+# PR 593 pointed all 47 production-facing examples at /data/library.db; this
+# keeps them there. Scans source, never rendered pages: the script registry
+# behind /admin/system/scripts, every script's module docstring (it's the
+# `--help` text), and the three operator docs. scripts/archive/ is out of
+# scope — frozen one-time migrations, never run again.
+_DB_ARG_RE = re.compile(r"--db[ =]+([^\s\"'`)<,;]+)")
+_DB_DOC_FILES = ("CLAUDE.md", "README.md", "RUNBOOK.md")
+
+# Every allowed relative example, keyed by (file, a substring of the line)
+# with the reason it's allowed. Each is a local-dev command, never one meant
+# to run against production. Source: PR 593's own "Left alone" list.
+DB_PATH_ALLOWLIST: tuple[tuple[str, str, str], ...] = (
+    ("scripts/import_archive.py", "scripts.import_archive",
+     "Local-dev quick start: the one-time Feedly import builds a brand-new local library.db."),
+    ("scripts/enrich_backfill.py", "scripts.enrich_backfill",
+     "Local-dev quick start: backfills the local library.db the import just built."),
+    ("scripts/embed_backfill.py", "scripts.embed_backfill",
+     "Local-dev quick start: embeds the local library.db the import just built."),
+    ("scripts/dump_communities.py", "scripts.dump_communities --db library.db",
+     "Explicitly labeled \"locally against a copy of the DB\"; the prod line above it uses /data."),
+    ("CLAUDE.md", "scripts.import_archive --zip feedly-archive.zip --db library.db",
+     "The \"Running locally\" block: local-dev quick start."),
+    ("CLAUDE.md", "scripts.enrich_backfill --db library.db",
+     "The \"Running locally\" block: local-dev quick start."),
+    ("CLAUDE.md", "scripts.embed_backfill --db library.db",
+     "The \"Running locally\" block: local-dev quick start."),
+    ("README.md", "scripts.import_archive --zip feedly-archive.zip --db library.db",
+     "\"The library pipeline\" walkthrough of the local quick start (same three scripts)."),
+    ("README.md", "scripts.enrich_backfill --db library.db",
+     "\"The library pipeline\" walkthrough of the local quick start (same three scripts)."),
+)
+
+
+def _db_path_ok(path: str) -> bool:
+    """Absolute, an env-var reference (resolves to LINKLIB_DB, which is
+    /data/library.db in production), or a <placeholder>. Anything else that
+    looks like a path is relative. Prose like "--db explicitly" isn't a
+    path at all and is skipped by _looks_like_path."""
+    return path.startswith("/") or path.startswith("$") or path.startswith("{")
+
+
+def _looks_like_path(token: str) -> bool:
+    return token.endswith(".db") or "/" in token or token.startswith(("$", "~", "."))
+
+
+def _registry_example_lines() -> list[tuple[int, str]]:
+    """(line, text) for every string literal inside _SCRIPT_REGISTRY, read
+    straight from webapp/app.py's source. Parses only the registry's own
+    span, not the 36k-line file."""
+    import ast
+    lines = _app_src().splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("_SCRIPT_REGISTRY = ["))
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == "]")
+    tree = ast.parse("\n".join(lines[start:end + 1]))
+    return [(start + node.lineno, node.value) for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+
+
+def _script_docstring_lines() -> list[tuple[str, int, str]]:
+    import ast
+    out = []
+    for path in sorted((_ROOT / "scripts").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        doc = tree.body[0] if tree.body else None
+        if not (isinstance(doc, ast.Expr) and isinstance(doc.value, ast.Constant)
+                and isinstance(doc.value.value, str)):
+            continue
+        rel = f"scripts/{path.name}"
+        for offset, line in enumerate(doc.value.value.splitlines()):
+            out.append((rel, doc.lineno + offset, line))
+    return out
+
+
+def _db_path_candidates() -> list[tuple[str, int, str]]:
+    """Every (file, line, text) the guard reads."""
+    out = [("webapp/app.py", ln, text) for ln, text in _registry_example_lines()]
+    out += _script_docstring_lines()
+    for name in _DB_DOC_FILES:
+        path = _ROOT / name
+        if path.exists():
+            out += [(name, i, line) for i, line in
+                    enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)]
+    return out
+
+
+def _db_path_allowed(fname: str, line: str) -> bool:
+    return any(fname == f and sub in line for f, sub, _reason in DB_PATH_ALLOWLIST)
+
+
+def db_path_example_problems(candidates=None) -> list[str]:
+    """Every production-facing `--db` example whose path isn't absolute.
+    `candidates` is for tests; the live check reads the real files."""
+    problems = []
+    for fname, line_no, text in (candidates if candidates is not None else _db_path_candidates()):
+        if fname.startswith("scripts/archive/"):
+            continue
+        for m in _DB_ARG_RE.finditer(text):
+            path = m.group(1)
+            if not _looks_like_path(path) or _db_path_ok(path):
+                continue
+            if _db_path_allowed(fname, text):
+                continue
+            problems.append(f"{fname}:{line_no} passes --db {path}, a relative path. Use "
+                            f"--db /data/library.db (production's database), or add a reasoned "
+                            f"entry to DB_PATH_ALLOWLIST if this is a local-only example.")
+    return problems
+
+
 # --- open-source showcase ↔ dependencies sync -------------------------------
 # Celebrated projects that aren't direct lines in requirements*.txt: transitive
 # deps, the optional extractor, and a one-off build tool. Single source of truth.
@@ -539,6 +652,15 @@ def run_all() -> list[dict]:
                 "the style of its own instructions, so the guide has to follow the rules it teaches.",
         "detail": (f"Checked {voice_core_source}. Clean." if not vt
                    else "; ".join(f"{rule}: {excerpt}" for rule, excerpt in vt[:6]))})
+
+    dp = db_path_example_problems()
+    results.append({
+        "name": "Production script examples use an absolute --db", "where": "Live + CI", "ok": not dp,
+        "what": "Every --db example meant for production (the /admin/system/scripts registry, each script's "
+                "--help docstring, CLAUDE.md, README.md, RUNBOOK.md) points at /data/library.db, never a "
+                "relative path that silently creates an empty database when run from the wrong directory.",
+        "detail": "; ".join(dp[:6]) if dp else
+                  f"Every production --db example is absolute ({len(DB_PATH_ALLOWLIST)} local-dev examples allowlisted, each with a reason)."})
 
     ol = brand_check.outbound_link_problems(src)
     results.append({

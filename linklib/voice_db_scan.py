@@ -141,15 +141,50 @@ class DbCopyViolation:
 
 def _scan_value(table: str, row_id: object, column: str, value: str, *,
                  check_typography: bool = True, approved_ampersand_terms=()) -> list[DbCopyViolation]:
+    return _scan_value_counted(table, row_id, column, value, check_typography=check_typography,
+                               approved_ampersand_terms=approved_ampersand_terms)[0]
+
+
+def _scan_value_counted(table: str, row_id: object, column: str, value: str, *,
+                        check_typography: bool = True,
+                        approved_ampersand_terms=()) -> tuple[list[DbCopyViolation], int]:
+    """`_scan_value` plus how many typography findings an "Always allow"
+    term suppressed in this value — the count the /admin/checks decisions
+    line reports, so a finding hidden by a decision is still accounted for
+    rather than silently vanishing from the page. Computed by scanning the
+    value once without the approved terms and once with them; the second
+    pass only runs when there's at least one approved term to mask."""
     if not value:
-        return []
+        return [], 0
     out = [DbCopyViolation(table, row_id, column, rule, phrase)
            for rule, phrase in mechanical_findings(value)]
+    suppressed = 0
     if check_typography:
-        out += [DbCopyViolation(table, row_id, column, rule, excerpt)
-                for rule, excerpt in typography_findings_plain(
-                    value, approved_ampersand_terms=approved_ampersand_terms)]
-    return out
+        masked = typography_findings_plain(value, approved_ampersand_terms=approved_ampersand_terms)
+        if approved_ampersand_terms:
+            suppressed = max(0, len(typography_findings_plain(value)) - len(masked))
+        out += [DbCopyViolation(table, row_id, column, rule, excerpt) for rule, excerpt in masked]
+    return out, suppressed
+
+
+def _load_row_exceptions(lib) -> set[tuple[str, object, str, str]]:
+    """Every row-level "Allow once" decision, as (table, row_id, column,
+    rule) keys — the same key `Library.is_voice_exception` matches on
+    (row_id as a string, or None for a settings key). Read once per scan,
+    never once per value. An older DB without the queue table yet simply
+    has no decisions."""
+    try:
+        rows = lib.conn.execute(
+            "SELECT table_name, row_id, column_name, rule FROM voice_review_queue "
+            "WHERE status='exception'"
+        ).fetchall()
+    except Exception:
+        return set()
+    return {(r[0], r[1], r[2], r[3]) for r in rows}
+
+
+def _exception_key(v: "DbCopyViolation") -> tuple[str, object, str, str]:
+    return (v.table, str(v.row_id) if v.row_id is not None else None, v.column, v.rule)
 
 
 @dataclass(frozen=True)
@@ -177,6 +212,15 @@ class DbScanReport:
     columns_configured: int
     settings_checked: int
     rows_checked: int
+    # Decisions made in /admin/voice/review-queue (checks-page follow-ups,
+    # 2026-09). A finding a person already decided on is not a violation:
+    # `allowed_once` holds findings covered by a row-level "Allow once"
+    # exception, `always_allowed_count` the number of typography findings an
+    # "Always allow" term masked out. Neither is counted in `violations`, and
+    # neither is hidden — /admin/checks states both on their own line.
+    # Removing the decision puts the finding back on the next pass.
+    allowed_once: tuple[DbCopyViolation, ...] = ()
+    always_allowed_count: int = 0
 
 
 def scan_db_copy_report(lib) -> DbScanReport:
@@ -193,9 +237,17 @@ def scan_db_copy_report(lib) -> DbScanReport:
         row["term"] for row in lib.list_approved_voice_terms("bare-ampersand")
     )
 
+    always_allowed = 0
+
+    def _scan(*args, **kwargs):
+        nonlocal always_allowed
+        found, suppressed = _scan_value_counted(*args, approved_ampersand_terms=approved_ampersand_terms,
+                                                **kwargs)
+        always_allowed += suppressed
+        violations.extend(found)
+
     for key in _SCAN_SETTINGS_KEYS:
-        violations.extend(_scan_value("settings", None, key, lib.get_setting(key),
-                                       approved_ampersand_terms=approved_ampersand_terms))
+        _scan("settings", None, key, lib.get_setting(key))
 
     tables_checked: list[str] = []
     tables_skipped: list[tuple[str, str]] = []
@@ -222,14 +274,22 @@ def scan_db_copy_report(lib) -> DbScanReport:
             d = dict(row)
             row_id = d[id_col]
             for col in columns:
-                violations.extend(_scan_value(table, row_id, col, d.get(col) or "",
-                                               check_typography=col not in typography_exempt,
-                                               approved_ampersand_terms=approved_ampersand_terms))
+                _scan(table, row_id, col, d.get(col) or "",
+                      check_typography=col not in typography_exempt)
 
     columns_configured = sum(len(cols) for _, _, cols, _ in _SCAN_TABLES)
 
+    # Honor "Allow once" the same way the queue does: a finding at a
+    # (table, row, column, rule) someone already marked as an exception is
+    # moved out of the violation count, not dropped — see DbScanReport.
+    exceptions = _load_row_exceptions(lib)
+    counted = [v for v in violations if _exception_key(v) not in exceptions]
+    allowed_once = [v for v in violations if _exception_key(v) in exceptions]
+
     return DbScanReport(
-        violations=tuple(violations),
+        violations=tuple(counted),
+        allowed_once=tuple(allowed_once),
+        always_allowed_count=always_allowed,
         tables_checked=tuple(tables_checked),
         tables_skipped=tuple(tables_skipped),
         columns_checked=columns_checked,
