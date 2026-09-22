@@ -222,9 +222,10 @@ def test_approve_term_input_not_rendered_in_actions_cell_on_first_load(env):
     assert r.status_code == 200
 
     # The trigger button is on the page, in the default one-line action row.
-    # Renamed "Approve term" -> "Allow everywhere" (voice-queue-durability
-    # fix, Part C item 4).
-    assert "Allow everywhere</button>" in r.text
+    # Renamed "Approve term" -> "Allow everywhere" -> "Always allow"
+    # (voice-queue-durability fix, Part C item 4; then the label-shortening
+    # follow-up).
+    assert "Always allow</button>" in r.text
 
     # But the actual term input lives ONLY inside a panel `<tr>` that starts
     # collapsed. There must be exactly one `name="term"` input on the page
@@ -269,9 +270,9 @@ def test_approve_term_panel_is_full_width_and_only_appears_there(env):
     assert 'name="term"' in panel_html
     assert "Sales" in panel_html  # the prefilled guess
     # Part C item 4 fix (voice-queue-durability PR, PR #595 review round) —
-    # "Approve term" renamed to "Allow everywhere," and this caption
-    # replaced with Brian's own exact wording, verbatim (linking
-    # /admin/voice, matching how the page's own lede references it).
+    # "Approve term" renamed to "Allow everywhere" (later "Always allow"),
+    # and this caption replaced with Brian's own exact wording, verbatim
+    # (linking /admin/voice, matching how the page's own lede references it).
     assert ("Keep only the exact term, like Dun &amp; Bradstreet. "
             "It'll be allowed everywhere. Remove it anytime on "
             '<a href="/admin/voice">/admin/voice</a>.') in panel_html
@@ -291,7 +292,7 @@ def test_every_row_action_button_uses_the_shared_button_class(env):
     broke height parity with the outlined buttons next to it)."""
     lib = Library(os.environ["LINKLIB_DB"])
     try:
-        # An "open" bare-ampersand row (Edit / Allow here / Approve term
+        # An "open" bare-ampersand row (Edit / Allow once / Approve term
         # + the Approve/Cancel panel).
         cid = lib.add_community("Amp Class Co", "https://amp-class.com",
                                  "Ops & Finance", "", [])

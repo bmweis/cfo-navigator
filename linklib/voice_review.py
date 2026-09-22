@@ -249,7 +249,7 @@ AMPERSAND_NAMES = [
     "CFOs & VP Finance",       # linklib/enrich.py community-profile prompt example, per Brian
     "Flux Analysis & Summaries",  # linklib/feature_scan.py few-shot example, per Brian
     "Bain & Company",  # webapp/app.py's "Approve term" placeholder example (2026-09)
-    "Dun & Bradstreet",  # webapp/app.py's "Allow everywhere" panel caption example (PR #595 review round)
+    "Dun & Bradstreet",  # webapp/app.py's "Always allow" (renamed "Allow everywhere") panel caption example (PR #595 review round)
 ]
 
 # Code that legitimately contains an ampersand inside a string literal, removed
@@ -635,7 +635,8 @@ _AMP_TERM_GUESS_RE = re.compile(
 
 
 def guess_ampersand_terms(text: str, approved_terms=()) -> list[str]:
-    """Best-guess candidate terms for the "Allow everywhere" panel — one per
+    """Best-guess candidate terms for the "Always allow" (renamed from
+    "Allow everywhere") panel — one per
     unapproved bare-ampersand occurrence in `text`, deduplicated, in order of
     first appearance. Each guess is up to 2 capitalized words/acronyms on
     either side of the ampersand (e.g. "Spend & Expense", "Dun &
@@ -663,7 +664,8 @@ def guess_ampersand_terms(text: str, approved_terms=()) -> list[str]:
 
 
 def validate_ampersand_term(term: str, field_text: str) -> tuple[bool, str]:
-    """Validation gate for "Allow everywhere" (issue #592/#594-followup C4):
+    """Validation gate for "Always allow" (renamed from "Allow everywhere",
+    issue #592/#594-followup C4):
     the term must contain the ampersand, appear verbatim in the field's
     CURRENT value, start and end on word boundaries, and be short (<=6
     words) — closing the exact production failure this fixes, an untrimmed
