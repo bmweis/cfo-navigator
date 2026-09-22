@@ -11535,6 +11535,44 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   so they're out of scope for this scan with no corresponding config to map
   a column-aware check onto — reported, not silently force-included or
   dropped. See ARCHITECTURE.md's matching section for the full write-up.
+- **Voice review queue, PR #595 review round (2026-09) — the base
+  durability guard/mirror-drift-detection PR wasn't done when it claimed
+  it was.** Brian's review of the PR found two real gaps beyond what its
+  own description claimed: (1) queue writes to `original_content.body_md`
+  never fired `sync_original_content_article()` — the drift check on
+  `/admin/checks` could eventually flag a stale mirror, but detection
+  alone meant a queue Edit/Revert/bulk-ampersand-replace quietly created
+  the exact drift it would then ask Brian to fix by hand; confirmed live
+  via a real production finding (`original_content.body_md` id 36, open
+  in the queue with no corresponding sync). Fixed by calling the sync
+  directly from the three write paths (`webapp.app._resolve_voice_item_
+  action`, `admin_voice_review_bulk_replace_ampersand_apply`), the same
+  layer the two admin save routes already call it from — see the
+  Published-Content Ingestion entry above and ARCHITECTURE.md's matching
+  follow-up for the full write-up. (2) Part C items 1-4 (column widths,
+  page layout, button style, labels) were reported as "already shipped in
+  prior PRs" — literally impossible for item 2's lede copy, which was
+  written for this PR — and re-verifying each against the brief found
+  three more real gaps beyond what had actually shipped: the table's
+  `min-width` floor was still the old bespoke 760px even though Field/
+  Actions had both grown to 280px, squeezing Detail exactly the way the
+  fix was supposed to prevent (fixed with a documented `_TABLE_FLOOR_
+  XWIDE` exception, `_VOICE_TABLE_FLOOR`); the lede paragraph had no
+  `max-width`, so it spanned the full `page-standard` container instead
+  of matching the sitewide descriptive-lede pattern (e.g. `/admin/
+  ai-surfaces`'s own lede) at `max-width:900px`; and three buttons
+  ("Keep mine," and the Cancel button inside both the Allow-everywhere
+  and Edit reveal panels) still carried `color:var(--muted)`, plus "Save
+  edit" was still outlined instead of filled, contrary to the brief's own
+  "the only filled buttons are Approve, Save edit." The Allow-everywhere
+  panel's caption also still had placeholder text instead of Brian's
+  exact specified wording — fixed verbatim, with "Dun & Bradstreet" added
+  to `linklib.voice_review.AMPERSAND_NAMES` so the new example clears the
+  typography lint. Every fix has a regression test in `tests/
+  test_voice_bulk_bar_gating.py`, each confirmed to fail against the
+  pre-fix code before being trusted — the bulk-bar (rule, status) gating
+  itself (item 4 of the review) was re-verified and found already
+  correct, with new tests pinning the exact button set per group type.
 - **`_seed_toolbox()`'s sync loops have no manual-override guard — the
   exact class of bug the incident above surfaced, generalized (2026-09
   investigation, report-only, not fixed here).** Reading `_seed_toolbox()`
