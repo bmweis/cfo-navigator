@@ -11015,6 +11015,20 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
      deliberately wants the real thread can still get it via
      `force=True`. Production is unaffected either way — `LINKLIB_DB`
      never changes after boot there, and it isn't running under pytest.
+     **Checked explicitly, not assumed (a same-PR follow-up review):**
+     `PYTEST_CURRENT_TEST` is only set while a test is actively running,
+     never during collection/import — could the refresher start before
+     then? Every `with TestClient(...)` in this suite (the only thing
+     that can trigger the startup event and reach this function at all)
+     lives inside a `def test_*` function body, and there's no
+     conftest.py providing a session/module fixture that could construct
+     one earlier — so under the current suite, no. As a cheap, strictly
+     broader backup guard against a future test file collecting a
+     `TestClient` outside any test function, the check also covers
+     `"pytest" in sys.modules` (true for the whole pytest process
+     lifetime, not just while a test is running) — safe in production
+     since `pytest` is `requirements-dev.txt`-only, never installed in
+     the Docker image.
   3. **`reconcile_voice_review_queue()` tagged its own inserted rows
      `source="script"`**, indistinguishable from a genuinely one-off,
      human-run backfill script (`scripts/backfill_voice_review_queue.py`,
@@ -11043,8 +11057,8 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
      literal code path produced a row) — there's no reliable per-row
      signal to split them by after the fact, so none were reclassified;
      this is stated here rather than guessed past.
-  4. **A group-level "Replace & with and" bulk action on the Ampersands
-     group** (`/admin/voice/review-queue`), for cases like the ~20
+  4. **A group-level "Replace ampersands with and" bulk action on the
+     Ampersands group** (`/admin/voice/review-queue`), for cases like the ~20
      `communities.demographic` bare-ampersand findings the live DB scan
      surfaced (see the "Database content is scanned too" section above) —
      almost certainly all legitimate mechanical fixes, not judgment calls.
@@ -11095,6 +11109,57 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
      `body_md` edge cases), and `tests/test_voice_bulk_replace_ampersand.py`
      for the two routes' own coverage (diff rendering, no-write-on-preview,
      empty-selection redirect, TOCTOU-safe apply, auth).
+  5. **Same-PR UI review round, from live screenshots of the queue page** —
+     folded into this PR per explicit instruction, not shipped as a
+     follow-up. Row actions (`_voice_review_row_html`) now render inside
+     one `flex-wrap:wrap` single-line row by default (wrapping to a
+     second line only when the viewport forces it), left-aligned
+     (`justify-content:flex-start`, reversing the earlier page-scoped
+     `flex-end` departure to match `.admin-table-actions-grid`'s own
+     sitewide left-aligned convention elsewhere, e.g.
+     `/admin/tools/software` — Brian's own framing is that this is the
+     alignment to try now, not a settled final call). Every row-action
+     button, filled or outlined, shares one `btn_style` string
+     (`font-size:12px;padding:5px 10px;`) and the shared `.btn`/
+     `.btn-ghost` classes — the filled "Approve term" button no longer
+     overrides `.btn`'s own `border:1px solid var(--navy)` with
+     `border:none`, which is what broke its height parity with the
+     outlined buttons beside it. Approve term moved out of the Actions
+     cell entirely: it's now a plain third button in the default action
+     row (Edit / Allow here / Approve term), and clicking it reveals a
+     dedicated full-width panel — a second `<tr id="voice-approve-term-
+     {id}">` with a `colspan="5"` cell spanning the whole table, shown/
+     hidden via `voiceToggleApproveTerm` (mirroring `voiceToggleEditField`'s
+     existing collapsed/expanded pattern) — holding a full-width text
+     input prefilled with the detected term, the caption "Trim to the
+     exact term first. Once approved, it's fine everywhere, permanently."
+     (no em dash, no all-caps, replacing the old em-dash/all-caps
+     wording), then Approve/Cancel; nothing is approved until that second
+     click. Field and Source columns were compressed to fixed narrow
+     widths (`_VOICE_COL_WIDTH_FIELD = 150`, `_VOICE_COL_WIDTH_SOURCE =
+     100`, both down from reusing `_COL_WIDTH_NAME`/`_COL_WIDTH_STATUS`)
+     with `nowrap`+ellipsis truncation and a `title` tooltip carrying the
+     full value (`_voice_field_cell_html`) — the width freed up flows
+     straight to Detail, which has no declared width of its own under
+     `table-layout:fixed`; Actions was narrowed to `_VOICE_COL_WIDTH_
+     ACTIONS = 280`, sized to the widest real case (an open bare-ampersand
+     row's three buttons on one line). Two of the bulk-replace-ampersand
+     feature's own rendered strings (the group bulk bar's button label,
+     the preview page's H1/explanatory prose) had to be reworded away
+     from a literal `&amp;`/`&amp;amp;` — "Replace ampersands with and,"
+     never a literal ampersand character — since `webapp/app.py` is itself
+     one of `linklib.voice_review`'s `VOICE_SCANNED_FILES`, and
+     `_BARE_AMPERSAND`'s `&amp;` alternative matches unconditionally
+     regardless of spacing; a page whose whole purpose is describing the
+     ampersand character has to do it in words, not by rendering the
+     character itself, or it fails its own lint (a real regression this
+     round caught and fixed, surfaced by `tests/test_checks.py`'s live
+     `run_all()` check, not by Brian's screenshots). New tests in `tests/
+     test_voice_bulk_replace_ampersand.py` assert the Approve-term input
+     is absent from the page except inside its own (initially hidden)
+     panel row, and that every row-action button (scoped past the page's
+     own nav-toggle hamburger, a legitimate non-row-action exception)
+     carries the shared `.btn` class.
 - **Voice review queue, remaining-tables follow-up (2026-09) — the five
   tables disclosed and named as a scope cut in the bullet above
   (`communities`, `community_profiles`, `benchmarks`, `thought_leadership`,

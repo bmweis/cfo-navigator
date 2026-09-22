@@ -964,6 +964,25 @@ def test_start_background_checks_refresher_does_not_start_under_pytest(refresher
     )
 
 
+def test_start_background_checks_refresher_backup_guard_via_sys_modules(refresher_state_reset, monkeypatch):
+    """issue #592's REFRESHER CHECK follow-up — PYTEST_CURRENT_TEST is only
+    set while a test is actively running, never during collection/import;
+    confirmed (see start_background_checks_refresher's own docstring) that
+    no code path in the CURRENT suite reaches this function before then, but
+    "pytest" in sys.modules is a strictly broader, free backup for a future
+    test file that might. Proven directly here by removing the narrower
+    signal and confirming the broader one alone still blocks the start —
+    not just that both together happen to work under a normal test run."""
+    taskmod = refresher_state_reset
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert "pytest" in taskmod.sys.modules, "sanity: the pytest package is always importable/imported here"
+    taskmod._checks_refresher_started = False
+    taskmod.start_background_checks_refresher()
+    assert taskmod._checks_refresher_started is False, (
+        "the sys.modules backup guard alone must still block the start"
+    )
+
+
 def test_start_background_checks_refresher_force_true_still_starts(refresher_state_reset, monkeypatch, tmp_path):
     taskmod = refresher_state_reset
     monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "forced.db"))

@@ -34208,12 +34208,19 @@ def _voice_field_cell_html(lib, item: dict) -> str:
     """The review-queue table's "Field" column: the record's own name,
     linked to its admin edit page where one is known, with the table/column
     name as quieter secondary text — replacing the old raw
-    "communities.demographic id=2" format."""
+    "communities.demographic id=2" format.
+
+    Compressed to a fixed narrow column (issue #592 item 5): both lines are
+    `nowrap`+ellipsis-truncated rather than wrapping or stretching the
+    column, with the full un-truncated value in a `title` tooltip — the
+    width this frees up flows to the Detail column instead."""
     name, url = _voice_admin_edit_link(lib, item["table_name"], item["row_id"])
-    primary = (f'<a href="{_esc(url)}" style="color:var(--navy);font-weight:600;text-decoration:none;">{_esc(name)}</a>'
-               if url else f'<span style="font-weight:600;">{_esc(name)}</span>')
-    return (f'<div style="font-size:13px;">{primary}</div>'
-            f'<div style="font-size:11px;color:var(--muted);">{_esc(item["table_name"])}.{_esc(item["column_name"])}</div>')
+    trunc = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;"
+    primary = (f'<a href="{_esc(url)}" title="{_esc(name)}" style="color:var(--navy);font-weight:600;text-decoration:none;">{_esc(name)}</a>'
+               if url else f'<span title="{_esc(name)}" style="font-weight:600;">{_esc(name)}</span>')
+    path = f"{item['table_name']}.{item['column_name']}"
+    return (f'<div style="font-size:13px;{trunc}">{primary}</div>'
+            f'<div title="{_esc(path)}" style="font-size:11px;color:var(--muted);{trunc}">{_esc(path)}</div>')
 
 
 def _voice_char_diff_html(before: str, after: str) -> str:
@@ -34247,10 +34254,22 @@ def _voice_char_diff_html(before: str, after: str) -> str:
 # groups, Field 153-220px, with no consistency at all. `table-layout:fixed`
 # makes a `<th>`'s declared width authoritative regardless of content, so
 # every group's table now renders with byte-identical column proportions.
+#
+# Narrowed again (issue #592 review-round feedback, item 5): Field/Source
+# only ever hold a short record name + a table.column path and a one-word
+# provenance badge — neither needs anywhere near _COL_WIDTH_NAME/
+# _COL_WIDTH_STATUS's own room, and the old widths were starving Detail
+# (the column that actually holds the finding's substance). Both are now
+# fixed, narrow, `nowrap` columns (see `_voice_field_cell_html`'s own
+# `title=` tooltips for the un-truncated value); the width freed up flows
+# straight to Detail, which has no declared width of its own and so
+# absorbs everything the fixed columns don't claim under table-layout:fixed.
+# Actions is sized to fit exactly one row of buttons for the widest case
+# (an "open" bare-ampersand row: Edit / Allow here / Approve term).
 _VOICE_COL_WIDTH_CHECKBOX = 30
-_VOICE_COL_WIDTH_FIELD = _COL_WIDTH_NAME  # same "record name + secondary line" shape as every other admin table's Name column
-_VOICE_COL_WIDTH_SOURCE = _COL_WIDTH_STATUS  # a small provenance badge, same shape as any other status badge
-_VOICE_COL_WIDTH_ACTIONS = 320  # wide enough for the edit textarea/Approve-term input, narrower than the pre-fix 221-651px range this replaces
+_VOICE_COL_WIDTH_FIELD = 150
+_VOICE_COL_WIDTH_SOURCE = 100
+_VOICE_COL_WIDTH_ACTIONS = 280
 
 
 def _voice_review_row_html(lib, item: dict) -> str:
@@ -34259,17 +34278,31 @@ def _voice_review_row_html(lib, item: dict) -> str:
     rule = item["rule"]
     checkbox = (f'<input type="checkbox" class="voice-item-cb" data-group="{_esc(rule)}" value="{item["id"]}">'
                 if status in ("open", "auto_corrected") else "")
-    # C5 fix (PR #590 Phase 2): every row type's actions render inside one
-    # right-aligned, single-line flex row by default — an "open" row's
-    # edit textarea is the one exception, since it genuinely can't fit on
-    # one line; it's collapsed behind an Edit button instead (see the
-    # `status == "open"` branch below), so the DEFAULT state for every row
-    # is one line, right-aligned, matching the spec even though it departs
-    # from `.admin-table-actions-grid`'s own site-wide `justify-content:
-    # start` convention elsewhere — a deliberate, page-scoped choice, not
-    # an oversight (see CLAUDE.md's own note on this).
-    actions_row_open = '<div style="display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap;">'
+    # C5 fix (PR #590 Phase 2), reversed (issue #592 item 6): every row
+    # type's actions render inside one single-line flex row by default,
+    # left-aligned to match `.admin-table-actions-grid`'s own site-wide
+    # `justify-content:start` convention (e.g. /admin/tools/software's
+    # Actions column) instead of the earlier page-scoped `flex-end`
+    # departure. Brian's own framing: this is the alignment call he wants
+    # tried now, not a final decision — worth revisiting live before
+    # treating it as settled either way. `flex-wrap:wrap` means a row only
+    # ever breaks to a second line when the viewport genuinely can't fit
+    # every button on one (issue #592 item 1) — an "open" row's edit
+    # textarea/approve-term panel are the two exceptions that can't fit on
+    # one line at all; both are collapsed behind a button instead (see the
+    # `status == "open"` branch below).
+    actions_row_open = '<div style="display:flex;gap:6px;align-items:center;justify-content:flex-start;flex-wrap:wrap;">'
     actions_row_close = '</div>'
+    # issue #592 item 2 — one shared style string for every row-action
+    # button (outlined AND filled) so every button on this page renders at
+    # the same height: same font-size/padding, and — the actual fix — no
+    # button overrides `.btn`'s own `border:1px solid var(--navy)` with
+    # `border:none` any more, so a filled button's border is the same
+    # width as an outlined one's. Individual buttons may still add a
+    # color/border-style override (e.g. Allow here's dashed border, Keep
+    # mine's muted text) as long as the border WIDTH stays 1px.
+    btn_style = "font-size:12px;padding:5px 10px;"
+    approve_term_panel_html = ""
 
     if rule == "seed-disagreement" and status in ("open",):
         # Distinct per-row-type actions (Part 3/Part 1): "Use seed version"
@@ -34282,11 +34315,11 @@ def _voice_review_row_html(lib, item: dict) -> str:
         actions = actions_row_open + f"""
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="use_seed">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Use seed version</button>
+  <button type="submit" class="btn btn-ghost" style="{btn_style}">Use seed version</button>
 </form>
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="keep_mine">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;color:var(--muted);">Keep mine</button>
+  <button type="submit" class="btn btn-ghost" style="{btn_style}color:var(--muted);">Keep mine</button>
 </form>""" + actions_row_close
     elif status == "auto_corrected":
         diff = _voice_char_diff_html(item.get("before_text") or "", item.get("after_text") or "")
@@ -34294,11 +34327,11 @@ def _voice_review_row_html(lib, item: dict) -> str:
         actions = actions_row_open + f"""
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="accept">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Accept</button>
+  <button type="submit" class="btn btn-ghost" style="{btn_style}">Accept</button>
 </form>
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="revert">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Revert</button>
+  <button type="submit" class="btn btn-ghost" style="{btn_style}">Revert</button>
 </form>""" + actions_row_close
     elif status == "open":
         # Part 4 fix — pre-filled with the FULL, CURRENT column value
@@ -34322,47 +34355,60 @@ def _voice_review_row_html(lib, item: dict) -> str:
         # matched term is fine everywhere) — shown ONLY for bare-ampersand
         # findings, since a banned word/filler/performative phrase staying
         # permanently banned (with case-by-case exceptions via Allow here
-        # only) is Brian's own explicit, stated policy. The two are styled
-        # with a deliberately unmistakable visual difference — a solid navy
-        # "Approve term" button vs. a plain muted-outline "Allow here" one—
-        # plus a one-line caption under each, since a misclick here has real
-        # consequences (silently un-banning a term everywhere vs. a scoped,
-        # reversible exception).
-        # C3/C4 fix (PR #590 Phase 2) — Approve term stays a compact,
-        # ALWAYS-visible mini-form (its own bordered box, solid navy
-        # button) exactly as originally designed — C4's "behind a button
-        # reveal" requirement is specifically about the bulky full-width
-        # edit textarea below, not this small term-only input. So the
-        # default row for every "open" finding is Edit / Allow here
-        # (+ this Approve-term box for bare-ampersand rows), matching C3's
-        # "Edit / Approve term / Allow here as applicable" default set.
-        approve_term_html = ""
+        # only) is Brian's own explicit, stated policy.
+        #
+        # issue #592 item 3 — Approve term is no longer a boxed input
+        # sitting in the Actions cell (that broke the "one line" rule and
+        # gave this filled button a different border/height than every
+        # outlined one next to it). It's now a plain third button in the
+        # same single-line action row as Edit/Allow here; clicking it
+        # reveals a full-width panel BELOW the row — a second `<tr>`
+        # spanning every column via `colspan`, using the exact same
+        # collapsed/expanded div-toggle mechanism Edit already uses, just
+        # rendered as its own row instead of confined to the Actions cell
+        # (`voiceToggleApproveTerm`, mirroring `voiceToggleEditField`) —
+        # holding a full-width text input prefilled with the detected term,
+        # the caption, then Approve/Cancel. Nothing is approved until that
+        # second click.
+        approve_term_btn = ""
         if rule == "bare-ampersand":
             guess = (item.get("excerpt") or "").strip()[:120]
-            approve_term_html = f"""
-<div style="border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--surface);margin-top:8px;">
-  <form method="post" action="/admin/voice/review-queue/{item['id']}/approve-term" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
-    <input type="text" name="term" value="{_esc(guess)}"
-           style="font-size:12px;padding:5px 7px;border:1px solid var(--line);border-radius:5px;flex:1;min-width:140px;font-family:inherit;">
-    <button type="submit" class="btn" style="font-size:12px;padding:6px 12px;background:var(--navy);color:#fff;border:none;">Approve term</button>
-  </form>
-  <div style="font-size:10.5px;color:var(--muted);margin-top:3px;text-align:right;">Adjust the exact words first&mdash;this makes the term fine EVERYWHERE, permanently, once approved.</div>
-</div>"""
+            approve_term_id = f"voice-approve-term-{item['id']}"
+            approve_term_btn = (
+                f'<button type="button" class="btn btn-ghost" style="{btn_style}" '
+                f'onclick="voiceToggleApproveTerm(\'{item["id"]}\', true)">Approve term</button>'
+            )
+            approve_term_panel_html = f"""
+<tr id="{approve_term_id}" style="display:none;">
+  <td colspan="5" style="padding:10px 14px;background:var(--bg);border-top:1px dashed var(--line);">
+    <form method="post" action="/admin/voice/review-queue/{item['id']}/approve-term" style="display:flex;flex-direction:column;gap:6px;max-width:520px;">
+      <input type="text" name="term" value="{_esc(guess)}"
+             style="font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;width:100%;box-sizing:border-box;font-family:inherit;">
+      <div style="font-size:11px;color:var(--muted);">Trim to the exact term first. Once approved, it's fine everywhere, permanently.</div>
+      <div style="display:flex;gap:6px;justify-content:flex-start;">
+        <button type="submit" class="btn" style="{btn_style}">Approve</button>
+        <button type="button" class="btn btn-ghost" style="{btn_style}color:var(--muted);"
+                onclick="voiceToggleApproveTerm('{item['id']}', false)">Cancel</button>
+      </div>
+    </form>
+  </td>
+</tr>"""
         # C4 fix (PR #590 Phase 2) — the EDIT field (the bulky full-width
         # textarea) used to render always-visible for every open row. It's
         # now collapsed behind an "Edit" button (`voiceToggleEditField`, in
-        # _VOICE_BULK_JS below): the default, one-line, right-aligned
-        # state shows Edit / Allow here; clicking Edit reveals the
-        # full-width textarea + Save edit / Cancel underneath, and Cancel
-        # collapses it back without submitting anything.
+        # _VOICE_BULK_JS below): the default, one-line state shows Edit /
+        # Allow here / Approve term (on ampersand rows); clicking Edit
+        # reveals the full-width textarea + Save edit / Cancel underneath,
+        # and Cancel collapses it back without submitting anything.
         edit_field_id = f"voice-edit-field-{item['id']}"
         collapsed_row = actions_row_open + f"""
-<button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;"
+<button type="button" class="btn btn-ghost" style="{btn_style}"
         onclick="voiceToggleEditField('{item['id']}', true)">Edit</button>
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="accept_exception">
-  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;border:1px dashed var(--line);color:var(--muted);">Allow here</button>
-</form>""" + actions_row_close + approve_term_html
+  <button type="submit" class="btn btn-ghost" style="{btn_style}border:1px dashed var(--line);color:var(--muted);">Allow here</button>
+</form>
+{approve_term_btn}""" + actions_row_close
         actions = f"""
 <div id="{edit_field_id}-collapsed">{collapsed_row}</div>
 <div id="{edit_field_id}-expanded" style="display:none;">
@@ -34370,10 +34416,10 @@ def _voice_review_row_html(lib, item: dict) -> str:
     <input type="hidden" name="action" value="edit">
     <textarea name="edited_text" rows="3"
            style="font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:100%;min-width:260px;font-family:inherit;box-sizing:border-box;">{_esc(current)}</textarea>
-    <div style="display:flex;gap:6px;justify-content:flex-end;">
-      <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;color:var(--muted);"
+    <div style="display:flex;gap:6px;justify-content:flex-start;">
+      <button type="button" class="btn btn-ghost" style="{btn_style}color:var(--muted);"
               onclick="voiceToggleEditField('{item['id']}', false)">Cancel</button>
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save edit</button>
+      <button type="submit" class="btn btn-ghost" style="{btn_style}">Save edit</button>
     </div>
     <div style="font-size:10.5px;color:var(--muted);">Editing the full value directly&mdash;"Allow here" (collapse this first) only exempts THIS one spot, never global, always reversible.</div>
   </form>
@@ -34404,11 +34450,11 @@ def _voice_review_row_html(lib, item: dict) -> str:
     return f"""
 <tr>
   <td style="padding:8px 10px;">{checkbox}</td>
-  <td style="padding:8px 10px;">{field_cell}<div style="font-size:11px;color:var(--muted);">{row_id_txt}</div></td>
+  <td style="padding:8px 10px;overflow:hidden;">{field_cell}<div title="{_esc(row_id_txt)}" style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{row_id_txt}</div></td>
   <td style="padding:8px 10px;font-size:13px;">{detail}</td>
-  <td style="padding:8px 10px;">{source_badge}</td>
+  <td style="padding:8px 10px;overflow:hidden;">{source_badge}</td>
   <td style="padding:8px 10px;">{actions}</td>
-</tr>"""
+</tr>{approve_term_panel_html}"""
 
 
 def _voice_review_group_bulk_actions_html(rule: str) -> str:
@@ -34437,7 +34483,7 @@ def _voice_review_group_bulk_actions_html(rule: str) -> str:
     if rule == "bare-ampersand":
         btn_html += (
             f'<button type="button" onclick="voiceBulkReplaceAmpersandPreview(\'{_esc(rule)}\')" '
-            f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Replace &amp; with and</button>'
+            f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Replace ampersands with and</button>'
         )
     return (f'<div style="display:flex;gap:8px;align-items:center;margin:8px 0;">'
             f'<label style="font-size:12px;color:var(--muted);">'
@@ -34470,6 +34516,11 @@ function voiceToggleEditField(itemId, expand) {
   if (!collapsed || !expanded) return;
   collapsed.style.display = expand ? 'none' : 'block';
   expanded.style.display = expand ? 'block' : 'none';
+}
+function voiceToggleApproveTerm(itemId, expand) {
+  var panel = document.getElementById('voice-approve-term-' + itemId);
+  if (!panel) return;
+  panel.style.display = expand ? 'table-row' : 'none';
 }
 function voiceBulkReplaceAmpersandPreview(group) {
   var ids = Array.from(document.querySelectorAll('.voice-item-cb[data-group="' + group + '"]:checked')).map(function(cb) { return cb.value; });
@@ -34731,8 +34782,8 @@ async def admin_voice_review_bulk_resolve(request: Request):
 
 @app.post("/admin/voice/review-queue/bulk-replace-ampersand/preview")
 async def admin_voice_review_bulk_replace_ampersand_preview(request: Request):
-    """Issue #592 item 4 — the Ampersands group's own "Replace & with and"
-    bulk action, PREVIEW half. Nothing is written here: every selected row
+    """Issue #592 item 4 — the Ampersands group's own "Replace ampersands
+    with and" bulk action, PREVIEW half. Nothing is written here: every selected row
     is run through `Library.preview_ampersand_replacement` (full current
     value in, would-be replacement out, never touching an unspaced
     ampersand or one inside an approved term) and shown as a before/after
@@ -34783,8 +34834,8 @@ async def admin_voice_review_bulk_replace_ampersand_preview(request: Request):
 </tr>""" for p in unchanged)
         unchanged_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Left as-is ({len(unchanged)})</h3>
-<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">No eligible spaced ampersand&mdash;either every "&amp;" here is
-unspaced (e.g. "S&amp;M", left for a manual decision) or it's inside an already-approved term. Not included in the write below.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">No eligible spaced ampersand&mdash;every ampersand here is
+either unspaced (e.g. S&M, left for a manual decision) or inside an already-approved term. Not included in the write below.</p>
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
@@ -34804,10 +34855,10 @@ unspaced (e.g. "S&amp;M", left for a manual decision) or it's inside an already-
 
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/voice/review-queue" style="font-size:13px;color:var(--muted);">&larr; Voice review queue</a></p>
-<h1>Preview: replace &amp; with and</h1>
-<p style="color:var(--muted);margin:0 0 18px;">Nothing has been written yet. Only a spaced ampersand (" &amp; " or the
-HTML-escaped " &amp;amp; ") is ever replaced&mdash;an unspaced form like "S&amp;M" or text inside an already-approved
-term is always left for a manual decision.</p>
+<h1>Preview: replace ampersands with and</h1>
+<p style="color:var(--muted);margin:0 0 18px;">Nothing has been written yet. Only a spaced ampersand&mdash;surrounded by
+spaces, written raw or as its HTML-escaped form&mdash;is ever replaced. An unspaced form like S&M, or text inside an
+already-approved term, is always left for a manual decision.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Will be replaced ({len(will_change)})</h3>
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">

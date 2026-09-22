@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 import time
 
@@ -341,12 +342,32 @@ def start_background_checks_refresher(force: bool = False) -> None:
        via `PYTEST_CURRENT_TEST` — pytest sets this in `os.environ` for the
        duration of every test's setup/call/teardown, a standard, reliable
        way for library code to detect it's running under pytest without a
-       pytest import of its own. A test that wants to exercise the real
-       background thread (rather than calling `_run_one_refresh_iteration`/
-       `_reconcile_voice_review_queue_once` directly, as every existing
-       refresher test in tests/test_task_badges.py already does) can still
-       do so explicitly via `force=True`."""
-    if not force and "PYTEST_CURRENT_TEST" in os.environ:
+       pytest import of its own.
+
+       `PYTEST_CURRENT_TEST` is only ever set while a test is actively
+       running (setup/call/teardown) — never during collection or module
+       import. Checked directly (issue #592's own follow-up review): every
+       `with TestClient(...)` in this suite — the only thing that can
+       actually trigger `webapp.app`'s startup event and reach this
+       function at all — lives inside a `def test_*(...)` function body,
+       never at module scope, and there is no conftest.py providing a
+       session/module-scoped fixture that could construct one earlier
+       either. So under the CURRENT suite there is no real gap: nothing
+       ever reaches here before `PYTEST_CURRENT_TEST` exists. As a cheap,
+       strictly broader backup guard against a FUTURE test file collecting
+       a `TestClient` (or otherwise triggering the startup event) outside
+       any test function — where `PYTEST_CURRENT_TEST` would still be
+       unset — this also checks `"pytest" in sys.modules`, true for the
+       whole pytest process lifetime (collection through final teardown),
+       not just while a test is running. Safe in production: `pytest` is
+       requirements-dev.txt-only, never installed in the Docker image, so
+       this can never be true there. A test that wants to exercise the
+       real background thread (rather than calling
+       `_run_one_refresh_iteration`/`_reconcile_voice_review_queue_once`
+       directly, as every existing refresher test in
+       tests/test_task_badges.py already does) can still do so explicitly
+       via `force=True`."""
+    if not force and ("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules):
         return
     global _checks_refresher_started
     with _checks_refresher_lock:

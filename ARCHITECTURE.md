@@ -10318,7 +10318,9 @@ bullet for the full per-item write-up, and
 `tests/test_fix_invisible_characters.py` for the two new scripts' coverage.
 
 **Issue #592 follow-ups (2026-09)** — four items logged from #590's own
-merge review, all closed in one PR:
+merge review, plus a same-PR UI review round from live screenshots of the
+queue page (item 5, folded in per explicit instruction rather than shipped
+as a follow-up), all closed in one PR:
 
 1. `tools.advisor`/`communities.advisor` had the identical silent-revert
    bug as the pre-#590 text fields (name/notes/description) — a raw,
@@ -10354,7 +10356,7 @@ merge review, all closed in one PR:
    the identical path, with no other column recording which literal code
    path produced a given row) — none were reclassified, stated here
    rather than guessed.
-4. A group-level "Replace & with and" bulk action ships on the Ampersands
+4. A group-level "Replace ampersands with and" bulk action ships on the Ampersands
    group at `/admin/voice/review-queue`. `linklib.voice_review.
    replace_spaced_ampersands(text, approved_terms)` replaces only a
    SPACED raw or HTML-escaped ampersand (`" & "`/`" &amp; "`) with
@@ -10376,6 +10378,27 @@ merge review, all closed in one PR:
    confirm-form shape — a before/after diff per row (reusing
    `_voice_char_diff_html`), a "Left as-is" section for anything that
    wouldn't change and why, nothing written until confirmed.
+5. Row actions now render one `flex-wrap:wrap` single-line row by
+   default, left-aligned to match `.admin-table-actions-grid`'s sitewide
+   convention (reversing the earlier page-scoped `flex-end` choice), with
+   every button — filled or outlined — sharing one style string and the
+   `.btn`/`.btn-ghost` classes (the filled "Approve term" button no
+   longer overrides `.btn`'s own border with `border:none`, which had
+   broken its height parity with the outlined buttons beside it). Approve
+   term moved out of the Actions cell into its own full-width reveal
+   panel — a second `<tr>` with a `colspan="5"` cell, toggled by
+   `voiceToggleApproveTerm` mirroring the existing Edit-field pattern —
+   holding a full-width input, a shortened caption ("Trim to the exact
+   term first. Once approved, it's fine everywhere, permanently."), then
+   Approve/Cancel. Field and Source columns were compressed to fixed
+   narrow widths with `nowrap`+ellipsis truncation and a `title` tooltip
+   for the full value, freeing width for Detail; Actions was narrowed to
+   fit exactly one row of buttons. This same round also caught and fixed
+   a real regression: the bulk-replace-ampersand feature's own button
+   label and preview-page prose rendered a literal `&amp;`/`&amp;amp;`,
+   which trips `webapp/app.py`'s own bare-ampersand lint unconditionally
+   regardless of spacing — reworded to describe the character in words
+   ("Replace ampersands with and") instead of rendering it.
 
 See CLAUDE.md's matching "issue #592 follow-ups" bullet for the full
 per-item write-up, `tests/test_voice_review_queue.py`'s "Issue #592 item 4"
