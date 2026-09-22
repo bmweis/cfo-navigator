@@ -26455,15 +26455,15 @@ def _checks_summary_cell_html(column: str, row: dict) -> str:
                           f'text-decoration:none;font-size:14px;">{check_text}</a>')
         else:
             check_html = f'<span style="color:var(--navy);font-weight:600;font-size:14px;">{check_text}</span>'
-        return f'<td style="padding:9px 8px 9px 2px;vertical-align:middle;">{check_html}</td>'
+        return f'<td style="padding:10px 12px;vertical-align:middle;">{check_html}</td>'
     if column == "status":
         dot_color, word = _SUMMARY_STATUS_META[row["status"]]
         dot_html = (f'<span role="img" title="{_esc(word)}" aria-label="{_esc(word)}" '
                     f'style="display:inline-block;width:10px;height:10px;border-radius:50%;'
                     f'background:{dot_color};"></span>')
-        return f'<td style="padding:9px 8px;text-align:center;vertical-align:middle;">{dot_html}</td>'
+        return f'<td style="padding:10px 12px;text-align:center;vertical-align:middle;">{dot_html}</td>'
     # "details" — the status text only, left-aligned.
-    return (f'<td style="padding:9px 2px 9px 8px;text-align:left;vertical-align:middle;'
+    return (f'<td style="padding:10px 12px;text-align:left;vertical-align:middle;'
             f'font-size:13px;color:var(--ink-soft);">{_esc(row["details"])}</td>')
 
 
@@ -26477,7 +26477,12 @@ def _checks_summary_row_tr(row: dict) -> str:
     section on this same page (never an outbound GitHub/vendor link — see
     the AI-providers rows' own detail sections further down the page for
     those). Columns are built in _SUMMARY_ROW_COLUMNS' own order, the same
-    tuple the <thead> headers come from."""
+    tuple the <thead> headers come from. Every row — including the last —
+    gets the same border-bottom divider, matching every other admin table
+    on the site (Software, Communities, ...); there's no card edge here
+    for a trailing divider to look stray against any more (see
+    _checks_summary_table_html), so the old last-row special case that
+    used to strip it is gone."""
     cells = "".join(_checks_summary_cell_html(col, row) for col in _SUMMARY_ROW_COLUMNS)
     return f'<tr style="border-bottom:1px solid var(--line);">{cells}</tr>'
 
@@ -26498,53 +26503,58 @@ def _checks_summary_thead_html() -> str:
     place (_SUMMARY_ROW_COLUMNS) and both the header and every row's
     rendering follow automatically.
 
-    One deliberate exception (2026-09, per design review): the Check
-    column's own visible label is dropped. Every row already names a
-    check ("Live checks", "Anthropic pricing", ...), so a header reading
-    "Check" above them was redundant and, on some viewports, wrapped —
-    the column's width now goes entirely to that content. The header cell
-    still carries an aria-label so the column stays identified for
-    assistive tech; Status and Details are unaffected."""
+    2026-09 (design review, round 3): this used to be a muted, small,
+    all-caps header with the Check label dropped entirely — a one-off
+    style invented for this page, not the site's actual admin-table
+    convention. It's now the same `var(--accent-light)` header band, 13px,
+    sentence-case, all three columns visibly labeled, that every other
+    admin table (Software, Communities, ...) already uses — see those
+    tables' own <thead> for the reference. The Check header sits flush
+    with the eyebrow label above the table now that that label has moved
+    out of the table entirely (see _checks_summary_table_html), so there's
+    no more reason to hide it."""
     cells = []
-    for i, col in enumerate(_SUMMARY_ROW_COLUMNS):
+    for col in _SUMMARY_ROW_COLUMNS:
         align = _SUMMARY_COL_HEADER_ALIGN[col]
-        pad = "0 8px 6px 2px" if i == 0 else ("0 2px 6px 8px" if i == len(_SUMMARY_ROW_COLUMNS) - 1
-                                               else "0 8px 6px")
-        label = col.capitalize()
-        visible = "" if col == "check" else _esc(label)
-        aria = f' aria-label="{_esc(label)}"' if col == "check" else ""
-        cells.append(f'<th{aria} style="text-align:{align};padding:{pad};font-size:11px;color:var(--muted);'
-                     f'text-transform:uppercase;letter-spacing:.04em;">{visible}</th>')
-    return f'<tr style="border-bottom:1px solid var(--line);">{"".join(cells)}</tr>'
+        label = _esc(col.capitalize())
+        cells.append(f'<th style="text-align:{align};padding:10px 12px;font-size:13px;">{label}</th>')
+    return f'<tr style="background:var(--accent-light);">{"".join(cells)}</tr>'
 
 
 def _checks_summary_table_html(heading: str, rows: list) -> str:
-    """One card of the /admin/checks top summary — a heading (reusing the
-    existing "AI providers" label style verbatim, no new styling) above a
-    real <table> with a <thead> whose header text is derived mechanically
-    from _SUMMARY_ROW_COLUMNS (see _checks_summary_thead_html), the same
-    ordered field-name tuple every row's own <td>s are built from — so
-    header and data can never drift apart. The last row's bottom border is
-    stripped (a `:last-child` rule can't be expressed inline, so this is
-    done by string substitution instead) to fix the stray divider line
-    that used to sit just above the card's own bottom edge."""
-    heading_html = (f'<div style="font:600 12px var(--font-body);letter-spacing:.06em;'
-                     f'text-transform:uppercase;color:var(--muted);padding:2px 2px 8px;">'
+    """One column of the /admin/checks top summary — an eyebrow label above
+    a real <table>, no bordered card wrapping the two together.
+
+    2026-09 (design review, round 3): the heading used to be the first
+    line INSIDE a padded, bordered "card," with the table's own header row
+    (Status/Details, Check dropped entirely) starting well to the right of
+    it once Check's label was blanked — which read as the heading and the
+    table header not lining up, because they never were the same kind of
+    thing: one's a section label, the other's a table's own header row.
+    Restructured to match how the rest of the site actually separates a
+    label from the content under it (see /tools/fpa-buddy's "Sources"/
+    "Depth" labels, `.ask-section-label`) — a plain eyebrow label with no
+    box around it, directly above a bare table. There's nothing left to
+    misread as unaligned, because there's no longer a shared edge the two
+    are expected to share.
+
+    Header text is derived mechanically from _SUMMARY_ROW_COLUMNS (see
+    _checks_summary_thead_html), the same ordered field-name tuple every
+    row's own <td>s are built from — so header and data can never drift
+    apart."""
+    heading_html = (f'<div style="font-size:11.5px;font-weight:600;color:var(--muted);'
+                     f'text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;">'
                      f'{_esc(heading)}</div>')
-    body_rows_list = [_checks_summary_row_tr(r) for r in rows]
-    if body_rows_list:
-        body_rows_list[-1] = body_rows_list[-1].replace(
-            'border-bottom:1px solid var(--line);', 'border-bottom:none;', 1)
+    body_rows_html = "".join(_checks_summary_row_tr(r) for r in rows)
     table_html = (
         f'<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
         f'<colgroup><col style="width:{_SUMMARY_COL_WIDTH_CHECK};">'
         f'<col style="width:{_SUMMARY_COL_WIDTH_STATUS};"><col></colgroup>'
         f'<thead>{_checks_summary_thead_html()}</thead>'
-        f'<tbody>{"".join(body_rows_list)}</tbody>'
+        f'<tbody>{body_rows_html}</tbody>'
         f'</table>'
     )
-    return (f'<div class="checks-summary-card" style="border:1px solid var(--line);border-radius:12px;'
-            f'background:var(--surface);padding:12px 16px 6px;">{heading_html}{table_html}</div>')
+    return f'<div>{heading_html}{table_html}</div>'
 
 
 @app.get("/admin/checks", response_class=HTMLResponse)
@@ -26705,9 +26715,9 @@ def admin_checks(request: Request):
         "AI providers", [pricing_row, models_row, exa_row])
 
     summary_box = (
-        f'<style>.checks-summary-grid{{display:flex;align-items:flex-start;gap:16px;margin:-4px 0 20px;}}'
-        f'.checks-summary-grid>.checks-summary-card{{flex:1 1 0;min-width:0;}}'
-        f'@media(max-width:760px){{.checks-summary-grid{{flex-direction:column;}}}}</style>'
+        f'<style>.checks-summary-grid{{display:flex;align-items:flex-start;gap:32px;margin:-4px 0 24px;}}'
+        f'.checks-summary-grid>div{{flex:1 1 0;min-width:0;}}'
+        f'@media(max-width:760px){{.checks-summary-grid{{flex-direction:column;gap:24px;}}}}</style>'
         f'<div class="checks-summary-grid">{site_checks_table}{ai_providers_table}</div>'
     )
 

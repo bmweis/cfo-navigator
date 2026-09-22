@@ -9879,6 +9879,56 @@ it supersedes the old "`/save` is token-gated" note.
   identical `<colgroup>`s, the stray-divider fix, the 760px stacking
   breakpoint).
 
+  **Round 3 (same PR, same day) — the blank Check header from Round 2 was
+  the actual cause of a real visual complaint, and the fix turned out to
+  be structural, not cosmetic.** Brian flagged "the headers aren't
+  aligning" against a live screenshot; several rounds of pixel-level
+  verification (raw HTML byte inspection for hidden characters, a real
+  headless-Chromium render with the actual site fonts loaded, a direct
+  pixel scan of the divider line's y-coordinate across the full width of
+  both cards) all came back clean — no wrap, no hidden character, no
+  genuine CSS misalignment anywhere. The header row itself was pixel-
+  perfect. What Brian was circling in a hand-annotated screenshot was
+  real, just not a rendering bug: with Check's visible label blank, the
+  STATUS/DETAILS header row started well to the right of "SITE CHECKS"/
+  "AI PROVIDERS" above it (the Check column still needed its 150px for the
+  data rows below, it just had nothing to show in the header cell), and
+  that blank strip read as two things failing to line up even though every
+  column was correctly positioned over its own data one row down. Brian's
+  own fix proposal, modeled on `/tools/fpa-buddy`'s "Sources"/"Depth"
+  labels (a plain eyebrow label sitting above a control group, no card
+  around the two together): move "Site checks"/"AI providers" out of the
+  table entirely, as a bare label above a bare table — and while doing
+  that, restore Check's visible header, since it no longer has anywhere
+  disconnected to sit. He separately flagged that the header style itself
+  (small muted 11px all-caps, invented for this page) had drifted from the
+  site's real admin-table convention — the soft `var(--accent-light)`
+  header band with plain 13px sentence-case text every other admin table
+  (Software, Communities, ...) already uses — and asked for that back too.
+  All three landed together: `_checks_summary_table_html` no longer wraps
+  a heading + table in a bordered/padded "card" (`.checks-summary-card` is
+  gone); the heading is now a plain eyebrow label (`font-size:11.5px;
+  font-weight:600;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.1em;margin-bottom:10px;` — matching `.ask-section-label`'s
+  own values, the "Sources"/"Depth" precedent, not a new invented style)
+  directly above the table; `_checks_summary_thead_html` dropped the
+  aria-label-only trick and the muted/uppercase treatment for the real
+  `background:var(--accent-light)` band with visible, sentence-case
+  `<th>` text for all three columns (Check included); `_checks_summary_
+  row_tr`'s last-row border-strip hack is gone too, since there's no card
+  edge left for a trailing divider to look stray against — every row,
+  header included, now matches ordinary admin-table styling with no
+  special-casing. `.checks-summary-grid`'s gap widened from 16px to 32px
+  (24px stacked on mobile) now that a card border isn't doing any of the
+  visual separation between the two columns any more. Verified with a real
+  local render (logged-in session, real fonts, both 1280px desktop and a
+  390px mobile viewport) before shipping, not just reasoned about — see
+  `tests/test_checks.py`'s `test_summary_tables_have_three_columns_with_
+  headers_matching_the_named_row_fields` (rewritten for the visible Check
+  header + `accent-light` band) and `test_summary_every_row_including_
+  the_last_has_the_ordinary_divider` (replacing the retired stray-border
+  test) for the regression coverage.
+
 
 ## Authentication & security
 

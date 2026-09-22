@@ -318,7 +318,6 @@ def test_summary_renders_exactly_two_tables_with_the_right_rows(env, monkeypatch
     r = c.get("/admin/checks")
     summary = _summary_grid_html(r.text)
     assert summary.count("<table") == 2
-    assert summary.count("checks-summary-card") >= 2   # one heading div per card + the card wrapper itself
 
     site_start = summary.index("Site checks")
     ai_start = summary.index("AI providers")
@@ -344,11 +343,16 @@ def test_summary_tables_have_three_columns_with_headers_matching_the_named_row_f
     field names the row-building code (_checks_summary_table_html) actually
     uses, closing the drift this rule exists to prevent.
 
-    2026-09 design revision: the Check column's own VISIBLE label is
-    dropped (every row already names a check, so the header was redundant
-    and wrapped on some viewports) — but the column still exists (three
-    <th> per table) and stays identified for assistive tech via an
-    aria-label, so this pins that instead of a visible ">Check</th>"."""
+    2026-09 design review, round 3: the Check column's label is visible
+    again — dropping it (round 2) left a blank strip in the header row with
+    nothing anchoring it to the card heading above, which read as
+    "misaligned" even though every column was correctly positioned over its
+    own data. Fixed by restructuring, not by hiding text: the heading moved
+    out of the table entirely (see _checks_summary_table_html), so there's
+    no more card edge for the header row to look disconnected from, and
+    Check can go back to being a normal, visible, sentence-case label like
+    Status and Details — matching the site's other admin tables (Software,
+    Communities), not a one-off style."""
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     from fastapi.testclient import TestClient
     import webapp.app as appmod
@@ -358,26 +362,27 @@ def test_summary_tables_have_three_columns_with_headers_matching_the_named_row_f
     summary = _summary_grid_html(r.text)
 
     # The header text is literally the sentence-cased field names of the
-    # named-row dict webapp.app._checks_summary_row_tr consumes — except
-    # "check", whose visible text is intentionally blank (see above).
+    # named-row dict webapp.app._checks_summary_row_tr consumes.
     expected_field_names = ["check", "status", "details"]
     expected_headers = [f.capitalize() for f in expected_field_names]
     assert expected_headers == ["Check", "Status", "Details"]
 
     for table_html in (summary[:summary.index("AI providers")], summary[summary.index("AI providers"):]):
         assert table_html.count("<th ") == 3, "exactly three columns"  # "<th" alone also matches "<thead"
-        # Check: no visible text, but still labeled for assistive tech.
-        assert 'aria-label="Check"' in table_html
-        assert "<th aria-label=\"Check\"" in table_html
-        assert ">Check</th>" not in table_html, "the visible label was asked to be dropped"
-        # Status/Details are unaffected — still derived, still visible.
-        for header in ("Status", "Details"):
+        # All three columns are visibly labeled, sentence case, no aria-only hiding.
+        for header in ("Check", "Status", "Details"):
             assert f">{header}</th>" in table_html, header
+        assert "aria-label=" not in table_html.split("<thead>")[1].split("</thead>")[0]
         # Header order matches column order: Check, then Status, then Details.
-        check_pos = table_html.index('aria-label="Check"')
+        check_pos = table_html.index(">Check</th>")
         status_pos = table_html.index(">Status</th>")
         details_pos = table_html.index(">Details</th>")
         assert check_pos < status_pos < details_pos
+        # The site's standard admin-table header band (var(--accent-light),
+        # see Software/Communities' own <thead>), not a one-off muted/
+        # uppercase treatment.
+        assert 'background:var(--accent-light);' in table_html
+        assert "text-transform:uppercase" not in table_html.split("<thead>")[1].split("</thead>")[0]
 
 
 def test_summary_details_cells_are_left_aligned(env, monkeypatch):
@@ -463,10 +468,15 @@ def test_never_reviewed_dot_uses_the_stoplight_amber_never_coral(env, monkeypatc
         assert token not in summary, token
 
 
-def test_summary_has_no_stray_border_under_the_last_row_of_either_table(env, monkeypatch):
-    """Item e's first bug fix: the last row of each table must not carry
-    its own bottom border (the stray line that used to sit just above the
-    card's own edge, most visible under Exa pricing)."""
+def test_summary_every_row_including_the_last_has_the_ordinary_divider(env, monkeypatch):
+    """2026-09 design review, round 3: the "strip the last row's border" hack
+    (Item e's original fix) existed to stop a divider line looking stray
+    against the card's own rounded bottom edge. There's no card any more —
+    each table sits bare under its eyebrow label (see
+    _checks_summary_table_html) — so that edge doesn't exist to look stray
+    against, and the special case is gone: every row, including the last,
+    carries the same border-bottom divider every other admin table on the
+    site uses on every row (Software, Communities, ...)."""
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     from fastapi.testclient import TestClient
     import webapp.app as appmod
@@ -474,15 +484,16 @@ def test_summary_has_no_stray_border_under_the_last_row_of_either_table(env, mon
     c.post("/login", data={"username": "admin", "password": "adminpass"})
     r = c.get("/admin/checks")
     summary = _summary_grid_html(r.text)
-    # Badge refresh (last Site checks row) and Exa pricing (last AI
-    # providers row) must each be the last <tr> in their own <tbody> and
-    # must NOT carry the ordinary row border-bottom.
+    assert "border-bottom:none;" not in summary
     for last_row_check in ("Badge refresh", "Exa pricing"):
         idx = summary.index(f">{last_row_check}<")
         tr_start = summary.rindex("<tr", 0, idx)
         tr_tag = summary[tr_start:summary.index(">", tr_start) + 1]
-        assert "border-bottom:none;" in tr_tag, tr_tag
-    assert summary.count("border-bottom:none;") == 2   # exactly the two last rows, no more
+        assert "border-bottom:1px solid var(--line);" in tr_tag, tr_tag
+    # 2 header rows + 5 Site checks rows + 3 AI providers rows = 8 body
+    # rows all carrying the divider, plus the 2 header rows' own tr has no
+    # border-bottom at all (it has a background instead) — so exactly 8.
+    assert summary.count("border-bottom:1px solid var(--line);") == 8
 
 
 def test_summary_contains_no_outbound_links_only_internal_section_links(env, monkeypatch):
