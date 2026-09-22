@@ -186,7 +186,7 @@ def scan_db_copy_report(lib) -> DbScanReport:
     wrapper over this for every caller that only wants the flat list."""
     violations: list[DbCopyViolation] = []
     # Read once per scan, not once per value — globally-approved bare-
-    # ampersand terms (2026-09, "Approve term") mask their own ampersand
+    # ampersand terms (2026-09, "Always allow") mask their own ampersand
     # out of every scanned column so an approved term can't be re-flagged
     # on the very next pass. See Library.approve_voice_term's own docstring.
     approved_ampersand_terms = tuple(

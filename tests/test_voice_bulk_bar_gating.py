@@ -48,9 +48,9 @@ def _login_admin(appmod):
 
 
 # --- Group type 1: a plain `open` group (not bare-ampersand, not --------
-# --- seed-disagreement) — only "Allow selected here" -------------------
+# --- seed-disagreement) — only "Allow selected once" -------------------
 
-def test_open_findings_group_shows_allow_here_only(env):
+def test_open_findings_group_shows_allow_once_only(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         tid1 = lib.add_tool("Buzz Tool One", "This is seamless.", "https://buzz-one.example", [], approved=1)
@@ -64,7 +64,7 @@ def test_open_findings_group_shows_allow_here_only(env):
     r = c.get("/admin/voice/review-queue")
     assert r.status_code == 200
 
-    assert "Allow selected here" in r.text
+    assert "Allow selected once" in r.text
     assert "Accept selected" not in r.text
     assert "Revert selected" not in r.text
     assert "Use seed selected" not in r.text
@@ -74,7 +74,7 @@ def test_open_findings_group_shows_allow_here_only(env):
 
 
 # --- Group type 2: an `auto_corrected` group — "Accept selected" / -----
-# --- "Revert selected" only, never "Allow selected here" ---------------
+# --- "Revert selected" only, never "Allow selected once" ---------------
 
 def test_auto_corrected_group_shows_accept_and_revert_only(env):
     lib = Library(os.environ["LINKLIB_DB"])
@@ -102,7 +102,7 @@ def test_auto_corrected_group_shows_accept_and_revert_only(env):
 
     assert "Accept selected" in r.text
     assert "Revert selected" in r.text
-    assert "Allow selected here" not in r.text
+    assert "Allow selected once" not in r.text
     assert "Use seed selected" not in r.text
     assert "Keep mine selected" not in r.text
 
@@ -126,7 +126,7 @@ def test_seed_disagreement_group_shows_use_seed_and_keep_mine_only(env):
 
     assert "Use seed selected" in r.text
     assert "Keep mine selected" in r.text
-    assert "Allow selected here" not in r.text
+    assert "Allow selected once" not in r.text
     assert "Accept selected" not in r.text
     assert "Revert selected" not in r.text
 
@@ -145,7 +145,7 @@ def test_a_single_open_finding_shows_no_bulk_bar(env):
     r = c.get("/admin/voice/review-queue")
     assert r.status_code == 200
     assert "Select all" not in r.text
-    assert "Allow selected here" not in r.text
+    assert "Allow selected once" not in r.text
 
 
 # --- Part C item 1 (column widths), re-verified against the review's -----
@@ -209,8 +209,9 @@ def test_lede_uses_the_standard_admin_lede_treatment(env):
 # --- uniform — no dashed border, no grey text, anywhere on the page --------
 
 def test_no_button_on_the_page_has_a_dashed_border_or_grey_text(env):
-    """Confirms the fix is complete, not just applied to "Allow here"
-    (renamed "Allow once")/"Allow selected here" — three more instances
+    """Confirms the fix is complete, not just applied to "Allow once"
+    (renamed from "Allow here")/"Allow selected once" (renamed from
+    "Allow selected here") — three more instances
     (the row-level "Keep mine" button, and the Cancel button inside both
     the Allow-everywhere (renamed "Always allow") and Edit reveal panels)
     still carried `color:var(--muted)` before this fix; none of the three
@@ -301,3 +302,27 @@ def test_allow_everywhere_button_and_caption_use_brians_exact_wording(env):
     assert ("Keep only the exact term, like Dun &amp; Bradstreet. It'll be "
             'allowed everywhere. Remove it anytime on <a href="/admin/voice">'
             "/admin/voice</a>.") in r.text
+
+
+def test_allow_once_caption_says_it_holds_until_removed(env):
+    """"Allow once" can read as "this one time" — the caption under it
+    (inside the row's Edit reveal panel, the only place this exemption is
+    explained) has to say what the action actually does: it's scoped to
+    this one spot, and it holds there until someone removes it, not just
+    for a single occurrence."""
+    lib = Library(os.environ["LINKLIB_DB"])
+    try:
+        tid = lib.add_tool("Caption Check Tool", "This is seamless.",
+                            "https://caption-check.example", [], approved=1)
+        lib.add_voice_review_item("tools", tid, "description", "buzzword", "seamless")
+    finally:
+        lib.close()
+
+    c = _login_admin(env)
+    r = c.get("/admin/voice/review-queue")
+    assert r.status_code == 200
+    assert ('Editing the full value directly&mdash;"Allow once" (collapse this '
+            "first) exempts only THIS one spot, and it holds until it's removed, "
+            "not just once. Never global, always reversible.") in r.text
+    # The old, ambiguous-sounding caption is gone.
+    assert "only exempts THIS one spot, never global, always reversible" not in r.text

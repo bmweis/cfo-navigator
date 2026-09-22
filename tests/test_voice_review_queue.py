@@ -224,6 +224,16 @@ def test_add_voice_review_item_and_exception_flow(lib):
     assert lib.count_open_voice_review_items() == 0
 
 
+def test_accept_exception_writes_an_allowed_once_resolution_note(lib):
+    """PR #595 follow-up: "Allow once" (accept_exception) used to leave
+    resolution_note blank — the note now says plainly what happened, in
+    the current button's own words, not the old "Allow here" wording."""
+    item_id = lib.add_voice_review_item("communities", 5, "demographic", "bare-ampersand", "Bain & Company")
+    lib.resolve_voice_review_item(item_id, "accept_exception")
+    item = lib.get_voice_review_item(item_id)
+    assert item["resolution_note"] == "Allowed once."
+
+
 def test_exception_is_row_scoped_not_global(lib):
     """Accepting an exception for one record must not suppress the identical
     finding on a DIFFERENT record — this is a per-record exception, never a

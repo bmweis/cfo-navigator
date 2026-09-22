@@ -34445,7 +34445,7 @@ async def admin_voice_save_matchmaker(request: Request):
 @app.post("/admin/voice/approved-terms/add")
 async def admin_voice_approved_terms_add(request: Request):
     """Manually add a globally-approved bare-ampersand term from /admin/voice
-    itself, outside the review-queue's own per-row "Approve term" flow—
+    itself, outside the review-queue's own per-row "Always allow" flow—
     e.g. adding a term nobody has flagged yet. Same
     `Library.approve_voice_term`, so it also resolves any already-open queue
     rows containing this exact term."""
@@ -34871,7 +34871,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
               onclick="voiceToggleEditField('{item['id']}', false)">Cancel</button>
       <button type="submit" class="btn" style="{btn_style}">Save edit</button>
     </div>
-    <div style="font-size:10.5px;color:var(--muted);">Editing the full value directly&mdash;"Allow once" (collapse this first) only exempts THIS one spot, never global, always reversible.</div>
+    <div style="font-size:10.5px;color:var(--muted);">Editing the full value directly&mdash;"Allow once" (collapse this first) exempts only THIS one spot, and it holds until it's removed, not just once. Never global, always reversible.</div>
   </form>
 </div>"""
     else:
@@ -34936,7 +34936,7 @@ def _voice_review_group_bulk_actions_html(rule: str, status: str) -> str:
     elif status == "auto_corrected":
         buttons = [("accept", "Accept selected", ""), ("revert", "Revert selected", "")]
     else:
-        buttons = [("accept_exception", "Allow selected here", "")]
+        buttons = [("accept_exception", "Allow selected once", "")]
     btn_html = "".join(
         f'<button type="button" onclick="voiceBulkResolve(\'{_esc(group_key)}\',\'{action}\')" '
         f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;{style}">{label}</button>'

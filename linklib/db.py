@@ -1498,7 +1498,8 @@ CREATE INDEX IF NOT EXISTS idx_voice_review_queue_status ON voice_review_queue(s
 CREATE INDEX IF NOT EXISTS idx_voice_review_queue_lookup
     ON voice_review_queue(table_name, column_name, rule, row_id);
 
--- Globally-approved voice terms (2026-09) — "Approve term" on the review
+-- Globally-approved voice terms (2026-09) — "Always allow" (renamed from
+-- "Approve term"/"Allow everywhere") on the review
 -- queue. Scoped to `rule='bare-ampersand'` only, on purpose: an ampersand
 -- violation is usually a real defined term/name ("Bain & Company"), which
 -- is exactly what a global, permanent approval is for; a banned word
@@ -2582,7 +2583,7 @@ class Library:
             # the queue's own per-row actions — set only by
             # `reconcile_voice_review_queue()` ("resolved outside the
             # queue — no longer found on the last scan") and
-            # `approve_voice_term()` ("approved as a global term"). NULL
+            # `approve_voice_term()` ('Always allowed as "<term>".'). NULL
             # for every row resolved through an ordinary per-row action.
             "ALTER TABLE voice_review_queue ADD COLUMN resolution_note TEXT",
         ]:
@@ -4505,8 +4506,8 @@ class Library:
         violation still there and reopened it as a brand-new row. Every
         remaining action on an `open` finding now provably ends it one of
         three ways: the text changes (`edit`), an exception is recorded
-        (`accept_exception`), or (via the separate approve-term route) a
-        term is allowed everywhere -- never a status flip with nothing
+        (`accept_exception`), or (via the separate "Always allow" route) a
+        term is always allowed -- never a status flip with nothing
         durable behind it."""
         item = self.get_voice_review_item(item_id)
         valid_actions = ("accept", "revert", "edit", "accept_exception", "use_seed", "keep_mine")
@@ -4522,10 +4523,21 @@ class Library:
         new_status = {"accept": "resolved", "revert": "resolved",
                       "edit": "resolved", "accept_exception": "exception",
                       "use_seed": "resolved", "keep_mine": "exception"}[action]
-        self.conn.execute(
-            "UPDATE voice_review_queue SET status=?, reviewed_at=? WHERE id=?",
-            (new_status, _now(), item_id),
-        )
+        if action == "accept_exception":
+            # "Allow once" — a real resolution note, matching "Always
+            # allowed as <term>." below in tense/shape (voice-queue-
+            # durability fix, Part C). Every other action's own note (if
+            # any) is written elsewhere — this is the one write path that
+            # previously left resolution_note blank on every exception.
+            self.conn.execute(
+                "UPDATE voice_review_queue SET status=?, reviewed_at=?, resolution_note=? WHERE id=?",
+                (new_status, _now(), "Allowed once.", item_id),
+            )
+        else:
+            self.conn.execute(
+                "UPDATE voice_review_queue SET status=?, reviewed_at=? WHERE id=?",
+                (new_status, _now(), item_id),
+            )
         self.conn.commit()
         return True
 
@@ -4731,7 +4743,7 @@ class Library:
         self.conn.commit()
         return cur.lastrowid
 
-    # --- Voice review queue: globally-approved terms ("Approve term") ------
+    # --- Voice review queue: globally-approved terms ("Always allow") ------
 
     def list_approved_voice_terms(self, rule: str | None = None) -> list[dict]:
         sql = "SELECT * FROM voice_approved_terms"
@@ -4789,7 +4801,7 @@ class Library:
             self.conn.commit()
             term_id = cur.lastrowid
         low_term = term.lower()
-        note = f'Allowed everywhere as a global term ("{term}").'
+        note = f'Always allowed as "{term}".'
         for item in self.list_voice_review_queue(status="open"):
             if item["rule"] != rule:
                 continue

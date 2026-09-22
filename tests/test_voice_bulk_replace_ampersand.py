@@ -307,7 +307,7 @@ def test_every_row_action_button_uses_the_shared_button_class(env):
         lib.add_seed_disagreement_item("communities", cid2, "notes", "Old text", "New seed text")
 
         # A second bare-ampersand row so the group bulk bar (Select all /
-        # Accept selected / Allow selected here / Replace & with and)
+        # Accept selected / Allow selected once / Replace & with and)
         # actually renders.
         cid3 = lib.add_community("Amp Class Co 2", "https://amp-class-2.com", "R&D team", "", [])
         lib.add_voice_review_item("communities", cid3, "demographic", "bare-ampersand", "R&D team")

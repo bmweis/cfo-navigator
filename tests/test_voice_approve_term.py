@@ -109,6 +109,11 @@ def test_approve_term_resolves_all_matching_open_rows(env):
         i2 = lib2.get_voice_review_item(item2)
         assert i1["status"] != "open"
         assert i2["status"] != "open"
+        # PR #595 follow-up: the note reads in the current "Always allow"
+        # button's own words, not the retired "Allowed everywhere as a
+        # global term" phrasing.
+        assert i1["resolution_note"] == 'Always allowed as "Bain & Company".'
+        assert i2["resolution_note"] == 'Always allowed as "Bain & Company".'
         terms = lib2.list_approved_voice_terms("bare-ampersand")
         assert any(t["term"] == "Bain & Company" for t in terms)
     finally:

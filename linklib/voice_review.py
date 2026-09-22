@@ -248,7 +248,7 @@ AMPERSAND_NAMES = [
     "Research & Development",  # ditto
     "CFOs & VP Finance",       # linklib/enrich.py community-profile prompt example, per Brian
     "Flux Analysis & Summaries",  # linklib/feature_scan.py few-shot example, per Brian
-    "Bain & Company",  # webapp/app.py's "Approve term" placeholder example (2026-09)
+    "Bain & Company",  # webapp/app.py's "Always allow" placeholder example (2026-09)
     "Dun & Bradstreet",  # webapp/app.py's "Always allow" (renamed "Allow everywhere") panel caption example (PR #595 review round)
 ]
 
@@ -548,7 +548,7 @@ def mask_approved_ampersand_terms(text: str, approved_terms) -> str:
     """Blank out every case-insensitive occurrence of an approved bare-
     ampersand term (e.g. "Bain & Company") before scanning, the same
     masking technique `_mask_rubric_enumerations` already uses — a real,
-    global "Approve term" decision (see `Library.approve_voice_term`) has
+    global "Always allow" decision (see `Library.approve_voice_term`) has
     to stop the term's own ampersand from being re-flagged on the very next
     scan, not just resolve the queue row that already exists for it.
     Replaced with same-length UNDERSCORES, not deleted outright and not
@@ -698,7 +698,7 @@ def typography_findings_plain(text: str, approved_ampersand_terms=()) -> list[tu
     from. Used by the DB-backed-copy scanner (see CLAUDE.md's "Database
     content is scanned too" note) — never by anything reading Python source.
 
-    `approved_ampersand_terms` (2026-09, "Approve term") is an optional
+    `approved_ampersand_terms` (2026-09, "Always allow") is an optional
     iterable of globally-approved bare-ampersand terms, masked out of `text`
     before scanning via `mask_approved_ampersand_terms` — omitted by every
     caller that has no database to read the approved-terms list from
