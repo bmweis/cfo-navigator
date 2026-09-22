@@ -63,8 +63,8 @@ only) — tested only against a local fixture DB. Brian runs this via
 `railway ssh` once merged.
 
 Usage:
-    python -m scripts.backfill_voice_review_queue --db library.db            # preview
-    python -m scripts.backfill_voice_review_queue --db library.db --apply    # write for real
+    python -m scripts.backfill_voice_review_queue --db /data/library.db            # preview
+    python -m scripts.backfill_voice_review_queue --db /data/library.db --apply    # write for real
 """
 from __future__ import annotations
 

@@ -24139,9 +24139,9 @@ _SCRIPT_REGISTRY = [
      "Recurring-manual—run whenever new tools/communities need a logo; the whole "
      "catalog fits in one pass now, no monthly batching required.",
      ["LOGODEV_API_KEY (required for --apply; not needed for a preview or --status)"],
-     ["python -m scripts.backfill_logos --db library.db                 # preview (default limit 500)",
-      "python -m scripts.backfill_logos --db library.db --apply          # fetch + save for real",
-      "python -m scripts.backfill_logos --db library.db --status         # coverage report only"]),
+     ["python -m scripts.backfill_logos --db /data/library.db                 # preview (default limit 500)",
+      "python -m scripts.backfill_logos --db /data/library.db --apply          # fetch + save for real",
+      "python -m scripts.backfill_logos --db /data/library.db --status         # coverage report only"]),
     ("audit_tool_logo_dimensions.py", "scripts.audit_tool_logo_dimensions", "Reusable diagnostic",
      "Read-only: reads every already-downloaded tool/community logo file on disk (PNG/JPEG/GIF/"
      "WEBP/ICO/SVG, parsed by hand—no Pillow) and flags ones that are undersized or have a "
@@ -24152,9 +24152,9 @@ _SCRIPT_REGISTRY = [
      "Recurring-manual—run whenever a batch of tiny/lopsided logos is reported, or as a "
      "periodic sweep after a backfill_logos.py run.",
      ["LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.audit_tool_logo_dimensions --db library.db",
-      "python -m scripts.audit_tool_logo_dimensions --db library.db --min-px 96 --max-ratio 2.0",
-      "python -m scripts.audit_tool_logo_dimensions --db library.db --csv logo_audit.csv"]),
+     ["python -m scripts.audit_tool_logo_dimensions --db /data/library.db",
+      "python -m scripts.audit_tool_logo_dimensions --db /data/library.db --min-px 96 --max-ratio 2.0",
+      "python -m scripts.audit_tool_logo_dimensions --db /data/library.db --csv logo_audit.csv"]),
     ("capture_tool_screenshots.py", "scripts.capture_tool_screenshots", "Recurring and actively useful",
      "Bulk homepage screenshot capture for the Software directory—the same "
      "capture_homepage() logic the live \"Recapture\" admin button uses, run across many "
@@ -24163,15 +24163,15 @@ _SCRIPT_REGISTRY = [
      "existing ones need a refresh.",
      ["None required, but needs Playwright's Chromium installed and real network egress—"
       "run from a dev machine or railway ssh, not a sandboxed build session."],
-     ["python -m scripts.capture_tool_screenshots --db library.db --tools \"Ramp,Brex\" --dry-run",
-      "python -m scripts.capture_tool_screenshots --db library.db --limit 20"]),
+     ["python -m scripts.capture_tool_screenshots --db /data/library.db --tools \"Ramp,Brex\" --dry-run",
+      "python -m scripts.capture_tool_screenshots --db /data/library.db --limit 20"]),
     ("seed_tools.py", "scripts.seed_tools", "Recurring and actively useful",
      "Seeds the CFO Toolbox Software directory from a curated vendor list. Safe to "
      "re-run—skips any tool whose URL is already in the DB.",
      "Recurring-manual—run by hand whenever the curated seed list gains new tools, and "
      "once against a brand-new database.",
      ["LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.seed_tools --db library.db"]),
+     ["python -m scripts.seed_tools --db /data/library.db"]),
     ("seed_communities.py", "scripts.seed_communities", "Recurring and actively useful",
      "Seeds the CFO Toolbox Communities directory from a curated list. Safe to re-run—"
      "adds any community missing by URL and syncs name/notes/advisor on existing rows; "
@@ -24179,7 +24179,7 @@ _SCRIPT_REGISTRY = [
      "Recurring-manual—run by hand whenever the curated seed list changes, and once "
      "against a brand-new database.",
      ["LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.seed_communities --db library.db"]),
+     ["python -m scripts.seed_communities --db /data/library.db"]),
     ("enrich_community_profiles.py", "scripts.enrich_community_profiles", "Recurring and actively useful",
      "Bulk/backfill Community Profile drafting—the Communities equivalent of "
      "enrich_agent_taxonomy.py. One Claude call per community drafts the sixteen "
@@ -24187,8 +24187,8 @@ _SCRIPT_REGISTRY = [
      "contract as the live \"Auto-fill from URL\" admin button.",
      "Recurring-manual—whenever a batch of communities needs profile drafts.",
      ["ANTHROPIC_API_KEY", "LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.enrich_community_profiles --db library.db --communities \"Chief,Rho Community\" --dry-run",
-      "python -m scripts.enrich_community_profiles --db library.db --limit 10"]),
+     ["python -m scripts.enrich_community_profiles --db /data/library.db --communities \"Chief,Rho Community\" --dry-run",
+      "python -m scripts.enrich_community_profiles --db /data/library.db --limit 10"]),
     ("enrich_agent_taxonomy.py", "scripts.enrich_agent_taxonomy", "Recurring and actively useful",
      "Agent-taxonomy research for Software tools (renamed from enrich_tool_features.py in "
      "the Feature Taxonomy Phase 1b PR 2 legacy retirement, which dropped the feature-drafting "
@@ -24198,8 +24198,8 @@ _SCRIPT_REGISTRY = [
      "this script is the bulk/backfill path.",
      "Recurring-manual—whenever a batch of tools needs agent-taxonomy research.",
      ["ANTHROPIC_API_KEY", "LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.enrich_agent_taxonomy --db library.db --tools \"Ramp,Brex\" --dry-run",
-      "python -m scripts.enrich_agent_taxonomy --db library.db --limit 10"]),
+     ["python -m scripts.enrich_agent_taxonomy --db /data/library.db --tools \"Ramp,Brex\" --dry-run",
+      "python -m scripts.enrich_agent_taxonomy --db /data/library.db --limit 10"]),
     ("mcp_server.py", "scripts.mcp_server", "Recurring and actively useful",
      "Stdio MCP server wrapping the hosted CFO Library search (GET /api/search)—lets "
      "Claude Desktop/Code search the archive directly, without going through the "
@@ -24221,7 +24221,7 @@ _SCRIPT_REGISTRY = [
      "active vocabulary. Makes no writes—a diagnostic to review before any manual cleanup.",
      "Recurring-manual—run as needed if orphaned-category drift is suspected.",
      ["LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.report_orphaned_categories --db library.db"]),
+     ["python -m scripts.report_orphaned_categories --db /data/library.db"]),
     ("report_feature_taxonomy_coverage.py", "scripts.report_feature_taxonomy_coverage", "Recurring and actively useful",
      "Read-only: per tool_categories row, reports tool count, live/retired category_features "
      "counts, and pending feature_review_queue counts by source. Built for the Feature Taxonomy "
@@ -24230,7 +24230,7 @@ _SCRIPT_REGISTRY = [
      "Recurring-manual—run before scoping/running an origination scan against a new category, "
      "to see current coverage and avoid duplicating proposals already in the queue.",
      ["LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.report_feature_taxonomy_coverage --db library.db"]),
+     ["python -m scripts.report_feature_taxonomy_coverage --db /data/library.db"]),
     ("originate_category_features.py", "scripts.originate_category_features", "Recurring and actively useful",
      "Runs the Feature Taxonomy scan tool's Phase 3 pipeline (docs/FEATURE_TAXONOMY.md §10, "
      "origination mode) against one category's whole tool roster—research, incremental §7 "
@@ -24243,7 +24243,7 @@ _SCRIPT_REGISTRY = [
      "curated feature list yet gets originated. Check /admin/tools/software/feature-review-queue "
      "for the results afterward.",
      ["ANTHROPIC_API_KEY", "EXA_API_KEY (optional—falls back to the model's own knowledge without it)"],
-     ["python -m scripts.originate_category_features --db library.db --category Neobanking --apply"]),
+     ["python -m scripts.originate_category_features --db /data/library.db --category Neobanking --apply"]),
     ("deny_pending_scan_proposals.py", "scripts.deny_pending_scan_proposals", "Recurring and actively useful",
      "Bulk-denies pending feature_review_queue items for one category/source, with a shared "
      "resolution note—cleanup tool for a botched origination run (built for the real "
@@ -24252,7 +24252,7 @@ _SCRIPT_REGISTRY = [
      "Recurring-manual—run before a corrected re-run of originate_category_features.py "
      "whenever a prior run's proposals need clearing.",
      ["LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.deny_pending_scan_proposals --db library.db --category Neobanking "
+     ["python -m scripts.deny_pending_scan_proposals --db /data/library.db --category Neobanking "
       "--reason \"Superseded by corrected clustering re-run\" --apply"]),
     ("remap_queue_to_framework.py", "scripts.remap_queue_to_framework", "Recurring and actively useful",
      "Remaps a category's pending source='scan' feature_review_queue proposals against a FIXED, "
@@ -24271,14 +24271,13 @@ _SCRIPT_REGISTRY = [
      "supersedes that category's raw origination-scan output. Hand it a new --framework JSON file "
      "for the next category; the script itself doesn't change.",
      ["ANTHROPIC_API_KEY"],
-     ["python -m scripts.remap_queue_to_framework --db library.db --category Neobanking --apply"]),
+     ["python -m scripts.remap_queue_to_framework --db /data/library.db --category Neobanking --apply"]),
     ("dump_communities.py", "scripts.dump_communities", "Recurring and actively useful",
      "Read-only plain listing of every community's name, URL, and slug—no filtering or "
      "formatting. A quick ad hoc lookup tool.",
      "Recurring-manual—run as needed.",
      ["LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.dump_communities --db library.db",
-      "railway run python -m scripts.dump_communities --db /data/library.db   # against prod"]),
+     ["railway run python -m scripts.dump_communities --db /data/library.db"]),
     ("diagnose_cookie_banner.py", "scripts.diagnose_cookie_banner", "Reusable diagnostic",
      "Reproduces linklib.screenshots.capture_homepage()'s exact navigation/wait sequence "
      "against a real URL and dumps the rendered DOM (including any Shadow DOM content and "
@@ -24309,7 +24308,7 @@ _SCRIPT_REGISTRY = [
      "Recurring-manual—run again whenever a new fetch-failure domain cluster needs the same "
      "scale-and-Exa-feasibility check before scoping a fetch-tier fix.",
      ["EXA_API_KEY (only for the Exa spike—omit or pass --skip-exa to run the scale check alone)"],
-     ["python -m scripts.medium_platform_scale_check --db library.db --skip-exa   # scale check only",
+     ["python -m scripts.medium_platform_scale_check --db /data/library.db --skip-exa   # scale check only",
       "railway run python -m scripts.medium_platform_scale_check --db /data/library.db   # full report against prod"]),
     ("trace_medium_tier.py", "scripts.trace_medium_tier", "Reusable diagnostic",
      "Built for a live-proof round on the fetch-by-URL tier follow-up (2026-08 wrap-up sprint "
@@ -24342,7 +24341,7 @@ _SCRIPT_REGISTRY = [
      "www-mismatch-vs-genuine-block check, or a candidate list for a bulk delete.",
      ["None required for --task www/bettereveryday/delete-candidates; needs real network egress "
       "for the live HEAD check (railway ssh or a dev machine, not a sandboxed build session)."],
-     ["python -m scripts.diagnose_reader_backfill_failures --db library.db --task www --skip-live-check",
+     ["python -m scripts.diagnose_reader_backfill_failures --db /data/library.db --task www --skip-live-check",
       "railway run python -m scripts.diagnose_reader_backfill_failures --db /data/library.db --task all"]),
 ]
 

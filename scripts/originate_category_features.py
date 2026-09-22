@@ -20,8 +20,8 @@ real multi-member cluster found — ballpark $2-5 total for a category this
 size. Set ANTHROPIC_API_KEY and EXA_API_KEY first.
 
 Usage:
-    python -m scripts.originate_category_features --db library.db --category Neobanking
-    python -m scripts.originate_category_features --db library.db --category Neobanking --apply
+    python -m scripts.originate_category_features --db /data/library.db --category Neobanking
+    python -m scripts.originate_category_features --db /data/library.db --category Neobanking --apply
 """
 from __future__ import annotations
 

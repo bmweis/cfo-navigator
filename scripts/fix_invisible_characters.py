@@ -56,8 +56,8 @@ this — verified only against a temp scratch SQLite DB. Running --apply
 against the real database is reserved for Brian, via `railway ssh`.
 
 Usage:
-    python -m scripts.fix_invisible_characters --db library.db            # preview
-    python -m scripts.fix_invisible_characters --db library.db --apply    # write for real
+    python -m scripts.fix_invisible_characters --db /data/library.db            # preview
+    python -m scripts.fix_invisible_characters --db /data/library.db --apply    # write for real
 """
 from __future__ import annotations
 

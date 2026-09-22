@@ -14,7 +14,7 @@ of the removal: investigate and propose, do not execute (see CLAUDE.md's
 "no dead data" / one-off-admin-fix discipline).
 
 Usage:
-    python -m scripts.investigate_comp_benchmarking_removal --db library.db
+    python -m scripts.investigate_comp_benchmarking_removal --db /data/library.db
 """
 from __future__ import annotations
 

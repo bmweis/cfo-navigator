@@ -48,8 +48,8 @@ drifting out of sync with the live backstop's own shape. Mirrors
 `scripts/fix_invisible_characters.py`'s identical fix for this same gap.
 
 Usage:
-    python -m scripts.fix_spaced_em_dashes --db library.db            # preview
-    python -m scripts.fix_spaced_em_dashes --db library.db --apply    # write for real
+    python -m scripts.fix_spaced_em_dashes --db /data/library.db            # preview
+    python -m scripts.fix_spaced_em_dashes --db /data/library.db --apply    # write for real
 """
 from __future__ import annotations
 

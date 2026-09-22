@@ -16,9 +16,9 @@ Preview by default (lists exactly what would be denied, writes nothing);
 shared resolution note.
 
 Usage:
-    python -m scripts.deny_pending_scan_proposals --db library.db --category Neobanking \\
+    python -m scripts.deny_pending_scan_proposals --db /data/library.db --category Neobanking \\
         --reason "Superseded by corrected clustering re-run, 2026-08-23"
-    python -m scripts.deny_pending_scan_proposals --db library.db --category Neobanking \\
+    python -m scripts.deny_pending_scan_proposals --db /data/library.db --category Neobanking \\
         --reason "..." --apply
 """
 from __future__ import annotations

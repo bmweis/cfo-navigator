@@ -23,7 +23,7 @@ Output is sorted by updated_at descending (most recently touched first) so
 that signal is the first thing visible, not buried in an alphabetical list.
 
 Usage:
-    python -m scripts.report_orphaned_categories [--db library.db]
+    python -m scripts.report_orphaned_categories [--db /data/library.db]
 """
 from __future__ import annotations
 

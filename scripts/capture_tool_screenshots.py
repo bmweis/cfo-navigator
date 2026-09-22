@@ -10,9 +10,9 @@ chromium`) and real network access to the target sites — run this from
 wherever both of those are true (your machine, or `railway ssh` into the
 production container), not from a sandboxed build session.
 
-    python -m scripts.capture_tool_screenshots --db library.db --tools "Ramp,Brex" --dry-run
-    python -m scripts.capture_tool_screenshots --db library.db --tools "Ramp,Brex"
-    python -m scripts.capture_tool_screenshots --db library.db --limit 20
+    python -m scripts.capture_tool_screenshots --db /data/library.db --tools "Ramp,Brex" --dry-run
+    python -m scripts.capture_tool_screenshots --db /data/library.db --tools "Ramp,Brex"
+    python -m scripts.capture_tool_screenshots --db /data/library.db --limit 20
 
 Re-running is safe: a tool that already has a screenshot_url is skipped
 unless --force. Screenshots are written to the directory the app itself

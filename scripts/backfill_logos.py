@@ -54,10 +54,10 @@ practice, an --apply run re-SELECTs every row it touched after the run and
 asserts logo_path took the expected value.
 
 Usage:
-    python -m scripts.backfill_logos --db library.db                 # preview (default limit 500)
-    python -m scripts.backfill_logos --db library.db --apply          # fetch + save for real
-    python -m scripts.backfill_logos --db library.db --limit 50 --apply
-    python -m scripts.backfill_logos --db library.db --status         # coverage report only, no fetch
+    python -m scripts.backfill_logos --db /data/library.db                 # preview (default limit 500)
+    python -m scripts.backfill_logos --db /data/library.db --apply          # fetch + save for real
+    python -m scripts.backfill_logos --db /data/library.db --limit 50 --apply
+    python -m scripts.backfill_logos --db /data/library.db --status         # coverage report only, no fetch
 
 Requires LOGODEV_API_KEY in the environment for --apply (not required for
 --status or a preview run).
