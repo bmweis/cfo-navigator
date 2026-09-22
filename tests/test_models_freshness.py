@@ -27,9 +27,17 @@ def _models_section(html: str) -> str:
     marked reviewed" appears in all three, independently, when
     marked-reviewed at different times) — so a plain whole-page substring
     check can false-positive/negative on an OTHER banner's state. Scope
-    every assertion to just the New-model-awareness section, bounded on
-    both sides so it doesn't also swallow the Exa section that follows it."""
-    return html.split("New-model awareness")[1].split("Exa pricing freshness")[0]
+    every assertion to just the New-model-awareness (renamed "Anthropic
+    models" in the 2026-09 /admin/checks summary rework) section, bounded
+    on both sides so it doesn't also swallow the Exa section that follows
+    it.
+
+    Splits on each heading's own `id` attribute, not its visible text —
+    "Anthropic models"/"Anthropic pricing" also appear once earlier on the
+    page as row names in the top status summary, which a text-based split
+    would incorrectly treat as a section boundary. The id attributes each
+    render exactly once, on the real <h3> elements."""
+    return html.split('id="new-model-awareness"')[1].split('id="exa-pricing-freshness"')[0]
 
 
 @pytest.fixture
@@ -52,7 +60,7 @@ def test_banner_defaults_to_stale_when_never_reviewed(admin_client):
     client, appmod, db = admin_client
     r = client.get("/admin/checks")
     assert r.status_code == 200
-    assert "New-model awareness" in r.text
+    assert "Anthropic models" in r.text
     assert "never been marked reviewed" in r.text
     # Both banners share this button text — the never-reviewed pricing
     # copy and the never-reviewed models copy both render, so at least 2.

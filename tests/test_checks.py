@@ -24,6 +24,7 @@ file's own test setup needed to stop blocking CI).
 import pathlib
 import sys
 import tempfile
+import time
 import os
 
 import pytest
@@ -64,11 +65,19 @@ def test_live_checks_currently_pass(env):
 
 def test_admin_checks_summary_banner_is_green_on_a_clean_db(env, monkeypatch):
     """Regression for a real, previously-shipped bug: `admin_checks()`'s
-    summary banner compared each row's `where` against "In-app", a value
-    `run_all()` has never actually produced (every live row is "Live + CI");
-    the banner was permanently blank regardless of pass/fail state. Fixed to
-    compare against "Live + CI" — this asserts the green branch renders on a
-    clean DB; the sibling test below forces a real failure and asserts red."""
+    old single green/red paragraph compared each row's `where` against
+    "In-app", a value `run_all()` has never actually produced (every live
+    row is "Live + CI"); the banner was permanently blank regardless of
+    pass/fail state.
+
+    2026-09 rework replaced that single paragraph with a per-section status
+    summary (item 1: it used to stay green while a section further down the
+    SAME page reported real findings) — this asserts the "Live checks" row
+    renders its "N of N passing" state, with NO link (nothing to fix while
+    everything's green, the same rule Disk space/Badge refresh use — a
+    plain <span>, never a dead-looking <a>). The sibling test below forces
+    a real failure and asserts the row becomes a real link to the failing
+    check's own anchor."""
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     from fastapi.testclient import TestClient
     import webapp.app as appmod
@@ -76,16 +85,20 @@ def test_admin_checks_summary_banner_is_green_on_a_clean_db(env, monkeypatch):
     c.post("/login", data={"username": "admin", "password": "adminpass"})
     r = c.get("/admin/checks")
     assert r.status_code == 200
-    assert "All " in r.text and "live checks passing" in r.text
-    assert "live check" not in r.text.replace("live checks passing", "")
+    import re
+    m = re.search(r"(\d+) of (\d+) passing", r.text)
+    assert m and m.group(1) == m.group(2), "every bool-eligible live check should be passing on a clean DB"
+    assert ">Live checks</span>" in r.text   # plain text, not a link — nothing to fix
+    assert ">Live checks</a>" not in r.text
 
 
 def test_admin_checks_summary_banner_is_red_on_a_real_failure(env, monkeypatch):
     """Same page, forced into the failing branch via a real run_all() check
     (mechanical_findings, imported inside webapp.checks.run_all from
-    linklib.voice_review) — proves the fixed comparison actually flips the
-    banner red when a live check genuinely fails, not just that it's no
-    longer permanently blank."""
+    linklib.voice_review) — proves the summary's "Live checks" row both
+    flips to a failing count AND becomes a real link, pointing at the
+    FIRST failing check's own per-row anchor (item 2: "Live checks -> the
+    failing check's section, when one fails"), not just the generic list."""
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     import linklib.voice_review as vr_mod
     from fastapi.testclient import TestClient
@@ -98,9 +111,332 @@ def test_admin_checks_summary_banner_is_red_on_a_real_failure(env, monkeypatch):
     try:
         r = c.get("/admin/checks")
         assert r.status_code == 200
-        assert "failing" in r.text and "live check" in r.text
+        assert "failing" in r.text
+        import re
+        m = re.search(r'href="(#check-[a-z0-9-]+)"[^>]*>Live checks</a>', r.text)
+        assert m, "the Live checks summary row should link to the first failing check's own anchor"
+        assert f'id="{m.group(1)[1:]}"' in r.text   # the anchor it links to actually exists on the page
     finally:
         vr_mod.mechanical_findings = orig
+
+
+# --- /admin/checks status summary (2026-09 rework) — items 1-4 --------------
+
+def test_summary_shows_all_section_rows(env, monkeypatch):
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    r = c.get("/admin/checks")
+    for label in ("Live checks", "Database copy", "Review queue", "Disk space", "Badge refresh",
+                  "AI providers", "Anthropic pricing", "Anthropic models", "Exa pricing"):
+        assert label in r.text, label
+
+
+def test_review_queue_row_labels_seed_disagreements_separately_from_database_copy(env, monkeypatch):
+    """A real input from a separate PR's verification: the Database copy
+    scan's count and the Review queue's own open count will legitimately
+    differ — the queue also holds seed-disagreement items (an ordinary
+    state, source='startup-sync') and already-applied auto-corrections,
+    neither of which the live DB-copy scan counts at all. Confirms the two
+    rows are labeled distinctly enough that a real discrepancy never reads
+    as a mismatch with this expected one: "N open, including M seed
+    disagreements" vs. the scan's own plain "N findings"."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    from linklib.db import Library
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+
+    lib = Library(appmod.DB_PATH)
+    try:
+        lib.add_voice_review_item("communities", 1, "notes", "spaced-em-dash",
+                                   "an excerpt", source="startup-sync")
+        lib.add_voice_review_item("tools", 2, "description", "filler",
+                                   "another excerpt", source="script")
+    finally:
+        lib.close()
+
+    r = c.get("/admin/checks")
+    assert "2 open, including 1 seed disagreement" in r.text
+    # The Database copy row's own count (a live text scan of current column
+    # content) is unaffected by queue rows — it should read the clean "No
+    # findings" state here, genuinely different from the queue's "2 open"
+    # without either number implying the other is wrong.
+    assert "No findings" in r.text
+
+
+def test_review_queue_row_omits_the_seed_note_when_there_are_none(env, monkeypatch):
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    from linklib.db import Library
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+
+    lib = Library(appmod.DB_PATH)
+    try:
+        lib.add_voice_review_item("tools", 2, "description", "filler", "an excerpt", source="script")
+    finally:
+        lib.close()
+
+    r = c.get("/admin/checks")
+    assert "1 open" in r.text
+    assert "seed disagreement" not in r.text
+
+
+def test_database_copy_summary_row_always_links_to_the_review_queue(env, monkeypatch):
+    """Item 2: "Database copy -> /admin/voice/review-queue" — the row's own
+    destination is where a finding is actually triaged, not its local
+    /admin/checks section, regardless of whether there's currently anything
+    to review."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    r = c.get("/admin/checks")
+    assert '<a href="/admin/voice/review-queue" style="color:var(--navy);font-weight:600;' \
+           'text-decoration:none;font-size:14px;">Database copy</a>' in r.text
+    assert "No findings" in r.text
+
+
+def test_disk_space_row_has_no_link_when_no_volume(env, monkeypatch):
+    """Item 1's explicit call: Disk space has nothing to manage while it
+    reads clean/not-applicable, so no link — this sandbox genuinely has no
+    /data volume, which is the live, unfaked case."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    r = c.get("/admin/checks")
+    assert ">Disk space</span>" in r.text
+    assert ">Disk space</a>" not in r.text
+    assert "No /data volume" in r.text
+
+
+def test_badge_refresh_row_has_no_link_when_healthy(env, monkeypatch):
+    """A bare `TestClient(app)` (no `with` block, matching every other test
+    in this file) never fires FastAPI's startup event, so the real
+    background refresher deterministically reads "Not started" here — not
+    a flake, just not what this test is checking. Monkeypatch
+    refresher_status() directly to exercise the healthy/no-link render path
+    on its own, independent of whether a real thread happens to be up."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    import webapp.tasks as tasksmod
+    monkeypatch.setattr(tasksmod, "refresher_status", lambda: {
+        "started": True, "last_success_at": time.time(), "last_attempt_at": time.time(),
+        "last_error": None,
+    })
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    r = c.get("/admin/checks")
+    assert ">Badge refresh</span>" in r.text
+    assert ">Badge refresh</a>" not in r.text
+    assert "Healthy" in r.text
+
+
+def test_ai_provider_summary_rows_always_link_to_their_section_and_carry_fix_links(env, monkeypatch):
+    """Item 1's default (name links to the section below, where "Mark
+    reviewed" lives) PLUS item 2's two secondary links (GitHub source,
+    vendor page) — both render in the summary itself, always, regardless
+    of staleness state ("Put the same GitHub and vendor links in the three
+    AI provider sections below, not only in the summary")."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    r = c.get("/admin/checks")
+    assert '<a href="#pricing-freshness"' in r.text
+    assert '<a href="#new-model-awareness"' in r.text
+    assert '<a href="#exa-pricing-freshness"' in r.text
+    assert "linklib/pricing.py" in r.text and "linklib/models.py" in r.text
+    assert "https://www.anthropic.com/pricing" in r.text
+    assert "https://platform.claude.com/docs/en/about-claude/models/overview" in r.text
+    assert "https://exa.ai/pricing" in r.text
+    assert "Never reviewed" in r.text   # a fresh DB has never marked any of the three reviewed
+
+
+def test_ai_provider_fix_links_open_in_a_new_tab(env, monkeypatch):
+    """These are the site's first outbound links inside the summary box —
+    confirm they follow the standing target=_blank/rel=noopener rule
+    (see brand_check.outbound_link_problems, already part of run_all())."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    r = c.get("/admin/checks")
+    import re
+    for url in ("https://www.anthropic.com/pricing", "https://exa.ai/pricing",
+                "https://platform.claude.com/docs/en/about-claude/models/overview"):
+        m = re.search(re.escape(f'href="{url}"') + r'[^>]*', r.text)
+        assert m and "target=\"_blank\"" in m.group(0) and "rel=\"noopener\"" in m.group(0), url
+
+
+def test_voice_review_queue_row_shows_real_open_count(env, monkeypatch):
+    """Item 3: the Voice review queue check runs live (where="Live + CI")
+    but is deliberately ok=None (informational, not pass/fail) — it used to
+    fall through to the CI-only "Latest run" GitHub Actions link even
+    though it never runs in CI at all."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    from linklib.db import Library
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+
+    r = c.get("/admin/checks")
+    assert '<a href="/admin/voice/review-queue" style="color:var(--good);font-weight:600;">0 open</a>' in r.text
+
+    lib = Library(appmod.DB_PATH)
+    try:
+        lib.add_voice_review_item("tools", 1, "description", "spaced-em-dash", "an excerpt")
+    finally:
+        lib.close()
+    r2 = c.get("/admin/checks")
+    assert '<a href="/admin/voice/review-queue" style="color:#92400e;font-weight:600;">1 open &rarr;</a>' in r2.text
+
+
+def test_ci_quota_toggle_replaces_latest_run_links(env, monkeypatch):
+    """Item 4: no GitHub API client exists in this app's runtime (confirmed
+    by grep before building — see admin_checks_set_ci_quota's own
+    docstring), so quota exhaustion is a plain admin-settable flag, not a
+    live-detected state. Round-trips both directions."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+
+    # "Quota exhausted" (capital Q, bare) is deliberately NOT the assertion
+    # string here — it also appears, always, as the toggle form's own
+    # static checkbox label ("GitHub Actions quota exhausted right now?" /
+    # the label text "Quota exhausted" next to the checkbox itself),
+    # regardless of the flag's value. The DYNAMIC row text this test
+    # actually cares about is the longer phrase with the em dash.
+    dynamic_phrase = "Quota exhausted&mdash;see local verification"
+
+    r = c.get("/admin/checks")
+    assert r.text.count("Latest run") > 0
+    assert dynamic_phrase not in r.text
+
+    pr_url = "https://github.com/bmweis/cfo-navigator/pull/591"
+    resp = c.post("/admin/checks/ci-quota", data={"exhausted": "on", "pr_url": pr_url},
+                   follow_redirects=False)
+    assert resp.status_code == 303
+
+    r2 = c.get("/admin/checks")
+    assert r2.text.count("Latest run") == 0
+    assert r2.text.count(dynamic_phrase) > 0
+    assert f'href="{pr_url}"' in r2.text
+
+    resp2 = c.post("/admin/checks/ci-quota", data={"pr_url": pr_url}, follow_redirects=False)
+    assert resp2.status_code == 303
+    r3 = c.get("/admin/checks")
+    assert r3.text.count("Latest run") > 0
+    assert dynamic_phrase not in r3.text
+
+
+def test_ci_quota_toggle_requires_auth(monkeypatch):
+    monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib
+    import webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    c = TestClient(appmod.app, raise_server_exceptions=True)
+    r = c.post("/admin/checks/ci-quota", data={"exhausted": "on"}, follow_redirects=False)
+    assert r.status_code in (302, 303)
+    assert "/login" in r.headers.get("location", "")
+
+
+# --- Voice guide checks — live-or-default resolution, ampersand exceptions, --
+# --- and typography/invisible-char coverage (2026-09, item 5a/5b/5d) --------
+
+def test_voice_guide_row_falls_back_to_default_with_no_live_value(env):
+    """A fresh DB has no voice_core setting at all — CI (and this case)
+    falls back to VOICE_CORE_DEFAULT, and the row says so."""
+    results = env.run_all()
+    row = next(r for r in results if r["name"] == "Voice guide names what it enforces")
+    assert row["ok"] is True
+    assert "VOICE_CORE_DEFAULT" in row["detail"]
+    assert "differs from VOICE_CORE_DEFAULT" not in row["detail"]
+
+
+def test_voice_guide_row_validates_a_live_value_when_present(env):
+    """When the live voice_core setting is real and reachable, the check
+    validates THAT text, not VOICE_CORE_DEFAULT — and says so, including
+    whether it differs from the shipped default."""
+    from linklib.db import Library
+    import webapp.app as appmod
+    lib = Library(appmod.DB_PATH)
+    try:
+        lib.set_setting("voice_core", "A short custom voice guide with no quoted examples at all.")
+    finally:
+        lib.close()
+    results = env.run_all()
+    row = next(r for r in results if r["name"] == "Voice guide names what it enforces")
+    assert "the live voice_core setting" in row["detail"]
+    assert "differs from VOICE_CORE_DEFAULT" in row["detail"]
+
+
+def test_voice_guide_ampersand_row_passes_on_the_real_default(env):
+    """T&E (and every other current acronym the guide names as permitted)
+    is already in AMPERSAND_ACRONYMS — this pins that staying true."""
+    results = env.run_all()
+    row = next(r for r in results if r["name"] == "Voice guide's permitted ampersand terms are honored")
+    assert row["ok"] is True
+
+
+def test_voice_guide_ampersand_row_catches_an_unlisted_permitted_term(env, monkeypatch):
+    """A future edit to voice_core's prose naming a NEW ampersand exception
+    with no matching AMPERSAND_ACRONYMS/AMPERSAND_NAMES entry must fail
+    this row, not go unnoticed — the exact class of drift this check
+    exists to guard against going forward."""
+    import webapp.checks as checksmod
+    orig = checksmod._resolve_checked_voice_core
+
+    def _fake():
+        return ('Standard abbreviations keep their ampersand (FP&A, T&E, B&B, and similar).',
+                "a fake test guide", False)
+    monkeypatch.setattr(checksmod, "_resolve_checked_voice_core", _fake)
+    try:
+        results = checksmod.run_all()
+    finally:
+        monkeypatch.setattr(checksmod, "_resolve_checked_voice_core", orig)
+    row = next(r for r in results if r["name"] == "Voice guide's permitted ampersand terms are honored")
+    assert row["ok"] is False
+    assert "B&B" in row["detail"]
+
+
+def test_voice_guide_typography_row_passes_on_the_real_default(env):
+    results = env.run_all()
+    row = next(r for r in results if r["name"] == "Voice guide follows its own typography rules")
+    assert row["ok"] is True
+
+
+def test_voice_guide_typography_row_catches_a_spaced_em_dash(env, monkeypatch):
+    import webapp.checks as checksmod
+    orig = checksmod._resolve_checked_voice_core
+
+    def _fake():
+        return ("A guide that has a spaced em dash — right here.", "a fake test guide", False)
+    monkeypatch.setattr(checksmod, "_resolve_checked_voice_core", _fake)
+    try:
+        results = checksmod.run_all()
+    finally:
+        monkeypatch.setattr(checksmod, "_resolve_checked_voice_core", orig)
+    row = next(r for r in results if r["name"] == "Voice guide follows its own typography rules")
+    assert row["ok"] is False
+    assert "spaced-em-dash" in row["detail"]
 
 
 def test_voice_core_gap_row_states_how_many_examples_it_checked(env):

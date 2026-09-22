@@ -26381,6 +26381,55 @@ def _checks_refresher_banner(status: dict) -> str:
             f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
 
 
+def _check_row_slug(name: str) -> str:
+    """Stable per-check anchor id ("check-brand-standards") for one row in
+    the "Live checks" list below the top summary — lets the summary's own
+    "Live checks" row deep-link to the SPECIFIC failing check instead of
+    just the generic list, when something is actually failing."""
+    return "check-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def _checks_summary_row_html(label: str, href: str | None, status_text: str, dot_color: str,
+                              fix_links=()) -> str:
+    """One row of /admin/checks' top status summary (2026-09 rework —
+    replaces the old single green/red "All N live checks passing" banner,
+    which could read all-clear while a section further down the page
+    reported real findings).
+
+    `href` is None when there's nothing to click through to — a green row
+    with nothing to manage (Disk space/Badge refresh while healthy, Live
+    checks while every check passes): the label renders as plain text
+    rather than a dead-looking link, matching the brief's own explicit
+    call for those two rows. `fix_links` is a small (label, href) sequence
+    rendered as secondary external links beside the status text — used only
+    where "where you fix it" isn't this row's own /admin/checks section
+    below (the three AI-provider rows' GitHub source file + vendor page).
+    Colors follow this page's existing semantic palette, not the navy
+    `var(--good)`/muted `var(--alert)` pair `_status()` below uses for the
+    per-check pass/fail badges — those read correctly as text next to a
+    checkmark/cross glyph, but a plain colored dot needs a real green/amber/
+    red to register as a status signal at a glance (the same reasoning
+    BRAND.md documents for the auth-cookie-status dots elsewhere on this
+    site)."""
+    label_html = (f'<a href="{href}" style="color:var(--navy);font-weight:600;text-decoration:none;'
+                  f'font-size:14px;">{_esc(label)}</a>' if href else
+                  f'<span style="color:var(--navy);font-weight:600;font-size:14px;">{_esc(label)}</span>')
+    fix_html = ""
+    if fix_links:
+        links = " &middot; ".join(
+            f'<a href="{fh}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;">'
+            f'{_esc(fl)}</a>' for fl, fh in fix_links)
+        fix_html = f'<span style="margin-right:4px;">{links}</span>'
+    return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;'
+            f'padding:9px 2px;border-bottom:1px solid var(--line);flex-wrap:wrap;">'
+            f'{label_html}'
+            f'<span style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+            f'{fix_html}'
+            f'<span style="font-size:13px;color:var(--ink-soft);white-space:nowrap;">{_esc(status_text)}</span>'
+            f'<span style="width:9px;height:9px;border-radius:50%;background:{dot_color};flex-shrink:0;" '
+            f'aria-hidden="true"></span></span></div>')
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
@@ -26388,6 +26437,8 @@ def admin_checks(request: Request):
     from webapp import checks as _checks
     from webapp import tasks as _tasks
     from linklib.voice_db_scan import scan_db_copy_report
+    from linklib.pricing import pricing_review_is_stale, exa_pricing_review_is_stale
+    from linklib.models import models_review_is_stale
     results = _checks.run_all()
     lib = _lib()
     try:
@@ -26395,44 +26446,181 @@ def admin_checks(request: Request):
         models_last_reviewed = lib.get_setting("models_last_reviewed")
         exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
         db_copy_report = scan_db_copy_report(lib)
+        ci_quota_exhausted = lib.get_setting("ci_quota_exhausted") == "1"
+        ci_quota_pr_url = lib.get_setting("ci_quota_pr_url") or ""
     finally:
         lib.close()
-    refresher_banner = _checks_refresher_banner(_tasks.refresher_status())
+    refresher_status = _tasks.refresher_status()
+    refresher_banner = _checks_refresher_banner(refresher_status)
     pricing_banner = _pricing_freshness_banner(pricing_last_verified)
     models_banner = _models_freshness_banner(models_last_reviewed)
     exa_pricing_banner = _exa_pricing_freshness_banner(exa_pricing_last_verified)
     db_copy_banner = _db_copy_scan_banner(db_copy_report)
-    disk_banner = _disk_space_banner(_checks.disk_space_status())
+    disk_status = _checks.disk_space_status()
+    disk_banner = _disk_space_banner(disk_status)
 
-    # Fixed 2026-09 (voice-enforcement PR follow-up) — this compared against
-    # "In-app", a value run_all() has never actually produced (every live
-    # row's "where" is "Live + CI"; the only other value, "CI", marks a row
-    # that never runs here at all). The summary banner below was
-    # permanently blank as a result, regardless of whether every check was
-    # passing or several were failing — confirmed by reading run_all()'s
-    # own "where" values directly, not assumed. Real risk given this PR
-    # adds a third check that can genuinely fail (the semantic-contradiction
-    # row) on top of the two that could already fail: a broken headline
-    # indicator on the one page meant to surface exactly that.
-    live = [r for r in results if r["where"] == "Live + CI"]
-    passing = sum(1 for r in live if r["ok"])
-    failing = [r for r in live if r["ok"] is False]
+    _GITHUB_MAIN = "https://github.com/bmweis/cfo-navigator/blob/main/"
+    _pricing_gh = _GITHUB_MAIN + "linklib/pricing.py"
+    _models_gh = _GITHUB_MAIN + "linklib/models.py"
+    _anthropic_pricing_url = "https://www.anthropic.com/pricing"
+    _anthropic_models_url = "https://platform.claude.com/docs/en/about-claude/models/overview"
+    _exa_pricing_url = "https://exa.ai/pricing"
 
-    if not live:
-        summary = ""
-    elif failing:
-        summary = (f'<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
-                   f'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">{len(failing)} live check'
-                   f'{"s" if len(failing) != 1 else ""} failing&mdash;details below.</p>')
+    # ------------------------------------------------------------------
+    # Status summary (2026-09 rework) — replaces the old single green/red
+    # "All N live checks passing" banner, which stayed green while a
+    # section further down the SAME page (Database-backed copy) reported
+    # real findings — both were technically true, but the top of the page
+    # still read as all-clear. One row per section instead, so nothing on
+    # this page can read as "fine" while something below it isn't.
+    #
+    # Per-row link rule, decided explicitly rather than left ambiguous
+    # (see PR description for the full reasoning): a row's own name always
+    # links to its local section below UNLESS there's nothing to manage
+    # while it's green (Disk space, Badge refresh, Live checks — matching
+    # the brief's own explicit "nothing to manage while green, so no
+    # link" for the first two, applied the same way to the third since
+    # it's the same shape). Database copy's own destination is the review
+    # queue itself, not its local section, since that's where a finding is
+    # actually triaged. The three AI-provider rows keep their local-section
+    # link (where "Mark reviewed" lives) AND carry two small secondary
+    # links to the actual GitHub source and vendor page — rendered here
+    # AND in each section's own body further down, per the explicit ask
+    # not to put them only in one place.
+    # ------------------------------------------------------------------
+
+    live_bool_rows = [r for r in results if r["where"] == "Live + CI" and r["ok"] is not None]
+    live_passing = sum(1 for r in live_bool_rows if r["ok"] is True)
+    live_failing = [r for r in live_bool_rows if r["ok"] is False]
+    if live_failing:
+        live_status_text = f"{len(live_failing)} of {len(live_bool_rows)} failing"
+        live_dot, live_href = "var(--alert)", f"#{_check_row_slug(live_failing[0]['name'])}"
     else:
-        summary = (f'<p style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;border-radius:10px;'
-                   f'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">&#10003; All {passing} live checks passing.</p>')
+        live_status_text = f"{live_passing} of {len(live_bool_rows)} passing"
+        live_dot, live_href = "#065f46", None
+    live_summary_row = _checks_summary_row_html("Live checks", live_href, live_status_text, live_dot)
+
+    n_violations = len(db_copy_report.violations)
+    if n_violations:
+        db_status_text = f"{n_violations} finding{'s' if n_violations != 1 else ''}"
+        db_dot = "var(--alert)"
+    elif db_copy_report.tables_skipped:
+        n_skipped = len(db_copy_report.tables_skipped)
+        db_status_text = f"stale scan—{n_skipped} table{'s' if n_skipped != 1 else ''} skipped"
+        db_dot = "#92400e"
+    else:
+        db_status_text, db_dot = "No findings", "#065f46"
+    db_summary_row = _checks_summary_row_html("Database copy", "/admin/voice/review-queue",
+                                               db_status_text, db_dot)
+
+    # Reuses the row run_all() already computed (webapp.checks.
+    # voice_review_queue_status) rather than a second DB round trip. This
+    # count and Database copy's own count above will LEGITIMATELY differ —
+    # the queue also holds seed-disagreement items (an ordinary state, see
+    # that function's own docstring) and already-applied auto-corrections
+    # that the live DB-copy scan never counts at all. Named "including N
+    # seed disagreements" when there are any, so a genuinely different
+    # number never reads as a mismatch between the two rows.
+    voice_queue_row = next(r for r in results if r["name"] == "Voice review queue")
+    n_open, n_seed = voice_queue_row.get("count", 0), voice_queue_row.get("seed_disagreement_count", 0)
+    if n_open:
+        seed_note = f", including {n_seed} seed disagreement{'s' if n_seed != 1 else ''}" if n_seed else ""
+        queue_status_text, queue_dot = f"{n_open} open{seed_note}", "#92400e"
+    else:
+        queue_status_text, queue_dot = "0 open", "#065f46"
+    queue_summary_row = _checks_summary_row_html("Review queue", "/admin/voice/review-queue",
+                                                  queue_status_text, queue_dot)
+
+    if disk_status is None:
+        disk_status_text, disk_dot, disk_href = "No /data volume (this environment)", "var(--muted)", None
+    else:
+        disk_status_text = (f'{_disk_mb(disk_status["used"])} of {_disk_mb(disk_status["total"])} used '
+                             f'({disk_status["percent_used"]:.0f}%)')
+        if disk_status["level"] == "critical":
+            disk_dot, disk_href = "var(--alert)", "#disk-space"
+        elif disk_status["level"] == "warn":
+            disk_dot, disk_href = "#92400e", "#disk-space"
+        else:
+            disk_dot, disk_href = "#065f46", None
+    disk_summary_row = _checks_summary_row_html("Disk space", disk_href, disk_status_text, disk_dot)
+
+    if not refresher_status["started"]:
+        badge_status_text, badge_dot, badge_href = "Not started", "var(--alert)", "#badge-refresh"
+    elif refresher_status["last_success_at"] is None:
+        badge_status_text, badge_dot, badge_href = "Starting up", "#92400e", "#badge-refresh"
+    elif (refresher_status["last_error"]
+          or time.time() - refresher_status["last_success_at"] > 2 * _tasks._CHECKS_CACHE_TTL):
+        badge_status_text, badge_dot, badge_href = "Failing", "var(--alert)", "#badge-refresh"
+    else:
+        when = _epoch_relative_age(refresher_status["last_success_at"])
+        badge_status_text = f"Healthy, refreshed {when or 'just now'}"
+        badge_dot, badge_href = "#065f46", None
+    badge_summary_row = _checks_summary_row_html("Badge refresh", badge_href, badge_status_text, badge_dot)
+
+    def _ai_row_status(last_x: str, stale: bool) -> tuple[str, str]:
+        if not last_x:
+            return "Never reviewed", "#92400e"
+        when = _relative_age(last_x)
+        if stale:
+            return f"Stale—{when or 'a while ago'}", "#92400e"
+        return f"Reviewed {when or 'recently'}", "#065f46"
+
+    pricing_status_text, pricing_dot = _ai_row_status(
+        pricing_last_verified, pricing_review_is_stale(pricing_last_verified))
+    models_status_text, models_dot = _ai_row_status(
+        models_last_reviewed, models_review_is_stale(models_last_reviewed))
+    exa_status_text, exa_dot = _ai_row_status(
+        exa_pricing_last_verified, exa_pricing_review_is_stale(exa_pricing_last_verified))
+
+    pricing_fix_links = [("GitHub", _pricing_gh), ("Anthropic pricing", _anthropic_pricing_url)]
+    models_fix_links = [("GitHub", _models_gh), ("Anthropic docs", _anthropic_models_url)]
+    exa_fix_links = [("GitHub", _pricing_gh), ("Exa pricing", _exa_pricing_url)]
+
+    pricing_summary_row = _checks_summary_row_html("Anthropic pricing", "#pricing-freshness",
+                                                    pricing_status_text, pricing_dot, pricing_fix_links)
+    models_summary_row = _checks_summary_row_html("Anthropic models", "#new-model-awareness",
+                                                   models_status_text, models_dot, models_fix_links)
+    exa_summary_row = _checks_summary_row_html("Exa pricing", "#exa-pricing-freshness",
+                                                exa_status_text, exa_dot, exa_fix_links)
+    ai_providers_heading = ('<div style="font:600 12px var(--font-body);letter-spacing:.06em;'
+                             'text-transform:uppercase;color:var(--muted);padding:14px 2px 4px;">'
+                             'AI providers</div>')
+
+    summary_box = (f'<div style="border:1px solid var(--line);border-radius:12px;background:var(--surface);'
+                    f'padding:2px 16px 4px;margin:-4px 0 20px;">'
+                    f'{live_summary_row}{db_summary_row}{queue_summary_row}{disk_summary_row}{badge_summary_row}'
+                    f'{ai_providers_heading}{pricing_summary_row}{models_summary_row}{exa_summary_row}'
+                    f'</div>')
 
     def _status(r):
         if r["ok"] is True:
             return ('<span style="color:var(--good);font-weight:600;">&#10003; Passing</span>', "var(--good)")
         if r["ok"] is False:
             return ('<span style="color:var(--alert);font-weight:600;">&#10007; Failing</span>', "var(--alert)")
+        # "Voice review queue" runs live (where="Live + CI") but is
+        # deliberately ok=None — an open count is work waiting on Brian,
+        # not a pass/fail fact — so it used to fall through to the CI-only
+        # "Latest run" GitHub Actions link below even though it never runs
+        # in CI at all. Give it its own real status instead.
+        if r["name"] == "Voice review queue":
+            n = r.get("count", 0)
+            if n:
+                return (f'<a href="/admin/voice/review-queue" style="color:#92400e;font-weight:600;">'
+                        f'{n} open &rarr;</a>', "#92400e")
+            return ('<a href="/admin/voice/review-queue" style="color:var(--good);font-weight:600;">'
+                    '0 open</a>', "var(--good)")
+        # A genuinely CI-only check ("Everything else", "Secret scan", and
+        # "Dead code"/"Script blocks" wherever pyflakes/node aren't
+        # installed live). Normally links to the GitHub Actions run
+        # history — but during a quota outage every run there fails in
+        # ~3 seconds with an empty summary, so clicking through reads as
+        # "this is broken" when it's really just unrun. See
+        # admin_checks_set_ci_quota's own docstring for why this is a
+        # settings flag rather than a live API check.
+        if ci_quota_exhausted and ci_quota_pr_url:
+            return (f'<a href="{ci_quota_pr_url}" target="_blank" rel="noopener" '
+                    f'style="color:#92400e;font-weight:600;">Quota exhausted&mdash;see local '
+                    f'verification &rarr;</a>', "#92400e")
         return (f'<a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" '
                 f'style="color:var(--accent);font-weight:600;">Latest run &rarr;</a>', "var(--line-strong)")
 
@@ -26442,8 +26630,9 @@ def admin_checks(request: Request):
         where = ('<span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">'
                  f'{r["where"]}</span>')
         rows += (
-            f'<div style="border-left:3px solid {bar};background:var(--bg);border:1px solid var(--line);'
-            f'border-left-width:3px;border-radius:10px;padding:12px 16px;margin-bottom:10px;">'
+            f'<div id="{_check_row_slug(r["name"])}" style="border-left:3px solid {bar};background:var(--bg);'
+            f'border:1px solid var(--line);border-left-width:3px;border-radius:10px;padding:12px 16px;'
+            f'margin-bottom:10px;scroll-margin-top:16px;">'
             f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
             f'<span style="font-weight:600;font-size:15px;color:var(--navy);">{_esc(r["name"])}</span>'
             f'<span style="display:flex;gap:12px;align-items:baseline;">{where}{badge}</span></div>'
@@ -26451,15 +26640,30 @@ def admin_checks(request: Request):
             f'<p style="margin:3px 0 0;font-size:12px;color:var(--muted);line-height:1.45;">{_esc(r["detail"])}</p>'
             f'</div>')
 
+    ci_quota_form = (
+        f'<details style="margin:16px 0 0;">'
+        f'<summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">GitHub Actions quota exhausted right now? &rarr;</summary>'
+        f'<form method="post" action="/admin/checks/ci-quota" style="margin:10px 0 0;display:flex;'
+        f'gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;">'
+        f'<label style="display:flex;align-items:center;gap:6px;color:var(--ink-soft);">'
+        f'<input type="checkbox" name="exhausted" {"checked" if ci_quota_exhausted else ""}> Quota exhausted</label>'
+        f'<input type="url" name="pr_url" placeholder="Most recently merged PR URL" value="{_esc(ci_quota_pr_url)}" '
+        f'style="flex:1;min-width:220px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;">'
+        f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save</button>'
+        f'</form></details>'
+    )
+
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Checks</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. Every check runs automatically on every code change; the ones marked <em>Live + CI</em> also run right here, so you don't have to wait to see the result.</p>
-{summary}
+{summary_box}
+<h2 id="live-checks" style="margin:8px 0 4px;">Live checks</h2>
 {rows}
 <p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
+{ci_quota_form}
 <h2 id="db-copy-scan" style="margin:28px 0 4px;">Database-backed copy</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The checks above only ever scan Python source&mdash;CI has no route to the live database (see CLAUDE.md's "Voice enforcement" notes). A growing share of real user-facing copy lives in the database instead (original content, tool and community profiles, saved homepage/about overrides, and more). This runs live, right here, on every page load&mdash;no dated reminder, no CI equivalent, and no auto-fix: a flagged row is an ordinary editorial fix through whatever admin page owns that record.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The checks above only ever scan Python source&mdash;CI has no route to the live database (see CLAUDE.md's "Voice enforcement" notes). A growing share of real user-facing copy lives in the database instead (original content, tool and community profiles, saved homepage/about overrides, and more). This runs live, right here, on every page load&mdash;no dated reminder, no CI equivalent, and no auto-fix: a flagged row is an ordinary editorial fix through whatever admin page owns that record, triaged from <a href="/admin/voice/review-queue" style="color:var(--accent);">the voice review queue &rarr;</a>.</p>
 {db_copy_banner}
 <h2 id="disk-space" style="margin:28px 0 4px;">Disk space</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Where the production volume actually stands&mdash;read live via <code>shutil.disk_usage</code>, never by shelling out to <code>df</code>. Mechanically computed on every load, same as the section above; a green row still states the real numbers, since a healthy check that says nothing looks identical to one that never ran.</p>
@@ -26467,15 +26671,16 @@ def admin_checks(request: Request):
 <h2 id="badge-refresh" style="margin:28px 0 4px;">Badge refresh</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The admin nav and hub badge counts above are kept warm by a background thread on its own schedule, not computed inline on whatever page render happens to land next&mdash;see CLAUDE.md's "logged-in slowness" investigation. Shown here so a dead or failing refresher is visible on the page itself, same as the two sections above: a healthy state that says nothing looks identical to one that never ran.</p>
 {refresher_banner}
-<p style="color:var(--ink-soft);margin:24px 0 -4px;font-size:14px;line-height:1.6;">None of the three sections below can be checked automatically&mdash;there&rsquo;s no pricing or model-catalog API to reconcile these tables against, so each is a dated reminder for a human re-check, not a pass/fail test.</p>
-<h2 id="pricing-freshness" style="margin:28px 0 4px;">Pricing freshness</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table still accurate against Anthropic&rsquo;s current published rates?</p>
+<h2 id="ai-providers" style="margin:28px 0 4px;">AI providers</h2>
+<p style="color:var(--ink-soft);margin:-2px 0 12px;font-size:14px;line-height:1.6;">None of these three can be checked automatically&mdash;there&rsquo;s no pricing or model-catalog API to reconcile these tables against, so each is a dated reminder for a human re-check, not a pass/fail test.</p>
+<h3 id="pricing-freshness" style="margin:20px 0 4px;font-size:16.5px;">Anthropic pricing</h3>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table still accurate against Anthropic&rsquo;s current published rates? <a href="{_pricing_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/pricing.py on GitHub &#8599;</a> &middot; <a href="{_anthropic_pricing_url}" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic&rsquo;s pricing page &#8599;</a></p>
 {pricing_banner}
-<h2 id="new-model-awareness" style="margin:28px 0 4px;">New-model awareness</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">A different question from pricing freshness above: has Anthropic shipped a model since the last check that isn&rsquo;t in <code>linklib/models.py</code> yet?</p>
+<h3 id="new-model-awareness" style="margin:24px 0 4px;font-size:16.5px;">Anthropic models</h3>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">A different question from Anthropic pricing above: has Anthropic shipped a model since the last check that isn&rsquo;t in <code>linklib/models.py</code> yet? <a href="{_models_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/models.py on GitHub &#8599;</a> &middot; <a href="{_anthropic_models_url}" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic&rsquo;s model docs &#8599;</a></p>
 {models_banner}
-<h2 id="exa-pricing-freshness" style="margin:28px 0 4px;">Exa pricing freshness</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table still accurate against Exa&rsquo;s current published rates?</p>
+<h3 id="exa-pricing-freshness" style="margin:24px 0 4px;font-size:16.5px;">Exa pricing</h3>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table still accurate against Exa&rsquo;s current published rates? <a href="{_pricing_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/pricing.py on GitHub &#8599;</a> &middot; <a href="{_exa_pricing_url}" target="_blank" rel="noopener" style="color:var(--accent);">Exa&rsquo;s pricing page &#8599;</a></p>
 {exa_pricing_banner}
 </div>"""
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
@@ -26530,6 +26735,44 @@ def admin_checks_mark_exa_pricing_reviewed(request: Request):
     lib = _lib()
     try:
         lib.set_setting("exa_pricing_last_verified", datetime.now(timezone.utc).isoformat())
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/checks", status_code=303)
+
+
+@app.post("/admin/checks/ci-quota")
+async def admin_checks_set_ci_quota(request: Request):
+    """2026-09 /admin/checks summary work — the four CI-only rows (Dead
+    code, Script blocks, Everything else, Secret scan) link to the GitHub
+    Actions run history by default, but during a GitHub Actions quota
+    outage every run there fails in ~3 seconds with an empty summary,
+    regardless of whether the code is actually correct — clicking through
+    from one of those rows reads as "this is broken" when it isn't.
+
+    There's no credential or GitHub API client anywhere in this app's own
+    runtime (confirmed by a full grep before building this — every existing
+    GITHUB_ACTIONS_URL-style reference is a plain link, never an API call),
+    so cleanly detecting quota exhaustion from in-app would mean adding a
+    new integration just for this. Given the choice the brief asked to
+    make explicitly: this is a plain, admin-settable settings flag (same
+    shape as pricing_last_verified/models_last_reviewed/
+    exa_pricing_last_verified above — a dated/stated human attestation, not
+    something this app can verify on its own) rather than a live API check.
+    Brian flips it on when he knows quota is exhausted and points it at the
+    most recently merged PR's own local-verification record (this session's
+    own standing practice: report pytest/pyflakes/secret-scan results
+    directly in the PR body when CI can't run) — flips it off once quota
+    resets, so the rows fall back to the normal GitHub Actions link on
+    their own with no second action needed."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    exhausted = "1" if form.get("exhausted") == "on" else ""
+    pr_url = str(form.get("pr_url") or "").strip()
+    lib = _lib()
+    try:
+        lib.set_setting("ci_quota_exhausted", exhausted)
+        lib.set_setting("ci_quota_pr_url", pr_url)
     finally:
         lib.close()
     return RedirectResponse("/admin/checks", status_code=303)
