@@ -393,7 +393,7 @@ def test_apply_voice_review_write_use_seed_flips_advisor(app_client):
     from linklib.db import Library
 
     lib = Library(app_client)
-    cid = lib.add_tool_category("Test Cat")
+    lib.add_tool_category("Test Cat")
     tool_id = lib.add_tool("Testco", "A test tool.", "https://testco.example",
                             [], approved=1, advisor=0)
     item_id = lib.add_seed_disagreement_item(
