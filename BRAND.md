@@ -493,7 +493,18 @@ graffiti marks on admin tables, forms, or the chat UI.
   disclosure, at every nesting level, loads collapsed** — no exceptions, and nesting goes three
   deep on `/admin` today (CFO Toolbox → Reader → a quadrant), so "collapsed by default" has to
   hold for a group that only ever renders inside another one.
-- **Tables** — navy header row with white text; alt rows `--surface-2`.
+- **Tables** — two live conventions, one per surface (reconciled with the
+  live site 2026-09; this line used to describe only the first):
+  - **Admin tables** (every `/admin/*` page): a `--accent-light` header band
+    with 13px sentence-case header text; the **rows under the header sit on
+    white** (`--surface`), not the page background. Enforced by one scoped
+    rule in `_CSS` (`.admin-main tbody>tr`), so a new admin table gets white
+    rows without anyone remembering to. A row with its own inline background
+    (an inline editor/expansion panel, a deliberately tinted row) keeps it.
+    Admin tables stay undecorated otherwise — no zebra striping.
+  - **Public content tables** (article bodies, e.g. the Growth Engine Ratio
+    tier table, NetSuite MCP's tables): navy header row with white text; alt
+    rows `--surface-2`.
   Checkbox/boolean-indicator columns are always center-justified, header and
   cells alike. Text, link, and dropdown columns are left-justified. Actions
   columns are right-aligned. Once a table collapses to stacked labelled rows on

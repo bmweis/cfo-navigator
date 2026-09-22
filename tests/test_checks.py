@@ -165,7 +165,7 @@ def test_review_queue_row_labels_seed_disagreements_separately_from_database_cop
     # content) is unaffected by queue rows — it should read the clean "No
     # findings" state here, genuinely different from the queue's "2 open"
     # without either number implying the other is wrong.
-    assert "No findings" in r.text
+    assert "0 violations. 0 allowed once, 0 always allowed." in r.text
 
 
 def test_review_queue_row_omits_the_seed_note_when_there_are_none(env, monkeypatch):
@@ -200,7 +200,7 @@ def test_database_copy_summary_row_always_links_to_the_review_queue(env, monkeyp
     r = c.get("/admin/checks")
     assert '<a href="/admin/voice/review-queue" style="color:var(--navy);font-weight:600;' \
            'text-decoration:none;font-size:14px;">Database copy</a>' in r.text
-    assert "No findings" in r.text
+    assert "0 violations. 0 allowed once, 0 always allowed." in r.text
 
 
 def test_disk_space_row_has_no_link_when_no_volume(env, monkeypatch):

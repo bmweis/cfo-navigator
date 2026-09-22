@@ -321,8 +321,12 @@ def test_allow_once_caption_says_it_holds_until_removed(env):
     c = _login_admin(env)
     r = c.get("/admin/voice/review-queue")
     assert r.status_code == 200
-    assert ('Editing the full value directly&mdash;"Allow once" (collapse this '
-            "first) exempts only THIS one spot, and it holds until it's removed, "
-            "not just once. Never global, always reversible.") in r.text
+    # Checks-page follow-ups (2026-09): the editor's caption now says what
+    # Save does ("replaces the whole field"); what Allow once does moved to
+    # the Allow once button's own tooltip, next to the action itself.
+    assert ("Saving replaces the whole field. To keep the text as it is, "
+            "cancel and use Allow once.") in r.text
+    assert ('title="Exempts only this one spot, and it holds until someone '
+            'removes it. Never global.">Allow once</button>') in r.text
     # The old, ambiguous-sounding caption is gone.
     assert "only exempts THIS one spot, never global, always reversible" not in r.text
