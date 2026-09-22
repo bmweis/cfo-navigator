@@ -26393,17 +26393,29 @@ def _check_row_slug(name: str) -> str:
 # two-table rework). Every summary row is built as a named-field dict —
 # {"check": ..., "href": ..., "status": <one of these 4 keys>, "details": ...}
 # — rather than a positional tuple, specifically so the table's rendered
-# <thead> header text ("Check"/"Status"/"Details") can be derived
-# mechanically from these same three field names instead of being a
-# separately hand-typed label that could drift from what the row data
-# actually is. `status` maps to a CSS custom property (never a raw hex, and
-# never the coral family — coral is not a status color on this site) plus
-# an accessible word used for both `title` and `aria-label` on the dot, so
-# color is never the only signal.
+# <thead> header text ("Status"/"Details" — "Check" is dropped, see
+# _checks_summary_thead_html) can be derived mechanically from these same
+# three field names instead of being a separately hand-typed label that
+# could drift from what the row data actually is.
+#
+# `status` maps to a literal hex, not the semantic --good/--caution/--alert
+# tokens — this is the sanctioned "glanceable health indicators" exception
+# (BRAND.md §6): --good is navy, the site's own dominant color, so a
+# passing check read as ordinary text rather than a status signal. True
+# stoplight colors instead, the same trio the cookie-status panel already
+# uses (_COOKIE_STATE_STYLES): #15803D green, #CA8A04 amber, #b91c1c red
+# (reusing the existing destructive-action red, never a second red).
+# "unknown" (no signal either way, e.g. Disk space with no /data volume)
+# stays var(--muted) — neutral, not part of the stoplight. All three hexes
+# are already registered in brand_check.py's AUX_COLORS allowlist under
+# that same exception, so nothing there needed to change. Never the coral
+# family — coral is not a status color on this site. Each entry also
+# carries an accessible word used for both `title` and `aria-label` on the
+# dot, so color is never the only signal.
 _SUMMARY_STATUS_META = {
-    "ok": ("var(--good)", "OK"),
-    "warning": ("var(--caution)", "Warning"),
-    "critical": ("var(--alert)", "Critical"),
+    "ok": ("#15803D", "OK"),
+    "warning": ("#CA8A04", "Warning"),
+    "critical": ("#b91c1c", "Critical"),
     "unknown": ("var(--muted)", "Unknown"),
 }
 
@@ -26484,14 +26496,25 @@ def _checks_summary_thead_html() -> str:
     hand-typed label — so the header and the data it labels can't drift
     apart: renaming, reordering, or adding a column happens in exactly one
     place (_SUMMARY_ROW_COLUMNS) and both the header and every row's
-    rendering follow automatically."""
+    rendering follow automatically.
+
+    One deliberate exception (2026-09, per design review): the Check
+    column's own visible label is dropped. Every row already names a
+    check ("Live checks", "Anthropic pricing", ...), so a header reading
+    "Check" above them was redundant and, on some viewports, wrapped —
+    the column's width now goes entirely to that content. The header cell
+    still carries an aria-label so the column stays identified for
+    assistive tech; Status and Details are unaffected."""
     cells = []
     for i, col in enumerate(_SUMMARY_ROW_COLUMNS):
         align = _SUMMARY_COL_HEADER_ALIGN[col]
         pad = "0 8px 6px 2px" if i == 0 else ("0 2px 6px 8px" if i == len(_SUMMARY_ROW_COLUMNS) - 1
                                                else "0 8px 6px")
-        cells.append(f'<th style="text-align:{align};padding:{pad};font-size:11px;color:var(--muted);'
-                     f'text-transform:uppercase;letter-spacing:.04em;">{_esc(col.capitalize())}</th>')
+        label = col.capitalize()
+        visible = "" if col == "check" else _esc(label)
+        aria = f' aria-label="{_esc(label)}"' if col == "check" else ""
+        cells.append(f'<th{aria} style="text-align:{align};padding:{pad};font-size:11px;color:var(--muted);'
+                     f'text-transform:uppercase;letter-spacing:.04em;">{visible}</th>')
     return f'<tr style="border-bottom:1px solid var(--line);">{"".join(cells)}</tr>'
 
 
@@ -26909,7 +26932,11 @@ def _ai_usage_freshness_dot(label: str, last_value: str, stale: bool, anchor: st
     module's own *_review_is_stale() to color a dot; the actual review
     action lives exclusively on /admin/checks, which this links to via the
     anchor ids added alongside the three h2 headings there."""
-    color = ("#CA8A04" if stale else "var(--seafoam-deep)")
+    # Same sanctioned true-stoplight palette as /admin/checks' own summary
+    # dots and the cookie-status panel (BRAND.md §6) — a "fresh/reviewed"
+    # reminder dot is a health signal too, not a decorative accent, so it
+    # gets the real green rather than the visually-similar --seafoam-deep.
+    color = ("#CA8A04" if stale else "#15803D")
     when = _relative_age(last_value)
     if not last_value:
         detail = "never reviewed"

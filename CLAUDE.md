@@ -9825,40 +9825,59 @@ it supersedes the old "`/save` is token-gated" note.
   dot_color)` tuple. `_SUMMARY_ROW_COLUMNS = ("check", "status",
   "details")` (`webapp/app.py`) is the single source of truth for both
   the column order and the `<thead>` header text — `_checks_summary_
-  thead_html()` sentence-cases the tuple's own entries into "Check"/
-  "Status"/"Details," and `_checks_summary_cell_html()` builds every
-  `<td>` from the same tuple, so a header can't drift from what its
-  column actually renders: there's one place to edit for a column to
-  change, not two. `href` is deliberately excluded from the column list
-  — it's link metadata for the Check cell's own `<a>`, not a rendered
-  column of its own. Status is a colored dot ONLY (`var(--good)`/
-  `var(--caution)`/`var(--alert)`/`var(--muted)`, via `_SUMMARY_STATUS_
-  META` — never a raw hex, and never coral, which this page treats as
-  never a status color), each with a real `title`/`aria-label` word so
-  color is never the only signal; Details is the status text only, left-
-  aligned. The AI-providers rows' GitHub-source and vendor-page links
-  came OUT of the summary entirely — Details there shows plain text only
-  ("Never reviewed"); those two links stay exactly where they already
-  were, in each provider's own `<h3>` detail section further down the
-  page. Both tables share an identical `<colgroup>` (a fixed Check width,
-  a fixed Status width, Details flexible) so the dot column lines up
-  across the two cards regardless of either one's own row-count or text
-  length, and the last row of each `<tbody>` has its `border-bottom`
-  stripped by string substitution (no `:last-child` selector available
-  inline) — fixing a real stray divider that used to sit just above the
-  card's own bottom edge, most visible under Exa pricing. Below 760px the
-  two cards stack (Site checks first, AI providers second) via a single
+  thead_html()` sentence-cases the tuple's own entries into header labels
+  and `_checks_summary_cell_html()` builds every `<td>` from the same
+  tuple, so a header can't drift from what its column actually renders:
+  there's one place to edit for a column to change, not two. `href` is
+  deliberately excluded from the column list — it's link metadata for the
+  Check cell's own `<a>`, not a rendered column of its own. Status is a
+  colored dot ONLY, each with a real `title`/`aria-label` word so color is
+  never the only signal; Details is the status text only, left-aligned.
+  The AI-providers rows' GitHub-source and vendor-page links came OUT of
+  the summary entirely — Details there shows plain text only ("Never
+  reviewed"); those two links stay exactly where they already were, in
+  each provider's own `<h3>` detail section further down the page. Both
+  tables share an identical `<colgroup>` (a fixed Check width, a fixed
+  Status width, Details flexible) so the dot column lines up across the
+  two cards regardless of either one's own row-count or text length, and
+  the last row of each `<tbody>` has its `border-bottom` stripped by
+  string substitution (no `:last-child` selector available inline) —
+  fixing a real stray divider that used to sit just above the card's own
+  bottom edge, most visible under Exa pricing. Below 760px the two cards
+  stack (Site checks first, AI providers second) via a single
   `flex-direction:column` override in a page-scoped `<style>` block, DOM
   order alone doing the ordering. Database copy's and Review queue's own
   destination (`/admin/voice/review-queue`, not their local `/admin/
   checks` section) is unchanged from the prior rework — this pass's "no
   outbound links" rule is scoped to the three AI-provider rows' GitHub/
-  vendor fix-links specifically, not to same-site destinations. See
-  `tests/test_checks.py`'s two-table-summary section for the regression
-  coverage (row membership per table, header-text-matches-column-tuple,
-  left-aligned Details, non-empty `aria-label` on every dot, zero
-  outbound links anywhere in the summary, identical `<colgroup>`s, the
-  stray-divider fix, the 760px stacking breakpoint).
+  vendor fix-links specifically, not to same-site destinations.
+  **Two same-PR design corrections, from Brian's own review of a live
+  screenshot rather than the initial spec:** (1) the Check column's
+  `<th>` header text ("Check") is dropped to a blank visible label — every
+  row already names a check ("Live checks," "Anthropic pricing," ...), so
+  the header was redundant and was wrapping on some viewports; the `<th>`
+  still carries `aria-label="Check"` so the column stays identified for
+  assistive tech, and Status/Details keep their visible headers unchanged.
+  (2) The dot colors moved off the semantic `var(--good)`/`var(--caution)`/
+  `var(--alert)` tokens onto the sanctioned true-stoplight hex trio BRAND.md
+  §6 carves out for exactly this case ("glanceable health indicators" —
+  test results, uptime/sync status) — `--good` is navy, the site's own
+  dominant color, so a passing check read as ordinary text rather than a
+  status signal at a glance. Now `#15803D` green / `#CA8A04` amber /
+  `#b91c1c` red (`_SUMMARY_STATUS_META`), the exact same trio the
+  cookie-status panel already uses (`_COOKIE_STATE_STYLES`) — red reuses
+  the existing destructive-action red rather than adding a second one;
+  "unknown" stays `var(--muted)`, unaffected, since it's outside the
+  stoplight (no signal either way, not a pass/warn/fail state). All three
+  hexes were already registered in `linklib/brand_check.py`'s `AUX_COLORS`
+  allowlist under that same exception, so no new palette entry was needed.
+  See `tests/test_checks.py`'s two-table-summary section for the
+  regression coverage (row membership per table, header-text-matches-
+  column-tuple including the blank Check label's `aria-label`, left-aligned
+  Details, non-empty `aria-label` on every dot, the sanctioned-stoplight-
+  only dot-color check, zero outbound links anywhere in the summary,
+  identical `<colgroup>`s, the stray-divider fix, the 760px stacking
+  breakpoint).
 
 
 ## Authentication & security

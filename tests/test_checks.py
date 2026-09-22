@@ -342,7 +342,13 @@ def test_summary_tables_have_three_columns_with_headers_matching_the_named_row_f
     parameter: check/status/details), not a separately hand-typed label —
     so this test pins both the header text AND that it's the same three
     field names the row-building code (_checks_summary_table_html) actually
-    uses, closing the drift this rule exists to prevent."""
+    uses, closing the drift this rule exists to prevent.
+
+    2026-09 design revision: the Check column's own VISIBLE label is
+    dropped (every row already names a check, so the header was redundant
+    and wrapped on some viewports) — but the column still exists (three
+    <th> per table) and stays identified for assistive tech via an
+    aria-label, so this pins that instead of a visible ">Check</th>"."""
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     from fastapi.testclient import TestClient
     import webapp.app as appmod
@@ -352,17 +358,23 @@ def test_summary_tables_have_three_columns_with_headers_matching_the_named_row_f
     summary = _summary_grid_html(r.text)
 
     # The header text is literally the sentence-cased field names of the
-    # named-row dict webapp.app._checks_summary_row_tr consumes.
+    # named-row dict webapp.app._checks_summary_row_tr consumes — except
+    # "check", whose visible text is intentionally blank (see above).
     expected_field_names = ["check", "status", "details"]
     expected_headers = [f.capitalize() for f in expected_field_names]
     assert expected_headers == ["Check", "Status", "Details"]
 
     for table_html in (summary[:summary.index("AI providers")], summary[summary.index("AI providers"):]):
         assert table_html.count("<th ") == 3, "exactly three columns"  # "<th" alone also matches "<thead"
-        for header in expected_headers:
+        # Check: no visible text, but still labeled for assistive tech.
+        assert 'aria-label="Check"' in table_html
+        assert "<th aria-label=\"Check\"" in table_html
+        assert ">Check</th>" not in table_html, "the visible label was asked to be dropped"
+        # Status/Details are unaffected — still derived, still visible.
+        for header in ("Status", "Details"):
             assert f">{header}</th>" in table_html, header
         # Header order matches column order: Check, then Status, then Details.
-        check_pos = table_html.index(">Check</th>")
+        check_pos = table_html.index('aria-label="Check"')
         status_pos = table_html.index(">Status</th>")
         details_pos = table_html.index(">Details</th>")
         assert check_pos < status_pos < details_pos
@@ -405,7 +417,16 @@ def test_every_summary_status_dot_has_a_non_empty_aria_label(env, monkeypatch):
         assert t and t.group(1) == m.group(1)
 
 
-def test_summary_status_dots_use_design_tokens_not_hardcoded_hex(env, monkeypatch):
+def test_summary_status_dots_use_the_sanctioned_stoplight_palette(env, monkeypatch):
+    """Design review correction (2026-09): the semantic --good/--caution/
+    --alert tokens read as off for a glanceable status indicator (--good
+    is navy, the site's own dominant color — it doesn't register as
+    "healthy" at a glance). Switched to the true-stoplight trio BRAND.md
+    §6 sanctions for exactly this case ("glanceable health indicators"),
+    the same colors the cookie-status panel already uses
+    (webapp.app._COOKIE_STATE_STYLES): #15803D green, #CA8A04 amber,
+    #b91c1c red. "unknown" (no signal either way) stays var(--muted),
+    which was already correct and unaffected by this change."""
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     from fastapi.testclient import TestClient
     import webapp.app as appmod
@@ -418,14 +439,16 @@ def test_summary_status_dots_use_design_tokens_not_hardcoded_hex(env, monkeypatc
         r'border-radius:50%;background:(var\(--[a-z]+\)|#[0-9a-fA-F]{3,6});"', summary)
     assert dot_backgrounds
     for bg in dot_backgrounds:
-        assert bg in ("var(--good)", "var(--caution)", "var(--alert)", "var(--muted)"), bg
+        assert bg in ("#15803D", "#CA8A04", "#b91c1c", "var(--muted)"), bg
+        # never the semantic tokens this replaced, and never coral
+        assert bg not in ("var(--good)", "var(--caution)", "var(--alert)"), bg
 
 
-def test_never_reviewed_dot_uses_caution_never_coral(env, monkeypatch):
-    """Item e's second bug fix: on a fresh DB, all three AI-provider rows
-    are "Never reviewed" — confirm that state's dot is var(--caution), and
-    that coral (in any of its three forms) never appears anywhere in the
-    summary as a status color."""
+def test_never_reviewed_dot_uses_the_stoplight_amber_never_coral(env, monkeypatch):
+    """Item e's second bug fix, updated for the stoplight-palette switch
+    above: on a fresh DB, all three AI-provider rows are "Never reviewed"
+    (a "warning" status) — confirm that state's dot is the sanctioned
+    #CA8A04 amber (not the old var(--caution), and not any coral form)."""
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     from fastapi.testclient import TestClient
     import webapp.app as appmod
@@ -434,6 +457,8 @@ def test_never_reviewed_dot_uses_caution_never_coral(env, monkeypatch):
     r = c.get("/admin/checks")
     summary = _summary_grid_html(r.text)
     assert "Never reviewed" in summary
+    assert "background:#CA8A04;" in summary
+    assert "var(--caution)" not in summary
     for token in ("--coral", "--coral-deep", "--coral-wash"):
         assert token not in summary, token
 
