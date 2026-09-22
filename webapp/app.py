@@ -26389,45 +26389,139 @@ def _check_row_slug(name: str) -> str:
     return "check-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
-def _checks_summary_row_html(label: str, href: str | None, status_text: str, dot_color: str,
-                              fix_links=()) -> str:
-    """One row of /admin/checks' top status summary (2026-09 rework —
-    replaces the old single green/red "All N live checks passing" banner,
-    which could read all-clear while a section further down the page
-    reported real findings).
+# Canonical status vocabulary for the top summary's two tables (2026-09
+# two-table rework). Every summary row is built as a named-field dict —
+# {"check": ..., "href": ..., "status": <one of these 4 keys>, "details": ...}
+# — rather than a positional tuple, specifically so the table's rendered
+# <thead> header text ("Check"/"Status"/"Details") can be derived
+# mechanically from these same three field names instead of being a
+# separately hand-typed label that could drift from what the row data
+# actually is. `status` maps to a CSS custom property (never a raw hex, and
+# never the coral family — coral is not a status color on this site) plus
+# an accessible word used for both `title` and `aria-label` on the dot, so
+# color is never the only signal.
+_SUMMARY_STATUS_META = {
+    "ok": ("var(--good)", "OK"),
+    "warning": ("var(--caution)", "Warning"),
+    "critical": ("var(--alert)", "Critical"),
+    "unknown": ("var(--muted)", "Unknown"),
+}
 
-    `href` is None when there's nothing to click through to — a green row
-    with nothing to manage (Disk space/Badge refresh while healthy, Live
-    checks while every check passes): the label renders as plain text
-    rather than a dead-looking link, matching the brief's own explicit
-    call for those two rows. `fix_links` is a small (label, href) sequence
-    rendered as secondary external links beside the status text — used only
-    where "where you fix it" isn't this row's own /admin/checks section
-    below (the three AI-provider rows' GitHub source file + vendor page).
-    Colors follow this page's existing semantic palette, not the navy
-    `var(--good)`/muted `var(--alert)` pair `_status()` below uses for the
-    per-check pass/fail badges — those read correctly as text next to a
-    checkmark/cross glyph, but a plain colored dot needs a real green/amber/
-    red to register as a status signal at a glance (the same reasoning
-    BRAND.md documents for the auth-cookie-status dots elsewhere on this
-    site)."""
-    label_html = (f'<a href="{href}" style="color:var(--navy);font-weight:600;text-decoration:none;'
-                  f'font-size:14px;">{_esc(label)}</a>' if href else
-                  f'<span style="color:var(--navy);font-weight:600;font-size:14px;">{_esc(label)}</span>')
-    fix_html = ""
-    if fix_links:
-        links = " &middot; ".join(
-            f'<a href="{fh}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;">'
-            f'{_esc(fl)}</a>' for fl, fh in fix_links)
-        fix_html = f'<span style="margin-right:4px;">{links}</span>'
-    return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;'
-            f'padding:9px 2px;border-bottom:1px solid var(--line);flex-wrap:wrap;">'
-            f'{label_html}'
-            f'<span style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
-            f'{fix_html}'
-            f'<span style="font-size:13px;color:var(--ink-soft);white-space:nowrap;">{_esc(status_text)}</span>'
-            f'<span style="width:9px;height:9px;border-radius:50%;background:{dot_color};flex-shrink:0;" '
-            f'aria-hidden="true"></span></span></div>')
+# Shared fixed widths for the summary tables' three columns — same values
+# in both tables' <colgroup>, so the Status/dot column lines up across the
+# two side-by-side cards regardless of either table's own Check/Details
+# text length.
+_SUMMARY_COL_WIDTH_CHECK = "150px"
+_SUMMARY_COL_WIDTH_STATUS = "56px"
+
+# The single source of truth for both the column ORDER and the <thead>
+# header TEXT of every /admin/checks summary table — the tuple's own
+# entries, sentence-cased, ARE the header labels (see
+# _checks_summary_table_html), and are also exactly the three keys
+# _checks_summary_row_tr reads off each row dict to build a <td>. `href` is
+# deliberately excluded — it's link metadata (where the Check cell's own
+# <a> points), not a rendered column of its own. This is what makes the
+# header/data correspondence structural rather than a convention to
+# remember: adding, renaming, or reordering a column here changes both the
+# header row and what each <td> renders, in the same place, for every
+# summary row in both tables — there's nowhere left for the two to drift
+# apart, since there's only one thing to edit.
+_SUMMARY_ROW_COLUMNS = ("check", "status", "details")
+
+
+def _checks_summary_cell_html(column: str, row: dict) -> str:
+    """One <td> in a /admin/checks summary row, dispatched by column name
+    (one of _SUMMARY_ROW_COLUMNS) rather than position — so
+    _checks_summary_row_tr and _checks_summary_table_html's <thead> stay
+    driven by the exact same ordered column list, with no second place a
+    column's rendering could drift out of sync with its own header."""
+    if column == "check":
+        check_href = row["href"]
+        check_text = _esc(row["check"])
+        if check_href:
+            check_html = (f'<a href="{check_href}" style="color:var(--navy);font-weight:600;'
+                          f'text-decoration:none;font-size:14px;">{check_text}</a>')
+        else:
+            check_html = f'<span style="color:var(--navy);font-weight:600;font-size:14px;">{check_text}</span>'
+        return f'<td style="padding:9px 8px 9px 2px;vertical-align:middle;">{check_html}</td>'
+    if column == "status":
+        dot_color, word = _SUMMARY_STATUS_META[row["status"]]
+        dot_html = (f'<span role="img" title="{_esc(word)}" aria-label="{_esc(word)}" '
+                    f'style="display:inline-block;width:10px;height:10px;border-radius:50%;'
+                    f'background:{dot_color};"></span>')
+        return f'<td style="padding:9px 8px;text-align:center;vertical-align:middle;">{dot_html}</td>'
+    # "details" — the status text only, left-aligned.
+    return (f'<td style="padding:9px 2px 9px 8px;text-align:left;vertical-align:middle;'
+            f'font-size:13px;color:var(--ink-soft);">{_esc(row["details"])}</td>')
+
+
+def _checks_summary_row_tr(row: dict) -> str:
+    """One <tr> in a /admin/checks summary table. `row` is the named-field
+    shape every summary row shares: check/href/status/details — see
+    _SUMMARY_STATUS_META's own docstring for why this is a named dict
+    rather than a positional tuple. Status is a colored dot ONLY (no
+    status text next to it — the text lives in Details); Details is the
+    status text ONLY, left-aligned; Check is the only link, and only to a
+    section on this same page (never an outbound GitHub/vendor link — see
+    the AI-providers rows' own detail sections further down the page for
+    those). Columns are built in _SUMMARY_ROW_COLUMNS' own order, the same
+    tuple the <thead> headers come from."""
+    cells = "".join(_checks_summary_cell_html(col, row) for col in _SUMMARY_ROW_COLUMNS)
+    return f'<tr style="border-bottom:1px solid var(--line);">{cells}</tr>'
+
+
+# Per-column header alignment — mirrors each column's own <td> alignment
+# in _checks_summary_cell_html (Check/Details left, Status centered), so
+# the header and its cells always agree.
+_SUMMARY_COL_HEADER_ALIGN = {"check": "left", "status": "center", "details": "left"}
+
+
+def _checks_summary_thead_html() -> str:
+    """The <thead> row shared by every /admin/checks summary table — built
+    directly from _SUMMARY_ROW_COLUMNS, the same ordered tuple
+    _checks_summary_cell_html reads to build each row's <td>s. Header text
+    is that tuple's own field names, sentence-cased — never a separately
+    hand-typed label — so the header and the data it labels can't drift
+    apart: renaming, reordering, or adding a column happens in exactly one
+    place (_SUMMARY_ROW_COLUMNS) and both the header and every row's
+    rendering follow automatically."""
+    cells = []
+    for i, col in enumerate(_SUMMARY_ROW_COLUMNS):
+        align = _SUMMARY_COL_HEADER_ALIGN[col]
+        pad = "0 8px 6px 2px" if i == 0 else ("0 2px 6px 8px" if i == len(_SUMMARY_ROW_COLUMNS) - 1
+                                               else "0 8px 6px")
+        cells.append(f'<th style="text-align:{align};padding:{pad};font-size:11px;color:var(--muted);'
+                     f'text-transform:uppercase;letter-spacing:.04em;">{_esc(col.capitalize())}</th>')
+    return f'<tr style="border-bottom:1px solid var(--line);">{"".join(cells)}</tr>'
+
+
+def _checks_summary_table_html(heading: str, rows: list) -> str:
+    """One card of the /admin/checks top summary — a heading (reusing the
+    existing "AI providers" label style verbatim, no new styling) above a
+    real <table> with a <thead> whose header text is derived mechanically
+    from _SUMMARY_ROW_COLUMNS (see _checks_summary_thead_html), the same
+    ordered field-name tuple every row's own <td>s are built from — so
+    header and data can never drift apart. The last row's bottom border is
+    stripped (a `:last-child` rule can't be expressed inline, so this is
+    done by string substitution instead) to fix the stray divider line
+    that used to sit just above the card's own bottom edge."""
+    heading_html = (f'<div style="font:600 12px var(--font-body);letter-spacing:.06em;'
+                     f'text-transform:uppercase;color:var(--muted);padding:2px 2px 8px;">'
+                     f'{_esc(heading)}</div>')
+    body_rows_list = [_checks_summary_row_tr(r) for r in rows]
+    if body_rows_list:
+        body_rows_list[-1] = body_rows_list[-1].replace(
+            'border-bottom:1px solid var(--line);', 'border-bottom:none;', 1)
+    table_html = (
+        f'<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+        f'<colgroup><col style="width:{_SUMMARY_COL_WIDTH_CHECK};">'
+        f'<col style="width:{_SUMMARY_COL_WIDTH_STATUS};"><col></colgroup>'
+        f'<thead>{_checks_summary_thead_html()}</thead>'
+        f'<tbody>{"".join(body_rows_list)}</tbody>'
+        f'</table>'
+    )
+    return (f'<div class="checks-summary-card" style="border:1px solid var(--line);border-radius:12px;'
+            f'background:var(--surface);padding:12px 16px 6px;">{heading_html}{table_html}</div>')
 
 
 @app.get("/admin/checks", response_class=HTMLResponse)
@@ -26467,51 +26561,53 @@ def admin_checks(request: Request):
     _exa_pricing_url = "https://exa.ai/pricing"
 
     # ------------------------------------------------------------------
-    # Status summary (2026-09 rework) — replaces the old single green/red
-    # "All N live checks passing" banner, which stayed green while a
-    # section further down the SAME page (Database-backed copy) reported
-    # real findings — both were technically true, but the top of the page
-    # still read as all-clear. One row per section instead, so nothing on
-    # this page can read as "fine" while something below it isn't.
+    # Status summary (2026-09 two-table rework) — two side-by-side cards,
+    # "Site checks" (5 rows) and "AI providers" (3 rows), replacing both
+    # the original single green/red "All N live checks passing" banner AND
+    # the later single-stacked-list version. Every row is built as a
+    # named-field dict (check/href/status/details) — see
+    # _SUMMARY_STATUS_META's own docstring for why this replaced the
+    # earlier positional-tuple `_ai_row_status`/`_checks_summary_row_html`
+    # shape: the table's own <thead> header text is derived from these
+    # same three field names, so header and data can't drift apart.
     #
-    # Per-row link rule, decided explicitly rather than left ambiguous
-    # (see PR description for the full reasoning): a row's own name always
-    # links to its local section below UNLESS there's nothing to manage
-    # while it's green (Disk space, Badge refresh, Live checks — matching
-    # the brief's own explicit "nothing to manage while green, so no
-    # link" for the first two, applied the same way to the third since
-    # it's the same shape). Database copy's own destination is the review
-    # queue itself, not its local section, since that's where a finding is
-    # actually triaged. The three AI-provider rows keep their local-section
-    # link (where "Mark reviewed" lives) AND carry two small secondary
-    # links to the actual GitHub source and vendor page — rendered here
-    # AND in each section's own body further down, per the explicit ask
-    # not to put them only in one place.
+    # Per-row link rule, unchanged from the prior rework: a row's own name
+    # always links to its local section below UNLESS there's nothing to
+    # manage while it's green (Disk space, Badge refresh, Live checks).
+    # Database copy's and Review queue's destination is the review queue
+    # itself, not a local section, since that's where a finding is
+    # actually triaged — both predate this two-table pass and are kept
+    # unchanged; this task's own "no outbound links" rule is scoped to the
+    # AI-providers rows' GitHub/vendor fix_links specifically, not to
+    # same-site destinations like this one. The three AI-provider rows
+    # link only to their own local section now — their GitHub-source and
+    # vendor-page links are gone from the summary entirely (still shown in
+    # each provider's own detail section further down the page).
     # ------------------------------------------------------------------
 
     live_bool_rows = [r for r in results if r["where"] == "Live + CI" and r["ok"] is not None]
     live_passing = sum(1 for r in live_bool_rows if r["ok"] is True)
     live_failing = [r for r in live_bool_rows if r["ok"] is False]
     if live_failing:
-        live_status_text = f"{len(live_failing)} of {len(live_bool_rows)} failing"
-        live_dot, live_href = "var(--alert)", f"#{_check_row_slug(live_failing[0]['name'])}"
+        live_details = f"{len(live_failing)} of {len(live_bool_rows)} failing"
+        live_status, live_href = "critical", f"#{_check_row_slug(live_failing[0]['name'])}"
     else:
-        live_status_text = f"{live_passing} of {len(live_bool_rows)} passing"
-        live_dot, live_href = "#065f46", None
-    live_summary_row = _checks_summary_row_html("Live checks", live_href, live_status_text, live_dot)
+        live_details = f"{live_passing} of {len(live_bool_rows)} passing"
+        live_status, live_href = "ok", None
+    live_row = {"check": "Live checks", "href": live_href, "status": live_status, "details": live_details}
 
     n_violations = len(db_copy_report.violations)
     if n_violations:
-        db_status_text = f"{n_violations} finding{'s' if n_violations != 1 else ''}"
-        db_dot = "var(--alert)"
+        db_details = f"{n_violations} finding{'s' if n_violations != 1 else ''}"
+        db_status = "critical"
     elif db_copy_report.tables_skipped:
         n_skipped = len(db_copy_report.tables_skipped)
-        db_status_text = f"stale scan—{n_skipped} table{'s' if n_skipped != 1 else ''} skipped"
-        db_dot = "#92400e"
+        db_details = f"stale scan—{n_skipped} table{'s' if n_skipped != 1 else ''} skipped"
+        db_status = "warning"
     else:
-        db_status_text, db_dot = "No findings", "#065f46"
-    db_summary_row = _checks_summary_row_html("Database copy", "/admin/voice/review-queue",
-                                               db_status_text, db_dot)
+        db_details, db_status = "No findings", "ok"
+    db_row = {"check": "Database copy", "href": "/admin/voice/review-queue",
+              "status": db_status, "details": db_details}
 
     # Reuses the row run_all() already computed (webapp.checks.
     # voice_review_queue_status) rather than a second DB round trip. This
@@ -26525,72 +26621,72 @@ def admin_checks(request: Request):
     n_open, n_seed = voice_queue_row.get("count", 0), voice_queue_row.get("seed_disagreement_count", 0)
     if n_open:
         seed_note = f", including {n_seed} seed disagreement{'s' if n_seed != 1 else ''}" if n_seed else ""
-        queue_status_text, queue_dot = f"{n_open} open{seed_note}", "#92400e"
+        queue_details, queue_status = f"{n_open} open{seed_note}", "warning"
     else:
-        queue_status_text, queue_dot = "0 open", "#065f46"
-    queue_summary_row = _checks_summary_row_html("Review queue", "/admin/voice/review-queue",
-                                                  queue_status_text, queue_dot)
+        queue_details, queue_status = "0 open", "ok"
+    queue_row = {"check": "Review queue", "href": "/admin/voice/review-queue",
+                 "status": queue_status, "details": queue_details}
 
     if disk_status is None:
-        disk_status_text, disk_dot, disk_href = "No /data volume (this environment)", "var(--muted)", None
+        disk_details, disk_row_status, disk_href = "No /data volume (this environment)", "unknown", None
     else:
-        disk_status_text = (f'{_disk_mb(disk_status["used"])} of {_disk_mb(disk_status["total"])} used '
-                             f'({disk_status["percent_used"]:.0f}%)')
+        disk_details = (f'{_disk_mb(disk_status["used"])} of {_disk_mb(disk_status["total"])} used '
+                         f'({disk_status["percent_used"]:.0f}%)')
         if disk_status["level"] == "critical":
-            disk_dot, disk_href = "var(--alert)", "#disk-space"
+            disk_row_status, disk_href = "critical", "#disk-space"
         elif disk_status["level"] == "warn":
-            disk_dot, disk_href = "#92400e", "#disk-space"
+            disk_row_status, disk_href = "warning", "#disk-space"
         else:
-            disk_dot, disk_href = "#065f46", None
-    disk_summary_row = _checks_summary_row_html("Disk space", disk_href, disk_status_text, disk_dot)
+            disk_row_status, disk_href = "ok", None
+    disk_row = {"check": "Disk space", "href": disk_href, "status": disk_row_status, "details": disk_details}
 
     if not refresher_status["started"]:
-        badge_status_text, badge_dot, badge_href = "Not started", "var(--alert)", "#badge-refresh"
+        badge_details, badge_row_status, badge_href = "Not started", "critical", "#badge-refresh"
     elif refresher_status["last_success_at"] is None:
-        badge_status_text, badge_dot, badge_href = "Starting up", "#92400e", "#badge-refresh"
+        badge_details, badge_row_status, badge_href = "Starting up", "warning", "#badge-refresh"
     elif (refresher_status["last_error"]
           or time.time() - refresher_status["last_success_at"] > 2 * _tasks._CHECKS_CACHE_TTL):
-        badge_status_text, badge_dot, badge_href = "Failing", "var(--alert)", "#badge-refresh"
+        badge_details, badge_row_status, badge_href = "Failing", "critical", "#badge-refresh"
     else:
         when = _epoch_relative_age(refresher_status["last_success_at"])
-        badge_status_text = f"Healthy, refreshed {when or 'just now'}"
-        badge_dot, badge_href = "#065f46", None
-    badge_summary_row = _checks_summary_row_html("Badge refresh", badge_href, badge_status_text, badge_dot)
+        badge_details = f"Healthy, refreshed {when or 'just now'}"
+        badge_row_status, badge_href = "ok", None
+    badge_row = {"check": "Badge refresh", "href": badge_href, "status": badge_row_status, "details": badge_details}
 
-    def _ai_row_status(last_x: str, stale: bool) -> tuple[str, str]:
+    def _ai_row_status(last_x: str, stale: bool) -> dict:
+        """Named-field replacement for the old `(status_text, dot_color)`
+        positional tuple — returns the same {status, details} shape every
+        other summary row already uses, so this row participates in the
+        same header-derivation mechanism as the rest of the table."""
         if not last_x:
-            return "Never reviewed", "#92400e"
+            return {"status": "warning", "details": "Never reviewed"}
         when = _relative_age(last_x)
         if stale:
-            return f"Stale—{when or 'a while ago'}", "#92400e"
-        return f"Reviewed {when or 'recently'}", "#065f46"
+            return {"status": "warning", "details": f"Stale—{when or 'a while ago'}"}
+        return {"status": "ok", "details": f"Reviewed {when or 'recently'}"}
 
-    pricing_status_text, pricing_dot = _ai_row_status(
-        pricing_last_verified, pricing_review_is_stale(pricing_last_verified))
-    models_status_text, models_dot = _ai_row_status(
-        models_last_reviewed, models_review_is_stale(models_last_reviewed))
-    exa_status_text, exa_dot = _ai_row_status(
-        exa_pricing_last_verified, exa_pricing_review_is_stale(exa_pricing_last_verified))
+    pricing_ai = _ai_row_status(pricing_last_verified, pricing_review_is_stale(pricing_last_verified))
+    models_ai = _ai_row_status(models_last_reviewed, models_review_is_stale(models_last_reviewed))
+    exa_ai = _ai_row_status(exa_pricing_last_verified, exa_pricing_review_is_stale(exa_pricing_last_verified))
 
-    pricing_fix_links = [("GitHub", _pricing_gh), ("Anthropic pricing", _anthropic_pricing_url)]
-    models_fix_links = [("GitHub", _models_gh), ("Anthropic docs", _anthropic_models_url)]
-    exa_fix_links = [("GitHub", _pricing_gh), ("Exa pricing", _exa_pricing_url)]
+    pricing_row = {"check": "Anthropic pricing", "href": "#pricing-freshness",
+                   "status": pricing_ai["status"], "details": pricing_ai["details"]}
+    models_row = {"check": "Anthropic models", "href": "#new-model-awareness",
+                  "status": models_ai["status"], "details": models_ai["details"]}
+    exa_row = {"check": "Exa pricing", "href": "#exa-pricing-freshness",
+               "status": exa_ai["status"], "details": exa_ai["details"]}
 
-    pricing_summary_row = _checks_summary_row_html("Anthropic pricing", "#pricing-freshness",
-                                                    pricing_status_text, pricing_dot, pricing_fix_links)
-    models_summary_row = _checks_summary_row_html("Anthropic models", "#new-model-awareness",
-                                                   models_status_text, models_dot, models_fix_links)
-    exa_summary_row = _checks_summary_row_html("Exa pricing", "#exa-pricing-freshness",
-                                                exa_status_text, exa_dot, exa_fix_links)
-    ai_providers_heading = ('<div style="font:600 12px var(--font-body);letter-spacing:.06em;'
-                             'text-transform:uppercase;color:var(--muted);padding:14px 2px 4px;">'
-                             'AI providers</div>')
+    site_checks_table = _checks_summary_table_html(
+        "Site checks", [live_row, db_row, queue_row, disk_row, badge_row])
+    ai_providers_table = _checks_summary_table_html(
+        "AI providers", [pricing_row, models_row, exa_row])
 
-    summary_box = (f'<div style="border:1px solid var(--line);border-radius:12px;background:var(--surface);'
-                    f'padding:2px 16px 4px;margin:-4px 0 20px;">'
-                    f'{live_summary_row}{db_summary_row}{queue_summary_row}{disk_summary_row}{badge_summary_row}'
-                    f'{ai_providers_heading}{pricing_summary_row}{models_summary_row}{exa_summary_row}'
-                    f'</div>')
+    summary_box = (
+        f'<style>.checks-summary-grid{{display:flex;align-items:flex-start;gap:16px;margin:-4px 0 20px;}}'
+        f'.checks-summary-grid>.checks-summary-card{{flex:1 1 0;min-width:0;}}'
+        f'@media(max-width:760px){{.checks-summary-grid{{flex-direction:column;}}}}</style>'
+        f'<div class="checks-summary-grid">{site_checks_table}{ai_providers_table}</div>'
+    )
 
     def _status(r):
         if r["ok"] is True:

@@ -9813,6 +9813,53 @@ it supersedes the old "`/save` is token-gated" note.
   background refresh, making the route-rendering check opt-in rather than part
   of the badge path, or precomputing at deploy.
 
+- **`/admin/checks`' top summary, two-table rework (2026-09) — Brian's
+  direct review of PR #593's preview replaced the single stacked list of 8
+  rows with two side-by-side cards, "Site checks" (5 rows) and "AI
+  providers" (3 rows), sharing one identical column layout.** Every row is
+  a named-field dict — `{"check", "href", "status", "details"}` — rather
+  than the prior `_checks_summary_row_html(label, href, status_text,
+  dot_color, fix_links)`'s positional args, and `_ai_row_status` (the
+  AI-provider rows' own status computation) returns that same
+  `{"status", "details"}` shape instead of an unnamed `(status_text,
+  dot_color)` tuple. `_SUMMARY_ROW_COLUMNS = ("check", "status",
+  "details")` (`webapp/app.py`) is the single source of truth for both
+  the column order and the `<thead>` header text — `_checks_summary_
+  thead_html()` sentence-cases the tuple's own entries into "Check"/
+  "Status"/"Details," and `_checks_summary_cell_html()` builds every
+  `<td>` from the same tuple, so a header can't drift from what its
+  column actually renders: there's one place to edit for a column to
+  change, not two. `href` is deliberately excluded from the column list
+  — it's link metadata for the Check cell's own `<a>`, not a rendered
+  column of its own. Status is a colored dot ONLY (`var(--good)`/
+  `var(--caution)`/`var(--alert)`/`var(--muted)`, via `_SUMMARY_STATUS_
+  META` — never a raw hex, and never coral, which this page treats as
+  never a status color), each with a real `title`/`aria-label` word so
+  color is never the only signal; Details is the status text only, left-
+  aligned. The AI-providers rows' GitHub-source and vendor-page links
+  came OUT of the summary entirely — Details there shows plain text only
+  ("Never reviewed"); those two links stay exactly where they already
+  were, in each provider's own `<h3>` detail section further down the
+  page. Both tables share an identical `<colgroup>` (a fixed Check width,
+  a fixed Status width, Details flexible) so the dot column lines up
+  across the two cards regardless of either one's own row-count or text
+  length, and the last row of each `<tbody>` has its `border-bottom`
+  stripped by string substitution (no `:last-child` selector available
+  inline) — fixing a real stray divider that used to sit just above the
+  card's own bottom edge, most visible under Exa pricing. Below 760px the
+  two cards stack (Site checks first, AI providers second) via a single
+  `flex-direction:column` override in a page-scoped `<style>` block, DOM
+  order alone doing the ordering. Database copy's and Review queue's own
+  destination (`/admin/voice/review-queue`, not their local `/admin/
+  checks` section) is unchanged from the prior rework — this pass's "no
+  outbound links" rule is scoped to the three AI-provider rows' GitHub/
+  vendor fix-links specifically, not to same-site destinations. See
+  `tests/test_checks.py`'s two-table-summary section for the regression
+  coverage (row membership per table, header-text-matches-column-tuple,
+  left-aligned Details, non-empty `aria-label` on every dot, zero
+  outbound links anywhere in the summary, identical `<colgroup>`s, the
+  stray-divider fix, the 760px stacking breakpoint).
+
 
 ## Authentication & security
 
