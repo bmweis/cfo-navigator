@@ -1120,6 +1120,51 @@ rendering into a different `plain_text_from_body_md()` output, so no
 extra embedding cost results), but it's a real, separate bug in the save
 path worth its own investigation and fix later.
 
+**Second follow-up (2026-09, voice-queue-durability PR): the Voice review
+queue's own write paths — a genuinely new gap this drift check could
+detect but never fixed — now fire the sync directly, at the point of
+write.** The Voice review queue (see the "Voice review queue" section
+below) can write back to `original_content.<column>` (including
+`body_md`) three ways: the per-item and bulk-resolve routes' "Edit"/
+"Revert"/"Use seed version" actions (`webapp.app._resolve_voice_item_
+action`, shared by both `/admin/voice/review-queue/{item_id}/resolve` and
+`/admin/voice/review-queue/bulk-resolve`), and the Ampersands rule's bulk
+"Replace ampersands with and" apply route
+(`admin_voice_review_bulk_replace_ampersand_apply`, via `Library.
+apply_ampersand_replacement`). None of these three called `sync_original_
+content_article()` before this fix — a queue action against an
+`original_content.body_md` finding would quietly create a drifted mirror,
+only ever caught later by `original_content_mirror_problems()`'s next
+`/admin/checks` scan, asking Brian to re-open the same piece and click
+Save to fix what the queue action itself should have fixed already. Found
+live: a real production `original_content.body_md` id 36 sat as an open
+review-queue finding with no corresponding sync. Fixed by calling
+`sync_original_content_article(lib, item["row_id"])` immediately after
+each of the three write paths' own successful write, exactly mirroring
+how the two `/admin/thought-leadership/original` save routes already do
+it — same "regenerate at the mutation point" call, one layer up in
+`webapp/app.py`, not a new mechanism. The circular-import/embedding-cost
+reasoning above (why the sync stays out of `Library`'s own write methods)
+is about keeping it out of the *data layer*; it says nothing about which
+route-layer caller may invoke `sync_original_content_article()` — these
+three review-queue handlers live in the identical `webapp/app.py` layer
+as the two admin save routes, so calling the same function from here is
+the intended shape, not an exception to it. The "Allow everywhere"
+(approve-term) action is confirmed to never write to `original_content`
+at all (it only inserts into `voice_approved_terms` and resolves matching
+queue rows without touching the underlying stored text), so it needs no
+sync call — documented inline at that route rather than left as a silent
+omission. `list_drifted_original_content_mirrors()`'s own docstring, and
+the code comment above `original_content_mirror_problems()`, are both
+updated to say plainly that the check is now a safety net for a write
+path this PR doesn't already know about — a future script, a future
+admin route — not the primary fix for the review queue's own actions.
+See `tests/test_original_content_ingestion.py`'s "Voice review queue
+writes to original_content.body_md now re-sync the mirror synchronously"
+section for the regression coverage — each test asserts the mirror is
+already correct the instant the write path returns, not merely that a
+later drift scan would eventually flag it.
+
 ### Accounts
 
 | Table | Purpose | Columns that carry meaning |
