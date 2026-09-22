@@ -4448,6 +4448,22 @@ class Library:
         ).fetchone()
         return row[0] if row else 0
 
+    def count_open_voice_review_seed_disagreements(self) -> int:
+        """Subset of count_open_voice_review_items() whose source is
+        'startup-sync' — _seed_toolbox's per-boot re-sync of a tools/
+        communities/benchmarks row against its static seed-source value
+        finding a live disagreement, not a genuine scanner/write-time voice
+        violation. An ordinary, expected state, not an edge case — broken
+        out so a caller (the /admin/checks summary) can label the review
+        queue's own count apart from the database-copy scan's, which never
+        counts these at all (see webapp.checks.voice_review_queue_status's
+        own docstring for why the two totals legitimately differ)."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM voice_review_queue WHERE status IN ('open','auto_corrected') "
+            "AND source='startup-sync'"
+        ).fetchone()
+        return row[0] if row else 0
+
     def get_voice_review_item(self, item_id: int) -> dict | None:
         row = self.conn.execute(
             "SELECT * FROM voice_review_queue WHERE id=?", (item_id,)

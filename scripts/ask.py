@@ -2,7 +2,7 @@
 """Ask your library an FP&A / finance question, grounded in your saved articles.
 
     python -m scripts.ask "how should I think about CAC payback for usage-based pricing?"
-    python -m scripts.ask --db library.db --effort deep "what's a healthy net dollar retention?"
+    python -m scripts.ask --db /data/library.db --effort deep "what's a healthy net dollar retention?"
 """
 from __future__ import annotations
 

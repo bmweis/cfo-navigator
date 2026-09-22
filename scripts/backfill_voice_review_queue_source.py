@@ -54,8 +54,8 @@ this — verified only against a temp scratch SQLite DB. Running --apply
 against the real database is reserved for Brian, via `railway ssh`.
 
 Usage:
-    python -m scripts.backfill_voice_review_queue_source --db library.db            # preview
-    python -m scripts.backfill_voice_review_queue_source --db library.db --apply    # write for real
+    python -m scripts.backfill_voice_review_queue_source --db /data/library.db            # preview
+    python -m scripts.backfill_voice_review_queue_source --db /data/library.db --apply    # write for real
 """
 from __future__ import annotations
 

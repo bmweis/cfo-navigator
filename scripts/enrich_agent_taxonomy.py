@@ -16,9 +16,9 @@ button — this script is for bulk/backfill only.
 This makes real API calls under YOUR OWN Anthropic API credits — set
 ANTHROPIC_API_KEY first. Always dry-run a new tool list before writing:
 
-    python -m scripts.enrich_agent_taxonomy --db library.db --tools "Ramp,Brex" --dry-run
-    python -m scripts.enrich_agent_taxonomy --db library.db --tools "Ramp,Brex"
-    python -m scripts.enrich_agent_taxonomy --db library.db --limit 10
+    python -m scripts.enrich_agent_taxonomy --db /data/library.db --tools "Ramp,Brex" --dry-run
+    python -m scripts.enrich_agent_taxonomy --db /data/library.db --tools "Ramp,Brex"
+    python -m scripts.enrich_agent_taxonomy --db /data/library.db --limit 10
 
 Re-running is safe: a tool with an existing agent_taxonomy_note is skipped
 by default. Pass --force to redraft everything anyway — e.g. re-running the

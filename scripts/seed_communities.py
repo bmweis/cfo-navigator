@@ -11,7 +11,7 @@ sponsor_name, access, format, categories, approved — is admin-owned once
 seeded, edited at /admin/tools/communities, and never touched by a re-run.
 
 Usage:
-    python -m scripts.seed_communities [--db library.db]
+    python -m scripts.seed_communities [--db /data/library.db]
 """
 from __future__ import annotations
 

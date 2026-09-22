@@ -25,7 +25,7 @@ For each tool_categories row, reports:
     have proposals already sitting in the queue
 
 Usage:
-    python -m scripts.report_feature_taxonomy_coverage [--db library.db]
+    python -m scripts.report_feature_taxonomy_coverage [--db /data/library.db]
 """
 from __future__ import annotations
 

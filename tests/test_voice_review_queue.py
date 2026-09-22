@@ -6,7 +6,7 @@ import tempfile
 import pytest
 
 from linklib.db import Library
-from linklib.voice_review import AMPERSAND_ACRONYMS, mechanical_findings
+from linklib.voice_review import AMPERSAND_ACRONYMS
 from linklib.voice_db_scan import scan_db_copy, scan_db_copy_report
 
 
@@ -251,7 +251,8 @@ def test_apply_voice_review_write_rejects_unknown_table_column(lib):
 
 
 def test_backfill_script_queues_open_items_from_the_scan(lib):
-    from scripts.backfill_voice_review_queue import main as _unused  # importable
+    from scripts.backfill_voice_review_queue import main
+    assert callable(main), "backfill script must at least be importable"
     cid = lib.add_tool_category("Test Category 3")
     lib.conn.execute(
         "UPDATE category_features SET definition=? WHERE category_id=? AND id=(SELECT id FROM category_features WHERE category_id=?)",

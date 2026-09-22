@@ -16,7 +16,7 @@ scripts/enrich_compare.py.
 
 Usage:
     export OPENAI_API_KEY=...   # for the vector column; FTS-only-only works without it
-    python -m scripts.eval_retrieval --db library.db
+    python -m scripts.eval_retrieval --db /data/library.db
 
 Run this AFTER scripts/embed_backfill.py — otherwise articles_vec is empty
 and the vector/hybrid columns just repeat the FTS5 results.

@@ -27,7 +27,7 @@ Category resolution (Brian's decision, 2026-08 Phase 0 investigation):
 
 Usage:
     LINKLIB_DB=/data/library.db python -m scripts.seed_feature_taxonomy
-    python -m scripts.seed_feature_taxonomy --db library.db
+    python -m scripts.seed_feature_taxonomy --db /data/library.db
 """
 from __future__ import annotations
 

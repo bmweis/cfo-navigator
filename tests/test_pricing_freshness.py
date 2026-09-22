@@ -22,13 +22,20 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 def _pricing_section(html: str) -> str:
     """/admin/checks now renders a second, sibling reminder banner below
-    this one (New-model awareness, issue #98 Piece 2 follow-up) that
+    this one (Anthropic models, issue #98 Piece 2 follow-up, renamed from
+    "New-model awareness" in the 2026-09 /admin/checks summary rework) that
     deliberately mirrors this banner's own phrasing closely ("never been
     marked reviewed" appears in both, independently, when marked-reviewed
     at different times) — so a plain whole-page substring check can false-
     positive/negative on the OTHER banner's state. Scope every assertion
-    to just the Pricing-freshness section."""
-    return html.split("New-model awareness")[0]
+    to just the Pricing-freshness section.
+
+    Splits on the models heading's own `id` ATTRIBUTE, not its visible text
+    ("Anthropic models") — that visible label also appears once earlier on
+    the page, as a row name in the top status summary (2026-09 rework),
+    which a text-based split would incorrectly treat as the section
+    boundary. The id attribute renders exactly once, on the real <h3>."""
+    return html.split('id="new-model-awareness"')[0]
 
 
 @pytest.fixture
@@ -63,7 +70,7 @@ def test_banner_defaults_to_stale_when_never_reviewed(admin_client):
     client, appmod, db = admin_client
     r = client.get("/admin/checks")
     assert r.status_code == 200
-    assert "Pricing freshness" in r.text
+    assert "Anthropic pricing" in r.text
     assert "never been marked reviewed" in r.text
     assert "Mark reviewed" in r.text
 

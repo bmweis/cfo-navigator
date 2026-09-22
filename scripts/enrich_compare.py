@@ -10,8 +10,8 @@ This makes real API calls (a few cents). Set ANTHROPIC_API_KEY first.
 
 Pick the article one of three ways:
     python -m scripts.enrich_compare --url https://www.mostlymetrics.com/p/...
-    python -m scripts.enrich_compare --db library.db --id 42
-    python -m scripts.enrich_compare --db library.db          # auto-pick a sample
+    python -m scripts.enrich_compare --db /data/library.db --id 42
+    python -m scripts.enrich_compare --db /data/library.db          # auto-pick a sample
 
 Default models: Opus vs Sonnet. Override with --models a,b,c.
 """

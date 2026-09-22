@@ -32,8 +32,8 @@ standing convention is that a script only moves to scripts/archive/ once
 its job is done (git mv, same PR), never before.
 
 Usage:
-    python -m scripts.seed_book_recommendations --db library.db            # preview
-    python -m scripts.seed_book_recommendations --db library.db --apply    # write for real
+    python -m scripts.seed_book_recommendations --db /data/library.db            # preview
+    python -m scripts.seed_book_recommendations --db /data/library.db --apply    # write for real
 """
 from __future__ import annotations
 

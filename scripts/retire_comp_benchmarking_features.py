@@ -34,8 +34,8 @@ locally. Brian runs --apply via railway ssh, after Pave/Culpepper/Radford
 have been deleted via the admin UI.
 
 Usage:
-    python -m scripts.retire_comp_benchmarking_features --db library.db            # preview
-    python -m scripts.retire_comp_benchmarking_features --db library.db --apply    # write for real
+    python -m scripts.retire_comp_benchmarking_features --db /data/library.db            # preview
+    python -m scripts.retire_comp_benchmarking_features --db /data/library.db --apply    # write for real
 """
 from __future__ import annotations
 

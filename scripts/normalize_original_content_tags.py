@@ -35,8 +35,8 @@ Brian runs it via `railway ssh` (absolute `--db /data/library.db`), after
 reviewing this preview output.
 
 Usage:
-    python -m scripts.normalize_original_content_tags --db library.db            # preview
-    python -m scripts.normalize_original_content_tags --db library.db --apply    # write for real
+    python -m scripts.normalize_original_content_tags --db /data/library.db            # preview
+    python -m scripts.normalize_original_content_tags --db /data/library.db --apply    # write for real
 """
 from __future__ import annotations
 

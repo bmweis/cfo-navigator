@@ -7,7 +7,7 @@ deterministically; tone is judged by Claude when ANTHROPIC_API_KEY is set.
 Usage:
     python -m scripts.voice_review path/to/file.md
     pbpaste | python -m scripts.voice_review        # read stdin
-    python -m scripts.voice_review --db library.db  # use saved custom voice
+    python -m scripts.voice_review --db /data/library.db  # use saved custom voice
 """
 import argparse
 import os

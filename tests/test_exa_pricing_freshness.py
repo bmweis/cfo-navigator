@@ -22,12 +22,18 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 def _exa_pricing_section(html: str) -> str:
     """/admin/checks renders two sibling reminder banners above this one
-    (Pricing freshness, New-model awareness) that share overlapping phrasing
-    ("never been marked reviewed", "manually verified") — so a plain
-    whole-page substring check can false-positive/negative on an OTHER
-    banner's state. Scope every assertion to just the Exa pricing freshness
-    section, which is the last one on the page."""
-    return html.split("Exa pricing freshness")[-1]
+    (Anthropic pricing, Anthropic models — renamed from "Pricing freshness"/
+    "New-model awareness" in the 2026-09 /admin/checks summary rework) that
+    share overlapping phrasing ("never been marked reviewed", "manually
+    verified") — so a plain whole-page substring check can false-positive/
+    negative on an OTHER banner's state. Scope every assertion to just the
+    Exa pricing section, which is the last one on the page.
+
+    Splits on the heading's own `id` attribute, not its visible text
+    ("Exa pricing") — that visible label also appears once earlier on the
+    page, as a row name in the top status summary, which a text-based
+    split would incorrectly treat as the section boundary."""
+    return html.split('id="exa-pricing-freshness"')[-1]
 
 
 @pytest.fixture
@@ -62,7 +68,7 @@ def test_banner_defaults_to_stale_when_never_reviewed(admin_client):
     client, appmod, db = admin_client
     r = client.get("/admin/checks")
     assert r.status_code == 200
-    assert "Exa pricing freshness" in r.text
+    assert "Exa pricing" in r.text
     section = _exa_pricing_section(r.text)
     assert "never been marked reviewed" in section
     assert "Mark reviewed" in section

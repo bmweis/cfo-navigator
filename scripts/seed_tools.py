@@ -4,7 +4,7 @@
 Safe to run multiple times — skips any tool whose URL is already in the DB.
 
 Usage:
-    python -m scripts.seed_tools [--db library.db]
+    python -m scripts.seed_tools [--db /data/library.db]
 """
 from __future__ import annotations
 

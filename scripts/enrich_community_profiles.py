@@ -24,9 +24,9 @@ for `summary`.
 This makes real API calls under YOUR OWN Anthropic API credits — set
 ANTHROPIC_API_KEY first. Always dry-run a new community list before writing:
 
-    python -m scripts.enrich_community_profiles --db library.db --communities "Chief,Rho Community" --dry-run
-    python -m scripts.enrich_community_profiles --db library.db --communities "Chief,Rho Community"
-    python -m scripts.enrich_community_profiles --db library.db --limit 10
+    python -m scripts.enrich_community_profiles --db /data/library.db --communities "Chief,Rho Community" --dry-run
+    python -m scripts.enrich_community_profiles --db /data/library.db --communities "Chief,Rho Community"
+    python -m scripts.enrich_community_profiles --db /data/library.db --limit 10
 
 Re-running is safe: a community whose profile already has a non-empty
 `ideal_member` is skipped by default. Pass --force to redraft everything

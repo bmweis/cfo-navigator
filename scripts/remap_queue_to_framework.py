@@ -40,9 +40,9 @@ different category's 30-40-line bucket list can be handed in via --framework
 without touching this script.
 
 Usage:
-    python -m scripts.remap_queue_to_framework --db library.db --category Neobanking
-    python -m scripts.remap_queue_to_framework --db library.db --category Neobanking --apply
-    python -m scripts.remap_queue_to_framework --db library.db \\
+    python -m scripts.remap_queue_to_framework --db /data/library.db --category Neobanking
+    python -m scripts.remap_queue_to_framework --db /data/library.db --category Neobanking --apply
+    python -m scripts.remap_queue_to_framework --db /data/library.db \\
         --framework scripts/seed_data/some_other_category_framework.json --apply
 """
 from __future__ import annotations

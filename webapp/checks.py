@@ -189,18 +189,38 @@ def original_content_mirror_problems() -> list[str]:
 # open queue count... while still reporting that the check ran even at zero"
 # — the DbScanReport execution-stats lesson (a report has to say it ran
 # before "0 open" means anything) applies here too.
+#
+# This count and the Database-backed copy scan's own violation count
+# (_db_copy_scan_banner, webapp/app.py) will LEGITIMATELY differ, and that's
+# not a bug either time: the queue also holds seed-disagreement items
+# (source='startup-sync' — _seed_toolbox's per-boot re-sync of a tools/
+# communities/benchmarks row finding its live value doesn't match its static
+# seed source, an ordinary, expected state) and already-applied
+# auto-corrections, neither of which the live DB-copy scan counts at all — it
+# only ever scans CURRENT column text for a violation, with no concept of a
+# queue history. Reported separately (seed_disagreement_count) so a caller
+# (the /admin/checks summary) can label the two counts apart, rather than a
+# real discrepancy between them reading as identical-looking-but-mismatched
+# numbers for the same thing.
 def voice_review_queue_status() -> dict:
     from webapp.app import _lib
     lib = _lib()
     try:
         n = lib.count_open_voice_review_items()
+        n_seed = lib.count_open_voice_review_seed_disagreements()
     finally:
         lib.close()
+    seed_note = (f" (including {n_seed} seed disagreement{'s' if n_seed != 1 else ''} — "
+                 f"_seed_toolbox finding a live value doesn't match its static seed source, an "
+                 f"ordinary state, not a bug)" if n_seed else "")
     return {"name": "Voice review queue", "where": "Live + CI", "ok": None,
+            "count": n, "seed_disagreement_count": n_seed,
             "what": "Every _voice_fix correction and unresolved scanner finding, queued for human "
                     "review at /admin/voice/review-queue rather than silently applied or reported "
-                    "only as a count.",
-            "detail": f"{n} open item{'s' if n != 1 else ''} awaiting review."
+                    "only as a count. Distinct from the Database-backed copy scan below — this "
+                    "queue also holds seed-disagreement items and already-applied auto-corrections "
+                    "that scan never counts, so the two totals are expected to differ.",
+            "detail": f"{n} open item{'s' if n != 1 else ''} awaiting review.{seed_note}"
                       if n else "0 open items — the queue ran and found nothing pending."}
 
 
@@ -208,6 +228,41 @@ def voice_review_queue_status() -> dict:
 def coral_moment_problems() -> list[str]:
     from webapp import app
     return app.coral_moment_problems()
+
+
+# --- voice guide checks: live-or-default resolution (2026-09 /admin/checks --
+# --- summary work) ------------------------------------------------------------
+# Before this, "Voice guide names what it enforces" always checked
+# VOICE_CORE_DEFAULT (the code constant), even when running live with a real
+# DB connection available — so an admin edit at /admin/voice that drifted
+# from the shipped default was invisible to every check on this page. Brian
+# edits the live voice_core; CI only ever sees the code default (it has no
+# DB to read from at all, or does, from a fresh/unseeded test fixture, which
+# is functionally the same as "nothing to read"). This resolves once, shared
+# by all three voice-guide-prose checks below, so they can never independently
+# disagree about which text they're validating.
+def _resolve_checked_voice_core() -> tuple[str, str, bool]:
+    """(text, source_label, differs_from_default). Prefers the live
+    voice_core setting when reachable and non-empty; falls back to
+    VOICE_CORE_DEFAULT otherwise — the same degrade-gracefully contract
+    every other DB-touching check in this module already uses (a fresh/CI/
+    unreachable DB is not a check failure). `differs_from_default` is only
+    ever True when a real live value was actually read — there's nothing to
+    "differ" from when the fallback IS the default."""
+    from linklib.agent import VOICE_CORE_DEFAULT
+    live_text = ""
+    try:
+        from webapp.app import _lib
+        lib = _lib()
+        try:
+            live_text = (lib.get_setting("voice_core") or "").strip()
+        finally:
+            lib.close()
+    except Exception:
+        live_text = ""
+    if live_text:
+        return live_text, "the live voice_core setting", live_text != VOICE_CORE_DEFAULT
+    return VOICE_CORE_DEFAULT, "VOICE_CORE_DEFAULT", False
 
 
 # --- disk space (2026-09) ----------------------------------------------------
@@ -390,27 +445,65 @@ def run_all() -> list[dict]:
 
     # Semantic contradiction: voice_core's own prose names a word/phrase as
     # unwanted (quoted) that BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE don't
-    # actually enforce. Deliberately checks VOICE_CORE_DEFAULT (the code
-    # constant), not the live DB-backed `voice_core` setting — this stays a
-    # CI-safe, source-only check for the same reason the mechanical lists
-    # themselves stay source-only: CI has no route to the live database. An
-    # admin edit to the live voice_core prose that names a new example isn't
-    # caught by this row — only a drift in the code default is.
-    from linklib.agent import VOICE_CORE_DEFAULT
-    vg = voice_review.voice_core_gap_problems(VOICE_CORE_DEFAULT)
+    # actually enforce. As of the 2026-09 /admin/checks summary work, this
+    # validates the LIVE voice_core setting when this process can reach a
+    # real DB with a real value in it — Brian edits the live guide at
+    # /admin/voice, so checking only the shipped code default meant a live
+    # edit could drift from what's actually enforced with nothing on this
+    # page ever noticing. CI (and any fresh/unseeded DB) falls back to
+    # VOICE_CORE_DEFAULT, same as before.
+    checked_voice_core, voice_core_source, voice_core_differs = _resolve_checked_voice_core()
+    vg = voice_review.voice_core_gap_problems(checked_voice_core)
     # State execution, not just findings (2026-09 follow-up, same fix as the
     # DB scan's stats line below) — "0 gaps" and "this row never ran" must
     # not read the same. quoted_voice_examples() is the exact candidate set
     # voice_core_gap_problems() checks, so the count can't drift from what
     # was actually checked.
-    _n_checked = len(voice_review.quoted_voice_examples(VOICE_CORE_DEFAULT))
+    _n_checked = len(voice_review.quoted_voice_examples(checked_voice_core))
+    _diff_note = (" The live voice_core setting currently differs from VOICE_CORE_DEFAULT "
+                   "(expected — Brian edits it directly; this check still validates whichever one "
+                   "is actually live)." if voice_core_differs else "")
     results.append({
         "name": "Voice guide names what it enforces", "where": "Live + CI", "ok": not vg,
-        "what": "Every 2+-word phrase VOICE_CORE_DEFAULT quotes as an example to avoid is actually "
-                "in BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE — the rubric never promises a rejection "
-                "the mechanical lists don't back up.",
+        "what": "Every 2+-word phrase the voice guide quotes as an example to avoid is actually in "
+                "BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE — the rubric never promises a rejection the "
+                "mechanical lists don't back up. Validates the live voice_core setting when reachable, "
+                "VOICE_CORE_DEFAULT otherwise (CI has no DB to read a live edit from).",
         "detail": (f"Checked {_n_checked} quoted example{'s' if _n_checked != 1 else ''} in "
-                   f"VOICE_CORE_DEFAULT. 0 gaps." if not vg else "; ".join(vg[:6]))})
+                   f"{voice_core_source}. 0 gaps.{_diff_note}" if not vg
+                   else "; ".join(vg[:6]) + _diff_note)})
+
+    # The mirror-image check, same live-or-default text: an ampersand-joined
+    # acronym the guide's own prose names as PERMITTED ("FP&A, T&E, R&D, and
+    # similar") that isn't actually in AMPERSAND_ACRONYMS/AMPERSAND_NAMES —
+    # the scanner would flag a term the guide itself says is fine. See
+    # linklib.voice_review.voice_core_ampersand_gap_problems's own docstring.
+    vag = voice_review.voice_core_ampersand_gap_problems(checked_voice_core)
+    results.append({
+        "name": "Voice guide's permitted ampersand terms are honored", "where": "Live + CI", "ok": not vag,
+        "what": "Every ampersand-joined acronym the voice guide names as a permitted exception "
+                "(\"FP&A, T&E, R&D, and similar\") is actually in AMPERSAND_ACRONYMS/AMPERSAND_NAMES — "
+                "the guide never promises an exception the typography check doesn't honor.",
+        "detail": (f"Checked {voice_core_source}. 0 gaps." if not vag else "; ".join(vag[:6]))})
+
+    # Typography and invisible characters ARE checked against the voice
+    # guide's own prose (unlike banned words/filler/performative, which stay
+    # exempt — the rubric legitimately quotes those as examples of what to
+    # avoid). Neither exemption reason applies to a spaced em dash, a bare
+    # ampersand, or an invisible character: the guide's own prose shouldn't
+    # break the typography rules it teaches, and a model imitates the style
+    # of its own instructions. Uses typography_findings_plain (a single
+    # plain-text value, not Python source) since voice_core is prose, not a
+    # Python string literal to extract from a file.
+    vt = (voice_review.typography_findings_plain(checked_voice_core)
+          + voice_review.invisible_character_findings(checked_voice_core))
+    results.append({
+        "name": "Voice guide follows its own typography rules", "where": "Live + CI", "ok": not vt,
+        "what": "The voice guide's own prose spells out \"and\" (except FP&A and friends), never "
+                "spaces an em dash, and carries no invisible/zero-width characters — a model imitates "
+                "the style of its own instructions, so the guide has to follow the rules it teaches.",
+        "detail": (f"Checked {voice_core_source}. Clean." if not vt
+                   else "; ".join(f"{rule}: {excerpt}" for rule, excerpt in vt[:6]))})
 
     ol = brand_check.outbound_link_problems(src)
     results.append({

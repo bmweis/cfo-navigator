@@ -34,9 +34,22 @@ NOT run against library.db or any production database as part of building
 this — verified only against a temp scratch SQLite DB. Running --apply
 against the real database is reserved for Brian, via `railway ssh`.
 
+Every `--apply` write is ALSO logged to `voice_review_queue` as an
+`auto_corrected` row, `source='script'` — the same `Library.
+log_voice_correction()` the write-time backstop (`Library._vf`) calls, so a
+run of this script leaves the identical kind of visible trace a live save
+would have left. Brian's rule is that nothing changes quietly; a raw one-off
+UPDATE with no queue row would violate that just as much as a live write
+path that skipped `_vf` would. This is why the script constructs a real
+`Library(db_path)` instead of a bare `sqlite3.connect(db_path)` —
+`log_voice_correction` is a `Library` method, and reusing it (rather than
+re-implementing the same INSERT here) keeps this script's logging from ever
+drifting out of sync with the live backstop's own shape. Mirrors
+`scripts/fix_invisible_characters.py`'s identical fix for this same gap.
+
 Usage:
-    python -m scripts.fix_spaced_em_dashes --db library.db            # preview
-    python -m scripts.fix_spaced_em_dashes --db library.db --apply    # write for real
+    python -m scripts.fix_spaced_em_dashes --db /data/library.db            # preview
+    python -m scripts.fix_spaced_em_dashes --db /data/library.db --apply    # write for real
 """
 from __future__ import annotations
 
@@ -46,8 +59,8 @@ import sqlite3
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from linklib.db import resolve_db_path  # noqa: E402
-from linklib.voice_mechanics import fix_spaced_em_dashes  # noqa: E402
+from linklib.db import Library, resolve_db_path  # noqa: E402
+from linklib.voice_mechanics import correction_rule_for, fix_spaced_em_dashes  # noqa: E402
 
 # (table, id_column, name_column_or_None, [prose columns to check])
 # name_column is used only for a readable per-row label in the printout; it
@@ -118,8 +131,8 @@ def main() -> int:
     print(f"Database: {db_path}")
     print(f"Mode: {'APPLY (writing)' if args.apply else 'PREVIEW (no writes)'}\n")
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    lib = Library(db_path)
+    conn = lib.conn
     total_changed = 0
     total_rows_touched: set[tuple[str, int]] = set()
 
@@ -164,6 +177,10 @@ def main() -> int:
                             f"Write-then-read-back FAILED for {table}.{col} "
                             f"{id_col}={row_id}: expected {fixed!r}, got {check!r}"
                         )
+                        lib.log_voice_correction(
+                            table, row_id, col, original, fixed,
+                            source="script", rule=correction_rule_for(original),
+                        )
             if table_changed == 0:
                 print("  (no spaced em dashes found — clean)")
             print()
@@ -200,6 +217,13 @@ def main() -> int:
                         f"Write-then-read-back FAILED for settings key={key!r}: "
                         f"expected {fixed!r}, got {check!r}"
                     )
+                    # Settings-row convention (matches Library.set_setting's
+                    # own _vf call): row_id=None, the settings key is the
+                    # "column".
+                    lib.log_voice_correction(
+                        "settings", None, key, original, fixed,
+                        source="script", rule=correction_rule_for(original),
+                    )
             if settings_changed == 0:
                 print("  (no spaced em dashes found — clean)")
             print()
@@ -215,7 +239,7 @@ def main() -> int:
         print(f"{'=' * 70}")
         return 0
     finally:
-        conn.close()
+        lib.close()
 
 
 if __name__ == "__main__":

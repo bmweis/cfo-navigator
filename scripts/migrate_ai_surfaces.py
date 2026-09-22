@@ -22,8 +22,8 @@ Idempotent: guarded by an empty `ai_surfaces` table — if the table already
 has any rows, the script reports that and does nothing.
 
 Usage:
-    python -m scripts.migrate_ai_surfaces --db library.db            # preview
-    python -m scripts.migrate_ai_surfaces --db library.db --apply     # write for real
+    python -m scripts.migrate_ai_surfaces --db /data/library.db            # preview
+    python -m scripts.migrate_ai_surfaces --db /data/library.db --apply     # write for real
 """
 from __future__ import annotations
 

@@ -53,9 +53,9 @@ default intrinsic size in that case, which is its own source of tiny
 logos).
 
 Usage:
-    python -m scripts.audit_tool_logo_dimensions --db library.db
-    python -m scripts.audit_tool_logo_dimensions --db library.db --min-px 96 --max-ratio 2.0
-    python -m scripts.audit_tool_logo_dimensions --db library.db --csv logo_audit.csv
+    python -m scripts.audit_tool_logo_dimensions --db /data/library.db
+    python -m scripts.audit_tool_logo_dimensions --db /data/library.db --min-px 96 --max-ratio 2.0
+    python -m scripts.audit_tool_logo_dimensions --db /data/library.db --csv logo_audit.csv
 
 Read-only: no Brand API calls, no file writes, no DB writes.
 """

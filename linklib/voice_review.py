@@ -101,6 +101,18 @@ INVISIBLE_CHARS: dict[str, str] = {
 }
 
 
+def invisible_character_findings(text: str) -> list[tuple[str, str]]:
+    """(rule, excerpt) for any INVISIBLE_CHARS hit in the raw, unmasked
+    `text`. Factored out of `mechanical_findings` (2026-09, /admin/checks
+    summary work) so a caller that must skip the banned-word/filler/
+    performative checks — voice_core's own rubric prose, which legitimately
+    QUOTES banned words as examples of what to avoid — can still check for
+    invisible characters alone, without pulling in checks that would
+    false-positive on the rubric's own enumeration."""
+    return [("invisible-character", f"U+{ord(ch):04X} ({label})")
+            for ch, label in INVISIBLE_CHARS.items() if ch in text]
+
+
 def mechanical_findings(text: str) -> list[tuple[str, str]]:
     """Deterministic voice violations as (rule, matched_phrase). No API calls.
 
@@ -124,9 +136,7 @@ def mechanical_findings(text: str) -> list[tuple[str, str]]:
     # enumeration, and neither operation removes or alters a zero-width
     # character anywhere else in the string, so there's nothing to lose by
     # checking the original.
-    for ch, label in INVISIBLE_CHARS.items():
-        if ch in text:
-            findings.append(("invisible-character", f"U+{ord(ch):04X} ({label})"))
+    findings.extend(invisible_character_findings(text))
     return findings
 
 
@@ -388,6 +398,51 @@ def _term_pattern(term: str) -> re.Pattern:
 # without changing what gets matched — see that function's own module
 # comment for the badge-caching mechanism this feeds.
 _AMPERSAND_ALLOW_PATTERNS = [_term_pattern(t) for t in AMPERSAND_NAMES + AMPERSAND_ACRONYMS]
+
+# --- The mirror-image check to voice_core_gap_problems above -----------------
+# That one catches an over-permissive rubric promise: a banned term the
+# mechanical lists don't actually enforce. This catches the opposite failure
+# mode — an ampersand-joined short acronym the guide's own prose names as a
+# PERMITTED exception ("FP&A, T&E, R&D, and similar") that isn't actually in
+# AMPERSAND_ACRONYMS/AMPERSAND_NAMES, so typography_findings would flag a term
+# the guide itself says is fine. Found via /admin/checks work (2026-09):
+# T&E was already correctly listed by the time this shipped, but nothing
+# mechanically guaranteed that stayed true — a future edit to voice_core's
+# prose naming a new acronym (say, "COGS" is never ampersand-joined, but a
+# hypothetical "B&B" or "AR&AP") would silently go unenforced with no test to
+# catch it, the same class of drift voice_core_gap_problems already guards
+# against in the other direction.
+#
+# Requires letters on both sides, so a bare "&" quoted as a character example
+# (the "never use '&' as a casual stand-in" rule itself) never matches — that
+# rule's own example is single-character, not an acronym token.
+_AMPERSAND_TOKEN_RE = re.compile(r"\b[A-Za-z]{1,4}&[A-Za-z]{1,4}\b")
+
+
+def voice_core_ampersand_gap_problems(voice_core_text: str) -> list[str]:
+    """Ampersand-joined short-acronym tokens (FP&A, T&E, ...) that appear
+    literally in `voice_core_text`'s own prose — almost certainly named
+    there as a permitted exception to the "spell out and" rule — but aren't
+    actually covered by AMPERSAND_ACRONYMS/AMPERSAND_NAMES, so
+    typography_findings/typography_findings_plain would flag a term the
+    guide itself claims is allowed. One direction only, same discipline as
+    voice_core_gap_problems: an allowlist entry the prose never mentions is
+    fine (the lists are allowed to be broader than the rubric's own
+    examples) — only a prose-named term with no allowlist backing is a
+    problem."""
+    problems: list[str] = []
+    seen: set[str] = set()
+    for m in _AMPERSAND_TOKEN_RE.finditer(voice_core_text):
+        token = m.group(0)
+        if token in seen:
+            continue
+        seen.add(token)
+        if not any(p.search(token) for p in _AMPERSAND_ALLOW_PATTERNS):
+            problems.append(
+                f'"{token}" appears in the voice guide but is not in '
+                f"AMPERSAND_ACRONYMS/AMPERSAND_NAMES, so the typography check would flag it"
+            )
+    return problems
 
 
 def scannable_copy(literal: str) -> str:
