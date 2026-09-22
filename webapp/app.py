@@ -34273,7 +34273,7 @@ def admin_voice_page(request: Request):
 <span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Approved ampersand terms</span>
 <span style="font-size:12px;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 8px;">Database-backed</span>
 </div>
-<p style="color:var(--muted);margin:0 0 12px;font-size:13px;">A GLOBAL, permanent whitelist&mdash;each exact term here is always fine, everywhere, in every scanned column. This is what the Voice review queue's &ldquo;Allow everywhere&rdquo; action writes to. Distinct from the source-managed <code>AMPERSAND_NAMES</code>/<code>AMPERSAND_ACRONYMS</code> lists above: those govern the CI-only source-code scan (which never sees this database), and this table has no bearing on them&mdash;the two can never disagree, since they check different things (source literals vs. live database columns). Removing a term here makes it flaggable again on the next scan.</p>
+<p style="color:var(--muted);margin:0 0 12px;font-size:13px;">A GLOBAL, permanent whitelist&mdash;each exact term here is always fine, everywhere, in every scanned column. This is what the Voice review queue's &ldquo;Always allow&rdquo; action writes to. Distinct from the source-managed <code>AMPERSAND_NAMES</code>/<code>AMPERSAND_ACRONYMS</code> lists above: those govern the CI-only source-code scan (which never sees this database), and this table has no bearing on them&mdash;the two can never disagree, since they check different things (source literals vs. live database columns). Removing a term here makes it flaggable again on the next scan.</p>
 {approved_rows_html}
 <form method="post" action="/admin/voice/approved-terms/add" style="display:flex;gap:8px;margin-top:12px;">
 <input type="text" name="term" placeholder="e.g. Bain &amp; Company" required style="flex:1;font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;">
@@ -34649,7 +34649,11 @@ def _voice_char_diff_html(before: str, after: str) -> str:
 # straight to Detail, which has no declared width of its own and so
 # absorbs everything the fixed columns don't claim under table-layout:fixed.
 # Actions is sized to fit exactly one row of buttons for the widest case
-# (an "open" bare-ampersand row: Edit / Allow here / Allow everywhere).
+# (an "open" bare-ampersand row: Edit / Allow once / Always allow — renamed
+# from Allow here / Allow everywhere, and widened from 280 to 300 in the
+# same pass, since the shorter labels still wrapped to two lines against a
+# real (non-fallback) font; Detail absorbs the difference, per explicit
+# instruction that compressing it here is fine).
 _VOICE_COL_WIDTH_CHECKBOX = 30
 # Part C item 1 fix (voice-queue-durability PR): the previous narrow 150px
 # Field/100px Source pair truncated real record names/paths while Detail
@@ -34661,7 +34665,7 @@ _VOICE_COL_WIDTH_CHECKBOX = 30
 # two lines, not three.
 _VOICE_COL_WIDTH_FIELD = _COL_WIDTH_NAME
 _VOICE_COL_WIDTH_SOURCE = _COL_WIDTH_STATUS
-_VOICE_COL_WIDTH_ACTIONS = 280
+_VOICE_COL_WIDTH_ACTIONS = 300
 
 # Part C item 1 fix, floor bucket (PR #595 review round) — a documented
 # exception, per BRAND.md's "Admin table width floors" rule: this table
@@ -34722,7 +34726,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
     # button overrides `.btn`'s own `border:1px solid var(--navy)` with
     # `border:none` any more, so a filled button's border is the same
     # width as an outlined one's. Individual buttons may still add a
-    # color/border-style override (e.g. Allow here's dashed border, Keep
+    # color/border-style override (e.g. Allow once's dashed border, Keep
     # mine's muted text) as long as the border WIDTH stays 1px.
     btn_style = "font-size:12px;padding:5px 10px;"
     approve_term_panel_html = ""
@@ -34771,20 +34775,21 @@ def _voice_review_row_html(lib, item: dict) -> str:
         detail = excerpt_hint
         # Addition 2 (2026-09 coordinator amendment) — "Mark as exception" is
         # replaced with two visually and functionally distinct actions.
-        # "Allow here" (renamed/rescoped from accept_exception) is scoped to
-        # exactly this one record+column+finding — never global, always
-        # reversible only by manually clearing the DB row. "Approve term" is
-        # the opposite: a GLOBAL, permanent whitelist entry (this exact
-        # matched term is fine everywhere) — shown ONLY for bare-ampersand
-        # findings, since a banned word/filler/performative phrase staying
-        # permanently banned (with case-by-case exceptions via Allow here
-        # only) is Brian's own explicit, stated policy.
+        # "Allow once" (renamed from "Allow here"/rescoped from
+        # accept_exception) is scoped to exactly this one record+column+
+        # finding — never global, always reversible only by manually
+        # clearing the DB row. "Always allow" (renamed from "Allow
+        # everywhere") is the opposite: a GLOBAL, permanent whitelist entry
+        # (this exact matched term is fine everywhere) — shown ONLY for
+        # bare-ampersand findings, since a banned word/filler/performative
+        # phrase staying permanently banned (with case-by-case exceptions
+        # via Allow once only) is Brian's own explicit, stated policy.
         #
         # issue #592 item 3 — Approve term is no longer a boxed input
         # sitting in the Actions cell (that broke the "one line" rule and
         # gave this filled button a different border/height than every
         # outlined one next to it). It's now a plain third button in the
-        # same single-line action row as Edit/Allow here; clicking it
+        # same single-line action row as Edit/Allow once; clicking it
         # reveals a full-width panel BELOW the row — a second `<tr>`
         # spanning every column via `colspan`, using the exact same
         # collapsed/expanded div-toggle mechanism Edit already uses, just
@@ -34811,7 +34816,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
                 approve_term_id = f"voice-approve-term-{item['id']}-{gi}"
                 buttons.append(
                     f'<button type="button" class="btn btn-ghost" style="{btn_style}" '
-                    f'onclick="voiceToggleApproveTerm(\'{item["id"]}-{gi}\', true)">Allow everywhere</button>'
+                    f'onclick="voiceToggleApproveTerm(\'{item["id"]}-{gi}\', true)">Always allow</button>'
                 )
                 panels.append(f"""
 <tr id="{approve_term_id}" style="display:none;">
@@ -34834,22 +34839,24 @@ def _voice_review_row_html(lib, item: dict) -> str:
         # textarea) used to render always-visible for every open row. It's
         # now collapsed behind an "Edit" button (`voiceToggleEditField`, in
         # _VOICE_BULK_JS below): the default, one-line state shows Edit /
-        # Allow here / Allow everywhere (on ampersand rows); clicking Edit
+        # Allow once / Always allow (on ampersand rows); clicking Edit
         # reveals the full-width textarea + Save edit / Cancel underneath,
         # and Cancel collapses it back without submitting anything.
         #
-        # Durability fix (2026-09) — "Allow here"/"Allow everywhere" are the
+        # Durability fix (2026-09), relabeled ("Allow here"->"Allow once",
+        # "Allow everywhere"->"Always allow" — shorter labels, same meaning,
+        # to help the Actions column fit on one line) — the two are the
         # button-style pair: same outlined style as every other action
-        # button on this page (no dashed border, no grey text) — the two
-        # differ only in SCOPE, named plainly: "here" (this one spot) vs.
-        # "everywhere" (a global term).
+        # button on this page (no dashed border, no grey text) — they
+        # differ only in SCOPE, named plainly: "once" (this one spot) vs.
+        # "always" (a global term).
         edit_field_id = f"voice-edit-field-{item['id']}"
         collapsed_row = actions_row_open + f"""
 <button type="button" class="btn btn-ghost" style="{btn_style}"
         onclick="voiceToggleEditField('{item['id']}', true)">Edit</button>
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="accept_exception">
-  <button type="submit" class="btn btn-ghost" style="{btn_style}">Allow here</button>
+  <button type="submit" class="btn btn-ghost" style="{btn_style}">Allow once</button>
 </form>
 {approve_term_btn}""" + actions_row_close
         actions = f"""
@@ -34864,7 +34871,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
               onclick="voiceToggleEditField('{item['id']}', false)">Cancel</button>
       <button type="submit" class="btn" style="{btn_style}">Save edit</button>
     </div>
-    <div style="font-size:10.5px;color:var(--muted);">Editing the full value directly&mdash;"Allow here" (collapse this first) only exempts THIS one spot, never global, always reversible.</div>
+    <div style="font-size:10.5px;color:var(--muted);">Editing the full value directly&mdash;"Allow once" (collapse this first) only exempts THIS one spot, never global, always reversible.</div>
   </form>
 </div>"""
     else:
@@ -35228,10 +35235,11 @@ async def admin_voice_review_resolve(item_id: int, request: Request):
 
 @app.post("/admin/voice/review-queue/{item_id}/approve-term")
 async def admin_voice_review_approve_term(item_id: int, request: Request):
-    """"Allow everywhere" (renamed from "Approve term" — voice-queue-
-    durability fix): globally, permanently approve one exact ampersand term
+    """"Always allow" (renamed from "Approve term", then again from "Allow
+    everywhere" — voice-queue-durability fix, label-shortening follow-up):
+    globally, permanently approve one exact ampersand term
     (e.g. "Bain & Company"). Deliberately distinct from /resolve's
-    accept_exception ("Allow here"): this writes a row to
+    accept_exception ("Allow once"): this writes a row to
     `voice_approved_terms` via `Library.approve_voice_term`, which also
     resolves EVERY currently-open queue row (any table/column/row_id)
     whose excerpt/before/after text contains this exact term, case-
@@ -35272,7 +35280,7 @@ async def admin_voice_review_approve_term(item_id: int, request: Request):
             current = item.get("after_text") or item.get("excerpt") or ""
         if not term:
             # A blank submission still resolves this one row via the
-            # ordinary "Allow here" path, rather than silently no-op-ing—
+            # ordinary "Allow once" path, rather than silently no-op-ing—
             # an admin who clears the field and submits anyway almost
             # certainly meant "just this one," not "do nothing."
             lib.resolve_voice_review_item(item_id, "accept_exception")
@@ -35287,7 +35295,7 @@ async def admin_voice_review_approve_term(item_id: int, request: Request):
             return RedirectResponse(
                 "/admin/voice/review-queue?error=" + quote(
                     f'Approved "{term}" everywhere, but it did not clear this specific '
-                    "finding—check the term matches exactly and try again, or use Allow here instead."),
+                    "finding—check the term matches exactly and try again, or use Allow once instead."),
                 status_code=303)
     finally:
         lib.close()

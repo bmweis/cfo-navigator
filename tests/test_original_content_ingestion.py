@@ -847,8 +847,9 @@ def test_bulk_replace_ampersand_apply_route_resyncs_mirror_synchronously(monkeyp
 
 
 def test_approve_term_route_never_needs_to_resync_because_it_never_writes(monkeypatch, tmp_path):
-    """Negative case, per the same review point: "Allow everywhere" is
-    confirmed to never write back to original_content.body_md at all — it
+    """Negative case, per the same review point: "Always allow" (renamed
+    from "Allow everywhere") is confirmed to never write back to
+    original_content.body_md at all — it
     only inserts into voice_approved_terms and resolves matching queue
     rows — so body_md (and therefore the mirror) must be byte-identical
     before and after, even once approving the term resolves the open

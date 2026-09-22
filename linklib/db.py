@@ -1504,8 +1504,9 @@ CREATE INDEX IF NOT EXISTS idx_voice_review_queue_lookup
 -- is exactly what a global, permanent approval is for; a banned word
 -- (`rule='buzzword'`) never gets a global approval from this table at
 -- all — Brian's own explicit call ("seamless" stays banned everywhere;
--- allowing it in one specific spot is the row-scoped "Allow here"
--- exception on voice_review_queue, `status='exception'`, not a change to
+-- allowing it in one specific spot is the row-scoped "Allow once"
+-- (renamed from "Allow here") exception on voice_review_queue,
+-- `status='exception'`, not a change to
 -- what's banned). DB-backed, not source-code, since CI has no route to a
 -- live database anyway (same boundary voice_db_scan.py's own module
 -- docstring already states) — so this table is read only by the LIVE

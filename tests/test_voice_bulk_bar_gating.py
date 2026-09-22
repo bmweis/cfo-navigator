@@ -209,13 +209,14 @@ def test_lede_uses_the_standard_admin_lede_treatment(env):
 # --- uniform — no dashed border, no grey text, anywhere on the page --------
 
 def test_no_button_on_the_page_has_a_dashed_border_or_grey_text(env):
-    """Confirms the fix is complete, not just applied to "Allow here"/
-    "Allow selected here" — three more instances (the row-level "Keep
-    mine" button, and the Cancel button inside both the Allow-everywhere
-    and Edit reveal panels) still carried `color:var(--muted)` before this
-    fix; none of the three were named explicitly in the brief's own bullet
-    list, but the brief's own opening sentence ("Every action button,
-    row-level and bulk, uses the same outlined style...") covers them."""
+    """Confirms the fix is complete, not just applied to "Allow here"
+    (renamed "Allow once")/"Allow selected here" — three more instances
+    (the row-level "Keep mine" button, and the Cancel button inside both
+    the Allow-everywhere (renamed "Always allow") and Edit reveal panels)
+    still carried `color:var(--muted)` before this fix; none of the three
+    were named explicitly in the brief's own bullet list, but the brief's
+    own opening sentence ("Every action button, row-level and bulk, uses
+    the same outlined style...") covers them."""
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid1 = lib.add_community("Style Check Co", "https://style-check-1.example",
@@ -274,6 +275,10 @@ def test_only_approve_and_save_edit_are_filled_buttons(env):
 
 
 # --- Part C item 4 (labels): the exact wording pair and panel caption -----
+#
+# Follow-up (label-shortening pass): "Allow here" -> "Allow once" and
+# "Allow everywhere" -> "Always allow" — shorter labels, same meaning, so
+# the row's Actions column fits Edit/Allow once/Always allow on one line.
 
 def test_allow_everywhere_button_and_caption_use_brians_exact_wording(env):
     lib = Library(os.environ["LINKLIB_DB"])
@@ -288,8 +293,10 @@ def test_allow_everywhere_button_and_caption_use_brians_exact_wording(env):
     c = _login_admin(env)
     r = c.get("/admin/voice/review-queue")
     assert r.status_code == 200
-    assert ">Allow here</button>" in r.text
-    assert ">Allow everywhere</button>" in r.text
+    assert ">Allow once</button>" in r.text
+    assert ">Always allow</button>" in r.text
+    assert ">Allow here</button>" not in r.text
+    assert ">Allow everywhere</button>" not in r.text
     assert ">Approve term</button>" not in r.text
     assert ("Keep only the exact term, like Dun &amp; Bradstreet. It'll be "
             'allowed everywhere. Remove it anytime on <a href="/admin/voice">'

@@ -1,6 +1,7 @@
 """Addition 2 (2026-09 coordinator amendment) — "Approve term" (global,
-permanent) vs. "Allow here" (scoped to one record+column+finding), replacing
-the earlier single "Mark as exception" action for open findings only.
+permanent, later renamed "Always allow") vs. "Allow here" (scoped to one
+record+column+finding, later renamed "Allow once"), replacing the earlier
+single "Mark as exception" action for open findings only.
 """
 import os
 import pathlib
@@ -52,11 +53,13 @@ def test_open_ampersand_row_shows_both_approve_term_and_allow_here(env):
     c = _login_admin(env)
     r = c.get("/admin/voice/review-queue")
     assert r.status_code == 200
-    # Renamed "Approve term" -> "Allow everywhere" (voice-queue-durability
-    # fix, Part C item 4) — the button reveals a full-width panel rather
-    # than rendering the term input inline.
-    assert "Allow everywhere" in r.text
-    assert "Allow here" in r.text
+    # Renamed "Approve term" -> "Allow everywhere" -> "Always allow"
+    # (voice-queue-durability fix, Part C item 4; then the label-shortening
+    # follow-up) — the button reveals a full-width panel rather than
+    # rendering the term input inline. "Allow here" -> "Allow once" in the
+    # same follow-up.
+    assert "Always allow" in r.text
+    assert "Allow once" in r.text
     assert f"/admin/voice/review-queue/{item_id}/approve-term" in r.text
     # The two actions are visually distinct (solid navy button vs. outlined
     # dashed button) — spot check both style fragments are present.
@@ -75,7 +78,7 @@ def test_open_banned_word_row_shows_only_allow_here(env):
     c = _login_admin(env)
     r = c.get("/admin/voice/review-queue")
     assert r.status_code == 200
-    assert "Allow here" in r.text
+    assert "Allow once" in r.text
     assert f"/admin/voice/review-queue/{item_id}/approve-term" not in r.text
 
 
