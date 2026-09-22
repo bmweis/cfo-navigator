@@ -10399,6 +10399,23 @@ as a follow-up), all closed in one PR:
    which trips `webapp/app.py`'s own bare-ampersand lint unconditionally
    regardless of spacing — reworded to describe the character in words
    ("Replace ampersands with and") instead of rendering it.
+6. Pre-merge review pushed back on `scripts/fix_invisible_characters.py`:
+   its `--apply` writes were raw single-column `UPDATE`s with no
+   `voice_review_queue` trace at all — the same "nothing changes
+   quietly" violation the whole queue exists to close, just via a script
+   instead of a live write path. Fixed by switching the script from a
+   bare `sqlite3.connect(db_path)` to a real `Library(db_path)` and
+   calling `Library.log_voice_correction` (the same method `Library._vf`
+   calls) right after each verified write, `source="script"`, rule
+   derived from the pre-fix text via `voice_mechanics.correction_rule_for`.
+   `scripts/fix_spaced_em_dashes.py` has the identical gap and was
+   deliberately left unfixed here, flagged rather than silently widened
+   into this PR. Also confirmed by actually running both scripts against
+   a missing path (not just reading the code) that both already exit
+   nonzero with a clear error and create no file, via the existing
+   `resolve_db_path(..., allow_missing=False)` guard — a regression test
+   for that was added to both scripts' test files anyway, since nothing
+   exercised it directly before.
 
 See CLAUDE.md's matching "issue #592 follow-ups" bullet for the full
 per-item write-up, `tests/test_voice_review_queue.py`'s "Issue #592 item 4"

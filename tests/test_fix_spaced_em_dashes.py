@@ -80,6 +80,31 @@ def test_apply_is_idempotent(db_path):
     assert "Fixed: 0 field(s)" in out2
 
 
+def test_missing_db_exits_nonzero_and_never_creates_a_file():
+    """resolve_db_path(allow_missing=False) already refuses to let sqlite3
+    silently create an empty file at a path that doesn't exist — confirm
+    that guard actually holds for this script specifically (nonzero exit,
+    clear stderr message, no file left behind), rather than trusting it by
+    inference from the shared helper alone. Production is /data/library.db,
+    not a relative library.db — a typo'd path here must fail loudly, never
+    silently report a clean, empty database."""
+    missing_path = tempfile.mktemp(suffix=".db")
+    assert not os.path.exists(missing_path)
+    try:
+        args = [sys.executable, "-m", "scripts.fix_spaced_em_dashes", "--db", missing_path]
+        result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=30)
+        assert result.returncode != 0, (
+            f"expected a nonzero exit for a missing DB file, got 0\nstdout: {result.stdout}"
+        )
+        assert "not found" in result.stderr.lower() or "not found" in result.stdout.lower()
+        assert not os.path.exists(missing_path), (
+            "script must never let sqlite3 silently create an empty DB file at a missing path"
+        )
+    finally:
+        if os.path.exists(missing_path):
+            os.remove(missing_path)
+
+
 def test_apply_does_not_clear_needs_verification_or_citations(db_path):
     """The one real risk of a narrow raw-SQL fix vs. reusing
     Library.update_tool_agent_taxonomy: that higher-level method clears

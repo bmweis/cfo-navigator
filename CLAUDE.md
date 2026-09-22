@@ -11160,6 +11160,44 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
      panel row, and that every row-action button (scoped past the page's
      own nav-toggle hamburger, a legitimate non-row-action exception)
      carries the shared `.btn` class.
+- **Voice review queue, issue #592 PR — pre-merge review fixes (2026-09) —
+  `scripts/fix_invisible_characters.py --apply` now logs every change to
+  `voice_review_queue`, the same way the write-time backstop does; and a
+  standing note that its sibling script has an identical, still-open
+  gap.** A pre-merge review of the #592-followups PR pushed back on the
+  script: it did raw single-column `UPDATE`s with no queue trace at all,
+  which is the exact "nothing changes quietly" violation this whole
+  feature exists to close, just via a script instead of a live write
+  path. Fixed by switching the script from a bare `sqlite3.connect(db_path)`
+  to a real `Library(db_path)`, and calling `Library.log_voice_correction`
+  — the same method `Library._vf` calls — immediately after each verified
+  `--apply` write, with `source="script"` and the rule derived from the
+  pre-fix text via `voice_mechanics.correction_rule_for` (never
+  hardcoded, since a future caller of `strip_safe_invisible_chars` isn't
+  guaranteed to be invisible-character-only forever). The settings branch
+  follows `Library.set_setting`'s own convention exactly (`row_id=None`,
+  the settings key stored as the "column"). **`scripts/
+  fix_spaced_em_dashes.py` — the sibling script this one was built to
+  mirror, and the other of the two scripts this PR's own post-merge
+  instructions ask Brian to run — has the identical gap and was
+  deliberately NOT fixed here**, since it wasn't part of the request that
+  prompted this fix and touching it would have silently widened the PR;
+  flagged explicitly so it isn't mistaken for already covered. Also
+  confirmed, by actually running each script against a path that doesn't
+  exist (not just reading the code): both scripts already exit nonzero
+  with a clear "Database file not found" error and create no file,
+  because both already call `resolve_db_path(..., allow_missing=False)`
+  — the guard this repo built specifically after the July 2026 Corpay
+  silent-write-to-nowhere incident (see "One-off admin fixes against the
+  database" below) already covers this case for every script that uses
+  it, this pair included. A regression test for that exact behavior was
+  added to both scripts' test files anyway, since nothing had exercised
+  it directly before. See `tests/test_fix_invisible_characters.py`'s
+  `test_apply_logs_every_change_to_voice_review_queue`/
+  `test_preview_never_writes_to_voice_review_queue`/
+  `test_missing_db_exits_nonzero_and_never_creates_a_file`, and `tests/
+  test_fix_spaced_em_dashes.py`'s own `test_missing_db_exits_nonzero_and_
+  never_creates_a_file`, for the regression coverage.
 - **Voice review queue, remaining-tables follow-up (2026-09) — the five
   tables disclosed and named as a scope cut in the bullet above
   (`communities`, `community_profiles`, `benchmarks`, `thought_leadership`,
