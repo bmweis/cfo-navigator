@@ -11314,6 +11314,20 @@ test_voice_fix_write_path_audit.py` for the full implementation and regression c
   `test_missing_db_exits_nonzero_and_never_creates_a_file`, and `tests/
   test_fix_spaced_em_dashes.py`'s own `test_missing_db_exits_nonzero_and_
   never_creates_a_file`, for the regression coverage.
+- **`scripts/fix_spaced_em_dashes.py` closes the sibling gap the bullet
+  above deliberately left open (2026-09).** Same fix, same shape: switched
+  from a bare `sqlite3.connect(db_path)` to a real `Library(db_path)`, and
+  every verified `--apply` write (both the per-table columns and the
+  `settings` key/value branch) now also calls `Library.log_voice_correction`
+  — `source="script"`, rule derived via `voice_mechanics.correction_rule_for`
+  rather than hardcoded, matching `fix_invisible_characters.py`'s own
+  pattern exactly, including the settings-row convention (`row_id=None`,
+  the key stored as the "column"). Preview mode still writes nothing,
+  including to the queue. See `tests/test_fix_spaced_em_dashes.py`'s
+  `test_apply_logs_every_change_to_voice_review_queue`/
+  `test_preview_never_writes_to_voice_review_queue` for the regression
+  coverage — both scripts now leave the identical kind of trace a live
+  save through `Library._vf` would have.
 - **Voice review queue, remaining-tables follow-up (2026-09) — the five
   tables disclosed and named as a scope cut in the bullet above
   (`communities`, `community_profiles`, `benchmarks`, `thought_leadership`,
