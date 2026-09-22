@@ -614,6 +614,79 @@ def replace_spaced_ampersands(text: str, approved_terms=()) -> tuple[str, bool]:
     return new_text, changed
 
 
+# PR 592/594-followup "Allow everywhere" fix — the "Approve term" panel used
+# to prefill the row's raw, truncated `excerpt` (a mid-text snippet, e.g. cut
+# off mid-word: "NetSuite, and Intacct[1] BILL Spend & Expense pairs
+# budgeting software with a"), which two real production incidents showed
+# doesn't reliably mask the finding it was approved from: a mid-word cut
+# breaks the substring match the masking regex needs, and an over-wide guess
+# swallows unrelated prose that will never repeat. `guess_ampersand_terms`
+# extracts a real best-guess term instead — the run of capitalized words/
+# acronyms immediately touching each unapproved ampersand, stopping at
+# punctuation, brackets, or a citation marker like "[1]" — one guess per
+# distinct ampersand occurrence in the field, so a field with two unrelated
+# ampersands (e.g. "Bain & Company, Dun & Bradstreet") gets two separate
+# candidates instead of one guess hiding the second.
+_TERM_WORD_RE = r"[A-Z][A-Za-z0-9']*"
+_AMP_TERM_GUESS_RE = re.compile(
+    rf"(?:{_TERM_WORD_RE}(?:\s+{_TERM_WORD_RE})?\s+)?(?:&amp;|&)(?:\s+{_TERM_WORD_RE}(?:\s+{_TERM_WORD_RE})?)?"
+)
+
+
+def guess_ampersand_terms(text: str, approved_terms=()) -> list[str]:
+    """Best-guess candidate terms for the "Allow everywhere" panel — one per
+    unapproved bare-ampersand occurrence in `text`, deduplicated, in order of
+    first appearance. Each guess is up to 2 capitalized words/acronyms on
+    either side of the ampersand (e.g. "Spend & Expense", "Dun &
+    Bradstreet", "Riemer & Braunstein LLP") — a real extraction, not the raw
+    excerpt the pre-fix panel prefilled. Returns an empty list when `text`
+    has no bare ampersand left to guess at (including one already covered by
+    `approved_terms`, via the same masking `mask_approved_ampersand_terms`
+    uses elsewhere)."""
+    masked = mask_approved_ampersand_terms(text, approved_terms) if approved_terms else text
+    guesses: list[str] = []
+    seen: set[str] = set()
+    for m in _AMP_TERM_GUESS_RE.finditer(masked):
+        span = m.group(0)
+        if "_" in span:
+            continue  # fell inside an already-approved term
+        guess = re.sub(r"\s+", " ", span.replace("&amp;", "&")).strip()
+        if "&" not in guess or guess == "&":
+            continue
+        key = guess.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        guesses.append(guess)
+    return guesses
+
+
+def validate_ampersand_term(term: str, field_text: str) -> tuple[bool, str]:
+    """Validation gate for "Allow everywhere" (issue #592/#594-followup C4):
+    the term must contain the ampersand, appear verbatim in the field's
+    CURRENT value, start and end on word boundaries, and be short (<=6
+    words) — closing the exact production failure this fixes, an untrimmed
+    excerpt ending mid-word ("...Spend & Expense pairs budgeting software
+    with a") that silently never masked its own finding. Returns
+    `(ok, error_message)` — `error_message` is empty when `ok` is True."""
+    term = (term or "").strip()
+    if not term:
+        return False, "A term is required."
+    if "&" not in term:
+        return False, "The term must contain an ampersand (&)."
+    if len(term.split()) > 6:
+        return False, "The term is too long (max 6 words) — trim it to just the name."
+    idx = field_text.find(term)
+    if idx == -1:
+        return False, "The term does not appear verbatim in the field's current value."
+    before = field_text[idx - 1] if idx > 0 else ""
+    after_idx = idx + len(term)
+    after = field_text[after_idx] if after_idx < len(field_text) else ""
+    if before.isalnum() or after.isalnum():
+        return False, "The term must start and end on whole words — trim any partial word."
+    return True, ""
+
+
 def typography_findings_plain(text: str, approved_ampersand_terms=()) -> list[tuple[str, str]]:
     """Same bare-ampersand/spaced-em-dash rules as `typography_findings`, but
     for a single already-plain-text value rather than Python source — the

@@ -42,7 +42,7 @@ def test_open_ampersand_row_shows_both_approve_term_and_allow_here(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_tool_category("Test Cat")
-        fid = lib.add_category_feature(cid, "Test Feature")
+        fid = lib.add_category_feature(cid, "Test Feature", "Works with Bain & Company")
         item_id = lib.add_voice_review_item(
             "category_features", fid, "definition", "bare-ampersand",
             "Bain & Company", source="script",
@@ -52,11 +52,14 @@ def test_open_ampersand_row_shows_both_approve_term_and_allow_here(env):
     c = _login_admin(env)
     r = c.get("/admin/voice/review-queue")
     assert r.status_code == 200
-    assert "Approve term" in r.text
+    # Renamed "Approve term" -> "Allow everywhere" (voice-queue-durability
+    # fix, Part C item 4) — the button reveals a full-width panel rather
+    # than rendering the term input inline.
+    assert "Allow everywhere" in r.text
     assert "Allow here" in r.text
     assert f"/admin/voice/review-queue/{item_id}/approve-term" in r.text
-    # The two actions are visually distinct (solid navy button vs. dashed
-    # muted outline) — spot check both style fragments are present.
+    # The two actions are visually distinct (solid navy button vs. outlined
+    # dashed button) — spot check both style fragments are present.
     assert "background:var(--navy);color:#fff" in r.text
 
 
@@ -80,8 +83,8 @@ def test_approve_term_resolves_all_matching_open_rows(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_tool_category("Test Cat")
-        fid1 = lib.add_category_feature(cid, "F1")
-        fid2 = lib.add_category_feature(cid, "F2")
+        fid1 = lib.add_category_feature(cid, "F1", "Bain & Company is great")
+        fid2 = lib.add_category_feature(cid, "F2", "", "See Bain & Company docs")
         item1 = lib.add_voice_review_item(
             "category_features", fid1, "definition", "bare-ampersand",
             "Bain & Company is great", source="script",

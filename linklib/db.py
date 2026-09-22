@@ -4488,10 +4488,35 @@ class Library:
         `after_text` back to the live table/column — this method only
         updates the queue row's own state, since it has no generic way to
         UPDATE an arbitrary table/column safely without a real column
-        allowlist per table."""
+        allowlist per table.
+
+        Durability fix (2026-09, closing the "reopen loop" incident): also
+        rejects an action that is meaningless for the item's own current
+        `status` -- the exact gap that let a group's own "Accept selected"
+        bulk button be run against a still-`open` row it was never valid
+        for (`accept`/`revert` require `status='auto_corrected'`;
+        `accept_exception`/`edit` require `status='open'`; `use_seed`/
+        `keep_mine` require `rule='seed-disagreement'`, which is always
+        `status='open'`). Calling `resolve_voice_review_item('accept', ...)`
+        against an `open` row used to write nothing back and record no
+        exception -- it read as resolved for exactly one 120s reconciler
+        pass before `reconcile_voice_review_queue()` found the same live
+        violation still there and reopened it as a brand-new row. Every
+        remaining action on an `open` finding now provably ends it one of
+        three ways: the text changes (`edit`), an exception is recorded
+        (`accept_exception`), or (via the separate approve-term route) a
+        term is allowed everywhere -- never a status flip with nothing
+        durable behind it."""
         item = self.get_voice_review_item(item_id)
         valid_actions = ("accept", "revert", "edit", "accept_exception", "use_seed", "keep_mine")
         if not item or action not in valid_actions:
+            return False
+        status = item["status"]
+        if action in ("accept", "revert") and status != "auto_corrected":
+            return False
+        if action in ("accept_exception", "edit") and status != "open":
+            return False
+        if action in ("use_seed", "keep_mine") and item["rule"] != "seed-disagreement":
             return False
         new_status = {"accept": "resolved", "revert": "resolved",
                       "edit": "resolved", "accept_exception": "exception",
@@ -4763,7 +4788,7 @@ class Library:
             self.conn.commit()
             term_id = cur.lastrowid
         low_term = term.lower()
-        note = f'Approved as a global term ("{term}").'
+        note = f'Allowed everywhere as a global term ("{term}").'
         for item in self.list_voice_review_queue(status="open"):
             if item["rule"] != rule:
                 continue
@@ -7369,6 +7394,48 @@ class Library:
             "ORDER BY oc.id"
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def list_drifted_original_content_mirrors(self) -> list[dict]:
+        """Every original_content row WITH a working mirror
+        (mirrored_article_id points at a real articles row) whose mirrored
+        content is stale relative to the current body_md — i.e. the mirror
+        exists but sync_original_content_article() hasn't actually run
+        since the last edit. Complements list_unmirrored_original_content()
+        above, which only catches "no mirror at all"; this catches "mirror
+        exists but drifted," the gap a future non-route write (a script
+        that calls update_original_content() directly, bypassing the
+        admin-save-route sync trigger) can still produce.
+
+        Deliberately compares CONTENT, not updated_at timestamps: scripts/
+        normalize_original_content_tags.py calls update_original_content()
+        passing body_md unchanged (only tag_label/link_label actually
+        change), but Library.update_original_content() still bumps
+        updated_at unconditionally on every call — a timestamp comparison
+        would false-positive on that exact case. Re-deriving the expected
+        plain-text via plain_text_from_body_md() (the same function
+        sync_original_content_article() itself uses) and comparing it
+        directly against the stored articles.content is immune to that:
+        no drift is reported unless the actual indexed text differs."""
+        from .original_content_sync import plain_text_from_body_md
+
+        rows = self.conn.execute(
+            "SELECT oc.id, oc.slug, oc.title, oc.mirrored_article_id, "
+            "oc.body_md, a.content AS mirrored_content "
+            "FROM original_content oc JOIN articles a ON a.id = oc.mirrored_article_id "
+            "WHERE TRIM(COALESCE(oc.body_md, '')) != '' "
+            "ORDER BY oc.id"
+        ).fetchall()
+        drifted = []
+        for r in rows:
+            expected = plain_text_from_body_md(r["body_md"])
+            if expected != (r["mirrored_content"] or ""):
+                drifted.append({
+                    "id": r["id"],
+                    "slug": r["slug"],
+                    "title": r["title"],
+                    "mirrored_article_id": r["mirrored_article_id"],
+                })
+        return drifted
 
     def insert_mirrored_article(self, url: str, title: str, content: str) -> int:
         """Create the articles row backing a mirrored original_content piece.

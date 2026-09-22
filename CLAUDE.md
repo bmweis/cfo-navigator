@@ -234,7 +234,25 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   content ingestion) for the full write-up and
   `tests/test_original_content_ingestion.py`'s
   `test_list_unmirrored_*`/`test_admin_checks_surfaces_an_unmirrored_row`
-  for the regression coverage.
+  for the regression coverage. **Follow-up (2026-09, durability audit) —
+  the invariant now also catches DRIFT, not just a missing mirror**:
+  `Library.list_drifted_original_content_mirrors()` flags a row whose
+  `mirrored_article_id` is valid but whose mirrored `articles.content` no
+  longer matches the current `body_md` — the gap a future non-route write
+  (any script calling `update_original_content()` without also calling
+  `sync_original_content_article()`) can still produce even with the
+  missing-mirror check in place. Compares content directly (re-deriving
+  the expected text via `plain_text_from_body_md()`, the same function the
+  sync itself uses), never `updated_at` timestamps — deliberately, since
+  `scripts/normalize_original_content_tags.py` calls `update_original_
+  content()` with `body_md` UNCHANGED but the method still bumps
+  `updated_at` on every call, which would false-positive a timestamp-based
+  check on that exact already-shipping script. `original_content_mirror_
+  problems()` reports both missing and drifted rows together, each naming
+  the fix (`/admin/thought-leadership/original/{id}/edit`, click Save —
+  identical for both failure modes). See
+  `tests/test_original_content_ingestion.py`'s `test_list_drifted_*` for
+  the coverage, including the tag-only-edit false-positive guard.
 - **Embedding costs are split by who pays for them.** Embed-on-save/backfill cost is
   Brian's overhead (`article_embeddings.cost_usd`) and never touches a user's Ask
   budget. Embedding the retrieval QUESTION at ask-time is a user-cap cost — it folds

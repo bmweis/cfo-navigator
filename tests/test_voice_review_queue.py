@@ -290,11 +290,18 @@ def test_review_queue_edit_prefill_uses_full_value_not_truncated_excerpt(lib):
     stored value is much longer, then submits the "full value, unchanged"
     round trip through the real submit path and asserts the full column
     value survives byte-identical."""
+    # Uses a bare-ampersand (an OPEN finding, not an auto-corrected em-dash
+    # write) so "edit" is a valid action for this row's status — the
+    # durability guard (Part A item 1/2) restricts "edit" to `status='open'`
+    # rows, and `update_tool_content` with a spaced em dash would instead
+    # auto-correct at write time and land the row in `auto_corrected`, where
+    # "edit" is no longer a valid action at all.
     tid = lib.add_tool("Test Tool Long", "placeholder", "https://example-long.com", [], approved=1)
-    long_value = ("This is a long description. " * 20) + "A tool that does X — and Y too."
+    long_value = ("This is a long description. " * 20) + "A tool that does X & Y too."
     lib.update_tool_content(tid, "Test Tool Long", long_value)
-
-    item = lib.list_voice_review_queue()[0]
+    item_id = lib.add_voice_review_item("tools", tid, "description", "bare-ampersand", "X & Y too")
+    item = lib.get_voice_review_item(item_id)
+    assert item["status"] == "open"
     assert item["table_name"] == "tools" and item["column_name"] == "description"
     # The excerpt is genuinely a short snippet, not the full stored value —
     # confirms the seeded scenario actually exercises the truncation risk.
@@ -305,9 +312,7 @@ def test_review_queue_edit_prefill_uses_full_value_not_truncated_excerpt(lib):
     # is now pre-filled with, per the Part 4 fix.
     current = lib.get_voice_review_current_value(item["table_name"], item["row_id"], item["column_name"])
     assert current is not None
-    # The normalized (spaced-em-dash-fixed) value is what's actually stored —
-    # apply_voice_review_write's UPDATE will write it back byte-identical.
-    normalized_long_value = long_value.replace(" — ", "—")
+    normalized_long_value = long_value
     assert current == normalized_long_value
 
     # Submit the FULL value back unchanged, through the real submit path
@@ -681,3 +686,225 @@ def test_apply_ampersand_replacement_handles_escaped_amp_in_body_md(lib):
 def test_apply_ampersand_replacement_returns_false_for_unknown_item(lib):
     assert lib.apply_ampersand_replacement(999999) is False
     assert lib.preview_ampersand_replacement(999999) is None
+
+
+# --- Part A item 1/2 — the "reopen loop" durability guard -------------------
+#
+# Before this fix, `resolve_voice_review_item` only checked that `action` was
+# one of the six known action strings — it never checked the item's own
+# `status`, so running e.g. "accept" (an `auto_corrected`-only action) against
+# a still-`open` row silently wrote nothing back and returned True anyway.
+# That's the exact "reopen loop": the queue read as resolved for one 120s
+# reconciler pass, then `reconcile_voice_review_queue()` found the identical
+# live violation still there and re-queued it as a brand-new row. Every test
+# below is proven to fail against the pre-fix code (no `status` check at all,
+# every action accepted unconditionally for any item) before being trusted.
+
+def test_accept_and_revert_are_rejected_against_an_open_row(lib):
+    """`accept`/`revert` only make sense for an `auto_corrected` row (undo or
+    keep an already-applied automatic correction) — running either against a
+    still-`open` finding must be a no-op, not a silent false-positive
+    resolve."""
+    tid = lib.add_tool("Durability Tool", "A tool.", "https://durability.example.com", [], approved=1)
+    item_id = lib.add_voice_review_item("tools", tid, "description", "bare-ampersand", "Acme & Co", source="script")
+    item = lib.get_voice_review_item(item_id)
+    assert item["status"] == "open"
+
+    assert lib.resolve_voice_review_item(item_id, "accept") is False
+    assert lib.get_voice_review_item(item_id)["status"] == "open"
+
+    assert lib.resolve_voice_review_item(item_id, "revert") is False
+    assert lib.get_voice_review_item(item_id)["status"] == "open"
+
+
+def test_accept_exception_and_edit_are_rejected_against_an_auto_corrected_row(lib):
+    """`accept_exception`/`edit` only make sense for a still-`open` finding —
+    running either against an already-`auto_corrected` row (whose text was
+    already fixed at save time) must be rejected, not silently accepted."""
+    tid = lib.add_tool("Durability Tool 2", "A tool.", "https://durability2.example.com", [], approved=1)
+    lib.update_tool_content(tid, "Durability Tool 2", "A tool that does X — and Y too")
+    item = lib.list_voice_review_queue(status="auto_corrected")[0]
+    assert item["status"] == "auto_corrected"
+
+    assert lib.resolve_voice_review_item(item["id"], "accept_exception") is False
+    assert lib.get_voice_review_item(item["id"])["status"] == "auto_corrected"
+
+    assert lib.resolve_voice_review_item(item["id"], "edit") is False
+    assert lib.get_voice_review_item(item["id"])["status"] == "auto_corrected"
+
+
+def test_accept_exception_and_edit_succeed_against_an_open_row(lib):
+    """The matching-status actions still work — the guard only rejects a
+    mismatch, it doesn't break the legitimate path."""
+    tid = lib.add_tool("Durability Tool 3", "A tool.", "https://durability3.example.com", [], approved=1)
+    item_id = lib.add_voice_review_item("tools", tid, "description", "bare-ampersand", "Acme & Co", source="script")
+    assert lib.resolve_voice_review_item(item_id, "accept_exception") is True
+    assert lib.get_voice_review_item(item_id)["status"] == "exception"
+
+
+def test_accept_and_revert_succeed_against_an_auto_corrected_row(lib):
+    tid = lib.add_tool("Durability Tool 4", "A tool.", "https://durability4.example.com", [], approved=1)
+    lib.update_tool_content(tid, "Durability Tool 4", "A tool that does X — and Y too")
+    item = lib.list_voice_review_queue(status="auto_corrected")[0]
+    assert lib.resolve_voice_review_item(item["id"], "accept") is True
+    assert lib.get_voice_review_item(item["id"])["status"] == "resolved"
+
+
+def test_use_seed_and_keep_mine_are_rejected_against_a_non_seed_disagreement_item(lib):
+    """`use_seed`/`keep_mine` only ever make sense for `rule='seed-disagreement'`
+    rows — running either against an ordinary bare-ampersand/spaced-em-dash
+    finding must be rejected."""
+    tid = lib.add_tool("Durability Tool 5", "A tool.", "https://durability5.example.com", [], approved=1)
+    item_id = lib.add_voice_review_item("tools", tid, "description", "bare-ampersand", "Acme & Co", source="script")
+    assert lib.resolve_voice_review_item(item_id, "use_seed") is False
+    assert lib.resolve_voice_review_item(item_id, "keep_mine") is False
+    assert lib.get_voice_review_item(item_id)["status"] == "open"
+
+
+def test_use_seed_and_keep_mine_succeed_against_a_seed_disagreement_item(lib):
+    tid = lib.add_tool("Durability Tool 6", "A tool.", "https://durability6.example.com", [], approved=1)
+    item_id = lib.add_seed_disagreement_item("tools", tid, "name", "Live Name", "Seed Name")
+    assert lib.resolve_voice_review_item(item_id, "use_seed") is True
+    assert lib.get_voice_review_item(item_id)["status"] == "resolved"
+
+    item_id2 = lib.add_seed_disagreement_item("tools", tid, "name", "Live Name 2", "Seed Name 2")
+    assert lib.resolve_voice_review_item(item_id2, "keep_mine") is True
+    assert lib.get_voice_review_item(item_id2)["status"] == "exception"
+
+
+# --- Part A item 4 — Allow-everywhere prefill/validation/verification -------
+
+def test_guess_ampersand_terms_extracts_a_real_term_not_the_raw_excerpt():
+    """The production bad-write shape this closes: prefilling from the raw
+    excerpt let an untrimmed multi-sentence blob be submitted as a "term".
+    `guess_ampersand_terms` must instead extract just the capitalized phrase
+    immediately around the ampersand."""
+    from linklib.voice_review import guess_ampersand_terms
+    text = "NetSuite, and Intacct[1] BILL Spend & Expense pairs budgeting software with a"
+    guesses = guess_ampersand_terms(text)
+    assert any("Spend & Expense" in g for g in guesses)
+    # The guess must never be the entire untrimmed field text.
+    assert text not in guesses
+
+
+def test_guess_ampersand_terms_handles_multiple_ampersands_as_separate_candidates():
+    from linklib.voice_review import guess_ampersand_terms
+    text = "Bain & Company, Dun & Bradstreet, and the G&A team"
+    guesses = guess_ampersand_terms(text)
+    assert "Bain & Company" in guesses
+    assert "Dun & Bradstreet" in guesses
+    # An unspaced, unanchored ampersand with no adjacent capitalized words on
+    # either side (G&A, lowercase "team" after) must never surface as a
+    # bare "&" guess with nothing around it.
+    assert "&" not in guesses
+
+
+def test_guess_ampersand_terms_masks_already_approved_terms(lib):
+    from linklib.voice_review import guess_ampersand_terms
+    lib.approve_voice_term("Bain & Company")
+    text = "Bain & Company and Dun & Bradstreet are both cited here"
+    approved = [row["term"] for row in lib.list_approved_voice_terms()]
+    guesses = guess_ampersand_terms(text, approved_terms=approved)
+    assert "Bain & Company" not in guesses
+    assert "Dun & Bradstreet" in guesses
+
+
+def test_validate_ampersand_term_rejects_untrimmed_excerpt():
+    from linklib.voice_review import validate_ampersand_term
+    text = "NetSuite, and Intacct[1] BILL Spend & Expense pairs budgeting software with a"
+    ok, err = validate_ampersand_term(text, text)
+    assert ok is False
+    assert err
+
+
+def test_validate_ampersand_term_rejects_missing_ampersand():
+    from linklib.voice_review import validate_ampersand_term
+    ok, err = validate_ampersand_term("Just some words", "Just some words appear here")
+    assert ok is False
+
+
+def test_validate_ampersand_term_rejects_term_not_verbatim_in_field():
+    from linklib.voice_review import validate_ampersand_term
+    ok, err = validate_ampersand_term("Foo & Bar", "This field mentions nothing like that")
+    assert ok is False
+
+
+def test_validate_ampersand_term_rejects_partial_word_boundary():
+    from linklib.voice_review import validate_ampersand_term
+    # "ain & Company" is a substring of "Bain & Company" but starts mid-word.
+    ok, err = validate_ampersand_term("ain & Company", "We work with Bain & Company often")
+    assert ok is False
+
+
+def test_validate_ampersand_term_accepts_a_clean_trimmed_term():
+    from linklib.voice_review import validate_ampersand_term
+    ok, err = validate_ampersand_term("Spend & Expense", "BILL Spend & Expense pairs budgeting")
+    assert ok is True
+    assert err == ""
+
+
+def test_approve_voice_term_clears_the_masked_finding_and_sibling_rows(lib):
+    """Approving a term must (a) mask it out of future scans, and (b)
+    immediately resolve every currently-open row of the same rule whose text
+    contains it — proving the term actually took effect, not just that a row
+    was inserted into voice_approved_terms."""
+    tid1 = lib.add_tool("Sibling Tool A", "A tool.", "https://siblinga.example.com", [], approved=1)
+    tid2 = lib.add_tool("Sibling Tool B", "A tool.", "https://siblingb.example.com", [], approved=1)
+    item1 = lib.add_voice_review_item("tools", tid1, "description", "bare-ampersand", "Works with Bain & Company", source="script")
+    item2 = lib.add_voice_review_item("tools", tid2, "description", "bare-ampersand", "Also cites Bain & Company here", source="script")
+
+    lib.approve_voice_term("Bain & Company")
+
+    assert lib.get_voice_review_item(item1)["status"] == "resolved"
+    assert lib.get_voice_review_item(item2)["status"] == "resolved"
+
+    # And a fresh scan of raw text containing the same term no longer flags it.
+    from linklib.voice_review import mask_approved_ampersand_terms
+    approved = [row["term"] for row in lib.list_approved_voice_terms()]
+    masked = mask_approved_ampersand_terms("We partner with Bain & Company on this.", approved)
+    assert "Bain & Company" not in masked
+
+
+def test_remove_approved_voice_term_reopens_the_finding_on_the_next_reconcile_pass(lib):
+    """Part A item 5 — "Remove reopens the masked findings." Confirmed as
+    "on the next reconcile pass," not immediately: `remove_approved_voice_term`
+    itself never touches `voice_review_queue` (its own docstring says so —
+    it "does not retroactively reopen queue rows already resolved"), but the
+    live scan no longer masks the term once it's removed, and
+    `reconcile_voice_review_queue()` (the background reconciler) adds a
+    fresh `open` row for any live finding not already queued. Together, the
+    two satisfy the brief's "Remove reopens the masked findings" —
+    mechanically, through the reconciler, not through Remove itself."""
+    # A term with no source-level allowlist entry (unlike "Bain & Company",
+    # which is in AMPERSAND_NAMES for an unrelated reason — that would mask
+    # it at the source scanner level regardless of this DB-backed mechanism).
+    tid = lib.add_tool("Reopen Tool", "Works with Widgetco & Partners", "https://reopen.example.com",
+                        [], approved=1)
+    term_id = lib.approve_voice_term("Widgetco & Partners")
+
+    # A fresh scan finds nothing (masked) and reconcile adds no open row.
+    result1 = lib.reconcile_voice_review_queue()
+    open_rows = lib.list_voice_review_queue(status="open")
+    matching = [i for i in open_rows if i["table_name"] == "tools" and str(i["row_id"]) == str(tid)]
+    assert not matching, "masked term must not produce an open row while approved"
+
+    lib.remove_approved_voice_term(term_id)
+    result2 = lib.reconcile_voice_review_queue()
+    assert result2["added"] >= 1
+    open_rows2 = lib.list_voice_review_queue(status="open")
+    matching2 = [i for i in open_rows2 if i["table_name"] == "tools" and str(i["row_id"]) == str(tid)
+                 and i["rule"] == "bare-ampersand"]
+    assert matching2, "removing the approved term must let the finding reopen on the next reconcile pass"
+
+
+def test_remove_approved_voice_term_lets_the_term_be_flagged_again(lib):
+    term_id = lib.approve_voice_term("Foo & Bar")
+    from linklib.voice_review import mask_approved_ampersand_terms
+    approved = [row["term"] for row in lib.list_approved_voice_terms()]
+    masked = mask_approved_ampersand_terms("Foo & Bar shows up here.", approved)
+    assert "Foo & Bar" not in masked
+
+    lib.remove_approved_voice_term(term_id)
+    approved2 = [row["term"] for row in lib.list_approved_voice_terms()]
+    masked2 = mask_approved_ampersand_terms("Foo & Bar shows up here.", approved2)
+    assert "Foo & Bar" in masked2

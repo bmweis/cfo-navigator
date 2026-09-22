@@ -171,14 +171,36 @@ def og_card_missing_problems() -> list[str]:
 # mechanically-enforced invariant, the same shape as hub_nav_orphan_problems
 # above, not a dated manual attestation like the pricing/model-freshness
 # banners on /admin/checks.
+#
+# 2026-09 durability follow-up: extended to also catch DRIFT, not just a
+# missing mirror outright — a row whose mirrored_article_id points at a
+# real articles row, but whose content no longer matches the current
+# body_md (see Library.list_drifted_original_content_mirrors' own
+# docstring for why this compares content, not updated_at timestamps).
+# Every flagged row, missing-mirror or drifted alike, names the exact fix:
+# open it at /admin/thought-leadership/original/{id}/edit and click Save,
+# which re-runs sync_original_content_article() unconditionally.
 def original_content_mirror_problems() -> list[str]:
     from webapp.app import _lib
     lib = _lib()
     try:
-        rows = lib.list_unmirrored_original_content()
+        missing = lib.list_unmirrored_original_content()
+        drifted = lib.list_drifted_original_content_mirrors()
     finally:
         lib.close()
-    return [f"{r['slug']!r} (id {r['id']}) has body_md but no working articles mirror" for r in rows]
+    problems = [
+        f"{r['slug']!r} (id {r['id']}) has body_md but no working articles "
+        f"mirror — fix: open /admin/thought-leadership/original/{r['id']}/edit "
+        f"and click Save"
+        for r in missing
+    ]
+    problems += [
+        f"{r['slug']!r} (id {r['id']}) mirror is stale — its articles row "
+        f"no longer matches body_md — fix: open "
+        f"/admin/thought-leadership/original/{r['id']}/edit and click Save"
+        for r in drifted
+    ]
+    return problems
 
 
 # --- Voice review queue (2026-09) --------------------------------------------

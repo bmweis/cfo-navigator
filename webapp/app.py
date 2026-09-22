@@ -68,6 +68,10 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 
 from linklib import compare, gates
 from linklib.db import DuplicateURLError, Library, normalize_url
+from linklib.voice_review import (
+    guess_ampersand_terms as _voice_guess_ampersand_terms,
+    validate_ampersand_term,
+)
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS
 from linklib.overhead_csv import parse_overhead_csv
@@ -34269,7 +34273,7 @@ def admin_voice_page(request: Request):
 <span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Approved ampersand terms</span>
 <span style="font-size:12px;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 8px;">Database-backed</span>
 </div>
-<p style="color:var(--muted);margin:0 0 12px;font-size:13px;">A GLOBAL, permanent whitelist&mdash;each exact term here is always fine, everywhere, in every scanned column. This is what the Voice review queue's &ldquo;Approve term&rdquo; action writes to. Distinct from the source-managed <code>AMPERSAND_NAMES</code>/<code>AMPERSAND_ACRONYMS</code> lists above: those govern the CI-only source-code scan (which never sees this database), and this table has no bearing on them&mdash;the two can never disagree, since they check different things (source literals vs. live database columns). Removing a term here makes it flaggable again on the next scan.</p>
+<p style="color:var(--muted);margin:0 0 12px;font-size:13px;">A GLOBAL, permanent whitelist&mdash;each exact term here is always fine, everywhere, in every scanned column. This is what the Voice review queue's &ldquo;Allow everywhere&rdquo; action writes to. Distinct from the source-managed <code>AMPERSAND_NAMES</code>/<code>AMPERSAND_ACRONYMS</code> lists above: those govern the CI-only source-code scan (which never sees this database), and this table has no bearing on them&mdash;the two can never disagree, since they check different things (source literals vs. live database columns). Removing a term here makes it flaggable again on the next scan.</p>
 {approved_rows_html}
 <form method="post" action="/admin/voice/approved-terms/add" style="display:flex;gap:8px;margin-top:12px;">
 <input type="text" name="term" placeholder="e.g. Bain &amp; Company" required style="flex:1;font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;">
@@ -34585,15 +34589,20 @@ def _voice_field_cell_html(lib, item: dict) -> str:
     name as quieter secondary text — replacing the old raw
     "communities.demographic id=2" format.
 
-    Compressed to a fixed narrow column (issue #592 item 5): both lines are
-    `nowrap`+ellipsis-truncated rather than wrapping or stretching the
-    column, with the full un-truncated value in a `title` tooltip — the
-    width this frees up flows to the Detail column instead."""
+    Two lines, not three (Part C item 1 fix, voice-queue-durability PR):
+    the `table.column` path and the record id are combined onto ONE
+    secondary line ("community_profiles.notable_members · id 26") rather
+    than the path getting its own line and the row's caller adding a
+    third for the id. Both lines are `nowrap`+ellipsis-truncated rather
+    than wrapping or stretching the column, with the full un-truncated
+    value in a `title` tooltip — the width this frees up flows to the
+    Detail column instead."""
     name, url = _voice_admin_edit_link(lib, item["table_name"], item["row_id"])
     trunc = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;"
     primary = (f'<a href="{_esc(url)}" title="{_esc(name)}" style="color:var(--navy);font-weight:600;text-decoration:none;">{_esc(name)}</a>'
                if url else f'<span title="{_esc(name)}" style="font-weight:600;">{_esc(name)}</span>')
-    path = f"{item['table_name']}.{item['column_name']}"
+    id_suffix = f" · id {item['row_id']}" if item["row_id"] is not None else " · (setting)"
+    path = f"{item['table_name']}.{item['column_name']}{id_suffix}"
     return (f'<div style="font-size:13px;{trunc}">{primary}</div>'
             f'<div title="{_esc(path)}" style="font-size:11px;color:var(--muted);{trunc}">{_esc(path)}</div>')
 
@@ -34642,16 +34651,36 @@ def _voice_char_diff_html(before: str, after: str) -> str:
 # Actions is sized to fit exactly one row of buttons for the widest case
 # (an "open" bare-ampersand row: Edit / Allow here / Approve term).
 _VOICE_COL_WIDTH_CHECKBOX = 30
-_VOICE_COL_WIDTH_FIELD = 150
-_VOICE_COL_WIDTH_SOURCE = 100
+# Part C item 1 fix (voice-queue-durability PR): the previous narrow 150px
+# Field/100px Source pair truncated real record names/paths while Detail
+# sat mostly empty. Field/Source now use the same site-wide named widths
+# every other admin table uses for these field types (_COL_WIDTH_NAME/
+# _COL_WIDTH_STATUS, webapp/app.py's shared column-width constants) rather
+# than page-local one-off numbers, and the row id folds onto the same line
+# as the table.column path (see `_voice_field_cell_html`) so the cell is
+# two lines, not three.
+_VOICE_COL_WIDTH_FIELD = _COL_WIDTH_NAME
+_VOICE_COL_WIDTH_SOURCE = _COL_WIDTH_STATUS
 _VOICE_COL_WIDTH_ACTIONS = 280
 
 
 def _voice_review_row_html(lib, item: dict) -> str:
-    row_id_txt = f"id={_esc(item['row_id'])}" if item["row_id"] is not None else "(setting)"
     status = item["status"]
     rule = item["rule"]
-    checkbox = (f'<input type="checkbox" class="voice-item-cb" data-group="{_esc(rule)}" value="{item["id"]}">'
+    # Durability fix (2026-09) — the checkbox group key is now `rule::status`,
+    # not just `rule`. Before this, one "Select all" checkbox and one bulk
+    # bar covered BOTH an `auto_corrected` row and an unrelated `open` row
+    # sharing the same rule — so "Accept selected" (meant for auto_corrected
+    # rows) could be run against an `open` finding too. `resolve_voice_review_item`
+    # sets status='resolved' unconditionally regardless of which action name
+    # is passed, with nothing written back and no exception/term recorded —
+    # so an `open` row "accepted" this way looked resolved for exactly one
+    # reconciler pass (120s) before `reconcile_voice_review_queue()` found
+    # the same live violation still there and reopened it as a brand-new
+    # row. Scoping the group by status means the bulk bar rendered for a
+    # given group can only ever offer actions valid for that group's own
+    # status (see `_voice_review_group_bulk_actions_html`).
+    checkbox = (f'<input type="checkbox" class="voice-item-cb" data-group="{_esc(rule)}::{_esc(status)}" value="{item["id"]}">'
                 if status in ("open", "auto_corrected") else "")
     # C5 fix (PR #590 Phase 2), reversed (issue #592 item 6): every row
     # type's actions render inside one single-line flex row by default,
@@ -34747,13 +34776,25 @@ def _voice_review_row_html(lib, item: dict) -> str:
         # second click.
         approve_term_btn = ""
         if rule == "bare-ampersand":
-            guess = (item.get("excerpt") or "").strip()[:120]
-            approve_term_id = f"voice-approve-term-{item['id']}"
-            approve_term_btn = (
-                f'<button type="button" class="btn btn-ghost" style="{btn_style}" '
-                f'onclick="voiceToggleApproveTerm(\'{item["id"]}\', true)">Approve term</button>'
-            )
-            approve_term_panel_html = f"""
+            # Allow-everywhere fix — one guess (and one panel) per distinct
+            # unapproved ampersand occurrence in the field's CURRENT value,
+            # via `guess_ampersand_terms`, never the raw excerpt: a field
+            # with two unrelated ampersands ("Bain & Company, Dun &
+            # Bradstreet") gets two separate buttons/panels, so the second
+            # one is never hidden behind the first.
+            approved_terms = [t["term"] for t in lib.list_approved_voice_terms("bare-ampersand")]
+            guesses = _voice_guess_ampersand_terms(current, approved_terms)
+            if not guesses:
+                guesses = [(item.get("excerpt") or "").strip()[:120]]
+            panels = []
+            buttons = []
+            for gi, guess in enumerate(guesses):
+                approve_term_id = f"voice-approve-term-{item['id']}-{gi}"
+                buttons.append(
+                    f'<button type="button" class="btn btn-ghost" style="{btn_style}" '
+                    f'onclick="voiceToggleApproveTerm(\'{item["id"]}-{gi}\', true)">Allow everywhere</button>'
+                )
+                panels.append(f"""
 <tr id="{approve_term_id}" style="display:none;">
   <td colspan="5" style="padding:10px 14px;background:var(--bg);border-top:1px dashed var(--line);">
     <form method="post" action="/admin/voice/review-queue/{item['id']}/approve-term" style="display:flex;flex-direction:column;gap:6px;max-width:520px;">
@@ -34763,25 +34804,33 @@ def _voice_review_row_html(lib, item: dict) -> str:
       <div style="display:flex;gap:6px;justify-content:flex-start;">
         <button type="submit" class="btn" style="{btn_style}">Approve</button>
         <button type="button" class="btn btn-ghost" style="{btn_style}color:var(--muted);"
-                onclick="voiceToggleApproveTerm('{item['id']}', false)">Cancel</button>
+                onclick="voiceToggleApproveTerm('{item['id']}-{gi}', false)">Cancel</button>
       </div>
     </form>
   </td>
-</tr>"""
+</tr>""")
+            approve_term_btn = "".join(buttons)
+            approve_term_panel_html = "".join(panels)
         # C4 fix (PR #590 Phase 2) — the EDIT field (the bulky full-width
         # textarea) used to render always-visible for every open row. It's
         # now collapsed behind an "Edit" button (`voiceToggleEditField`, in
         # _VOICE_BULK_JS below): the default, one-line state shows Edit /
-        # Allow here / Approve term (on ampersand rows); clicking Edit
+        # Allow here / Allow everywhere (on ampersand rows); clicking Edit
         # reveals the full-width textarea + Save edit / Cancel underneath,
         # and Cancel collapses it back without submitting anything.
+        #
+        # Durability fix (2026-09) — "Allow here"/"Allow everywhere" are the
+        # button-style pair: same outlined style as every other action
+        # button on this page (no dashed border, no grey text) — the two
+        # differ only in SCOPE, named plainly: "here" (this one spot) vs.
+        # "everywhere" (a global term).
         edit_field_id = f"voice-edit-field-{item['id']}"
         collapsed_row = actions_row_open + f"""
 <button type="button" class="btn btn-ghost" style="{btn_style}"
         onclick="voiceToggleEditField('{item['id']}', true)">Edit</button>
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="accept_exception">
-  <button type="submit" class="btn btn-ghost" style="{btn_style}border:1px dashed var(--line);color:var(--muted);">Allow here</button>
+  <button type="submit" class="btn btn-ghost" style="{btn_style}">Allow here</button>
 </form>
 {approve_term_btn}""" + actions_row_close
         actions = f"""
@@ -34825,44 +34874,56 @@ def _voice_review_row_html(lib, item: dict) -> str:
     return f"""
 <tr>
   <td style="padding:8px 10px;">{checkbox}</td>
-  <td style="padding:8px 10px;overflow:hidden;">{field_cell}<div title="{_esc(row_id_txt)}" style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{row_id_txt}</div></td>
+  <td style="padding:8px 10px;overflow:hidden;">{field_cell}</td>
   <td style="padding:8px 10px;font-size:13px;">{detail}</td>
   <td style="padding:8px 10px;overflow:hidden;">{source_badge}</td>
   <td style="padding:8px 10px;">{actions}</td>
 </tr>{approve_term_panel_html}"""
 
 
-def _voice_review_group_bulk_actions_html(rule: str) -> str:
-    """Group-level bulk actions, matching the per-row-type action sets:
-    'seed-disagreement' groups get "Use seed selected"/"Keep mine
-    selected"; every other group gets "Accept selected"/"Mark selected as
-    exception" — mirroring /admin/tools/software's own bulk "Edit
-    selected"/"Delete selected" pattern.
+def _voice_review_group_bulk_actions_html(rule: str, status: str) -> str:
+    """Group-level bulk actions for one (rule, status) group — durability fix
+    (2026-09): the bulk bar now offers ONLY what the rows it applies to
+    actually offer, never a mismatched action a row's own type doesn't
+    support. `seed-disagreement` rows are always `status='open'` and get
+    "Use seed selected"/"Keep mine selected"; an `auto_corrected` group
+    gets "Accept selected"/"Revert selected" (mirroring each row's own
+    Accept/Revert pair); an `open` group (any other rule) gets only "Allow
+    selected here" — there is no bulk "Accept" for an open finding, since
+    accepting an open row writes nothing back and records no exception, so
+    it can never survive the next reconciler pass (this is the exact
+    mechanism that caused the reopen loop this fix closes).
 
-    'bare-ampersand' (issue #592 item 4) additionally gets a "Replace &
-    with and" button — a real, separate mechanism from the other buttons
-    here (which all POST straight to /bulk-resolve via voiceBulkResolve):
-    this one submits to a dedicated PREVIEW route first
+    `bare-ampersand`+`open` (issue #592 item 4) additionally gets a
+    "Replace & with and" button — a real, separate mechanism from the other
+    buttons here (which all POST straight to /bulk-resolve via
+    voiceBulkResolve): this one submits to a dedicated PREVIEW route first
     (voiceBulkReplaceAmpersandPreview), since the whole point of the
     action is showing before/after for every selected row before writing
-    anything, not resolving on click."""
+    anything, not resolving on click. That preview-then-confirm flow is
+    itself durable — it only ever resolves a row after actually writing a
+    real replacement back (`Library.apply_ampersand_replacement`), never a
+    bare "accept" with nothing changed."""
+    group_key = f"{rule}::{status}"
     if rule == "seed-disagreement":
-        buttons = [("use_seed", "Use seed selected", ""), ("keep_mine", "Keep mine selected", "color:var(--muted);")]
+        buttons = [("use_seed", "Use seed selected", ""), ("keep_mine", "Keep mine selected", "")]
+    elif status == "auto_corrected":
+        buttons = [("accept", "Accept selected", ""), ("revert", "Revert selected", "")]
     else:
-        buttons = [("accept", "Accept selected", ""), ("accept_exception", "Allow selected here", "color:var(--muted);")]
+        buttons = [("accept_exception", "Allow selected here", "")]
     btn_html = "".join(
-        f'<button type="button" onclick="voiceBulkResolve(\'{_esc(rule)}\',\'{action}\')" '
+        f'<button type="button" onclick="voiceBulkResolve(\'{_esc(group_key)}\',\'{action}\')" '
         f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;{style}">{label}</button>'
         for action, label, style in buttons
     )
-    if rule == "bare-ampersand":
+    if rule == "bare-ampersand" and status == "open":
         btn_html += (
-            f'<button type="button" onclick="voiceBulkReplaceAmpersandPreview(\'{_esc(rule)}\')" '
+            f'<button type="button" onclick="voiceBulkReplaceAmpersandPreview(\'{_esc(group_key)}\')" '
             f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Replace ampersands with and</button>'
         )
     return (f'<div style="display:flex;gap:8px;align-items:center;margin:8px 0;">'
             f'<label style="font-size:12px;color:var(--muted);">'
-            f'<input type="checkbox" onclick="voiceToggleAll(\'{_esc(rule)}\',this.checked)"> Select all</label>'
+            f'<input type="checkbox" onclick="voiceToggleAll(\'{_esc(group_key)}\',this.checked)"> Select all</label>'
             f'{btn_html}</div>')
 
 
@@ -35007,7 +35068,19 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
 </tr></thead>"""
         for rule, rows in sorted(groups.items(), key=lambda kv: -len(kv[1])):
             rows_html = "".join(_voice_review_row_html(lib, r) for r in rows)
-            bulk_html = _voice_review_group_bulk_actions_html(rule) if len(rows) > 1 else ""
+            # Durability fix — one bulk bar per (rule, status) actually
+            # present in this rule's rows, never one bar covering a mix of
+            # open and auto_corrected rows (see `_voice_review_group_bulk_
+            # actions_html`'s own docstring for why that mix was the reopen-
+            # loop's real cause).
+            by_status: dict[str, list[dict]] = {}
+            for r in rows:
+                by_status.setdefault(r["status"], []).append(r)
+            bulk_html = "".join(
+                _voice_review_group_bulk_actions_html(rule, st)
+                for st in ("auto_corrected", "open")
+                if len(by_status.get(st, [])) > 1
+            )
             group_html += f"""
 <h2 style="margin-top:28px;">{_esc(_voice_rule_label(rule))} <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(rows)})</span></h2>
 {bulk_html}
@@ -35035,10 +35108,10 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
 
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Voice review queue</h1>
-<p style="color:var(--muted);max-width:760px;">Every voice-rule finding lands here for review&mdash;nothing is
-ever silently applied or silently overwritten. See /admin/voice for the source-managed mechanical rules and the
-ampersand allowlists in linklib/voice_review.py.</p>
+<h1 style="margin:0 0 4px;">Voice review queue</h1>
+<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Every voice-rule finding and automatic fix lands
+here. Fixes apply right away, and none happen without a record here. Rules and allowed terms are on
+<a href="/admin/voice">/admin/voice</a>.</p>
 {error_banner}
 {group_html}
 {resolved_html}
@@ -35092,17 +35165,26 @@ async def admin_voice_review_resolve(item_id: int, request: Request):
 
 @app.post("/admin/voice/review-queue/{item_id}/approve-term")
 async def admin_voice_review_approve_term(item_id: int, request: Request):
-    """Addition 2 (2026-09) — globally, permanently approve one exact
-    ampersand term (e.g. "Bain & Company"). Deliberately distinct from
-    /resolve's accept_exception ("Allow here"): this writes a row to
+    """"Allow everywhere" (renamed from "Approve term" — voice-queue-
+    durability fix): globally, permanently approve one exact ampersand term
+    (e.g. "Bain & Company"). Deliberately distinct from /resolve's
+    accept_exception ("Allow here"): this writes a row to
     `voice_approved_terms` via `Library.approve_voice_term`, which also
     resolves EVERY currently-open queue row (any table/column/row_id)
     whose excerpt/before/after text contains this exact term, case-
-    insensitively — not just this one item_id. The submitted `term` is
-    whatever the admin typed/adjusted in the form, never a mechanically-
-    derived boundary — a bare-ampersand match has no reliable way to know
-    where a "term" starts/ends (e.g. "Finance & Operations leaders" vs.
-    "Finance & Operations"), so the human draws that line here."""
+    insensitively — not just this one item_id.
+
+    Validated via `linklib.voice_review.validate_ampersand_term` before
+    anything is written — the term must contain the ampersand, appear
+    verbatim in the field's CURRENT live value, start/end on word
+    boundaries, and be <=6 words — closing the production incident where an
+    untrimmed, mid-word-cut excerpt was approved and never actually masked
+    its own finding. After a successful approve, this re-checks that the
+    finding it was raised from is now actually resolved; if it isn't
+    (masking somehow still missed it), that's reported as a visible error
+    rather than silently leaving the row open with no explanation — the term
+    itself stays approved either way, since `voice_approved_terms` has no
+    safe automatic rollback and the admin can always Remove it on /admin/voice."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
@@ -35112,14 +35194,28 @@ async def admin_voice_review_approve_term(item_id: int, request: Request):
         item = lib.get_voice_review_item(item_id)
         if not item:
             raise HTTPException(status_code=404, detail="not found")
-        if term:
-            lib.approve_voice_term(term, rule="bare-ampersand")
-        else:
+        current = lib.get_voice_review_current_value(item["table_name"], item["row_id"], item["column_name"])
+        if current is None:
+            current = item.get("after_text") or item.get("excerpt") or ""
+        if not term:
             # A blank submission still resolves this one row via the
             # ordinary "Allow here" path, rather than silently no-op-ing—
             # an admin who clears the field and submits anyway almost
             # certainly meant "just this one," not "do nothing."
             lib.resolve_voice_review_item(item_id, "accept_exception")
+            return RedirectResponse("/admin/voice/review-queue", status_code=303)
+        ok, err = validate_ampersand_term(term, current)
+        if not ok:
+            return RedirectResponse(
+                "/admin/voice/review-queue?error=" + quote(err), status_code=303)
+        lib.approve_voice_term(term, rule="bare-ampersand")
+        refreshed = lib.get_voice_review_item(item_id)
+        if refreshed and refreshed["status"] == "open":
+            return RedirectResponse(
+                "/admin/voice/review-queue?error=" + quote(
+                    f'Approved "{term}" everywhere, but it did not clear this specific '
+                    "finding—check the term matches exactly and try again, or use Allow here instead."),
+                status_code=303)
     finally:
         lib.close()
     return RedirectResponse("/admin/voice/review-queue", status_code=303)
