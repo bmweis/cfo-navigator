@@ -268,8 +268,13 @@ def test_approve_term_panel_is_full_width_and_only_appears_there(env):
     assert 'colspan="5"' in panel_html
     assert 'name="term"' in panel_html
     assert "Sales" in panel_html  # the prefilled guess
-    # issue #592 item 4 — the shortened caption, verbatim, no em dash, no all-caps.
-    assert "Trim to the exact term first. Once approved, it's fine everywhere, permanently." in panel_html
+    # Part C item 4 fix (voice-queue-durability PR, PR #595 review round) —
+    # "Approve term" renamed to "Allow everywhere," and this caption
+    # replaced with Brian's own exact wording, verbatim (linking
+    # /admin/voice, matching how the page's own lede references it).
+    assert ("Keep only the exact term, like Dun &amp; Bradstreet. "
+            "It'll be allowed everywhere. Remove it anytime on "
+            '<a href="/admin/voice">/admin/voice</a>.') in panel_html
     assert "—" not in panel_html  # no em dash anywhere in the panel
     assert ">Approve</button>" in panel_html
     assert ">Cancel</button>" in panel_html

@@ -678,3 +678,220 @@ def test_admin_checks_surfaces_a_drifted_row_with_an_edit_page_link(monkeypatch,
     assert row["ok"] is False
     assert "drifted-piece" in row["detail"]
     assert f"/admin/thought-leadership/original/{item_id}/edit" in row["detail"]
+
+
+# --- Voice review queue writes to original_content.body_md now re-sync ----
+# --- the mirror synchronously (voice-queue-durability fix, 2026-09) -------
+#
+# Brian's review feedback on this PR named a real, live gap: the review
+# queue's Edit/Revert/bulk-ampersand-replace actions write directly to
+# original_content.<column> via Library.apply_voice_review_write, but
+# nothing called sync_original_content_article() afterward — so a queue
+# edit would quietly leave the mirrored articles row stale until a human
+# happened to re-open the piece on /admin/thought-leadership/original and
+# click Save. The drift-detection tests above (test_list_drifted_*) only
+# ever prove the SAFETY NET catches an already-stale mirror; they say
+# nothing about whether the queue's own actions leave one in the first
+# place. These tests exercise the actual fix: they assert the mirror is
+# already correct immediately after the queue action returns, never via a
+# later checks.run_all()/list_drifted_original_content_mirrors() pass.
+
+
+def _reload_app(monkeypatch, tmp_path, name):
+    """Shared setup for the route/function-level tests below — same
+    reload-with-monkeypatched-env pattern as test_admin_checks_surfaces_*
+    above, factored out since four tests need it."""
+    import importlib
+    monkeypatch.setenv("LINKLIB_DB", str(tmp_path / name))
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import webapp.app as appmod
+    importlib.reload(appmod)
+    return appmod
+
+
+def test_resolve_edit_action_resyncs_mirror_synchronously(monkeypatch, tmp_path):
+    """The single most direct case: an admin clicks Edit on an open
+    original_content.body_md finding, types a new body, and saves. The
+    mirrored articles.content must already reflect the new body the
+    instant _resolve_voice_item_action returns — not eventually, not on
+    the next /admin/checks scan."""
+    appmod = _reload_app(monkeypatch, tmp_path, "edit-resync.db")
+    lib = appmod._lib()
+    try:
+        item_id = lib.add_original_content(
+            "edit-resync-piece", "Title", "Teaser", "Guide", "Read it",
+            body_md="Original body about FP&A.", status="live",
+        )
+        article_id = sync_original_content_article(lib, item_id)
+        assert article_id is not None
+
+        queue_id = lib.add_voice_review_item(
+            "original_content", item_id, "body_md", "bare-ampersand",
+            "Original body about FP&A.", source="scan",
+        )
+        assert queue_id != 0
+        item = lib.get_voice_review_item(queue_id)
+
+        new_body = "A completely different body about revenue recognition."
+        ok = appmod._resolve_voice_item_action(lib, item, "edit", new_body)
+        assert ok is True
+
+        # The live original_content row was updated...
+        row = lib.get_original_content(item_id)
+        assert row["body_md"] == new_body
+        # ...and the mirror already matches it — synchronously, not via a
+        # later scan.
+        article = lib.get_article(row["mirrored_article_id"])
+        assert "revenue recognition" in article["content"]
+        assert "Original body about FP&A" not in article["content"]
+        # And the drift check (the safety net, not the fix) correctly finds
+        # nothing wrong — confirming the sync actually ran, not just that
+        # the write succeeded.
+        assert lib.list_drifted_original_content_mirrors() == []
+    finally:
+        lib.close()
+
+
+def test_resolve_revert_action_resyncs_mirror_synchronously(monkeypatch, tmp_path):
+    """An auto_corrected row (a real _voice_fix correction already applied
+    at write time) gets Reverted back to its pre-correction text — the
+    mirror must follow that revert immediately too.
+
+    The initial body_md is deliberately dash-free: add_original_content()
+    itself runs every prose field through the same _voice_fix write-time
+    backstop, so a body containing a spaced em dash at INSERT time would
+    silently create its own extra auto_corrected queue row for this same
+    (table, row_id, column) — and list_voice_review_queue()'s ordering
+    (rule, table_name, column_name, id) would then hand the "first"
+    auto_corrected row back to a naive `next(...)` lookup, not the one this
+    test actually means to revert. Avoiding that ambiguity outright (rather
+    than filtering it out afterward) is what makes this test unambiguous
+    about which row it's exercising."""
+    appmod = _reload_app(monkeypatch, tmp_path, "revert-resync.db")
+    lib = appmod._lib()
+    try:
+        item_id = lib.add_original_content(
+            "revert-resync-piece", "Title", "Teaser", "Guide", "Read it",
+            body_md="The corrected body, already fixed.", status="live",
+        )
+        sync_original_content_article(lib, item_id)
+        assert lib.list_voice_review_queue() == []  # no spurious insert-time row
+
+        lib.log_voice_correction(
+            "original_content", item_id, "body_md",
+            before="The original body -- unfixed.",
+            after="The corrected body, already fixed.",
+            source="admin-edit", rule="spaced-em-dash",
+        )
+        rows = lib.list_voice_review_queue(status="auto_corrected")
+        queue_row = next(r for r in rows if r["table_name"] == "original_content")
+        item = lib.get_voice_review_item(queue_row["id"])
+
+        ok = appmod._resolve_voice_item_action(lib, item, "revert")
+        assert ok is True
+
+        row = lib.get_original_content(item_id)
+        assert row["body_md"] == "The original body -- unfixed."
+        article = lib.get_article(row["mirrored_article_id"])
+        assert "unfixed" in article["content"]
+        assert lib.list_drifted_original_content_mirrors() == []
+    finally:
+        lib.close()
+
+
+def test_bulk_replace_ampersand_apply_route_resyncs_mirror_synchronously(monkeypatch, tmp_path):
+    """Route-level (not just function-level), covering the third write path
+    named in the review: the "Replace ampersands with and" bulk apply
+    route. Posts to the real HTTP route via TestClient — the same way an
+    admin's browser would — and asserts the mirror already matches
+    immediately after the response comes back, no scan involved."""
+    from fastapi.testclient import TestClient
+
+    appmod = _reload_app(monkeypatch, tmp_path, "bulk-amp-resync.db")
+    lib = appmod._lib()
+    try:
+        item_id = lib.add_original_content(
+            "bulk-amp-resync-piece", "Title", "Teaser", "Guide", "Read it",
+            body_md="Finance & Operations leaders read this.", status="live",
+        )
+        sync_original_content_article(lib, item_id)
+        queue_id = lib.add_voice_review_item(
+            "original_content", item_id, "body_md", "bare-ampersand",
+            "Finance & Operations leaders read this.", source="scan",
+        )
+        assert queue_id != 0
+    finally:
+        lib.close()
+
+    client = TestClient(appmod.app, raise_server_exceptions=True)
+    client.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    resp = client.post(
+        "/admin/voice/review-queue/bulk-replace-ampersand/apply",
+        data={"item_ids": [str(queue_id)]},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+
+    lib2 = appmod._lib()
+    try:
+        row = lib2.get_original_content(item_id)
+        assert "Finance and Operations" in row["body_md"]
+        assert row["mirrored_article_id"] is not None
+        article = lib2.get_article(row["mirrored_article_id"])
+        assert "Finance and Operations" in article["content"]
+        # Synchronous, not eventual — the safety net finds nothing pending.
+        assert lib2.list_drifted_original_content_mirrors() == []
+    finally:
+        lib2.close()
+
+
+def test_approve_term_route_never_needs_to_resync_because_it_never_writes(monkeypatch, tmp_path):
+    """Negative case, per the same review point: "Allow everywhere" is
+    confirmed to never write back to original_content.body_md at all — it
+    only inserts into voice_approved_terms and resolves matching queue
+    rows — so body_md (and therefore the mirror) must be byte-identical
+    before and after, even once approving the term resolves the open
+    finding."""
+    from fastapi.testclient import TestClient
+
+    appmod = _reload_app(monkeypatch, tmp_path, "approve-term-no-resync.db")
+    lib = appmod._lib()
+    try:
+        item_id = lib.add_original_content(
+            "approve-term-piece", "Title", "Teaser", "Guide", "Read it",
+            body_md="Bain & Company is a real firm name.", status="live",
+        )
+        sync_original_content_article(lib, item_id)
+        row_before = lib.get_original_content(item_id)
+        article_before = lib.get_article(row_before["mirrored_article_id"])
+        queue_id = lib.add_voice_review_item(
+            "original_content", item_id, "body_md", "bare-ampersand",
+            "Bain & Company is a real firm name.", source="scan",
+        )
+        assert queue_id != 0
+    finally:
+        lib.close()
+
+    client = TestClient(appmod.app, raise_server_exceptions=True)
+    client.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    resp = client.post(
+        f"/admin/voice/review-queue/{queue_id}/approve-term",
+        data={"term": "Bain & Company"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "error=" not in (resp.headers.get("location") or "")
+
+    lib2 = appmod._lib()
+    try:
+        row_after = lib2.get_original_content(item_id)
+        # body_md is untouched — this action never writes to the table.
+        assert row_after["body_md"] == row_before["body_md"]
+        article_after = lib2.get_article(row_after["mirrored_article_id"])
+        assert article_after["content"] == article_before["content"]
+        # The finding it was raised from is actually resolved.
+        item = lib2.get_voice_review_item(queue_id)
+        assert item["status"] != "open"
+    finally:
+        lib2.close()
