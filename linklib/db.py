@@ -2537,17 +2537,31 @@ class Library:
             # by Library.seed_current_feed_order() — see its own docstring.
             "ALTER TABLE feeds ADD COLUMN current_feed_order INTEGER NOT NULL DEFAULT 0",
             # Voice review queue trigger taxonomy (2026-09, seed-sync infinite-
-            # loop investigation) — records WHICH mechanism produced a given
-            # voice_review_queue row: 'admin-edit' (a human editing a record
-            # through an /admin/* submit route), 'startup-sync' (_seed_toolbox's
-            # per-boot re-sync of a tools/communities/benchmarks row against its
-            # static seed-source value), 'script' (a one-off backfill/fix
-            # script, e.g. scripts/backfill_voice_review_queue.py,
+            # loop investigation; extended 2026-09 for issue #592 item 3) —
+            # records WHICH mechanism produced a given voice_review_queue row.
+            # Five values: 'admin-edit' (a human editing a record through an
+            # /admin/* submit route), 'startup-sync' (_seed_toolbox's per-boot
+            # re-sync of a tools/communities/benchmarks row, or its advisor
+            # boolean, against its static seed-source value), 'script' (a
+            # one-off, HUMAN-RUN backfill/fix script, e.g.
+            # scripts/backfill_voice_review_queue.py,
             # scripts/fix_spaced_em_dashes.py, scripts/regen_ai_drafted_fields.py),
-            # or 'submission' (a public, member-gated submission route —
+            # 'submission' (a public, member-gated submission route —
             # POST /tools/submit, POST /tools/communities/submit — where the
             # content's origin is known but it's neither an admin edit nor a
-            # script/sync run).
+            # script/sync run), or 'scan' (a periodic BACKGROUND pass —
+            # `Library.reconcile_voice_review_queue()`, run on a schedule by
+            # webapp.tasks' checks refresher, re-reading the live DB — not a
+            # human-run script, even though it shares add_voice_review_item's
+            # same insertion path as scripts/backfill_voice_review_queue.py;
+            # the two were indistinguishable under 'script' before this fix).
+            #
+            # A sixth string worth knowing about here, even though it's a
+            # DIFFERENT column: `rule='seed-disagreement'` (set by
+            # `add_seed_disagreement_item`) is the RULE that matched, not a
+            # `source` value — a seed-disagreement row's own `source` is
+            # always 'startup-sync', the mechanism that found the divergence.
+            #
             # NULL for every pre-existing row (deliberately not backfilled —
             # see Library._vf's own call sites for which value each caller now
             # passes) and for any future caller that doesn't yet pass one;
@@ -4318,14 +4332,21 @@ class Library:
         callers should still be free to call this unconditionally; see `_vf`
         above for the guarded wrapper most `Library` methods should use.
 
-        `source` (2026-09, seed-sync infinite-loop investigation) is one of
-        'admin-edit' (an /admin/* submit route saving a human's edit),
-        'startup-sync' (_seed_toolbox's per-boot re-sync against a static
-        seed source), 'script' (a one-off backfill/fix script), or
-        'submission' (a public, member-gated submission route — the content's
-        origin is known but it's neither an admin edit nor a script/sync run)
-        — or None when the caller doesn't yet pass one (every write path
-        predating this parameter). Purely descriptive: it changes nothing about
+        `source` (2026-09, seed-sync infinite-loop investigation, extended
+        2026-09 for issue #592 item 3) is one of 'admin-edit' (an /admin/*
+        submit route saving a human's edit), 'startup-sync' (_seed_toolbox's
+        per-boot re-sync against a static seed source), 'script' (a one-off
+        backfill/fix script), 'submission' (a public, member-gated
+        submission route — the content's origin is known but it's neither
+        an admin edit nor a script/sync run), or 'scan' (a periodic
+        background pass re-reading the live DB — `reconcile_voice_review_
+        queue()`, not a human-run script) — or None when the caller doesn't
+        yet pass one (every write path predating this parameter). Note: a
+        `voice_review_queue` row can also carry `rule='seed-disagreement'`
+        (via `add_seed_disagreement_item`) — that's a distinct dimension,
+        the RULE that matched, not a `source` value; a seed-disagreement
+        row's own `source` is always 'startup-sync', the mechanism that
+        found the divergence. Purely descriptive: it changes nothing about
         whether/how the correction is logged, only what's recorded about
         who/what triggered it, so a reviewer at /admin/voice/review-queue
         can tell "an admin typed this" from "the seed sync did this again"
@@ -4391,11 +4412,13 @@ class Library:
         auto-corrected) — skipped when a matching exception already exists
         OR an open row for this exact location already exists (see
         `has_open_voice_review_item`'s own docstring for why both checks
-        matter). `source` defaults to 'script' since the only current
-        caller is scripts/backfill_voice_review_queue.py, driven by
-        voice_db_scan's live scan of the database — not an admin edit or a
-        startup sync (see `log_voice_correction`'s own docstring for the
-        full taxonomy)."""
+        matter). `source` defaults to 'script' since the original caller is
+        scripts/backfill_voice_review_queue.py, a one-off human-run backfill
+        — but `reconcile_voice_review_queue()` (a periodic BACKGROUND pass,
+        not a one-off script) is a second caller, and passes 'scan'
+        explicitly rather than accepting this default, since the two are a
+        genuinely different mechanism (see `log_voice_correction`'s own
+        docstring for the full taxonomy)."""
         if self.is_voice_exception(table, row_id, column, rule):
             return 0
         if self.has_open_voice_review_item(table, row_id, column, rule):
@@ -4464,17 +4487,36 @@ class Library:
         self.conn.commit()
         return True
 
+    # A small, separate allowlist from `linklib.voice_db_scan._SCAN_TABLES`
+    # (which is prose-column-only, feeding the voice scanner) — these are
+    # boolean columns that can also land a 'seed-disagreement' item (via
+    # `add_seed_disagreement_item`) when `_seed_toolbox()` finds the stored
+    # value disagrees with the seed list, same mechanism as the five text
+    # fields, just for a boolean instead of free text. Never scanned for
+    # voice violations (they hold no prose), so they deliberately do NOT
+    # live in `_SCAN_TABLES` — only here, for `apply_voice_review_write`/
+    # `get_voice_review_current_value` to recognize.
+    _SEED_BOOLEAN_COLUMNS: tuple[tuple[str, str, str], ...] = (
+        ("tools", "id", "advisor"),
+        ("communities", "id", "advisor"),
+    )
+
     def apply_voice_review_write(self, table: str, row_id, column: str, text: str) -> bool:
         """Writes `text` back to the live `(table, row_id, column)` cell —
         the generic counterpart `resolve_voice_review_item`'s docstring
         says it deliberately doesn't do itself. Validated against
         `linklib.voice_db_scan._SCAN_TABLES` (the same enumeration the
-        scanner reads from) plus the settings special case, so this can
-        never be pointed at an arbitrary table/column from outside that
-        known list — there is no free-text table/column parameter reaching
-        this from an admin form, only whatever the queue row itself
-        already recorded. Returns False for an unrecognized table/column
-        or a settings row with no key (row_id None but table != 'settings')."""
+        scanner reads from) plus the settings special case and
+        `_SEED_BOOLEAN_COLUMNS` (boolean seed-disagreement columns, e.g.
+        tools.advisor/communities.advisor — not voice-scanned, but still a
+        real seed-disagreement write target), so this can never be pointed
+        at an arbitrary table/column from outside those known lists —
+        there is no free-text table/column parameter reaching this from an
+        admin form, only whatever the queue row itself already recorded.
+        For a boolean column, `text` is the literal string "True"/"False"
+        (as stored by `add_seed_disagreement_item`'s callers) and is
+        written as 1/0. Returns False for an unrecognized table/column or
+        a settings row with no key (row_id None but table != 'settings')."""
         from .voice_db_scan import _SCAN_TABLES
         if table == "settings":
             self.conn.execute(
@@ -4489,23 +4531,34 @@ class Library:
                 )
                 self.conn.commit()
                 return True
+        for tname, id_col, col in self._SEED_BOOLEAN_COLUMNS:
+            if tname == table and column == col and row_id is not None:
+                self.conn.execute(
+                    f"UPDATE {table} SET {column}=? WHERE {id_col}=?",
+                    (1 if text == "True" else 0, row_id),
+                )
+                self.conn.commit()
+                return True
         return False
 
     def get_voice_review_current_value(self, table: str, row_id, column: str) -> str | None:
         """The FULL, CURRENT live value of `(table, row_id, column)` — the
         read-side counterpart of `apply_voice_review_write`, validated the
-        identical way (against `linklib.voice_db_scan._SCAN_TABLES` plus
-        the settings special case). Exists specifically so the review-queue
-        UI's "Edit" action can pre-fill with the real current column value
-        instead of the row's own `excerpt` (a mid-text snippet on a real
-        scanner finding, or a display label like "U+200B (zero-width
-        space)" on an invisible-character finding — neither is the full
-        column value, and saving either back verbatim would truncate or
-        replace real published copy with a fragment or a label; see
-        CLAUDE.md's Part 4 writeup for the incident this closes). Returns
-        None when the table/column isn't recognized or the row no longer
-        exists — the caller falls back to the queue row's own stored text
-        in that case, since there's nothing live left to read."""
+        identical way (against `linklib.voice_db_scan._SCAN_TABLES`, the
+        settings special case, and `_SEED_BOOLEAN_COLUMNS`). Exists
+        specifically so the review-queue UI's "Edit" action can pre-fill
+        with the real current column value instead of the row's own
+        `excerpt` (a mid-text snippet on a real scanner finding, or a
+        display label like "U+200B (zero-width space)" on an
+        invisible-character finding — neither is the full column value,
+        and saving either back verbatim would truncate or replace real
+        published copy with a fragment or a label; see CLAUDE.md's Part 4
+        writeup for the incident this closes). A boolean column reads back
+        as the literal string "True"/"False", matching what
+        `add_seed_disagreement_item`'s boolean callers store. Returns None
+        when the table/column isn't recognized or the row no longer exists
+        — the caller falls back to the queue row's own stored text in that
+        case, since there's nothing live left to read."""
         from .voice_db_scan import _SCAN_TABLES
         if table == "settings":
             row = self.conn.execute("SELECT value FROM settings WHERE key=?", (column,)).fetchone()
@@ -4516,7 +4569,80 @@ class Library:
                     f"SELECT {column} FROM {table} WHERE {id_col}=?", (row_id,)
                 ).fetchone()
                 return row[0] if row else None
+        for tname, id_col, col in self._SEED_BOOLEAN_COLUMNS:
+            if tname == table and column == col and row_id is not None:
+                row = self.conn.execute(
+                    f"SELECT {column} FROM {table} WHERE {id_col}=?", (row_id,)
+                ).fetchone()
+                return None if not row else ("True" if row[0] else "False")
         return None
+
+    def preview_ampersand_replacement(self, item_id: int) -> dict | None:
+        """Issue #592 item 4 — computes what a bulk "Replace & with and"
+        action would do to one open review-queue row, WITHOUT writing
+        anything. Reads the FULL, CURRENT live value (same
+        `get_voice_review_current_value` every other write-back path here
+        uses — never the queue row's own excerpt/before/after, which can
+        be a stale mid-text snippet), then runs it through
+        `linklib.voice_review.replace_spaced_ampersands` against the
+        currently-approved bare-ampersand terms.
+
+        Returns None for an unknown item or one whose table/column isn't
+        recognized by `get_voice_review_current_value` (nothing to preview
+        against). Otherwise a dict with `item_id`/`table`/`row_id`/
+        `column`/`before`/`after`/`changed` — `changed` is False when
+        `text` had no eligible (spaced, unprotected) ampersand to replace
+        at all, e.g. it's only "S&M"-style unspaced text, or every spaced
+        ampersand present is inside an approved term — the caller should
+        treat that row as untouched, left open for a manual decision, not
+        as an error."""
+        from .voice_review import replace_spaced_ampersands
+        item = self.get_voice_review_item(item_id)
+        if not item:
+            return None
+        current = self.get_voice_review_current_value(item["table_name"], item["row_id"], item["column_name"])
+        if current is None:
+            return None
+        approved_terms = [t["term"] for t in self.list_approved_voice_terms("bare-ampersand")]
+        new_text, changed = replace_spaced_ampersands(current, approved_terms)
+        return {
+            "item_id": item_id, "table": item["table_name"], "row_id": item["row_id"],
+            "column": item["column_name"], "before": current, "after": new_text, "changed": changed,
+        }
+
+    def apply_ampersand_replacement(self, item_id: int) -> bool:
+        """Writes the replacement `preview_ampersand_replacement` computes
+        and resolves the row — but ONLY when there's a real change to make.
+        Re-derives the replacement fresh against the CURRENT live value
+        (not whatever a caller's earlier preview call showed), the same
+        TOCTOU discipline every other preview-then-confirm flow in this
+        codebase uses (bulk-delete, the manual-review/purge CSV round
+        trips) — a value edited between preview and apply is replaced
+        against its own current text, never a stale preview snapshot.
+
+        Returns False (writes nothing, resolves nothing) when the item/row
+        no longer exists, or when there's nothing eligible to replace
+        (an unspaced-only or fully-approved-term field) — that row stays
+        open, exactly as `preview_ampersand_replacement`'s own `changed`
+        flag promises, so a genuinely no-op selection can never silently
+        resolve a row nobody actually looked at. Returns True once the
+        write succeeds and the row is resolved with a `resolution_note`
+        explaining the bulk action, not a plain per-row "edit"."""
+        preview = self.preview_ampersand_replacement(item_id)
+        if preview is None or not preview["changed"]:
+            return False
+        ok = self.apply_voice_review_write(preview["table"], preview["row_id"], preview["column"], preview["after"])
+        if not ok:
+            return False
+        self.resolve_voice_review_item(item_id, "edit", preview["after"])
+        self.conn.execute(
+            "UPDATE voice_review_queue SET resolution_note=? WHERE id=?",
+            ('Bulk "Replace & with and"—spaced ampersand(s) replaced; any '
+             "unspaced or approved-term ampersand in the same field was left untouched.",
+             item_id),
+        )
+        self.conn.commit()
+        return True
 
     def add_seed_disagreement_item(self, table: str, row_id, column: str,
                                     stored_value: str, seed_value: str,
@@ -4534,6 +4660,12 @@ class Library:
         SEED's proposed value — "use seed version" applies `after_text`;
         "keep mine" leaves the stored value untouched and marks this exact
         (table, row_id, column) a permanent exception.
+
+        Also used for a boolean column (see `_SEED_BOOLEAN_COLUMNS`, e.g.
+        tools.advisor/communities.advisor) — the same shape, just with
+        `stored_value`/`seed_value` as the literal strings "True"/"False"
+        rather than free text; `apply_voice_review_write`/
+        `get_voice_review_current_value` both recognize that convention.
 
         Deduplicated exactly like `add_voice_review_item`: skipped when this
         exact (table, row_id, column) is already a permanent exception
@@ -4677,7 +4809,15 @@ class Library:
             # an existing exception and an existing open row (see its own
             # docstring) — it returns 0, never inserting, in either case, so
             # a truthy return here always means a genuinely new row.
-            new_id = self.add_voice_review_item(v.table, v.row_id, v.column, v.rule, v.excerpt, source="script")
+            # 2026-09 follow-up (issue #592 item 3) — 'scan', not 'script':
+            # this is a periodic background pass re-reading the live DB,
+            # not a one-off human-run script (scripts/
+            # backfill_voice_review_queue.py, which shares this exact
+            # insertion path via add_voice_review_item's own 'script'
+            # default). The two were previously indistinguishable at this
+            # call site, which is exactly the ambiguity a reviewer at
+            # /admin/voice/review-queue shouldn't have to guess past.
+            new_id = self.add_voice_review_item(v.table, v.row_id, v.column, v.rule, v.excerpt, source="scan")
             if new_id:
                 added += 1
 

@@ -59,6 +59,8 @@ this follow-up.
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import threading
 import time
 
@@ -221,6 +223,16 @@ def _failing_checks_count() -> int:
 # the schedule into a single cron-style trigger, or accepting the
 # redundancy as cheap enough to ignore) only if/when a real multi-worker
 # deploy is adopted — not a concern under the current single-process setup.
+#
+# Test-suite guard (2026-09 follow-up, issue #592 item 2): even the one
+# test file that does trigger the startup event (test_seed_toolbox_startup.py,
+# via `with TestClient`) no longer actually starts this thread —
+# start_background_checks_refresher() itself now no-ops under pytest by
+# default (see its own docstring). A leftover refresher thread from an
+# earlier test looping in the background, re-reading a since-monkeypatched-
+# and-deleted LINKLIB_DB path, was a real "database is locked" flakiness
+# risk this closes at the source rather than only narrowing the window with
+# the once-per-thread-start db_path fix above.
 _checks_refresher_started = False
 _checks_refresher_lock = threading.Lock()
 
@@ -237,7 +249,7 @@ _checks_last_attempt_at: float | None = None
 _checks_last_error: str | None = None
 
 
-def _reconcile_voice_review_queue_once() -> None:
+def _reconcile_voice_review_queue_once(db_path: str) -> None:
     """One pass of `Library.reconcile_voice_review_queue()` — the
     bidirectional-sync fix (2026-09): the live DB scan and the review queue
     used to be able to disagree in both directions (a new can't-auto-fix
@@ -250,10 +262,18 @@ def _reconcile_voice_review_queue_once() -> None:
     connection (own thread, own connection — see this module's own
     connection-safety comment above) and never raises past this function;
     a failure here is logged, not propagated, so it can never take the
-    checks refresher itself down."""
-    import os as _os
+    checks refresher itself down.
+
+    2026-09 follow-up (issue #592 item 2) — `db_path` is now passed in by
+    the caller (resolved once, when the refresher thread starts) rather
+    than re-read from `LINKLIB_DB` on every single iteration. Production
+    never changes this env var after boot, so the behavior there is
+    identical; a per-iteration re-read was a real latent risk under any
+    test that monkeypatches LINKLIB_DB per-test while a leftover refresher
+    thread from an earlier test is still looping in the background — it
+    could pick up a mid-test env value and open a connection against a DB
+    file a different test is mid-teardown on ("database is locked")."""
     from linklib.db import Library as _Library
-    db_path = _os.environ.get("LINKLIB_DB", "library.db")
     try:
         lib = _Library(db_path)
         try:
@@ -291,24 +311,71 @@ def _run_one_refresh_iteration() -> None:
             _checks_last_error = None
 
 
-def _checks_refresher_loop() -> None:
+def _checks_refresher_loop(db_path: str) -> None:
     while True:
         _run_one_refresh_iteration()
-        _reconcile_voice_review_queue_once()
+        _reconcile_voice_review_queue_once(db_path)
         time.sleep(_CHECKS_CACHE_TTL)
 
 
-def start_background_checks_refresher() -> None:
+def start_background_checks_refresher(force: bool = False) -> None:
     """Start the daemon thread that keeps _checks_cache warm on a schedule.
     Called once from webapp.app's own startup hook — idempotent (a second
     call, e.g. from a hot-reload, is a no-op) so nothing here needs its own
-    process-level guard beyond this module's own flag."""
+    process-level guard beyond this module's own flag.
+
+    2026-09 follow-up (issue #592 item 2), two changes:
+
+    1. The DB path is resolved exactly once, right here, and threaded
+       through to the loop/reconciliation pass as a plain argument instead
+       of each iteration independently re-reading LINKLIB_DB from the
+       environment. Production's path never changes after boot, so this
+       costs nothing there — see `_reconcile_voice_review_queue_once`'s own
+       docstring for the test-suite risk this closes.
+
+    2. This is a no-op under the test suite by default — `webapp.app`'s
+       startup hook fires on every `with TestClient(appmod.app)` (see this
+       module's own connection-safety comment above `_checks_refresher_
+       started`), and a leftover thread from one test looping in the
+       background is exactly the wandering-between-test-databases hazard
+       item 2 exists to close, not just the per-iteration re-read. Detected
+       via `PYTEST_CURRENT_TEST` — pytest sets this in `os.environ` for the
+       duration of every test's setup/call/teardown, a standard, reliable
+       way for library code to detect it's running under pytest without a
+       pytest import of its own.
+
+       `PYTEST_CURRENT_TEST` is only ever set while a test is actively
+       running (setup/call/teardown) — never during collection or module
+       import. Checked directly (issue #592's own follow-up review): every
+       `with TestClient(...)` in this suite — the only thing that can
+       actually trigger `webapp.app`'s startup event and reach this
+       function at all — lives inside a `def test_*(...)` function body,
+       never at module scope, and there is no conftest.py providing a
+       session/module-scoped fixture that could construct one earlier
+       either. So under the CURRENT suite there is no real gap: nothing
+       ever reaches here before `PYTEST_CURRENT_TEST` exists. As a cheap,
+       strictly broader backup guard against a FUTURE test file collecting
+       a `TestClient` (or otherwise triggering the startup event) outside
+       any test function — where `PYTEST_CURRENT_TEST` would still be
+       unset — this also checks `"pytest" in sys.modules`, true for the
+       whole pytest process lifetime (collection through final teardown),
+       not just while a test is running. Safe in production: `pytest` is
+       requirements-dev.txt-only, never installed in the Docker image, so
+       this can never be true there. A test that wants to exercise the
+       real background thread (rather than calling
+       `_run_one_refresh_iteration`/`_reconcile_voice_review_queue_once`
+       directly, as every existing refresher test in
+       tests/test_task_badges.py already does) can still do so explicitly
+       via `force=True`."""
+    if not force and ("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules):
+        return
     global _checks_refresher_started
     with _checks_refresher_lock:
         if _checks_refresher_started:
             return
         _checks_refresher_started = True
-    threading.Thread(target=_checks_refresher_loop, daemon=True).start()
+    db_path = os.environ.get("LINKLIB_DB", "library.db")
+    threading.Thread(target=_checks_refresher_loop, args=(db_path,), daemon=True).start()
 
 
 def refresher_status() -> dict:

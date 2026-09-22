@@ -942,6 +942,86 @@ def test_refresher_status_reflects_started_flag(refresher_state_reset):
     taskmod._checks_refresher_started = False   # don't leak into other tests
 
 
+# --- Background refresher: does not start under the test suite (issue #592
+# item 2) -----------------------------------------------------------------
+# start_background_checks_refresher() used to always spin up a real daemon
+# thread whenever the FastAPI startup event fired (which happens under
+# `with TestClient(...)`, per test_seed_toolbox_startup.py), re-reading
+# LINKLIB_DB on every iteration — a real "wander between test databases"
+# risk once a leftover thread from one test outlives that test's own
+# monkeypatched-and-deleted DB file. These prove the fix directly: under
+# pytest (PYTEST_CURRENT_TEST is always set here, since we're inside a
+# test), calling it with no arguments must be a no-op, and force=True must
+# still start the thread for a test that deliberately wants to exercise it.
+
+def test_start_background_checks_refresher_does_not_start_under_pytest(refresher_state_reset):
+    taskmod = refresher_state_reset
+    assert "PYTEST_CURRENT_TEST" in os.environ, "sanity: pytest always sets this while a test is running"
+    taskmod._checks_refresher_started = False
+    taskmod.start_background_checks_refresher()
+    assert taskmod._checks_refresher_started is False, (
+        "the refresher must not start under the test suite by default"
+    )
+
+
+def test_start_background_checks_refresher_backup_guard_via_sys_modules(refresher_state_reset, monkeypatch):
+    """issue #592's REFRESHER CHECK follow-up — PYTEST_CURRENT_TEST is only
+    set while a test is actively running, never during collection/import;
+    confirmed (see start_background_checks_refresher's own docstring) that
+    no code path in the CURRENT suite reaches this function before then, but
+    "pytest" in sys.modules is a strictly broader, free backup for a future
+    test file that might. Proven directly here by removing the narrower
+    signal and confirming the broader one alone still blocks the start —
+    not just that both together happen to work under a normal test run."""
+    taskmod = refresher_state_reset
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert "pytest" in taskmod.sys.modules, "sanity: the pytest package is always importable/imported here"
+    taskmod._checks_refresher_started = False
+    taskmod.start_background_checks_refresher()
+    assert taskmod._checks_refresher_started is False, (
+        "the sys.modules backup guard alone must still block the start"
+    )
+
+
+def test_start_background_checks_refresher_force_true_still_starts(refresher_state_reset, monkeypatch, tmp_path):
+    taskmod = refresher_state_reset
+    monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "forced.db"))
+    taskmod._checks_refresher_started = False
+    started_threads = []
+    orig_thread = taskmod.threading.Thread
+
+    def _tracking_thread(*args, **kwargs):
+        t = orig_thread(*args, **kwargs)
+        started_threads.append(t)
+        return t
+
+    monkeypatch.setattr(taskmod.threading, "Thread", _tracking_thread)
+    taskmod.start_background_checks_refresher(force=True)
+    try:
+        assert taskmod._checks_refresher_started is True
+        assert len(started_threads) == 1
+        assert started_threads[0].daemon is True
+    finally:
+        taskmod._checks_refresher_started = False   # don't leak a real thread's state into other tests
+
+
+def test_start_background_checks_refresher_is_idempotent_when_forced(refresher_state_reset, monkeypatch, tmp_path):
+    """A second call, even with force=True, must not start a second thread
+    once one is already marked started — the pre-existing idempotency
+    guard is untouched by the pytest-detection fix."""
+    taskmod = refresher_state_reset
+    monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "forced2.db"))
+    taskmod._checks_refresher_started = True   # simulate an already-started refresher
+    started_threads = []
+    monkeypatch.setattr(
+        taskmod.threading, "Thread",
+        lambda *a, **k: started_threads.append(1) or taskmod.threading.Thread(*a, **k),
+    )
+    taskmod.start_background_checks_refresher(force=True)
+    taskmod._checks_refresher_started = False
+    assert started_threads == [], "already-started must stay a no-op regardless of force"
+
+
 def test_checks_refresher_banner_renders_all_three_states(refresher_state_reset):
     """Direct coverage for webapp.app._checks_refresher_banner — never
     started (red), started-but-no-success-yet (amber), and healthy

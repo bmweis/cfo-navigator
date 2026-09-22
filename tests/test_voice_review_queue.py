@@ -454,6 +454,40 @@ def test_tools_name_sync_via_library_method(lib):
 
 # --- Addition 1: the 3 bidirectional-sync regression tests -----------------
 
+def test_reconciliation_tags_new_rows_as_scan_not_script(lib):
+    """Issue #592 item 3 — reconcile_voice_review_queue() must tag the rows
+    it inserts as source='scan', not 'script'. 'script' is reserved for a
+    one-off, human-run backfill/fix script (e.g.
+    scripts/backfill_voice_review_queue.py, which shares this exact
+    insertion path via add_voice_review_item's own 'script' default); this
+    is a periodic background pass, a genuinely different mechanism, and the
+    two were indistinguishable under the old shared label."""
+    lib.add_community("Amp Scan Label Co", "https://amp-scan-label.com",
+                       "Widgets & Gadgets clients", "", [])
+    result = lib.reconcile_voice_review_queue()
+    assert result["added"] >= 1
+    open_items = lib.list_voice_review_queue(status="open")
+    hits = [i for i in open_items
+            if i["table_name"] == "communities" and i["column_name"] == "demographic"]
+    assert hits
+    assert hits[0]["source"] == "scan"
+    assert hits[0]["source"] != "script"
+
+
+def test_backfill_script_still_tags_rows_as_script(lib):
+    """The sibling half of the fix above: the actual one-off backfill
+    script's own default ('script') must be untouched by the 'scan' fix —
+    add_voice_review_item's default parameter still applies whenever a
+    caller doesn't explicitly pass source, exactly like
+    scripts/backfill_voice_review_queue.py's own call."""
+    item_id = lib.add_voice_review_item(
+        "communities", 999, "demographic", "bare-ampersand", "Widgets & Gadgets",
+    )
+    assert item_id
+    item = lib.get_voice_review_item(item_id)
+    assert item["source"] == "script"
+
+
 def test_finding_appears_without_backfill(lib):
     """Addition 1 — a bare-ampersand/banned-word-style violation entering
     the DB via an ordinary write no longer needs a manual backfill-script
@@ -511,3 +545,138 @@ def test_scan_count_equals_queue_open_count(lib):
 
     open_items = [i for i in lib.list_voice_review_queue(status="open") if i["rule"] in scanned_rules]
     assert len(open_items) == live_count
+
+
+# --- Issue #592 item 4: bulk "Replace & with and" ---------------------------
+
+def test_replace_spaced_ampersands_unit():
+    """Direct unit coverage for linklib.voice_review.replace_spaced_ampersands
+    — the pure function underneath the bulk action, independent of the
+    review queue."""
+    from linklib.voice_review import replace_spaced_ampersands
+
+    # A plain spaced ampersand is replaced.
+    text, changed = replace_spaced_ampersands("Finance & Operations leaders", [])
+    assert changed is True
+    assert text == "Finance and Operations leaders"
+
+    # An unspaced ampersand is left alone entirely — never even flagged as
+    # a candidate, per the "S&M" -> "SandM" caution in the spec.
+    text, changed = replace_spaced_ampersands("A firm doing S&M consulting", [])
+    assert changed is False
+    assert text == "A firm doing S&M consulting"
+
+    # An HTML-escaped, spaced ampersand becomes "and", not a stray "amp;".
+    text, changed = replace_spaced_ampersands("Widgets &amp; Gadgets only", [])
+    assert changed is True
+    assert text == "Widgets and Gadgets only"
+    assert "amp;" not in text
+
+    # An approved term's own ampersand is protected; a different, unapproved
+    # ampersand elsewhere in the same text is still replaced.
+    text, changed = replace_spaced_ampersands(
+        "Bain & Company advises on finance & operations for clients.",
+        ["Bain & Company"],
+    )
+    assert changed is True
+    assert text == "Bain & Company advises on finance and operations for clients."
+
+
+def test_preview_ampersand_replacement_shows_before_after_without_writing(lib):
+    cid = lib.add_community("Amp Preview Co", "https://amp-preview.com",
+                             "Finance & Operations leaders", "", [])
+    item_id = lib.add_voice_review_item(
+        "communities", cid, "demographic", "bare-ampersand", "Finance & Operations leaders",
+    )
+    preview = lib.preview_ampersand_replacement(item_id)
+    assert preview is not None
+    assert preview["changed"] is True
+    assert preview["before"] == "Finance & Operations leaders"
+    assert preview["after"] == "Finance and Operations leaders"
+
+    # Nothing was written by preview alone.
+    row = lib.get_community(cid)
+    assert row["demographic"] == "Finance & Operations leaders"
+    item = lib.get_voice_review_item(item_id)
+    assert item["status"] == "open"
+
+
+def test_apply_ampersand_replacement_writes_and_resolves(lib):
+    cid = lib.add_community("Amp Apply Co", "https://amp-apply.com",
+                             "Finance & Operations leaders", "", [])
+    item_id = lib.add_voice_review_item(
+        "communities", cid, "demographic", "bare-ampersand", "Finance & Operations leaders",
+    )
+    ok = lib.apply_ampersand_replacement(item_id)
+    assert ok is True
+
+    row = lib.get_community(cid)
+    assert row["demographic"] == "Finance and Operations leaders"
+
+    item = lib.get_voice_review_item(item_id)
+    assert item["status"] == "resolved"
+    assert item["resolution_note"]
+    assert "Replace" in item["resolution_note"]
+
+
+def test_apply_ampersand_replacement_leaves_unspaced_field_untouched_and_open(lib):
+    cid = lib.add_community("Amp Unspaced Co", "https://amp-unspaced.com",
+                             "A firm doing S&M consulting", "", [])
+    item_id = lib.add_voice_review_item(
+        "communities", cid, "demographic", "bare-ampersand", "A firm doing S&M consulting",
+    )
+    preview = lib.preview_ampersand_replacement(item_id)
+    assert preview["changed"] is False
+
+    ok = lib.apply_ampersand_replacement(item_id)
+    assert ok is False
+
+    row = lib.get_community(cid)
+    assert row["demographic"] == "A firm doing S&M consulting", "unspaced text must never be written to"
+
+    item = lib.get_voice_review_item(item_id)
+    assert item["status"] == "open", "a no-op selection must leave the row open for a manual decision"
+
+
+def test_apply_ampersand_replacement_protects_approved_term_in_same_field(lib):
+    """The exact scenario named in the spec: a field mixing an approved
+    term with an ordinary prose ampersand — only the unapproved one moves."""
+    lib.approve_voice_term("Bain & Company", rule="bare-ampersand")
+    cid = lib.add_community(
+        "Amp Mixed Co", "https://amp-mixed.com",
+        "Bain & Company advises on finance & operations for clients.", "", [],
+    )
+    item_id = lib.add_voice_review_item(
+        "communities", cid, "demographic", "bare-ampersand",
+        "Bain & Company advises on finance & operations for clients.",
+    )
+    ok = lib.apply_ampersand_replacement(item_id)
+    assert ok is True
+
+    row = lib.get_community(cid)
+    assert row["demographic"] == "Bain & Company advises on finance and operations for clients."
+
+
+def test_apply_ampersand_replacement_handles_escaped_amp_in_body_md(lib):
+    """body_md (original_content) can carry HTML-escaped ampersands —
+    confirms the write-back produces real "and", not a stray "amp;"."""
+    oc_id = lib.add_original_content(
+        slug="amp-test-piece", title="Amp Test Piece", teaser="A teaser.",
+        tag_label="Guide", link_label="Read the guide",
+        body_md="This covers widgets &amp; gadgets in depth.",
+    )
+    item_id = lib.add_voice_review_item(
+        "original_content", oc_id, "body_md", "bare-ampersand",
+        "This covers widgets &amp; gadgets in depth.",
+    )
+    ok = lib.apply_ampersand_replacement(item_id)
+    assert ok is True
+
+    row = lib.get_original_content(oc_id)
+    assert row["body_md"] == "This covers widgets and gadgets in depth."
+    assert "amp;" not in row["body_md"]
+
+
+def test_apply_ampersand_replacement_returns_false_for_unknown_item(lib):
+    assert lib.apply_ampersand_replacement(999999) is False
+    assert lib.preview_ampersand_replacement(999999) is None
