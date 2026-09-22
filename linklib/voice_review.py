@@ -249,6 +249,7 @@ AMPERSAND_NAMES = [
     "CFOs & VP Finance",       # linklib/enrich.py community-profile prompt example, per Brian
     "Flux Analysis & Summaries",  # linklib/feature_scan.py few-shot example, per Brian
     "Bain & Company",  # webapp/app.py's "Approve term" placeholder example (2026-09)
+    "Dun & Bradstreet",  # webapp/app.py's "Allow everywhere" panel caption example (PR #595 review round)
 ]
 
 # Code that legitimately contains an ampersand inside a string literal, removed

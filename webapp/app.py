@@ -34649,7 +34649,7 @@ def _voice_char_diff_html(before: str, after: str) -> str:
 # straight to Detail, which has no declared width of its own and so
 # absorbs everything the fixed columns don't claim under table-layout:fixed.
 # Actions is sized to fit exactly one row of buttons for the widest case
-# (an "open" bare-ampersand row: Edit / Allow here / Approve term).
+# (an "open" bare-ampersand row: Edit / Allow here / Allow everywhere).
 _VOICE_COL_WIDTH_CHECKBOX = 30
 # Part C item 1 fix (voice-queue-durability PR): the previous narrow 150px
 # Field/100px Source pair truncated real record names/paths while Detail
@@ -34662,6 +34662,25 @@ _VOICE_COL_WIDTH_CHECKBOX = 30
 _VOICE_COL_WIDTH_FIELD = _COL_WIDTH_NAME
 _VOICE_COL_WIDTH_SOURCE = _COL_WIDTH_STATUS
 _VOICE_COL_WIDTH_ACTIONS = 280
+
+# Part C item 1 fix, floor bucket (PR #595 review round) — a documented
+# exception, per BRAND.md's "Admin table width floors" rule: this table
+# has 5 rendered columns (checkbox/Field/Detail/Source/Actions), which by
+# plain column count would fall in the Medium bucket (_TABLE_FLOOR_MEDIUM,
+# 640px, "4-5 columns"). But two of those five are now full-size named
+# widths — Field reuses _COL_WIDTH_NAME (280px) and Actions is sized to
+# fit three buttons (280px) — so the checkbox+Field+Source+Actions columns
+# alone already sum to 700px before Detail (the column this whole fix
+# exists to give real room to) gets anything at all. A 640px floor would
+# force Detail below zero the moment the table actually hits its floor
+# (narrow/mobile viewports), reproducing exactly the "Detail sat mostly
+# empty" bug this fix closes. _TABLE_FLOOR_XWIDE (960px, the 8+-column
+# bucket) is the smallest bucket that still leaves Detail a real minimum
+# (~260px) once the four fixed columns are subtracted — the same
+# "content forces a floor above what column count alone would assign"
+# exception BRAND.md names for /admin/overhead-spend's own Vendor/Date/
+# Category/Note/Amount/Actions table.
+_VOICE_TABLE_FLOOR = _TABLE_FLOOR_XWIDE
 
 
 def _voice_review_row_html(lib, item: dict) -> str:
@@ -34723,7 +34742,7 @@ def _voice_review_row_html(lib, item: dict) -> str:
 </form>
 <form method="post" action="/admin/voice/review-queue/{item['id']}/resolve" style="display:inline;">
   <input type="hidden" name="action" value="keep_mine">
-  <button type="submit" class="btn btn-ghost" style="{btn_style}color:var(--muted);">Keep mine</button>
+  <button type="submit" class="btn btn-ghost" style="{btn_style}">Keep mine</button>
 </form>""" + actions_row_close
     elif status == "auto_corrected":
         diff = _voice_char_diff_html(item.get("before_text") or "", item.get("after_text") or "")
@@ -34800,10 +34819,10 @@ def _voice_review_row_html(lib, item: dict) -> str:
     <form method="post" action="/admin/voice/review-queue/{item['id']}/approve-term" style="display:flex;flex-direction:column;gap:6px;max-width:520px;">
       <input type="text" name="term" value="{_esc(guess)}"
              style="font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;width:100%;box-sizing:border-box;font-family:inherit;">
-      <div style="font-size:11px;color:var(--muted);">Trim to the exact term first. Once approved, it's fine everywhere, permanently.</div>
+      <div style="font-size:11px;color:var(--muted);">Keep only the exact term, like Dun &amp; Bradstreet. It'll be allowed everywhere. Remove it anytime on <a href="/admin/voice">/admin/voice</a>.</div>
       <div style="display:flex;gap:6px;justify-content:flex-start;">
         <button type="submit" class="btn" style="{btn_style}">Approve</button>
-        <button type="button" class="btn btn-ghost" style="{btn_style}color:var(--muted);"
+        <button type="button" class="btn btn-ghost" style="{btn_style}"
                 onclick="voiceToggleApproveTerm('{item['id']}-{gi}', false)">Cancel</button>
       </div>
     </form>
@@ -34841,9 +34860,9 @@ def _voice_review_row_html(lib, item: dict) -> str:
     <textarea name="edited_text" rows="3"
            style="font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:100%;min-width:260px;font-family:inherit;box-sizing:border-box;">{_esc(current)}</textarea>
     <div style="display:flex;gap:6px;justify-content:flex-start;">
-      <button type="button" class="btn btn-ghost" style="{btn_style}color:var(--muted);"
+      <button type="button" class="btn btn-ghost" style="{btn_style}"
               onclick="voiceToggleEditField('{item['id']}', false)">Cancel</button>
-      <button type="submit" class="btn btn-ghost" style="{btn_style}">Save edit</button>
+      <button type="submit" class="btn" style="{btn_style}">Save edit</button>
     </div>
     <div style="font-size:10.5px;color:var(--muted);">Editing the full value directly&mdash;"Allow here" (collapse this first) only exempts THIS one spot, never global, always reversible.</div>
   </form>
@@ -35086,7 +35105,7 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
 {bulk_html}
 {_VOICE_SCROLL_HINT_ITEM_HTML}
 <div class="voice-scroll-wrap" style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-<table style="width:100%;min-width:760px;table-layout:fixed;border-collapse:collapse;">
+<table style="width:100%;min-width:{_VOICE_TABLE_FLOOR}px;table-layout:fixed;border-collapse:collapse;">
 {_voice_thead}
 <tbody>{rows_html}</tbody></table></div>"""
 
@@ -35097,7 +35116,7 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
 <h2 style="margin-top:36px;">Resolved and exceptions <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(resolved_items)})</span></h2>
 {_VOICE_SCROLL_HINT_ITEM_HTML}
 <div class="voice-scroll-wrap" style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-<table style="width:100%;min-width:760px;table-layout:fixed;border-collapse:collapse;">
+<table style="width:100%;min-width:{_VOICE_TABLE_FLOOR}px;table-layout:fixed;border-collapse:collapse;">
 {_voice_thead}
 <tbody>{rows_html}</tbody></table></div>"""
     finally:
@@ -35106,10 +35125,20 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
     error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
                      f'font-size:14px;margin:0 0 16px;">{_esc(error)}</p>' if error else '')
 
+    # Part C item 2 fix (PR #595 review round) — the lede's own font-size/
+    # color/margin already matched the sitewide "descriptive lede under an
+    # h1" pattern (e.g. /admin/ai-surfaces' own add/edit form lede), but it
+    # was missing that same pattern's max-width:900px — so, unlike every
+    # other lede of this shape in the codebase, it stretched the full
+    # page-standard container width (~1232px at 1280px viewport) instead of
+    # wrapping at a readable measure. h1/container were already correct
+    # (measured live against /admin/tools/software: identical h1 font-size/
+    # margin/color/weight, identical `.page.page-standard` container) —
+    # only the lede's own width needed matching, which this closes.
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1 style="margin:0 0 4px;">Voice review queue</h1>
-<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Every voice-rule finding and automatic fix lands
+<p style="color:var(--muted);margin:4px 0 22px;max-width:900px;font-size:14px;line-height:1.5;">Every voice-rule finding and automatic fix lands
 here. Fixes apply right away, and none happen without a record here. Rules and allowed terms are on
 <a href="/admin/voice">/admin/voice</a>.</p>
 {error_banner}
@@ -35127,19 +35156,53 @@ def _resolve_voice_item_action(lib, item: dict, action: str, edited_text: str | 
     """Shared per-item resolution logic used by both the single-item and
     bulk-resolve routes, so the two can never drift apart. Returns True on
     success, False for an invalid action or a stale item (already
-    resolved)."""
+    resolved).
+
+    Durability fix (2026-09) — any write-back that lands on
+    `original_content.<column>` (title/teaser/tag_label/link_label/
+    body_md — see `linklib.voice_db_scan._SCAN_TABLES`) immediately
+    re-syncs that row's mirrored `articles` row via
+    `sync_original_content_article()`, the identical "regenerate at the
+    mutation point" call the two admin save routes under
+    `/admin/thought-leadership/original` already make for this exact
+    table (see `linklib/original_content_sync.py`'s own module docstring
+    — the circular-import/embedding-cost reasoning that keeps this sync
+    OUT of `Library`'s write methods is about the data layer, not about
+    which route layer callers may invoke it; this function lives in
+    `webapp/app.py`, the same layer as those two routes, so calling the
+    same function here is exactly the intended shape, not a workaround).
+    Without this, a queue Edit/Revert/"Use seed version" write would
+    quietly leave the mirror stale until a human happened to re-open the
+    piece and click Save by hand — confirmed as a real, live gap (a
+    production `original_content.body_md` finding, id 36, sat as an open
+    review-queue item with no corresponding sync). `Library.
+    list_drifted_original_content_mirrors()`/`original_content_mirror_
+    problems()` on `/admin/checks` is still worth keeping — it's now a
+    genuine safety net for a write path this function doesn't know about
+    (a future script, a future admin route that bypasses this one), not a
+    substitute for firing the sync here."""
+    wrote_ok = False
     if action == "revert" and item.get("before_text") is not None:
-        lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
-                                      item["before_text"])
+        wrote_ok = lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
+                                                  item["before_text"])
     elif action == "edit" and edited_text is not None:
-        lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
-                                      edited_text)
+        wrote_ok = lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
+                                                  edited_text)
     elif action == "use_seed" and item.get("after_text") is not None:
-        lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
-                                      item["after_text"])
+        # original_content is never a seed-disagreement table — that
+        # mechanism (_seed_toolbox()/add_seed_disagreement_item) only ever
+        # targets tools/communities/benchmarks (name/notes/description) and
+        # the tools.advisor/communities.advisor booleans — so this branch
+        # can never actually hit original_content in practice. The sync
+        # check below still runs unconditionally for correctness rather
+        # than special-casing this branch out of it.
+        wrote_ok = lib.apply_voice_review_write(item["table_name"], item["row_id"], item["column_name"],
+                                                  item["after_text"])
     # "accept"/"accept_exception"/"keep_mine" write nothing back — the
     # corrected/stored value is already what's live; these only confirm
-    # or exempt it.
+    # or exempt it. Nothing to re-sync for those either.
+    if wrote_ok and item["table_name"] == "original_content" and item["row_id"] is not None:
+        sync_original_content_article(lib, item["row_id"])
     return lib.resolve_voice_review_item(item["id"], action, edited_text)
 
 
@@ -35184,7 +35247,17 @@ async def admin_voice_review_approve_term(item_id: int, request: Request):
     (masking somehow still missed it), that's reported as a visible error
     rather than silently leaving the row open with no explanation — the term
     itself stays approved either way, since `voice_approved_terms` has no
-    safe automatic rollback and the admin can always Remove it on /admin/voice."""
+    safe automatic rollback and the admin can always Remove it on /admin/voice.
+
+    Durability fix (2026-09) — deliberately does NOT call
+    `sync_original_content_article()`: this action never writes back to
+    `original_content.<column>` (or any other live table/column) at all —
+    it only inserts a row into `voice_approved_terms` and flips already-
+    matching queue rows to `resolved`, the same "confirm without writing"
+    shape as plain `accept`/`accept_exception`. The underlying stored text
+    is untouched either way, so there is nothing for a mirror re-sync to
+    pick up here — see `_resolve_voice_item_action`'s own docstring for
+    the write paths that DO need one."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
@@ -35366,7 +35439,13 @@ async def admin_voice_review_bulk_replace_ampersand_apply(request: Request):
     /admin/reader/bulk-delete's own commit route already uses — so a row
     edited or already resolved between preview and this submit is simply
     skipped (apply_ampersand_replacement returns False), not force-applied
-    against stale text."""
+    against stale text.
+
+    Durability fix (2026-09) — same as `_resolve_voice_item_action` above:
+    when the write actually lands on `original_content.<column>`, the
+    row's mirrored `articles` row is re-synced immediately via
+    `sync_original_content_article()`, not just flagged later by
+    `original_content_mirror_problems()` on `/admin/checks`."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
@@ -35378,7 +35457,10 @@ async def admin_voice_review_bulk_replace_ampersand_apply(request: Request):
                 item_id = int(raw_id)
             except (TypeError, ValueError):
                 continue
-            lib.apply_ampersand_replacement(item_id)
+            item = lib.get_voice_review_item(item_id)
+            ok = lib.apply_ampersand_replacement(item_id)
+            if ok and item and item["table_name"] == "original_content" and item["row_id"] is not None:
+                sync_original_content_article(lib, item["row_id"])
     finally:
         lib.close()
     return RedirectResponse("/admin/voice/review-queue", status_code=303)

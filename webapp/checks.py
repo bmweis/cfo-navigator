@@ -180,6 +180,19 @@ def og_card_missing_problems() -> list[str]:
 # Every flagged row, missing-mirror or drifted alike, names the exact fix:
 # open it at /admin/thought-leadership/original/{id}/edit and click Save,
 # which re-runs sync_original_content_article() unconditionally.
+#
+# Same 2026-09 pass also closed the actual write-time gap this check used
+# to be the only defense against: every voice review queue action that can
+# write original_content.<column> (Edit, Revert, the bulk "Replace
+# ampersands with and" apply route) now fires sync_original_content_
+# article() itself, synchronously, at the point of write — see
+# webapp.app._resolve_voice_item_action's own docstring. This check is a
+# safety net for a write path that ISN'T wired to the sync (a future
+# script, a future admin route), not the fix for the queue's own actions
+# any more — detection alone was never a substitute for firing the sync,
+# and a real production finding (original_content.body_md id 36, sitting
+# open in the review queue with no corresponding sync) is what surfaced
+# the gap.
 def original_content_mirror_problems() -> list[str]:
     from webapp.app import _lib
     lib = _lib()

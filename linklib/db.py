@@ -7406,6 +7406,20 @@ class Library:
         that calls update_original_content() directly, bypassing the
         admin-save-route sync trigger) can still produce.
 
+        This is a SAFETY NET, not the primary fix for any write path this
+        codebase already knows about — the two /admin/thought-leadership/
+        original save routes and, as of the voice-queue-durability fix
+        (2026-09), every voice review queue action that can write
+        original_content.<column> (Edit, Revert, and the bulk "Replace
+        ampersands with and" apply route — see webapp.app._resolve_voice_
+        item_action and admin_voice_review_bulk_replace_ampersand_apply)
+        all fire sync_original_content_article() synchronously, at the
+        point of write, so none of THOSE paths should ever actually
+        produce a row this method flags. What's left for this method to
+        catch is a genuinely future write path — a new script, a new admin
+        route — that forgets to call the sync, not the queue's own already-
+        wired actions.
+
         Deliberately compares CONTENT, not updated_at timestamps: scripts/
         normalize_original_content_tags.py calls update_original_content()
         passing body_md unchanged (only tag_label/link_label actually
