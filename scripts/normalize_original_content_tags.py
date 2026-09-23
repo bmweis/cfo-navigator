@@ -1,38 +1,41 @@
 #!/usr/bin/env python3
-"""Original Content tag taxonomy migration — normalizes the four existing
-`original_content` rows onto the new closed three-value tag set (Guide /
-Playbook / Framework) and their derived link_label, per CLAUDE.md's
-"Original content — tag taxonomy" build.
+"""Original Content tag taxonomy migration: moves any `original_content` row
+still carrying a LEGACY free-text tag (anything outside the closed set
+Guide / Playbook / Framework, e.g. the old "Setup Guide") onto the closed
+set, with its derived link_label.
 
-Two of the four rows are a real reclassification, not a mechanical
-rename — flagged explicitly rather than silently mapped:
+A row that already carries one of the three valid tags is an editorial
+decision and is never retagged. That covers both a row this script already
+normalized and a tag Brian set by hand in /admin/thought-leadership/original
+after the taxonomy shipped: once a tag is valid, the script can't and
+shouldn't tell the two apart, and it doesn't need to. The same standing rule
+as the seed sync: scripts never silently overwrite an editorial decision.
+(2026-09: the first version mapped chart-of-accounts to Playbook
+unconditionally, so a run after Brian set it to Guide by hand would have
+overwritten his choice. That's the bug this version fixes.)
 
-  slug                     tag_label now  ->  tag_label after   link_label after
-  growth-engine-ratio      Framework      ->  Framework         Read the framework
-  ai-hackathon-playbook    Playbook       ->  Playbook          Read the playbook
-  chart-of-accounts        Setup Guide    ->  Playbook          Read the playbook
-  netsuite-mcp             Setup Guide    ->  Guide              Read the guide
+For a valid-tag row the only thing this script may touch is link_label,
+and only when it disagrees with the tag. link_label isn't editorial: the
+admin form derives it from the tag on every save and won't accept one typed
+by hand.
 
-chart-of-accounts is steps for designing and maintaining a chart of
-accounts — an action, which is a Playbook — and its teaser/link label
-already said so; only tag_label was out of step. netsuite-mcp is a setup
-manual you follow once and refer back to — a Guide.
+Legacy mappings (used only while a row's tag is still outside the closed set):
 
-Only these four slugs are touched. If a fifth original_content row exists
-in the live database, this script refuses to guess at its tag and reports
-it instead of silently leaving it alone or normalizing it incorrectly.
+  slug                     legacy tag    ->  tag_label   link_label
+  growth-engine-ratio      (any legacy)  ->  Framework   Read the framework
+  ai-hackathon-playbook    (any legacy)  ->  Playbook    Read the playbook
+  chart-of-accounts        (any legacy)  ->  Playbook    Read the playbook
+  netsuite-mcp             (any legacy)  ->  Guide       Read the guide
+
+A row with a legacy tag and a slug not in that table stops the run: the
+script refuses to guess a tag and writes nothing.
 
 Safe by default: preview only, no writes, unless --apply is passed. An
 --apply run re-reads each row afterward and asserts tag_label/link_label
-match the expected new values before reporting success (write-then-
-read-back, per CLAUDE.md's standing one-off-fix discipline).
+match (write-then-read-back, per CLAUDE.md's one-off-fix discipline).
 
-Idempotent: a row already at its target tag_label/link_label is reported
-as "already normalized" and left untouched.
-
-NOT run with --apply against production as part of building this PR —
-Brian runs it via `railway ssh` (absolute `--db /data/library.db`), after
-reviewing this preview output.
+Brian runs it via `railway ssh` with an absolute `--db /data/library.db`,
+after reviewing the preview output.
 
 Usage:
     python -m scripts.normalize_original_content_tags --db /data/library.db            # preview
@@ -47,86 +50,100 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from linklib.db import Library, resolve_db_path
 
-# slug -> (new tag_label, new link_label)
-_TARGETS = {
-    "growth-engine-ratio": ("Framework", "Read the framework"),
-    "ai-hackathon-playbook": ("Playbook", "Read the playbook"),
-    "chart-of-accounts": ("Playbook", "Read the playbook"),
-    "netsuite-mcp": ("Guide", "Read the guide"),
+# The closed tag set and each tag's derived link label. Mirrors
+# webapp.app._OC_TAG_INFO; kept here so the script doesn't import the web app.
+_TAG_LINK = {
+    "Guide": "Read the guide",
+    "Playbook": "Read the playbook",
+    "Framework": "Read the framework",
+}
+
+# Used ONLY for a row whose tag is still outside _TAG_LINK.
+_LEGACY_TARGETS = {
+    "growth-engine-ratio": "Framework",
+    "ai-hackathon-playbook": "Playbook",
+    "chart-of-accounts": "Playbook",
+    "netsuite-mcp": "Guide",
 }
 
 
-def main() -> int:
+def plan(rows: list[dict]) -> tuple[list[tuple[dict, str, str, str]], list[str], list[dict]]:
+    """Return (changes, messages, unknown).
+
+    changes: (row, new_tag, new_link, why) for rows that need a write.
+    unknown: legacy-tag rows whose slug has no mapping; any of these stops
+    the run before a single write."""
+    changes, messages, unknown = [], [], []
+    for row in rows:
+        slug, tag, link = row["slug"], row["tag_label"], row["link_label"]
+        if tag in _TAG_LINK:
+            want_link = _TAG_LINK[tag]
+            if link == want_link:
+                messages.append(f"  left alone: {slug} -> tag_label={tag!r} is already a valid tag "
+                                f"(editorial, never retagged)")
+            else:
+                changes.append((row, tag, want_link, "link label out of step with tag"))
+                messages.append(f"  would change: {slug} -- tag_label {tag!r} kept; link_label "
+                                f"{link!r} -> {want_link!r}")
+            continue
+        if slug not in _LEGACY_TARGETS:
+            unknown.append(row)
+            continue
+        new_tag = _LEGACY_TARGETS[slug]
+        changes.append((row, new_tag, _TAG_LINK[new_tag], "legacy tag"))
+        messages.append(f"  would change: {slug} -- legacy tag_label {tag!r} -> {new_tag!r}, "
+                        f"link_label {link!r} -> {_TAG_LINK[new_tag]!r}")
+    return changes, messages, unknown
+
+
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--apply", action="store_true",
-                     help="Actually write the new tag_label/link_label values. Without this "
-                          "flag, only a preview is printed — no DB writes.")
-    args = ap.parse_args()
+                     help="Actually write. Without this flag, only a preview is printed.")
+    args = ap.parse_args(argv)
     args.db = resolve_db_path(args.db, allow_missing=False)
     print(f"Target database: {args.db}\n")
 
     lib = Library(args.db)
     try:
-        all_rows = lib.list_original_content()
-        known_slugs = set(_TARGETS)
-        live_slugs = {r["slug"] for r in all_rows}
-        unexpected = live_slugs - known_slugs
-        missing = known_slugs - live_slugs
-        if missing:
-            print(f"ERROR: expected slug(s) not found in original_content: {sorted(missing)} — "
-                  f"refusing to guess. Live slugs: {sorted(live_slugs)}", file=sys.stderr)
+        to_change, messages, unknown = plan(lib.list_original_content())
+        for m in messages:
+            print(m)
+        if unknown:
+            print(f"STOP: {len(unknown)} row(s) carry a legacy tag this script has no mapping for: "
+                  f"{sorted((r['slug'], r['tag_label']) for r in unknown)}. Not touching anything. "
+                  f"Set the tag in /admin/thought-leadership/original instead.", file=sys.stderr)
             return 1
-        if unexpected:
-            print(f"STOP: original_content has {len(unexpected)} slug(s) this script doesn't "
-                  f"know about: {sorted(unexpected)}. Not touching anything — confirm what tag "
-                  f"they should have before running this, rather than guessing.", file=sys.stderr)
-            return 1
-
-        rows_by_slug = {r["slug"]: r for r in all_rows}
-        to_change = []
-        for slug, (new_tag, new_link) in _TARGETS.items():
-            row = rows_by_slug[slug]
-            if row["tag_label"] == new_tag and row["link_label"] == new_link:
-                print(f"  already normalized: {slug} -> tag_label={new_tag!r}, link_label={new_link!r}")
-                continue
-            to_change.append((row, new_tag, new_link))
-            print(f"  would change: {slug} -- tag_label {row['tag_label']!r} -> {new_tag!r}, "
-                  f"link_label {row['link_label']!r} -> {new_link!r}")
-
         if not to_change:
-            print("\nNothing to do — every row already matches its target tag/link label.")
+            print("\nNothing to do.")
             return 0
-
         if not args.apply:
-            print("\nPREVIEW ONLY — no DB writes. Re-run with --apply to write for real.")
+            print("\nPREVIEW ONLY. No DB writes. Re-run with --apply to write for real.")
             return 0
 
-        for row, new_tag, new_link in to_change:
+        for row, new_tag, new_link, _why in to_change:
             lib.update_original_content(
                 row["id"], row["slug"], row["title"], row["teaser"], new_tag, new_link,
                 row["body_md"], row["status"], bool(row["featured_home"]), row["date_label"],
                 row["sort_key"], row["display_order"], source="script",
             )
-        print(f"\nApplied — updated {len(to_change)} row(s).\n")
+        print(f"\nApplied. Updated {len(to_change)} row(s).\n")
 
-        # Write-then-read-back.
         ok = True
-        for row, new_tag, new_link in to_change:
+        for row, new_tag, new_link, _why in to_change:
             fresh = lib.get_original_content(row["id"])
             if fresh["tag_label"] != new_tag or fresh["link_label"] != new_link:
                 ok = False
-                print(f"  MISMATCH: {row['slug']} — expected tag_label={new_tag!r}/"
-                      f"link_label={new_link!r}, got tag_label={fresh['tag_label']!r}/"
-                      f"link_label={fresh['link_label']!r}", file=sys.stderr)
+                print(f"  MISMATCH: {row['slug']}: expected {new_tag!r}/{new_link!r}, got "
+                      f"{fresh['tag_label']!r}/{fresh['link_label']!r}", file=sys.stderr)
             else:
                 print(f"  confirmed: {row['slug']} -> tag_label={fresh['tag_label']!r}, "
                       f"link_label={fresh['link_label']!r}")
         if not ok:
-            print("\nERROR: one or more rows did not verify after the update — see MISMATCH lines above.",
-                  file=sys.stderr)
+            print("\nERROR: one or more rows did not verify after the update.", file=sys.stderr)
             return 1
-        print(f"\nVerified {len(to_change)} row(s). Normalization complete.")
+        print(f"\nVerified {len(to_change)} row(s).")
     finally:
         lib.close()
     return 0

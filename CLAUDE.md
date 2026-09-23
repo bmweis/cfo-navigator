@@ -3589,16 +3589,19 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   was migrated once, not live-rendering content, same precedent as every
   other frozen-tuple entry in this doc. **`scripts/normalize_original_content_tags.py`**
   (preview/`--apply`/write-then-read-back, not yet run against production
-  or archived) is the one-off fix for the four already-live rows — two are
-  a straight carry-forward (`growth-engine-ratio` → Framework,
-  `ai-hackathon-playbook` → Playbook) and two are a genuine
-  reclassification, not a mechanical rename: `chart-of-accounts` is steps
-  for designing and maintaining a chart of accounts, an action, so it
-  becomes Playbook (its teaser and link label already said so — only
-  `tag_label` was out of step); `netsuite-mcp` is a setup manual you follow
-  once and refer back to, so it becomes Guide. The script refuses to guess
-  at a fifth slug if one turns up in production that it doesn't recognize,
-  rather than silently leaving it alone or normalizing it wrong. See
+  or archived) moves any row still carrying a legacy free-text tag (e.g.
+  "Setup Guide") onto the closed set. **Tags are Brian's editorial call**:
+  a row that already carries one of the three valid tags is never retagged,
+  whether the script set it or Brian did by hand (`chart-of-accounts` is
+  Live as Guide, set by hand, and stays Guide). The only thing the script
+  may change on a valid-tag row is a `link_label` out of step with its tag,
+  since that label is derived, not chosen. A legacy-tag row with a slug the
+  script has no mapping for stops the run with no writes. (Corrected
+  2026-09: the first version mapped `chart-of-accounts` to Playbook
+  unconditionally, so a run after the hand edit would have overwritten it;
+  reproduced against a copy of the live tags before fixing. As of
+  2026-09-23 all four live rows already carry valid tags, so a production
+  preview should report nothing to do.) See
   BRAND.md §2.3 for the full color-semantics write-up and
   `tests/test_original_content_admin.py`'s tag-taxonomy section for the
   regression coverage (invalid-tag rejection, each tag's derived link
@@ -6881,6 +6884,31 @@ never reads as something to tap.
   pending, 0 member submissions ever, 1-2 bookmarklet saves every few days)
   are the reason it's gone — don't restore it on the assumption it might be
   useful again without confirming the volume has actually changed.
+
+- **Category-feature definition editor could silently truncate (2026-09).**
+  `category_features.definition` stores up to 1,470 characters in production
+  (ten rows over 500), but the Manage Features inline editor, its "Add a
+  feature" form, and the review-queue approve card all capped the field at
+  `maxlength="500"`. Measured in Chromium before fixing, the real failure
+  mode is narrower than "any save truncates": an untouched long value
+  submits intact and a hand-edit is blocked with a validation message, but
+  **pasting** a revised definition is silently cut to 500 characters and the
+  form still submits as valid. Separately, the fields were `<input
+  type="text">`, which strips line breaks on submit (no production row has
+  one today). Fixed: all three are `<textarea>`s with one shared limit,
+  `Library.CATEGORY_FEATURE_TEXT_MAX` (10,000, ~7x the longest stored value,
+  mirrored by `webapp.app._FEATURE_TEXT_MAX`), and
+  `Library.add_category_feature`/`update_category_feature` now **refuse** an
+  over-limit value with an error naming the limit and the actual length,
+  never shortening it, so every write path (routes, the review-queue
+  approve, scripts) gets the same guard. A second, related bug in the same
+  pass: edit-then-approve on a new-feature proposal rebuilt the payload
+  without its `definition`, so the proposed definition was dropped on
+  approval; the approve card now shows it and the route carries it through.
+  Second instance of this shape after the tool Short summary field; the
+  `maxlength` sweep of every other admin input is in the PR, pending
+  production length reads, with no mechanical check built yet (a separate
+  decision). See `tests/test_category_feature_text_length.py`.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
