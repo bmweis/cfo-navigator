@@ -3392,7 +3392,8 @@ def _feature_definition_short(text: str) -> str:
     return cut + "…"
 
 
-def _software_key_features_card(feature_links: list[dict], *, authed: bool = False) -> str:
+def _software_key_features_card(feature_links: list[dict], *, authed: bool = False,
+                                tool_name: str = "") -> str:
     """Public "Key features" card (Feature Taxonomy Phase 2) — ALWAYS
     renders, for every tool. Links are grouped by category only when they
     span more than one seeded category; a single-category tool gets a flat
@@ -3431,17 +3432,19 @@ def _software_key_features_card(feature_links: list[dict], *, authed: bool = Fal
         """Per-feature definition block (feature-definitions PR, 2026-09):
         a short derived line by default, expandable via a native
         <details>/<summary> to the full category-level definition plus the
-        category's pointer_note when present. Real DOM text, never a title
-        tooltip (tooltips don't exist on touch), and keyboard-operable with
-        no JavaScript at all.
+        category's pointer_note when present, then this tool's own
+        public_note when Brian has written one. When vendor text is present
+        both blocks are labeled ("Definition", "In {tool}") so a reader can
+        tell the category-wide text from the vendor-specific text. Real DOM
+        text, never a title tooltip (tooltips don't exist on touch), and
+        keyboard-operable with no JavaScript at all.
 
-        Deliberately NOT rendered: tool_feature_links.note. It reads like
-        vendor-specific text but is a curation log: quoted vendor copy mixed
-        with reviewer caveats ("UNVERIFIED... keep pending", "ai_enabled
-        left false"). It stays admin-side until it's split into a
-        publishable field."""
+        Never rendered: tool_feature_links.note. It's a curation log, quoted
+        vendor copy mixed with reviewer caveats ("UNVERIFIED... keep
+        pending"). public_note is the separate, publishable field."""
         definition = " ".join((link.get("feature_definition") or "").split())
         pointer = (link.get("feature_pointer_note") or "").strip()
+        vendor = (link.get("public_note") or "").strip()
         copy = gates.EMPTY_COPY["feature_definition"]
         placeholder = _empty_state_text(copy.visitor_text, copy.admin_suffix, authed)
         short = _feature_definition_short(definition)
@@ -3449,13 +3452,18 @@ def _software_key_features_card(feature_links: list[dict], *, authed: bool = Fal
             short_html = f'<span class="tp-fd-short">{_esc(short)}</span>'
         else:
             short_html = f'<span class="tp-fd-short tp-fd-empty">{_esc(placeholder)}</span>'
-        has_more = bool(pointer or (definition and short != definition))
+        has_more = bool(vendor or pointer or (definition and short != definition))
         if not has_more:
             return f'<div class="tp-fd"><p class="tp-fd-line">{short_html}</p></div>'
-        full_html = (f'<p>{_esc(definition)}</p>' if definition
-                     else f'<p class="tp-fd-empty">{_esc(placeholder)}</p>')
+        full_html = ('<p class="tp-fd-label">Definition</p>' if vendor else "")
+        full_html += (f'<p>{_esc(definition)}</p>' if definition
+                      else f'<p class="tp-fd-empty">{_esc(placeholder)}</p>')
         if pointer:
             full_html += f'<p class="tp-fd-pointer">{_esc(pointer)}</p>'
+        if vendor:
+            vendor_label = f"In {tool_name}" if tool_name else "For this tool"
+            full_html += (f'<p class="tp-fd-label tp-fd-label-vendor">{_esc(vendor_label)}</p>'
+                          f'<p class="tp-fd-vendor">{_esc(vendor)}</p>')
         return (
             '<details class="tp-fd">'
             f'<summary class="tp-fd-line">{short_html} '
@@ -9685,7 +9693,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # seeded category (a tool tagged into both ERP and Close Management, for
     # instance) — a single-category tool's card stays a flat list, no
     # redundant sub-heading repeating what the tool already is.
-    features_card = _software_key_features_card(feature_links, authed=authed)
+    features_card = _software_key_features_card(feature_links, authed=authed, tool_name=tool["name"])
 
     # Category tags: Phase F4 moved these from their own right-column card
     # to sit next to the Visit/Compare/Edit button group; the Sidebar
@@ -10069,6 +10077,8 @@ function submitIntroForm() {{
 .tp-card .tp-fd p{{font-size:13px;line-height:1.5;color:var(--muted);margin:0;}}
 .tp-card .tp-fd-full p{{margin:0 0 6px;}}
 .tp-card .tp-fd-full p:last-child{{margin-bottom:0;}}
+.tp-card .tp-fd-full .tp-fd-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--navy);margin:0 0 2px;}}
+.tp-card .tp-fd-full .tp-fd-label-vendor{{margin-top:10px;}}
 .tp-fd-pointer{{font-style:italic;}}
 .tp-feature-group+.tp-feature-group{{margin-top:18px;}}
 .tp-feature-group-h{{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
@@ -14517,6 +14527,9 @@ def _merge_open_ids(csv: str, extra) -> str:
 # <textarea>s, not <input type="text">: a text input silently strips line
 # breaks on submit, so a multi-paragraph definition would lose them on save.
 _FEATURE_TEXT_MAX = Library.CATEGORY_FEATURE_TEXT_MAX
+# tool_feature_links.public_note: same shared-constant pattern, so the admin
+# textarea's maxlength and the server-side refusal can't disagree.
+_FEATURE_LINK_PUBLIC_NOTE_MAX = Library.FEATURE_LINK_PUBLIC_NOTE_MAX
 
 
 # The textareas carry their own min-width (260px definition, 180px pointer
@@ -19444,7 +19457,8 @@ def admin_tools_reject(request: Request, tool_id: int):
 @app.get("/tools/software/{slug}/edit", response_class=HTMLResponse)
 def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "", research_refreshed: str = "",
                       app_screenshot_captured: str = "",
-                      logo_refetched: str = "", logo_refetch_msg: str = ""):
+                      logo_refetched: str = "", logo_refetch_msg: str = "",
+                      feature_links_error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -19568,6 +19582,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         ai_checked = "checked" if (link or {}).get("ai_enabled") else ""
         verified = (link or {}).get("verified_as_of", "")
         note = (link or {}).get("note", "")
+        public_note = (link or {}).get("public_note", "")
+        # Internal note and public text sit side by side in ~30-character
+        # columns; size both to the longer so the whole note is readable
+        # while copying from it, capped so one row can't take the screen.
+        note_rows = max(2, min(10, max(len(note), len(public_note)) // 30 + 1))
         source_url = (link or {}).get("source_url", "")
         pointer_html = (
             f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;">{_esc(f["pointer_note"])}</div>'
@@ -19588,8 +19607,10 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   <td style="padding:8px 8px;text-align:center;"><input type="checkbox" name="feature_{f['id']}_ai_enabled" value="1" {ai_checked}></td>
   <td style="padding:8px 8px;"><input type="date" name="feature_{f['id']}_verified_as_of" value="{_esc(verified)}"
     style="width:130px;max-width:100%;min-width:0;min-height:27px;-webkit-appearance:none;appearance:none;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;box-sizing:border-box;"></td>
-  <td style="padding:8px 8px;min-width:120px;"><input type="text" name="feature_{f['id']}_note" value="{_esc(note)}" maxlength="500" placeholder="Note"
-    style="width:100%;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;"></td>
+  <td style="padding:8px 8px;"><textarea name="feature_{f['id']}_note" rows="{note_rows}" maxlength="500" placeholder="Internal note" aria-label="Internal note"
+    style="width:100%;min-width:200px;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:var(--bg);resize:vertical;">{_esc(note)}</textarea></td>
+  <td style="padding:8px 8px;"><textarea name="feature_{f['id']}_public_note" rows="{note_rows}" maxlength="{_FEATURE_LINK_PUBLIC_NOTE_MAX}" placeholder="Public text (optional)" aria-label="Public text"
+    style="width:100%;min-width:200px;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;resize:vertical;">{_esc(public_note)}</textarea></td>
   <td style="padding:8px 8px;min-width:120px;"><input type="url" name="feature_{f['id']}_source_url" value="{_esc(source_url)}" maxlength="500" placeholder="Source URL"
     style="width:100%;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;"></td>
 </tr>"""
@@ -19605,14 +19626,15 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             )
             all_feature_ids.extend(f["id"] for f in section["features"])
             table_html = (
-                f'<div style="overflow-x:auto;"><table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;margin-top:6px;">'
+                f'<div style="overflow-x:auto;"><table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;margin-top:6px;">'
                 f'<thead><tr style="background:var(--bg);">'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">On</th>'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Feature</th>'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Availability</th>'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">AI</th>'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Verified as of</th>'
-                f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Note</th>'
+                f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Internal note</th>'
+                f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Public text</th>'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Source URL</th>'
                 f'</tr></thead><tbody>{rows_html}</tbody></table></div>'
                 if rows_html else
@@ -19623,7 +19645,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   {table_html}
 </div>"""
         feature_ids_input = "".join(f'<input type="hidden" name="feature_ids" value="{fid}">' for fid in all_feature_ids)
-        _governed_features_html = f"""<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+        _feature_links_error_html = (
+            f'<p role="alert" style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;font-size:14px;margin:12px 0 0;">{_esc(feature_links_error)}</p>'
+            if feature_links_error else ""
+        )
+        _governed_features_html = f"""<details class="features-group"{' open' if feature_links_error else ''} style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
       <h2 style="font-size:16px;font-weight:600;margin:0;">Key features</h2>
@@ -19632,6 +19658,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </summary>
   <p style="font-size:13px;color:var(--muted);margin:12px 0 0;">The governed replacement for Features above, one curated list per category this tool belongs to&mdash;see
   <a href="/admin/tools/software/features" target="_blank" rel="noopener">Software features</a>. Check a row on to link this tool to that feature; availability/AI/verified date only matter once checked.</p>
+  <p style="font-size:13px;color:var(--muted);margin:8px 0 0;">The internal note stays admin-only. Public text shows on the profile under the feature&rsquo;s definition, labeled as specific to this tool. Copy the publishable part of the note into it; nothing is filled in automatically.</p>
+  {_feature_links_error_html}
   <form method="post" action="/admin/tools/software/{tool_id}/feature-links/save">
     {feature_ids_input}
     {section_blocks}
@@ -20656,6 +20684,19 @@ async def admin_tools_feature_links_save(request: Request, tool_id: int):
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         feature_ids = {int(v) for v in form.getlist("feature_ids")}
+        # Check every row's public text before writing anything, so an
+        # over-limit value refuses the whole save instead of leaving it half
+        # applied. Nothing is ever shortened.
+        for fid in feature_ids:
+            if form.get(f"feature_{fid}_enabled") != "1":
+                continue
+            try:
+                Library._check_feature_link_public_note(
+                    (form.get(f"feature_{fid}_public_note") or "").strip())
+            except ValueError as e:
+                return RedirectResponse(
+                    f"/tools/software/{tool['slug']}/edit?feature_links_error={quote(str(e))}",
+                    status_code=303)
         for fid in feature_ids:
             if form.get(f"feature_{fid}_enabled") == "1":
                 lib.upsert_tool_feature_link(
@@ -20665,6 +20706,8 @@ async def admin_tools_feature_links_save(request: Request, tool_id: int):
                     verified_as_of=(form.get(f"feature_{fid}_verified_as_of") or "").strip(),
                     note=(form.get(f"feature_{fid}_note") or "").strip(),
                     source_url=(form.get(f"feature_{fid}_source_url") or "").strip(),
+                    public_note=(form.get(f"feature_{fid}_public_note") or "").strip(),
+                    source="admin-edit",
                 )
             else:
                 lib.delete_tool_feature_link(tool_id, fid)

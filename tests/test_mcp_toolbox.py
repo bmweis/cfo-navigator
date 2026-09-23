@@ -655,7 +655,8 @@ def test_get_software_key_features_include_full_definition(live_server):
                                         "See the Procurement category.")
     without_def = lib.add_category_feature(cat_id, "Card Issuance")
     lib.upsert_tool_feature_link(tool["id"], with_def, "native", 0, "2026-08-24",
-                                 note="UNVERIFIED, keep pending")
+                                 note="UNVERIFIED, keep pending",
+                                 public_note="Limits are set per card or per team.")
     lib.upsert_tool_feature_link(tool["id"], without_def, "native", 0, "2026-08-24")
     lib.close()
 
@@ -666,7 +667,11 @@ def test_get_software_key_features_include_full_definition(live_server):
     assert spend["definition"]["state"] == "verified"
     assert spend["definition"]["text"] == long_def          # full text, not the short form
     assert spend["pointer_note"] == "See the Procurement category."
+    assert spend["public_note"] == "Limits are set per card or per team."
     assert "vendor_note" not in spend and "note" not in spend
+    assert "UNVERIFIED" not in str(result)          # internal note never leaves
+    assert feats["Card Issuance"]["public_note"] == ""
     card = feats["Card Issuance"]["definition"]
     assert card["state"] == "empty" and card["text"] == ""
-    assert card["placeholder"] == "Definition not yet available."
+    from linklib import gates
+    assert card["placeholder"] == gates.EMPTY_COPY["feature_definition"].visitor_text

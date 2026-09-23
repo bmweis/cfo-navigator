@@ -1923,14 +1923,22 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   full stored text plus the category's `pointer_note`. Nothing is stored
   and nothing is shortened in the database. No title tooltips, no
   JavaScript. A feature with no definition shows
-  `gates.EMPTY_COPY["feature_definition"]`. `get_software`'s MCP
-  `key_features` items now carry `definition` (the same `_gated_field`
-  shape as description) and `pointer_note`. **`tool_feature_links.note` is
-  intentionally not rendered anywhere public or in MCP**: it's a curation
-  log that mixes quoted vendor copy with reviewer caveats ("UNVERIFIED...
-  keep pending"), not vendor-facing description. Surfacing vendor-specific
-  text needs a separate, publishable field first. Brian's call; not built.
-  See ARCHITECTURE.md's matching paragraph and
+  `gates.EMPTY_COPY["feature_definition"]` ("Definition not available.";
+  a separate PR is moving the rest of that dict off "not yet").
+  **`tool_feature_links.note` is never rendered publicly or sent via MCP**:
+  it's a curation log mixing quoted vendor copy with reviewer caveats.
+  **Publishable vendor text is a separate column, `public_note`**, empty
+  for every row at launch and never copied from `note` automatically;
+  Brian curates it on the tool edit page's Key features table, where the
+  internal note sits in the column beside it. On the profile it follows the
+  definition, the two labeled "Definition" and "In {tool}". `get_software`'s
+  `key_features` items carry `definition` (the `_gated_field` shape),
+  `pointer_note`, and `public_note`. Limit:
+  `Library.FEATURE_LINK_PUBLIC_NOTE_MAX` (1,000), shared with the
+  textarea's `maxlength` like `CATEGORY_FEATURE_TEXT_MAX`; an over-limit
+  save is refused whole, never shortened. `upsert_tool_feature_link`'s
+  `public_note=None` default keeps stored text, so queue approval and the
+  seed script can't wipe it. See ARCHITECTURE.md's matching paragraph and
   `tests/test_feature_definitions.py`.
 
 - **Resources — Book recommendations (2026-08).** `/tools/resources` splits

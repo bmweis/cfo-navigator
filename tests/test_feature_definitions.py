@@ -46,7 +46,7 @@ def _client(appmod):
     return TestClient(appmod.app, raise_server_exceptions=True)
 
 
-def _seed(definitions: list[tuple[str, str, str]], note: str = ""):
+def _seed(definitions: list[tuple[str, str, str]], note: str = "", public_note: str | None = None):
     """definitions: (feature name, definition, pointer_note)."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
@@ -55,10 +55,16 @@ def _seed(definitions: list[tuple[str, str, str]], note: str = ""):
     fids = []
     for name, definition, pointer in definitions:
         fid = lib.add_category_feature(cat_id, name, definition, pointer)
-        lib.upsert_tool_feature_link(tool_id, fid, "native", 0, "2026-08-24", note=note)
+        lib.upsert_tool_feature_link(tool_id, fid, "native", 0, "2026-08-24", note=note,
+                                     public_note=public_note)
         fids.append(fid)
     lib.close()
     return fids
+
+
+def _placeholder():
+    from linklib import gates
+    return gates.EMPTY_COPY["feature_definition"]
 
 
 def _card(html: str) -> str:
@@ -134,8 +140,10 @@ def test_short_definition_renders_without_expand_control(env):
 def test_missing_definition_renders_placeholder(env):
     _seed([("Basic Card Issuance", "", "")])
     card = _card(_client(env).get("/tools/software/mercury").text)
-    assert "Definition not yet available." in card
-    assert "Add one from Software features." not in card   # admin suffix only
+    copy = _placeholder()
+    assert copy.visitor_text == "Definition not available."
+    assert copy.visitor_text in card
+    assert copy.admin_suffix not in card   # admin suffix only
 
 
 def test_missing_definition_placeholder_carries_admin_prompt_when_signed_in(env):
@@ -143,7 +151,9 @@ def test_missing_definition_placeholder_carries_admin_prompt_when_signed_in(env)
     c = _client(env)
     c.post("/login", data={"username": "admin", "password": "adminpass"})
     card = _card(c.get("/tools/software/mercury").text)
-    assert "Definition not yet available. Add one from Software features." in card
+    copy = _placeholder()
+    assert copy.admin_suffix == "Add one from Software features."
+    assert f"{copy.visitor_text} {copy.admin_suffix}" in card
 
 
 def test_pointer_note_is_in_expanded_view(env):
@@ -177,6 +187,127 @@ def test_expand_control_is_native_details_summary(env):
     assert "onclick" not in card[card.index("<details"):card.index("</details>")]
 
 
+# ---------------------------------------------------------------------------
+# Publishable vendor text: tool_feature_links.public_note (2026-09)
+# ---------------------------------------------------------------------------
+
+VENDOR = "Mercury sets limits per card, per team, or per vendor, and routes over-limit spend to an approver."
+
+
+def test_public_note_renders_after_definition_each_labeled(env):
+    _seed([("Spend Controls", "Set spending rules before money moves.", "")], public_note=VENDOR)
+    card = _card(_client(env).get("/tools/software/mercury").text)
+    full = card[card.index('class="tp-fd-full"'):card.index("</details>")]
+    i_label_def = full.index('<p class="tp-fd-label">Definition</p>')
+    i_def = full.index("Set spending rules before money moves.")
+    i_label_vendor = full.index('<p class="tp-fd-label tp-fd-label-vendor">In Mercury</p>')
+    i_vendor = full.index(env._esc(VENDOR))
+    assert i_label_def < i_def < i_label_vendor < i_vendor
+
+
+def test_public_note_makes_a_short_definition_expandable(env):
+    _seed([("Mobile Check Deposit", "Deposit paper checks by photo.", "")], public_note=VENDOR)
+    card = _card(_client(env).get("/tools/software/mercury").text)
+    assert '<details class="tp-fd">' in card
+    assert env._esc(VENDOR) in card
+
+
+def test_public_note_with_empty_definition_keeps_the_placeholder(env):
+    _seed([("Basic Card Issuance", "", "")], public_note=VENDOR)
+    card = _card(_client(env).get("/tools/software/mercury").text)
+    full = card[card.index('class="tp-fd-full"'):]
+    assert _placeholder().visitor_text in full
+    assert env._esc(VENDOR) in full
+
+
+def test_no_labels_without_public_note(env):
+    _seed([("Spend Controls", LONG_DEF, "")])
+    card = _card(_client(env).get("/tools/software/mercury").text)
+    assert "tp-fd-label" not in card
+
+
+def test_public_note_starts_empty_and_is_never_copied_from_note(env):
+    _seed([("Charge Cards", "Issues charge cards.", "")], note="Vendor says: settles in full monthly.")
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    rows = lib.conn.execute("SELECT note, public_note FROM tool_feature_links").fetchall()
+    lib.close()
+    assert [tuple(r) for r in rows] == [("Vendor says: settles in full monthly.", "")]
+
+
+def test_upsert_without_public_note_keeps_existing_text(env):
+    """Queue approval and the seed script never pass public_note; a re-upsert
+    from either must not wipe what Brian wrote."""
+    fid = _seed([("Spend Controls", "d.", "")], public_note=VENDOR)[0]
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.conn.execute("SELECT tool_id FROM tool_feature_links").fetchone()[0]
+    lib.upsert_tool_feature_link(tool_id, fid, "add_on", 1, "2026-09-01", note="new note")
+    link = lib.get_tool_feature_link(tool_id, fid)
+    lib.close()
+    assert link["public_note"] == VENDOR and link["availability"] == "add_on"
+
+
+def test_public_note_over_limit_is_refused_not_shortened(env):
+    fid = _seed([("Spend Controls", "d.", "")], public_note=VENDOR)[0]
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.conn.execute("SELECT tool_id FROM tool_feature_links").fetchone()[0]
+    too_long = "x" * (Library.FEATURE_LINK_PUBLIC_NOTE_MAX + 1)
+    with pytest.raises(ValueError, match="limit is 1,000"):
+        lib.upsert_tool_feature_link(tool_id, fid, "native", 0, "", public_note=too_long)
+    exactly = "y" * Library.FEATURE_LINK_PUBLIC_NOTE_MAX
+    lib.upsert_tool_feature_link(tool_id, fid, "native", 0, "", public_note=exactly)
+    stored = lib.get_tool_feature_link(tool_id, fid)["public_note"]
+    lib.close()
+    assert stored == exactly
+
+
+def _admin(env):
+    c = _client(env)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    return c
+
+
+def test_editor_shows_internal_note_beside_public_text(env):
+    fid = _seed([("Spend Controls", "d.", "")], note="Vendor copy: per-card limits. UNVERIFIED",
+                public_note=VENDOR)[0]
+    html = _admin(env).get("/tools/software/mercury/edit").text
+    note_i = html.index(f'name="feature_{fid}_note"')
+    public_i = html.index(f'name="feature_{fid}_public_note"')
+    assert note_i < public_i
+    # Adjacent cells: nothing but the closing/opening <td> between them.
+    between = html[note_i:public_i]
+    assert between.count("<td") == 1 and "Vendor copy: per-card limits. UNVERIFIED" in between
+    assert f'maxlength="{env._FEATURE_LINK_PUBLIC_NOTE_MAX}"' in html[public_i:public_i + 300]
+    assert env._esc(VENDOR) in html[public_i:public_i + 1200]
+    assert ">Internal note</th>" in html and ">Public text</th>" in html
+
+
+def test_editor_save_writes_public_note_and_refuses_over_limit(env):
+    fid = _seed([("Spend Controls", "d.", "")])[0]
+    c = _admin(env)
+    base = {"feature_ids": str(fid), f"feature_{fid}_enabled": "1",
+            f"feature_{fid}_availability": "native", f"feature_{fid}_note": "internal"}
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.conn.execute("SELECT tool_id FROM tool_feature_links").fetchone()[0]
+    lib.close()
+    url = f"/admin/tools/software/{tool_id}/feature-links/save"
+    r = c.post(url, data={**base, f"feature_{fid}_public_note": VENDOR}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/tools/software/mercury/edit"
+    r = c.post(url, data={**base, f"feature_{fid}_note": "changed",
+                          f"feature_{fid}_public_note": "z" * 1001}, follow_redirects=False)
+    assert "feature_links_error=" in r.headers["location"]
+    lib = Library(os.environ["LINKLIB_DB"])
+    link = lib.get_tool_feature_link(tool_id, fid)
+    lib.close()
+    # Refused as a whole: neither field changed, nothing shortened.
+    assert link["public_note"] == VENDOR and link["note"] == "internal"
+    page = c.get(r.headers["location"]).text
+    assert "the limit is 1,000" in page and '<details class="features-group" open' in page
+
+
 def test_live_browser_expand_by_keyboard_without_js_errors(env):
     """Real Chromium: Tab to the summary, press Enter, the full text shows,
     no page errors. Skips when no browser binary is available (CI)."""
@@ -184,7 +315,7 @@ def test_live_browser_expand_by_keyboard_without_js_errors(env):
         from playwright.sync_api import sync_playwright
     except ImportError:
         pytest.skip("playwright not installed")
-    _seed([("Spend Controls", LONG_DEF, "")])
+    _seed([("Spend Controls", LONG_DEF, "")], public_note=VENDOR)
     html = _client(env).get("/tools/software/mercury").text
     pw = sync_playwright().start()
     browser = None
@@ -213,6 +344,7 @@ def test_live_browser_expand_by_keyboard_without_js_errors(env):
         page.keyboard.press("Enter")
         assert full.is_visible()
         assert "route approvals" in full.inner_text()
+        assert "in mercury" in full.inner_text().lower() and "over-limit spend" in full.inner_text()
         assert errors == []
     finally:
         browser.close()

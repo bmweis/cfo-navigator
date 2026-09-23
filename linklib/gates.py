@@ -131,8 +131,10 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
     # the Software profile's Key features card (feature-definitions PR). A
     # definition is admin-curated reference text with no verification
     # flag, so it only ever has two states: populated or empty.
+    # "not available", not "not yet": Brian's copy for this field. A
+    # separate PR is moving the rest of this dict the same way.
     "feature_definition": EmptyCopy(
-        "Definition not yet available.", "Add one from Software features."),
+        "Definition not available.", "Add one from Software features."),
 }
 
 # Compare-matrix per-column empty-cell labels — a shorter, table-cell-scoped
