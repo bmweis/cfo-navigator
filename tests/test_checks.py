@@ -252,7 +252,7 @@ def _summary_grid_html(html: str) -> str:
     own detail section, so a whole-page substring check couldn't tell
     "still in the summary" from "only in its detail section" apart."""
     start = html.index('<style>.checks-summary-grid')
-    end = html.index('<h2 id="live-checks"')
+    end = html.index('<div id="ci-quota"')
     return html[start:end]
 
 
