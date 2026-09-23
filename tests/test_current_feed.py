@@ -446,6 +446,9 @@ def test_tracks_sort_by_current_feed_order_within_a_side(env):
     finally:
         lib.close()
     html = client.get("/current-feed").text
+    # Search the page body only: the shared <head> CSS carries comments
+    # (e.g. "Secondary format") that would otherwise match these names.
+    html = html[html.index("<main"):]
     assert html.index("First") < html.index("Second") < html.index("Third")
 
 
