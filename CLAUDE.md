@@ -1914,6 +1914,25 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   mixed-case brand name still gets lowercased) is unchanged and still
   flagged in the function's own docstring.
 
+- **Feature definitions render on the public Key features card (2026-09).**
+  `category_features.definition` was collected and never shown, so each
+  feature row on `/tools/software/{slug}` now shows a short line derived at
+  render time (`_feature_definition_short`: first sentence if 170
+  characters or fewer, else a word-boundary cut near 140 with an
+  ellipsis), expandable through a native `<details>`/`<summary>` to the
+  full stored text plus the category's `pointer_note`. Nothing is stored
+  and nothing is shortened in the database. No title tooltips, no
+  JavaScript. A feature with no definition shows
+  `gates.EMPTY_COPY["feature_definition"]`. `get_software`'s MCP
+  `key_features` items now carry `definition` (the same `_gated_field`
+  shape as description) and `pointer_note`. **`tool_feature_links.note` is
+  intentionally not rendered anywhere public or in MCP**: it's a curation
+  log that mixes quoted vendor copy with reviewer caveats ("UNVERIFIED...
+  keep pending"), not vendor-facing description. Surfacing vendor-specific
+  text needs a separate, publishable field first. Brian's call; not built.
+  See ARCHITECTURE.md's matching paragraph and
+  `tests/test_feature_definitions.py`.
+
 - **Resources — Book recommendations (2026-08).** `/tools/resources` splits
   from one flat card list into two headed sections: "Benchmarking" (the
   existing cards, unchanged) and a new "Book recommendations" — a personal

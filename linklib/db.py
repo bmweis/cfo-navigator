@@ -6653,9 +6653,13 @@ class Library:
         the link row itself is untouched). Ordered by category name then the
         feature's own sort_order, so a multi-category tool's card groups
         predictably. Powers the public "Key features" card on
-        /tools/software/{slug} and the Software Matchmaker's context."""
+        /tools/software/{slug} (which, since the feature-definitions PR,
+        also renders each feature's category-level definition/pointer_note
+        and the link's own vendor-specific `note`), get_software's MCP
+        payload, and the Software Matchmaker's context."""
         rows = self.conn.execute(
             """SELECT l.*, cf.name AS feature_name, cf.sort_order AS feature_sort_order,
+                      cf.definition AS feature_definition, cf.pointer_note AS feature_pointer_note,
                       cf.category_id AS category_id, tc.name AS category_name
                FROM tool_feature_links l
                JOIN category_features cf ON cf.id = l.feature_id

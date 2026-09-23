@@ -5864,7 +5864,11 @@ deliberate:**
   over `linklib.gates`, using the FULL field text (`tools.description`,
   not `linklib.compare`'s summary-preferring excerpt) — matching the real
   profile page's own field selection. `get_software` assembles this by hand
-  (description/agent_taxonomy/bottom_line/competitors/key_features);
+  (description/agent_taxonomy/bottom_line/competitors/key_features; each
+  key_features item carries `definition`, a `_gated_field` dict with the
+  full category-level text or the "Definition not yet available."
+  placeholder, plus `pointer_note`; `tool_feature_links.note` is omitted,
+  since it's a curation log and this tool takes any token);
   `get_community` instead calls `linklib.compare.build_communities_compare`
   with a single-entity list and takes `entities[0]` — reusable as-is here
   because, unlike the tool builder, the community builder already selects
@@ -8385,6 +8389,34 @@ result — the same `retired_at`-filtering convention
 `list_category_features(include_retired=False)`'s admin default already
 uses, so a retired feature disappears from public rendering the moment it's
 retired, with no separate cleanup step.
+
+**Feature definitions on the Key features card (2026-09).**
+`category_features.definition` (146 rows; about 75 carry text, up to 1,470
+characters) was collected but never shown to a visitor. Each feature row
+now renders it: a short line by default, expandable to the full stored
+text. The short form is derived at render time by
+`webapp.app._feature_definition_short` (the first sentence when it's 170
+characters or fewer, otherwise a cut near 140 characters at a word
+boundary, with an ellipsis and no dangling open parenthesis). It is never
+stored, and the stored value is never shortened. Expansion is a native
+`<details class="tp-fd">`/`<summary>`: real DOM text, keyboard-operable,
+no JavaScript. Tooltips are ruled out because they never appear on touch.
+The expanded view also shows the category's `pointer_note` when set. A
+feature with no definition shows `gates.EMPTY_COPY["feature_definition"]`
+("Definition not yet available.", plus "Add one from Software
+features." for an admin); a definition has no verification flag, so it's
+only ever populated or empty. The read path is the same
+`list_tool_feature_links_with_details`, which now also selects
+`cf.definition AS feature_definition` and
+`cf.pointer_note AS feature_pointer_note`. **`tool_feature_links.note` is
+deliberately not rendered, publicly or via MCP.** A production survey
+found 238 of 377 links carry a note, but those notes are a curation log:
+quoted vendor copy mixed with reviewer caveats ("UNVERIFIED... keep
+pending", "ai_enabled left false"), not publishable vendor-specific
+description. The notes are copied in from `feature_review_queue`
+`payload.links[].note` on approval. The `.tool-prose` reading column
+doesn't apply here, because the card sits in the profile's sidebar column.
+The definition block is a full-width row inside each `<li>`.
 
 **Legacy `tool_features` retirement — every code path enumerated and
 disposed of, nothing orphaned:**

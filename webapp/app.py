@@ -3347,7 +3347,52 @@ def _sentence_case_feature_name(name: str) -> str:
     return result[:1].upper() + result[1:] if result else result
 
 
-def _software_key_features_card(feature_links: list[dict]) -> str:
+# Short form of a feature definition for the Key features card (feature-
+# definitions PR, 2026-09). Derived at render time from the stored
+# category_features.definition, never stored: no new column and nothing new
+# for Brian to write. The first sentence wins when it's short enough;
+# otherwise the text is cut at a word boundary near 140 characters and
+# marked with an ellipsis. The stored value is never shortened.
+_FEATURE_DEF_SHORT_TARGET = 140
+_FEATURE_DEF_SENTENCE_MAX = 170
+# Abbreviations whose trailing period isn't a sentence end.
+_FEATURE_DEF_ABBREVIATIONS = ("e.g.", "i.e.", "vs.", "etc.", "approx.", "incl.", "U.S.")
+
+
+def _first_sentence(text: str) -> str:
+    for m in re.finditer(r"[.!?](?=\s|$)", text):
+        end = m.end()
+        before = text[:end]
+        if any(before.endswith(a) for a in _FEATURE_DEF_ABBREVIATIONS):
+            continue
+        return before
+    return text
+
+
+def _feature_definition_short(text: str) -> str:
+    """The collapsed-view form of a feature definition: its first sentence
+    when that runs no longer than _FEATURE_DEF_SENTENCE_MAX characters,
+    otherwise roughly the first _FEATURE_DEF_SHORT_TARGET characters cut at
+    a word boundary, trailing punctuation or dash stripped, with an
+    ellipsis appended. Empty in, empty out."""
+    full = " ".join((text or "").split())
+    if not full:
+        return ""
+    sentence = _first_sentence(full)
+    if len(sentence) <= _FEATURE_DEF_SENTENCE_MAX:
+        return sentence
+    cut = full[:_FEATURE_DEF_SHORT_TARGET + 1]
+    space = cut.rfind(" ")
+    if space > _FEATURE_DEF_SHORT_TARGET // 2:
+        cut = cut[:space]
+    if cut.count("(") > cut.count(")"):
+        # Don't leave a dangling open parenthetical in the short line.
+        cut = cut[:cut.rfind("(")]
+    cut = cut.rstrip(" ,;:—–-(")
+    return cut + "…"
+
+
+def _software_key_features_card(feature_links: list[dict], *, authed: bool = False) -> str:
     """Public "Key features" card (Feature Taxonomy Phase 2) — ALWAYS
     renders, for every tool. Links are grouped by category only when they
     span more than one seeded category; a single-category tool gets a flat
@@ -3382,6 +3427,44 @@ def _software_key_features_card(feature_links: list[dict]) -> str:
     def _tag(label: str, cls: str) -> str:
         return f'<span class="tp-feature-tag {cls}">{_esc(label)}</span>'
 
+    def _feature_definition_html(link: dict) -> str:
+        """Per-feature definition block (feature-definitions PR, 2026-09):
+        a short derived line by default, expandable via a native
+        <details>/<summary> to the full category-level definition plus the
+        category's pointer_note when present. Real DOM text, never a title
+        tooltip (tooltips don't exist on touch), and keyboard-operable with
+        no JavaScript at all.
+
+        Deliberately NOT rendered: tool_feature_links.note. It reads like
+        vendor-specific text but is a curation log: quoted vendor copy mixed
+        with reviewer caveats ("UNVERIFIED... keep pending", "ai_enabled
+        left false"). It stays admin-side until it's split into a
+        publishable field."""
+        definition = " ".join((link.get("feature_definition") or "").split())
+        pointer = (link.get("feature_pointer_note") or "").strip()
+        copy = gates.EMPTY_COPY["feature_definition"]
+        placeholder = _empty_state_text(copy.visitor_text, copy.admin_suffix, authed)
+        short = _feature_definition_short(definition)
+        if short:
+            short_html = f'<span class="tp-fd-short">{_esc(short)}</span>'
+        else:
+            short_html = f'<span class="tp-fd-short tp-fd-empty">{_esc(placeholder)}</span>'
+        has_more = bool(pointer or (definition and short != definition))
+        if not has_more:
+            return f'<div class="tp-fd"><p class="tp-fd-line">{short_html}</p></div>'
+        full_html = (f'<p>{_esc(definition)}</p>' if definition
+                     else f'<p class="tp-fd-empty">{_esc(placeholder)}</p>')
+        if pointer:
+            full_html += f'<p class="tp-fd-pointer">{_esc(pointer)}</p>'
+        return (
+            '<details class="tp-fd">'
+            f'<summary class="tp-fd-line">{short_html} '
+            '<span class="tp-fd-toggle"><span class="tp-fd-more">More</span>'
+            '<span class="tp-fd-less">Less</span></span></summary>'
+            f'<div class="tp-fd-full">{full_html}</div>'
+            '</details>'
+        )
+
     def _feature_li(link: dict) -> str:
         tags = "".join([
             _tag("Add-on", "tp-feature-tag-addon") if link["availability"] == "add_on" else "",
@@ -3394,7 +3477,7 @@ def _software_key_features_card(feature_links: list[dict]) -> str:
             f'data-category-id="{link["category_id"]}" '
             f'onclick="openFeatureSuggest(\'flag\',this)">&#9873;</button>'
         )
-        return f'<li>{_esc(name)}{tags}{flag_btn}</li>'
+        return f'<li>{_esc(name)}{tags}{flag_btn}{_feature_definition_html(link)}</li>'
 
     categories: list[str] = []
     for link in feature_links:
@@ -9602,7 +9685,7 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # seeded category (a tool tagged into both ERP and Close Management, for
     # instance) — a single-category tool's card stays a flat list, no
     # redundant sub-heading repeating what the tool already is.
-    features_card = _software_key_features_card(feature_links)
+    features_card = _software_key_features_card(feature_links, authed=authed)
 
     # Category tags: Phase F4 moved these from their own right-column card
     # to sit next to the Visit/Compare/Edit button group; the Sidebar
@@ -9969,6 +10052,24 @@ function submitIntroForm() {{
 .tp-feature-list li{{position:relative;padding:8px 28px 8px 0;border-bottom:1px solid var(--line);color:var(--ink-soft);
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;}}
 .tp-feature-list li:last-child{{border-bottom:none;}}
+/* Feature definitions (2026-09): a full-width row under each feature's
+   name/tags, collapsed to a derived short line; <details> expands it. */
+.tp-fd{{flex-basis:100%;margin:2px 0 0;font-size:13px;line-height:1.5;color:var(--muted);}}
+.tp-fd-line{{margin:0;}}
+.tp-fd summary{{list-style:none;cursor:pointer;}}
+.tp-fd summary::-webkit-details-marker{{display:none;}}
+.tp-fd summary:focus-visible{{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px;}}
+.tp-fd-toggle{{color:var(--accent);font-weight:500;white-space:nowrap;}}
+.tp-fd-less,.tp-fd[open] .tp-fd-more,.tp-fd[open] .tp-fd-short{{display:none;}}
+.tp-fd[open] .tp-fd-less{{display:inline;}}
+.tp-fd-empty{{font-style:italic;}}
+.tp-fd-full{{margin-top:2px;}}
+/* Two-class selector so this outranks .tp-card p (15px/1.7, ink-soft),
+   which is declared later on the page and would otherwise win. */
+.tp-card .tp-fd p{{font-size:13px;line-height:1.5;color:var(--muted);margin:0;}}
+.tp-card .tp-fd-full p{{margin:0 0 6px;}}
+.tp-card .tp-fd-full p:last-child{{margin-bottom:0;}}
+.tp-fd-pointer{{font-style:italic;}}
 .tp-feature-group+.tp-feature-group{{margin-top:18px;}}
 .tp-feature-group-h{{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
   color:var(--seafoam-deep);margin:0 0 4px;}}

@@ -367,9 +367,21 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
                 [{"id": c["id"], "slug": c["slug"], "name": c["name"],
                   "profile_url": f"/tools/software/{c['slug']}"} for c in competitors],
                 authed),
+            # Each feature carries its full category-level definition (same
+            # gated-field shape as description/bottom_line, profile-page
+            # empty copy) and pointer_note, so FP&A Buddy and other MCP
+            # callers get the text the public Key features card renders, in
+            # full rather than the card's derived short form.
+            # tool_feature_links.note is deliberately omitted: it's a
+            # curation log with reviewer caveats, not public copy, and this
+            # tool is callable by any token.
             "key_features": [
                 {"category": f["category_name"], "name": f["feature_name"],
-                 "availability": f.get("availability"), "ai_enabled": bool(f.get("ai_enabled"))}
+                 "availability": f.get("availability"), "ai_enabled": bool(f.get("ai_enabled")),
+                 "definition": _gated_field(
+                     "definition", "Definition", "feature_definition",
+                     " ".join((f.get("feature_definition") or "").split()), False, authed),
+                 "pointer_note": (f.get("feature_pointer_note") or "").strip()}
                 for f in feature_links
             ],
         }
