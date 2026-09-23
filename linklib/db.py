@@ -457,6 +457,11 @@ CREATE INDEX IF NOT EXISTS idx_category_features_category ON category_features(c
 -- (§6: "claims decay fast"); source_url is nullable free text for now, not a
 -- source-tier enum — §8's sourcing hierarchy is a scan-tool/reviewer
 -- judgment call, not yet schema.
+-- note is the internal curation log (quoted vendor copy mixed with reviewer
+-- caveats) and is never shown publicly or sent over MCP. public_note is the
+-- separate, visitor-facing vendor-specific text Brian curates by hand, often
+-- lifting the publishable part out of note; it starts empty for every row and
+-- nothing seeds or copies into it automatically.
 CREATE TABLE IF NOT EXISTS tool_feature_links (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     tool_id        INTEGER NOT NULL,
@@ -468,6 +473,7 @@ CREATE TABLE IF NOT EXISTS tool_feature_links (
     source_url     TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL DEFAULT '',
+    public_note    TEXT NOT NULL DEFAULT '',
     UNIQUE(tool_id, feature_id)
 );
 
@@ -2256,6 +2262,7 @@ class Library:
             # competitive_differentiation/agent_taxonomy_note. Nullable/empty means
             # "no suite to note," not "not yet researched."
             "ALTER TABLE tools ADD COLUMN suite_note TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE tool_feature_links ADD COLUMN public_note TEXT NOT NULL DEFAULT ''",
             # /tools/resources splits into two sections (Benchmarking, Book
             # recommendations) — 'benchmarking' | 'books'. Every existing row
             # defaults to 'benchmarking' with no backfill needed; the ten
@@ -6653,9 +6660,14 @@ class Library:
         the link row itself is untouched). Ordered by category name then the
         feature's own sort_order, so a multi-category tool's card groups
         predictably. Powers the public "Key features" card on
-        /tools/software/{slug} and the Software Matchmaker's context."""
+        /tools/software/{slug} (which, since the feature-definitions PR,
+        also renders each feature's category-level definition/pointer_note
+        and the link's publishable `public_note`; the internal `note` is
+        never rendered), get_software's MCP payload, and the Software
+        Matchmaker's context."""
         rows = self.conn.execute(
             """SELECT l.*, cf.name AS feature_name, cf.sort_order AS feature_sort_order,
+                      cf.definition AS feature_definition, cf.pointer_note AS feature_pointer_note,
                       cf.category_id AS category_id, tc.name AS category_name
                FROM tool_feature_links l
                JOIN category_features cf ON cf.id = l.feature_id
@@ -6672,34 +6684,74 @@ class Library:
         ).fetchone()
         return dict(row) if row else None
 
+    # Upper bound on tool_feature_links.public_note, shared by the admin
+    # textarea's maxlength and the server-side check below so the two can
+    # never disagree (same pattern as CATEGORY_FEATURE_TEXT_MAX). Derived: the
+    # longest internal note, the text this is usually lifted from, was 312
+    # characters (production, 2026-09-23), and it renders under the category
+    # definition in a sidebar card, so ~3x that is room enough. A save over
+    # the limit is REFUSED with a visible error naming both numbers; nothing
+    # here ever shortens a value.
+    FEATURE_LINK_PUBLIC_NOTE_MAX = 1_000
+
+    @classmethod
+    def _check_feature_link_public_note(cls, public_note: str) -> None:
+        n = len(public_note or "")
+        if n > cls.FEATURE_LINK_PUBLIC_NOTE_MAX:
+            raise ValueError(
+                f"Public text is {n:,} characters; the limit is {cls.FEATURE_LINK_PUBLIC_NOTE_MAX:,}. "
+                f"Nothing was saved. Shorten it and try again."
+            )
+
     def upsert_tool_feature_link(self, tool_id: int, feature_id: int, availability: str,
                                   ai_enabled: int, verified_as_of: str, note: str = "",
-                                  source_url: str = "") -> int:
+                                  source_url: str = "", public_note: str | None = None,
+                                  source: str | None = None) -> int:
         """Insert or update the one link row for this (tool, feature) pair —
         the admin checklist toggles a feature on by calling this, and re-calls
         it on every designation edit. availability must be 'native'|'add_on'
-        (the CHECK constraint backs this up at the DB layer too)."""
+        (the CHECK constraint backs this up at the DB layer too).
+
+        public_note=None (the default) leaves any stored public_note alone,
+        so review-queue approval and the seed script, which never carry it,
+        can't wipe text Brian curated. Pass a string (including "") to set
+        it. Over FEATURE_LINK_PUBLIC_NOTE_MAX raises ValueError and writes
+        nothing."""
         if availability not in ("native", "add_on"):
             raise ValueError('availability must be "native" or "add_on".')
+        if public_note is not None:
+            public_note = public_note.strip()
+            self._check_feature_link_public_note(public_note)
         now = _now()
         existing = self.get_tool_feature_link(tool_id, feature_id)
         if existing:
+            if public_note is None:
+                public_note = existing.get("public_note") or ""
+            else:
+                public_note = self._vf("tool_feature_links", existing["id"], "public_note",
+                                       public_note, source=source)
             self.conn.execute(
                 """UPDATE tool_feature_links SET availability=?, ai_enabled=?, verified_as_of=?,
-                   note=?, source_url=?, updated_at=? WHERE id=?""",
+                   note=?, source_url=?, public_note=?, updated_at=? WHERE id=?""",
                 (availability, int(ai_enabled), verified_as_of.strip(), note.strip(),
-                 source_url.strip(), now, existing["id"]),
+                 source_url.strip(), public_note, now, existing["id"]),
             )
             self.conn.commit()
             return existing["id"]
+        raw_public = public_note or ""
+        fixed_public = _voice_fix(raw_public) if raw_public else raw_public
         cur = self.conn.execute(
             """INSERT INTO tool_feature_links (tool_id, feature_id, availability, ai_enabled,
-               verified_as_of, note, source_url, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+               verified_as_of, note, source_url, public_note, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (tool_id, feature_id, availability, int(ai_enabled), verified_as_of.strip(),
-             note.strip(), source_url.strip(), now, now),
+             note.strip(), source_url.strip(), fixed_public, now, now),
         )
         self.conn.commit()
+        if fixed_public != raw_public:
+            self.log_voice_correction("tool_feature_links", cur.lastrowid, "public_note",
+                                      raw_public, fixed_public, source=source,
+                                      rule=_voice_fix_rule(raw_public))
         return cur.lastrowid
 
     def delete_tool_feature_link(self, tool_id: int, feature_id: int) -> None:

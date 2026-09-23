@@ -109,6 +109,10 @@ _SCAN_TABLES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
     # comment above _SCAN_TABLES) — mechanical rules (banned words/filler/
     # performative) still apply to it, same as every other name column here.
     ("category_features", "id", ("name", "definition", "pointer_note"), ("name",)),
+    # public_note is the visitor-facing vendor-specific text on the Key
+    # features card. The internal `note` (a curation log) is not user copy
+    # and isn't scanned.
+    ("tool_feature_links", "id", ("public_note",), ()),
     ("benchmarks", "id", ("name", "description"), ("name",)),
     ("tool_categories", "id", ("name", "description"), ()),
     ("community_categories", "id", ("name", "description"), ()),

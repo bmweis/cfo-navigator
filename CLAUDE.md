@@ -1914,6 +1914,33 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   mixed-case brand name still gets lowercased) is unchanged and still
   flagged in the function's own docstring.
 
+- **Feature definitions render on the public Key features card (2026-09).**
+  `category_features.definition` was collected and never shown, so each
+  feature row on `/tools/software/{slug}` now shows a short line derived at
+  render time (`_feature_definition_short`: first sentence if 170
+  characters or fewer, else a word-boundary cut near 140 with an
+  ellipsis), expandable through a native `<details>`/`<summary>` to the
+  full stored text plus the category's `pointer_note`. Nothing is stored
+  and nothing is shortened in the database. No title tooltips, no
+  JavaScript. A feature with no definition shows
+  `gates.EMPTY_COPY["feature_definition"]` ("Definition not available.";
+  a separate PR is moving the rest of that dict off "not yet").
+  **`tool_feature_links.note` is never rendered publicly or sent via MCP**:
+  it's a curation log mixing quoted vendor copy with reviewer caveats.
+  **Publishable vendor text is a separate column, `public_note`**, empty
+  for every row at launch and never copied from `note` automatically;
+  Brian curates it on the tool edit page's Key features table, where the
+  internal note sits in the column beside it. On the profile it follows the
+  definition, the two labeled "Definition" and "In {tool}". `get_software`'s
+  `key_features` items carry `definition` (the `_gated_field` shape),
+  `pointer_note`, and `public_note`. Limit:
+  `Library.FEATURE_LINK_PUBLIC_NOTE_MAX` (1,000), shared with the
+  textarea's `maxlength` like `CATEGORY_FEATURE_TEXT_MAX`; an over-limit
+  save is refused whole, never shortened. `upsert_tool_feature_link`'s
+  `public_note=None` default keeps stored text, so queue approval and the
+  seed script can't wipe it. See ARCHITECTURE.md's matching paragraph and
+  `tests/test_feature_definitions.py`.
+
 - **Resources — Book recommendations (2026-08).** `/tools/resources` splits
   from one flat card list into two headed sections: "Benchmarking" (the
   existing cards, unchanged) and a new "Book recommendations" — a personal

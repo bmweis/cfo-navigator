@@ -127,6 +127,14 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
         "This section hasn't been researched yet.", "Generate a draft from the edit page."),
     "community_similar_communities": EmptyCopy(
         "Similar communities not yet available.", "Curate them from the edit page."),
+    # One curated feature's category-level definition, rendered per row in
+    # the Software profile's Key features card (feature-definitions PR). A
+    # definition is admin-curated reference text with no verification
+    # flag, so it only ever has two states: populated or empty.
+    # "not available", not "not yet": Brian's copy for this field. A
+    # separate PR is moving the rest of this dict the same way.
+    "feature_definition": EmptyCopy(
+        "Definition not available.", "Add one from Software features."),
 }
 
 # Compare-matrix per-column empty-cell labels — a shorter, table-cell-scoped

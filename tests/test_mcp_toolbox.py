@@ -640,3 +640,38 @@ def test_search_books_limit_is_capped_at_50(live_server):
 def test_search_books_callable_by_non_admin_member_token(live_server):
     result = _call_tool(live_server.base_url, live_server.member, "search_books", {})
     assert not result.isError
+
+
+# ---------------------------------------------------------------------------
+# get_software key_features carry each feature's definition (2026-09)
+# ---------------------------------------------------------------------------
+
+def test_get_software_key_features_include_full_definition(live_server):
+    lib = Library(live_server.db_path)
+    tool = _seed_tool(lib, "Definition Tool")
+    cat_id = lib.add_tool_category("DefCat")
+    long_def = "Set spending rules up front. " + ("More detail about approvals and limits. " * 40).strip()
+    with_def = lib.add_category_feature(cat_id, "Spend Controls", long_def,
+                                        "See the Procurement category.")
+    without_def = lib.add_category_feature(cat_id, "Card Issuance")
+    lib.upsert_tool_feature_link(tool["id"], with_def, "native", 0, "2026-08-24",
+                                 note="UNVERIFIED, keep pending",
+                                 public_note="Limits are set per card or per team.")
+    lib.upsert_tool_feature_link(tool["id"], without_def, "native", 0, "2026-08-24")
+    lib.close()
+
+    result = _dict_result(_call_tool(live_server.base_url, live_server.member, "get_software",
+                                      {"slug_or_id": tool["slug"]}))
+    feats = {f["name"]: f for f in result["key_features"]}
+    spend = feats["Spend Controls"]
+    assert spend["definition"]["state"] == "verified"
+    assert spend["definition"]["text"] == long_def          # full text, not the short form
+    assert spend["pointer_note"] == "See the Procurement category."
+    assert spend["public_note"] == "Limits are set per card or per team."
+    assert "vendor_note" not in spend and "note" not in spend
+    assert "UNVERIFIED" not in str(result)          # internal note never leaves
+    assert feats["Card Issuance"]["public_note"] == ""
+    card = feats["Card Issuance"]["definition"]
+    assert card["state"] == "empty" and card["text"] == ""
+    from linklib import gates
+    assert card["placeholder"] == gates.EMPTY_COPY["feature_definition"].visitor_text
