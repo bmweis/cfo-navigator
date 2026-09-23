@@ -136,7 +136,7 @@ class DbCopyViolation:
 
     def __str__(self) -> str:
         rid = f"id={self.row_id}" if self.row_id is not None else "(setting)"
-        return f"{self.table}.{self.column} {rid} — {self.rule}: {self.excerpt}"
+        return f"{self.table}.{self.column} {rid}: {self.rule}, \u201c{self.excerpt}\u201d"
 
 
 def _scan_value(table: str, row_id: object, column: str, value: str, *,

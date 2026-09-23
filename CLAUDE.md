@@ -10283,10 +10283,18 @@ the category-CRUD card it exercises moved out of `_TOOLBOX_TOOLS`).
   brings the finding back on the next pass. A red status nobody can clear
   by deciding trains the reader to ignore the page, so the two surfaces
   may differ in what they show but never contradict each other.
-- **Admin table rows sit on white.** The header keeps its band; the rows
-  under it are `--surface`, enforced by one scoped `_CSS` rule
-  (`.admin-main`). BRAND.md's table line was stale (it described the public
-  article-table style only) and now names both conventions.
+- **Every admin table uses one format.** Light-blue header row, white
+  rows, a line between rows, rounded 12px frame in `--table-border`. It's
+  one `!important` block in `_CSS` scoped to `main.admin-main`, so don't
+  style a new admin table inline; it inherits the format. `_page()` sets
+  `admin-main` from the request path (`_CURRENT_PATH` + `_is_admin_path`),
+  not from `active`, because Toolbox and thought-leadership admin pages
+  pass their own section and used to fall outside the format. A sticky-
+  column table puts the frame on its wrapper (`.table-frame`). BRAND.md's
+  table rule and `tests/test_admin_table_format.py` are the reference.
+- **`webapp/checks.py` is voice-linted** (joined `VOICE_SCANNED_FILES`):
+  its check descriptions render on `/admin/checks`, so they follow the same
+  rules as app.py copy. Keep them to one plain sentence.
 - **Mechanical guard: production script examples use an absolute `--db`.**
   `webapp.checks.db_path_example_problems()`, a `/admin/checks` row and CI
   test (`tests/test_db_path_examples.py`). It scans the script registry,
@@ -10297,8 +10305,8 @@ the category-CRUD card it exercises moved out of `_TOOLBOX_TOOLS`).
 - **`/admin/checks` layout:** the CI-quota control is a switch near the
   top; Live checks loads collapsed, grouped by theme (`_LIVE_CHECK_THEMES`:
   voice and copy, brand and design, site structure and content, code and
-  repo health), in a grid whose column count is `_LIVE_CHECKS_COLUMNS`
-  (placeholder pending Brian's pick). Every card's status sits in the same
+  repo health), in a two-column grid (`_LIVE_CHECKS_COLUMNS = 2`, Brian's pick over
+  three). Every card's status sits in the same
   top-right spot. A new `run_all()` check needs a theme line, or
   `tests/test_checks.py` fails.
 - **Voice review queue:** Detail shows findings and fixes in context,

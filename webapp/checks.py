@@ -63,8 +63,7 @@ def _app_src() -> str:
 # dedupe.py, tagstyle.py) is still unchanged — not swept as part of this PR.
 # agent.py in particular has the identical "rubric enumerates its own banned
 # words" shape voice_review._mask_rubric_enumerations was built to handle
-# (VOICE_CORE_DEFAULT's own "- Avoid: ... delve, robust, seamless, ..."
-# line) — but two of its OTHER rubric lines ("No performative openers or
+# (VOICE_CORE_DEFAULT's own "- Avoid:" line, which lists banned words) — but two of its OTHER rubric lines ("No performative openers or
 # closers (...)", "No filler (...)") use a different marker shape the
 # current mask doesn't cover, so adding agent.py to this list today would
 # still need new markers, not just a one-line addition. Flagged here so a
@@ -72,7 +71,11 @@ def _app_src() -> str:
 #
 # Kept as a real list, not a single hardcoded path, so a future file that
 # DOES belong here is a one-line addition, not a refactor.
-VOICE_SCANNED_FILES = (_APP_PY, _ENRICH_PY, _FEATURE_SCAN_PY)
+#
+# webapp/checks.py joined in 2026-09: its check descriptions and details
+# render on /admin/checks, so they're UI copy like anything in app.py.
+_CHECKS_PY = pathlib.Path(__file__).resolve()
+VOICE_SCANNED_FILES = (_APP_PY, _ENRICH_PY, _FEATURE_SCAN_PY, _CHECKS_PY)
 
 
 def _voice_scanned_sources() -> list[tuple[pathlib.Path, str]]:
@@ -316,13 +319,13 @@ def original_content_mirror_problems() -> list[str]:
         lib.close()
     problems = [
         f"{r['slug']!r} (id {r['id']}) has body_md but no working articles "
-        f"mirror — fix: open /admin/thought-leadership/original/{r['id']}/edit "
+        f"mirror. Fix: open /admin/thought-leadership/original/{r['id']}/edit "
         f"and click Save"
         for r in missing
     ]
     problems += [
-        f"{r['slug']!r} (id {r['id']}) mirror is stale — its articles row "
-        f"no longer matches body_md — fix: open "
+        f"{r['slug']!r} (id {r['id']}) mirror is stale: its articles row "
+        f"no longer matches body_md. Fix: open "
         f"/admin/thought-leadership/original/{r['id']}/edit and click Save"
         for r in drifted
     ]
@@ -358,18 +361,14 @@ def voice_review_queue_status() -> dict:
         n_seed = lib.count_open_voice_review_seed_disagreements()
     finally:
         lib.close()
-    seed_note = (f" (including {n_seed} seed disagreement{'s' if n_seed != 1 else ''} — "
-                 f"_seed_toolbox finding a live value doesn't match its static seed source, an "
-                 f"ordinary state, not a bug)" if n_seed else "")
+    seed_note = (f" {n_seed} of them {'are' if n_seed != 1 else 'is a'} seed disagreement"
+                 f"{'s' if n_seed != 1 else ''}, which is normal." if n_seed else "")
     return {"name": "Voice review queue", "where": "Live + CI", "ok": None,
             "count": n, "seed_disagreement_count": n_seed,
-            "what": "Every _voice_fix correction and unresolved scanner finding, queued for human "
-                    "review at /admin/voice/review-queue rather than silently applied or reported "
-                    "only as a count. Distinct from the Database-backed copy scan below — this "
-                    "queue also holds seed-disagreement items and already-applied auto-corrections "
-                    "that scan never counts, so the two totals are expected to differ.",
+            "what": "Voice fixes and findings waiting for a person to review. Its count won't match "
+                    "Database copy, since it also holds auto-fixes and seed-list conflicts.",
             "detail": f"{n} open item{'s' if n != 1 else ''} awaiting review.{seed_note}"
-                      if n else "0 open items — the queue ran and found nothing pending."}
+                      if n else "0 open items. Nothing is waiting."}
 
 
 # --- coral discipline: at most one coral moment per public page (PR 16) -----
@@ -577,7 +576,7 @@ def run_all() -> list[dict]:
         vf.extend((_path.name, rule, phrase) for rule, phrase in voice_review.mechanical_findings(_src))
     results.append({
         "name": "Voice standards", "where": "Live + CI", "ok": not vf,
-        "what": "No banned buzzwords, filler, or performative phrases in the scanned source's UI/prompt copy.",
+        "what": "No banned buzzwords, filler, or performative phrases in site copy or prompts.",
         "detail": "; ".join(f"{fname} {rule}: “{phrase}”" for fname, rule, phrase in vf[:6])
                   if vf else "Copy is on-voice."})
 
@@ -587,7 +586,7 @@ def run_all() -> list[dict]:
                   for rule, line, excerpt in voice_review.typography_findings(_src))
     results.append({
         "name": "Typography (ampersands, em dashes)", "where": "Live + CI", "ok": not tf,
-        "what": "UI copy spells out \"and\" (except FP&A and friends) and never spaces an em dash.",
+        "what": "Copy spells out \"and\" (terms like FP&A excepted) and never spaces an em dash.",
         "detail": "; ".join(f"{fname} {rule} (line {line}): {excerpt}" for fname, rule, line, excerpt in tf[:6])
                   if tf else "Copy follows both typographic rules."})
 
@@ -608,15 +607,11 @@ def run_all() -> list[dict]:
     # voice_core_gap_problems() checks, so the count can't drift from what
     # was actually checked.
     _n_checked = len(voice_review.quoted_voice_examples(checked_voice_core))
-    _diff_note = (" The live voice_core setting currently differs from VOICE_CORE_DEFAULT "
-                   "(expected — Brian edits it directly; this check still validates whichever one "
-                   "is actually live)." if voice_core_differs else "")
+    _diff_note = (" The live voice guide differs from the code default, which is expected. "
+                   "This checks the live one." if voice_core_differs else "")
     results.append({
         "name": "Voice guide names what it enforces", "where": "Live + CI", "ok": not vg,
-        "what": "Every 2+-word phrase the voice guide quotes as an example to avoid is actually in "
-                "BANNED_WORDS/FILLER_PHRASES/PERFORMATIVE — the rubric never promises a rejection the "
-                "mechanical lists don't back up. Validates the live voice_core setting when reachable, "
-                "VOICE_CORE_DEFAULT otherwise (CI has no DB to read a live edit from).",
+        "what": "Every phrase the voice guide says to avoid is one the checks actually catch.",
         "detail": (f"Checked {_n_checked} quoted example{'s' if _n_checked != 1 else ''} in "
                    f"{voice_core_source}. 0 gaps.{_diff_note}" if not vg
                    else "; ".join(vg[:6]) + _diff_note)})
@@ -629,9 +624,7 @@ def run_all() -> list[dict]:
     vag = voice_review.voice_core_ampersand_gap_problems(checked_voice_core)
     results.append({
         "name": "Voice guide's permitted ampersand terms are honored", "where": "Live + CI", "ok": not vag,
-        "what": "Every ampersand-joined acronym the voice guide names as a permitted exception "
-                "(\"FP&A, T&E, R&D, and similar\") is actually in AMPERSAND_ACRONYMS/AMPERSAND_NAMES — "
-                "the guide never promises an exception the typography check doesn't honor.",
+        "what": "Every ampersand term the voice guide allows, like FP&A, passes the typography check.",
         "detail": (f"Checked {voice_core_source}. 0 gaps." if not vag else "; ".join(vag[:6]))})
 
     # Typography and invisible characters ARE checked against the voice
@@ -647,20 +640,16 @@ def run_all() -> list[dict]:
           + voice_review.invisible_character_findings(checked_voice_core))
     results.append({
         "name": "Voice guide follows its own typography rules", "where": "Live + CI", "ok": not vt,
-        "what": "The voice guide's own prose spells out \"and\" (except FP&A and friends), never "
-                "spaces an em dash, and carries no invisible/zero-width characters — a model imitates "
-                "the style of its own instructions, so the guide has to follow the rules it teaches.",
+        "what": "The voice guide follows its own rules. Claude copies the style of its instructions.",
         "detail": (f"Checked {voice_core_source}. Clean." if not vt
                    else "; ".join(f"{rule}: {excerpt}" for rule, excerpt in vt[:6]))})
 
     dp = db_path_example_problems()
     results.append({
         "name": "Production script examples use an absolute --db", "where": "Live + CI", "ok": not dp,
-        "what": "Every --db example meant for production (the /admin/system/scripts registry, each script's "
-                "--help docstring, CLAUDE.md, README.md, RUNBOOK.md) points at /data/library.db, never a "
-                "relative path that silently creates an empty database when run from the wrong directory.",
+        "what": "Production script examples point at /data/library.db. A relative path can quietly create an empty database.",
         "detail": "; ".join(dp[:6]) if dp else
-                  f"Every production --db example is absolute ({len(DB_PATH_ALLOWLIST)} local-dev examples allowlisted, each with a reason)."})
+                  f"Every production example is absolute. {len(DB_PATH_ALLOWLIST)} local-only examples are allowlisted."})
 
     ol = brand_check.outbound_link_problems(src)
     results.append({
@@ -672,43 +661,43 @@ def run_all() -> list[dict]:
     op = open_source_problems()
     results.append({
         "name": "Open-source showcase in sync", "where": "Live + CI", "ok": not op,
-        "what": "Every code library the site uses is credited on Open source, and nothing credited there has actually been removed.",
+        "what": "Every library the site uses is credited on Open source, and nothing removed is still credited.",
         "detail": "; ".join(op) if op else "Showcase matches requirements."})
 
     bd = brand_docs_problems()
     results.append({
         "name": "BRAND.md §7 in sync", "where": "Live + CI", "ok": not bd,
-        "what": "The color table in BRAND.md always matches the site's real CSS—never hand-copied out of sync.",
+        "what": "BRAND.md's color table matches the site's real CSS.",
         "detail": "; ".join(bd) if bd else "BRAND.md matches the live CSS."})
 
     hn = hub_nav_orphan_problems()
     results.append({
         "name": "Hub-nav orphans", "where": "Live + CI", "ok": not hn,
-        "what": "Every real /admin route has a corresponding hub-nav card—nothing reachable only by guessing the URL.",
+        "what": "Every admin page has a card on /admin.",
         "detail": "; ".join(hn) if hn else "Every admin route has a hub-nav card."})
 
     ac = ai_config_orphan_problems()
     results.append({
         "name": "AI config consolidated", "where": "Live + CI", "ok": not ac,
-        "what": "AI settings only live in one place (/admin/system/ai)—nothing left over from the pages that used to hold them.",
+        "what": "AI settings live in one place: /admin/system/ai.",
         "detail": "; ".join(ac) if ac else "AI configuration lives only at /admin/system/ai."})
 
     ou = og_url_threading_problems()
     results.append({
         "name": "og:url threading", "where": "Live + CI", "ok": not ou,
-        "what": "Every public page's _page() call passes request=request—so og:url reports its own real URL, never a silent fallback to the homepage.",
+        "what": "Every public page reports its own URL when shared.",
         "detail": "; ".join(ou) if ou else "Every public route threads request into og:url."})
 
     om = original_content_mirror_problems()
     results.append({
         "name": "Original content mirrored for retrieval", "where": "Live + CI", "ok": not om,
-        "what": "Every original_content row with real body_md has a working articles mirror, so FP&A Buddy can find and cite it.",
+        "what": "Every original piece with a body is mirrored, so FP&A Buddy can find and cite it.",
         "detail": "; ".join(om) if om else "Every row with body_md has a valid mirror."})
 
     og = og_card_missing_problems()
     results.append({
         "name": "Every live piece has a share card", "where": "Live + CI", "ok": not og,
-        "what": "Every Live original_content piece has its own committed webapp/static/og/<slug>.png—the publish gate stops new occurrences, this catches a card that goes missing afterward.",
+        "what": "Every live original piece has its own share card.",
         "detail": "; ".join(og) if og else "Every Live piece has its own share card."})
 
     results.append(voice_review_queue_status())
@@ -716,42 +705,41 @@ def run_all() -> list[dict]:
     cm = coral_moment_problems()
     results.append({
         "name": "Coral discipline (one moment per page)", "where": "Live + CI", "ok": not cm,
-        "what": "No public page overuses the coral accent color—at most one coral moment per page. "
-                "Best-effort: only checks signed-out pages, and only inline styles—a coral moment set through a CSS class wouldn't be caught.",
+        "what": "Each public page uses coral at most once. Checks inline styles on signed-out pages only.",
         "detail": "; ".join(cm) if cm else "Every checked page has at most one coral moment."})
 
     pf = _pyflakes_problems()
     if pf is None:
         results.append({
             "name": "Dead code / unused imports", "where": "CI", "ok": None,
-            "what": "No leftover, unused code anywhere in the codebase.",
+            "what": "No unused code or imports.",
             "detail": "Runs automatically as part of every code check."})
     else:
         results.append({
             "name": "Dead code / unused imports", "where": "Live + CI", "ok": not pf,
-            "what": "No leftover, unused code anywhere in the codebase.",
+            "what": "No unused code or imports.",
             "detail": "; ".join(pf[:6]) if pf else "No unused imports or dead code."})
 
     sp = script_syntax_problems()
     if sp is None:
         results.append({
             "name": "Script blocks are valid JavaScript", "where": "CI", "ok": None,
-            "what": "Every reusable bit of JavaScript on the site is syntactically valid.",
+            "what": "Every shared script block is valid JavaScript.",
             "detail": "Runs automatically as part of every code check."})
     else:
         results.append({
             "name": "Script blocks are valid JavaScript", "where": "Live + CI", "ok": not sp,
-            "what": "Every reusable bit of JavaScript on the site is syntactically valid.",
+            "what": "Every shared script block is valid JavaScript.",
             "detail": "; ".join(sp) if sp else "Every shared script block parses clean."})
 
     results.append({
         "name": "Everything else", "where": "CI", "ok": None,
-        "what": "Everything else the suite covers—access tiers, auth, dedupe, publish dates, tagging, users.",
+        "what": "Everything else the test suite covers: access, auth, dedupe, publish dates, tagging, users.",
         "detail": "Runs the whole suite (including the three above) on every code change."})
 
     results.append({
         "name": "Secret scan", "where": "CI", "ok": None,
-        "what": "No verified, live secrets committed anywhere in the repo.",
+        "what": "No live secrets committed to the repo.",
         "detail": "Runs separately, on every code change."})
 
     return results
