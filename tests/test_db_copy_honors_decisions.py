@@ -168,8 +168,10 @@ def test_all_decided_reads_clean(client):
     html = c.get("/admin/checks").text
     assert _summary_details(html) == "0 violations. 2 allowed once, 0 always allowed."
     section = _section(html)
-    assert "#fee2e2" not in section  # no red violation box
-    assert "&#10003; 0 violations. 2 allowed once, 0 always allowed." in section
+    assert "By table:" not in section  # no violation list
+    status = section[section.index('class="chk-status"'):]
+    assert "0 violations. 2 allowed once, 0 always allowed." in status
+    assert ">OK</strong>" in status
 
 
 def test_decisions_line_reads_correctly_at_zero(client):
