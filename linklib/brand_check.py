@@ -445,3 +445,101 @@ def findings(src: str) -> list[str]:
     # check, and its /admin/checks row describes itself that way. The outbound
     # rule is its own standing rule with its own row (see webapp.checks.run_all).
     return problems
+
+
+# ---------------------------------------------------------------------------
+# One table format (2026-09)
+# ---------------------------------------------------------------------------
+# Every table on the site takes its look from ONE !important block in
+# webapp/app.py's _CSS: light-blue header, white rows, a line between rows,
+# a rounded --table-border (navy-light) frame, and the secondary format for
+# subheading bands. Inline styles can't override !important, so the ways
+# the standard can quietly break are: the block loses a rule, the scope
+# grows a new exclusion, the border token changes, or some other CSS rule
+# fights the block with its own !important. These two functions catch all
+# four from source text; no rendering needed.
+
+TABLE_SCOPE = ".site-main table:not(.tp-competitor-table):not(.rr-reader-body table)"
+
+# The only tables left out of the standard, each for a reason Brian signed
+# off on. Adding one here is a design decision, not a code fix.
+TABLE_SCOPE_EXCLUSIONS = {
+    ".tp-competitor-table": "the profile page's Competitors logo list inside a card; a frame would box in a box",
+    ".rr-reader-body table": "other sites' article HTML in the Reader; newsletters use tables for layout",
+}
+
+# What the block must declare, in the words a failure message uses.
+_TABLE_STANDARD_RULES = (
+    ("rounded frame", f"{TABLE_SCOPE}{{border-collapse:separate!important;"),
+    ("frame color", "border:1px solid var(--table-border)!important"),
+    ("frame radius", "border-radius:12px!important"),
+    ("light-blue header", "background:var(--accent-light)!important;color:var(--ink)!important"),
+    ("white rows", f"{TABLE_SCOPE} tr{{background:var(--surface);}}"),
+    ("line between rows", f"{TABLE_SCOPE} td{{border-top:1px solid var(--line)!important"),
+    ("subheading band (secondary format)",
+     f"{TABLE_SCOPE} td.cc-section{{background:var(--table-border)!important;color:#fff!important;}}"),
+    ("white label column (secondary format)",
+     f"{TABLE_SCOPE}>tbody td.cc-label{{background:var(--surface)!important;}}"),
+    ("sticky-table wrapper frame", ".site-main .table-frame{"),
+    ("navy-light border token", "--table-border:var(--navy-light);"),
+)
+
+# Other !important table rules that exist to SUPPORT the standard, not fight
+# it. Keyed by selector, with the reason.
+TABLE_OVERRIDE_ALLOWLIST = {
+    ".oc-body tbody tr": "resets row stripes stored inline in article HTML to the standard's white rows",
+    ".oc-body .ger-table-wrap,.oc-body .ns-table-wrap":
+        "removes the frame stored on article table wrappers so the table's own frame is the only one",
+    ".admin-table-responsive tr": "mobile card layout, where a table's rows become stacked cards",
+    ".backup-log-table td": "mobile card layout for the backup history table",
+}
+
+_CSS_RULE_RE = re.compile(r"([^{}]{1,400})\{([^{}]{0,800})\}")
+_TABLE_TOKEN_RE = re.compile(r"(?<![\w-])(?:table|thead|tbody|tr|th|td)(?![\w-])|\.cc-section|\.cc-label|\.table-frame")
+_IMPORTANT_FRAME_RE = re.compile(r"(?:background|border)[\w-]*\s*:[^;]*!\s*important")
+
+
+def _last_selector(raw: str) -> str:
+    """The selector text a CSS rule starts with, stripped of whatever Python
+    or CSS came before it in the source (a comment, a string quote)."""
+    for sep in ("*/", "'", '"', "}"):
+        if sep in raw:
+            raw = raw.rsplit(sep, 1)[1]
+    return " ".join(raw.split())
+
+
+def table_standard_problems(css: str) -> list[str]:
+    """The one-table-format block in the live _CSS is whole and its scope
+    excludes only the approved tables."""
+    problems = [f"table standard is missing its {label} rule"
+                for label, needle in _TABLE_STANDARD_RULES if needle not in css]
+    scopes = set(re.findall(r"\.site-main table((?::not\([^)]*\))+)", css))
+    for scope in scopes:
+        excluded = set(re.findall(r":not\(([^)]*)\)", scope))
+        for extra in sorted(excluded - set(TABLE_SCOPE_EXCLUSIONS)):
+            problems.append(f"table standard excludes {extra!r}, which isn't an approved exception "
+                            "(TABLE_SCOPE_EXCLUSIONS in linklib/brand_check.py)")
+    return problems
+
+
+def table_override_problems(src: str) -> list[str]:
+    """No CSS rule outside the standard block sets a table's background or
+    border with !important. That's the one way a later rule could beat the
+    standard, since the standard itself is !important."""
+    norm = src.replace("{{", "{").replace("}}", "}")
+    problems = []
+    for m in _CSS_RULE_RE.finditer(norm):
+        decl = m.group(2)
+        if not _IMPORTANT_FRAME_RE.search(decl):
+            continue
+        selector = _last_selector(m.group(1))
+        if not _TABLE_TOKEN_RE.search(selector):
+            continue
+        in_block = (selector.startswith((TABLE_SCOPE, ".site-main .table-frame"))
+                    or selector == ".site-main table.admin-table-responsive td")
+        if in_block or selector in TABLE_OVERRIDE_ALLOWLIST:
+            continue
+        line = norm.count("\n", 0, m.start(2)) + 1
+        problems.append(f"line {line}: {selector[:90]!r} overrides the table standard with !important. "
+                        "Drop the !important, or add the selector to TABLE_OVERRIDE_ALLOWLIST with a reason")
+    return problems

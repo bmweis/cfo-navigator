@@ -117,3 +117,56 @@ def test_sticky_admin_tables_frame_their_wrapper(env):
     html = c.get("/admin/tools/software").text
     i = html.index('id="cmp-scroll-wrap"')
     assert 'class="table-frame"' in html[i - 200:i]
+
+
+# --- The live guard (/admin/checks "One table format") ---------------------
+# Each test plants a real violation of the shape the guard exists for and
+# confirms it's caught, then confirms the live source is clean. A guard
+# that only ever passes proves nothing.
+
+def _src():
+    return pathlib.Path(__file__).resolve().parents[1].joinpath("webapp", "app.py").read_text()
+
+
+def test_live_source_passes_the_guard():
+    from linklib import brand_check
+    from webapp.app import _CSS
+    assert brand_check.table_standard_problems(_CSS) == []
+    assert brand_check.table_override_problems(_src()) == []
+
+
+def test_guard_catches_a_missing_rule():
+    from linklib import brand_check
+    from webapp.app import _CSS
+    broken = _CSS.replace(f"{T} td{{border-top:1px solid var(--line)!important", f"{T} td{{border-top:0")
+    assert any("line between rows" in p for p in brand_check.table_standard_problems(broken))
+    broken = _CSS.replace("--table-border:var(--navy-light);", "--table-border:var(--line);")
+    assert any("navy-light border token" in p for p in brand_check.table_standard_problems(broken))
+    broken = _CSS.replace("td.cc-section{background:var(--table-border)!important", "td.cc-section{background:var(--seafoam)!important")
+    assert any("subheading band" in p for p in brand_check.table_standard_problems(broken))
+
+
+def test_guard_catches_a_new_exclusion():
+    from linklib import brand_check
+    from webapp.app import _CSS
+    broken = _CSS.replace(":not(.rr-reader-body table)", ":not(.rr-reader-body table):not(.my-special-table)")
+    assert any(".my-special-table" in p for p in brand_check.table_standard_problems(broken))
+
+
+def test_guard_catches_a_competing_important_override():
+    from linklib import brand_check
+    planted = _src() + "\n_X = '.pricing-table th{background:var(--navy)!important;color:#fff;}'\n"
+    problems = brand_check.table_override_problems(planted)
+    assert len(problems) == 1 and ".pricing-table th" in problems[0]
+    # Doubled braces, as inside an f-string, are caught too.
+    planted = _src() + "\n_Y = f'.leader-table tr{{background:#fafafa!important;}}'\n"
+    assert any(".leader-table tr" in p for p in brand_check.table_override_problems(planted))
+    # A plain (non-important) table rule can't beat the standard, so it's fine.
+    planted = _src() + "\n_Z = '.leader-table td{padding:4px;background:#fafafa;}'\n"
+    assert brand_check.table_override_problems(planted) == []
+
+
+def test_guard_runs_on_the_checks_page():
+    from webapp import checks
+    row = next(r for r in checks.run_all() if r["name"] == "One table format")
+    assert row["ok"] is True and row["where"] == "Live + CI"
