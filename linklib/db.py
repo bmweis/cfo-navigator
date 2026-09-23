@@ -6552,11 +6552,31 @@ class Library:
         row = self.conn.execute("SELECT * FROM category_features WHERE id=?", (feature_id,)).fetchone()
         return dict(row) if row else None
 
+    # Upper bound on category_features.definition/pointer_note, shared by the
+    # admin inputs' maxlength and this server-side check so the two can never
+    # disagree. Derived, not arbitrary: the longest stored definition was 1,470
+    # characters (production, 2026-09-23), and the old 500 cap sat below it.
+    # 10,000 is ~7x that — room for real reference text, while still refusing an
+    # accidental whole-document paste. A save over the limit is REFUSED with a
+    # visible error naming both numbers; nothing here ever shortens a value.
+    CATEGORY_FEATURE_TEXT_MAX = 10_000
+
+    @classmethod
+    def _check_category_feature_text(cls, definition: str, pointer_note: str) -> None:
+        for label, value in (("Definition", definition), ("Pointer note", pointer_note)):
+            n = len(value or "")
+            if n > cls.CATEGORY_FEATURE_TEXT_MAX:
+                raise ValueError(
+                    f"{label} is {n:,} characters; the limit is {cls.CATEGORY_FEATURE_TEXT_MAX:,}. "
+                    f"Nothing was saved. Shorten it and try again."
+                )
+
     def add_category_feature(self, category_id: int, name: str, definition: str = "",
                               pointer_note: str = "", sort_order: int | None = None, source: str | None = None) -> int:
         name = name.strip()
         if not name:
             raise ValueError("Feature name is required.")
+        self._check_category_feature_text(definition.strip(), pointer_note.strip())
         existing = self.conn.execute(
             "SELECT 1 FROM category_features WHERE category_id=? AND name=? COLLATE NOCASE AND retired_at=''",
             (category_id, name),
@@ -6592,6 +6612,7 @@ class Library:
         row = self.conn.execute("SELECT category_id FROM category_features WHERE id=?", (feature_id,)).fetchone()
         if row is None:
             raise ValueError("Feature not found.")
+        self._check_category_feature_text(definition.strip(), pointer_note.strip())
         dup = self.conn.execute(
             "SELECT 1 FROM category_features WHERE category_id=? AND name=? COLLATE NOCASE AND id!=? AND retired_at=''",
             (row[0], name, feature_id),

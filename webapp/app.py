@@ -14410,6 +14410,24 @@ def _merge_open_ids(csv: str, extra) -> str:
     return ",".join(ids)
 
 
+# category_features.definition/pointer_note: one limit, shared with the
+# server-side check in Library._check_category_feature_text, so the input's
+# maxlength and what the server accepts can never disagree. These are
+# <textarea>s, not <input type="text">: a text input silently strips line
+# breaks on submit, so a multi-paragraph definition would lose them on save.
+_FEATURE_TEXT_MAX = Library.CATEGORY_FEATURE_TEXT_MAX
+
+
+# The textareas carry their own min-width (260px definition, 180px pointer
+# note) so on a phone the table scrolls sideways instead of squeezing a
+# 1,000+ character definition into a one-word-wide column.
+def _feature_text_rows(value: str) -> int:
+    """Rows for an inline feature textarea: tall enough to show a long
+    definition without scrolling inside a sliver, capped so a 1,470-char
+    value doesn't push the row off screen."""
+    return max(2, min(8, len(value or "") // 90 + 1))
+
+
 def _feature_row(f: dict, category_id: int) -> str:
     fid = f["id"]
     edit_form_id = f"feat-edit-{fid}"
@@ -14421,10 +14439,10 @@ def _feature_row(f: dict, category_id: int) -> str:
         style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;font-weight:500;background:var(--bg);">
     </form>
   </td>
-  <td style="padding:8px 10px;"><input type="text" name="definition" form="{edit_form_id}" value="{_esc(f['definition'])}" maxlength="500" placeholder="Optional"
-    style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);"></td>
-  <td style="padding:8px 10px;"><input type="text" name="pointer_note" form="{edit_form_id}" value="{_esc(f['pointer_note'])}" maxlength="500" placeholder="Optional"
-    style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);"></td>
+  <td style="padding:8px 10px;"><textarea name="definition" form="{edit_form_id}" rows="{_feature_text_rows(f['definition'])}" maxlength="{_FEATURE_TEXT_MAX}" placeholder="Optional" aria-label="Definition"
+    style="width:100%;min-width:260px;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);resize:vertical;">{_esc(f['definition'])}</textarea></td>
+  <td style="padding:8px 10px;"><textarea name="pointer_note" form="{edit_form_id}" rows="{_feature_text_rows(f['pointer_note'])}" maxlength="{_FEATURE_TEXT_MAX}" placeholder="Optional" aria-label="Pointer note"
+    style="width:100%;min-width:180px;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);resize:vertical;">{_esc(f['pointer_note'])}</textarea></td>
   <td style="padding:8px 10px;"><input type="number" name="sort_order" form="{edit_form_id}" value="{f['sort_order']}"
     style="width:64px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);"></td>
   <td style="padding:8px 10px;">
@@ -14570,10 +14588,10 @@ a tool gets tagged with it from its own edit page. For naming guidance, see <a h
     </select>
     <input type="text" name="name" required maxlength="150" placeholder="Name" aria-label="Name"
       style="flex:2 1 220px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
-    <input type="text" name="definition" maxlength="500" placeholder="Definition (optional)" aria-label="Definition"
-      style="flex:2 1 200px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
-    <input type="text" name="pointer_note" maxlength="500" placeholder="Pointer note (optional)" aria-label="Pointer note"
-      style="flex:2 1 200px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
+    <textarea name="definition" rows="2" maxlength="{_FEATURE_TEXT_MAX}" placeholder="Definition (optional)" aria-label="Definition"
+      style="flex:2 1 200px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;resize:vertical;"></textarea>
+    <textarea name="pointer_note" rows="2" maxlength="{_FEATURE_TEXT_MAX}" placeholder="Pointer note (optional)" aria-label="Pointer note"
+      style="flex:2 1 200px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;resize:vertical;"></textarea>
     <button type="submit" class="btn" style="font-size:13px;padding:8px 16px;white-space:nowrap;">+ Add feature</button>
   </form>
 </div>
@@ -14790,6 +14808,13 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
         return (f'<input type="text" name="{name}" value="{_esc(str(value))}" maxlength="500" {extra}'
                 f'style="width:{width};box-sizing:border-box;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13px;background:#fff;">')
 
+    def _ta(name, value):
+        # Feature definition/pointer note: no 500 cap (a proposal's text can
+        # run past it) and a textarea so line breaks survive the round trip.
+        return (f'<textarea name="{name}" rows="{_feature_text_rows(str(value or ""))}" maxlength="{_FEATURE_TEXT_MAX}" '
+                f'style="width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13px;background:#fff;resize:vertical;">'
+                f'{_esc(str(value or ""))}</textarea>')
+
     link_rows = ""
     for i, link in enumerate(payload.get("links", [])):
         t = tools_by_id.get(link.get("tool_id"))
@@ -14823,7 +14848,12 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
         f'<div style="flex:1 1 220px;">'
         f'<label style="display:block;font-size:12px;font-weight:500;color:var(--navy);margin-bottom:4px;">Pointer note '
         f'<span style="font-weight:400;color:var(--muted);">(optional)</span></label>'
-        f'{_in("pointer_note", feature.get("pointer_note", ""), width="100%")}'
+        f'{_ta("pointer_note", feature.get("pointer_note", ""))}'
+        f'</div>'
+        f'<div style="flex:1 1 100%;">'
+        f'<label style="display:block;font-size:12px;font-weight:500;color:var(--navy);margin-bottom:4px;">Definition '
+        f'<span style="font-weight:400;color:var(--muted);">(optional)</span></label>'
+        f'{_ta("definition", feature.get("definition", ""))}'
         f'</div>'
         f'</div>'
         if is_new_feature else
@@ -14986,6 +15016,10 @@ async def admin_feature_review_queue_approve(request: Request, item_id: int):
         else:
             override["feature"] = {
                 "name": (form.get("feature_name") or "").strip(),
+                # Carried through, not dropped: before this, approving a
+                # new-feature proposal rebuilt the payload without its
+                # definition, so the proposer's definition was lost silently.
+                "definition": (form.get("definition") or "").strip(),
                 "pointer_note": (form.get("pointer_note") or "").strip(),
             }
         n_links = int(form.get("n_links") or 0)
@@ -15025,7 +15059,7 @@ async def admin_feature_review_queue_approve(request: Request, item_id: int):
         def _comparable(p: dict) -> tuple:
             f = p.get("feature") or {}
             return (
-                p.get("feature_id"), f.get("name", ""), f.get("pointer_note", ""),
+                p.get("feature_id"), f.get("name", ""), f.get("definition", ""), f.get("pointer_note", ""),
                 tuple(sorted(
                     (l.get("tool_id"), l.get("availability", "native"),
                      int(l.get("ai_enabled") or 0), l.get("verified_as_of", ""))
