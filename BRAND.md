@@ -493,18 +493,21 @@ graffiti marks on admin tables, forms, or the chat UI.
   disclosure, at every nesting level, loads collapsed** — no exceptions, and nesting goes three
   deep on `/admin` today (CFO Toolbox → Reader → a quadrant), so "collapsed by default" has to
   hold for a group that only ever renders inside another one.
-- **Tables** — two live conventions, one per surface (reconciled with the
-  live site 2026-09; this line used to describe only the first):
-  - **Admin tables** (every `/admin/*` page): a `--accent-light` header band
-    with 13px sentence-case header text; the **rows under the header sit on
-    white** (`--surface`), not the page background. Enforced by one scoped
-    rule in `_CSS` (`.admin-main tbody>tr`), so a new admin table gets white
-    rows without anyone remembering to. A row with its own inline background
-    (an inline editor/expansion panel, a deliberately tinted row) keeps it.
-    Admin tables stay undecorated otherwise — no zebra striping.
-  - **Public content tables** (article bodies, e.g. the Growth Engine Ratio
-    tier table, NetSuite MCP's tables): navy header row with white text; alt
-    rows `--surface-2`.
+- **Tables** — one format for every admin table (2026-09): a light-blue
+  `--accent-light` header row with 13px sentence-case header text, **white
+  rows** (`--surface`), a `--line` rule between rows, and a rounded 12px
+  frame in `--table-border`. No zebra striping, no navy header rows. It all
+  lives in one `!important` block in `_CSS`, scoped to `main.admin-main`,
+  which `_page()` sets for every `/admin/*` page and the admin edit pages
+  beside a public profile (`/tools/*/edit`), whatever section the route
+  passes as `active`. A new admin table gets the format without anyone
+  remembering it, and older inline styles can't override it. A table with
+  sticky columns can't clip its own corners (`overflow:hidden` on the table
+  breaks `position:sticky`), so its scroll wrapper carries the frame via
+  `.table-frame` instead. Covered by `tests/test_admin_table_format.py`.
+  Public tables (article bodies such as the Growth Engine Ratio tier table,
+  the Compare pages, the FP&A Buddy explainer) keep their own treatment for
+  now.
   Checkbox/boolean-indicator columns are always center-justified, header and
   cells alike. Text, link, and dropdown columns are left-justified. Actions
   columns are right-aligned. Once a table collapses to stacked labelled rows on
@@ -1047,6 +1050,7 @@ colors for status only," §6, still holds everywhere else).
   /* Lines (warm-toned) */
   --line:#E4E0D6;
   --line-strong:#D6D1C4;
+  --table-border:var(--line); /* the one frame color every admin table uses */
   /* Semantic — status only (GER calculator readout, form pass/fail, Warnings callouts) */
   --good:#002975; --caution:#9A6B12; --alert:#9E3B30;
   --alert-wash:#FBEEEC;    /* soft alert fill — Warnings callout background only */

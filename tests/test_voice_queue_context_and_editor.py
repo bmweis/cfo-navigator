@@ -65,7 +65,7 @@ def test_multiple_spots_are_called_out(env):
     tid = lib.add_tool("Acme", "A seamless start. Then a seamless finish.", "https://acme.example", [])
     lib.add_voice_review_item("tools", tid, "description", "buzzword", "seamless")
     html = c.get("/admin/voice/review-queue").text
-    assert "Spot 1 of 2 in this field matching this rule" in html
+    assert "Match 1 of 2 in this field" in html
 
 
 def test_match_gone_is_said_plainly(env):

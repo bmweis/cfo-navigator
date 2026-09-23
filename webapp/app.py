@@ -591,6 +591,26 @@ async def _no_store_admin_pages(request: Request, call_next):
 
 _TOKEN_ONLY_SAVE_PATHS = {"/save", "/save-later"}
 
+# The path of the request being rendered, so _page() can tell an admin
+# surface from a public one without every caller passing request=. Admin
+# pages don't all pass active="Admin" (Toolbox and Thought leadership admin
+# pages pass their own section), which left their tables outside the one
+# admin table format. A ContextVar, not a global: Starlette copies the
+# context into the threadpool worker that runs a sync route.
+_CURRENT_PATH: contextvars.ContextVar[str] = contextvars.ContextVar("_CURRENT_PATH", default="")
+
+
+def _is_admin_path(path: str) -> bool:
+    """/admin/* plus the admin-only edit pages that live beside a public
+    profile (/tools/software/{slug}/edit, /tools/communities/{slug}/edit)."""
+    return path.startswith("/admin") or (path.startswith("/tools/") and path.endswith("/edit"))
+
+
+@app.middleware("http")
+async def _remember_path(request: Request, call_next):
+    _CURRENT_PATH.set(request.url.path)
+    return await call_next(request)
+
 
 @app.middleware("http")
 async def _save_cors(request: Request, call_next):
@@ -1572,6 +1592,7 @@ _CSS = """
   /* Lines (warm-toned) */
   --line:#E4E0D6;
   --line-strong:#D6D1C4;
+  --table-border:var(--line); /* the one frame color every admin table uses */
   /* Semantic — status only (GER calculator readout, form pass/fail, Warnings callouts) */
   --good:#002975; --caution:#9A6B12; --alert:#9E3B30;
   --alert-wash:#FBEEEC;    /* soft alert fill — Warnings callout background only */
@@ -1603,12 +1624,36 @@ html,body{height:100%;}
 body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;
   min-height:100vh;display:flex;flex-direction:column;}
 .site-main{flex:1 0 auto;display:flex;flex-direction:column;}
-/* Admin tables: the rows under a header sit on white (checks-page
-   follow-ups, 2026-09). The header keeps its --accent-light band; a row
-   with its own background (inline style, or a header row made of th cells)
-   is untouched. Scoped to admin pages via .admin-main, set by _page() when
-   active == "Admin" — public tables keep their own treatment. */
-.admin-main tbody>tr:not(:has(>th)){background:var(--surface);}
+/* Admin tables: ONE format for every table on an /admin page (2026-09).
+   Light-blue header row, white rows, a line between rows, and a rounded
+   --table-border frame. Scoped via .admin-main (set by _page() for
+   every /admin page and admin edit page); public tables keep their own
+   treatment. The rules
+   are !important on purpose: dozens of tables carry older inline styles,
+   and this block is the single source of the format, so it has to win.
+   Frame: on the table itself (separate borders + overflow:hidden clip the
+   corners). A table with sticky columns can't clip (overflow:hidden on the
+   table breaks position:sticky), so its scroll wrapper carries the frame
+   instead via .table-frame, and the table inside drops its own. */
+.admin-main table{border-collapse:separate!important;border-spacing:0!important;
+  background:var(--surface)!important;border:1px solid var(--table-border)!important;
+  border-radius:12px!important;overflow:hidden!important;}
+.admin-main .table-frame{background:var(--surface)!important;border:1px solid var(--table-border)!important;
+  border-radius:12px!important;}
+.admin-main .table-frame>table{border:0!important;border-radius:0!important;overflow:visible!important;}
+.admin-main table>thead>tr>th,
+.admin-main table>tbody:first-child>tr:first-child>th{
+  background:var(--accent-light)!important;color:var(--ink)!important;font-size:13px!important;
+  font-weight:600!important;text-transform:none!important;letter-spacing:normal!important;
+  border-top:0!important;border-bottom:0!important;}
+.admin-main table tr{background:var(--surface);}
+.admin-main table>thead>tr,
+.admin-main table>tbody:first-child>tr:first-child:has(>th){background:var(--accent-light)!important;}
+.admin-main table td{border-top:1px solid var(--line)!important;border-bottom:0!important;}
+.admin-main table>tbody:first-child>tr:first-child>td{border-top:0!important;}
+@media(max-width:700px){
+  .admin-main table.admin-table-responsive td{border-top:0!important;}
+}
 a{color:var(--navy);text-decoration:none;}
 a:hover{text-decoration:underline;}
 
@@ -2185,7 +2230,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
   <button class="nav-toggle" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">&#9776;</button>
   <nav class="site-nav" id="nav">{nav}</nav>
 </header>
-<main class="site-main{" admin-main" if active == "Admin" else ""}">{body}</main>
+<main class="site-main{" admin-main" if active == "Admin" or _is_admin_path(_CURRENT_PATH.get()) else ""}">{body}</main>
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
@@ -5204,7 +5249,7 @@ def admin_ai_surfaces(request: Request, status: str = ""):
 <p style="margin:0 0 16px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Destination</th>
@@ -11347,7 +11392,7 @@ def admin_compare_summary_feedback(request: Request):
 <h1>Compare summary feedback</h1>
 <p style="color:var(--muted);margin:8px 0 20px;">Flags on the AI-generated Compare-page overlap/contrast summary. No automated action&mdash;review each and mark it reviewed once handled.</p>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Comparison</th>
@@ -12595,7 +12640,7 @@ def admin_contacts(request: Request):
     onclick="return document.querySelectorAll('.contact-row-cb:checked').length &amp;&amp; confirm('Delete ' + document.querySelectorAll('.contact-row-cb:checked').length + ' selected submission(s)?');">Delete selected</button>
 </div>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:12px;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;margin-top:12px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" id="contact-select-all" onchange="document.querySelectorAll('.contact-row-cb').forEach(cb => cb.checked = this.checked);"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
@@ -12610,7 +12655,7 @@ def admin_contacts(request: Request):
 </form>
 <h2 style="font-size:16px;margin:40px 0 12px;">Deletion history</h2>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:8px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">When</th>
   <th style="padding:8px 12px;text-align:left;font-size:13px;">Admin</th>
@@ -12676,7 +12721,7 @@ def admin_email_failures(request: Request):
 <p style="color:var(--muted);margin:-6px 0 6px;">Every outbound email is best-effort—contact form, tool submissions, welcome emails, password resets, warm intros. The underlying record always saves even if the send fails.</p>
 <p style="color:var(--muted);margin:0 0 18px;">A failure lands here instead of just a server log, so it never goes unnoticed.</p>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">When</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Flow</th>
@@ -13601,7 +13646,7 @@ def admin_software(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
 <div style="overflow-x:auto;margin-bottom:40px;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
@@ -13620,7 +13665,7 @@ def admin_software(request: Request, filter: str = ""):
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
 {_ADMIN_SCROLL_HINT_HTML}
-<div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
@@ -13871,7 +13916,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
 
     def _actionable_table(rows: list[dict]) -> str:
         return f"""<div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool A</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool B</th>
@@ -13905,7 +13950,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
     if decisions:
         decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Dismissed—not duplicates</h2>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;">
 <tbody>{"".join(_decision_row(d) for d in decisions)}</tbody>
 </table>
 </div>"""
@@ -14119,7 +14164,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 <h1>Toolbox intros{title_suffix}</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm intro requests from readers&mdash;{len(leads)} total.</p>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Tool</th>
@@ -15110,7 +15155,7 @@ def _admin_resource_table(benchmarks: list[dict]) -> str:
 </tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">None yet.</td></tr>'
     colgroup = "".join(f'<col style="width:{w};">' for w in _ADMIN_RESOURCE_TABLE_COL_WIDTHS)
     return f"""<div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;table-layout:fixed;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;table-layout:fixed;">
 <colgroup>{colgroup}</colgroup>
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
@@ -16092,7 +16137,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Type</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
@@ -16598,7 +16643,7 @@ def admin_original_content(request: Request, status: str = ""):
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
 <div style="overflow-x:auto;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Slug</th>
@@ -17506,7 +17551,7 @@ def admin_communities(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
 <div style="overflow-x:auto;margin-bottom:40px;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
@@ -17525,7 +17570,7 @@ def admin_communities(request: Request, filter: str = ""):
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
 {_ADMIN_SCROLL_HINT_HTML}
-<div style="overflow-x:auto;overflow-y:hidden;background:#fff;border-radius:12px;border:1px solid var(--line);" id="cmp-scroll-wrap">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
@@ -26109,7 +26154,7 @@ def _pricing_freshness_banner(last_verified: str) -> str:
         if last_verified:
             when = _relative_age(last_verified)
             html = (f'Pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
-                    f'against Anthropic&rsquo;s published rates&mdash;that&rsquo;s past the '
+                    f'against Anthropic&rsquo;s published rates, past the '
                     f'{PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
                     f'<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
                     f'Anthropic&rsquo;s current published rates, then mark it reviewed.')
@@ -26148,17 +26193,17 @@ def _models_freshness_banner(last_reviewed: str) -> str:
         if last_reviewed:
             when = _relative_age(last_reviewed)
             html = (f'Anthropic&rsquo;s model lineup was last manually checked <strong>{_esc(when) or "a while ago"}</strong>'
-                    f'&mdash;that&rsquo;s past the {MODELS_REVIEW_STALE_DAYS}-day review window. Check '
+                    f', past the {MODELS_REVIEW_STALE_DAYS}-day review window. Check '
                     f'<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
                     f'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s current model docs</a> '
-                    f'for anything new, add it to <code>linklib/models.py</code>&rsquo;s registry if it belongs in the curated '
-                    f'pickers, and see {doc_link} before wiring a model into FP&amp;A Buddy specifically&mdash;then mark it reviewed.')
+                    f'for anything new and add it to <code>linklib/models.py</code> if it belongs in the pickers. '
+                    f'Then mark it reviewed. Adding one to FP&amp;A Buddy? See {doc_link}.')
         else:
             html = (f'Anthropic&rsquo;s model lineup has <strong>never been marked reviewed</strong>. Check '
                     f'<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
                     f'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s current model docs</a> '
-                    f'against <code>linklib/models.py</code>&rsquo;s registry, and see {doc_link} before wiring a model into '
-                    f'FP&amp;A Buddy specifically&mdash;then mark it reviewed.')
+                    f'against <code>linklib/models.py</code>, then mark it reviewed. Adding one to FP&amp;A Buddy? '
+                    f'See {doc_link}.')
     else:
         when = _relative_age(last_reviewed)
         html = (f'Anthropic&rsquo;s model lineup was manually checked <strong>{_esc(when) or "recently"}</strong> '
@@ -26183,7 +26228,7 @@ def _exa_pricing_freshness_banner(last_verified: str) -> str:
         if last_verified:
             when = _relative_age(last_verified)
             html = (f'Exa pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
-                    f'against Exa&rsquo;s published rates&mdash;that&rsquo;s past the '
+                    f'against Exa&rsquo;s published rates, past the '
                     f'{EXA_PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
                     f'<code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table against '
                     f'<a href="https://exa.ai/pricing" target="_blank" rel="noopener" '
@@ -26268,14 +26313,14 @@ def _db_copy_scan_banner(report) -> str:
     skip_html = ""
     if report.tables_skipped:
         skip_items = "".join(
-            f'<li style="margin:0 0 4px;">{_esc(t)}&mdash;{_esc(err)}</li>'
+            f'<li style="margin:0 0 4px;">{_esc(t)}: {_esc(err)}</li>'
             for t, err in report.tables_skipped
         )
         skip_html = (
             f'<p style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;'
             f'padding:10px 16px;font-size:14px;margin:0 0 10px;">{len(report.tables_skipped)} table'
-            f'{"s" if len(report.tables_skipped) != 1 else ""} could not be scanned this pass&mdash;'
-            f'a stale scan, not a clean one:</p>'
+            f'{"s" if len(report.tables_skipped) != 1 else ""} couldn&rsquo;t be scanned this pass, '
+            f'so this result is incomplete:</p>'
             f'<ul style="margin:0 0 10px;padding-left:20px;font-size:13px;color:var(--ink-soft);'
             f'font-family:ui-monospace,monospace;">{skip_items}</ul>'
         )
@@ -26284,9 +26329,7 @@ def _db_copy_scan_banner(report) -> str:
     decisions_html = _db_copy_decisions_html(report)
     if not violations:
         clean = ('<p style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;border-radius:10px;'
-                 f'padding:10px 16px;font-size:14px;margin:0;">&#10003; {count_text} No banned words, filler, '
-                 'performative phrases, bare ampersands, or spaced em dashes left undecided in the scanned '
-                 'database columns.</p>')
+                 f'padding:10px 16px;font-size:14px;margin:0;">&#10003; {count_text}</p>')
         return (f'<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;">{_esc(stats_line)}</p>'
                 f'{skip_html}{clean}{decisions_html}')
 
@@ -26332,9 +26375,8 @@ def _disk_space_banner(status: dict | None) -> str:
 
     if status is None:
         bg, border, color = "var(--surface-2)", "var(--line)", "var(--muted)"
-        html = ('No <code>/data</code> volume on this host&mdash;this check only runs where the '
-                'production Railway volume is actually mounted (production itself, not dev/CI/this '
-                'environment).')
+        html = ('No <code>/data</code> volume here. This check only runs in production, where the '
+                'Railway volume is mounted.')
         return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
                 f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
 
@@ -26343,10 +26385,8 @@ def _disk_space_banner(status: dict | None) -> str:
     stats = (f'{_disk_mb(used)} of {_disk_mb(total)} used ({pct:.0f}%), {_disk_mb(free)} free. '
              f'<code>{_esc(os.path.basename(status["db_path"]))}</code> is {_disk_mb(db_size)} of that.')
     if status["can_vacuum"] is False:
-        vacuum_note = (f' A classic <code>VACUUM</code> needs roughly the database&rsquo;s own size again '
-                        f'in free scratch space to run in place&mdash;free space ({_disk_mb(free)}) is '
-                        f'currently less than the database ({_disk_mb(db_size)}), so a <code>VACUUM</code> '
-                        f'cannot run in place right now.')
+        vacuum_note = (f' A <code>VACUUM</code> can&rsquo;t run in place right now. It needs free space about the size '
+                        f'of the database ({_disk_mb(db_size)}), and only {_disk_mb(free)} is free.')
     elif status["can_vacuum"] is True:
         vacuum_note = ' There&rsquo;s room for a classic <code>VACUUM</code> to run in place if one is ever needed.'
     else:
@@ -26397,9 +26437,8 @@ def _checks_refresher_banner(status: dict) -> str:
 
     if not status["started"]:
         bg, border, color = alert_wash, alert, alert
-        html = ('The background badge refresher has <strong>not started</strong>&mdash;the admin nav '
-                'and hub badge counts are running entirely on the synchronous fallback (computed inline '
-                'on whichever page render happens to hit a stale cache first).')
+        html = ('The background badge refresher has <strong>not started</strong>. Badge counts are '
+                'being computed during page loads instead, which is slower.')
         return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
                 f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
 
@@ -26409,18 +26448,16 @@ def _checks_refresher_banner(status: dict) -> str:
     if status["last_success_at"] is None:
         bg, border, color = "#fef3c7", "#fde68a", "#92400e"
         html = (f'The background badge refresher started but hasn&rsquo;t completed its first pass yet '
-                f'(last attempt {last_attempt_age or "just now"}). Normal for the first '
-                f'{_tasks._CHECKS_CACHE_TTL}s or so after a deploy&mdash;the synchronous fallback covers '
-                f'any page render that lands before it finishes.')
+                f'(last attempt {last_attempt_age or "just now"}). That&rsquo;s normal for the first '
+                f'{_tasks._CHECKS_CACHE_TTL}s or so after a deploy.')
     elif (status["last_error"]
           # More than one full interval overdue for a fresh success means at
           # least one whole scheduled pass was skipped, stuck, or failing.
           or time.time() - status["last_success_at"] > 2 * _tasks._CHECKS_CACHE_TTL):
         bg, border, color = alert_wash, alert, alert
         error_note = f' Last error: <code>{_esc(status["last_error"])}</code>.' if status["last_error"] else ''
-        html = (f'The background badge refresher is <strong>failing</strong>&mdash;badge counts last '
-                f'refreshed successfully {last_success_age}, but the most recent attempt was '
-                f'{last_attempt_age}.{error_note}')
+        html = (f'The background badge refresher is <strong>failing</strong>. Badge counts last '
+                f'refreshed {last_success_age}; the latest attempt was {last_attempt_age}.{error_note}')
     else:
         bg, border, color = seafoam_wash, seafoam, "inherit"
         html = f'Badge counts last refreshed {last_success_age}.'
@@ -26543,8 +26580,7 @@ _OPEN_DETAILS_FOR_HASH_JS = (
 )
 
 # How many columns the Live checks cards lay out in at desktop width. Below
-# 760px it's always one. Brian picks between 2 and 3 from screenshots; this
-# is the one line that changes.
+# 760px it's always one. Brian picked 2 over 3 from screenshots.
 _LIVE_CHECKS_COLUMNS = 2
 
 
@@ -26975,26 +27011,26 @@ def admin_checks(request: Request):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Checks</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. Every check runs automatically on every code change; the ones marked <em>Live + CI</em> also run right here, so you don't have to wait to see the result.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">Automated checks that keep the site honest. All of them run on every code change. The ones marked <em>Live + CI</em> also run here, so you see results now.</p>
 {summary_box}
 {ci_quota_form}
 {live_checks_html}
 <h2 id="db-copy-scan" style="margin:28px 0 4px;">Database-backed copy</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The checks above only ever scan Python source&mdash;CI has no route to the live database (see CLAUDE.md's "Voice enforcement" notes). A growing share of real user-facing copy lives in the database instead (original content, tool and community profiles, saved homepage/about overrides, and more). This runs live, right here, on every page load&mdash;no dated reminder, no CI equivalent, and no auto-fix: a flagged row is an ordinary editorial fix through whatever admin page owns that record, triaged from <a href="/admin/voice/review-queue" style="color:var(--accent);">the voice review queue &rarr;</a>.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The voice checks above read code. This one reads the copy stored in the database: original pieces, tool and community profiles, and saved page text. It runs on every page load and never changes anything. Fix a finding on the page that owns the record, or decide it in <a href="/admin/voice/review-queue" style="color:var(--accent);">the voice review queue &rarr;</a>.</p>
 {db_copy_banner}
 <h2 id="disk-space" style="margin:28px 0 4px;">Disk space</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Where the production volume actually stands&mdash;read live via <code>shutil.disk_usage</code>, never by shelling out to <code>df</code>. Mechanically computed on every load, same as the section above; a green row still states the real numbers, since a healthy check that says nothing looks identical to one that never ran.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">How full the production volume is, read live on every load. A healthy result still shows the numbers, so you can tell it ran.</p>
 {disk_banner}
 <h2 id="badge-refresh" style="margin:28px 0 4px;">Badge refresh</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The admin nav and hub badge counts above are kept warm by a background thread on its own schedule, not computed inline on whatever page render happens to land next&mdash;see CLAUDE.md's "logged-in slowness" investigation. Shown here so a dead or failing refresher is visible on the page itself, same as the two sections above: a healthy state that says nothing looks identical to one that never ran.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">A background job keeps the admin badge counts fresh, so pages don't compute them while you wait. This shows whether that job is running.</p>
 {refresher_banner}
 <h2 id="ai-providers" style="margin:28px 0 4px;">AI providers</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 12px;font-size:14px;line-height:1.6;">None of these three can be checked automatically&mdash;there&rsquo;s no pricing or model-catalog API to reconcile these tables against, so each is a dated reminder for a human re-check, not a pass/fail test.</p>
+<p style="color:var(--ink-soft);margin:-2px 0 12px;font-size:14px;line-height:1.6;">No API reports pricing or new models, so these three are dated reminders for you to re-check by hand.</p>
 <h3 id="pricing-freshness" style="margin:20px 0 4px;font-size:16.5px;">Anthropic pricing</h3>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table still accurate against Anthropic&rsquo;s current published rates? <a href="{_pricing_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/pricing.py on GitHub &#8599;</a> &middot; <a href="{_anthropic_pricing_url}" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic&rsquo;s pricing page &#8599;</a></p>
 {pricing_banner}
 <h3 id="new-model-awareness" style="margin:24px 0 4px;font-size:16.5px;">Anthropic models</h3>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">A different question from Anthropic pricing above: has Anthropic shipped a model since the last check that isn&rsquo;t in <code>linklib/models.py</code> yet? <a href="{_models_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/models.py on GitHub &#8599;</a> &middot; <a href="{_anthropic_models_url}" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic&rsquo;s model docs &#8599;</a></p>
+<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Has Anthropic shipped a model since the last check that isn&rsquo;t in <code>linklib/models.py</code> yet? <a href="{_models_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/models.py on GitHub &#8599;</a> &middot; <a href="{_anthropic_models_url}" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic&rsquo;s model docs &#8599;</a></p>
 {models_banner}
 <h3 id="exa-pricing-freshness" style="margin:24px 0 4px;font-size:16.5px;">Exa pricing</h3>
 <p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table still accurate against Exa&rsquo;s current published rates? <a href="{_pricing_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/pricing.py on GitHub &#8599;</a> &middot; <a href="{_exa_pricing_url}" target="_blank" rel="noopener" style="color:var(--accent);">Exa&rsquo;s pricing page &#8599;</a></p>
@@ -28368,7 +28404,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <p style="color:var(--muted);margin:8px 0 18px;">The RSS subscriptions behind the Reader's Feed view and FP&amp;A Buddy's web-search allowlist.</p>
 {banner}{error_banner}
 {_ADMIN_SCROLL_HINT_HTML}
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
   <table class="ff-table" id="ff-table">
     <thead><tr>
       <th style="width:15%;" data-sort="name" tabindex="0" role="button" aria-label="Sort by name"
@@ -30474,7 +30510,7 @@ def admin_overhead_spend_details(request: Request, msg: str = "", error: str = "
 <h2 style="font-size:16px;margin:0 0 4px;">All vendor charges</h2>
 <p style="color:var(--muted);margin:0 0 14px;">Click Edit on any row to make changes in place.</p>
 {_ADMIN_SCROLL_HINT_HTML}
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;" id="cmp-scroll-wrap">
+<div class="table-frame" style="overflow:hidden;overflow-x:auto;" id="cmp-scroll-wrap">
   <table style="width:100%;border-collapse:collapse;min-width:{_TABLE_FLOOR_WIDE}px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_VENDOR}px;">Vendor</th>
@@ -31405,7 +31441,7 @@ def admin_users(request: Request, msg: str = ""):
 </div>
 
 <div style="overflow-x:auto;">
-<table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('users',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Username</th>
@@ -33922,7 +33958,7 @@ def admin_backup(request: Request, uploaded: str = ""):
   .backup-actions{{grid-template-columns:1fr 1fr;align-items:start;}}
   .backup-actions .backup-action-divider{{border-left:1px solid var(--line);border-top:none;padding-left:24px;padding-top:0;}}
 }}
-.backup-log-table{{width:100%;table-layout:fixed;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;}}
+.backup-log-table{{width:100%;table-layout:fixed;}}
 .backup-log-table td{{overflow-wrap:anywhere;}}
 .backup-log-table .col-when{{width:150px;}}
 .backup-log-table .col-filename{{width:200px;}}
@@ -34166,11 +34202,11 @@ def admin_brand(request: Request):
         '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Input—click to see the seafoam focus ring</div>'
         '<input type="text" placeholder="Search…" style="width:100%;max-width:320px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--surface);"></div>'
         # table
-        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Table—navy header, white text</div>'
-        '<table style="width:100%;max-width:380px;border-collapse:collapse;font-size:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;">'
-        '<thead><tr style="background:var(--navy);"><th style="padding:8px 12px;text-align:left;color:#fff;">Tier</th><th style="padding:8px 12px;text-align:left;color:#fff;">Ratio</th></tr></thead>'
-        '<tbody><tr style="border-top:1px solid var(--line);"><td style="padding:8px 12px;">Elite</td><td style="padding:8px 12px;">&gt; $1.20</td></tr>'
-        '<tr style="border-top:1px solid var(--line);background:var(--surface-2);"><td style="padding:8px 12px;">Strong</td><td style="padding:8px 12px;">$0.80–1.20</td></tr></tbody></table></div>'
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Table: light-blue header, white rows, rounded frame</div>'
+        '<table style="width:100%;max-width:380px;font-size:14px;">'
+        '<thead><tr><th style="padding:8px 12px;text-align:left;">Tier</th><th style="padding:8px 12px;text-align:left;">Ratio</th></tr></thead>'
+        '<tbody><tr><td style="padding:8px 12px;">Elite</td><td style="padding:8px 12px;">&gt; $1.20</td></tr>'
+        '<tr><td style="padding:8px 12px;">Strong</td><td style="padding:8px 12px;">$0.80–1.20</td></tr></tbody></table></div>'
         # coral in action
         '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Coral in action—rare, decorative, never status</div>'
         f'<span style="font:600 11px var(--font-body);letter-spacing:.06em;text-transform:uppercase;color:#fff;background:{CORAL};border-radius:6px;padding:3px 10px;">New</span>'
@@ -34195,20 +34231,20 @@ def admin_brand(request: Request):
     checks_doc = (
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
         '<div style="overflow-x:auto;">'
-        '<table style="width:100%;border-collapse:collapse;font-size:14px;min-width:560px;">'
-        '<thead><tr style="background:var(--navy);">'
-        '<th style="padding:9px 12px;text-align:left;color:#fff;">Check</th>'
-        '<th style="padding:9px 12px;text-align:left;color:#fff;">What it looks at</th>'
-        '<th style="padding:9px 12px;text-align:left;color:#fff;">When and where</th>'
-        '<th style="padding:9px 12px;text-align:left;color:#fff;">Cost</th>'
+        '<table style="width:100%;font-size:14px;min-width:560px;">'
+        '<thead><tr>'
+        '<th style="padding:9px 12px;text-align:left;">Check</th>'
+        '<th style="padding:9px 12px;text-align:left;">What it looks at</th>'
+        '<th style="padding:9px 12px;text-align:left;">When and where</th>'
+        '<th style="padding:9px 12px;text-align:left;">Cost</th>'
         '</tr></thead><tbody>'
-        '<tr style="border-top:1px solid var(--line);">'
+        '<tr>'
         '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Brand check</td>'
         '<td style="padding:10px 12px;">Colors, fonts, and the voice <em>mechanics</em>&mdash;banned buzzwords, filler, performative phrases.</td>'
         '<td style="padding:10px 12px;"><strong>Automatic.</strong> Runs on every code change and blocks anything from merging if it fails. To run it yourself: <code>pytest -q</code>.</td>'
         '<td style="padding:10px 12px;white-space:nowrap;">Free &middot; deterministic</td>'
         '</tr>'
-        '<tr style="border-top:1px solid var(--line);background:var(--surface-2);">'
+        '<tr>'
         '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Tone review</td>'
         '<td style="padding:10px 12px;">The holistic read: &ldquo;does this sound like me,&rdquo; judged by Claude against the voice guide.</td>'
         '<td style="padding:10px 12px;"><strong>On demand only.</strong> The <em>Check content against your voice</em> box below, or <code>python -m scripts.voice_review</code> from the command line. Never runs automatically.</td>'
@@ -34875,9 +34911,8 @@ def _voice_open_detail_html(current: str | None, item: dict, approved_terms=()) 
                 f'probably fixed outside the queue; the next scan closes this row.</div>', -1)
     html = f'<div style="font-size:12.5px;line-height:1.5;">{_voice_context_html(current, spans[idx])}</div>'
     if len(spans) > 1:
-        html += (f'<div style="font-size:11px;color:var(--muted);margin-top:4px;">Spot {idx + 1} of {len(spans)} '
-                 f'in this field matching this rule. This row covers all of them: an edit should fix each, '
-                 f'and Allow once exempts them all.</div>')
+        html += (f'<div style="font-size:11px;color:var(--muted);margin-top:4px;">Match {idx + 1} of {len(spans)} '
+                 f'in this field. Fix every match when you edit; Allow once covers them all.</div>')
     return html, spans[idx][0]
 
 
