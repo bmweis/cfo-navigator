@@ -591,25 +591,6 @@ async def _no_store_admin_pages(request: Request, call_next):
 
 _TOKEN_ONLY_SAVE_PATHS = {"/save", "/save-later"}
 
-# The path of the request being rendered, so _page() can tell an admin
-# surface from a public one without every caller passing request=. Admin
-# pages don't all pass active="Admin" (Toolbox and Thought leadership admin
-# pages pass their own section), which left their tables outside the one
-# admin table format. A ContextVar, not a global: Starlette copies the
-# context into the threadpool worker that runs a sync route.
-_CURRENT_PATH: contextvars.ContextVar[str] = contextvars.ContextVar("_CURRENT_PATH", default="")
-
-
-def _is_admin_path(path: str) -> bool:
-    """/admin/* plus the admin-only edit pages that live beside a public
-    profile (/tools/software/{slug}/edit, /tools/communities/{slug}/edit)."""
-    return path.startswith("/admin") or (path.startswith("/tools/") and path.endswith("/edit"))
-
-
-@app.middleware("http")
-async def _remember_path(request: Request, call_next):
-    _CURRENT_PATH.set(request.url.path)
-    return await call_next(request)
 
 
 @app.middleware("http")
@@ -1592,7 +1573,7 @@ _CSS = """
   /* Lines (warm-toned) */
   --line:#E4E0D6;
   --line-strong:#D6D1C4;
-  --table-border:var(--line); /* the one frame color every admin table uses */
+  --table-border:var(--navy-light); /* the one frame color every table uses; also the subheading band */
   /* Semantic — status only (GER calculator readout, form pass/fail, Warnings callouts) */
   --good:#002975; --caution:#9A6B12; --alert:#9E3B30;
   --alert-wash:#FBEEEC;    /* soft alert fill — Warnings callout background only */
@@ -1624,35 +1605,43 @@ html,body{height:100%;}
 body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;
   min-height:100vh;display:flex;flex-direction:column;}
 .site-main{flex:1 0 auto;display:flex;flex-direction:column;}
-/* Admin tables: ONE format for every table on an /admin page (2026-09).
-   Light-blue header row, white rows, a line between rows, and a rounded
-   --table-border frame. Scoped via .admin-main (set by _page() for
-   every /admin page and admin edit page); public tables keep their own
-   treatment. The rules
-   are !important on purpose: dozens of tables carry older inline styles,
-   and this block is the single source of the format, so it has to win.
+/* Tables: ONE format for every table on the site (2026-09). Light-blue
+   header row, white rows, a line between rows, and a rounded
+   --table-border (navy-light) frame. The rules are !important on purpose:
+   many tables carry older inline styles, including article tables stored
+   in the database, and this block is the single source of the format, so
+   it has to win.
+   Secondary format, for a table with subheading rows (the Compare pages'
+   .cc-section bands): the band is --table-border navy-light with white
+   text, and the label column stays white rather than beige.
+   Not tables in this sense, so excluded: the profile page's Competitors
+   list (.tp-competitor-table, a logo list inside a card) and article HTML
+   in the Reader (.rr-reader-body), which is other sites' markup,
+   newsletters' layout tables included.
    Frame: on the table itself (separate borders + overflow:hidden clip the
    corners). A table with sticky columns can't clip (overflow:hidden on the
    table breaks position:sticky), so its scroll wrapper carries the frame
    instead via .table-frame, and the table inside drops its own. */
-.admin-main table{border-collapse:separate!important;border-spacing:0!important;
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table){border-collapse:separate!important;border-spacing:0!important;
   background:var(--surface)!important;border:1px solid var(--table-border)!important;
   border-radius:12px!important;overflow:hidden!important;}
-.admin-main .table-frame{background:var(--surface)!important;border:1px solid var(--table-border)!important;
+.site-main .table-frame{background:var(--surface)!important;border:1px solid var(--table-border)!important;
   border-radius:12px!important;}
-.admin-main .table-frame>table{border:0!important;border-radius:0!important;overflow:visible!important;}
-.admin-main table>thead>tr>th,
-.admin-main table>tbody:first-child>tr:first-child>th{
+.site-main .table-frame>table{border:0!important;border-radius:0!important;overflow:visible!important;}
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>thead>tr>th,.site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>thead>tr>td,
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>tbody:first-child>tr:first-child>th{
   background:var(--accent-light)!important;color:var(--ink)!important;font-size:13px!important;
   font-weight:600!important;text-transform:none!important;letter-spacing:normal!important;
   border-top:0!important;border-bottom:0!important;}
-.admin-main table tr{background:var(--surface);}
-.admin-main table>thead>tr,
-.admin-main table>tbody:first-child>tr:first-child:has(>th){background:var(--accent-light)!important;}
-.admin-main table td{border-top:1px solid var(--line)!important;border-bottom:0!important;}
-.admin-main table>tbody:first-child>tr:first-child>td{border-top:0!important;}
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table) tr{background:var(--surface);}
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>thead>tr,
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>tbody:first-child>tr:first-child:has(>th){background:var(--accent-light)!important;}
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table) td{border-top:1px solid var(--line)!important;border-bottom:0!important;}
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>tbody:first-child>tr:first-child>td{border-top:0!important;}
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table) td.cc-section{background:var(--table-border)!important;color:#fff!important;}
+.site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>tbody td.cc-label{background:var(--surface)!important;}
 @media(max-width:700px){
-  .admin-main table.admin-table-responsive td{border-top:0!important;}
+  .site-main table.admin-table-responsive td{border-top:0!important;}
 }
 a{color:var(--navy);text-decoration:none;}
 a:hover{text-decoration:underline;}
@@ -2230,7 +2219,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
   <button class="nav-toggle" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">&#9776;</button>
   <nav class="site-nav" id="nav">{nav}</nav>
 </header>
-<main class="site-main{" admin-main" if active == "Admin" or _is_admin_path(_CURRENT_PATH.get()) else ""}">{body}</main>
+<main class="site-main">{body}</main>
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
@@ -2589,10 +2578,12 @@ _CMP_SHARED_CSS = f"""
 .cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
   color:var(--ink-soft);line-height:1.55;min-width:220px;}}
 .cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  min-width:140px;white-space:nowrap;background:var(--bg);}}
+  min-width:140px;white-space:nowrap;background:var(--surface);}}
 .cc-empty{{color:var(--muted);font-style:italic;}}
-.cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);
-  background:var(--seafoam);padding:8px 16px;}}
+/* Subheading band: the secondary table format (navy-light band, white
+   text). The sitewide table block in _CSS enforces the same colors. */
+.cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#fff;
+  background:var(--table-border);padding:8px 16px;}}
 /* Brand-consistency pass (2026-08): was #92400e/#fef3c7 (off-palette amber)
    — recolored to --coral-wash bg + --navy text (navy, not coral-deep,
    because BRAND.md's own mechanical CI check bans coral/coral-deep text
@@ -9219,7 +9210,7 @@ confirmed yet.</p>
 
 {_cmp_summary_block_html(request, entities, "tool")}
 {_CMP_SWIPE_HINT_HTML}
-<div style="overflow-x:auto;" id="cmp-scroll-wrap">
+<div class="table-frame" style="overflow-x:auto;" id="cmp-scroll-wrap">
 <table class="cc-table">
 <thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
 <tbody>
@@ -11233,7 +11224,7 @@ confirmed yet.</p>
 
 {_cmp_summary_block_html(request, entities, "community")}
 {_CMP_SWIPE_HINT_HTML}
-<div style="overflow-x:auto;" id="cmp-scroll-wrap">
+<div class="table-frame" style="overflow-x:auto;" id="cmp-scroll-wrap">
 <table class="cc-table">
 <thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
 <tbody>
@@ -15597,11 +15588,15 @@ _OC_ARTICLE_CSS = (
     'letter-spacing:-.01em;color:var(--ink);}'
     '.oc-body blockquote p{margin:0;}'
     '.oc-body img{max-width:100%;height:auto;border-radius:8px;margin:1.5em 0;display:block;}'
-    '.oc-body table{width:100%;border-collapse:collapse;font-size:.9em;margin:1.5em 0;'
-    'background:#fff;border-radius:12px;overflow:hidden;border:1px solid var(--line);}'
-    '.oc-body th,.oc-body td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;}'
-    '.oc-body th{background:var(--accent-light);font-family:var(--font-body);font-weight:600;}'
-    '.oc-body tr:last-child td{border-bottom:none;}'
+    '.oc-body table{width:100%;font-size:.9em;margin:1.5em 0;}'
+    '.oc-body th,.oc-body td{padding:10px 12px;text-align:left;}'
+    '.oc-body th{font-family:var(--font-body);}'
+    # Row stripes some stored article HTML still carries inline (the
+    # Growth Engine Ratio tier table) give way to the sitewide white rows.
+    '.oc-body tbody tr{background:var(--surface)!important;}'
+    # A wrapper stored with its own frame (the GER tier table's
+    # .ger-table-wrap) would draw a second border around the table's own.
+    '.oc-body .ger-table-wrap,.oc-body .ns-table-wrap{background:none!important;border:0!important;border-radius:0!important;}'
     '.oc-body pre,.oc-body code{font-family:ui-monospace,monospace;font-size:.85em;background:#f0ece4;border-radius:4px;padding:2px 5px;}'
     '.oc-body pre{padding:16px;overflow-x:auto;border-radius:8px;margin:1.5em 0;}'
     '.oc-body pre code{background:none;padding:0;}'
@@ -15640,14 +15635,12 @@ _OC_NETSUITE_MCP_CSS = (
     '.oc-body .ns-tip{background:var(--seafoam-wash);border-radius:6px;padding:10px 14px;font-size:13px;color:var(--seafoam-deep);margin-top:8px;}'
     '.oc-body .ns-tip strong{font-weight:600;}'
     '.oc-body .ns-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0;}'
-    '.oc-body .ns-table{width:100%;border-collapse:collapse;font-size:14px;}'
-    '.oc-body .ns-table th{background:var(--navy);color:#fff;padding:9px 14px;text-align:left;font-weight:600;}'
-    '.oc-body .ns-table td{padding:9px 14px;border-top:1px solid var(--line);}'
-    '.oc-body .ns-table tr:nth-child(even) td{background:var(--surface-2);}'
-    '.oc-body .ns-trouble{width:100%;border-collapse:collapse;font-size:14px;margin:16px 0;}'
-    '.oc-body .ns-trouble th{background:var(--surface-2);padding:9px 14px;text-align:left;font-weight:600;border-bottom:2px solid var(--line-strong);}'
-    '.oc-body .ns-trouble td{padding:10px 14px;border-top:1px solid var(--line);vertical-align:top;line-height:1.5;}'
-    '.oc-body .ns-trouble tr:hover td{background:var(--navy-wash);}'
+    '.oc-body .ns-table{width:100%;font-size:14px;margin:0;}'
+    '.oc-body .ns-table th{padding:9px 14px;text-align:left;}'
+    '.oc-body .ns-table td{padding:9px 14px;}'
+    '.oc-body .ns-trouble{width:100%;font-size:14px;margin:0;}'
+    '.oc-body .ns-trouble th{padding:9px 14px;text-align:left;}'
+    '.oc-body .ns-trouble td{padding:10px 14px;vertical-align:top;line-height:1.5;}'
     '.oc-body .ns-qr{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:24px 28px;margin:28px 0;}'
     '.oc-body .ns-qr-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;}'
     '.oc-body .ns-qr h3{font-family:var(--font-head);font-size:14px;font-weight:600;color:var(--ink);margin:16px 0 6px;}'
@@ -15835,7 +15828,6 @@ _OC_GER_CSS = (
     # source of the box's outer edge, same as the original bespoke page
     # before a generic table rule existed to fight it.
     '.oc-body .ger-table{margin:0;}'
-    '.oc-body .ger-table th{background:var(--navy);color:#fff;}'
     '.oc-body .ger-table th:nth-child(1),.oc-body .ger-table td:nth-child(1){white-space:nowrap;width:1%;}'
     '.oc-body .ger-table th:nth-child(2),.oc-body .ger-table td:nth-child(2){white-space:nowrap;}'
     '@media(max-width:640px){'

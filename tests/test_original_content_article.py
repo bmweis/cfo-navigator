@@ -284,7 +284,12 @@ def test_growth_engine_ratio_table_header_and_cta_button_styled_correctly(env):
          tag_label="Framework", date_label="June 2026", body_md=BODY_MD, status="live")
     r = _client(env).get("/thought-leadership/growth-engine-ratio-styling")
     assert r.status_code == 200
-    assert ".oc-body .ger-table th{background:var(--navy);color:#fff;}" in r.text
+    # 2026-09: the header now comes from the sitewide table standard
+    # (light-blue header, dark text), and the stored wrapper's own frame is
+    # neutralized so it can't draw a second border. Either way the header
+    # text can't land on a matching background.
+    assert "background:var(--accent-light)!important;color:var(--ink)!important" in r.text
+    assert ".oc-body .ger-table-wrap,.oc-body .ns-table-wrap{background:none!important" in r.text
     assert ".oc-body .btn{color:#fff;}" in r.text
 
 
