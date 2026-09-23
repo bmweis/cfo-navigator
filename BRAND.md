@@ -508,7 +508,12 @@ graffiti marks on admin tables, forms, or the chat UI.
     in the database) can't override it. A table with sticky columns or a
     sticky label can't clip its own corners (`overflow:hidden` on the table
     breaks `position:sticky`), so its scroll wrapper carries the frame via
-    `.table-frame` instead. Covered by `tests/test_table_format.py`.
+    `.table-frame` instead. Covered by `tests/test_table_format.py`, and
+    guarded live by the "One table format" row on `/admin/checks`
+    (`brand_check.table_standard_problems`/`table_override_problems`): it
+    fails if the block loses a rule, the border token changes, the scope
+    grows an exclusion that isn't approved, or any other CSS rule sets a
+    table's background or border with `!important`.
   - Not tables in this sense, so excluded: the profile page's Competitors
     logo list (`.tp-competitor-table`) and other sites' article HTML in the
     Reader (`.rr-reader-body`), where newsletters use tables for layout.

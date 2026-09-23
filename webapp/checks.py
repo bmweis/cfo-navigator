@@ -658,6 +658,14 @@ def run_all() -> list[dict]:
         "detail": "; ".join(ol[:6]) if ol
                   else "Every hand-written outbound link opens in a new tab."})
 
+    from webapp.app import _CSS as _app_css
+    tf = brand_check.table_standard_problems(_app_css) + brand_check.table_override_problems(src)
+    results.append({
+        "name": "One table format", "where": "Live + CI", "ok": not tf,
+        "what": "Every table uses the one standard: light-blue header, white rows, row lines, navy-light rounded border.",
+        "detail": "; ".join(tf[:6]) if tf
+                  else f"The standard is whole and nothing overrides it ({len(brand_check.TABLE_SCOPE_EXCLUSIONS)} approved exceptions)."})
+
     op = open_source_problems()
     results.append({
         "name": "Open-source showcase in sync", "where": "Live + CI", "ok": not op,

@@ -10292,6 +10292,10 @@ the category-CRUD card it exercises moved out of `_TOOLBOX_TOOLS`).
   format. Sticky tables put the frame on their wrapper (`.table-frame`).
   Excluded: the profile Competitors logo list and Reader article HTML.
   BRAND.md's table rule and `tests/test_table_format.py` are the reference.
+  Guarded live by the "One table format" row on `/admin/checks`: a new
+  exclusion goes in `brand_check.TABLE_SCOPE_EXCLUSIONS` (a design call for
+  Brian), and a supporting `!important` table rule goes in
+  `TABLE_OVERRIDE_ALLOWLIST` with its reason. Anything else fails.
 - **`webapp/checks.py` is voice-linted** (joined `VOICE_SCANNED_FILES`):
   its check descriptions render on `/admin/checks`, so they follow the same
   rules as app.py copy. Keep them to one plain sentence.

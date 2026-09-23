@@ -26584,6 +26584,7 @@ _LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "BRAND.md §7 in sync",
         "Coral discipline (one moment per page)",
         "Outbound links open in a new tab",
+        "One table format",
     )),
     ("Site structure and content", (
         "Hub-nav orphans",
