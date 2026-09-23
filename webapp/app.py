@@ -26487,6 +26487,48 @@ _SUMMARY_COL_WIDTH_STATUS = "56px"
 # apart, since there's only one thing to edit.
 _SUMMARY_ROW_COLUMNS = ("check", "status", "details")
 
+# Live checks, grouped by theme on /admin/checks (checks-page follow-ups,
+# 2026-09). Every run_all() check name belongs to exactly one theme; a new
+# check needs a line here (tests/test_checks.py enforces it).
+_LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Voice and copy", (
+        "Voice standards",
+        "Typography (ampersands, em dashes)",
+        "Voice guide names what it enforces",
+        "Voice guide's permitted ampersand terms are honored",
+        "Voice guide follows its own typography rules",
+        "Voice review queue",
+    )),
+    ("Brand and design", (
+        "Brand standards",
+        "BRAND.md §7 in sync",
+        "Coral discipline (one moment per page)",
+        "Outbound links open in a new tab",
+    )),
+    ("Site structure and content", (
+        "Hub-nav orphans",
+        "AI config consolidated",
+        "og:url threading",
+        "Original content mirrored for retrieval",
+        "Every live piece has a share card",
+    )),
+    ("Code and repo health", (
+        "Dead code / unused imports",
+        "Script blocks are valid JavaScript",
+        "Open-source showcase in sync",
+        "Production script examples use an absolute --db",
+        "Everything else",
+        "Secret scan",
+    )),
+)
+
+
+def _live_check_theme(name: str) -> str:
+    for theme, names in _LIVE_CHECK_THEMES:
+        if name in names:
+            return theme
+    return "Other"
+
 # Collapsed-by-default sections still need to be linkable: when the URL's
 # fragment names an element inside a closed <details> (or the <details>'s
 # own wrapper), open every enclosing one and scroll to it.
@@ -26821,21 +26863,40 @@ def admin_checks(request: Request):
         return (f'<a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" '
                 f'style="color:var(--accent);font-weight:600;">Latest run &rarr;</a>', "var(--line-strong)")
 
-    rows = ""
-    for r in results:
+    # Each card puts its status in the same place, the top-right corner:
+    # a two-column grid (name | status) so a long name wraps inside its own
+    # column instead of pushing the status onto a line of its own.
+    def _card(r):
         badge, bar = _status(r)
-        where = ('<span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">'
-                 f'{r["where"]}</span>')
-        rows += (
-            f'<div id="{_check_row_slug(r["name"])}" style="border-left:3px solid {bar};background:var(--bg);'
-            f'border:1px solid var(--line);border-left-width:3px;border-radius:10px;padding:12px 16px;'
+        where = ('<span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;'
+                 f'white-space:nowrap;">{r["where"]}</span>')
+        return (
+            f'<div id="{_check_row_slug(r["name"])}" style="background:var(--bg);'
+            f'border:1px solid var(--line);border-left:3px solid {bar};border-radius:10px;padding:12px 16px;'
             f'scroll-margin-top:16px;">'
-            f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
-            f'<span style="font-weight:600;font-size:15px;color:var(--navy);">{_esc(r["name"])}</span>'
-            f'<span style="display:flex;gap:12px;align-items:baseline;">{where}{badge}</span></div>'
+            f'<div class="checks-card-head" style="display:grid;grid-template-columns:minmax(0,1fr) auto;'
+            f'column-gap:12px;align-items:start;">'
+            f'<span style="font-weight:600;font-size:15px;color:var(--navy);line-height:1.35;">{_esc(r["name"])}</span>'
+            f'<span class="checks-card-status" style="display:flex;flex-direction:column;align-items:flex-end;'
+            f'gap:2px;text-align:right;white-space:nowrap;">{badge}{where}</span></div>'
             f'<p style="margin:4px 0 0;font-size:13px;color:var(--ink-soft);line-height:1.5;">{_esc(r["what"])}</p>'
             f'<p style="margin:3px 0 0;font-size:12px;color:var(--muted);line-height:1.45;">{_esc(r["detail"])}</p>'
             f'</div>')
+
+    # Grouped by theme so like sits with like; within a theme, run_all()'s
+    # own order. A check missing from _LIVE_CHECK_THEMES lands in "Other"
+    # rather than disappearing (and tests/test_checks.py fails on it).
+    by_theme: dict[str, list] = {}
+    for r in results:
+        by_theme.setdefault(_live_check_theme(r["name"]), []).append(r)
+    rows = ""
+    for theme in [t for t, _ in _LIVE_CHECK_THEMES] + ["Other"]:
+        items = by_theme.get(theme)
+        if not items:
+            continue
+        rows += (f'<h3 class="checks-theme" style="font-size:12px;font-weight:600;color:var(--muted);'
+                 f'text-transform:uppercase;letter-spacing:.08em;margin:18px 0 8px;">{_esc(theme)}</h3>'
+                 f'<div class="checks-live-grid">{"".join(_card(r) for r in items)}</div>')
 
     # CI quota switch (checks-page follow-ups, 2026-09) — a real on/off
     # control at the top of the page, next to the summary, instead of a link
@@ -26897,7 +26958,7 @@ def admin_checks(request: Request):
         '<div id="live-checks" style="scroll-margin-top:16px;">'
         + _disclosure_group(
             "Live checks",
-            f'<div class="checks-live-grid">{rows}</div>'
+            f'{rows}'
             f'<p style="margin:14px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including '
             f'the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" '
             f'style="color:var(--accent);">view the latest QA run &rarr;</a></p>',
