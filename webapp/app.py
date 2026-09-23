@@ -26130,7 +26130,7 @@ def _reviewed_freshness_banner(is_stale: bool, message_html: str, mark_url: str)
             f'</form></div>')
 
 
-def _pricing_freshness_banner(last_verified: str) -> str:
+def _pricing_freshness_message(last_verified: str) -> tuple[bool, str]:
     """Issue #98, Piece 2 — a dated manual-attestation reminder, not a
     pass/fail check: there's no pricing API to reconcile MODEL_PRICING
     against automatically (see linklib/pricing.py's module docstring), so
@@ -26166,10 +26166,15 @@ def _pricing_freshness_banner(last_verified: str) -> str:
         when = _relative_age(last_verified)
         html = (f'Pricing was manually verified <strong>{_esc(when) or "recently"}</strong> against '
                 f'Anthropic&rsquo;s published rates.')
+    return stale, html
+
+
+def _pricing_freshness_banner(last_verified: str) -> str:
+    stale, html = _pricing_freshness_message(last_verified)
     return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-pricing-reviewed")
 
 
-def _models_freshness_banner(last_reviewed: str) -> str:
+def _models_freshness_message(last_reviewed: str) -> tuple[bool, str]:
     """Issue #98, Piece 2 follow-up — a second, parallel dated
     manual-attestation reminder, sibling to _pricing_freshness_banner
     above (both share _reviewed_freshness_banner's rendering). Answers a
@@ -26208,10 +26213,15 @@ def _models_freshness_banner(last_reviewed: str) -> str:
         when = _relative_age(last_reviewed)
         html = (f'Anthropic&rsquo;s model lineup was manually checked <strong>{_esc(when) or "recently"}</strong> '
                 f'against <code>linklib/models.py</code>&rsquo;s registry.')
+    return stale, html
+
+
+def _models_freshness_banner(last_reviewed: str) -> str:
+    stale, html = _models_freshness_message(last_reviewed)
     return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-models-reviewed")
 
 
-def _exa_pricing_freshness_banner(last_verified: str) -> str:
+def _exa_pricing_freshness_message(last_verified: str) -> tuple[bool, str]:
     """A third, parallel dated manual-attestation reminder, sibling to
     _pricing_freshness_banner/_models_freshness_banner above (all three
     share _reviewed_freshness_banner's rendering). Answers the same
@@ -26244,6 +26254,11 @@ def _exa_pricing_freshness_banner(last_verified: str) -> str:
         when = _relative_age(last_verified)
         html = (f'Exa pricing was manually verified <strong>{_esc(when) or "recently"}</strong> against '
                 f'Exa&rsquo;s published rates.')
+    return stale, html
+
+
+def _exa_pricing_freshness_banner(last_verified: str) -> str:
+    stale, html = _exa_pricing_freshness_message(last_verified)
     return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-exa-pricing-reviewed")
 
 
@@ -26281,7 +26296,7 @@ def _db_copy_decisions_html(report) -> str:
             f'Not counted as violations; removing a decision puts the finding back on the next pass.</p>')
 
 
-def _db_copy_scan_banner(report) -> str:
+def _db_copy_scan_detail(report) -> str:
     """Live-only (2026-09 voice-enforcement PR, Part 2) — unlike the three
     freshness banners above, this is not a dated human attestation: it's a
     fact computed fresh on every page load, so there's no "Mark reviewed"
@@ -26325,28 +26340,22 @@ def _db_copy_scan_banner(report) -> str:
             f'font-family:ui-monospace,monospace;">{skip_items}</ul>'
         )
 
-    count_text = _esc(_db_copy_count_text(report))
     decisions_html = _db_copy_decisions_html(report)
-    if not violations:
-        clean = ('<p style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;border-radius:10px;'
-                 f'padding:10px 16px;font-size:14px;margin:0;">&#10003; {count_text}</p>')
-        return (f'<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;">{_esc(stats_line)}</p>'
-                f'{skip_html}{clean}{decisions_html}')
-
-    by_table: dict[str, int] = {}
-    for v in violations:
-        by_table[v.table] = by_table.get(v.table, 0) + 1
-    table_summary = ", ".join(f"{t} ({n})" for t, n in sorted(by_table.items(), key=lambda kv: -kv[1]))
-    rows_html = "".join(f'<li style="margin:0 0 4px;">{_esc(str(v))}</li>' for v in violations[:20])
-    more = f'<p style="margin:8px 0 0;font-size:12.5px;color:var(--muted);">+ {len(violations) - 20} more.</p>' if len(violations) > 20 else ""
-    finding_html = (
-        f'<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
-        f'padding:10px 16px;font-size:14px;margin:0 0 10px;">{count_text} Violations by table: '
-        f'{_esc(table_summary)}.</p>'
-        f'<ul style="margin:0;padding-left:20px;font-size:13px;color:var(--ink-soft);font-family:ui-monospace,monospace;">'
-        f'{rows_html}</ul>{more}')
-    return (f'<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;">{_esc(stats_line)}</p>'
-            f'{skip_html}{finding_html}{decisions_html}')
+    violations_html = ""
+    if violations:
+        by_table: dict[str, int] = {}
+        for v in violations:
+            by_table[v.table] = by_table.get(v.table, 0) + 1
+        table_summary = ", ".join(f"{t} ({n})" for t, n in sorted(by_table.items(), key=lambda kv: -kv[1]))
+        rows_html = "".join(f'<li style="margin:0 0 4px;">{_esc(str(v))}</li>' for v in violations[:20])
+        more = (f'<p style="margin:6px 0 0;font-size:12.5px;color:var(--muted);">+ {len(violations) - 20} more.</p>'
+                if len(violations) > 20 else "")
+        violations_html = (
+            f'<p style="font-size:13px;color:var(--ink-soft);margin:8px 0 4px;">By table: {_esc(table_summary)}.</p>'
+            f'<ul style="margin:0;padding-left:20px;font-size:13px;color:var(--ink-soft);'
+            f'font-family:ui-monospace,monospace;">{rows_html}</ul>{more}')
+    return (f'<p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;">{_esc(stats_line)}</p>'
+            f'{skip_html}{violations_html}{decisions_html}')
 
 
 def _disk_mb(n: int) -> str:
@@ -26355,7 +26364,7 @@ def _disk_mb(n: int) -> str:
     return f"{n // (1024 * 1024):,}M"
 
 
-def _disk_space_banner(status: dict | None) -> str:
+def _disk_space_detail(status: dict | None) -> str:
     """A plain status statement, matching /admin/library-backup's own
     register (a sentence naming the state, the real numbers, a colored
     box) rather than a dashboard widget — per the incident this closes
@@ -26369,16 +26378,10 @@ def _disk_space_banner(status: dict | None) -> str:
     signal), and it always states the numbers plainly, including when
     everything is green, so a healthy row can never read as "this check
     never ran"."""
-    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
-    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
-    alert_wash, alert = "var(--alert-wash)", "var(--alert)"
-
     if status is None:
-        bg, border, color = "var(--surface-2)", "var(--line)", "var(--muted)"
         html = ('No <code>/data</code> volume here. This check only runs in production, where the '
                 'Railway volume is mounted.')
-        return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
-                f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
+        return html
 
     total, used, free, pct, db_size = (status["total"], status["used"], status["free"],
                                         status["percent_used"], status["db_size"])
@@ -26393,16 +26396,12 @@ def _disk_space_banner(status: dict | None) -> str:
         vacuum_note = ''
 
     if status["level"] == "critical":
-        bg, border, color = alert_wash, alert, alert
         html = f'The <code>{_esc(status["volume_path"])}</code> volume is <strong>critically full</strong>: {stats}{vacuum_note}'
     elif status["level"] == "warn":
-        bg, border, color = amber_wash, amber_border, amber_text
         html = f'The <code>{_esc(status["volume_path"])}</code> volume is getting full: {stats}{vacuum_note}'
     else:
-        bg, border, color = seafoam_wash, seafoam, "inherit"
         html = f'The <code>{_esc(status["volume_path"])}</code> volume has room: {stats}{vacuum_note}'
-    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
-            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
+    return html
 
 
 def _epoch_relative_age(epoch: float | None) -> str:
@@ -26463,6 +26462,58 @@ def _checks_refresher_banner(status: dict) -> str:
         html = f'Badge counts last refreshed {last_success_age}.'
     return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
             f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
+
+
+def _checks_refresher_detail(status: dict) -> str:
+    """The refresher banner's sentence without its colored box, for the
+    text column of the details rows (the status column carries the color)."""
+    banner = _checks_refresher_banner(status)
+    return banner[banner.index(">") + 1:banner.rindex("</div>")]
+
+
+# Status text colors for the details rows' right-hand column. Green and red
+# reuse the summary dots' stoplight hexes (_SUMMARY_STATUS_META). Amber text
+# uses the darker #92400e the old amber banners used: the #CA8A04 dot color
+# is under AA as text (BRAND.md §6).
+_CHECKS_STATUS_TEXT_COLOR = {
+    "ok": "#15803D",
+    "warning": "#92400e",
+    "critical": "#b91c1c",
+    "unknown": "var(--muted)",
+}
+
+
+def _checks_detail_row(anchor: str, title: str, text_html: str, row: dict, action_html: str = "") -> str:
+    """One row of the consolidated details block on /admin/checks: what the
+    check is and what to do on the left two thirds, its result on the right
+    third (dot, status word, the same details text the summary shows, and
+    any action). Same status vocabulary as the summary tables, so a row
+    reads the same in both places."""
+    dot_color, label = _SUMMARY_STATUS_META[row["status"]]
+    text_color = _CHECKS_STATUS_TEXT_COLOR[row["status"]]
+    return (
+        f'<div class="chk-row" id="{anchor}">'
+        f'<div class="chk-text"><h3 style="margin:0 0 4px;font-size:16px;">{_esc(title)}</h3>'
+        f'<div style="font-size:14px;line-height:1.55;color:var(--ink-soft);">{text_html}</div></div>'
+        f'<div class="chk-status">'
+        f'<div style="display:flex;align-items:center;gap:8px;">'
+        f'<span title="{label}" aria-hidden="true" style="width:10px;height:10px;border-radius:50%;'
+        f'background:{dot_color};flex-shrink:0;"></span>'
+        f'<strong style="font-size:14px;color:{text_color};">{label}</strong></div>'
+        f'<div style="font-size:13.5px;color:{text_color};margin-top:4px;line-height:1.45;">{_esc(row["details"])}</div>'
+        f'{action_html}</div></div>'
+    )
+
+
+_CHECKS_DETAIL_CSS = (
+    ".chk-rows{background:var(--surface);border:1px solid var(--line);border-radius:12px;margin:0 0 8px;}"
+    ".chk-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:28px;"
+    "padding:18px 22px;border-top:1px solid var(--line);}"
+    ".chk-row:first-child{border-top:0;}"
+    ".chk-status{padding-left:20px;border-left:1px solid var(--line);}"
+    "@media(max-width:760px){.chk-row{grid-template-columns:minmax(0,1fr);gap:12px;}"
+    ".chk-status{padding-left:0;border-left:0;}}"
+)
 
 
 def _check_row_slug(name: str) -> str:
@@ -26721,13 +26772,13 @@ def admin_checks(request: Request):
     finally:
         lib.close()
     refresher_status = _tasks.refresher_status()
-    refresher_banner = _checks_refresher_banner(refresher_status)
-    pricing_banner = _pricing_freshness_banner(pricing_last_verified)
-    models_banner = _models_freshness_banner(models_last_reviewed)
-    exa_pricing_banner = _exa_pricing_freshness_banner(exa_pricing_last_verified)
-    db_copy_banner = _db_copy_scan_banner(db_copy_report)
+    refresher_detail = _checks_refresher_detail(refresher_status)
+    _, pricing_message = _pricing_freshness_message(pricing_last_verified)
+    _, models_message = _models_freshness_message(models_last_reviewed)
+    _, exa_pricing_message = _exa_pricing_freshness_message(exa_pricing_last_verified)
+    db_copy_detail = _db_copy_scan_detail(db_copy_report)
     disk_status = _checks.disk_space_status()
-    disk_banner = _disk_space_banner(disk_status)
+    disk_detail = _disk_space_detail(disk_status)
 
     _GITHUB_MAIN = "https://github.com/bmweis/cfo-navigator/blob/main/"
     _pricing_gh = _GITHUB_MAIN + "linklib/pricing.py"
@@ -27008,6 +27059,69 @@ def admin_checks(request: Request):
         + f'<script>{_OPEN_DETAILS_FOR_HASH_JS}</script>'
     )
 
+    # Details (2026-09): the three site checks and three AI-provider
+    # reminders that need more than a summary row, one consolidated block
+    # each. What the check is and what to do sits in the left two thirds;
+    # the result (dot, status word, details, action) in the right third,
+    # so the page scans down one column of results.
+    def _mark_form(url: str) -> str:
+        return (f'<form method="post" action="{url}" style="margin:10px 0 0;">'
+                f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;'
+                f'white-space:nowrap;">Mark reviewed</button></form>')
+
+    def _p(html: str) -> str:
+        return f'<p style="margin:0 0 6px;">{html}</p>'
+
+    _link = 'target="_blank" rel="noopener" style="color:var(--accent);"'
+    site_rows = "".join([
+        _checks_detail_row(
+            "db-copy-scan", "Database copy",
+            _p("Reads the copy stored in the database: original pieces, tool and community profiles, "
+               "and saved page text. It never changes anything. Fix a finding on the page that owns "
+               "the record, or decide it in the review queue.") + db_copy_detail,
+            db_row,
+            '<p style="margin:10px 0 0;font-size:13px;"><a href="/admin/voice/review-queue" '
+            'style="color:var(--accent);">Open the review queue &rarr;</a></p>'),
+        _checks_detail_row(
+            "disk-space", "Disk space",
+            _p("How full the production volume is, read live on every load.") + _p(disk_detail),
+            disk_row),
+        _checks_detail_row(
+            "badge-refresh", "Badge refresh",
+            _p("A background job keeps the admin badge counts fresh, so pages don&rsquo;t compute "
+               "them while you wait.") + _p(refresher_detail),
+            badge_row),
+    ])
+    ai_rows = "".join([
+        _checks_detail_row(
+            "pricing-freshness", "Anthropic pricing",
+            _p(pricing_message)
+            + _p(f'<a href="{_pricing_gh}" {_link}>linklib/pricing.py &#8599;</a> &middot; '
+                 f'<a href="{_anthropic_pricing_url}" {_link}>Anthropic&rsquo;s pricing &#8599;</a>'),
+            pricing_row, _mark_form("/admin/checks/mark-pricing-reviewed")),
+        _checks_detail_row(
+            "new-model-awareness", "Anthropic models",
+            _p(models_message)
+            + _p(f'<a href="{_models_gh}" {_link}>linklib/models.py &#8599;</a> &middot; '
+                 f'<a href="{_anthropic_models_url}" {_link}>Anthropic&rsquo;s model docs &#8599;</a>'),
+            models_row, _mark_form("/admin/checks/mark-models-reviewed")),
+        _checks_detail_row(
+            "exa-pricing-freshness", "Exa pricing",
+            _p(exa_pricing_message)
+            + _p(f'<a href="{_pricing_gh}" {_link}>linklib/pricing.py &#8599;</a> &middot; '
+                 f'<a href="{_exa_pricing_url}" {_link}>Exa&rsquo;s pricing &#8599;</a>'),
+            exa_row, _mark_form("/admin/checks/mark-exa-pricing-reviewed")),
+    ])
+    details_html = (
+        f'<style>{_CHECKS_DETAIL_CSS}</style>'
+        '<h2 id="site-check-details" style="margin:32px 0 10px;">Site check details</h2>'
+        f'<div class="chk-rows">{site_rows}</div>'
+        '<h2 id="ai-providers" style="margin:32px 0 4px;">AI providers</h2>'
+        '<p style="color:var(--ink-soft);margin:0 0 10px;font-size:14px;line-height:1.6;">No API reports '
+        'pricing or new models, so these are dated reminders to re-check by hand.</p>'
+        f'<div class="chk-rows">{ai_rows}</div>'
+    )
+
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Checks</h1>
@@ -27015,26 +27129,7 @@ def admin_checks(request: Request):
 {summary_box}
 {ci_quota_form}
 {live_checks_html}
-<h2 id="db-copy-scan" style="margin:28px 0 4px;">Database-backed copy</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">The voice checks above read code. This one reads the copy stored in the database: original pieces, tool and community profiles, and saved page text. It runs on every page load and never changes anything. Fix a finding on the page that owns the record, or decide it in <a href="/admin/voice/review-queue" style="color:var(--accent);">the voice review queue &rarr;</a>.</p>
-{db_copy_banner}
-<h2 id="disk-space" style="margin:28px 0 4px;">Disk space</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">How full the production volume is, read live on every load. A healthy result still shows the numbers, so you can tell it ran.</p>
-{disk_banner}
-<h2 id="badge-refresh" style="margin:28px 0 4px;">Badge refresh</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">A background job keeps the admin badge counts fresh, so pages don't compute them while you wait. This shows whether that job is running.</p>
-{refresher_banner}
-<h2 id="ai-providers" style="margin:28px 0 4px;">AI providers</h2>
-<p style="color:var(--ink-soft);margin:-2px 0 12px;font-size:14px;line-height:1.6;">No API reports pricing or new models, so these three are dated reminders for you to re-check by hand.</p>
-<h3 id="pricing-freshness" style="margin:20px 0 4px;font-size:16.5px;">Anthropic pricing</h3>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table still accurate against Anthropic&rsquo;s current published rates? <a href="{_pricing_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/pricing.py on GitHub &#8599;</a> &middot; <a href="{_anthropic_pricing_url}" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic&rsquo;s pricing page &#8599;</a></p>
-{pricing_banner}
-<h3 id="new-model-awareness" style="margin:24px 0 4px;font-size:16.5px;">Anthropic models</h3>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Has Anthropic shipped a model since the last check that isn&rsquo;t in <code>linklib/models.py</code> yet? <a href="{_models_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/models.py on GitHub &#8599;</a> &middot; <a href="{_anthropic_models_url}" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic&rsquo;s model docs &#8599;</a></p>
-{models_banner}
-<h3 id="exa-pricing-freshness" style="margin:24px 0 4px;font-size:16.5px;">Exa pricing</h3>
-<p style="color:var(--ink-soft);margin:-2px 0 4px;font-size:14px;line-height:1.6;">Is <code>linklib/pricing.py</code>&rsquo;s <code>EXA_PRICING</code> table still accurate against Exa&rsquo;s current published rates? <a href="{_pricing_gh}" target="_blank" rel="noopener" style="color:var(--accent);">View linklib/pricing.py on GitHub &#8599;</a> &middot; <a href="{_exa_pricing_url}" target="_blank" rel="noopener" style="color:var(--accent);">Exa&rsquo;s pricing page &#8599;</a></p>
-{exa_pricing_banner}
+{details_html}
 </div>"""
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
 

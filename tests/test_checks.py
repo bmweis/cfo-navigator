@@ -870,3 +870,33 @@ def test_live_checks_render_grouped_by_theme_with_status_top_right(env, monkeypa
     # Every card uses the same two-column head: name left, status right.
     heads = html.count('class="checks-card-head" style="display:grid;grid-template-columns:minmax(0,1fr) auto;')
     assert heads == len(env.run_all())
+
+
+# --- Consolidated details block (2026-09): text left, result right --------
+
+def test_details_rows_put_text_left_and_result_right(env, monkeypatch):
+    """Database copy, Disk space, Badge refresh and the three AI-provider
+    reminders render as one row each: explanation in .chk-text, the result
+    in .chk-status (dot, status word, the summary's details text, any
+    action), so the results scan down one column."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    html = c.get("/admin/checks").text
+    anchors = ["db-copy-scan", "disk-space", "badge-refresh",
+               "pricing-freshness", "new-model-awareness", "exa-pricing-freshness"]
+    positions = [html.index(f'<div class="chk-row" id="{a}">') for a in anchors]
+    assert positions == sorted(positions)
+    for i, a in enumerate(anchors):
+        end = positions[i + 1] if i + 1 < len(anchors) else len(html)
+        row = html[positions[i]:end]
+        assert row.index('class="chk-text"') < row.index('class="chk-status"'), a
+    status_of = lambda a: html[html.index('class="chk-status"', html.index(f'id="{a}"')):]
+    assert "Never reviewed" in status_of("pricing-freshness")[:600]
+    assert 'action="/admin/checks/mark-pricing-reviewed"' in status_of("pricing-freshness")[:900]
+    assert "No /data volume (this environment)" in status_of("disk-space")[:600]
+    # The two-thirds / one-third split, collapsing to one column on phones.
+    assert "grid-template-columns:minmax(0,2fr) minmax(0,1fr)" in appmod._CHECKS_DETAIL_CSS
+    assert "@media(max-width:760px)" in appmod._CHECKS_DETAIL_CSS

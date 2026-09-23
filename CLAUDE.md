@@ -10308,7 +10308,13 @@ the category-CRUD card it exercises moved out of `_TOOLBOX_TOOLS`).
   repo health), in a two-column grid (`_LIVE_CHECKS_COLUMNS = 2`, Brian's pick over
   three). Every card's status sits in the same
   top-right spot. A new `run_all()` check needs a theme line, or
-  `tests/test_checks.py` fails.
+  `tests/test_checks.py` fails. Below Live checks, Database copy, Disk
+  space, Badge refresh and the three AI-provider reminders are one
+  details block (`_checks_detail_row`): explanation in the left two
+  thirds, result in the right third (dot, status word, the summary's own
+  details text, and any action such as Mark reviewed), stacking on phones.
+  The status vocabulary and details text come from the same row dicts the
+  summary tables use, so the two can't disagree.
 - **Voice review queue:** Detail shows findings and fixes in context,
   editing happens in the Detail cell on the full stored value with a
   stale-value check, every resolution records its outcome, and the
