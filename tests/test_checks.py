@@ -639,7 +639,7 @@ def test_voice_guide_row_falls_back_to_default_with_no_live_value(env):
     row = next(r for r in results if r["name"] == "Voice guide names what it enforces")
     assert row["ok"] is True
     assert "VOICE_CORE_DEFAULT" in row["detail"]
-    assert "differs from VOICE_CORE_DEFAULT" not in row["detail"]
+    assert "differs from the code default" not in row["detail"]
 
 
 def test_voice_guide_row_validates_a_live_value_when_present(env):
@@ -656,7 +656,7 @@ def test_voice_guide_row_validates_a_live_value_when_present(env):
     results = env.run_all()
     row = next(r for r in results if r["name"] == "Voice guide names what it enforces")
     assert "the live voice_core setting" in row["detail"]
-    assert "differs from VOICE_CORE_DEFAULT" in row["detail"]
+    assert "differs from the code default" in row["detail"]
 
 
 def test_voice_guide_ampersand_row_passes_on_the_real_default(env):
@@ -736,7 +736,7 @@ def test_db_copy_scan_states_execution_on_a_clean_db(env, monkeypatch):
     r = c.get("/admin/checks")
     assert r.status_code == 200
     assert "Scanned" in r.text and "column" in r.text and "table" in r.text
-    assert "No banned words, filler, performative" in r.text
+    assert "0 violations. 0 allowed once, 0 always allowed." in r.text
 
 
 def test_db_copy_scan_shows_a_skipped_table_as_amber_not_clean(env, monkeypatch):
@@ -756,7 +756,7 @@ def test_db_copy_scan_shows_a_skipped_table_as_amber_not_clean(env, monkeypatch)
     try:
         r = c.get("/admin/checks")
         assert r.status_code == 200
-        assert "could not be scanned" in r.text
+        assert "couldn&rsquo;t be scanned this pass" in r.text
         assert "nonexistent_table" in r.text
     finally:
         scan_mod._SCAN_TABLES = orig_tables
