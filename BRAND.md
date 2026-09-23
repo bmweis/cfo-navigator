@@ -493,21 +493,25 @@ graffiti marks on admin tables, forms, or the chat UI.
   disclosure, at every nesting level, loads collapsed** — no exceptions, and nesting goes three
   deep on `/admin` today (CFO Toolbox → Reader → a quadrant), so "collapsed by default" has to
   hold for a group that only ever renders inside another one.
-- **Tables** — one format for every admin table (2026-09): a light-blue
-  `--accent-light` header row with 13px sentence-case header text, **white
-  rows** (`--surface`), a `--line` rule between rows, and a rounded 12px
-  frame in `--table-border`. No zebra striping, no navy header rows. It all
-  lives in one `!important` block in `_CSS`, scoped to `main.admin-main`,
-  which `_page()` sets for every `/admin/*` page and the admin edit pages
-  beside a public profile (`/tools/*/edit`), whatever section the route
-  passes as `active`. A new admin table gets the format without anyone
-  remembering it, and older inline styles can't override it. A table with
-  sticky columns can't clip its own corners (`overflow:hidden` on the table
-  breaks `position:sticky`), so its scroll wrapper carries the frame via
-  `.table-frame` instead. Covered by `tests/test_admin_table_format.py`.
-  Public tables (article bodies such as the Growth Engine Ratio tier table,
-  the Compare pages, the FP&A Buddy explainer) keep their own treatment for
-  now.
+- **Tables** — one format for every table on the site (2026-09): a
+  light-blue `--accent-light` header row with 13px sentence-case header
+  text, **white rows** (`--surface`), a `--line` rule between rows, and a
+  rounded 12px frame in `--table-border` (`--navy-light`). No zebra
+  striping, no navy header rows. Admin pages, articles, the Compare pages,
+  and the FP&A Buddy explainer all use it.
+  - **Secondary format, for a table with subheading rows** (the Compare
+    pages' section bands): the band is `--table-border` navy-light with
+    white text, and the label column stays white rather than beige.
+  - It all lives in one `!important` block in `_CSS`, scoped to
+    `main.site-main`, so a new table gets the format without anyone
+    remembering it, and older inline styles (including article HTML stored
+    in the database) can't override it. A table with sticky columns or a
+    sticky label can't clip its own corners (`overflow:hidden` on the table
+    breaks `position:sticky`), so its scroll wrapper carries the frame via
+    `.table-frame` instead. Covered by `tests/test_table_format.py`.
+  - Not tables in this sense, so excluded: the profile page's Competitors
+    logo list (`.tp-competitor-table`) and other sites' article HTML in the
+    Reader (`.rr-reader-body`), where newsletters use tables for layout.
   Checkbox/boolean-indicator columns are always center-justified, header and
   cells alike. Text, link, and dropdown columns are left-justified. Actions
   columns are right-aligned. Once a table collapses to stacked labelled rows on
@@ -1050,7 +1054,7 @@ colors for status only," §6, still holds everywhere else).
   /* Lines (warm-toned) */
   --line:#E4E0D6;
   --line-strong:#D6D1C4;
-  --table-border:var(--line); /* the one frame color every admin table uses */
+  --table-border:var(--navy-light); /* the one frame color every table uses; also the subheading band */
   /* Semantic — status only (GER calculator readout, form pass/fail, Warnings callouts) */
   --good:#002975; --caution:#9A6B12; --alert:#9E3B30;
   --alert-wash:#FBEEEC;    /* soft alert fill — Warnings callout background only */

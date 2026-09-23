@@ -10283,15 +10283,15 @@ the category-CRUD card it exercises moved out of `_TOOLBOX_TOOLS`).
   brings the finding back on the next pass. A red status nobody can clear
   by deciding trains the reader to ignore the page, so the two surfaces
   may differ in what they show but never contradict each other.
-- **Every admin table uses one format.** Light-blue header row, white
-  rows, a line between rows, rounded 12px frame in `--table-border`. It's
-  one `!important` block in `_CSS` scoped to `main.admin-main`, so don't
-  style a new admin table inline; it inherits the format. `_page()` sets
-  `admin-main` from the request path (`_CURRENT_PATH` + `_is_admin_path`),
-  not from `active`, because Toolbox and thought-leadership admin pages
-  pass their own section and used to fall outside the format. A sticky-
-  column table puts the frame on its wrapper (`.table-frame`). BRAND.md's
-  table rule and `tests/test_admin_table_format.py` are the reference.
+- **Every table on the site uses one format.** Light-blue header row,
+  white rows, a line between rows, rounded 12px frame in `--table-border`
+  (`--navy-light`, Brian's pick). Tables with subheading rows (Compare's
+  section bands) use the secondary format: navy-light band, white text,
+  white label column. It's one `!important` block in `_CSS` scoped to
+  `main.site-main`, so don't style a new table inline; it inherits the
+  format. Sticky tables put the frame on their wrapper (`.table-frame`).
+  Excluded: the profile Competitors logo list and Reader article HTML.
+  BRAND.md's table rule and `tests/test_table_format.py` are the reference.
 - **`webapp/checks.py` is voice-linted** (joined `VOICE_SCANNED_FILES`):
   its check descriptions render on `/admin/checks`, so they follow the same
   rules as app.py copy. Keep them to one plain sentence.
