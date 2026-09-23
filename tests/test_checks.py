@@ -843,3 +843,30 @@ def test_admin_checks_shows_real_disk_numbers_when_volume_present(env, monkeypat
     assert "254M" in r.text
     assert "434M" in r.text
     assert "cannot" in r.text.lower()  # can_vacuum False → the "cannot run in place" note
+
+
+# --- Live checks: themes and a fixed status position (checks-page follow-ups) --
+
+def test_every_live_check_belongs_to_exactly_one_theme(env):
+    import webapp.app as appmod
+    names = [r["name"] for r in env.run_all()]
+    themed = [n for _, ns in appmod._LIVE_CHECK_THEMES for n in ns]
+    assert len(themed) == len(set(themed)), "a check is listed under two themes"
+    missing = [n for n in names if n not in themed]
+    assert not missing, f"add these to _LIVE_CHECK_THEMES: {missing}"
+    stale = [n for n in themed if n not in names]
+    assert not stale, f"no longer in run_all(): {stale}"
+
+
+def test_live_checks_render_grouped_by_theme_with_status_top_right(env, monkeypatch):
+    import re
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+    html = c.get("/admin/checks").text
+    themes = re.findall(r'<h3 class="checks-theme"[^>]*>([^<]+)</h3>', html)
+    assert themes == [t for t, _ in appmod._LIVE_CHECK_THEMES]
+    # Every card uses the same two-column head: name left, status right.
+    heads = html.count('class="checks-card-head" style="display:grid;grid-template-columns:minmax(0,1fr) auto;')
+    assert heads == len(env.run_all())

@@ -10295,8 +10295,12 @@ the category-CRUD card it exercises moved out of `_TOOLBOX_TOOLS`).
   it only for a genuinely local-only example. So don't write a relative
   `--db` path in any of those files, prose included, unless it's allowlisted.
 - **`/admin/checks` layout:** the CI-quota control is a switch near the
-  top; Live checks loads collapsed and lays out in a grid whose column
-  count is `_LIVE_CHECKS_COLUMNS` (placeholder pending Brian's pick).
+  top; Live checks loads collapsed, grouped by theme (`_LIVE_CHECK_THEMES`:
+  voice and copy, brand and design, site structure and content, code and
+  repo health), in a grid whose column count is `_LIVE_CHECKS_COLUMNS`
+  (placeholder pending Brian's pick). Every card's status sits in the same
+  top-right spot. A new `run_all()` check needs a theme line, or
+  `tests/test_checks.py` fails.
 - **Voice review queue:** Detail shows findings and fixes in context,
   editing happens in the Detail cell on the full stored value with a
   stale-value check, every resolution records its outcome, and the
