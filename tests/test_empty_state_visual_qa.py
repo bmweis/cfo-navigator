@@ -122,8 +122,8 @@ def test_tool_empty_sections_render_as_card_with_header(env):
 
     r = _client(env).get(f"/tools/software/{slug}")
     for title, text in [
-        ("Competitors", "Competitors not yet available."),
-        ("Bottom line", "Bottom line not yet available."),
+        ("Competitors", "Competitors not available."),
+        ("Bottom line", "Bottom line not available."),
         ("AI agent capabilities", "How autonomous this tool's AI is hasn't been documented yet."),
         ("Description", "Description coming soon."),
     ]:
@@ -164,8 +164,8 @@ def test_community_empty_sections_use_generic_card_not_dashed(env):
 
     r = _client(env).get(f"/tools/communities/{slug}")
     for title, text in [
-        ("Bottom line", "Bottom line not yet available."),
-        ("Similar communities", "Similar communities not yet available."),
+        ("Bottom line", "Bottom line not available."),
+        ("Similar communities", "Similar communities not available."),
     ]:
         idx = r.text.index(text)
         preceding = r.text[max(0, idx - 250):idx]
@@ -183,7 +183,7 @@ def test_admin_gets_appended_prompt_inside_the_same_card(env):
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/software/{slug}")
-    idx = r.text.index("Competitors not yet available. Curate them from the edit page.")
+    idx = r.text.index("Competitors not available. Curate them from the edit page.")
     preceding = r.text[max(0, idx - 200):idx]
     assert '<h2 class="tp-card-h">Competitors' in preceding
 
@@ -254,7 +254,7 @@ def test_bottom_line_callout_empty_is_first_in_main_column_stack(env):
 
     r = _client(env).get(f"/tools/software/{slug}")
     stack_idx = r.text.index('<div class="tp-col-stack">')
-    diff_idx = r.text.index("Bottom line not yet available.")
+    diff_idx = r.text.index("Bottom line not available.")
     desc_idx = r.text.index('<h2 class="tp-card-h">Description')
     assert stack_idx < diff_idx < desc_idx
 

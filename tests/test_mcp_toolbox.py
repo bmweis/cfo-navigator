@@ -316,8 +316,8 @@ def test_get_software_empty_field_carries_placeholder_and_admin_suffix_only_for_
                                           {"slug_or_id": tool["slug"]}))
     assert member_data["bottom_line"]["state"] == "empty"
     assert member_data["bottom_line"]["text"] == ""
-    assert member_data["bottom_line"]["placeholder"] == "Bottom line not yet available."
-    assert admin_data["bottom_line"]["placeholder"].startswith("Bottom line not yet available.")
+    assert member_data["bottom_line"]["placeholder"] == "Bottom line not available."
+    assert admin_data["bottom_line"]["placeholder"].startswith("Bottom line not available.")
     assert admin_data["bottom_line"]["placeholder"] != member_data["bottom_line"]["placeholder"]
 
 
@@ -436,7 +436,7 @@ def test_compare_software_empty_field_uses_compare_matrix_empty_copy(live_server
     assert field["state"] == "empty"
     # Compare-matrix empty copy is the shorter, no-admin-suffix family —
     # distinct wording from the profile-page family get_software uses.
-    assert field["placeholder"] == "Not yet available."
+    assert field["placeholder"] == "Not available."
 
 
 def test_compare_communities_rejects_over_cap_of_three(live_server):

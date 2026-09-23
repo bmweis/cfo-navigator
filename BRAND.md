@@ -524,6 +524,15 @@ graffiti marks on admin tables, forms, or the chat UI.
   within.
 - **Links** — navy; optional seafoam underline for emphasis in editorial copy.
 
+### Character budget (capped text fields)
+
+A capped admin text field shows "Limited to N characters." and a live count
+directly under it, in 12px `--muted` text. Over the limit, the count turns
+`--alert` and says how far over it is, and the form's submit button reads
+"Over limit" and disables. Never coral: this is a warning state, not an
+accent. No HTML `maxlength` on these fields, because a browser silently cuts
+a paste to it. Built by `webapp.app._char_budget`.
+
 ### Radius scale
 `10px` buttons & inputs · `12–16px` cards & panels · `6px` tags/chips & inline row-action buttons ·
 `999px` filter pills.

@@ -578,7 +578,7 @@ def test_feature_review_queue_card_labels_new_feature_fields(env):
     assert 'name="feature_name" value="Business bank accounts" maxlength="500" style="width:100%' in r.text
     # Pointer note (and the new Definition field) are textareas with no 500
     # cap, so a long proposal survives edit-then-approve intact.
-    assert re.search(r'<textarea name="pointer_note" rows="\d+" maxlength="10000" style="width:100%[^>]*>core</textarea>', r.text)
+    assert re.search(r'<textarea name="pointer_note" rows="\d+" data-char-limit="10000"[^>]*>core</textarea>', r.text)
     assert '<textarea name="definition"' in r.text
     # The two fields share one row: Name's flex wrapper opens before
     # Pointer note's label closes the row, i.e. no full-width stack.

@@ -73,18 +73,15 @@ def _stored(db, fid):
 def _editor_field(page_html, fid, name):
     """The value the browser would submit for this feature's field: the
     textarea bound to the feature's edit form, HTML-unescaped. Fails loudly if
-    the field is an <input> (which would strip newlines) or carries a
-    maxlength below the stored value."""
+    the field is an <input> (which would strip newlines) or carries any
+    maxlength at all (a browser silently cuts a paste to it)."""
     m = re.search(
         rf'<textarea name="{name}" form="feat-edit-{fid}"([^>]*)>(.*?)</textarea>',
         page_html, re.S)
     assert m, f"{name} for feature {fid} is not a textarea bound to its edit form"
     attrs, body = m.group(1), m.group(2)
-    ml = re.search(r'maxlength="(\d+)"', attrs)
-    value = html.unescape(body)
-    if ml:
-        assert int(ml.group(1)) >= len(value), "maxlength is below the stored value"
-    return value
+    assert "maxlength" not in attrs, "a maxlength silently cuts a paste"
+    return html.unescape(body)
 
 
 def test_long_definition_round_trips_through_the_editor_unchanged(env):
@@ -114,7 +111,10 @@ def test_add_form_accepts_a_long_definition(env):
     lib.close()
     c = _client(appmod)
     page = c.get("/admin/tools/software/features").text
-    assert 'maxlength="500"' not in page.split('action="/admin/tools/software/features/new"')[1].split("</form>")[0]
+    add_form = page.split('action="/admin/tools/software/features/new"')[1].split("</form>")[0]
+    for name in ("definition", "pointer_note"):
+        tag = re.search(rf'<textarea name="{name}"[^>]*>', add_form).group(0)
+        assert "maxlength" not in tag
     r = c.post("/admin/tools/software/features/new", data={
         "category_id": str(cat), "name": "Ledger", "definition": LONG_DEFINITION, "pointer_note": "",
     }, follow_redirects=False)

@@ -240,4 +240,4 @@ def test_profile_page_shows_placeholder_for_similar_communities_when_empty(env):
     client = _client(env)
     r = client.get(f"/tools/communities/{a_slug}")
     assert r.status_code == 200
-    assert "Similar communities not yet available." in r.text
+    assert "Similar communities not available." in r.text

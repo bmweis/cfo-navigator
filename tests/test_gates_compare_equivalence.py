@@ -117,7 +117,7 @@ def test_communities_compare_row_present_and_per_cell_gated_when_one_community_h
     r = _client(env).get(f"/tools/communities/compare?ids={a},{b}")
     assert "Peer CFOs' ideal member." in r.text
     assert "under review" in r.text
-    assert "Not yet available." in r.text
+    assert "Not available." in r.text
 
 
 # ---------------------------------------------------------------------------

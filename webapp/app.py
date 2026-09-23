@@ -1605,6 +1605,9 @@ html,body{height:100%;}
 body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;
   min-height:100vh;display:flex;flex-direction:column;}
 .site-main{flex:1 0 auto;display:flex;flex-direction:column;}
+.char-budget{font-size:12px;line-height:1.4;color:var(--muted);margin-top:4px;}
+.char-budget-over .char-budget-count{color:var(--alert);font-weight:600;}
+[data-char-budget-label]{color:var(--alert)!important;border-color:var(--alert)!important;background:transparent!important;cursor:not-allowed;opacity:.85;}
 /* Tables: ONE format for every table on the site (2026-09). Light-blue
    header row, white rows, a line between rows, and a rounded
    --table-border (navy-light) frame. The rules are !important on purpose:
@@ -2135,6 +2138,87 @@ def _admin_nav_badge() -> str:
         lib.close()
 
 
+# ---------------------------------------------------------------------------
+# Character budget: the shared helper for any admin text field with a length
+# limit. Search for "_char_budget" to find it and every field using it.
+#
+# Why not HTML maxlength: a browser cuts a paste to maxlength silently and the
+# form stays valid, so the text past the cap is simply gone. Instead the field
+# carries no maxlength at all; a counter under it shows the limit and a live
+# count, turns --alert red with how far over it is once over, and the form's
+# submit button(s) switch to "Over limit" and disable. The server-side check
+# (e.g. Library._check_category_feature_text) stays the real enforcement and
+# refuses an over-limit save regardless of what the client does, so the stored
+# value is never touched. Counting uses Library.text_budget_length (CRLF counts
+# once), matching the JS below.
+#
+# Usage: attrs, counter = _char_budget(limit, value, "unique-id"); put attrs
+# inside the <textarea>/<input> tag and counter right after it. _page() adds
+# _CHAR_BUDGET_JS to any page that contains a budgeted field.
+# ---------------------------------------------------------------------------
+def _char_budget_count_text(count: int, limit: int) -> str:
+    over = count - limit
+    if over > 0:
+        return f"{count:,} characters, {over:,} over. This save will be refused."
+    return f"{count:,} characters"
+
+
+def _char_budget(limit: int, value: str | None, field_id: str) -> tuple[str, str]:
+    """(attrs for the field, counter HTML to render right under it)."""
+    count = Library.text_budget_length(value)
+    counter_id = f"{field_id}-budget"
+    over = " char-budget-over" if count > limit else ""
+    attrs = f'data-char-limit="{limit}" data-char-budget="{counter_id}" aria-describedby="{counter_id}"'
+    counter = (f'<div id="{counter_id}" class="char-budget{over}">Limited to {limit:,} characters. '
+               f'<span class="char-budget-count">{_char_budget_count_text(count, limit)}</span></div>')
+    return attrs, counter
+
+
+_CHAR_BUDGET_JS = """(function(){
+  function len(v){ return Array.from((v || '').replace(/\\r\\n/g, '\\n')).length; }
+  function fmt(n){ return n.toLocaleString('en-US'); }
+  function isOver(el){ return len(el.value) > +el.getAttribute('data-char-limit'); }
+  function buttonsFor(f){
+    var b = Array.from(f.querySelectorAll('button[type=submit],button:not([type]),input[type=submit]'));
+    if (f.id) b = b.concat(Array.from(document.querySelectorAll('button[form="' + f.id + '"],input[type=submit][form="' + f.id + '"]')));
+    return b;
+  }
+  function syncForm(f){
+    if (!f) return;
+    var over = Array.from(f.elements).some(function(e){ return e.hasAttribute && e.hasAttribute('data-char-limit') && isOver(e); });
+    buttonsFor(f).forEach(function(b){
+      if (over) {
+        if (!b.hasAttribute('data-char-budget-label')) b.setAttribute('data-char-budget-label', b.textContent);
+        b.textContent = 'Over limit';
+        b.disabled = true;
+        b.title = 'A field is over its character limit, so the server would refuse this save.';
+      } else if (b.hasAttribute('data-char-budget-label')) {
+        b.textContent = b.getAttribute('data-char-budget-label');
+        b.removeAttribute('data-char-budget-label');
+        b.disabled = false;
+        b.removeAttribute('title');
+      }
+    });
+  }
+  function update(el){
+    var limit = +el.getAttribute('data-char-limit');
+    var n = len(el.value), over = n - limit;
+    var c = document.getElementById(el.getAttribute('data-char-budget'));
+    if (c) {
+      var cnt = c.querySelector('.char-budget-count');
+      if (cnt) cnt.textContent = over > 0 ? fmt(n) + ' characters, ' + fmt(over) + ' over. This save will be refused.' : fmt(n) + ' characters';
+      c.classList.toggle('char-budget-over', over > 0);
+    }
+    syncForm(el.form);
+  }
+  document.addEventListener('input', function(e){
+    if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-char-limit')) update(e.target);
+  });
+  function init(){ document.querySelectorAll('[data-char-limit]').forEach(update); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();"""
+
+
 def _page(title: str, active: str, body: str, authed: bool = False,
           role: str | None = None, *, request: Request | None = None,
           og_description: str | None = None, og_image_slug: str | None = None) -> str:
@@ -2192,6 +2276,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     _love = 'Built with open source love <span style="color:var(--coral-light);">&#9829;</span>'
     oss_love = f'<a href="/admin/open-source">{_love}</a>'
 
+    char_budget_script = f"<script>{_CHAR_BUDGET_JS}</script>" if "data-char-limit=" in body else ""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(f"BMW CFO · {_short_title(title)}")}</title>
@@ -2219,7 +2304,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
   <button class="nav-toggle" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">&#9776;</button>
   <nav class="site-nav" id="nav">{nav}</nav>
 </header>
-<main class="site-main">{body}</main>
+<main class="site-main">{body}</main>{char_budget_script}
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
@@ -2356,7 +2441,7 @@ def _cmp_empty_html(empty_copy_key: str, authed: bool) -> str:
     consistent call signature with `_cmp_populated_field_html` even though
     this family doesn't vary by viewer."""
     del authed
-    return f'<span class="cc-empty">{_esc(gates.COMPARE_EMPTY_LABELS.get(empty_copy_key, "Not yet available."))}</span>'
+    return f'<span class="cc-empty">{_esc(gates.COMPARE_EMPTY_LABELS.get(empty_copy_key, "Not available."))}</span>'
 
 
 def _cmp_section_cell_html(section: "compare.CompareSection", authed: bool, empty_copy_key: str) -> str:
@@ -2450,7 +2535,7 @@ def _cmp_key_facts_cell_html(entity: "compare.CompareEntity") -> str:
         else:
             parts.append(f'<div class="cmp-fact"><span class="cmp-fact-label">{_esc(kf.label)}</span> '
                           f'<span class="cmp-fact-value">{_esc(kf.value)}</span></div>')
-    return "".join(parts) if parts else '<span class="cc-empty">Not yet available.</span>'
+    return "".join(parts) if parts else '<span class="cc-empty">Not available.</span>'
 
 
 # ---------------------------------------------------------------------------
@@ -9955,7 +10040,7 @@ function submitIntroForm() {{
 </div>"""
     else:
         # "Description coming soon." is a deliberate contextual variant of
-        # the standardized "{Field} not yet available." pattern — approved
+        # the standardized "{Field} not available." pattern — approved
         # verbatim, kept distinct from every other field's placeholder
         # wording (see CLAUDE.md's transparency-standard note).
         _desc_copy = gates.EMPTY_COPY["tool_description"]
@@ -14522,8 +14607,8 @@ def _merge_open_ids(csv: str, extra) -> str:
 
 
 # category_features.definition/pointer_note: one limit, shared with the
-# server-side check in Library._check_category_feature_text, so the input's
-# maxlength and what the server accepts can never disagree. These are
+# server-side check in Library._check_category_feature_text, so the live
+# counter (_char_budget) and what the server accepts can never disagree. These are
 # <textarea>s, not <input type="text">: a text input silently strips line
 # breaks on submit, so a multi-paragraph definition would lose them on save.
 _FEATURE_TEXT_MAX = Library.CATEGORY_FEATURE_TEXT_MAX
@@ -14545,6 +14630,8 @@ def _feature_text_rows(value: str) -> int:
 def _feature_row(f: dict, category_id: int) -> str:
     fid = f["id"]
     edit_form_id = f"feat-edit-{fid}"
+    def_attrs, def_counter = _char_budget(_FEATURE_TEXT_MAX, f["definition"], f"feat-{fid}-definition")
+    pn_attrs, pn_counter = _char_budget(_FEATURE_TEXT_MAX, f["pointer_note"], f"feat-{fid}-pointer-note")
     return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:8px 10px;">
     <form id="{edit_form_id}" method="post" action="/admin/tools/software/features/{fid}/edit" onsubmit="return featureTaxStateInputs(this)" style="margin:0;">
@@ -14553,10 +14640,10 @@ def _feature_row(f: dict, category_id: int) -> str:
         style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;font-weight:500;background:var(--bg);">
     </form>
   </td>
-  <td style="padding:8px 10px;"><textarea name="definition" form="{edit_form_id}" rows="{_feature_text_rows(f['definition'])}" maxlength="{_FEATURE_TEXT_MAX}" placeholder="Optional" aria-label="Definition"
-    style="width:100%;min-width:260px;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);resize:vertical;">{_esc(f['definition'])}</textarea></td>
-  <td style="padding:8px 10px;"><textarea name="pointer_note" form="{edit_form_id}" rows="{_feature_text_rows(f['pointer_note'])}" maxlength="{_FEATURE_TEXT_MAX}" placeholder="Optional" aria-label="Pointer note"
-    style="width:100%;min-width:180px;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);resize:vertical;">{_esc(f['pointer_note'])}</textarea></td>
+  <td style="padding:8px 10px;vertical-align:top;"><textarea name="definition" form="{edit_form_id}" rows="{_feature_text_rows(f['definition'])}" {def_attrs} placeholder="Optional" aria-label="Definition"
+    style="width:100%;min-width:260px;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);resize:vertical;">{_esc(f['definition'])}</textarea>{def_counter}</td>
+  <td style="padding:8px 10px;vertical-align:top;"><textarea name="pointer_note" form="{edit_form_id}" rows="{_feature_text_rows(f['pointer_note'])}" {pn_attrs} placeholder="Optional" aria-label="Pointer note"
+    style="width:100%;min-width:180px;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);resize:vertical;">{_esc(f['pointer_note'])}</textarea>{pn_counter}</td>
   <td style="padding:8px 10px;"><input type="number" name="sort_order" form="{edit_form_id}" value="{f['sort_order']}"
     style="width:64px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);"></td>
   <td style="padding:8px 10px;">
@@ -14683,6 +14770,8 @@ def admin_tools_features(request: Request, msg: str = "", error: str = "",
         for c, features, cat_pending in cat_data
     )
 
+    _add_def_attrs, _add_def_counter = _char_budget(_FEATURE_TEXT_MAX, "", "feat-new-definition")
+    _add_pn_attrs, _add_pn_counter = _char_budget(_FEATURE_TEXT_MAX, "", "feat-new-pointer-note")
     body = f"""<script>{_FEATURE_TAXONOMY_JS}</script>
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -14702,10 +14791,14 @@ a tool gets tagged with it from its own edit page. For naming guidance, see <a h
     </select>
     <input type="text" name="name" required maxlength="150" placeholder="Name" aria-label="Name"
       style="flex:2 1 220px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
-    <textarea name="definition" rows="2" maxlength="{_FEATURE_TEXT_MAX}" placeholder="Definition (optional)" aria-label="Definition"
-      style="flex:2 1 200px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;resize:vertical;"></textarea>
-    <textarea name="pointer_note" rows="2" maxlength="{_FEATURE_TEXT_MAX}" placeholder="Pointer note (optional)" aria-label="Pointer note"
-      style="flex:2 1 200px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;resize:vertical;"></textarea>
+    <div style="flex:2 1 200px;min-width:0;">
+      <textarea name="definition" rows="2" {_add_def_attrs} placeholder="Definition (optional)" aria-label="Definition"
+        style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;resize:vertical;"></textarea>{_add_def_counter}
+    </div>
+    <div style="flex:2 1 200px;min-width:0;">
+      <textarea name="pointer_note" rows="2" {_add_pn_attrs} placeholder="Pointer note (optional)" aria-label="Pointer note"
+        style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;resize:vertical;"></textarea>{_add_pn_counter}
+    </div>
     <button type="submit" class="btn" style="font-size:13px;padding:8px 16px;white-space:nowrap;">+ Add feature</button>
   </form>
 </div>
@@ -14923,11 +15016,14 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
                 f'style="width:{width};box-sizing:border-box;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13px;background:#fff;">')
 
     def _ta(name, value):
-        # Feature definition/pointer note: no 500 cap (a proposal's text can
-        # run past it) and a textarea so line breaks survive the round trip.
-        return (f'<textarea name="{name}" rows="{_feature_text_rows(str(value or ""))}" maxlength="{_FEATURE_TEXT_MAX}" '
+        # Feature definition/pointer note: a textarea so line breaks survive
+        # the round trip, and a character budget instead of a maxlength (see
+        # _char_budget) so a long paste is kept, counted, and refused by the
+        # server rather than silently cut.
+        attrs, counter = _char_budget(_FEATURE_TEXT_MAX, str(value or ""), f"frq-{item['id']}-{name}")
+        return (f'<textarea name="{name}" rows="{_feature_text_rows(str(value or ""))}" {attrs} '
                 f'style="width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13px;background:#fff;resize:vertical;">'
-                f'{_esc(str(value or ""))}</textarea>')
+                f'{_esc(str(value or ""))}</textarea>{counter}')
 
     link_rows = ""
     for i, link in enumerate(payload.get("links", [])):
