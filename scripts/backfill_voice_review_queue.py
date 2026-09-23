@@ -113,12 +113,18 @@ def main() -> None:
     for rule, n in sorted(by_rule.items(), key=lambda kv: -kv[1]):
         print(f"  {rule}: {n}")
 
+    # scan_db_copy_report moves findings covered by an "Allow once"
+    # exception out of `violations` into `allowed_once` (checks-page
+    # follow-ups, 2026-09). Walk both, so those still show up in the
+    # "already accepted" skip count rather than silently vanishing.
+    candidates = list(report.violations) + list(report.allowed_once)
+
     if not args.apply:
         print("\nPreview only — pass --apply to write these as 'open' review-queue rows.")
         skipped_queued = 0
         skipped_accepted = 0
         would_insert = 0
-        for v in report.violations:
+        for v in candidates:
             reason = skip_reason(lib, v)
             if reason == "queued":
                 skipped_queued += 1
@@ -134,7 +140,7 @@ def main() -> None:
     inserted = 0
     skipped_queued = 0
     skipped_accepted = 0
-    for v in report.violations:
+    for v in candidates:
         reason = skip_reason(lib, v)
         if reason == "queued":
             skipped_queued += 1

@@ -158,8 +158,12 @@ def test_skip_reason_distinguishes_accepted_exception_from_open_row(lib):
     item_id = lib.add_voice_review_item(v.table, v.row_id, v.column, v.rule, v.excerpt)
     lib.resolve_voice_review_item(item_id, "accept_exception")
 
+    # Checks-page follow-ups (2026-09): an Allow once finding is no longer
+    # a violation; the scan reports it under allowed_once instead.
     report2 = mod.scan_db_copy_report(lib)
-    v2 = [x for x in report2.violations
+    assert not [x for x in report2.violations
+                if x.table == "category_features" and x.row_id == fid]
+    v2 = [x for x in report2.allowed_once
           if x.table == "category_features" and x.row_id == fid][0]
     assert mod.skip_reason(lib, v2) == "accepted"
 
