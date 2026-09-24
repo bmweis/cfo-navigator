@@ -10679,6 +10679,75 @@ of pass/fail so the outstanding list stays visible. A future cleanup pass
 write-then-read-back convention) can lower a baseline once real content is
 fixed and reviewed.
 
+### Character budget: a soft target alongside the hard limit (2026-09)
+
+A production length read (2026-09-23) found several AI-drafted fields'
+hard caps already sitting below what was actually stored — nothing had
+been truncated (`webapp.app._char_budget`, introduced for
+`category_features.definition`/`pointer_note`, never truncates either),
+but the caps were tight enough to refuse the next legitimate save. Rather
+than just raising the caps, `_char_budget` gained a second, optional tier:
+a soft `target` the live counter turns `--caution` amber past (the save
+still works), on top of the existing hard `limit` (the save is refused,
+`--alert` red). Backward compatible — a field with no `target` keeps the
+original single-tier behavior.
+
+`Library._check_text_field_length(label, value, limit)` generalizes
+`_check_category_feature_text`/`_check_feature_link_public_note`'s
+identical hard-refusal shape and is now the one function every new
+budgeted write path calls: `add_tool`/`update_tool`/`quick_update_tool`
+(`tools.description`/`summary`), `update_tool_agent_taxonomy`
+(`agent_taxonomy_note`), `update_tool_differentiation`
+(`competitive_differentiation`), and `upsert_community_profile`
+(`stage_focus`/`jobs_program`/`team_or_individual` only — the other six
+Quick facts fields keep their unenforced `maxlength="300"`; confirmed
+directly against production in a PR 600 review follow-up, real longest
+79-128 chars across all six, none within even half the cap — see
+CLAUDE.md's matching bullet for the exact per-field numbers). Every new
+`MAX` clears its field's own real longest stored value with headroom:
+
+| Field | Target | Max |
+|---|---|---|
+| `tools.description` | 2,500 | 3,500 |
+| `tools.summary` | 400 | 800 |
+| `tools.agent_taxonomy_note` | 2,500 | 4,000 |
+| `tools.competitive_differentiation` | 600 | 1,200 |
+| `community_profiles.stage_focus`/`jobs_program`/`team_or_individual` | 300 | 800 |
+| `tool_feature_links.public_note` | 500 | 1,000 (unchanged — the column is new and empty on every row) |
+
+**`tools.summary`'s conditional-`maxlength` patch (see the "Key architecture
+decisions" entry that introduced it in CLAUDE.md) is retired outright** —
+the field now shares the same helper as every other field here, so a
+legacy value already over the old cap no longer permanently blocks typing.
+`_check_feature_link_public_note` also switched from a bare `len()` to
+`Library.text_budget_length`, so it agrees with the live counter's own
+CRLF-counts-once rule.
+
+Generator prompts were tightened to draft under the target in the first
+place — a counter the generator ignores just paints every row amber, it
+doesn't fix anything. `_TOOL_DESC_PROMPT`/`_AGENT_TAXONOMY_PROMPT`
+(`linklib/enrich.py`) both dropped "Budget and depth are not a constraint
+here" and gained an explicit word/character ceiling converted from the
+target at ~6.2 characters/word. `max_tokens` itself is **unchanged** for
+both (3,000 and 2,000) — lowering it risked reintroducing the exact
+truncation failure mode this codebase already fixed once for these two
+fields (Opus 5's adaptive thinking shares the response's token budget; see
+the citation-tag investigation and `MIN_GENERATE_MAX_TOKENS`'s own
+comment). Only the prose's stated length ceiling moved.
+`community_profiles.stage_focus`'s overflow traced to a real prompt gap,
+not a missing token budget: `_COMMUNITY_PROFILE_PROMPT`'s rule 8 already
+told six other Quick facts fields to stay "a phrase, not a
+paragraph—deliberately brief" but never named stage_focus/jobs_program/
+team_or_individual — fixed by adding all three to that rule.
+`generate_tool_differentiation` needed no change; its own rule 4 ("one or
+two sentences") already keeps it comfortably under target.
+
+No data repair and no production writes — this PR only changes what a
+*future* save is checked against and what a *future* draft is asked to
+produce; every already-stored over-old-cap value is untouched. See
+`tests/test_char_budget_targets.py` and
+`tests/test_generator_length_guidance.py`.
+
 ## 5. Directory map
 
 ```

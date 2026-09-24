@@ -124,7 +124,7 @@ def test_tool_empty_sections_render_as_card_with_header(env):
     for title, text in [
         ("Competitors", "Competitors not available."),
         ("Bottom line", "Bottom line not available."),
-        ("AI agent capabilities", "How autonomous this tool's AI is hasn't been documented yet."),
+        ("AI agent capabilities", "How autonomous this tool's AI is hasn't been documented."),
         ("Description", "Description coming soon."),
     ]:
         idx = r.text.index(text)
@@ -151,7 +151,7 @@ def test_community_group_card_shows_its_own_title_even_when_empty(env):
         idx = r.text.index(f'<h2 class="tp-card-h">{title}')
         following = r.text[idx:idx + 400]
         assert "This section hasn&#x27;t been researched yet." in following or \
-            "This section hasn't been researched yet." in following
+            "This section hasn't been researched." in following
 
 
 def test_community_empty_sections_use_generic_card_not_dashed(env):

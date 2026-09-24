@@ -98,9 +98,12 @@ def badge_text(state: GateState, authed: bool) -> str | None:
 # Empty-state placeholder copy — the three-variant family PR A.1 approved
 # verbatim (default "{Field} not available.", plus the two deliberate
 # contextual variants: Description's "coming soon" and a Community profile
-# group's "hasn't been researched yet"), one entry per field/section this
-# extraction found gated. `admin_suffix` is only ever appended for an
-# authed viewer — see webapp-side `empty_text`.
+# group's "hasn't been researched" — the character-budget-limits-targets PR
+# dropped the standing "yet" from both this and the compare-matrix labels
+# below, since "yet" implies Brian will eventually fill it in and often he
+# won't), one entry per field/section this extraction found gated.
+# `admin_suffix` is only ever appended for an authed viewer — see
+# webapp-side `empty_text`.
 # ---------------------------------------------------------------------------
 
 class EmptyCopy(NamedTuple):
@@ -112,7 +115,7 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
     "tool_description": EmptyCopy(
         "Description coming soon.", "Add one from the edit page."),
     "tool_agent_taxonomy": EmptyCopy(
-        "How autonomous this tool's AI is hasn't been documented yet.",
+        "How autonomous this tool's AI is hasn't been documented.",
         "Generate a draft from the edit page."),
     "tool_differentiation": EmptyCopy(
         "Bottom line not available.",
@@ -124,7 +127,7 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
     "community_bottom_line": EmptyCopy(
         "Bottom line not available.", "Generate a draft from the edit page."),
     "community_profile_group": EmptyCopy(
-        "This section hasn't been researched yet.", "Generate a draft from the edit page."),
+        "This section hasn't been researched.", "Generate a draft from the edit page."),
     "community_similar_communities": EmptyCopy(
         "Similar communities not available.", "Curate them from the edit page."),
     # One curated feature's category-level definition, rendered per row in
@@ -149,13 +152,13 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
 # available." literal — rendered directly by the HTML layer, not looked up
 # here, since it's a fixed string with no admin-suffix variant at all.
 COMPARE_EMPTY_LABELS: dict[str, str] = {
-    "tool_agent_taxonomy": "Not yet documented.",
+    "tool_agent_taxonomy": "Not documented.",
     "tool_description": "Not available.",
     "tool_differentiation": "Not available.",
-    "tool_competitors": "Not yet curated.",
+    "tool_competitors": "Not curated.",
     "community_bottom_line": "Not available.",
-    "community_profile_group": "Not yet documented.",
-    "community_similar_communities": "Not yet curated.",
+    "community_profile_group": "Not documented.",
+    "community_similar_communities": "Not curated.",
 }
 
 

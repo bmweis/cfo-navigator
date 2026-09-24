@@ -192,7 +192,7 @@ class TestEmptyCopyRegistry:
 
     def test_community_profile_group_copy_matches_pr_a1_approved_string(self):
         copy = gates.EMPTY_COPY["community_profile_group"]
-        assert copy.visitor_text == "This section hasn't been researched yet."
+        assert copy.visitor_text == "This section hasn't been researched."
 
     def test_compare_empty_labels_have_no_admin_suffix_concept(self):
         """Compare-matrix empty labels are plain strings, not EmptyCopy

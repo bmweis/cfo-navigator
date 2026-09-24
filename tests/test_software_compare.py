@@ -87,7 +87,7 @@ def test_agent_taxonomy_shows_placeholder_when_empty(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
-    assert "How autonomous this tool's AI is hasn't been documented yet." in r.text
+    assert "How autonomous this tool's AI is hasn't been documented." in r.text
 
 
 # -- compare route ------------------------------------------------------------
@@ -157,7 +157,7 @@ def test_compare_gives_agent_involvement_its_own_section(env):
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     assert "AI / Agent involvement" in r.text
     assert "Fully independent agent that runs the whole workflow." in r.text
-    assert "Not yet documented." in r.text
+    assert "Not documented." in r.text
     assert "not have" not in r.text.lower() and "no agent" not in r.text.lower()
 
 
@@ -357,7 +357,7 @@ def test_compare_competitors_empty_state_when_none_curated(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
-    assert "Not yet curated." in r.text
+    assert "Not curated." in r.text
 
 
 def test_compare_full_profile_link_per_entity(env):
@@ -423,7 +423,7 @@ def test_agent_taxonomy_no_flag_once_verified(env):
 def test_compare_shows_unverified_agent_taxonomy_under_review_to_public(env):
     """Radical-transparency review standard: an unverified note on the
     compare matrix always renders now, labeled "under review" for a public
-    visitor rather than collapsed into the empty-tool "Not yet documented."
+    visitor rather than collapsed into the empty-tool "Not documented."
     cell — the third, previously-missing distinguishable state."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])

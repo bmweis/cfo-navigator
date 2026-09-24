@@ -177,7 +177,7 @@ def test_profile_page_empty_fields_show_placeholder_within_populated_cards(env):
 def test_profile_page_whole_group_empty_shows_researched_yet_placeholder(env):
     """When an entire group (e.g. no Who-it's-for fields at all, including
     Stage focus) has zero content, the whole card collapses to the existing
-    'This section hasn't been researched yet.' empty-state card."""
+    'This section hasn't been researched.' empty-state card."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     c = lib.add_community("Peer CFOs", "https://peercfos.example", "Series B+ CFOs",
@@ -189,7 +189,7 @@ def test_profile_page_whole_group_empty_shows_researched_yet_placeholder(env):
     r = _client(env).get(f"/tools/communities/{slug}")
     assert r.status_code == 200
     assert "Who it's for" in r.text
-    assert "This section hasn't been researched yet." in r.text
+    assert "This section hasn't been researched." in r.text
 
 
 # -- Compare: verified / pending / empty -------------------------------------
@@ -255,7 +255,7 @@ def test_compare_renders_empty_state_for_the_three_fields(env):
     r = _client(env).get(f"/tools/communities/compare?ids={a},{b}")
     assert r.status_code == 200
     assert "Job board only" in r.text
-    assert "Not yet documented." in r.text
+    assert "Not documented." in r.text
 
 
 # -- Compare serializer: direct unit coverage --------------------------------

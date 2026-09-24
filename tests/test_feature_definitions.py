@@ -279,7 +279,12 @@ def test_editor_shows_internal_note_beside_public_text(env):
     # Adjacent cells: nothing but the closing/opening <td> between them.
     between = html[note_i:public_i]
     assert between.count("<td") == 1 and "Vendor copy: per-card limits. UNVERIFIED" in between
-    assert f'maxlength="{env._FEATURE_LINK_PUBLIC_NOTE_MAX}"' in html[public_i:public_i + 300]
+    # Character-budget-limits-targets PR (2026-09): public_note dropped the
+    # HTML maxlength in favor of the shared live char-budget counter
+    # (target 500, max 1000) — see tests/test_char_budget_targets.py.
+    assert f'data-char-limit="{env._FEATURE_LINK_PUBLIC_NOTE_MAX}"' in html[public_i:public_i + 300]
+    assert 'data-char-target="500"' in html[public_i:public_i + 300]
+    assert 'maxlength=' not in html[public_i:public_i + 300]
     assert env._esc(VENDOR) in html[public_i:public_i + 1200]
     assert ">Internal note</th>" in html and ">Public text</th>" in html
 

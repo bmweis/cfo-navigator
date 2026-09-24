@@ -159,7 +159,7 @@ def test_compare_groups_fields_into_the_four_profile_page_themes(env):
 
 def test_compare_whole_group_empty_shows_group_placeholder(env):
     """A themed group with NO populated fields for either community shows
-    the profile page's own "hasn't been researched yet" placeholder, not
+    the profile page's own "hasn't been researched" placeholder, not
     11 individually-empty rows."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
@@ -168,7 +168,7 @@ def test_compare_whole_group_empty_shows_group_placeholder(env):
     lib.close()
 
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
-    assert "Not yet documented." in r.text  # COMPARE_EMPTY_LABELS["community_profile_group"]
+    assert "Not documented." in r.text  # COMPARE_EMPTY_LABELS["community_profile_group"]
 
 
 def test_compare_populated_group_shows_tier2_for_missing_subfield(env):

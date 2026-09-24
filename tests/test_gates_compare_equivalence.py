@@ -64,7 +64,7 @@ def test_software_compare_row_omitted_when_no_tool_has_any_content(env):
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     assert r.status_code == 200
     assert "AI / Agent involvement" in r.text
-    assert "Not yet documented." in r.text
+    assert "Not documented." in r.text
 
 
 def test_software_compare_row_present_and_per_cell_gated_when_one_tool_has_content(env):
@@ -82,7 +82,7 @@ def test_software_compare_row_present_and_per_cell_gated_when_one_tool_has_conte
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     assert "Runway's agent taxonomy note." in r.text
     assert "under review" in r.text  # a's pending cell
-    assert "Not yet documented." in r.text  # b's empty cell, same row
+    assert "Not documented." in r.text  # b's empty cell, same row
 
 
 # ---------------------------------------------------------------------------

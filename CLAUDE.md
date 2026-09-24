@@ -6959,6 +6959,133 @@ never reads as something to tap.
   `gates.EMPTY_COPY` and the compare-cell "Not available." label so every
   surface moves together. See `tests/test_char_budget.py`.
 
+- **Character budget gains a soft target, not just a hard limit (2026-09) —
+  applied to every AI-drafted field a production length read (2026-09-23)
+  found already exceeding its old cap.** The read found caps sitting below
+  what's already stored — `tools.agent_taxonomy_note` (cap 1,200, longest
+  3,540, 133 rows over), `community_profiles.stage_focus` (cap 300, longest
+  440), `tools.summary` (cap 400, longest 453, previously guarded only by
+  `admin_tools_edit`'s own conditional `maxlength` patch — see the Key
+  architecture decisions bullet on that fix), plus `tools.description`/
+  `tools.competitive_differentiation` (0 rows over, but with little
+  headroom left). Nothing had been truncated — these were caps that would
+  cut on the next paste, and PR 599 above only removed that risk for the
+  category-feature definition field. `_char_budget(limit, value, field_id,
+  target=None)` grew a third, optional tier: under `target`, the counter
+  reads plainly; over `target` but under `limit`, it turns `--caution`
+  amber and reads "N characters. Aim for &lt;target&gt;." — the save still
+  works, it's an editorial nudge, not enforcement; over `limit`, the
+  original red "refused" behavior is unchanged. Every field this predates
+  (`category_features.definition`/`pointer_note`) keeps its old single-tier
+  behavior, since `target` defaults to `None`. New `Library.
+  _check_text_field_length(label, value, limit)` generalizes
+  `_check_category_feature_text`/`_check_feature_link_public_note`'s
+  identical shape to every field added here, wired into every write path
+  the admin edit forms actually post to — `add_tool`/`update_tool`/
+  `quick_update_tool` (description, summary), `update_tool_agent_taxonomy`,
+  `update_tool_differentiation`, and `upsert_community_profile`
+  (stage_focus/jobs_program/team_or_individual only — see below). Each new
+  MAX clears its field's own real longest stored value with headroom, so
+  nothing already saved becomes unsavable:
+
+  | Field | Target | Max |
+  |---|---|---|
+  | `tools.description` | 2,500 | 3,500 |
+  | `tools.summary` | 400 | 800 |
+  | `tools.agent_taxonomy_note` | 2,500 | 4,000 |
+  | `tools.competitive_differentiation` | 600 | 1,200 |
+  | `community_profiles.stage_focus`/`jobs_program`/`team_or_individual` | 300 | 800 |
+  | `tool_feature_links.public_note` | 500 | 1,000 (MAX unchanged — the column is new and empty on every row) |
+
+  **`tools.summary`'s conditional-`maxlength` patch is retired outright** —
+  the field now gets the same `_char_budget` treatment as every other
+  field here, so a legacy summary already over the old 400-char cap no
+  longer permanently blocks typing (the exact bug that patch existed to
+  work around); it just renders amber past the new 400-char target, same
+  as any other over-target-under-limit value. `_check_feature_link_public_note`
+  was also switched from a bare `len()` to `Library.text_budget_length`, so
+  its hard-limit check agrees with the live counter's own CRLF-counts-once
+  rule — a real, small pre-existing mismatch this PR closed while adding
+  the field's target.
+
+  **Generator prompts tightened to draft under target, not just refuse over
+  limit** — a nudge the generator ignores just paints every row amber.
+  `_TOOL_DESC_PROMPT` and `_AGENT_TAXONOMY_PROMPT` both dropped their
+  "Budget and depth are not a constraint here" opener (the likely actual
+  driver of the drift) and gained an explicit ceiling converted from the
+  character target at ~6.2 characters/word (Description: "stay under about
+  400 words (roughly 2,200 characters)"; Agent taxonomy: "keep the whole
+  summary under about 400 words (roughly 2,500 characters)," with an
+  explicit note to favor a concise agent roster over a lengthy write-up
+  per agent once there are more than a handful). **`max_tokens` itself is
+  deliberately UNCHANGED for both** (3,000 and 2,000 respectively) —
+  lowering it risked reintroducing the exact documented truncation
+  incident this codebase already fixed once (see the citation-tag
+  investigation and PR 260's `MIN_GENERATE_MAX_TOKENS` note above): Opus
+  5's adaptive thinking shares the same budget as the visible response, and
+  the current ceilings were raised specifically to give that headroom on a
+  content-rich page. Only the prose's own stated length shrank; the safety
+  margin against truncation did not. Differentiation needed no change —
+  rule 4 ("one or two sentences") already keeps it well under its 600-char
+  target (longest stored: 546), and its `max_tokens=1,200` already carries
+  the same documented anti-truncation headroom.
+
+  **`stage_focus`'s 440-character overflow root-caused to a real prompt
+  gap, not a missing max_tokens**: `_COMMUNITY_PROFILE_PROMPT`'s rule 8
+  already told the model six Quick facts fields (seniority_band,
+  primary_purpose, platform_type, meeting_format, event_style, and —
+  via its own separate rule 9 — cpe_eligible) to stay "a phrase, not a
+  paragraph—deliberately brief," but never named stage_focus, jobs_program,
+  or team_or_individual — the three fields this PR budgets. Fixed by
+  adding all three to rule 8. The other six Quick facts fields keep their
+  existing, unenforced `maxlength="300"` — flagged at ship time as unverified
+  ("no production evidence they've ever needed it," since this session had
+  no database access to confirm a number beyond what the brief supplied for
+  the three fixed here), and since confirmed directly (2026-09, PR 600
+  review, all 40 live `community_profiles` rows via the `/mcp` introspection
+  tools): real longest values are `primary_purpose` 79, `cpe_eligible` 91,
+  `platform_type` 90, `meeting_format` 116, `event_style` 100,
+  `seniority_band` 128 — none within even half the 300 cap. Pinned as a
+  static ceiling test (`tests/test_char_budget_targets.py`'s
+  `test_other_quick_facts_fields_stay_well_under_their_unenforced_cap`) so
+  a future regeneration pass that starts pushing these longer gets caught
+  by a failing test rather than a silent surprise. `stage_focus`/`jobs_program`/
+  `team_or_individual`'s own community-profile-edit-page `_short_field`
+  helper grew a `budgeted: bool` flag rather than a hardcoded per-field
+  branch, so a future field can opt in the same way.
+
+  **No data repair, no production writes** — the 133 over-old-cap agent-
+  taxonomy notes (and any other field already over its old cap) are
+  untouched; shortening them is a separate editorial decision Brian
+  hasn't made. Every Generate-populated field (`generateDescription`,
+  `generateDifferentiation`, `generateCommunityProfile`'s per-field loop)
+  now dispatches a synthetic `input` event after setting `.value`, since
+  none of those AJAX call sites previously fired one and the char-budget
+  counter only ever updates on a real `input` event — without this, the
+  counter stayed stale (showing the field's PRE-generate count) until the
+  admin's own next keystroke, which would have made the amber-vs-red
+  distinction actively misleading for a freshly-drafted, already-over-
+  target field. Agent taxonomy's own "Generate summary" button is a real
+  form POST to `/admin/tools/software/{tool_id}/research/refresh` (a full
+  page reload, not AJAX), so it needed no such fix — the counter is
+  already correct on the fresh server render.
+
+  **Two small riders, unrelated to the character budget itself but folded
+  into the same PR per its own brief**: the four remaining "yet" empty-
+  state strings (`gates.COMPARE_EMPTY_LABELS`'s "Not yet documented."/
+  "Not yet curated." and `gates.EMPTY_COPY`'s two full sentences ending in
+  "...hasn't been documented yet."/"...hasn't been researched yet.")
+  dropped the "yet" — same reasoning the PR 599 bullet above already
+  applied to the `{Field} not available.` family: "yet" promises a future
+  fill-in that often never comes. And `tests/test_checks.py`'s
+  `test_ai_provider_summary_rows_link_only_to_their_section_no_fix_links`,
+  previously order-dependent — see that test's own updated comment for the
+  root cause and fix.
+
+  See `tests/test_char_budget_targets.py` and
+  `tests/test_generator_length_guidance.py` for the full regression
+  coverage.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 

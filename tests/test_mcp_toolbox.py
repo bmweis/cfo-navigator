@@ -364,7 +364,7 @@ def test_get_community_empty_profile_group_field_has_placeholder(live_server):
                                     {"slug_or_id": community["slug"]}))
     anti_fit = next(f for sec in data["sections"] for f in sec["fields"] if f["key"] == "anti_fit")
     assert anti_fit["state"] == "empty"
-    assert anti_fit["placeholder"] == "This section hasn't been researched yet."
+    assert anti_fit["placeholder"] == "This section hasn't been researched."
 
 
 # ---------------------------------------------------------------------------

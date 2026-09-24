@@ -43,6 +43,20 @@ def env(monkeypatch):
     importlib.reload(appmod)
     import webapp.checks as checksmod
     importlib.reload(checksmod)
+    # webapp.tasks is deliberately never reloaded above — its module-level
+    # cache/sentinel (_checks_cache, _checks_computing) are plain globals
+    # that survive a reload of webapp.app/webapp.checks, exactly the
+    # "module-level globals leak between tests" hazard tests/test_task_
+    # badges.py already documents and resets in its own tests that touch
+    # this cache directly. This file's own tests never touched it before,
+    # so nothing here ever reset it — a test in this file running after
+    # another test file (in the same pytest process/worker) left a stale
+    # (timestamp, count) tuple behind would silently read that instead of
+    # computing fresh. Reset here too, once, for every test in this file,
+    # the same way test_task_badges.py resets it for its own.
+    from webapp import tasks as taskmod
+    taskmod._checks_cache = None
+    taskmod._checks_computing = False
     yield checksmod
     if os.path.exists(db):
         os.remove(db)
@@ -261,7 +275,28 @@ def test_ai_provider_summary_rows_link_only_to_their_section_no_fix_links(env, m
     source and vendor-page links come OUT of the summary entirely — Details
     shows only the plain status text. The check name is still the row's own
     link, still pointing at its local section (where "Mark reviewed" and the
-    real GitHub/vendor links live, further down the page)."""
+    real GitHub/vendor links live, further down the page).
+
+    Order-dependence note (character-budget-limits-targets PR): this test
+    was reported failing in certain multi-file groupings while passing
+    alone and in full runs — the "Never reviewed" assertion below depends
+    on `pricing_last_verified`/`models_last_reviewed`/`exa_pricing_last_
+    verified` genuinely being unset on this test's own fresh DB, which
+    `env`'s `importlib.reload(appmod)` already guarantees for `DB_PATH`.
+    Investigated for a stale module-level global surviving that reload —
+    `webapp.tasks._checks_cache`/`_checks_computing` are real, confirmed
+    examples of exactly that shape (plain module globals, never reloaded
+    by any fixture in this file, already documented and reset by
+    tests/test_task_badges.py's own tests that touch them directly) — now
+    reset in this file's own `env` fixture above, closing the same class
+    of hazard here too. Two repro attempts in this sandbox (a plausible
+    6-file grouping, and a smaller isolated pairing) did not reproduce
+    this exact test failing outright, but DID reproduce spurious failures
+    in sibling freshness-banner tests under heavy concurrent CPU
+    contention (multiple pytest processes racing for the same cores) —
+    worth ruling out first if this resurfaces: confirm it's not simply a
+    timing/resource artifact of `-n auto`'s parallel workers before
+    chasing another global."""
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     from fastapi.testclient import TestClient
     import webapp.app as appmod

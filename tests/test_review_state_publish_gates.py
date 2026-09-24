@@ -460,14 +460,14 @@ def test_community_profile_empty_shows_placeholder_to_both_viewers_admin_gets_pr
 
     r = _client(env).get(f"/tools/communities/{slug}")
     assert "Bottom line not available." in r.text
-    assert "This section hasn't been researched yet." in r.text
+    assert "This section hasn't been researched." in r.text
     assert "Generate a draft from the edit page." not in r.text
 
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/communities/{slug}")
     assert "Bottom line not available. Generate a draft from the edit page." in r.text
-    assert "This section hasn't been researched yet. Generate a draft from the edit page." in r.text
+    assert "This section hasn't been researched. Generate a draft from the edit page." in r.text
 
 
 def test_community_profile_sources_render_alongside_pending_content(env):

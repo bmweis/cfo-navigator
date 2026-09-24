@@ -289,14 +289,21 @@ def test_directory_page_serializes_summary(env):
 # has ever enforced a length limit). HTML `maxlength` blocks appending any
 # new character once the field's current value is already at or past the
 # cap — the textarea still focuses and shows a blinking cursor, but nothing
-# typed lands. Fixed by rendering `maxlength="400"` only when the stored
-# value already fits inside it.
+# typed lands. Originally fixed by rendering `maxlength="400"` only when
+# the stored value already fits inside it — that conditional-guard
+# mechanism is retired as of the character-budget-limits-targets PR
+# (2026-09): `summary` now uses the same `_char_budget` live-counter/
+# server-side-refusal mechanism as description/agent_taxonomy_note/
+# competitive_differentiation (target 400, max 800), which never blocks
+# typing at all, at any length — see `tests/test_char_budget_targets.py`
+# for the coverage of that shared mechanism, including a legacy
+# over-old-cap value round-tripping unchanged and the hard-limit refusal.
 
-def test_edit_page_omits_maxlength_when_summary_already_exceeds_it(env):
+def test_edit_page_never_uses_maxlength_on_summary_even_when_over_the_old_cap(env):
     lib = Library(os.environ["LINKLIB_DB"])
-    over_cap = "A" * 450
+    over_old_cap = "A" * 450
     tool_id = lib.add_tool("Runway", "Long description.", "https://runway.com", [],
-                           approved=1, summary=over_cap)
+                           approved=1, summary=over_old_cap)
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
@@ -304,12 +311,14 @@ def test_edit_page_omits_maxlength_when_summary_already_exceeds_it(env):
     _login(client)
     r = client.get(f"/tools/software/{slug}/edit")
     assert r.status_code == 200
-    assert '<textarea id="tool-summary" name="summary" required rows="4"' in r.text
-    assert 'maxlength="400"' not in r.text
-    assert over_cap in r.text
+    summary_i = r.text.index('<textarea id="tool-summary"')
+    summary_field = r.text[summary_i:summary_i + 300]
+    assert 'name="summary" required' in summary_field
+    assert 'maxlength=' not in summary_field
+    assert over_old_cap in r.text
 
 
-def test_edit_page_keeps_maxlength_when_summary_fits(env):
+def test_edit_page_omits_maxlength_on_summary_when_it_comfortably_fits(env):
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "Long description.", "https://runway.com", [],
                            approved=1, summary="A normal, compliant short summary.")
@@ -320,17 +329,24 @@ def test_edit_page_keeps_maxlength_when_summary_fits(env):
     _login(client)
     r = client.get(f"/tools/software/{slug}/edit")
     assert r.status_code == 200
-    assert '<textarea id="tool-summary" name="summary" required maxlength="400" rows="4"' in r.text
+    # No maxlength on this field at all — the live char-budget counter is
+    # the only guard now (other fields on this page, e.g. Name, legitimately
+    # keep their own maxlength, so scope the check to the summary field).
+    summary_i = r.text.index('<textarea id="tool-summary"')
+    summary_field = r.text[summary_i:summary_i + 300]
+    assert 'maxlength=' not in summary_field
+    assert 'data-char-limit="800"' in summary_field
+    assert 'data-char-target="400"' in summary_field
 
 
-def test_admin_can_save_a_trimmed_summary_after_it_was_over_the_cap(env):
-    """End-to-end: the field being unblocked in the browser is only useful if
-    the resulting save actually works — confirms the whole round trip, not
-    just the rendered attribute."""
+def test_admin_can_save_a_trimmed_summary_after_it_was_over_the_old_cap(env):
+    """End-to-end: a legacy over-old-cap value can be edited and saved without
+    ever being blocked — confirms the whole round trip, not just the
+    rendered attribute."""
     lib = Library(os.environ["LINKLIB_DB"])
-    over_cap = "A" * 450
+    over_old_cap = "A" * 450
     tool_id = lib.add_tool("Runway", "Long description.", "https://runway.com", [],
-                           approved=1, summary=over_cap)
+                           approved=1, summary=over_old_cap)
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
@@ -348,11 +364,14 @@ def test_admin_can_save_a_trimmed_summary_after_it_was_over_the_cap(env):
     assert tool["summary"] == "Trimmed, compliant short summary."
     lib.close()
 
-    # And now that it's compliant, the guardrail is back on the next load.
+    # No maxlength ever reappears on this field — the char-budget counter
+    # is the guard now, not a conditional HTML attribute.
     client2 = _client(env)
     _login(client2)
     r2 = client2.get(f"/tools/software/{slug}/edit")
-    assert 'maxlength="400"' in r2.text
+    summary_i = r2.text.index('<textarea id="tool-summary"')
+    summary_field = r2.text[summary_i:summary_i + 300]
+    assert 'maxlength=' not in summary_field
 
 
 # -- Edit-page-fixes item 2: "Bottom line" label mismatch (2026-09) ---------------
