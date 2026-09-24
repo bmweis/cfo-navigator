@@ -396,6 +396,12 @@ def test_no_maxlength_on_tool_add_fields(env):
 
 
 def test_no_maxlength_on_community_short_fields(env):
+    """stage_focus/jobs_program/team_or_individual moved from a single-line
+    <input> to a full-width <textarea> in the community quick-facts width
+    fix (2026-09, see test_community_profile_layout.py) — same character-
+    budget mechanism (data-char-limit, no maxlength), just a different tag,
+    since a 233px-wide input truncated a real saved value and wrapped its
+    own counter text to two lines."""
     appmod, db = env
     from linklib.db import Library
     lib = Library(db)
@@ -403,8 +409,8 @@ def test_no_maxlength_on_community_short_fields(env):
     lib.close()
     page = _client(appmod).get(f"/admin/tools/communities/{cid}/profile").text
     for name in ("stage_focus", "jobs_program", "team_or_individual"):
-        m = re.search(rf'<input[^>]*\bname="{name}"[^>]*>', page)
-        assert m, f"{name} input not found"
+        m = re.search(rf'<textarea[^>]*\bname="{name}"[^>]*>', page)
+        assert m, f"{name} textarea not found"
         assert "maxlength" not in m.group(0)
         assert "data-char-limit=" in m.group(0)
     # The other six Quick facts fields deliberately keep their unenforced

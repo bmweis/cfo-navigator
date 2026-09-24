@@ -17463,13 +17463,30 @@ def _community_profile_form_fields(p: dict | None, community: dict,
                 f'Claude confidence: {value}</span>')
 
     def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2,
-               confidence_key: str | None = None) -> str:
+               confidence_key: str | None = None, budgeted: bool = False) -> str:
         req_mark = " *" if required else ""
         req_attr = " required" if required else ""
         ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
         confidence_html = ""
         if confidence_key:
             confidence_html = _confidence_badge_html(p.get(f"{confidence_key}_ai_confident"))
+        # budgeted=True (community quick-facts width fix, 2026-09) — the
+        # three longer Quick-facts fields (stage_focus/jobs_program/
+        # team_or_individual) moved here from _short_field's narrow
+        # multi-column grid: they carry the same live character-budget
+        # counter (Library.COMMUNITY_SHORT_FIELD_TARGET/_MAX) as before,
+        # just on this full-width textarea layout instead of a ~230px-wide
+        # single-line input, matching the software edit page's own
+        # roomier narrative-field treatment. No other _field caller passes
+        # this — every narrative field above has no character cap at all.
+        if budgeted:
+            attrs, counter = _char_budget(
+                Library.COMMUNITY_SHORT_FIELD_MAX, p.get(key, ""), f"cp-{key}",
+                target=Library.COMMUNITY_SHORT_FIELD_TARGET)
+            field_attrs = f"{req_attr} {attrs}"
+        else:
+            field_attrs = req_attr
+            counter = ""
         # flex-wrap so the confidence badge drops to its own line rather than
         # crowding a required field's "*" on a narrow/mobile viewport, instead
         # of forcing both onto one cramped row.
@@ -17478,37 +17495,29 @@ def _community_profile_form_fields(p: dict | None, community: dict,
       <label for="cp-{key}" style="font-size:14px;font-weight:500;color:var(--navy);">{_esc(label)}{req_mark}</label>
       {confidence_html}
     </div>
-    <textarea id="cp-{key}" name="{key}" rows="{rows}"{req_attr}{ph}
+    <textarea id="cp-{key}" name="{key}" rows="{rows}"{field_attrs}{ph}
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(p.get(key, ''))}</textarea>
+    {counter}
   </div>"""
 
-    def _short_field(key: str, label: str, placeholder: str = "", budgeted: bool = False) -> str:
+    def _short_field(key: str, label: str, placeholder: str = "") -> str:
         """A single-line variant of _field for the short factual/categorical
         fields (backfilled alongside the 13 narrative fields, not part of the
         voice-rewrite pass) — a plain input, not a textarea, since these are
-        short values, not prose. `budgeted=True` (character-budget-limits-
-        targets PR) swaps the plain maxlength="300" for the live-counter/
-        server-refused shape (Library.COMMUNITY_SHORT_FIELD_TARGET/_MAX) —
-        stage_focus/jobs_program/team_or_individual only, the three Quick
-        facts fields the generator's own rule 8 never marked "deliberately
-        brief" until this PR (see the constant's own comment in linklib/db.py).
-        The other six keep their unenforced maxlength="300" unchanged — no
-        comparable overflow risk to close for them."""
+        short values, not prose. Always the plain unenforced maxlength="300" —
+        no comparable overflow risk to close for these six genuinely short/
+        enum-like fields (Primary purpose, CPE eligible, Platform, Programming,
+        Event style, Who it targets). stage_focus/jobs_program/
+        team_or_individual moved to the full-width, character-budgeted _field()
+        instead (community quick-facts width fix, 2026-09) — they can run up
+        to Library.COMMUNITY_SHORT_FIELD_MAX (800) characters, which never fit
+        this field's narrow multi-column layout."""
         ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
-        if budgeted:
-            attrs, counter = _char_budget(
-                Library.COMMUNITY_SHORT_FIELD_MAX, p.get(key, ""), f"cp-{key}",
-                target=Library.COMMUNITY_SHORT_FIELD_TARGET)
-            input_attrs = attrs
-        else:
-            input_attrs = 'maxlength="300"'
-            counter = ""
         return f"""  <div>
     <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}</label>
-    <input id="cp-{key}" name="{key}" type="text" {input_attrs}{ph}
+    <input id="cp-{key}" name="{key}" type="text" maxlength="300"{ph}
       value="{_esc(p.get(key, ''))}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-    {counter}
   </div>"""
 
     def _num_field(key: str, label: str, min_val: int, max_val: int) -> str:
@@ -17566,10 +17575,10 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 {_short_field('meeting_format', 'Programming', 'In-person / virtual / hybrid')}
 {_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
 {_short_field('seniority_band', 'Who it targets', 'e.g. C-suite, VP-level, first-time managers')}
-{_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus.', budgeted=True)}
-{_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any.', budgeted=True)}
-{_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both.', budgeted=True)}
   </div>
+  {_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus.', budgeted=True)}
+  {_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any.', budgeted=True)}
+  {_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both.', budgeted=True)}
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" id="cp-low_confidence" name="low_confidence" value="1"{' checked' if p.get('low_confidence') else ''}>
@@ -18591,7 +18600,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     body = f"""<div class="page page-standard">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
-<p style="font-size:13px;color:var(--muted);margin:-8px 0 24px;"><a href="/admin/tools/communities/{c['id']}/profile">Write the full community profile &rarr;</a></p>
+<p style="margin:-8px 0 24px;"><a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn">Write the full community profile &rarr;</a></p>
 <form id="comm-edit-form" method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
 
