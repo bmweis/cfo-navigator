@@ -9659,8 +9659,35 @@ async def tools_software_find_chat(request: Request):
         lib.close()
 
 
+# Legacy `-2` slug redirects (2026-09) — seven tools were created with a
+# spurious `-2` suffix from a slug collision at creation time (a
+# same-day duplicate row for the same vendor that has since been merged/
+# deleted, freeing up the bare slug — see the LiveFlow/Liveflow
+# name-duplicate merge in tool_audit_log for the one directly confirmed
+# case). Renamed to their bare vendor-name slug via a one-off migration
+# script (scripts/rename_dash2_tool_slugs.py); this map keeps the old
+# URL alive as a 301 rather than letting it 404 — see that script's own
+# module docstring for the full root-cause writeup and the confirmation
+# that no other internal link embeds the old slug. Keep this in sync with
+# that script's own RENAMES dict.
+_LEGACY_TOOL_SLUG_REDIRECTS = {
+    "dealhub-2": "dealhub",
+    "liveflow-2": "liveflow",
+    "puzzle-2": "puzzle",
+    "zenskar-2": "zenskar",
+    "m3ter-2": "m3ter",
+    "digits-2": "digits",
+    "tropic-2": "tropic",
+}
+
+
 @app.get("/tools/software/{slug}", response_class=HTMLResponse)
 def tools_software_profile(request: Request, slug: str, suggested: str = "", suggest_error: str = ""):
+    if slug in _LEGACY_TOOL_SLUG_REDIRECTS:
+        target = f"/tools/software/{_LEGACY_TOOL_SLUG_REDIRECTS[slug]}"
+        if request.url.query:
+            target += "?" + request.url.query
+        return RedirectResponse(target, status_code=301)
     authed = _is_authed(request)   # admin sees the meta line, verification count, and Edit button
     is_member = _is_member(request)  # gates the Warm Intro button, same as the card
     lib = _lib()
