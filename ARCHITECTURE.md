@@ -10700,9 +10700,11 @@ budgeted write path calls: `add_tool`/`update_tool`/`quick_update_tool`
 (`agent_taxonomy_note`), `update_tool_differentiation`
 (`competitive_differentiation`), and `upsert_community_profile`
 (`stage_focus`/`jobs_program`/`team_or_individual` only — the other six
-Quick facts fields keep their unenforced `maxlength="300"`, since nothing
-suggested a comparable overflow risk for them). Every new `MAX` clears its
-field's own real longest stored value with headroom:
+Quick facts fields keep their unenforced `maxlength="300"`; confirmed
+directly against production in a PR 600 review follow-up, real longest
+79-128 chars across all six, none within even half the cap — see
+CLAUDE.md's matching bullet for the exact per-field numbers). Every new
+`MAX` clears its field's own real longest stored value with headroom:
 
 | Field | Target | Max |
 |---|---|---|

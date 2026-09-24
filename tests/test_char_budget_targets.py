@@ -408,7 +408,9 @@ def test_no_maxlength_on_community_short_fields(env):
         assert "maxlength" not in m.group(0)
         assert "data-char-limit=" in m.group(0)
     # The other six Quick facts fields deliberately keep their unenforced
-    # maxlength="300" — no comparable overflow risk to close for them.
+    # maxlength="300" — confirmed against production (see
+    # test_other_quick_facts_fields_stay_well_under_their_unenforced_cap
+    # below), not just assumed, and none of them is close.
     for name in ("primary_purpose", "cpe_eligible", "platform_type",
                   "meeting_format", "event_style", "seniority_band"):
         m = re.search(rf'<input[^>]*\bname="{name}"[^>]*>', page)
@@ -470,3 +472,219 @@ def test_summary_conditional_guard_gone_even_for_a_legacy_over_length_value(env)
     assert "maxlength" not in m.group(0)
     assert 'data-char-limit="800"' in m.group(0)
     assert "_summary_maxlength_attr" not in dir(appmod)
+
+
+# --- Per-field 3-state coverage completion (PR 600 review, item 4) ---------
+#
+# The brief asked for three tests per touched field: (1) a value over the
+# field's OLD cap round-trips unchanged through the real write path, (2) a
+# value over the NEW max is refused with the limit+length named, and (3) a
+# value between target and max saves successfully, amber. (2) was already
+# covered for every field above. This section closes the two real gaps the
+# review found: description/competitive_differentiation had no "old cap"
+# scenario to round-trip (0 rows were ever over their notional old caps —
+# there was no enforced cap before this PR — so the closest honest analog
+# is the real production longest value round-tripping unchanged), and
+# summary/agent_taxonomy_note/differentiation/stage_focus had no
+# field-specific over-target-under-max round-trip through the actual route
+# (only description did, and only agent_taxonomy_note had a genuine
+# route-level legacy round-trip).
+
+def test_description_longest_stored_value_round_trips(env):
+    """The real production longest (2,339 chars) must still save cleanly —
+    description had 0 rows over its notional old cap (there was no
+    enforced cap before this PR), so this is the closest honest analog to
+    a legacy round-trip for this field."""
+    appmod, db = env
+    from linklib.db import Library
+    tool_id = _seed_tool(db)
+    lib = Library(db)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+    value = ("Rillet automates the accounting close for finance teams. " * 50)[:2339]
+    assert len(value) == 2339
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+        "name": "Rillet", "url": "https://rillet.example", "description": value, "summary": "s",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    lib2 = Library(db)
+    assert lib2.get_tool(tool_id)["description"] == value
+    lib2.close()
+
+
+def test_differentiation_longest_stored_value_round_trips(env):
+    """The real production longest (546 chars) — differentiation had 0 rows
+    over its notional old cap, same reasoning as description above."""
+    appmod, db = env
+    from linklib.db import Library
+    tool_id = _seed_tool(db)
+    lib = Library(db)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+    value = ("Unlike generic BI tools, Rillet is purpose-built for the close. " * 10).strip()[:546]
+    assert len(value) == 546
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+        "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": "s",
+        "competitive_differentiation": value,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    lib2 = Library(db)
+    assert lib2.get_tool(tool_id)["competitive_differentiation"] == value
+    lib2.close()
+
+
+def test_summary_legacy_over_old_cap_value_round_trips_via_route(env):
+    """Companion to test_summary_conditional_guard_gone_even_for_a_legacy_
+    over_length_value (which only checked the GET-rendered page): the real
+    production longest (453 chars, over the OLD 400 cap) must also
+    round-trip through an actual POST to the edit route, unchanged."""
+    appmod, db = env
+    from linklib.db import Library
+    tool_id = _seed_tool(db)
+    lib = Library(db)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+    value = "s" * 453
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+        "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": value,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    lib2 = Library(db)
+    assert lib2.get_tool(tool_id)["summary"] == value
+    lib2.close()
+
+
+def test_stage_focus_legacy_value_round_trips_via_route(env):
+    """The real production longest stage_focus (440 chars, over the OLD 300
+    cap) must round-trip through the community profile edit route,
+    unchanged — the community-side analog of the agent_taxonomy_note
+    round-trip test above."""
+    appmod, db = env
+    from linklib.db import Library
+    lib = Library(db)
+    cid = lib.add_community("Peer CFOs", "https://peercfos.example", "CFOs", "Free", [], approved=1)
+    lib.close()
+    value = ("Series B through pre-IPO growth-stage finance leaders, with a "
+              "smaller cohort of later-stage public-company CFOs who join "
+              "mainly for the peer network rather than the curriculum. " * 3).strip()[:440]
+    assert len(value) == 440
+    r = _client(appmod).post(f"/admin/tools/communities/{cid}/profile", data={
+        "verdict_summary": "Great fit.", "stage_focus": value,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    lib2 = Library(db)
+    assert lib2.get_community_profile(cid)["stage_focus"] == value
+    lib2.close()
+
+
+def test_over_target_under_limit_save_succeeds_summary(env):
+    appmod, db = env
+    from linklib.db import Library
+    tool_id = _seed_tool(db)
+    lib = Library(db)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+    value = "s" * 600   # over the 400 target, under the 800 limit
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+        "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": value,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    lib2 = Library(db)
+    assert lib2.get_tool(tool_id)["summary"] == value
+    lib2.close()
+    _attrs, counter = appmod._char_budget(Library.TOOL_SUMMARY_MAX, value, "x",
+                                           target=Library.TOOL_SUMMARY_TARGET)
+    assert "char-budget-warn" in counter
+
+
+def test_over_target_under_limit_save_succeeds_agent_taxonomy(env):
+    appmod, db = env
+    from linklib.db import Library
+    tool_id = _seed_tool(db)
+    lib = Library(db)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+    value = "a" * 3000   # over the 2,500 target, under the 4,000 limit
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+        "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": "s",
+        "agent_taxonomy_note": value,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    lib2 = Library(db)
+    assert lib2.get_tool(tool_id)["agent_taxonomy_note"] == value
+    lib2.close()
+    _attrs, counter = appmod._char_budget(Library.TOOL_AGENT_TAXONOMY_MAX, value, "x",
+                                           target=Library.TOOL_AGENT_TAXONOMY_TARGET)
+    assert "char-budget-warn" in counter
+
+
+def test_over_target_under_limit_save_succeeds_differentiation(env):
+    appmod, db = env
+    from linklib.db import Library
+    tool_id = _seed_tool(db)
+    lib = Library(db)
+    slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+    value = "d" * 900   # over the 600 target, under the 1,200 limit
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+        "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": "s",
+        "competitive_differentiation": value,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    lib2 = Library(db)
+    assert lib2.get_tool(tool_id)["competitive_differentiation"] == value
+    lib2.close()
+    _attrs, counter = appmod._char_budget(Library.TOOL_DIFFERENTIATION_MAX, value, "x",
+                                           target=Library.TOOL_DIFFERENTIATION_TARGET)
+    assert "char-budget-warn" in counter
+
+
+def test_over_target_under_limit_save_succeeds_stage_focus(env):
+    appmod, db = env
+    from linklib.db import Library
+    lib = Library(db)
+    cid = lib.add_community("Peer CFOs", "https://peercfos.example", "CFOs", "Free", [], approved=1)
+    lib.close()
+    value = "s" * 500   # over the 300 target, under the 800 limit
+    r = _client(appmod).post(f"/admin/tools/communities/{cid}/profile", data={
+        "verdict_summary": "Great fit.", "stage_focus": value,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    lib2 = Library(db)
+    assert lib2.get_community_profile(cid)["stage_focus"] == value
+    lib2.close()
+    _attrs, counter = appmod._char_budget(Library.COMMUNITY_SHORT_FIELD_MAX, value, "x",
+                                           target=Library.COMMUNITY_SHORT_FIELD_TARGET)
+    assert "char-budget-warn" in counter
+
+
+# --- Quick facts fields left uncapped: checked against production, not just
+# assumed (PR 600 review, item 1) ------------------------------------------
+#
+# The other six community_profiles Quick facts fields (primary_purpose,
+# cpe_eligible, platform_type, meeting_format, event_style, seniority_band)
+# kept their unenforced maxlength="300" with no budget added. At the time
+# this PR shipped that was stated as "nothing suggested a comparable
+# overflow risk" — true, but not actually checked against production data.
+# It has since been checked directly (all 40 live community_profiles rows,
+# via the /mcp introspection tools): the real longest value across all six
+# fields is seniority_band at 128 characters — well under half the 300-char
+# cap, with every other field's longest well below that. Pinned here as a
+# static ceiling so a future regeneration pass that starts pushing these
+# fields longer gets caught by a failing test rather than a silent surprise.
+
+def test_other_quick_facts_fields_stay_well_under_their_unenforced_cap():
+    """Not a live DB check (this suite runs against a fresh temp DB, not
+    production) — a static ceiling recording what a direct production
+    check found, so a future regression here fails loudly instead of
+    silently reopening the same gap community_profiles.stage_focus had."""
+    observed_production_longest = {
+        "primary_purpose": 79,
+        "cpe_eligible": 91,
+        "platform_type": 90,
+        "meeting_format": 116,
+        "event_style": 100,
+        "seniority_band": 128,
+    }
+    for field, longest in observed_production_longest.items():
+        assert longest < 300, f"{field}'s real longest ({longest}) is approaching its unenforced 300 cap"

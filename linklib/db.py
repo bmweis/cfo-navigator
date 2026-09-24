@@ -5826,7 +5826,12 @@ class Library:
     # meeting_format/event_style/seniority_band) were already covered by rule
     # 8 (or, for cpe_eligible, rule 9's own bounded "Yes/No/Unclear, optional
     # short qualifier" format) and keep their existing maxlength="300"
-    # unchanged — no comparable overflow risk to close there.
+    # unchanged. Confirmed directly against production (2026-09, PR 600
+    # review, all 40 live community_profiles rows via the /mcp introspection
+    # tools), not just inferred from the prompt: real longest values are
+    # 79/91/90/116/100/128 chars respectively — none within even half the
+    # 300 cap. See tests/test_char_budget_targets.py's
+    # test_other_quick_facts_fields_stay_well_under_their_unenforced_cap.
     COMMUNITY_SHORT_FIELD_TARGET = 300
     COMMUNITY_SHORT_FIELD_MAX = 800
 

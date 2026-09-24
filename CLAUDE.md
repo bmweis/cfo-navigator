@@ -7038,10 +7038,18 @@ never reads as something to tap.
   paragraph—deliberately brief," but never named stage_focus, jobs_program,
   or team_or_individual — the three fields this PR budgets. Fixed by
   adding all three to rule 8. The other six Quick facts fields keep their
-  existing, unenforced `maxlength="300"` — no comparable overflow risk to
-  close for them, and no production evidence they've ever needed it (this
-  session had no database access to confirm a number beyond what the brief
-  supplied for the three fixed here). `stage_focus`/`jobs_program`/
+  existing, unenforced `maxlength="300"` — flagged at ship time as unverified
+  ("no production evidence they've ever needed it," since this session had
+  no database access to confirm a number beyond what the brief supplied for
+  the three fixed here), and since confirmed directly (2026-09, PR 600
+  review, all 40 live `community_profiles` rows via the `/mcp` introspection
+  tools): real longest values are `primary_purpose` 79, `cpe_eligible` 91,
+  `platform_type` 90, `meeting_format` 116, `event_style` 100,
+  `seniority_band` 128 — none within even half the 300 cap. Pinned as a
+  static ceiling test (`tests/test_char_budget_targets.py`'s
+  `test_other_quick_facts_fields_stay_well_under_their_unenforced_cap`) so
+  a future regeneration pass that starts pushing these longer gets caught
+  by a failing test rather than a silent surprise. `stage_focus`/`jobs_program`/
   `team_or_individual`'s own community-profile-edit-page `_short_field`
   helper grew a `budgeted: bool` flag rather than a hardcoded per-field
   branch, so a future field can opt in the same way.
