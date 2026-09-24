@@ -1606,6 +1606,7 @@ body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:v
   min-height:100vh;display:flex;flex-direction:column;}
 .site-main{flex:1 0 auto;display:flex;flex-direction:column;}
 .char-budget{font-size:12px;line-height:1.4;color:var(--muted);margin-top:4px;}
+.char-budget-warn .char-budget-count{color:var(--caution);font-weight:600;}
 .char-budget-over .char-budget-count{color:var(--alert);font-weight:600;}
 [data-char-budget-label]{color:var(--alert)!important;border-color:var(--alert)!important;background:transparent!important;cursor:not-allowed;opacity:.85;}
 /* Tables: ONE format for every table on the site (2026-09). Light-blue
@@ -2152,25 +2153,42 @@ def _admin_nav_badge() -> str:
 # value is never touched. Counting uses Library.text_budget_length (CRLF counts
 # once), matching the JS below.
 #
-# Usage: attrs, counter = _char_budget(limit, value, "unique-id"); put attrs
-# inside the <textarea>/<input> tag and counter right after it. _page() adds
-# _CHAR_BUDGET_JS to any page that contains a budgeted field.
+# `target` (character-budget-target PR) is a second, SOFT number — the same
+# counter turns --caution amber past it, but the save still works; only the
+# hard `limit` above blocks the save. Every field with a target is AI-drafted
+# and prone to drift, so this is an editorial nudge for a human who's about to
+# save something over-long, not enforcement — a field can be a genuinely
+# thorough, correct save at 2,600 characters against a 2,500 target, and
+# nothing stops it. Optional and backward-compatible: every field this
+# predates keeps its single-tier (normal/over-limit-red) behavior unchanged.
+#
+# Usage: attrs, counter = _char_budget(limit, value, "unique-id", target=...);
+# put attrs inside the <textarea>/<input> tag and counter right after it.
+# _page() adds _CHAR_BUDGET_JS to any page that contains a budgeted field.
 # ---------------------------------------------------------------------------
-def _char_budget_count_text(count: int, limit: int) -> str:
+def _char_budget_count_text(count: int, limit: int, target: int | None = None) -> str:
     over = count - limit
     if over > 0:
         return f"{count:,} characters, {over:,} over. This save will be refused."
+    if target is not None and count > target:
+        return f"{count:,} characters. Aim for {target:,}."
     return f"{count:,} characters"
 
 
-def _char_budget(limit: int, value: str | None, field_id: str) -> tuple[str, str]:
+def _char_budget(limit: int, value: str | None, field_id: str, target: int | None = None) -> tuple[str, str]:
     """(attrs for the field, counter HTML to render right under it)."""
     count = Library.text_budget_length(value)
     counter_id = f"{field_id}-budget"
-    over = " char-budget-over" if count > limit else ""
-    attrs = f'data-char-limit="{limit}" data-char-budget="{counter_id}" aria-describedby="{counter_id}"'
-    counter = (f'<div id="{counter_id}" class="char-budget{over}">Limited to {limit:,} characters. '
-               f'<span class="char-budget-count">{_char_budget_count_text(count, limit)}</span></div>')
+    if count > limit:
+        state = " char-budget-over"
+    elif target is not None and count > target:
+        state = " char-budget-warn"
+    else:
+        state = ""
+    target_attr = f' data-char-target="{target}"' if target is not None else ""
+    attrs = f'data-char-limit="{limit}"{target_attr} data-char-budget="{counter_id}" aria-describedby="{counter_id}"'
+    counter = (f'<div id="{counter_id}" class="char-budget{state}">Limited to {limit:,} characters. '
+               f'<span class="char-budget-count">{_char_budget_count_text(count, limit, target)}</span></div>')
     return attrs, counter
 
 
@@ -2202,12 +2220,24 @@ _CHAR_BUDGET_JS = """(function(){
   }
   function update(el){
     var limit = +el.getAttribute('data-char-limit');
+    var targetAttr = el.getAttribute('data-char-target');
+    var target = targetAttr !== null ? +targetAttr : null;
     var n = len(el.value), over = n - limit;
     var c = document.getElementById(el.getAttribute('data-char-budget'));
     if (c) {
       var cnt = c.querySelector('.char-budget-count');
-      if (cnt) cnt.textContent = over > 0 ? fmt(n) + ' characters, ' + fmt(over) + ' over. This save will be refused.' : fmt(n) + ' characters';
+      var text, warn = false;
+      if (over > 0) {
+        text = fmt(n) + ' characters, ' + fmt(over) + ' over. This save will be refused.';
+      } else if (target !== null && n > target) {
+        text = fmt(n) + ' characters. Aim for ' + fmt(target) + '.';
+        warn = true;
+      } else {
+        text = fmt(n) + ' characters';
+      }
+      if (cnt) cnt.textContent = text;
       c.classList.toggle('char-budget-over', over > 0);
+      c.classList.toggle('char-budget-warn', warn);
     }
     syncForm(el.form);
   }
@@ -2450,7 +2480,7 @@ def _cmp_section_cell_html(section: "compare.CompareSection", authed: bool, empt
     themed group of several sub-fields (Communities' 4 profile groups)
     mirrors the profile page's own two-tier empty handling exactly: the
     WHOLE group empty -> one group-level placeholder (the profile page's
-    "This section hasn't been researched yet."); some fields populated,
+    "This section hasn't been researched."); some fields populated,
     some not -> each populated field renders normally and each empty one
     gets the profile page's Tier-2 "No details available." inline, with no
     admin suffix (a single missing fact inside an otherwise-populated card
@@ -12095,8 +12125,8 @@ def tools_community_profile(request: Request, slug: str):
   {sections}{missing}
 </div>""")
         else:
-            # "This section hasn't been researched yet." is a deliberate
-            # contextual variant of the standardized "{Field} not yet
+            # "This section hasn't been researched." is a deliberate
+            # contextual variant of the standardized "{Field} not
             # available." pattern — approved verbatim. Uses the section's
             # own group_title as the card header (empty-state visual QA
             # pass, PR A.1) — previously this rendered as a bare dashed box
@@ -12471,7 +12501,9 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
     });
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
-    document.getElementById(descId).value = d.description;
+    var descEl0 = document.getElementById(descId);
+    descEl0.value = d.description;
+    descEl0.dispatchEvent(new Event('input', {bubbles: true}));
     markAiDrafted('description');
     markAiConfidence('description', d.confident);
     markAiLowConfidence('description', d.low_confidence);
@@ -12479,7 +12511,9 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
     if (summaryId) {
       var summaryEl = document.getElementById(summaryId);
       if (summaryEl) {
-        summaryEl.value = d.summary || ''; markAiDrafted('summary');
+        summaryEl.value = d.summary || '';
+        summaryEl.dispatchEvent(new Event('input', {bubbles: true}));
+        markAiDrafted('summary');
         markAiConfidence('summary', d.confident); markAiLowConfidence('summary', d.low_confidence);
       }
     }
@@ -12568,6 +12602,7 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
       var el = document.getElementById('cp-' + k);
       if (!el) return;
       el.value = (d[k] === null || d[k] === undefined) ? '' : d[k];
+      el.dispatchEvent(new Event('input', {bubbles: true}));
       if (el.value) markAiDrafted(k);
     });
     var conf = d.confidence || {};
@@ -12747,6 +12782,8 @@ async def tools_submit(request: Request, background_tasks: BackgroundTasks):
             body_template=lib.get_setting("tool_submission_body_template") or None,
             signoff=lib.get_setting("tool_submission_signoff") or None,
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         lib.close()
     background_tasks.add_task(_run_tool_research, tool_id)
@@ -14613,8 +14650,9 @@ def _merge_open_ids(csv: str, extra) -> str:
 # breaks on submit, so a multi-paragraph definition would lose them on save.
 _FEATURE_TEXT_MAX = Library.CATEGORY_FEATURE_TEXT_MAX
 # tool_feature_links.public_note: same shared-constant pattern, so the admin
-# textarea's maxlength and the server-side refusal can't disagree.
+# textarea's live counter and the server-side refusal can't disagree.
 _FEATURE_LINK_PUBLIC_NOTE_MAX = Library.FEATURE_LINK_PUBLIC_NOTE_MAX
+_FEATURE_LINK_PUBLIC_NOTE_TARGET = Library.FEATURE_LINK_PUBLIC_NOTE_TARGET
 
 
 # The textareas carry their own min-width (260px definition, 180px pointer
@@ -17416,17 +17454,33 @@ def _community_profile_form_fields(p: dict | None, community: dict,
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(p.get(key, ''))}</textarea>
   </div>"""
 
-    def _short_field(key: str, label: str, placeholder: str = "") -> str:
+    def _short_field(key: str, label: str, placeholder: str = "", budgeted: bool = False) -> str:
         """A single-line variant of _field for the short factual/categorical
         fields (backfilled alongside the 13 narrative fields, not part of the
         voice-rewrite pass) — a plain input, not a textarea, since these are
-        short values, not prose."""
+        short values, not prose. `budgeted=True` (character-budget-limits-
+        targets PR) swaps the plain maxlength="300" for the live-counter/
+        server-refused shape (Library.COMMUNITY_SHORT_FIELD_TARGET/_MAX) —
+        stage_focus/jobs_program/team_or_individual only, the three Quick
+        facts fields the generator's own rule 8 never marked "deliberately
+        brief" until this PR (see the constant's own comment in linklib/db.py).
+        The other six keep their unenforced maxlength="300" unchanged — no
+        comparable overflow risk to close for them."""
         ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
+        if budgeted:
+            attrs, counter = _char_budget(
+                Library.COMMUNITY_SHORT_FIELD_MAX, p.get(key, ""), f"cp-{key}",
+                target=Library.COMMUNITY_SHORT_FIELD_TARGET)
+            input_attrs = attrs
+        else:
+            input_attrs = 'maxlength="300"'
+            counter = ""
         return f"""  <div>
     <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}</label>
-    <input id="cp-{key}" name="{key}" type="text" maxlength="300"{ph}
+    <input id="cp-{key}" name="{key}" type="text" {input_attrs}{ph}
       value="{_esc(p.get(key, ''))}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    {counter}
   </div>"""
 
     def _num_field(key: str, label: str, min_val: int, max_val: int) -> str:
@@ -17484,9 +17538,9 @@ def _community_profile_form_fields(p: dict | None, community: dict,
 {_short_field('meeting_format', 'Programming', 'In-person / virtual / hybrid')}
 {_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
 {_short_field('seniority_band', 'Who it targets', 'e.g. C-suite, VP-level, first-time managers')}
-{_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus.')}
-{_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any.')}
-{_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both.')}
+{_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus.', budgeted=True)}
+{_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any.', budgeted=True)}
+{_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both.', budgeted=True)}
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
@@ -19160,6 +19214,8 @@ async def admin_community_profile_submit(request: Request, community_id: int):
         else:
             lib.clear_entity_citations("community", community_id, "community_profile")
         _record_ai_drafted_reviews(lib, request, "community", community_id, form)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -19306,6 +19362,10 @@ def admin_tools_new(request: Request):
         categories = lib.list_tool_categories()
     finally:
         lib.close()
+    _new_desc_attrs, _new_desc_counter = _char_budget(
+        Library.TOOL_DESCRIPTION_MAX, "", "tool-desc-new", target=Library.TOOL_DESCRIPTION_TARGET)
+    _new_summary_attrs, _new_summary_counter = _char_budget(
+        Library.TOOL_SUMMARY_MAX, "", "tool-summary-new", target=Library.TOOL_SUMMARY_TARGET)
     body = f"""<div class="page page-standard">
 <h1>Add software</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
@@ -19370,15 +19430,17 @@ def admin_tools_new(request: Request):
       </span>
     </div>
     <p id="tool-desc-gen-err" style="display:none;"></p>
-    <textarea id="tool-desc" name="description" required maxlength="2500" rows="7"
+    <textarea id="tool-desc" name="description" required {_new_desc_attrs} rows="7"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences."></textarea>
+    {_new_desc_counter}
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
-    <textarea id="tool-summary" name="summary" required maxlength="400" rows="2"
+    <textarea id="tool-summary" name="summary" required {_new_summary_attrs} rows="2"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="2-3 sentences—shown on the directory card and in search results. Filled in by Generate above, or write your own."></textarea>
+    {_new_summary_counter}
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
@@ -19517,6 +19579,8 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         lib.close()
     background_tasks.add_task(_run_tool_research, tool_id)
@@ -19683,6 +19747,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         # columns; size both to the longer so the whole note is readable
         # while copying from it, capped so one row can't take the screen.
         note_rows = max(2, min(10, max(len(note), len(public_note)) // 30 + 1))
+        _pub_note_attrs, _pub_note_counter = _char_budget(
+            _FEATURE_LINK_PUBLIC_NOTE_MAX, public_note, f"pub-note-{f['id']}",
+            target=_FEATURE_LINK_PUBLIC_NOTE_TARGET)
         source_url = (link or {}).get("source_url", "")
         pointer_html = (
             f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;">{_esc(f["pointer_note"])}</div>'
@@ -19705,8 +19772,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     style="width:130px;max-width:100%;min-width:0;min-height:27px;-webkit-appearance:none;appearance:none;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;box-sizing:border-box;"></td>
   <td style="padding:8px 8px;"><textarea name="feature_{f['id']}_note" rows="{note_rows}" maxlength="500" placeholder="Internal note" aria-label="Internal note"
     style="width:100%;min-width:200px;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:var(--bg);resize:vertical;">{_esc(note)}</textarea></td>
-  <td style="padding:8px 8px;"><textarea name="feature_{f['id']}_public_note" rows="{note_rows}" maxlength="{_FEATURE_LINK_PUBLIC_NOTE_MAX}" placeholder="Public text (optional)" aria-label="Public text"
-    style="width:100%;min-width:200px;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;resize:vertical;">{_esc(public_note)}</textarea></td>
+  <td style="padding:8px 8px;"><textarea name="feature_{f['id']}_public_note" {_pub_note_attrs} rows="{note_rows}" placeholder="Public text (optional)" aria-label="Public text"
+    style="width:100%;min-width:200px;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;resize:vertical;">{_esc(public_note)}</textarea>{_pub_note_counter}</td>
   <td style="padding:8px 8px;min-width:120px;"><input type="url" name="feature_{f['id']}_source_url" value="{_esc(source_url)}" maxlength="500" placeholder="Source URL"
     style="width:100%;box-sizing:border-box;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:#fff;"></td>
 </tr>"""
@@ -19876,22 +19943,27 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     _taxonomy_confidence_html = (_confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
         + _low_confidence_indicator_html(tool.get("agent_taxonomy_low_confidence")))
 
-    # Edit-page-fixes item 1: a hand-authored HTML `maxlength` blocks any
+    # Edit-page-fixes item 1 retired the hand-authored HTML `maxlength` here
+    # entirely — see this doc's own earlier history: a `maxlength` blocks any
     # NEW keystroke once the field's current value is already at or past the
-    # cap — it doesn't clear or trim existing content, so a cursor still
-    # blinks on click but nothing typed lands. `summary`'s 400-char cap was
-    # added after the column already existed; the one-time migration that
-    # introduced the column (see linklib/db.py's summary-backfill comment)
-    # copied the full, uncapped `description` into any empty `summary`, and
-    # neither add_tool nor update_tool enforce a length limit server-side—
-    # so a tool whose summary was never redrafted since can still carry a
-    # legacy value well over 400 chars, permanently locking out typing in
-    # the browser. Only render the attribute when the stored value already
-    # fits inside it; once an admin saves a compliant value, the guardrail
-    # reapplies on the next page load.
-    _summary_maxlength_attr = (
-        ' maxlength="400"' if len(tool.get("summary") or "") <= 400 else ""
-    )
+    # cap, and doesn't clear or trim existing content, so a legacy summary
+    # over the old 400-char cap permanently locked out typing. Fixed for good
+    # by dropping `maxlength` on every character-budgeted field below in
+    # favor of _char_budget's live counter + server-side refusal (the
+    # character-budget-limits-targets PR) — the field never blocks typing,
+    # a paste past the target just turns the counter amber, and only a save
+    # genuinely over the hard MAX is refused, with the actual over-limit
+    # length still visible so it can be shortened and resaved.
+    _summary_attrs, _summary_counter = _char_budget(
+        Library.TOOL_SUMMARY_MAX, tool.get("summary"), "tool-summary", target=Library.TOOL_SUMMARY_TARGET)
+    _desc_attrs, _desc_counter = _char_budget(
+        Library.TOOL_DESCRIPTION_MAX, tool.get("description"), "tool-desc", target=Library.TOOL_DESCRIPTION_TARGET)
+    _taxonomy_attrs, _taxonomy_counter = _char_budget(
+        Library.TOOL_AGENT_TAXONOMY_MAX, tool.get("agent_taxonomy_note"), "tool-taxonomy",
+        target=Library.TOOL_AGENT_TAXONOMY_TARGET)
+    _diff_attrs, _diff_counter = _char_budget(
+        Library.TOOL_DIFFERENTIATION_MAX, tool.get("competitive_differentiation"), "tool-differentiation",
+        target=Library.TOOL_DIFFERENTIATION_TARGET)
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -20015,16 +20087,18 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       <div id="gen-host-tool-business-summary" style="display:grid;gap:20px;">
         <div>
           <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
-          <textarea id="tool-summary" name="summary" required{_summary_maxlength_attr} rows="4"
+          <textarea id="tool-summary" name="summary" required {_summary_attrs} rows="4"
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
+          {_summary_counter}
           <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—reviewing or verifying that field covers this one too.</p>
         </div>
         <div>
           <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description *{_description_verify_badge}</label>
-          <textarea id="tool-desc" name="description" required maxlength="2500" rows="14"
+          <textarea id="tool-desc" name="description" required {_desc_attrs} rows="14"
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
+          {_desc_counter}
           {_description_verify_action}
           {_citations_list_html(description_citations,
                                 empty_note="No sources recorded for this draft—it was either written by hand, "
@@ -20045,9 +20119,10 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         </div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">AI-drafted note on how this tool uses AI/agents, shown on its public profile. Drafted automatically when a tool is added; click Generate summary to refresh it after the vendor changes their product.</p>
         {_research_banner_html}
-        <textarea name="agent_taxonomy_note" maxlength="1200" rows="8"
+        <textarea id="tool-taxonomy" name="agent_taxonomy_note" {_taxonomy_attrs} rows="8"
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
           placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
+        {_taxonomy_counter}
         {_taxonomy_verify_action}
         {_citations_list_html(agent_taxonomy_citations,
                                empty_note="No sources recorded for this draft—it was either written by hand, "
@@ -20098,9 +20173,10 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       </span>
     </div>
     <p id="diff-gen-err" style="display:none;"></p>
-    <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" maxlength="600" rows="5"
+    <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" {_diff_attrs} rows="5"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('competitive_differentiation') or '')}</textarea>
+    {_diff_counter}
     <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Generated from the Description and competitor list above. Editing either one afterward won't update this automatically&mdash;click Generate summary again to refresh it.</p>
     {_differentiation_verify_action}
     {_differentiation_confidence_html}
@@ -20187,7 +20263,9 @@ async function generateDifferentiation(toolId, textareaId, statusId, errBoxId, h
     var r = await fetch('/admin/tools/software/' + toolId + '/generate-differentiation', {{method: 'POST'}});
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
-    document.getElementById(textareaId).value = d.competitive_differentiation;
+    var diffEl = document.getElementById(textareaId);
+    diffEl.value = d.competitive_differentiation;
+    diffEl.dispatchEvent(new Event('input', {{bubbles: true}}));
     markAiDrafted('competitive_differentiation');
     markAiConfidence('competitive_differentiation', d.confident);
     markAiLowConfidence('competitive_differentiation', d.low_confidence);
@@ -20362,6 +20440,8 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         _record_ai_drafted_reviews(lib, request, "tool", tool_id, form)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         lib.close()
     # "Save and continue" (Quick Fix: stay-on-page after save) redirects back
@@ -20852,6 +20932,8 @@ async def admin_tools_quick_edit(request: Request, tool_id: int):
             return JSONResponse({"ok": False, "error": "Tool not found"}, status_code=404)
         lib.quick_update_tool(tool_id, description, warm_intro_enabled, vendor_name, vendor_email, summary=summary,
                               source="admin-edit")
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     finally:
         lib.close()
     return JSONResponse({"ok": True, "tool": {

@@ -5790,6 +5790,60 @@ class Library:
         candidates.sort(key=lambda c: c["normalized_name"])
         return candidates
 
+    # Character budgets — a soft TARGET (the live counter, webapp.app.
+    # _char_budget, turns amber past it, but the save still works) and a hard
+    # MAX (the save is refused, nothing is written) — for every admin text
+    # field known to be AI-drafted and prone to drift, per a production
+    # length read (2026-09-23):
+    #   tools.agent_taxonomy_note          longest 3,540 (133 rows over the old 1,200 cap)
+    #   tools.description                  longest 2,339 (0 over the old 2,500 cap)
+    #   tools.competitive_differentiation  longest   546 (0 over the old 600 cap)
+    #   tools.summary                      longest   453 (35 rows over the old 400 cap —
+    #                                                      previously guarded by a conditional
+    #                                                      maxlength patch, see admin_tools_edit)
+    #   community_profiles.stage_focus     longest   440 (1 row over the old 300 cap)
+    # Every MAX below clears its own field's longest stored value with real
+    # headroom, so nothing already saved becomes unsavable — same "the cap
+    # sits below the longest value" discipline CATEGORY_FEATURE_TEXT_MAX
+    # established. Nothing here ever shortens a value; a save over MAX is
+    # refused outright with an error naming both numbers (see
+    # _check_text_field_length below), same as CATEGORY_FEATURE_TEXT_MAX/
+    # FEATURE_LINK_PUBLIC_NOTE_MAX's own _check_* methods.
+    TOOL_DESCRIPTION_TARGET = 2_500
+    TOOL_DESCRIPTION_MAX = 3_500
+    TOOL_SUMMARY_TARGET = 400
+    TOOL_SUMMARY_MAX = 800
+    TOOL_AGENT_TAXONOMY_TARGET = 2_500
+    TOOL_AGENT_TAXONOMY_MAX = 4_000
+    TOOL_DIFFERENTIATION_TARGET = 600
+    TOOL_DIFFERENTIATION_MAX = 1_200
+    # Shared by stage_focus/jobs_program/team_or_individual only — the three
+    # community_profiles "Quick facts" fields _COMMUNITY_PROFILE_PROMPT's own
+    # rule 8 never marked "a phrase, not a paragraph—deliberately brief" (this
+    # PR adds them to that rule too, which is the actual root cause of
+    # stage_focus's 440-character overflow — see CLAUDE.md). The other six
+    # Quick facts fields (primary_purpose/cpe_eligible/platform_type/
+    # meeting_format/event_style/seniority_band) were already covered by rule
+    # 8 (or, for cpe_eligible, rule 9's own bounded "Yes/No/Unclear, optional
+    # short qualifier" format) and keep their existing maxlength="300"
+    # unchanged — no comparable overflow risk to close there.
+    COMMUNITY_SHORT_FIELD_TARGET = 300
+    COMMUNITY_SHORT_FIELD_MAX = 800
+
+    @classmethod
+    def _check_text_field_length(cls, label: str, value: str, limit: int) -> None:
+        """Shared hard-limit refusal for a character-budgeted field, generalizing
+        _check_category_feature_text/_check_feature_link_public_note's identical
+        pattern to every field added since. A save over `limit` raises and writes
+        nothing; the caller's own soft TARGET (shown by the live counter, never
+        enforced here) never blocks a save."""
+        n = cls.text_budget_length(value)
+        if n > limit:
+            raise ValueError(
+                f"{label} is {n:,} characters; the limit is {limit:,}. "
+                f"Nothing was saved. Shorten it and try again."
+            )
+
     def add_tool(self, name: str, description: str, url: str,
                  categories: list[str], submitted_by: str = "",
                  approved: int = 0, advisor: int = 0,
@@ -5820,6 +5874,8 @@ class Library:
         dup = self._find_tool_by_normalized_url(url)
         if dup:
             raise DuplicateURLError("software entry", dup["id"], dup["name"], dup["slug"])
+        self._check_text_field_length("Description", description.strip(), self.TOOL_DESCRIPTION_MAX)
+        self._check_text_field_length("Short summary", summary.strip(), self.TOOL_SUMMARY_MAX)
         # Domain-derived slug (Phase 2): short domain root first (e.g.
         # "abacum"), falling back to the full hyphenated domain only when
         # the short form collides with an existing row, then a numeric
@@ -5938,6 +5994,8 @@ class Library:
             dup = self._find_tool_by_normalized_url(url, exclude_id=tool_id)
             if dup:
                 raise DuplicateURLError("software entry", dup["id"], dup["name"], dup["slug"])
+        self._check_text_field_length("Description", description.strip(), self.TOOL_DESCRIPTION_MAX)
+        self._check_text_field_length("Short summary", summary.strip(), self.TOOL_SUMMARY_MAX)
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
                advisor=?, promoted=?, vendor_email=?, warm_intro_enabled=?, vendor_name=?,
@@ -5985,6 +6043,8 @@ class Library:
         only description/summary and warm-intro fields, leaving name/url/
         categories/advisor/promoted untouched (those still require the full
         edit form)."""
+        self._check_text_field_length("Description", description.strip(), self.TOOL_DESCRIPTION_MAX)
+        self._check_text_field_length("Short summary", summary.strip(), self.TOOL_SUMMARY_MAX)
         self.conn.execute(
             """UPDATE tools SET description=?, warm_intro_enabled=?, vendor_name=?,
                vendor_email=?, summary=?, updated_at=? WHERE id=?""",
@@ -6109,6 +6169,7 @@ class Library:
         not-yet-human-reviewed draft. See update_tool's matching parameter
         for the full reasoning; never inferred from needs_verification's
         value itself."""
+        self._check_text_field_length("Bottom line", competitive_differentiation.strip(), self.TOOL_DIFFERENTIATION_MAX)
         self.conn.execute(
             "UPDATE tools SET competitive_differentiation=?, competitive_differentiation_needs_verification=?, "
             "competitive_differentiation_ai_confident=COALESCE(?, competitive_differentiation_ai_confident), "
@@ -6148,6 +6209,7 @@ class Library:
         leaving a prior AI draft's citations attached to text a human just
         overwrote would misattribute the human's own words as
         machine-grounded."""
+        self._check_text_field_length("Agent taxonomy", agent_taxonomy_note.strip(), self.TOOL_AGENT_TAXONOMY_MAX)
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
             "updated_at=? WHERE id=?",
@@ -6695,18 +6757,26 @@ class Library:
         return dict(row) if row else None
 
     # Upper bound on tool_feature_links.public_note, shared by the admin
-    # textarea's maxlength and the server-side check below so the two can
+    # textarea's live counter and the server-side check below so the two can
     # never disagree (same pattern as CATEGORY_FEATURE_TEXT_MAX). Derived: the
     # longest internal note, the text this is usually lifted from, was 312
     # characters (production, 2026-09-23), and it renders under the category
     # definition in a sidebar card, so ~3x that is room enough. A save over
     # the limit is REFUSED with a visible error naming both numbers; nothing
-    # here ever shortens a value.
+    # here ever shortens a value. TARGET (character-budget-target PR) is the
+    # softer, editorial ceiling the live counter turns amber past — roughly
+    # half the hard cap, since the field is meant to be a short caption next
+    # to a definition, not a second paragraph of text.
     FEATURE_LINK_PUBLIC_NOTE_MAX = 1_000
+    FEATURE_LINK_PUBLIC_NOTE_TARGET = 500
 
     @classmethod
     def _check_feature_link_public_note(cls, public_note: str) -> None:
-        n = len(public_note or "")
+        # text_budget_length (not a bare len()), so this agrees with the live
+        # counter's own CRLF-counts-once rule (webapp.app._char_budget) — a
+        # plain len() would count a pasted CRLF line break twice, disagreeing
+        # with what the on-screen counter shows for the exact same text.
+        n = cls.text_budget_length(public_note)
         if n > cls.FEATURE_LINK_PUBLIC_NOTE_MAX:
             raise ValueError(
                 f"Public text is {n:,} characters; the limit is {cls.FEATURE_LINK_PUBLIC_NOTE_MAX:,}. "
@@ -8014,6 +8084,11 @@ class Library:
         retired even earlier than that (primary_purpose_tags,
         resources_included_tags, meeting_format_tags, event_style_tags) went
         the same way in the same migration."""
+        for label, value in (
+            ("Stage focus", stage_focus), ("Jobs program", jobs_program),
+            ("Individual or team", team_or_individual),
+        ):
+            self._check_text_field_length(label, value.strip(), self.COMMUNITY_SHORT_FIELD_MAX)
         confidence = confidence or {}
         conf = [confidence.get(f) for f in (
             "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",

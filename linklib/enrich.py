@@ -353,19 +353,21 @@ Write your response as plain prose in exactly three parts, in this order,
 with no JSON and no markdown code fences:
 
 1. The full profile-page write-up—roughly 8-12 sentences (about 150-300
-   words). Budget and depth are not a constraint here; use the page
-   content thoroughly rather than settling for a thin summary. Every
-   sentence should carry real information, not padding. No markdown
-   syntax (no **bold**, no _italics_, no # headings)—the one exception
-   is a short "- " bulleted list where the content is genuinely
-   list-like, per the structure guidance above.
+   words), and even for the richest page you're given, stay under about
+   400 words (roughly 2,200 characters). Use the page content thoroughly
+   rather than settling for a thin summary, but thorough is not the same
+   as exhaustive—every sentence should carry real information, not
+   padding, and once you've covered what the tool does, who it's for, and
+   how it differs, stop. No markdown syntax (no **bold**, no _italics_, no
+   # headings)—the one exception is a short "- " bulleted list where the
+   content is genuinely list-like, per the structure guidance above.
 2. A blank line, then a line starting exactly with "SUMMARY:" followed on
    the same line by a short, standalone 2-3 sentence version (about 30-60
-   words) for the directory card and search results—a proper condensed
-   rewrite someone could read on its own and understand what the tool is
-   and does, not just the write-up's opening sentences copy-pasted.
-   Always a single continuous paragraph on one line, no line breaks or
-   bullets, and no citation markers.
+   words, staying under 400 characters) for the directory card and search
+   results—a proper condensed rewrite someone could read on its own and
+   understand what the tool is and does, not just the write-up's opening
+   sentences copy-pasted. Always a single continuous paragraph on one
+   line, no line breaks or bullets, and no citation markers.
 3. A blank line, then a line starting exactly with "CONFIDENT:" followed
    by "true" if the page content below gave you a solid, specific basis
    for both parts, or "false" if you had to draft from thin/ambiguous
@@ -871,26 +873,30 @@ def _fetch_taxonomy_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]
 
 
 _AGENT_TAXONOMY_PROMPT = """You are researching a vendor listed in the CFO Toolbox's Software
-directory. Budget and depth are not a constraint here—read the page
-content provided (as separate documents, when available) carefully and be
-as thorough and specific as the material supports.
+directory. Read the page content provided (as separate documents, when
+available) carefully and be as thorough and specific as the material
+supports—but thorough does not mean exhaustive: keep the whole summary
+under about 400 words (roughly 2,500 characters), even for a vendor with a
+long roster of named agents.
 
-Write a thorough summary (aim for 3-6 sentences, more if there's real
-material to cover) of whether and how AI agents are involved in this
-product. Ground this strictly in the documents provided—every specific
-claim should be traceable to something they actually say. If the vendor
-names ANY specific agents anywhere in the content (e.g. "Aura," "Ember," a
-"Contract Review Agent," a "flux agent")—find and name ALL of them, not
-just the first one you notice; a reader comparing tools needs the complete
-roster of named agents, not a sample. For each named agent, note what it
-actually does if the content says so. Distinguish: a fully independent
-agent that runs a workflow end-to-end, an agent-assisted feature where AI
-helps but a human stays in the loop, or no real agent framing at all
-(generic "AI-powered" marketing language without actual agent behavior
-described doesn't count as agentic—say so plainly rather than
-overstating it). If the documents give no genuine signal either way, say
-that rather than guessing, and end with CONFIDENT: false (see the format
-instructions below).
+Write a thorough summary (aim for 3-6 sentences; more only when there's a
+genuine roster of several distinct agents to name, and even then stay
+inside the 400-word ceiling above) of whether and how AI agents are
+involved in this product. Ground this strictly in the documents provided—
+every specific claim should be traceable to something they actually say.
+If the vendor names ANY specific agents anywhere in the content (e.g.
+"Aura," "Ember," a "Contract Review Agent," a "flux agent")—find and name
+ALL of them, not just the first one you notice; a reader comparing tools
+needs the complete roster of named agents, not a sample, but favor a
+concise roster (name plus one short clause on what it does) over a
+lengthy individual write-up per agent once there are more than a
+handful. Distinguish: a fully independent agent that runs a workflow
+end-to-end, an agent-assisted feature where AI helps but a human stays
+in the loop, or no real agent framing at all (generic "AI-powered"
+marketing language without actual agent behavior described doesn't count
+as agentic—say so plainly rather than overstating it). If the documents
+give no genuine signal either way, say that rather than guessing, and end
+with CONFIDENT: false (see the format instructions below).
 
 Additional rules:
 - Write directly to the CFO Toolbox reader. Never reference "the provided
@@ -1169,9 +1175,10 @@ Write about the community named below. Follow these rules exactly:
    depth are not a constraint here, so use the page content below thoroughly
    rather than settling for a thin one-liner.
 8. SENIORITY_BAND/PRIMARY_PURPOSE/RESOURCES_INCLUDED/PLATFORM_TYPE/
-   MEETING_FORMAT/EVENT_STYLE are short factual/categorical values (a
-   phrase, not a paragraph)—deliberately brief, distinct from the prose
-   fields above.
+   MEETING_FORMAT/EVENT_STYLE/STAGE_FOCUS/JOBS_PROGRAM/TEAM_OR_INDIVIDUAL
+   are short factual/categorical values (a phrase, not a paragraph, well
+   under 50 words)—deliberately brief, distinct from the prose fields
+   above.
 9. CPE_ELIGIBLE must be one of "Yes", "No", or "Unclear", optionally with a
    short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)")—
    never guess "Yes" without a specific reason to believe it.

@@ -527,11 +527,41 @@ graffiti marks on admin tables, forms, or the chat UI.
 ### Character budget (capped text fields)
 
 A capped admin text field shows "Limited to N characters." and a live count
-directly under it, in 12px `--muted` text. Over the limit, the count turns
-`--alert` and says how far over it is, and the form's submit button reads
-"Over limit" and disables. Never coral: this is a warning state, not an
-accent. No HTML `maxlength` on these fields, because a browser silently cuts
-a paste to it. Built by `webapp.app._char_budget`.
+directly under it, in 12px `--muted` text. No HTML `maxlength` on these
+fields, because a browser silently cuts a paste to it — the count and the
+server-side refusal are the only enforcement. Built by `webapp.app._char_budget`.
+
+Two tiers, for every AI-drafted field prone to drift (an admin-authored-only
+field, e.g. `category_features.definition`, carries only the hard limit
+below — no soft target, since there's no generator output to nudge):
+
+- **Soft TARGET** — past it, the count turns `--caution` amber and reads
+  "N characters. Aim for &lt;target&gt;." The save still works; this is an
+  editorial nudge, not enforcement.
+- **Hard MAX** — past it, the count turns `--alert` red, says how far over
+  it is ("N characters, N over. This save will be refused."), and the
+  form's submit button reads "Over limit" and disables. The server refuses
+  the save outright and writes nothing.
+
+Never coral for either state — both are warning states, not accents.
+
+| Field | Target | Max |
+|---|---|---|
+| `tools.description` | 2,500 | 3,500 |
+| `tools.summary` | 400 | 800 |
+| `tools.agent_taxonomy_note` | 2,500 | 4,000 |
+| `tools.competitive_differentiation` | 600 | 1,200 |
+| `community_profiles.stage_focus`/`jobs_program`/`team_or_individual` | 300 | 800 |
+| `tool_feature_links.public_note` | 500 | 1,000 |
+| `category_features.definition`/`pointer_note` | — | 10,000 |
+
+Every MAX clears its field's own longest value already stored in production
+(a 2026-09-23 length read), with real headroom — see `linklib/db.py`'s own
+comment above these constants for the exact numbers and reasoning, and the
+character-budget-limits-targets PR (CLAUDE.md) for why `max_tokens` itself
+was deliberately left unchanged on the two fields with a documented prior
+truncation incident (Description, Agent taxonomy) — only the prompt's own
+stated word/character ceiling moved.
 
 ### Radius scale
 `10px` buttons & inputs · `12–16px` cards & panels · `6px` tags/chips & inline row-action buttons ·
