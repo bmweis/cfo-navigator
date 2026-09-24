@@ -1839,12 +1839,13 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
 .site-footer .brand b{font-family:var(--font-wordmark);font-weight:400;color:#fff;font-size:12px;}
 .site-footer .center{flex:1;text-align:center;font-size:12px;white-space:nowrap;}
 .site-footer .links{flex:1;display:flex;gap:10px;align-items:center;justify-content:flex-end;}
+.site-footer .links a{white-space:nowrap;}
 .site-footer a{color:rgba(255,255,255,.55);}
 .site-footer a:hover{color:#fff;}
 @media(max-width:640px){
   .site-footer{flex-wrap:wrap;justify-content:center;text-align:center;}
   .site-footer .brand,.site-footer .center,.site-footer .links{flex:none;}
-  .site-footer .links{justify-content:center;}
+  .site-footer .links{justify-content:center;flex-wrap:wrap;row-gap:6px;max-width:100%;}
 }
 
 /* Mobile: nav collapses to a navy hamburger drawer */
