@@ -281,7 +281,7 @@ def test_compare_differentiation_renamed_to_bottom_line(env):
     heading the tool's own profile page uses for this field — both the
     section header and gates.EMPTY_COPY/COMPARE_EMPTY_LABELS were
     previously mismatched (row label "How this differs" vs. copy text
-    "Bottom line not yet available.")."""
+    "Bottom line not available.")."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)

@@ -1168,7 +1168,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   |---|---|---|
   | Verified | content | content |
   | Populated, pending review | content + "under review" label | content + "unverified, visible to visitors" badge |
-  | Empty | "{Field} not yet available." placeholder (two deliberate contextual variants: "Description coming soon." and "This section hasn't been researched yet.") | same placeholder + a "go fill this in" prompt |
+  | Empty | "{Field} not available." placeholder (was "not yet available" until 2026-09) (two deliberate contextual variants: "Description coming soon." and "This section hasn't been researched yet.") | same placeholder + a "go fill this in" prompt |
 
   Applied identically everywhere a gate existed: tools' Description/Agent
   taxonomy (per-field, unchanged column) now always render, badge-only;
@@ -6936,6 +6936,28 @@ never reads as something to tap.
   `maxlength` sweep of every other admin input is in the PR, pending
   production length reads, with no mechanical check built yet (a separate
   decision). See `tests/test_category_feature_text_length.py`.
+
+- **Character budget: a live count instead of `maxlength` (2026-09).** The
+  category-feature definition fix above raised the cap to 10,000 but kept an
+  HTML `maxlength`, so a paste over the limit was still cut silently, the
+  same bug at a higher number. `maxlength` is gone from those fields; the
+  server-side refusal is the only enforcement. `webapp.app._char_budget(limit,
+  value, field_id)` is the shared helper for every capped admin text field
+  (search for `_char_budget`): it returns the field's attributes plus a
+  counter reading "Limited to 10,000 characters. 1,470 characters" that
+  updates as you type or paste. Over the limit the count turns `--alert` red
+  (never coral), says how far over it is, and the form's submit button(s)
+  switch to "Over limit" and disable. `_page()` adds `_CHAR_BUDGET_JS` to any
+  page containing a budgeted field. Counting uses
+  `Library.text_budget_length`, which counts a CRLF line break once, since
+  the browser submits CRLF but counts one character. Live on the Manage
+  Features editor, its Add form, and the review-queue approve card. Other
+  capped fields (PR 598's `maxlength` sweep, and PR 597's publishable vendor
+  note) move to it in a later PR. Same PR: the empty-state placeholder
+  standard is "{Field} not available.", not "not yet available", since "yet"
+  implies Brian will write one, and often he won't. Changed in
+  `gates.EMPTY_COPY` and the compare-cell "Not available." label so every
+  surface moves together. See `tests/test_char_budget.py`.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

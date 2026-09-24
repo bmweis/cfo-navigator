@@ -96,7 +96,7 @@ def badge_text(state: GateState, authed: bool) -> str | None:
 
 # ---------------------------------------------------------------------------
 # Empty-state placeholder copy — the three-variant family PR A.1 approved
-# verbatim (default "{Field} not yet available.", plus the two deliberate
+# verbatim (default "{Field} not available.", plus the two deliberate
 # contextual variants: Description's "coming soon" and a Community profile
 # group's "hasn't been researched yet"), one entry per field/section this
 # extraction found gated. `admin_suffix` is only ever appended for an
@@ -115,24 +115,22 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
         "How autonomous this tool's AI is hasn't been documented yet.",
         "Generate a draft from the edit page."),
     "tool_differentiation": EmptyCopy(
-        "Bottom line not yet available.",
+        "Bottom line not available.",
         "This field is written by hand, not auto-drafted. Add one from the edit page."),
     "tool_competitors": EmptyCopy(
-        "Competitors not yet available.", "Curate them from the edit page."),
+        "Competitors not available.", "Curate them from the edit page."),
     "community_description": EmptyCopy(
         "Description coming soon.", "Add one from the edit page."),
     "community_bottom_line": EmptyCopy(
-        "Bottom line not yet available.", "Generate a draft from the edit page."),
+        "Bottom line not available.", "Generate a draft from the edit page."),
     "community_profile_group": EmptyCopy(
         "This section hasn't been researched yet.", "Generate a draft from the edit page."),
     "community_similar_communities": EmptyCopy(
-        "Similar communities not yet available.", "Curate them from the edit page."),
+        "Similar communities not available.", "Curate them from the edit page."),
     # One curated feature's category-level definition, rendered per row in
     # the Software profile's Key features card (feature-definitions PR). A
     # definition is admin-curated reference text with no verification
     # flag, so it only ever has two states: populated or empty.
-    # "not available", not "not yet": Brian's copy for this field. A
-    # separate PR is moving the rest of this dict the same way.
     "feature_definition": EmptyCopy(
         "Definition not available.", "Add one from Software features."),
 }
@@ -152,10 +150,10 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
 # here, since it's a fixed string with no admin-suffix variant at all.
 COMPARE_EMPTY_LABELS: dict[str, str] = {
     "tool_agent_taxonomy": "Not yet documented.",
-    "tool_description": "Not yet available.",
-    "tool_differentiation": "Not yet available.",
+    "tool_description": "Not available.",
+    "tool_differentiation": "Not available.",
     "tool_competitors": "Not yet curated.",
-    "community_bottom_line": "Not yet available.",
+    "community_bottom_line": "Not available.",
     "community_profile_group": "Not yet documented.",
     "community_similar_communities": "Not yet curated.",
 }

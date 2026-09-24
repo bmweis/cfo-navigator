@@ -157,7 +157,7 @@ def test_compare_distinguishes_pending_from_truly_empty_description(env):
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     assert "Drafted description for Runway." in r.text
     assert "under review" in r.text
-    assert "Not yet available." in r.text
+    assert "Not available." in r.text
 
 
 def test_compare_shows_description_verification_flag_to_admin(env):
@@ -321,13 +321,13 @@ def test_differentiation_empty_shows_placeholder_to_both_viewers_admin_gets_prom
     lib.close()
 
     r = _client(env).get(f"/tools/software/{slug}")
-    assert "Bottom line not yet available." in r.text
+    assert "Bottom line not available." in r.text
     assert "Add one from the edit page." not in r.text
 
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/software/{slug}")
-    assert "Bottom line not yet available." in r.text
+    assert "Bottom line not available." in r.text
     assert "Add one from the edit page." in r.text
 
 
@@ -360,7 +360,7 @@ def test_compare_distinguishes_pending_from_truly_empty_differentiation(env):
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     assert "Drafted differentiation for Runway." in r.text
     assert "under review" in r.text
-    assert "Not yet available." in r.text
+    assert "Not available." in r.text
 
 
 def test_compare_shows_differentiation_verification_flag_to_admin(env):
@@ -459,14 +459,14 @@ def test_community_profile_empty_shows_placeholder_to_both_viewers_admin_gets_pr
     lib.close()
 
     r = _client(env).get(f"/tools/communities/{slug}")
-    assert "Bottom line not yet available." in r.text
+    assert "Bottom line not available." in r.text
     assert "This section hasn't been researched yet." in r.text
     assert "Generate a draft from the edit page." not in r.text
 
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/communities/{slug}")
-    assert "Bottom line not yet available. Generate a draft from the edit page." in r.text
+    assert "Bottom line not available. Generate a draft from the edit page." in r.text
     assert "This section hasn't been researched yet. Generate a draft from the edit page." in r.text
 
 
@@ -526,7 +526,7 @@ def test_compare_distinguishes_pending_from_truly_empty_community_profile(env):
     r = _client(env).get(f"/tools/communities/compare?ids={a},{b}")
     assert "Drafted note for Peer CFOs." in r.text
     assert "under review" in r.text
-    assert "Not yet available." in r.text
+    assert "Not available." in r.text
 
 
 def test_compare_shows_community_profile_verification_flag_to_admin(env):

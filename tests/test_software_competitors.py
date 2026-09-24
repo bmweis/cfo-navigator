@@ -281,5 +281,5 @@ def test_profile_page_shows_placeholders_for_sections_when_empty(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
-    assert "Competitors not yet available." in r.text
-    assert "Bottom line not yet available." in r.text
+    assert "Competitors not available." in r.text
+    assert "Bottom line not available." in r.text

@@ -189,7 +189,7 @@ def _compare_field(f: "compare.CompareField", authed: bool) -> dict:
     if f.state == gates.GateState.EMPTY:
         out["text"] = ""
         out["placeholder"] = gates.COMPARE_EMPTY_LABELS.get(
-            _compare_field_empty_key(f.key), "Not yet available.")
+            _compare_field_empty_key(f.key), "Not available.")
         return out
     out["text"] = f.text
     badge = gates.badge_text(f.state, authed)

@@ -6560,18 +6560,28 @@ class Library:
         return dict(row) if row else None
 
     # Upper bound on category_features.definition/pointer_note, shared by the
-    # admin inputs' maxlength and this server-side check so the two can never
-    # disagree. Derived, not arbitrary: the longest stored definition was 1,470
+    # admin inputs' live character counter and this server-side check so the
+    # two can never disagree. This check is the only enforcement: the inputs
+    # carry no HTML maxlength, since a browser silently cuts a paste to it. Derived, not arbitrary: the longest stored definition was 1,470
     # characters (production, 2026-09-23), and the old 500 cap sat below it.
     # 10,000 is ~7x that — room for real reference text, while still refusing an
     # accidental whole-document paste. A save over the limit is REFUSED with a
     # visible error naming both numbers; nothing here ever shortens a value.
     CATEGORY_FEATURE_TEXT_MAX = 10_000
 
+    @staticmethod
+    def text_budget_length(value: str | None) -> int:
+        """Length as a character budget counts it: a browser submits a
+        textarea's line breaks as CRLF, but shows (and counts) them as one
+        character, so CRLF counts once here too. The live counter
+        (webapp.app._char_budget) uses the same rule, so the number on
+        screen and the number the server checks never disagree."""
+        return len((value or "").replace("\r\n", "\n"))
+
     @classmethod
     def _check_category_feature_text(cls, definition: str, pointer_note: str) -> None:
         for label, value in (("Definition", definition), ("Pointer note", pointer_note)):
-            n = len(value or "")
+            n = cls.text_budget_length(value)
             if n > cls.CATEGORY_FEATURE_TEXT_MAX:
                 raise ValueError(
                     f"{label} is {n:,} characters; the limit is {cls.CATEGORY_FEATURE_TEXT_MAX:,}. "

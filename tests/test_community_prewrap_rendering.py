@@ -121,7 +121,7 @@ def test_compare_table_cell_has_pre_wrap(env):
 
 
 def test_compare_table_empty_cell_unaffected(env):
-    """The 'Not yet available.' / needs-verification branches carry no
+    """The 'Not available.' / needs-verification branches carry no
     dynamic newline content — pre-wrap on them is harmless, but confirm the
     fix didn't change their actual text."""
     from linklib.db import Library
@@ -135,4 +135,4 @@ def test_compare_table_empty_cell_unaffected(env):
 
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
     assert r.status_code == 200
-    assert "Not yet available." in r.text
+    assert "Not available." in r.text
