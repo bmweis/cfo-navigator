@@ -160,6 +160,81 @@ def _failing_checks_count() -> int:
     return count
 
 
+# --- Static-source check cache (2026-09 test-suite-runtime PR) --------------
+# Read the block above this one first. `_checks_cache` holds a result that
+# genuinely depends on DATABASE / REQUEST state — the pricing settings,
+# voice_core, the live DB-copy scan, coral rendering against whatever the
+# current test's seeded rows are — so it MUST be reset per test (the #573
+# lesson: a stale (timestamp, count) tuple left by one test can make a LATER
+# test read a cached result and pass for the wrong reason).
+#
+# `_static_check_cache` below is a DIFFERENT KIND OF THING, on purpose kept
+# in the same file as `_checks_cache` so the contrast is unmissable: it
+# holds results for the five `run_all()` checks confirmed (per each
+# function's own quoted source, see the PR description) to be PURE
+# FUNCTIONS OF ON-DISK SOURCE CODE — table_override_problems/
+# table_standard_problems (regex over webapp/app.py's CSS), _pyflakes_
+# problems (lints linklib/webapp/scripts from disk), script_syntax_
+# problems (node --check over each shared _JS source constant), and the
+# "Voice standards"/"Typography" scans over VOICE_SCANNED_FILES
+# (mechanical_findings/typography_findings — confirmed via each function's
+# own docstring to take only the passed-in source string, never database
+# content; the SEPARATE, always-live DB-copy scan `admin_checks()` also
+# runs, scan_db_copy_report(), is untouched by this cache entirely — see
+# its own call site in webapp/app.py's admin_checks()).
+#
+# Source on disk cannot change within a running process — nothing in this
+# app or its test suite writes to a .py file — so unlike `_checks_cache`,
+# THIS cache is correct to keep for the lifetime of the process and must
+# NEVER be reset just because a test wants a fresh database. If you're
+# about to copy `_checks_cache`'s reset-every-test pattern for this one:
+# stop. That's not a correctness fix here, it's exactly the bug this
+# comment exists to prevent — it would silently defeat the whole point of
+# the cache (see the PR description for the measurement: these five checks
+# are ~11.4s of `run_all()`'s ~15s per-call cost, every bit of it safe to
+# compute once).
+#
+# `reset_static_check_cache()` exists for the one real use: a test that
+# plants a change (monkeypatches one of the five underlying functions, or
+# — for a genuinely on-disk change — isn't reachable via monkeypatch at
+# all, since these read real files) and needs to prove the NEXT call
+# recomputes fresh. It is not called anywhere in the standard per-test env
+# fixture, and should not be.
+_static_check_cache: dict[str, object] | None = None
+_static_check_cache_lock = threading.Lock()
+
+
+def cached_static_check(key: str, compute):
+    """Runs `compute()` once per process per `key`; every later call for the
+    same key reuses the cached result. Safe ONLY for a check that is a pure
+    function of on-disk source — see the module comment above. `compute` is
+    called OUTSIDE the lock (these calls can take seconds — pyflakes, a
+    node subprocess spawn — and none of the five callers this exists for
+    re-enters this function or `run_all()`, so there's no re-entrancy hazard
+    the way `coral_moment_problems()` has; holding the lock across a
+    multi-second compute would just block an unrelated key's cache read for
+    no reason)."""
+    global _static_check_cache
+    with _static_check_cache_lock:
+        if _static_check_cache is not None and key in _static_check_cache:
+            return _static_check_cache[key]
+    result = compute()
+    with _static_check_cache_lock:
+        if _static_check_cache is None:
+            _static_check_cache = {}
+        _static_check_cache[key] = result
+    return result
+
+
+def reset_static_check_cache() -> None:
+    """Clears the static-source check cache. See the module comment above —
+    this is for a test proving a planted change is picked up fresh, never
+    for per-test isolation (there is no state here to isolate)."""
+    global _static_check_cache
+    with _static_check_cache_lock:
+        _static_check_cache = None
+
+
 # --- Background refresher (2026-09) ------------------------------------------
 # The TTL-cache-plus-sentinel above still means the FIRST admin page render
 # after each 120s window pays the full run_all() cost inline, blocking that
@@ -236,6 +311,26 @@ def _failing_checks_count() -> int:
 _checks_refresher_started = False
 _checks_refresher_lock = threading.Lock()
 
+# Stop handle for the refresher thread (2026-09 test-suite-runtime PR) —
+# NOT a module-level boolean checked each loop iteration (that reintroduces
+# the #573 hazard: a flag read from a different thread with no ordering
+# guarantee). A `threading.Event` is the right primitive here specifically
+# because it IS thread-safe by design (`set()`/`wait()` are the whole
+# reason it exists) and, replacing `time.sleep()`, doubles as an
+# interruptible sleep: `stop_event.wait(timeout=...)` returns immediately
+# once `.set()` is called instead of blocking the full interval.
+#
+# Production never calls `.set()` on this, ever — nothing wires it into
+# `@app.on_event("shutdown")` or anywhere else app-side, and that's
+# deliberate: this exists solely so a TEST that deliberately starts the
+# real thread (`force=True`) can stop and `.join()` it in teardown, rather
+# than leaving a `while True: run_all(); sleep(120)` loop running for the
+# rest of the single-threaded suite — the exact bug this PR found in
+# tests/test_task_badges.py. Production's daemon thread still just dies
+# with the process, unchanged.
+_checks_refresher_stop_event: threading.Event | None = None
+_checks_refresher_thread: threading.Thread | None = None
+
 # Per-attempt state (2026-09, health-visibility follow-up) — deliberately
 # separate from _checks_cache, which only ever holds the last SUCCESSFUL
 # result. A refresher that's alive but failing every pass would otherwise
@@ -311,11 +406,19 @@ def _run_one_refresh_iteration() -> None:
             _checks_last_error = None
 
 
-def _checks_refresher_loop(db_path: str) -> None:
-    while True:
+def _checks_refresher_loop(db_path: str, stop_event: threading.Event) -> None:
+    """`stop_event.wait(timeout=...)` replaces the old bare `time.sleep()` —
+    it's the interruptible form: returns True immediately once `.set()` is
+    called (so a stopped test doesn't sit out the rest of a 120s interval),
+    or False after the timeout elapses, same as an ordinary sleep in every
+    other respect. Production never sets `stop_event`, so this loop runs
+    exactly as it always has there — `wait()` simply times out every
+    interval, same cadence as `sleep()` did."""
+    while not stop_event.is_set():
         _run_one_refresh_iteration()
         _reconcile_voice_review_queue_once(db_path)
-        time.sleep(_CHECKS_CACHE_TTL)
+        if stop_event.wait(timeout=_CHECKS_CACHE_TTL):
+            break
 
 
 def start_background_checks_refresher(force: bool = False) -> None:
@@ -369,13 +472,55 @@ def start_background_checks_refresher(force: bool = False) -> None:
        via `force=True`."""
     if not force and ("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules):
         return
-    global _checks_refresher_started
+    global _checks_refresher_started, _checks_refresher_stop_event, _checks_refresher_thread
     with _checks_refresher_lock:
         if _checks_refresher_started:
             return
         _checks_refresher_started = True
     db_path = os.environ.get("LINKLIB_DB", "library.db")
-    threading.Thread(target=_checks_refresher_loop, args=(db_path,), daemon=True).start()
+    _checks_refresher_stop_event = threading.Event()
+    _checks_refresher_thread = threading.Thread(
+        target=_checks_refresher_loop, args=(db_path, _checks_refresher_stop_event), daemon=True)
+    _checks_refresher_thread.start()
+
+
+def stop_background_checks_refresher(timeout: float = 20.0) -> bool:
+    """Signals the refresher thread to stop and joins it — test-only escape
+    hatch for the thread `start_background_checks_refresher(force=True)`
+    starts (see that stop-handle module comment above
+    `_checks_refresher_stop_event`). Never called from production code.
+
+    Default timeout is 20s, not something shorter — measured, not guessed:
+    `_checks_refresher_loop` only checks `stop_event` BETWEEN iterations,
+    so `.set()` has no effect while the thread is mid-`_run_one_refresh_
+    iteration()` (a real run_all() pass, ~15-16s measured cold on this
+    sandbox). A first attempt at this function shipped with a 5s default,
+    reasoned to be "plenty" without measuring, and failed against the real
+    thread — it genuinely takes 15s+ to notice a stop signal raised while
+    the loop is mid-computation, not stuck. 20s gives real margin above
+    that measured cost without being needlessly generous.
+
+    Returns True once the thread has genuinely exited (confirmed via
+    `join(timeout)` + `is_alive()`, not just "we called .set() and hoped"),
+    False if it didn't stop within `timeout` seconds or if no thread was
+    running. Only resets `_checks_refresher_started`/the stop-event/thread
+    handles back to their unstarted state on a CONFIRMED stop — a timed-out
+    thread is still real and still running, so leaving the module's own
+    bookkeeping pointed at it (rather than silently forgetting about a
+    thread that's still alive) is deliberate, not an oversight."""
+    global _checks_refresher_started, _checks_refresher_stop_event, _checks_refresher_thread
+    event, thread = _checks_refresher_stop_event, _checks_refresher_thread
+    if event is None or thread is None:
+        return False
+    event.set()
+    thread.join(timeout=timeout)
+    stopped = not thread.is_alive()
+    if stopped:
+        with _checks_refresher_lock:
+            _checks_refresher_started = False
+        _checks_refresher_stop_event = None
+        _checks_refresher_thread = None
+    return stopped
 
 
 def refresher_status() -> dict:

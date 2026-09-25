@@ -112,16 +112,31 @@ def test_admin_checks_summary_banner_is_red_on_a_real_failure(env, monkeypatch):
     linklib.voice_review) — proves the summary's "Live checks" row both
     flips to a failing count AND becomes a real link, pointing at the
     FIRST failing check's own per-row anchor (item 2: "Live checks -> the
-    failing check's section, when one fails"), not just the generic list."""
+    failing check's section, when one fails"), not just the generic list.
+
+    2026-09 test-suite-runtime PR: "Voice standards" is one of the five
+    checks now cached (see webapp.tasks.cached_static_check) since it's a
+    pure function of on-disk source in the ordinary case — but THIS test
+    is the one real exception the caching PR's own Condition A asked to be
+    checked for and found: it deliberately monkeypatches
+    mechanical_findings itself to simulate a violation, which the cache
+    would otherwise silently keep serving a stale (real, clean) result
+    over, from whatever the FIRST test in this file to render /admin/checks
+    already computed and cached. reset_static_check_cache() before the
+    request is what makes the monkeypatch actually take effect; calling it
+    again in `finally` stops this test's synthetic "seamless" finding from
+    leaking into every later test in this file as a false positive."""
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     import linklib.voice_review as vr_mod
     from fastapi.testclient import TestClient
     import webapp.app as appmod
+    from webapp import tasks as taskmod
     c = TestClient(appmod.app)
     c.post("/login", data={"username": "admin", "password": "adminpass"})
 
     orig = vr_mod.mechanical_findings
     vr_mod.mechanical_findings = lambda text: [("buzzword", "seamless")]
+    taskmod.reset_static_check_cache()
     try:
         r = c.get("/admin/checks")
         assert r.status_code == 200
@@ -132,6 +147,7 @@ def test_admin_checks_summary_banner_is_red_on_a_real_failure(env, monkeypatch):
         assert f'id="{m.group(1)[1:]}"' in r.text   # the anchor it links to actually exists on the page
     finally:
         vr_mod.mechanical_findings = orig
+        taskmod.reset_static_check_cache()
 
 
 # --- /admin/checks status summary (2026-09 rework) — items 1-4 --------------

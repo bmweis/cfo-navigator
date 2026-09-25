@@ -984,6 +984,20 @@ def test_start_background_checks_refresher_backup_guard_via_sys_modules(refreshe
 
 
 def test_start_background_checks_refresher_force_true_still_starts(refresher_state_reset, monkeypatch, tmp_path):
+    """2026-09 test-suite-runtime PR: this test used to leave its real
+    daemon thread running for the rest of the single-threaded suite — the
+    `finally:` only ever reset the `_checks_refresher_started` FLAG, never
+    joined the thread, which just kept looping (`run_all()`; sleep(120);
+    repeat) forever. Confirmed as a real, reproducible leak — not a
+    hypothetical — via a standalone before/after proof using
+    `threading.enumerate()` (see the PR description): against the
+    pre-fix code, the thread was still alive and running well after the
+    test's own cleanup ran. Fixed at the source (`_checks_refresher_loop`
+    now takes a `threading.Event` and checks it between iterations instead
+    of a bare `while True`) — this test now actually stops and joins the
+    thread it starts, via `stop_background_checks_refresher()`, and
+    asserts that succeeded rather than just hoping a flag reset was
+    enough."""
     taskmod = refresher_state_reset
     monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "forced.db"))
     taskmod._checks_refresher_started = False
@@ -1001,8 +1015,15 @@ def test_start_background_checks_refresher_force_true_still_starts(refresher_sta
         assert taskmod._checks_refresher_started is True
         assert len(started_threads) == 1
         assert started_threads[0].daemon is True
+        assert started_threads[0].is_alive(), "sanity: the thread should genuinely be running at this point"
     finally:
-        taskmod._checks_refresher_started = False   # don't leak a real thread's state into other tests
+        stopped = taskmod.stop_background_checks_refresher()
+        assert stopped is True, (
+            "the refresher thread must actually stop within the timeout — a False here means "
+            "either the fix regressed or the timeout is too short for a real run_all() pass again"
+        )
+        assert not started_threads[0].is_alive(), "the thread must be genuinely dead, not just marked stopped"
+        assert taskmod._checks_refresher_started is False   # don't leak a real thread's state into other tests
 
 
 def test_start_background_checks_refresher_is_idempotent_when_forced(refresher_state_reset, monkeypatch, tmp_path):
