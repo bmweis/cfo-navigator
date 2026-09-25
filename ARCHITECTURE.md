@@ -3225,6 +3225,61 @@ two independent concurrent misses) and a real open-auth `GET /` in a
 background thread with a hard join timeout, the same harness shape the
 coral fix's own `threading.local()` regression test used.
 
+### `run_all()`'s static-source check cache (2026-09, test-suite-runtime PR)
+
+The section above fixed re-entrancy/redundant-recompute for
+`_failing_checks_count()`'s own 120s badge cache, but `run_all()` itself —
+called directly by `/admin/checks`'s own route, by every test that renders
+that page, and by every test that calls `checks.run_all()` directly — was
+still fully uncached, every call, always. A test-suite-runtime
+investigation itemized every check's real cost (previous estimates in this
+codebase, including the "~3.5-9s" figure in the section above, undercounted
+it — see CLAUDE.md's "Slow first page load" resolution entry for the full
+itemized table and how that gap was found) and confirmed five of the 22
+checks are pure functions of on-disk source code, with zero dependency on
+database or request state:
+
+- `table_override_problems`/`table_standard_problems` (a CSS `!important`
+  audit — `linklib/brand_check.py`)
+- `_pyflakes_problems` (lints `linklib`/`webapp`/`scripts` from disk)
+- `script_syntax_problems` (`node --check` over every shared `_JS` source
+  constant)
+- Typography and "Voice standards" over `VOICE_SCANNED_FILES` (both take
+  only the passed-in source string — confirmed via
+  `typography_findings`'s own docstring: *"not rendered HTML and not
+  database content"*)
+
+`webapp.tasks.cached_static_check(key, compute)`/`reset_static_check_cache()`
+cache these five — first call per process pays full cost, every call after
+that reuses the cached result. Deliberately placed in `webapp/tasks.py`,
+adjacent to `_checks_cache`/`_checks_computing` from the section above, with
+an explicit comment distinguishing the two: `_checks_cache` holds
+DB/request-dependent state and must be reset every test (the #573 lesson);
+this new cache holds source-only state that cannot go stale within a
+process and must *never* be reset per test. `webapp.tasks` itself is
+reloaded nowhere in the test suite (confirmed by grep across the repo's
+full history), so the cache survives `importlib.reload(webapp.app)` and
+`importlib.reload(webapp.checks)` happening together — the exact pattern
+`tests/test_checks.py`'s own per-test fixture uses.
+
+**Left uncached, deliberately**: `coral_moment_problems()` (renders live
+pages — genuinely varies with whatever a given test's DB/request state is)
+and the check that resolves the live `voice_core` setting (reads a value
+Brian can edit at `/admin/voice`; caching it would mean a live edit
+silently stops showing up on `/admin/checks`).
+
+One test (`test_admin_checks_summary_banner_is_red_on_a_real_failure`)
+monkeypatches `linklib.voice_review.mechanical_findings` directly to
+simulate a violation — searched the whole suite for every monkeypatch of
+the five newly-cached functions and found only this one; fixed with
+`reset_static_check_cache()` bracketing the monkeypatch so the plant
+actually takes effect and doesn't leak into later tests. See
+`tests/test_static_check_cache.py` for the cache's own regression coverage
+(compute-once, plant/reset/prove-fresh, survives-reload) and CLAUDE.md's
+resolution entry for the full measured numbers, the `table_override_
+problems` root cause, and the unrelated bug (a stale `tf` variable read)
+found while wiring this in.
+
 ### Social share cards — Open Graph / Twitter Card metadata (2026-09)
 
 Every page previously shared as a bare link — no description, no image. Fixed

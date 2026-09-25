@@ -10035,6 +10035,125 @@ it supersedes the old "`/save` is token-gated" note.
   background refresh, making the route-rendering check opt-in rather than part
   of the badge path, or precomputing at deploy.
 
+  **Resolved (2026-09, test-suite-runtime PR) — the trigger fired again, this
+  time as suite runtime rather than a page load: `run_all()` was found to
+  cost ~110 uncached calls across just 14 test files, ~31.5 minutes (45.7%)
+  of a ~69-minute single-threaded suite.** Real, itemized per-check timing
+  (not the estimate this parked item shipped with — that guess turned out
+  wrong in an important way, see below):
+
+  | check | cost | cacheable (pure function of on-disk source)? |
+  |---|---|---|
+  | `table_override_problems` (+ `table_standard_problems`) | **6.3s** | yes |
+  | `_pyflakes_problems` | 2.2s | yes |
+  | `coral_moment_problems` | 1.9s | no — renders live pages |
+  | Typography (`VOICE_SCANNED_FILES`) | 1.8s | yes |
+  | `_resolve_checked_voice_core` | 1.1s | no — reads the live `voice_core` DB setting |
+  | `script_syntax_problems` | 0.7s | yes |
+  | Voice standards (`VOICE_SCANNED_FILES`) | 0.4s | yes |
+  | everything else (14 checks) | 0.7s combined | mixed, all individually trivial |
+  | **total** | **~15.1-15.5s** | **~11.4s cacheable** |
+
+  The single biggest line item was never itemized before this pass:
+  `table_override_problems(src)` runs `_CSS_RULE_RE.finditer()` — a regex
+  meant to find CSS `!important` overrides — over `_app_src()`, which is the
+  **entire 2.17-million-character `webapp/app.py` source file**, not just its
+  CSS. Timed in isolation: 6.25-6.41s, 6,137 matches, almost all of it spent
+  in the regex scan itself (the downstream filtering that actually finds a
+  real `!important` override is 0.0025s for all 6,137 matches). A Python
+  source file this size, full of dict literals, f-strings, and embedded
+  JS/HTML, gives a "text, then `{`, then text, then `}`" pattern an enormous
+  number of places to match. This was genuinely missed before — an earlier
+  read of the function assumed "pure regex over a 26KB CSS block = cheap"
+  without ever timing it standalone; it's actually a regex over 2.17MB of
+  Python source, and only `table_standard_problems` (the other half of the
+  same check) touches the small CSS block.
+
+  Five checks — table format, pyflakes, script syntax, and both
+  `VOICE_SCANNED_FILES` scans — are pure functions of on-disk source code
+  (confirmed per each function's own body/docstring: `_pyflakes_problems`
+  walks a static `("linklib", "webapp", "scripts")` tuple via `rglob`;
+  `script_syntax_problems` reads `_JS`-suffixed module attributes plus
+  `_app_src()`; `typography_findings`/`mechanical_findings` take only the
+  passed-in source string — `typography_findings`'s own docstring: *"source
+  is Python source text... not rendered HTML and not database content"*).
+  Source on disk can't change within a running process, so
+  `webapp.tasks.cached_static_check()`/`reset_static_check_cache()` now
+  cache all five — first call in a process pays the full ~15s, every call
+  after that drops to **~2.7-2.85s**, measured, including across
+  `importlib.reload(webapp.app)` + `importlib.reload(webapp.checks)`
+  together (the exact pattern `tests/test_checks.py`'s own `env` fixture
+  uses on every single test, which is why that one file alone was 27.1% of
+  the suite's total runtime). Deliberately placed adjacent to the
+  pre-existing `_checks_cache` in `webapp/tasks.py`, not inside
+  `webapp/checks.py` itself (which gets reloaded, wiping an in-module
+  cache) — with an explicit comment contrasting the two: `_checks_cache`
+  holds DB/request-dependent state and must reset every test (the #573
+  lesson); the new cache holds source-only state and must *never* reset
+  per test, since doing so would defeat the entire win for the one file
+  that needs it most. `coral_moment_problems` (live page renders) and
+  `_resolve_checked_voice_core` (reads the live `voice_core` setting,
+  which Brian edits at `/admin/voice`) stay uncached on purpose — caching
+  either would mean an admin's own live edit silently stops showing up on
+  `/admin/checks`, the exact "a check that finds something and doesn't
+  surface it" failure this project treats as worse than no check at all.
+
+  **One real gap this caching change surfaced, closed in the same PR**:
+  `tests/test_checks.py::test_admin_checks_summary_banner_is_red_on_a_real_failure`
+  monkeypatches `linklib.voice_review.mechanical_findings` directly to
+  force a synthetic finding — the cache would otherwise silently keep
+  serving a stale, clean, already-cached result over it. Searched the
+  whole suite for every such monkeypatch of the five now-cached functions
+  and found exactly this one; fixed with `reset_static_check_cache()`
+  around the plant (forces the monkeypatch to take effect) and again in
+  `finally` (stops the synthetic finding from leaking into later tests as
+  a false positive) — see `tests/test_static_check_cache.py` for the same
+  plant/reset/prove-fresh pattern covered generically.
+
+  **A second, unrelated real bug found while wiring the cache through, not
+  by this cache itself**: the "One table format" check's `detail` field
+  was reading a stale `tf` local variable left over from the Typography
+  check's own block immediately above it in `run_all()` — so it had always
+  rendered Typography's findings instead of its own. Harmless in practice
+  (both were empty on real source), but a real bug, fixed alongside the
+  cache wiring (renamed to `tbf`).
+
+  **Also fixed in the same PR**: the confirmed-real escaped daemon thread
+  in `tests/test_task_badges.py::test_start_background_checks_refresher_force_true_still_starts`
+  — it started a genuine, never-joined `while True: run_all(); sleep(120)`
+  thread that outlived the test for the rest of the single-threaded suite,
+  proven via a `threading.enumerate()`-based before/after script against
+  the pre-fix code (real output, not reasoning: the thread was still alive
+  well after the test's own cleanup ran). `_checks_refresher_loop` now
+  takes a `threading.Event`, checked between iterations via
+  `stop_event.wait(timeout=...)` in place of a bare `time.sleep()`; a new
+  `stop_background_checks_refresher()` lets a test that deliberately starts
+  the real thread (`force=True`) stop and join it deterministically.
+  Production behavior is unchanged — nothing calls `.set()` anywhere in app
+  code, only the one test that needs it. Worth remembering for next time:
+  a first attempt at this fix used a 5-second default join timeout,
+  reasoned rather than measured, and failed the same regression proof —
+  the loop only checks the stop event *between* iterations, and a first
+  `run_all()` pass takes ~15-16s, so `.set()` mid-computation has no
+  observable effect until that pass finishes. Raised to 20s once measured
+  against the real thread, not guessed at a second time.
+
+  **A citation correction, not a repo finding**: an earlier round of this
+  investigation was pointed at a specific figure ("~10.6s as of 2026-09-23,
+  PR #596") that turned out to live in Brian's Claude project instructions,
+  not in this repo — confirmed absent from every historical revision of
+  this file (`CLAUDE.md`) after unshallowing the clone (124 -> 1,623
+  commits) and grepping full history for both "10.6s" and "#596"; zero
+  hits either way. Worth noting as its own observation, unrelated to the
+  citation mistake: PR merge commits `#593`, `#594`, `#597`, `#599` all
+  exist in this history, but `#595`/`#596`/`#598` leave no traceable merge
+  commit — likely a mix of merge-commit and squash/rebase merges rather
+  than anything having actually gone missing, since the functionality
+  those PR numbers would correspond to is demonstrably live either way.
+  Not investigated further; the git-log-only lesson here is that a
+  PR-number citation in this project's own documentation can't always be
+  verified from commit history alone.
+
 - **`/admin/checks`' top summary, two-table rework (2026-09) — Brian's
   direct review of PR #593's preview replaced the single stacked list of 8
   rows with two side-by-side cards, "Site checks" (5 rows) and "AI
@@ -10692,6 +10811,44 @@ instead, off that page — kept for git history, not meant to run again.
 
 Note: the migration plan document (`MIGRATION_AND_BUILD_PLAN.md`) was never
 committed to the repo — this item is tracked here as the only record of it.
+
+## Running the test suite — single-threaded is the verification standard, `-n auto` is for iteration only
+
+**The single-threaded run (`python3 -m pytest -q`, never bare `pytest`) is the
+number that goes in a PR body and the only one that gates a merge.**
+`pytest-xdist`/`-n auto` is safe to use freely while iterating locally (it's
+what CI itself runs — see `.github/workflows/qa.yml`'s own "CI cost
+optimization round 2" comment, added 2026-08-22 with Brian's explicit
+sign-off), but never as the reported number for a PR.
+
+**Why single-threaded specifically, not "because it's slower and therefore
+more careful":** this repo has an open, real hazard around module-level
+globals leaking between tests within one process (see #573's
+`_checks_cache`/`_checks_computing` race, and the escaped-daemon-thread bug
+the 2026-09 test-suite-runtime PR found and fixed in
+`test_start_background_checks_refresher_force_true_still_starts`). Which
+tests share a process — and therefore which tests can leak state into which
+others — is exactly what changes between a single-threaded run and an
+`-n auto` run (xdist splits the suite across N worker *processes*, each
+running a different subset of tests in a different order than plain
+collection order). A suite that's green under `-n auto` and red
+single-threaded, or the reverse, is a live possibility here, not a
+theoretical one — it's already happened once (#573) and was found again
+while investigating suite runtime itself. The single-threaded run is the
+standard specifically because it's the one deterministic grouping: the same
+tests, in the same order, in the same process, every time, so a pass/fail
+result actually means the same thing from one run to the next.
+
+**Setup-phase cost, measured (2026-09 test-suite-runtime investigation):**
+across a full single-threaded run, the `setup` phase (pytest's per-test
+fixture cost) totaled **997.9s / 24.1% of the suite** (n=2615, avg 0.382s) —
+almost entirely the `importlib.reload(webapp.app)` + fresh temp-DB pattern
+every `env` fixture uses. **This is deliberate, not creep**: zero test files
+in this suite use a module- or session-scoped fixture (`grep -rn
+"@pytest.fixture(scope=" tests/*.py` → 0 hits) — every test gets a
+completely isolated app/DB, on purpose. Worth a look if suite runtime
+becomes a problem again, but secondary to whatever's dominating the `call`
+phase at the time (see the next section for how big that split can get).
 
 ## Testing standard for UI-facing changes
 
