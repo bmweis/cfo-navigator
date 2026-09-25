@@ -4123,6 +4123,69 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   correctly returns the intended `@font-face` stack — confirming the CSS
   itself is right and this is purely a rendering limitation of the
   comparison tooling, not something to chase in the app.
+- **Homepage "Recent highlights" — a hand-curated 4-slot featured set,
+  any mix of types, replacing the deleted per-type
+  `get_thought_leadership_representative` fallback (2026-09).** The
+  per-type mechanism above had a real, production-confirmed defect: its
+  featured branch was `LIMIT 1 ORDER BY updated_at DESC` per type, so when
+  two entries of the same type were both checked "Feature on homepage,"
+  only the more recently *saved* one ever rendered — the other's checkbox
+  had no visible effect. Both currently-featured production rows were
+  `type='writing'` (ids 34/35), so id 34's checkbox had been silently
+  inert since it was created. Its fallback branch (when nothing of a type
+  was checked) used `_TL_ORDER_SQL`, whose undated-first clause is correct
+  for a chronological feed but wrong for a hand-picked set — an undated
+  entry could silently jump ahead of a newer dated one with no admin lever
+  to move it. `get_thought_leadership_representative` is deleted outright
+  (confirmed via grep as its only caller besides its own tests) and
+  replaced by `Library.list_thought_leadership_featured_home()`: up to 4
+  `featured_home=1` rows, any mix of types, `LIMIT 4` — never an assert,
+  so a theoretical 5th featured row (a direct DB write, a race between two
+  admin tabs) still renders as exactly 4 on the public homepage rather
+  than taking the page down over an admin data condition; the cap of 4 is
+  enforced at the two write routes instead, via a new
+  `Library.count_featured_home(exclude_id=None)`. Ordered by a new
+  `_TL_FEATURED_ORDER_SQL = "sort_key DESC, display_order ASC"` —
+  deliberately **not** `_TL_ORDER_SQL`, since it drops the undated-first
+  clause that caused the defect above. **`exclude_id` is the case most
+  likely to be built wrong**: an edit save that keeps an already-featured
+  row's own `featured_home=1` must not count itself against the cap, or
+  every edit to any of the 4 currently-featured rows would be refused
+  against itself forever — the edit route passes its own `item_id`, has
+  its own regression test. A refused save (attempting to feature a 5th
+  piece) re-renders the add/edit form with the submitted values intact and
+  a visible inline error via a new shared `_tl_form_page` helper — the
+  same `--alert-wash`/`--alert` error-banner convention `_oc_form_page`/
+  `_ai_surface_form_page`/`_feed_form_page` already use, never coral. The
+  route's *other* validations (missing title, invalid type, a non-numeric
+  `display_order`) are unchanged and still raise `HTTPException` directly
+  — only the featured-home cap refusal goes through the re-render path.
+  **No lock guards the check-then-act race** between the count check and
+  the write — not worth building for a single-admin tool, per the standing
+  lesson from two prior over-engineered concurrency fixes in this codebase
+  (the coral-check `ContextVar` guard, `_failing_checks_count`'s
+  double-checked-locking near-miss); the `LIMIT 4` is what makes the race
+  harmless regardless. Icon and label per tile are now derived from the
+  piece's own `type` (`_TL_TYPE_ICON`/`_TL_TYPE_LABELS`), not from a fixed
+  per-column type — all 4 slots can be the same type now (and are, in
+  production), and repeated icons/labels down the grid are expected,
+  deliberate, and not deduplicated, varied by position, or flagged
+  anywhere in the admin UI; which four pieces to feature is Brian's own
+  curation call per occasion. Zero featured rows omits the whole
+  `.home-tl-highlights-wrap` (heading + grid together, not just the
+  tiles) — the "See all thought leadership →" link is a sibling of that
+  wrap, not inside it, so it survives either way. The admin list at
+  `/admin/thought-leadership/third-party` gained a Featured column showing
+  the homepage **render slot** (1-4, computed from the same
+  `list_thought_leadership_featured_home()` query the homepage itself
+  renders from, so it can't disagree with what's live) rather than a
+  plain yes/no badge — per the standing "a control that edits/reflects an
+  ordering has to show that ordering" lesson the feeds Order-arrows work
+  established (see `/admin/reader/feeds` above) — plus a live "Homepage
+  highlights: N of 4 slots used" line. Deliberately **not built**: order
+  (up/down) arrows for the featured set — this PR only makes the render
+  order visible (the slot column), which is the precondition for adding
+  arrows cheaply later if wanted, not the arrows themselves.
 - **Phase 6 — Layout Width Fixes, Admin Nav Restructure, Library Admin
   Cleanup.** Three coupled pieces in one PR (Library's management entry
   point moves as part of the nav restructure, so splitting wasn't clean).

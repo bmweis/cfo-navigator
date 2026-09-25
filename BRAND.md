@@ -886,8 +886,10 @@ exists to prevent:
   begin with — catalog size changes a badge number, never the layout.
 - **Homepage sidebar panel and Recent highlights** — the Toolbox panel is
   one fixed-360px card, nothing to distribute; Recent highlights is a
-  fixed 2-column grid capped at 4 thought-leadership types, and collapses
-  entirely rather than stretching when there's nothing to show.
+  fixed 2-column grid capped at 4 hand-curated featured pieces (any mix
+  of types — no longer one per thought-leadership type, see CLAUDE.md's
+  "Recent highlights" bullet), and collapses entirely (heading and grid
+  both) rather than stretching when there's nothing to show.
 
 **The height companion**: `-webkit-line-clamp` alone only bounds a
 field's ceiling. CSS Grid still sizes each ROW by its own tallest card, so

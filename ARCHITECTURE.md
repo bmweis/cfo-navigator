@@ -3347,7 +3347,7 @@ re-check before reviving this.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership/third-party` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (originally "pin into the homepage teaser" — Phase 3 addendum; repurposed by the Homepage Restructure phase to mean "represents this type in the homepage's "Recent highlights" grid", see below; defaults to 0, no retroactive selection) |
+| `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership/third-party` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (originally "pin into the homepage teaser" — Phase 3 addendum; repurposed by the Homepage Restructure phase for a since-deleted per-type representative mechanism; now selects membership in the homepage's hand-curated 4-slot "Recent highlights" set, any mix of types — see below; defaults to 0, no retroactive selection; a 5th feature is refused at the write routes) |
 | `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/archive/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4c, all three flagship pieces — `netsuite-mcp` (4a), `ai-hackathon-playbook` (4b), and `growth-engine-ratio` (4c) — have real `body_md` and are served by the catch-all, their bespoke routes all retired; `growth-engine-ratio`'s own JS calculator moved to a brand-new standalone bespoke route, `/thought-leadership/growth-engine-calculator`, which is not part of this table at all), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` is not a stored column — as of the closed tag-taxonomy PR (2026-09), the small category-tag accent color on each card is derived semantically from `tag_label` via `webapp/app.py`'s `_OC_TAG_INFO` dict (Guide → `--navy`, Playbook → `--seafoam-deep`, Framework → `--coral-deep`), read by `_oc_card_tuple`. This superseded an earlier by-card-position color cycle (`--coral-deep`/`--seafoam-deep`/`--navy-light`, chosen by array index rather than the piece's own tag) — see BRAND.md §2.3 for the full write-up, including the contrast-headroom guardrail on `--seafoam-deep`/`--coral-deep`. `mirrored_article_id` (FP&A Buddy published-content ingestion, 2026-09, nullable — `NULL` before the first sync) tracks which `articles.id` currently mirrors this piece for retrieval; see "Published-content ingestion" under FP&A Buddy above. |
 
 **Original Content Phase 2 (2026-08) — markdown rendering + `GET /thought-leadership/{slug}`.**
@@ -3745,17 +3745,74 @@ screenshot showing the header sitting flush against the wrapper's rounded top co
 new regression test (`test_growth_engine_ratio_table_wrap_has_no_visible_gap`) asserting the
 fixed CSS rule renders in the response.
 
-`Library.get_thought_leadership_representative(type)` (Homepage Restructure phase;
-supersedes the Phase 3 addendum's `list_thought_leadership_for_home` pin-then-
-recency-backfill panel, which the redesign replaced outright) selects one
-representative entry per type for the homepage's "Recent highlights" grid: the most
-recently updated `featured_home=1` entry of that type, if any (`updated_at
-DESC` — the tie-break when more than one entry of a type is checked); otherwise
-the most recent entry by the existing `_TL_ORDER_SQL` ordering, so a type with
-no admin selection yet still shows something instead of an empty column.
-Returns `None` only when the type has zero entries at all, in which case the
-homepage renders no column for it (same convention as `/thought-leadership`'s
-own `column()` collapsing when empty).
+**Recent highlights: a hand-curated 4-slot featured set, not a per-type
+fallback (superseded the Homepage Restructure phase's original design).**
+The homepage's "Recent highlights" grid used to be one tile per Thought
+Leadership type (writing/speaking/podcast/press), each independently
+populated by `Library.get_thought_leadership_representative(type)` — the
+most recently updated `featured_home=1` entry of that type, falling back
+to the most recent entry by `_TL_ORDER_SQL` when nothing was checked. That
+mechanism had a real, production-confirmed defect: `_TL_ORDER_SQL`'s
+undated-first clause (built for a chronological feed, where an undated
+standing link belongs at the top) meant an unchecked type's fallback pick
+could be an undated entry ahead of a newer dated one with no admin lever
+to move it; and the featured branch's own `LIMIT 1 ORDER BY updated_at
+DESC` per type meant that when two entries of the same type were both
+checked, only the more recently *saved* one ever rendered — the other's
+checkbox was silently inert. This is exactly what happened in production:
+both currently-featured entries were `type='writing'`, so only the newer
+one (id 35) ever showed; id 34's checkbox had no visible effect.
+
+`get_thought_leadership_representative` is deleted outright (no other
+caller existed — confirmed by grep before removing it). In its place,
+`Library.list_thought_leadership_featured_home()` returns up to 4
+`featured_home=1` rows, **any mix of types**, `LIMIT 4` (never asserted —
+a theoretical 5th featured row, from a direct DB write or a race between
+two admin tabs, still renders as exactly 4 on the public homepage rather
+than taking the page down over an admin data condition; the cap of 4 is
+enforced at the two write routes, not here). Ordered by a new
+`_TL_FEATURED_ORDER_SQL = "sort_key DESC, display_order ASC"` — the same
+newest-first idea as `_TL_ORDER_SQL`, deliberately **without** its
+undated-first clause, since a hand-curated set of four should never have
+an undated entry silently jump the queue. `Library.count_featured_home
+(exclude_id=None)` backs the cap check in both
+`admin_thought_leadership_new_submit`/`admin_thought_leadership_edit_submit`
+— `exclude_id` lets an edit save that keeps an already-featured row's own
+`featured_home=1` succeed without counting itself against the cap (the
+edit route passes its own `item_id`). A refused save (attempting to
+feature a 5th piece) re-renders the add/edit form with the submitted
+values intact and a visible inline error (`_tl_form_page`, the same
+`--alert-wash`/`--alert` error-banner convention `_oc_form_page`/
+`_ai_surface_form_page`/`_feed_form_page` already use) — the route's
+*other* validations (missing title, invalid type, a non-numeric
+`display_order`) are unchanged and still raise `HTTPException` directly;
+only the featured-home cap refusal goes through this re-render path.
+No lock guards the check-then-act race between the count check and the
+write — not worth building for a single-admin tool, per the standing
+lesson from two prior over-engineered concurrency fixes in this codebase
+(the coral-check `ContextVar` guard and `_failing_checks_count`'s
+double-checked-locking near-miss); the `LIMIT 4` above is what makes the
+race harmless regardless.
+
+Icon and label for each tile are now derived per-item from the piece's own
+`type` (`_TL_TYPE_ICON[item['type']]`, `_TL_TYPE_LABELS`), not from a fixed
+per-column type the way the old 4-type loop worked — since all 4 slots can
+now be the same type (and are, in production: both featured pieces are
+`writing`), repeated icons/labels down the grid are expected and
+deliberately not deduplicated, varied, or flagged in the admin UI. Zero
+featured rows omits the whole `.home-tl-highlights-wrap` (heading + grid),
+not just the tiles — the "See all thought leadership →" link is a sibling
+of that wrap, not inside it, so it survives either way.
+
+The admin list at `/admin/thought-leadership/third-party` shows a Featured
+column with the homepage **render slot** (1-4), computed from the same
+`list_thought_leadership_featured_home()` query the homepage itself
+renders from, so the column can't disagree with what's actually live — not
+a plain yes/no badge, per the standing "a control that edits/reflects an
+ordering has to show that ordering" lesson from the feeds Order-arrows
+work (see the CLAUDE.md `/admin/reader/feeds` bullets). A "Homepage
+highlights: N of 4 slots used" line, derived live from `count_featured_home()`,
+sits above the table.
 
 One Speaking & Events entry (Abacum AI Summit) has photos — a field this
 table doesn't carry, since it's the only entry that ever used it. It stays

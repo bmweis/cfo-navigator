@@ -4415,14 +4415,17 @@ def homepage(request: Request):
         homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
         homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
-        # One representative entry per Thought Leadership type, for the
-        # "Recent highlights" grid — see get_thought_leadership_representative's
-        # docstring for the selection rule (repurposes the `featured_home`
-        # checkbox). Deliberately the same piece can end up in both this grid
-        # and the flagship cards below (e.g. Growth Engine Ratio, if it's also
-        # Writing's representative) — that's expected given how the selection
-        # logic works, not a bug to guard against.
-        tl_reps = [lib.get_thought_leadership_representative(t) for t, _label in _TL_TYPES]
+        # Up to 4 curated pieces for the "Recent highlights" grid — any mix
+        # of types, Brian's own choice via the `featured_home` checkbox on
+        # /admin/thought-leadership/third-party — see
+        # list_thought_leadership_featured_home's docstring for the
+        # ordering. Deliberately the same piece can end up in both this grid
+        # and the flagship cards below (e.g. Growth Engine Ratio, if it's
+        # also featured here) — expected, not a bug to guard against.
+        # Repeated types/icons across the 4 slots are also expected (both
+        # currently-featured pieces are "writing") — this is Brian's own
+        # curation choice, not something to deduplicate or diversify.
+        tl_featured = lib.list_thought_leadership_featured_home()
         original_content_home = lib.list_original_content_for_home()
         password_nudge_html = _password_change_nudge_html(lib, request)
     finally:
@@ -4439,9 +4442,13 @@ def homepage(request: Request):
         for i, (href, title, icon, _desc, one_liner) in enumerate(_TOOLBOX_TILES)
     )
 
+    # Icon/label derived per-item from the piece's own type (not from a
+    # fixed per-column type the way the old 4-type loop worked) — four
+    # slots can be the same type, and that's the realistic case today.
     recent_highlights = "".join(
-        _tl_recent_highlight_item(i, _TL_TYPE_ICON[t], label, item)
-        for i, ((t, label), item) in enumerate(zip(_TL_TYPES, tl_reps))
+        _tl_recent_highlight_item(i, _TL_TYPE_ICON[item["type"]],
+                                   _TL_TYPE_LABELS.get(item["type"], item["type"]), item)
+        for i, item in enumerate(tl_featured)
     )
 
     # Reader access (admin-only): /read shipped in the Phase 5 Reader-merge PR,
@@ -4557,10 +4564,10 @@ def homepage(request: Request):
 
     {_oc_featured_cards_html(original_content_home)}
 
-    <div class="home-tl-highlights-wrap">
+    {f'''<div class="home-tl-highlights-wrap">
       <div class="home-tl-highlights-label">Recent highlights</div>
       <div class="home-tl-highlights">{recent_highlights}</div>
-    </div>
+    </div>''' if tl_featured else ''}
 
     <a href="/thought-leadership" style="display:inline-block;margin-top:32px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all thought leadership &rarr;</a>
   </div>
@@ -16497,7 +16504,7 @@ def _tl_form_fields(item: dict | None = None) -> str:
   {_tl_parse_warning(item)}
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (tiebreaker)</label>
-    <input name="display_order" type="number" value="{item.get('display_order', '') if item else ''}"
+    <input name="display_order" type="number" value="{item.get('display_order') if item and item.get('display_order') not in (None, '') else ''}"
       style="width:180px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="Auto-assigned">
   </div>
@@ -16526,9 +16533,9 @@ def _tl_form_fields(item: dict | None = None) -> str:
       Feature on homepage
     </label>
     <p style="margin:4px 0 0 26px;font-size:12px;color:var(--muted);">
-      Represents this entry's type (Writing, Speaking and Events, Podcasts, or Press) in the homepage's
-      4-column breakdown. If more than one entry of the same type is checked, the most recently updated one
-      wins. Leave unchecked and the most recent entry of that type is used automatically.
+      Shows this entry in the homepage's "Recent highlights" grid—4 slots total, any mix of
+      types, ordered newest first by Date label. Featuring a 5th entry while all 4 slots are
+      full is refused—uncheck one first.
     </p>
   </div>"""
 
@@ -16540,6 +16547,14 @@ def admin_thought_leadership(request: Request, type: str = ""):
     lib = _lib()
     try:
         items = lib.list_thought_leadership(type=type or None)
+        # Same query the homepage renders from, so this column can't
+        # disagree with what's actually live — a plain "featured: yes/no"
+        # badge would hide the order the arrows (if ever added) would
+        # need to show; see CLAUDE.md's feeds-order-arrows precedent for
+        # why a control that edits/reflects an ordering has to show that
+        # ordering, not just membership in it.
+        featured_slot = {it["id"]: i + 1 for i, it in enumerate(lib.list_thought_leadership_featured_home())}
+        featured_count = lib.count_featured_home()
     finally:
         lib.close()
 
@@ -16551,12 +16566,17 @@ def admin_thought_leadership(request: Request, type: str = ""):
         # is the page an admin scans to spot something off at a glance.
         date_warning = (' <span title="Didn&rsquo;t parse—floats to top of its section" '
                          'style="color:#92400e;">&#9888;</span>') if it['date_label'] and not it['sort_key'] else ''
+        slot = featured_slot.get(it["id"])
+        featured_cell = (f'<span style="display:inline-block;width:22px;height:22px;line-height:22px;'
+                          f'text-align:center;border-radius:6px;background:var(--seafoam-wash);'
+                          f'color:var(--navy);font-weight:700;font-size:12px;">{slot}</span>') if slot else ""
         return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(_TL_TYPE_LABELS.get(it['type'], it['type']))}</td>
   <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(it['venue']) or '—'}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(it['date_label']) or '—'}{date_warning}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{url_cell}</td>
+  <td style="padding:10px 12px;text-align:center;">{featured_cell}</td>
   <td style="padding:10px 12px;white-space:nowrap;">
     <a href="/admin/thought-leadership/third-party/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
     <form method="post" action="/admin/thought-leadership/third-party/{it['id']}/delete" style="display:inline;"
@@ -16567,7 +16587,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
 </tr>"""
 
     rows = "".join(_row(it) for it in items) or \
-        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No entries yet.</td></tr>'
+        '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No entries yet.</td></tr>'
 
     def _filter_link(t: str, label: str) -> str:
         active = t == type
@@ -16583,7 +16603,8 @@ def admin_thought_leadership(request: Request, type: str = ""):
   <h1>Third-party content</h1>
   <a href="/admin/thought-leadership/third-party/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add entry</a>
 </div>
-<p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
+<p style="margin:0 0 4px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
+<p style="margin:0 0 16px;font-size:13px;color:var(--muted);">Homepage highlights: {featured_count} of 4 slots used.</p>
 <div style="margin-bottom:16px;">{filters}</div>
 {_ADMIN_SCROLL_HINT_HTML}
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
@@ -16594,6 +16615,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Source / venue</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
+  <th style="padding:10px 12px;text-align:center;font-size:13px;width:{_COL_WIDTH_STATUS}px;">Featured</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
 <tbody>{rows}</tbody>
@@ -16611,21 +16633,39 @@ initAdminScrollHint();
     return HTMLResponse(_page("Third-party content—Admin", "", body, authed=True))
 
 
-@app.get("/admin/thought-leadership/third-party/new", response_class=HTMLResponse)
-def admin_thought_leadership_new(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    body = f"""<div class="page page-standard">
+def _tl_form_page(heading: str, action: str, values: dict, error: str, submit_label: str) -> str:
+    """Shared new/edit form shell — used by both GET routes' normal render
+    and by the POST routes' cap-refusal re-render, so a refused save shows
+    the submitted values and an inline error instead of a raw error page.
+    Same --alert-wash/--alert error-banner treatment (never coral) as
+    _oc_form_page/_ai_surface_form_page/_feed_form_page use for their own
+    validation failures — this route's OTHER validations (missing title,
+    invalid type, a non-numeric display_order) are unchanged and still
+    raise HTTPException directly; only the featured-home cap refusal goes
+    through this re-render path."""
+    error_html = (f'<p style="background:var(--alert-wash);color:var(--alert);border-radius:10px;'
+                  f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
+                  if error else '')
+    return f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/thought-leadership/third-party" style="font-size:13px;color:var(--muted);">&larr; Third-party content</a></p>
-<h1>Add a thought leadership entry</h1>
-<form method="post" action="/admin/thought-leadership/third-party/new" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
-{_tl_form_fields()}
+<h1>{_esc(heading)}</h1>
+{error_html}
+<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
+{_tl_form_fields(values)}
   <div>
-    <button type="submit" class="btn">Add entry</button>
+    <button type="submit" class="btn">{_esc(submit_label)}</button>
     <a href="/admin/thought-leadership/third-party" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>"""
+
+
+@app.get("/admin/thought-leadership/third-party/new", response_class=HTMLResponse)
+def admin_thought_leadership_new(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    body = _tl_form_page("Add a thought leadership entry", "/admin/thought-leadership/third-party/new",
+                          {}, "", "Add entry")
     return HTMLResponse(_page("Add thought leadership entry—Admin", "", body, authed=True))
 
 
@@ -16666,6 +16706,9 @@ def _tl_form_values(form) -> dict:
     }
 
 
+_TL_FEATURED_CAP_ERROR = "Four pieces are already featured on the homepage. Uncheck one before featuring this piece."
+
+
 @app.post("/admin/thought-leadership/third-party/new")
 async def admin_thought_leadership_new_submit(request: Request):
     if not _is_authed(request):
@@ -16674,6 +16717,10 @@ async def admin_thought_leadership_new_submit(request: Request):
     v = _tl_form_values(form)
     lib = _lib()
     try:
+        if v["featured_home"] and lib.count_featured_home() >= 4:
+            body = _tl_form_page("Add a thought leadership entry", "/admin/thought-leadership/third-party/new",
+                                  v, _TL_FEATURED_CAP_ERROR, "Add entry")
+            return HTMLResponse(_page("Add thought leadership entry—Admin", "", body, authed=True), status_code=400)
         # display_order left as None (blank on the add form) auto-assigns
         # the next value for this type — see Library.add_thought_leadership.
         lib.add_thought_leadership(v["type"], v["title"], v["url"], v["venue"], v["date_label"],
@@ -16695,17 +16742,8 @@ def admin_thought_leadership_edit(request: Request, item_id: int):
         lib.close()
     if not it:
         raise HTTPException(status_code=404, detail="Thought leadership entry not found")
-    body = f"""<div class="page page-standard">
-<p style="margin:0 0 4px;"><a href="/admin/thought-leadership/third-party" style="font-size:13px;color:var(--muted);">&larr; Third-party content</a></p>
-<h1>Edit thought leadership entry</h1>
-<form method="post" action="/admin/thought-leadership/third-party/{item_id}/edit" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
-{_tl_form_fields(it)}
-  <div>
-    <button type="submit" class="btn">Save changes</button>
-    <a href="/admin/thought-leadership/third-party" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
-  </div>
-</form>
-</div>"""
+    body = _tl_form_page("Edit thought leadership entry", f"/admin/thought-leadership/third-party/{item_id}/edit",
+                          it, "", "Save changes")
     # _page() escapes its own title argument internally — passing an
     # already-_esc()'d fragment here would double-escape (e.g. "&amp;amp;"),
     # the same bug Original Content Phase 3 found and fixed in
@@ -16721,6 +16759,17 @@ async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
     v = _tl_form_values(form)
     lib = _lib()
     try:
+        # exclude_id=item_id: an edit save that KEEPS this row's own
+        # existing featured_home=1 must not count itself against the cap —
+        # otherwise re-saving an already-featured row while all 4 slots are
+        # full would be refused against itself. This is the case most
+        # likely to be built wrong; see
+        # test_editing_already_featured_row_at_cap_succeeds.
+        if v["featured_home"] and lib.count_featured_home(exclude_id=item_id) >= 4:
+            body = _tl_form_page("Edit thought leadership entry",
+                                  f"/admin/thought-leadership/third-party/{item_id}/edit",
+                                  v, _TL_FEATURED_CAP_ERROR, "Save changes")
+            return HTMLResponse(_page("Edit thought leadership entry—Admin", "", body, authed=True), status_code=400)
         # The edit form always prefills display_order with the current
         # value, so a blank submission here is a deliberate clear — treat
         # it as 0 rather than re-triggering the add-only auto-assign.
