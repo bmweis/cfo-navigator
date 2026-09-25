@@ -1742,7 +1742,14 @@ p{margin:0 0 16px;color:var(--ink-soft);}
                                     PR 14 (2026-09). Replaces
                                     .page-full/.page-grid/.page-admin (PR
                                     13) and .page-content (PR 14). */
-.page-form{max-width:640px;}      /* forms — contact, admin edit forms */
+.page-form{max-width:640px;}      /* forms — genuinely public, one-column
+                                    forms only (contact, forgot/reset
+                                    password, submission forms). Admin edit
+                                    forms use .page-standard instead — see
+                                    _ai_surface_form_page/_oc_form_page for
+                                    the reference shape (back-link + <h1>
+                                    at the page's left edge, fields capped
+                                    at max-width:900px;margin:0 auto). */
 
 /* Two-column split for Software's Add/Edit forms (2fr wide left column,
    1fr narrow right column holding a few short fields). Stacks to one
@@ -12891,7 +12898,8 @@ def admin_contacts(request: Request):
   <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;"
     onclick="return document.querySelectorAll('.contact-row-cb:checked').length &amp;&amp; confirm('Delete ' + document.querySelectorAll('.contact-row-cb:checked').length + ' selected submission(s)?');">Delete selected</button>
 </div>
-<div style="overflow-x:auto;">
+{_ADMIN_SCROLL_HINT_HTML}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;margin-top:12px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" id="contact-select-all" onchange="document.querySelectorAll('.contact-row-cb').forEach(cb => cb.checked = this.checked);"></th>
@@ -12904,6 +12912,9 @@ def admin_contacts(request: Request):
 <tbody>{rows}</tbody>
 </table>
 </div>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>
 </form>
 <h2 style="font-size:16px;margin:40px 0 12px;">Deletion history</h2>
 <div style="overflow-x:auto;">
@@ -14415,7 +14426,8 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox intros{title_suffix}</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm intro requests from readers&mdash;{len(leads)} total.</p>
-<div style="overflow-x:auto;">
+{_ADMIN_SCROLL_HINT_HTML}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
@@ -14428,6 +14440,9 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 <tbody>{rows}</tbody>
 </table>
 </div>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>
 </div>"""
     return HTMLResponse(_page("Toolbox intros—Admin", "Admin", body, authed=True))
 
@@ -15508,9 +15523,10 @@ def admin_resources(request: Request):
 def admin_resources_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/tools/resources" style="font-size:13px;color:var(--muted);">&larr; Resources</a></p>
 <h1>Add a resource</h1>
-<form method="post" action="/admin/tools/resources/new" style="display:grid;gap:20px;">
+<form method="post" action="/admin/tools/resources/new" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_benchmark_form_fields()}
   <div>
     <button type="submit" class="btn">Add resource</button>
@@ -15555,9 +15571,10 @@ def admin_resources_edit(request: Request, benchmark_id: int):
         lib.close()
     if not b:
         raise HTTPException(status_code=404, detail="Benchmark not found")
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/tools/resources" style="font-size:13px;color:var(--muted);">&larr; Resources</a></p>
 <h1>Edit resource</h1>
-<form method="post" action="/admin/tools/resources/{benchmark_id}/edit" style="display:grid;gap:20px;">
+<form method="post" action="/admin/tools/resources/{benchmark_id}/edit" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_benchmark_form_fields(b)}
   <div>
     <button type="submit" class="btn">Save changes</button>
@@ -16438,7 +16455,8 @@ def admin_thought_leadership(request: Request, type: str = ""):
 </div>
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
-<div style="overflow-x:auto;">
+{_ADMIN_SCROLL_HINT_HTML}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Type</th>
@@ -16451,6 +16469,9 @@ def admin_thought_leadership(request: Request, type: str = ""):
 <tbody>{rows}</tbody>
 </table>
 </div>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
   The Abacum AI Summit entry (Speaking and Events) isn&rsquo;t listed here&mdash;it&rsquo;s a one-off page with
   photos, built by hand rather than added through this table. It won&rsquo;t show up if you edit or delete
@@ -16464,9 +16485,10 @@ def admin_thought_leadership(request: Request, type: str = ""):
 def admin_thought_leadership_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/thought-leadership/third-party" style="font-size:13px;color:var(--muted);">&larr; Third-party content</a></p>
 <h1>Add a thought leadership entry</h1>
-<form method="post" action="/admin/thought-leadership/third-party/new" style="display:grid;gap:20px;">
+<form method="post" action="/admin/thought-leadership/third-party/new" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_tl_form_fields()}
   <div>
     <button type="submit" class="btn">Add entry</button>
@@ -16543,9 +16565,10 @@ def admin_thought_leadership_edit(request: Request, item_id: int):
         lib.close()
     if not it:
         raise HTTPException(status_code=404, detail="Thought leadership entry not found")
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/thought-leadership/third-party" style="font-size:13px;color:var(--muted);">&larr; Third-party content</a></p>
 <h1>Edit thought leadership entry</h1>
-<form method="post" action="/admin/thought-leadership/third-party/{item_id}/edit" style="display:grid;gap:20px;">
+<form method="post" action="/admin/thought-leadership/third-party/{item_id}/edit" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_tl_form_fields(it)}
   <div>
     <button type="submit" class="btn">Save changes</button>
@@ -16944,7 +16967,8 @@ def admin_original_content(request: Request, status: str = ""):
 </div>
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
-<div style="overflow-x:auto;">
+{_ADMIN_SCROLL_HINT_HTML}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
@@ -16958,6 +16982,9 @@ def admin_original_content(request: Request, status: str = ""):
 <tbody>{rows}</tbody>
 </table>
 </div>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>
 {no_body_note}
 </div>"""
     return HTMLResponse(_page("Original content—Admin", "", body, authed=True))
@@ -29188,11 +29215,11 @@ def _feed_form_page(heading: str, action: str, sections: list, values: dict,
     error_html = (f'<p style="background:var(--alert-wash);color:var(--alert);border-radius:10px;'
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
-    return f"""<div class="page page-form">
+    return f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/reader/feeds" style="font-size:13px;color:var(--muted);">&larr; Feeds</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
-<form method="post" action="{action}" style="display:grid;gap:20px;">
+<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_feed_form_fields(sections, values, auth_status)}
   <div>
     <button type="submit" class="btn">{_esc(submit_label)}</button>
@@ -31921,7 +31948,8 @@ def admin_users(request: Request, msg: str = ""):
   </div>
 </div>
 
-<div style="overflow-x:auto;">
+{_ADMIN_SCROLL_HINT_HTML}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('users',this.checked)"></th>
@@ -31994,9 +32022,10 @@ def admin_users(request: Request, msg: str = ""):
 }}
 </style>
 
-<script>
+<script>{_ADMIN_SCROLL_HINT_JS}
 initColPicker('users', {json.dumps([k for k, _ in users_cols])}, {json.dumps(list(users_default_visible))});
 applySortFilter('users');
+initAdminScrollHint();
 // 2026-09 view/edit-mode follow-up: the row is read-only until this fires.
 // One click reveals every editable control for that row at once (Make
 // admin/member under the Access badge, Disable/Enable under Status, and
@@ -33103,7 +33132,8 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Preview import</button>
     <span style="font-size:12px;color:var(--muted);">Re-upload the exported CSV with a <code>corrected_url</code> column filled in. Nothing is saved until you confirm on the preview screen.</span>
   </form>
-  <div style="overflow-x:auto;">
+  {_ADMIN_SCROLL_HINT_HTML}
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
   <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
@@ -33362,7 +33392,8 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 {domains_html}
 {log_html}
 </div>
-<script>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
 (function() {{
   var reloadOnDone = false;
   function poll() {{
