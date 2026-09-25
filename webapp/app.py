@@ -3089,7 +3089,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     <input type="file" id="app-screenshot-file-{idsfx}" accept="image/jpeg,image/png,image/webp" style="display:none;"
       onchange="handleShotFile(this, '{idsfx}', 'app')">
     <p id="app-screenshot-upload-err-{idsfx}" style="display:none;"></p>
-    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Generate captures the URL above right now (no need to save first) at the same fixed size as the homepage screenshot, and saves that URL along with the image. Upload lets you crop your own image instead (a vendor press kit shot, a screenshot you took yourself)&mdash;either way overwrites whatever app screenshot is already saved.</p>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Generate captures the URL above at the same fixed size as the homepage screenshot, and saves that URL with the image. No need to save the page first. Upload lets you crop your own image instead (a vendor press kit shot, a screenshot you took yourself)&mdash;either way overwrites whatever app screenshot is already saved.</p>
     {banner_html}
     <div style="margin-top:8px;">{preview_html}</div>
   </div>"""
@@ -3184,7 +3184,7 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     in_form_html = f"""<div id="gen-host-logo-{idsfx}">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Logo{source_badge}</label>
     <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos update automatically once a month. A logo you set here overrides
-      that and stays put. Use &quot;Pull from Logo.dev&quot; to pull a fresh logo right now instead of waiting for the next update&mdash;if
+      that and stays put. Use &quot;Pull from Logo.dev&quot; to fetch a fresh logo right now instead of waiting for the next update&mdash;if
       nothing usable turns up, it reverts to automatic so next month's update can try again.</p>
     {banner_html}
     {stale_banner_html}
@@ -3396,7 +3396,7 @@ function submitAppScreenshotRecapture(idsfx) {
   var input = document.getElementById('app-screenshot-source-url-' + idsfx);
   var url = ((input && input.value) || '').trim();
   if (!url) {
-    showGenError(errBoxId, 'Enter a URL to capture first.');
+    showGenError(errBoxId, 'Enter a URL first.');
     return false;
   }
   var hidden = document.getElementById('app-screenshot-recapture-url-' + idsfx);
@@ -20430,7 +20430,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <input type="file" id="home-screenshot-file-tools-{tool_id}" accept="image/jpeg,image/png,image/webp" style="display:none;"
       onchange="handleShotFile(this, 'tools-{tool_id}', 'home')">
     <p id="home-screenshot-upload-err-tools-{tool_id}" style="display:none;"></p>
-    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture takes a fresh screenshot of the homepage at a standard size. To use a different image entirely, paste its URL above and click Save changes, or upload and crop your own image&mdash;either way overwrites whatever screenshot is already saved and shows as manually set, no capture date.</p>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture takes a fresh screenshot of the homepage at a standard size. To use a different image, either paste its URL above and click Save changes, or upload and crop your own. Both overwrite whatever screenshot is saved, and both show as manually set with no capture date.</p>
     {_screenshot_banner_html}
     <div style="margin-top:8px;">{_screenshot_preview_html}</div>
   </div>
