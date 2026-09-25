@@ -10151,6 +10151,45 @@ it supersedes the old "`/save` is token-gated" note.
   the_last_has_the_ordinary_divider` (replacing the retired stray-border
   test) for the regression coverage.
 
+- **Admin edit-form width-tier fix + scroll hints on six more wide tables
+  (2026-09) — `.page-form` had drifted onto three admin edit forms it was
+  never meant for; fixed, plus the shared scroll-affordance mechanism
+  extended to six tables that never got it.** Investigated first, per the
+  standing gate: `_feed_form_page` (the shared add/edit page for
+  `/admin/reader/feeds/new`/`{id}/edit`) and the inline Resources
+  (`/admin/tools/resources/new`/`{id}/edit`) and Third-party content
+  (`/admin/thought-leadership/third-party/new`/`{id}/edit`) forms were all
+  still on `.page-form` (640px, centered whole-page) — the same tier this
+  file's own PR-12 bullet already confirmed was a deliberate, considered
+  exception for Resources at the time, but never revisited once every
+  other admin edit form (Software, Communities, AI surfaces, Original
+  content) had already converted to the `.page-standard` reference shape
+  (`_ai_surface_form_page`/`_oc_form_page`: back-link + `<h1>` at the
+  page's own left edge, `<form>` capped at `max-width:900px;margin:0
+  auto`). All three converted to that exact shape — Resources' and
+  Third-party's inline forms also gained a back-link, which neither had
+  before (both other reference forms have one). The CSS comment on
+  `.page-form` itself was corrected — it used to say "forms — contact,
+  admin edit forms," which is exactly the wrong signal that let this drift
+  happen; it now states plainly that `.page-form` is for genuinely public,
+  single-purpose forms only, never an admin edit form, and points at the
+  two reference functions. **Six admin tables joined the `_ADMIN_SCROLL_HINT_
+  HTML`/`_ADMIN_SCROLL_HINT_JS`/`#cmp-scroll-wrap` mechanism `/admin/reader/
+  feeds` already had (PR 32, PR 33)**: Users, Toolbox intros, Third-party
+  content, Original content, and — on pages with more than one `<table>` —
+  the PRIMARY wide table only, matching the exact precedent Software/
+  Communities already set (their own secondary "Pending submissions" table
+  is deliberately left plain `overflow-x:auto`, no hint, per this file's own
+  "genuinely empty" reasoning elsewhere): Contact submissions' main
+  submissions table (its "Deletion history" audit table stays plain), and
+  Reader content backfill's "Needs manual review" table (its "Accepted as
+  final" and "Recent attempts" tables stay plain — the most-actionable
+  table on a multi-table page is the one that earns the hint, not every
+  table on the page). No table `min-width` floor or column width changed —
+  scoped strictly to the shell width tier and the scroll affordance, per
+  the task's own instruction. See BRAND.md §5's width-tier table for the
+  corrected `.page-form` row.
+
 
 ## Authentication & security
 

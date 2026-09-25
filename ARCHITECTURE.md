@@ -3088,6 +3088,36 @@ populates it with real rendered HTML every time — not gated behind a
 webkit` is a confirmed 403 policy denial) — a WebKit-specific defect can't
 be ruled out. Flagged as unresolved rather than silently closed.
 
+### Feeds/Resources/Third-party content admin forms move off `.page-form`, and six wide tables gain the scroll hint (2026-09)
+
+`.page-form` had drifted onto three more admin edit-form pages beyond the
+`/admin/copy/*` case above — `_feed_form_page` (the shared add/edit page
+for `/admin/reader/feeds/new`/`{id}/edit`) and the inline Resources
+(`/admin/tools/resources/new`/`{id}/edit`) and Third-party content
+(`/admin/thought-leadership/third-party/new`/`{id}/edit`) forms. All three
+converted to the same `.page-standard` reference shape
+(`_ai_surface_form_page`/`_oc_form_page`) — back-link + `<h1>` at the
+page's own left edge, `<form>` capped at `max-width:900px;margin:0 auto`.
+Resources' and Third-party's inline forms also gained a back-link, which
+neither had before. `.page-form`'s own CSS comment was corrected: it used
+to read "forms — contact, admin edit forms," the exact wrong signal that
+let this drift happen twice; it now states that `.page-form` is for
+genuinely public, single-purpose forms only, never an admin edit form.
+
+**Scroll hint.** Six more admin tables joined the `_ADMIN_SCROLL_HINT_HTML`/
+`_ADMIN_SCROLL_HINT_JS`/`#cmp-scroll-wrap` mechanism `/admin/reader/feeds`
+already had: `/admin/users`, `/admin/inbox/toolbox-intros`,
+`/admin/thought-leadership/third-party`, `/admin/thought-leadership/original`,
+and — on the two pages with more than one `<table>` — the single
+PRIMARY wide table only, matching the precedent Software/Communities
+already set for their own secondary "Pending submissions" table (left
+plain `overflow-x:auto`, no hint): `/admin/inbox/contact-submissions`'s
+main submissions table (its "Deletion history" audit table stays plain)
+and `/admin/reader/backfill-content`'s "Needs manual review" table (its
+"Accepted as final" and "Recent attempts" tables stay plain). No table
+`min-width` floor or column width changed. See CLAUDE.md's matching
+2026-09 bullet.
+
 ### Outbound links open in a new tab (PR 35, 2026-09)
 
 A standing site-wide rule: every anchor whose destination is not on

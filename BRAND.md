@@ -599,7 +599,18 @@ page read as a content page, not the outer shell.
 | Tier | CSS class | Width | Pages |
 |---|---|---|---|
 | Standard | `.page-standard` | 1300px | Every page except forms — homepage, Thought Leadership landing, every CFO Toolbox directory/profile/compare/matchmaker page (Software, Resources, Communities), every `/admin/*` list/dashboard/report page, `/admin/open-source`, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard), `/read/{article_id}`, About, Thought Leadership's 3 ported long-form articles (Growth Engine Ratio, Sail Don't Row/AI Hackathon Playbook, Connecting Claude to NetSuite), `/tools/fpa-buddy/how-it-works`, `/ask/history` |
-| Form | `.page-form` | 640px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit), admin single-record add/edit forms |
+| Form | `.page-form` | 640px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit, compare-summary feedback) — genuinely public, one-column forms only, never an admin edit form (2026-09 fix: `.page-form` had drifted onto Feeds/Resources/Third-party-content's admin add/edit forms; all three moved to Standard, matching every other admin edit form) |
+
+Every admin single-record add/edit form (a tool, a community, a resource, a
+feed, a thought-leadership entry, an AI surface, an original-content piece)
+sits on `.page-standard`, not `.page-form` — the reference shape is
+`_ai_surface_form_page`/`_oc_form_page`: a back-link + `<h1>` at the page's
+own left edge, with just the `<form>` itself capped at
+`max-width:900px;margin:0 auto`, so a single-column field stack still reads
+narrow while the page shell matches every other admin page. `.page-form`'s
+640px cap on the whole page (back-link included) reads too cramped once a
+page has its own nav chrome — reserve it for a standalone, single-purpose
+public form with nothing else on the page.
 
 Admin data tables sit on the same 1300px Standard tier as everything
 else, not a wider dedicated tier of their own — they already carry their
