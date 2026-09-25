@@ -272,7 +272,13 @@ def test_admin_app_screenshot_recapture_success(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/software/{a}/app-screenshot/recapture", follow_redirects=False)
+    # Edit-page-fixes item 2: the route now reads the source URL from the
+    # POSTED form field (what submitAppScreenshotRecapture sends), not the
+    # persisted DB value — see test_admin_app_screenshot_recapture_uses_
+    # posted_url_not_stale_db_value below for the case this was actually
+    # built to fix (no prior save at all).
+    r = client.post(f"/admin/tools/software/{a}/app-screenshot/recapture",
+                     data={"app_screenshot_source_url": "https://runway.com/demo"}, follow_redirects=False)
     assert r.status_code == 303
     assert "app_screenshot_captured=1" in r.headers["location"]
 
@@ -282,6 +288,36 @@ def test_admin_app_screenshot_recapture_success(env, monkeypatch):
     assert tool["app_screenshot_captured_at"]
     # Homepage slot is untouched by an app-screenshot capture.
     assert tool["screenshot_url"] == ""
+    lib.close()
+
+
+def test_admin_app_screenshot_recapture_uses_posted_url_not_stale_db_value(env, monkeypatch):
+    """Edit-page-fixes item 2 — the actual reported bug: a URL typed into
+    the App screenshot input but never Saved used to be invisible to
+    Generate (the route read app_screenshot_source_url back from the DB,
+    and the hidden recapture form carried no fields at all). Proves the
+    fix directly: the DB has NO source URL saved at all — only the posted
+    form field carries one — and the capture still succeeds and persists
+    that URL, with no prior Save required."""
+    written = _mock_playwright_success(monkeypatch)
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/software/{a}/app-screenshot/recapture",
+                     data={"app_screenshot_source_url": "https://runway.com/never-saved-demo"},
+                     follow_redirects=False)
+    assert r.status_code == 303
+    assert "app_screenshot_captured=1" in r.headers["location"]
+    assert written["url"] == "https://runway.com/never-saved-demo"
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool = lib.get_tool(a)
+    assert tool["app_screenshot_url"]
+    # Persisted in the same request, not just used transiently for the capture.
+    assert tool["app_screenshot_source_url"] == "https://runway.com/never-saved-demo"
     lib.close()
 
 
@@ -310,8 +346,14 @@ def test_admin_app_screenshot_recapture_failure(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/software/{a}/app-screenshot/recapture", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{a}/app-screenshot/recapture",
+                     data={"app_screenshot_source_url": "https://runway.com/demo"}, follow_redirects=False)
     assert "app_screenshot_captured=0" in r.headers["location"]
+    # A failed capture never loses the URL the admin typed — it's persisted
+    # before the capture attempt runs, not only on success.
+    lib = Library(os.environ["LINKLIB_DB"])
+    assert lib.get_tool(a)["app_screenshot_source_url"] == "https://runway.com/demo"
+    lib.close()
 
 
 def test_admin_app_screenshot_recapture_requires_auth(env):
@@ -328,9 +370,34 @@ def test_admin_communities_app_screenshot_recapture_success(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/communities/{c}/app-screenshot/recapture", follow_redirects=False)
+    r = client.post(f"/admin/tools/communities/{c}/app-screenshot/recapture",
+                     data={"app_screenshot_source_url": "https://fpaclub.example/join"}, follow_redirects=False)
     assert r.status_code == 303
     assert "app_screenshot_captured=1" in r.headers["location"]
+
+
+def test_admin_communities_app_screenshot_recapture_uses_posted_url_not_stale_db_value(env, monkeypatch):
+    """Communities equivalent of the tools-side proof above — same shared
+    _app_screenshot_admin_section markup, same fix."""
+    written = _mock_playwright_success(monkeypatch)
+    lib = Library(os.environ["LINKLIB_DB"])
+    c = lib.add_community("FP&A Club", "https://fpaclub.example", "CFOs", "Free", ["FP&A"], approved=1)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/communities/{c}/app-screenshot/recapture",
+                     data={"app_screenshot_source_url": "https://fpaclub.example/never-saved-join"},
+                     follow_redirects=False)
+    assert r.status_code == 303
+    assert "app_screenshot_captured=1" in r.headers["location"]
+    assert written["url"] == "https://fpaclub.example/never-saved-join"
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    community = lib.get_community(c)
+    assert community["app_screenshot_url"]
+    assert community["app_screenshot_source_url"] == "https://fpaclub.example/never-saved-join"
+    lib.close()
 
 
 # -- admin upload route (manual crop-and-upload) -----------------------------

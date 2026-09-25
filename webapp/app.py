@@ -1445,14 +1445,19 @@ def _validate_citations_payload(raw: str) -> list[dict]:
     return out
 
 
-def _ai_drafted_field_names(form) -> set[str]:
+def _ai_drafted_field_names(form, key: str = "ai_drafted_fields") -> set[str]:
     """The submitted ai_drafted_fields hidden input (see markAiDrafted in the
     edit-form JS), parsed into a set of field names — shared by
     _record_ai_drafted_reviews below and by the edit-submit routes that need
     to know, at save time, whether a specific field's current value is a
     freshly-generated-this-session AI draft (Description/Differentiation/
-    the Community profile draft's needs-verification flags, Phase G PR 2)."""
-    raw = (form.get("ai_drafted_fields") or "").strip()
+    the Community profile draft's needs-verification flags, Phase G PR 2).
+
+    `key` (Edit-page-fixes item 3) generalizes the same comma-separated-
+    field-name parsing to confirm_verified_fields — the hidden input
+    saveAndMarkVerified populates — since it's the identical shape (see
+    that JS function's own comment)."""
+    raw = (form.get(key) or "").strip()
     return {f.strip() for f in raw.split(",") if f.strip()}
 
 
@@ -3047,7 +3052,6 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
             f'style="width:100%;height:auto;border:1px solid var(--line);border-radius:10px;display:block;">'
             f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">{_esc(cap_note)}</p></div>'
         )
-    recapture_disabled = "" if source_url else ' disabled title="Enter a source URL above, then Save changes, first."'
     # Phase Q: confirmDiscardsUnsavedEdits checks a specific form's dirty
     # state, so the shared helper needs the right form id per entity type—
     # the Software edit page's own 'tool-edit-form' isn't the Community edit
@@ -3056,26 +3060,43 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     _confirm_form_id = "tool-edit-form" if kind == "tools" else "comm-edit-form"
     _gen_host_id = f"gen-host-app-screenshot-{idsfx}"
 
+    # Edit-page-fixes item 2: "Generate app screenshot" used to require a
+    # prior Save — the recapture route read app_screenshot_source_url back
+    # from the DB, and the hidden recapture form it submits carried no
+    # fields at all, so a URL just typed into this input (never yet saved)
+    # was invisible to the request. Fixed client-side, not by making the
+    # recapture route a full AJAX call (that would diverge from the
+    # homepage "Generate" button's own synchronous-reload shape, and this
+    # is a one-off admin action, not worth a bigger rewrite): the button's
+    # onclick reads the input's LIVE value and copies it into a hidden
+    # field on the recapture form before submitting, so whatever's
+    # currently typed — saved or not — is what gets captured. An empty
+    # value is refused client-side (submitAppScreenshotRecapture, below)
+    # with a visible inline error, never a disabled-button tooltip (a
+    # screen reader and a touch device both miss a title attribute).
     in_form_html = f"""  <div id="{_gen_host_id}">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">App screenshot</label>
     <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">No single reliable URL for "the app"—a login/demo/product-tour page you have public access to. This is inherently manual/curated, not something to fill in for every record.</p>
-    <input name="app_screenshot_source_url"{_form_attr} type="text" maxlength="500" value="{_esc(source_url)}"
+    <input id="app-screenshot-source-url-{idsfx}" name="app_screenshot_source_url"{_form_attr} type="text" maxlength="500" value="{_esc(source_url)}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/demo">
+    <p id="app-screenshot-recapture-err-{idsfx}" style="display:none;"></p>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-      <button type="submit" form="app-screenshot-recapture-form-{idsfx}" class="tool-admin-btn"{recapture_disabled}
-        onclick="return confirmDiscardsUnsavedEdits(this, '{_confirm_form_id}') && startGenAnim('{_gen_host_id}')">Generate app screenshot</button>
+      <button type="submit" form="app-screenshot-recapture-form-{idsfx}" class="tool-admin-btn"
+        onclick="return submitAppScreenshotRecapture('{idsfx}') && confirmDiscardsUnsavedEdits(this, '{_confirm_form_id}') && startGenAnim('{_gen_host_id}')">Generate app screenshot</button>
       <button type="button" class="tool-admin-btn" onclick="document.getElementById('app-screenshot-file-{idsfx}').click()">Upload app screenshot&hellip;</button>
     </div>
     <input type="file" id="app-screenshot-file-{idsfx}" accept="image/jpeg,image/png,image/webp" style="display:none;"
-      onchange="handleAppScreenshotFile(this, '{idsfx}')">
+      onchange="handleShotFile(this, '{idsfx}', 'app')">
     <p id="app-screenshot-upload-err-{idsfx}" style="display:none;"></p>
-    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Generate captures the source URL above at the same fixed size as the homepage screenshot. Upload lets you crop your own image instead (a vendor press kit shot, a screenshot you took yourself)&mdash;either way overwrites whatever app screenshot is already saved.</p>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Generate captures the URL above right now (no need to save first) at the same fixed size as the homepage screenshot, and saves that URL along with the image. Upload lets you crop your own image instead (a vendor press kit shot, a screenshot you took yourself)&mdash;either way overwrites whatever app screenshot is already saved.</p>
     {banner_html}
     <div style="margin-top:8px;">{preview_html}</div>
   </div>"""
 
-    after_form_html = f"""<form id="app-screenshot-recapture-form-{idsfx}" method="post" action="{route_prefix}/app-screenshot/recapture" style="display:none;"></form>
+    after_form_html = f"""<form id="app-screenshot-recapture-form-{idsfx}" method="post" action="{route_prefix}/app-screenshot/recapture" style="display:none;">
+  <input type="hidden" name="app_screenshot_source_url" id="app-screenshot-recapture-url-{idsfx}">
+</form>
 <form id="app-screenshot-upload-form-{idsfx}" method="post" action="{route_prefix}/app-screenshot/upload" enctype="multipart/form-data" style="display:none;">
   <input type="file" name="file" id="app-screenshot-upload-input-{idsfx}">
 </form>
@@ -3084,8 +3105,8 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     <p class="shot-crop-title">Crop app screenshot</p>
     <div class="shot-crop-stage"><img id="app-screenshot-crop-img-{idsfx}"></div>
     <div class="shot-crop-actions">
-      <button type="button" class="btn btn-ghost" onclick="cancelAppScreenshotCrop('{idsfx}')">Cancel</button>
-      <button type="button" class="btn" onclick="confirmAppScreenshotCrop('{idsfx}')">Use this crop</button>
+      <button type="button" class="btn btn-ghost" onclick="cancelShotCrop('{idsfx}', 'app')">Cancel</button>
+      <button type="button" class="btn" onclick="confirmShotCrop('{idsfx}', 'app')">Use this crop</button>
     </div>
   </div>
 </div>"""
@@ -3163,25 +3184,25 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
     in_form_html = f"""<div id="gen-host-logo-{idsfx}">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Logo{source_badge}</label>
     <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Logos update automatically once a month. A logo you set here overrides
-      that and stays put. Use &quot;Revert and re-fetch&quot; to pull a fresh logo right now instead of waiting for the next update&mdash;if
+      that and stays put. Use &quot;Pull from Logo.dev&quot; to pull a fresh logo right now instead of waiting for the next update&mdash;if
       nothing usable turns up, it reverts to automatic so next month's update can try again.</p>
     {banner_html}
     {stale_banner_html}
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
       {_logo_box(entity['name'], logo_url, 64, radius=10)}
-      <div style="flex:1;min-width:260px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;flex:1;min-width:220px;">
+      <div style="flex:1;min-width:260px;display:grid;gap:10px;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <input form="logo-seturl-form-{idsfx}" name="logo_url" type="text" maxlength="500"
-            style="flex:1;min-width:140px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
+            style="flex:1 1 160px;min-width:0;max-width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
             placeholder="https://…/logo.png">
-          <button type="submit" form="logo-seturl-form-{idsfx}" class="tool-admin-btn">Fetch from URL</button>
+          <button type="submit" form="logo-seturl-form-{idsfx}" class="tool-admin-btn" style="flex-shrink:0;">Fetch from URL</button>
+          <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn" style="flex-shrink:0;"{clear_disabled}>Pull from Logo.dev</button>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <input form="logo-upload-form-{idsfx}" type="file" name="file" accept="image/jpeg,image/png,image/webp" required
-            style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);max-width:180px;">
-          <button type="submit" form="logo-upload-form-{idsfx}" class="tool-admin-btn">Upload</button>
+            style="flex:1 1 160px;min-width:0;max-width:100%;box-sizing:border-box;font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+          <button type="submit" form="logo-upload-form-{idsfx}" class="tool-admin-btn" style="flex-shrink:0;">Upload</button>
         </div>
-        <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn"{clear_disabled}>Revert and re-fetch from Logo.dev</button>
       </div>
     </div>
   </div>"""
@@ -3291,21 +3312,30 @@ def _live_refetch_logo(lib: "Library", kind: str, entity_id: int, entity: dict) 
 
 
 # Shared client-side crop flow (Phase E) for the "Upload app screenshot"
-# button on both edit pages. Cropper.js (CDN, no pip dependency — see
-# requirements.txt for why this phase didn't need one) drives the crop UI;
-# the confirmed crop is rendered to a fixed-size PNG canvas client-side
-# (matching .tp-shot-frame's 4:3 ratio) and submitted as a File via
-# DataTransfer, so no server-side image-processing library (e.g. Pillow) is
-# needed either — the upload route only validates and saves what the browser
-# already produced at the right size. Validation (size/type) happens twice:
-# here, before the crop modal even opens (Phase M's showGenError/
-# clearGenError coral-box treatment), and again server-side in the upload
-# route (_sniff_image_mime, same as the brand avatar upload) — never trust
-# client-side validation alone.
+# button on both edit pages, generalized (item A4) to a `slot` parameter
+# ('app' or 'home') so the identical Cropper.js machinery also drives the
+# Software edit page's "Upload homepage screenshot" control — the app slot's
+# element ids were always literally "app-screenshot-*", so slot='app'
+# reproduces those exact ids (zero markup change for the existing app-slot
+# callers); slot='home' gives the new homepage-upload markup its own,
+# non-colliding "home-screenshot-*" ids for free. Cropper.js (CDN, no pip
+# dependency — see requirements.txt for why this phase didn't need one)
+# drives the crop UI; the confirmed crop is rendered to a fixed-size PNG
+# canvas client-side (matching .tp-shot-frame's 4:3 ratio, the same frame
+# both the homepage and app screenshot slides render inside on the public
+# profile) and submitted as a File via DataTransfer, so no server-side
+# image-processing library (e.g. Pillow) is needed either — the upload
+# route only validates and saves what the browser already produced at the
+# right size. Validation (size/type) happens twice: here, before the crop
+# modal even opens (Phase M's showGenError/clearGenError coral-box
+# treatment), and again server-side in the upload route (_sniff_image_mime,
+# same as the brand avatar upload) — never trust client-side validation
+# alone.
 _APP_SCREENSHOT_CROP_JS = """
 var _shotCroppers = {};
-function handleAppScreenshotFile(input, idsfx) {
-  var errBoxId = 'app-screenshot-upload-err-' + idsfx;
+function handleShotFile(input, idsfx, slot) {
+  var key = slot + '-' + idsfx;
+  var errBoxId = slot + '-screenshot-upload-err-' + idsfx;
   clearGenError(errBoxId);
   var file = input.files && input.files[0];
   if (!file) return;
@@ -3323,30 +3353,55 @@ function handleAppScreenshotFile(input, idsfx) {
   }
   var reader = new FileReader();
   reader.onload = function(e) {
-    var overlay = document.getElementById('app-screenshot-crop-overlay-' + idsfx);
-    var img = document.getElementById('app-screenshot-crop-img-' + idsfx);
+    var overlay = document.getElementById(slot + '-screenshot-crop-overlay-' + idsfx);
+    var img = document.getElementById(slot + '-screenshot-crop-img-' + idsfx);
     img.src = e.target.result;
     overlay.classList.add('open');
-    if (_shotCroppers[idsfx]) _shotCroppers[idsfx].destroy();
-    _shotCroppers[idsfx] = new Cropper(img, {aspectRatio: 4 / 3, viewMode: 1, autoCropArea: 1, background: false});
+    if (_shotCroppers[key]) _shotCroppers[key].destroy();
+    _shotCroppers[key] = new Cropper(img, {aspectRatio: 4 / 3, viewMode: 1, autoCropArea: 1, background: false});
   };
   reader.readAsDataURL(file);
 }
-function cancelAppScreenshotCrop(idsfx) {
-  document.getElementById('app-screenshot-crop-overlay-' + idsfx).classList.remove('open');
-  if (_shotCroppers[idsfx]) { _shotCroppers[idsfx].destroy(); delete _shotCroppers[idsfx]; }
-  document.getElementById('app-screenshot-file-' + idsfx).value = '';
+function cancelShotCrop(idsfx, slot) {
+  var key = slot + '-' + idsfx;
+  document.getElementById(slot + '-screenshot-crop-overlay-' + idsfx).classList.remove('open');
+  if (_shotCroppers[key]) { _shotCroppers[key].destroy(); delete _shotCroppers[key]; }
+  document.getElementById(slot + '-screenshot-file-' + idsfx).value = '';
 }
-function confirmAppScreenshotCrop(idsfx) {
-  var cropper = _shotCroppers[idsfx];
+function confirmShotCrop(idsfx, slot) {
+  var key = slot + '-' + idsfx;
+  var cropper = _shotCroppers[key];
   if (!cropper) return;
   cropper.getCroppedCanvas({width: 1280, height: 960}).toBlob(function(blob) {
     var dt = new DataTransfer();
-    dt.items.add(new File([blob], 'app-screenshot.png', {type: 'image/png'}));
-    document.getElementById('app-screenshot-upload-input-' + idsfx).files = dt.files;
-    cancelAppScreenshotCrop(idsfx);
-    document.getElementById('app-screenshot-upload-form-' + idsfx).submit();
+    dt.items.add(new File([blob], slot + '-screenshot.png', {type: 'image/png'}));
+    document.getElementById(slot + '-screenshot-upload-input-' + idsfx).files = dt.files;
+    cancelShotCrop(idsfx, slot);
+    document.getElementById(slot + '-screenshot-upload-form-' + idsfx).submit();
   }, 'image/png');
+}
+// Edit-page-fixes item 2: reads the App screenshot source-URL input's LIVE
+// value (saved or not) and copies it into the hidden recapture form's own
+// field before that form submits — see _app_screenshot_admin_section's own
+// comment for why this exists (the recapture route used to read the
+// persisted DB value, so a URL typed but not yet Saved was invisible to
+// it). An empty value is refused here, inline, rather than disabling the
+// button (a disabled button's title tooltip is invisible to a screen
+// reader and unreachable on a touch device) — chained with && in the
+// caller's onclick, same convention as confirmDiscardsUnsavedEdits/
+// startGenAnim, so an empty URL short-circuits before either of those run.
+function submitAppScreenshotRecapture(idsfx) {
+  var errBoxId = 'app-screenshot-recapture-err-' + idsfx;
+  clearGenError(errBoxId);
+  var input = document.getElementById('app-screenshot-source-url-' + idsfx);
+  var url = ((input && input.value) || '').trim();
+  if (!url) {
+    showGenError(errBoxId, 'Enter a URL to capture first.');
+    return false;
+  }
+  var hidden = document.getElementById('app-screenshot-recapture-url-' + idsfx);
+  if (hidden) hidden.value = url;
+  return true;
 }
 """
 
@@ -12418,6 +12473,69 @@ function unmarkAiDrafted(fieldName) {
     lowConfEl.value = lcPairs.join(',');
   }
 }
+// Edit-page-fixes item 3: "Mark verified" used to only appear after a
+// round trip through Save (the badge/button were server-rendered from the
+// DB's own needs_verification column, which a stateless Generate call
+// never touches — see generateDescription/generateDifferentiation below).
+// These three functions build the identical badge/button markup
+// _narrative_verify_widget renders server-side, client-side, so a fresh
+// draft shows it immediately. saveAndMarkVerified never marks the OLD
+// saved text verified — it marks confirm-verified-fields (a hidden input
+// parsed by _ai_drafted_field_names server-side, same shape as
+// ai-drafted-fields) and submits the real edit form with save_action=
+// continue, so the save and the verification happen together, against
+// whatever text is actually in the textarea right now.
+function showSaveAndMarkVerified(fieldName, badgeHostId, actionHostId) {
+  var badgeHost = document.getElementById(badgeHostId);
+  if (badgeHost) {
+    badgeHost.innerHTML = '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;'
+      + 'text-transform:uppercase;background:var(--coral-wash);color:var(--navy);border-radius:5px;'
+      + 'padding:2px 7px;margin-left:8px;">Needs verification</span>';
+  }
+  var actionHost = document.getElementById(actionHostId);
+  if (actionHost) {
+    actionHost.innerHTML = '';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tool-admin-btn';
+    btn.style.marginTop = '8px';
+    btn.textContent = 'Save and mark verified';
+    btn.onclick = function() { saveAndMarkVerified(fieldName); };
+    actionHost.appendChild(btn);
+  }
+}
+// Reverses showSaveAndMarkVerified — used when a field is hand-edited
+// right after a Generate call (see generateDescription's onEdit listener):
+// once the draft is no longer AI-drafted-this-session, an ordinary Save
+// treats the edit as its own confirmation and needs_verification comes
+// back 0 automatically, so there's nothing left to verify and the injected
+// badge/button should disappear rather than point at a stale action.
+function hideSaveAndMarkVerified(badgeHostId, actionHostId) {
+  var badgeHost = document.getElementById(badgeHostId);
+  if (badgeHost) badgeHost.innerHTML = '';
+  var actionHost = document.getElementById(actionHostId);
+  if (actionHost) actionHost.innerHTML = '';
+}
+function saveAndMarkVerified(fieldName) {
+  var confirmInput = document.getElementById('confirm-verified-fields');
+  if (confirmInput) {
+    var fields = confirmInput.value ? confirmInput.value.split(',').filter(function(f) { return f; }) : [];
+    if (fields.indexOf(fieldName) === -1) fields.push(fieldName);
+    confirmInput.value = fields.join(',');
+  }
+  var form = document.getElementById('tool-edit-form');
+  if (!form) return;
+  var actionInput = document.getElementById('tool-edit-save-action');
+  if (!actionInput) {
+    actionInput = document.createElement('input');
+    actionInput.type = 'hidden';
+    actionInput.id = 'tool-edit-save-action';
+    actionInput.name = 'save_action';
+    form.appendChild(actionInput);
+  }
+  actionInput.value = 'continue';
+  if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
+}
 // Citations-API grounding fix, Phase 2 — the citations a stateless
 // generate-description call handed back, carried to the submit route as
 // JSON in a hidden field (server-side validated again on arrival — see
@@ -12552,18 +12670,30 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
         markAiConfidence('summary', d.confident); markAiLowConfidence('summary', d.low_confidence);
       }
     }
+    // Edit-page-fixes item 3: show "Mark verified" (as "Save and mark
+    // verified" — there's no saved draft yet for a plain verify click to
+    // point at) the moment this draft lands, not after a separate Save
+    // round trip. Short summary has no verify widget of its own — this one
+    // badge/button already covers both fields, same as the server-rendered
+    // version does via description_needs_verification.
+    showSaveAndMarkVerified('description', 'description-verify-badge', 'description-verify-action');
     // A hand-edit to the description after this Generate call means its
     // text no longer matches what the citations above actually ground—
     // clear the AI-drafted-this-session flag and the citations together the
     // moment the admin types, so a save right after doesn't ship stale
     // citations against edited text. One-time listener: re-attached on the
     // next successful Generate, since a fresh draft needs the same guard.
+    // Also retracts the just-shown Save-and-mark-verified action: once the
+    // field is no longer AI-drafted-this-session, an ordinary Save clears
+    // needs_verification on its own (editing is itself a confirmation), so
+    // there's nothing left to verify.
     (function() {
       var descEl = document.getElementById(descId);
       if (!descEl) return;
       function onEdit() {
         unmarkAiDrafted('description');
         clearAiCitations();
+        hideSaveAndMarkVerified('description-verify-badge', 'description-verify-action');
         descEl.removeEventListener('input', onEdit);
       }
       descEl.addEventListener('input', onEdit);
@@ -18880,20 +19010,29 @@ def admin_communities_screenshot_recapture(request: Request, community_id: int):
 
 
 @app.post("/admin/tools/communities/{community_id}/app-screenshot/recapture")
-def admin_communities_app_screenshot_recapture(request: Request, community_id: int):
+async def admin_communities_app_screenshot_recapture(request: Request, community_id: int):
     """App-screenshot equivalent of admin_communities_screenshot_recapture
     (Phase E) — mirrors admin_tools_app_screenshot_recapture exactly, own
-    directory (_COMMUNITY_SCREENSHOT_DIR)."""
+    directory (_COMMUNITY_SCREENSHOT_DIR). Edit-page-fixes item 2: reads the
+    source URL from the POSTED form field (the recapture form's hidden
+    app_screenshot_source_url input, set client-side from the visible
+    input's live value right before submit — see submitAppScreenshotRecapture)
+    rather than the persisted DB value, so a URL typed but not yet Saved is
+    captured immediately, and persists it via update_community_app_screenshot_source
+    in the same request regardless of whether the capture itself succeeds —
+    a failed capture never leaves the typed URL lost."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    source_url = (form.get("app_screenshot_source_url") or "").strip()
     lib = _lib()
     try:
         community = lib.get_community(community_id)
         if not community:
             raise HTTPException(status_code=404, detail="Community not found")
-        source_url = (community.get("app_screenshot_source_url") or "").strip()
         ok = False
         if source_url:
+            lib.update_community_app_screenshot_source(community_id, source_url)
             from linklib.screenshots import capture_homepage
             dest = os.path.join(_COMMUNITY_SCREENSHOT_DIR, f"{community['slug']}-app.png")
             ok = capture_homepage(source_url, dest)
@@ -20071,6 +20210,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="">
   <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
   <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
+  <input type="hidden" id="confirm-verified-fields" name="confirm_verified_fields" value="">
 
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
@@ -20158,12 +20298,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—reviewing or verifying that field covers this one too.</p>
         </div>
         <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description *{_description_verify_badge}</label>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description *<span id="description-verify-badge">{_description_verify_badge}</span></label>
           <textarea id="tool-desc" name="description" required {_desc_attrs} rows="14"
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
           {_desc_counter}
-          {_description_verify_action}
+          <span id="description-verify-action">{_description_verify_action}</span>
           {_citations_list_html(description_citations,
                                 empty_note="No sources recorded for this draft—it was either written by hand, "
                                            "or the AI had no page content available to cite.")}
@@ -20199,6 +20339,19 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 </form>
 <form id="research-refresh-form" method="post" action="/admin/tools/software/{tool_id}/research/refresh" style="display:none;"></form>
 <form id="screenshot-recapture-form" method="post" action="/admin/tools/software/{tool_id}/screenshot/recapture" style="display:none;"></form>
+<form id="home-screenshot-upload-form-tools-{tool_id}" method="post" action="/admin/tools/software/{tool_id}/screenshot/upload" enctype="multipart/form-data" style="display:none;">
+  <input type="file" name="file" id="home-screenshot-upload-input-tools-{tool_id}">
+</form>
+<div id="home-screenshot-crop-overlay-tools-{tool_id}" class="shot-crop-overlay">
+  <div class="shot-crop-modal">
+    <p class="shot-crop-title">Crop homepage screenshot</p>
+    <div class="shot-crop-stage"><img id="home-screenshot-crop-img-tools-{tool_id}"></div>
+    <div class="shot-crop-actions">
+      <button type="button" class="btn btn-ghost" onclick="cancelShotCrop('tools-{tool_id}', 'home')">Cancel</button>
+      <button type="button" class="btn" onclick="confirmShotCrop('tools-{tool_id}', 'home')">Use this crop</button>
+    </div>
+  </div>
+</div>
 {_app_screenshot_after_form_html}
 {_taxonomy_verify_form_html}
 {_description_verify_form_html}
@@ -20230,7 +20383,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
   <div id="gen-host-tool-differentiation">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Bottom line{_differentiation_verify_badge}</label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Bottom line<span id="differentiation-verify-badge">{_differentiation_verify_badge}</span></label>
       <span>
         <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err', 'gen-host-tool-differentiation')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>
@@ -20242,7 +20395,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('competitive_differentiation') or '')}</textarea>
     {_diff_counter}
     <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Generated from the Description and competitor list above. Editing either one afterward won't update this automatically&mdash;click Generate summary again to refresh it.</p>
-    {_differentiation_verify_action}
+    <span id="differentiation-verify-action">{_differentiation_verify_action}</span>
     {_differentiation_confidence_html}
     {_differentiation_review_line_html}
   </div>
@@ -20254,9 +20407,10 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   <div id="gen-host-tool-screenshot-home" style="margin-bottom:28px;">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Homepage</label>
-      <span>
+      <span style="display:flex;gap:8px;flex-wrap:wrap;">
         <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn"
           onclick="return confirmDiscardsUnsavedEdits(this, 'tool-edit-form') && startGenAnim('gen-host-tool-screenshot-home')">Generate homepage screenshot</button>
+        <button type="button" class="tool-admin-btn" onclick="document.getElementById('home-screenshot-file-tools-{tool_id}').click()">Upload homepage screenshot&hellip;</button>
       </span>
     </div>
     <!-- type="text", not "url": Generate screenshot writes a site-relative
@@ -20267,7 +20421,16 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <input name="screenshot_url" form="tool-edit-form" type="text" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
-    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture takes a fresh screenshot of the homepage at a standard size. To use a different image entirely, paste its URL above and click Save changes.</p>
+    <!-- Edit-page-fixes item 4: the same Cropper.js crop flow the App
+         screenshot slot already uses (_APP_SCREENSHOT_CROP_JS,
+         generalized to a `slot` param for exactly this reuse), pointed at
+         the homepage slot instead — both slots render at the identical
+         fixed size on the public profile (.tp-shot-frame's 4:3 ratio), so
+         a homepage upload needs no separate crop target. -->
+    <input type="file" id="home-screenshot-file-tools-{tool_id}" accept="image/jpeg,image/png,image/webp" style="display:none;"
+      onchange="handleShotFile(this, 'tools-{tool_id}', 'home')">
+    <p id="home-screenshot-upload-err-tools-{tool_id}" style="display:none;"></p>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture takes a fresh screenshot of the homepage at a standard size. To use a different image entirely, paste its URL above and click Save changes, or upload and crop your own image&mdash;either way overwrites whatever screenshot is already saved and shows as manually set, no capture date.</p>
     {_screenshot_banner_html}
     <div style="margin-top:8px;">{_screenshot_preview_html}</div>
   </div>
@@ -20333,6 +20496,11 @@ async function generateDifferentiation(toolId, textareaId, statusId, errBoxId, h
     markAiDrafted('competitive_differentiation');
     markAiConfidence('competitive_differentiation', d.confident);
     markAiLowConfidence('competitive_differentiation', d.low_confidence);
+    // Edit-page-fixes item 3 — same immediate reveal as generateDescription's
+    // own call, no onEdit undo here since this field has never had one (a
+    // hand-edit after Generate stays AI-drafted-this-session, same as
+    // before this fix — see the module-level note on that asymmetry).
+    showSaveAndMarkVerified('competitive_differentiation', 'differentiation-verify-badge', 'differentiation-verify-action');
     status.textContent = d.low_confidence
       ? 'Drafted. No competitors curated yet, so this is weaker than it could be—review carefully.'
       : 'Drafted. Review before saving.';
@@ -20416,6 +20584,22 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     ai_low_confidence = _ai_drafted_field_low_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     competitive_differentiation_needs_verification = 1 if "competitive_differentiation" in ai_drafted else 0
+    # Edit-page-fixes item 3: "Save and mark verified" (saveAndMarkVerified,
+    # the edit-form JS) submits this same route with the field name added to
+    # confirm_verified_fields, so the one click that saves a just-drafted
+    # field also clears its needs_verification — against whatever text is
+    # actually in the textarea THIS submit, never a stale, previously-saved
+    # value (there's no separate "verify" step that could point at
+    # something else). Forcing needs_verification to 0 here — after it was
+    # computed from ai_drafted above — deliberately never skips the two-tier
+    # length guard: it's still the exact same lib.update_tool/
+    # update_tool_differentiation call below, which still raises on an
+    # over-max draft regardless of this flag.
+    confirm_verified = _ai_drafted_field_names(form, key="confirm_verified_fields")
+    if "description" in confirm_verified:
+        description_needs_verification = 0
+    if "competitive_differentiation" in confirm_verified:
+        competitive_differentiation_needs_verification = 0
     # Whole-record profile signoff (2026-08 consolidation) — auto-linked to
     # per-field regeneration, mirroring Communities' `needs_review =
     # existing-value OR profile_ai_drafted` pattern precisely for the two
@@ -20502,6 +20686,19 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
         lib.set_tool_needs_review(tool_id, needs_review)
         _record_ai_drafted_reviews(lib, request, "tool", tool_id, form)
+        # Edit-page-fixes item 3: a genuine "Mark verified" click — logged to
+        # narrative_review_log exactly like the standalone
+        # /description/verify and /differentiation/verify routes below, so
+        # the "Verified by X on Y" line is accurate regardless of which of
+        # the two paths (a plain verify click on already-saved text, or
+        # Save-and-mark-verified on a fresh draft) produced it.
+        if "description" in confirm_verified:
+            lib.record_narrative_review(
+                _current_user_id(lib, request), "tool", "description", tool_id, detail=description)
+        if "competitive_differentiation" in confirm_verified:
+            lib.record_narrative_review(
+                _current_user_id(lib, request), "tool", "differentiation", tool_id,
+                detail=competitive_differentiation)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     except ValueError as e:
@@ -20550,16 +20747,28 @@ def admin_tools_screenshot_recapture(request: Request, tool_id: int):
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
 
 
-@app.post("/admin/tools/software/{tool_id}/app-screenshot/recapture")
-def admin_tools_app_screenshot_recapture(request: Request, tool_id: int):
-    """App-screenshot equivalent of admin_tools_screenshot_recapture (Phase
-    E) — same synchronous-Playwright-in-request pattern and the same
-    capture_homepage() function (URL-agnostic despite the name — every
-    existing caller just always happened to pass the homepage url; this is
-    the first caller that doesn't), the only difference is the source URL
-    (app_screenshot_source_url, not the tool's own url) and the destination
-    filename ({slug}-app.png, not {slug}.png — same directory, no new
-    serving route needed, see _SCREENSHOT_DIR/_APP_SCREENSHOT_MAX_BYTES)."""
+@app.post("/admin/tools/software/{tool_id}/screenshot/upload")
+async def admin_tools_screenshot_upload(request: Request, tool_id: int, file: UploadFile = File(...)):
+    """Manual homepage-screenshot upload (item A4) — the manual alternative
+    to Generate/Recapture, for a case like Payhawk's (a captured homepage
+    that caught a cookie banner): admin_tools_app_screenshot_upload's own
+    crop flow, generalized to a `slot` param (see _APP_SCREENSHOT_CROP_JS)
+    and pointed at the homepage slot instead, so both slots share one
+    validate-magic-bytes-not-Pillow upload route shape and one Cropper.js
+    flow — same fixed size the profile page displays either slot at
+    (.tp-shot-frame's 4:3 ratio).
+
+    Unlike set_tool_app_screenshot (which always stamps a capture time,
+    upload or generate alike — see that method's own docstring for why
+    there's no such distinction on the app slot), this calls
+    update_tool_screenshot_url — the SAME method the hand-typed Screenshot
+    URL field already uses — so an uploaded image reads "Manually set—no
+    capture date," exactly like a hand-pasted URL. Only Recapture (which
+    stamps a fresh time via set_tool_screenshot_capture) ever claims
+    "Captured {date}" for the homepage slot; screenshot_is_product is
+    untouched either way, same as the existing hand-pasted-URL path — it's
+    a frozen, non-behavioral historical marker (see its own schema
+    comment), not something this upload needs to set."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
@@ -20567,9 +20776,58 @@ def admin_tools_app_screenshot_recapture(request: Request, tool_id: int):
         tool = lib.get_tool(tool_id)
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
-        source_url = (tool.get("app_screenshot_source_url") or "").strip()
+        data = await file.read()
+        ok = len(data) <= _APP_SCREENSHOT_MAX_BYTES and _sniff_image_mime(data) is not None
+        if ok:
+            dest = os.path.join(_SCREENSHOT_DIR, f"{tool['slug']}.png")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(data)
+            served_url = f"{_public_base_url(request)}/tools/software/screenshot/{tool['slug']}.png?v={int(time.time())}"
+            lib.update_tool_screenshot_url(tool_id, served_url)
+    finally:
+        lib.close()
+    msg = "screenshot_captured=1" if ok else "screenshot_captured=0"
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/software/{tool_id}/app-screenshot/recapture")
+async def admin_tools_app_screenshot_recapture(request: Request, tool_id: int):
+    """App-screenshot equivalent of admin_tools_screenshot_recapture (Phase
+    E) — same synchronous-Playwright-in-request pattern and the same
+    capture_homepage() function (URL-agnostic despite the name — every
+    existing caller just always happened to pass the homepage url; this is
+    the first caller that doesn't), the only difference is the source URL
+    (app_screenshot_source_url, not the tool's own url) and the destination
+    filename ({slug}-app.png, not {slug}.png — same directory, no new
+    serving route needed, see _SCREENSHOT_DIR/_APP_SCREENSHOT_MAX_BYTES).
+
+    Edit-page-fixes item 2: this used to read app_screenshot_source_url back
+    from the DB, and the hidden recapture form it's bound to carried no
+    fields at all — so "Generate app screenshot" only worked after a prior
+    "Save changes" had persisted whatever was typed. Fixed by reading the
+    source URL from the POSTED form field instead (a hidden input on the
+    recapture form, filled client-side from the visible input's live value
+    right before submit — see submitAppScreenshotRecapture), and persisting
+    it via update_tool_app_screenshot_source in this same request regardless
+    of whether the capture itself succeeds, so a failed capture never loses
+    the URL the admin just typed. Mirrors the homepage "Generate" button's
+    own synchronous-reload shape — see confirmDiscardsUnsavedEdits's comment
+    for the pre-existing, unchanged trade-off that a full-page reload on
+    Generate discards any other unsaved edit on the page, warned by that
+    same confirm() dialog either way."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    source_url = (form.get("app_screenshot_source_url") or "").strip()
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
         ok = False
         if source_url:
+            lib.update_tool_app_screenshot_source(tool_id, source_url)
             from linklib.screenshots import capture_homepage
             dest = os.path.join(_SCREENSHOT_DIR, f"{tool['slug']}-app.png")
             ok = capture_homepage(source_url, dest)

@@ -10316,6 +10316,100 @@ it supersedes the old "`/save` is token-gated" note.
   the task's own instruction. See BRAND.md §5's width-tier table for the
   corrected `.page-form` row.
 
+- **Software edit page — four admin fixes (2026-09).** Four independent
+  live-use gaps on `/tools/software/{slug}/edit`, fixed in one PR.
+  1. **Logo controls split into two rows** (`_logo_admin_section`, shared
+     with the Community edit page) — URL input + "Fetch from URL" +
+     "Pull from Logo.dev" (renamed from "Revert and re-fetch from
+     Logo.dev") on row one, file chooser + "Upload" on row two, preview to
+     the left of both. Every input on both rows carries `min-width:0` (a
+     flex item's default `min-width:auto` resists shrinking below its
+     intrinsic content — the same file-input-intrinsic-width lesson the
+     Overhead Spend investigation documented for date inputs, applied here
+     to the same failure class) so neither row can overlap or clip at a
+     narrower viewport (verified live at 1280/960/390px).
+  2. **"Generate app screenshot" no longer requires a prior Save**
+     (`admin_tools_app_screenshot_recapture`/
+     `admin_communities_app_screenshot_recapture`, both `_app_screenshot_
+     admin_section` call sites). Root cause: the route read
+     `app_screenshot_source_url` back from the DB, and the hidden
+     recapture `<form>` it submits carried no fields at all — a URL just
+     typed but never Saved was invisible to the request. Fixed
+     client-side: `submitAppScreenshotRecapture` reads the visible input's
+     live value, copies it into a new hidden field on the recapture form,
+     and refuses an empty value with a visible inline error (never a
+     disabled-button tooltip — invisible to a screen reader and
+     unreachable on touch) before `confirmDiscardsUnsavedEdits`/
+     `startGenAnim` run. The route itself now reads that posted field and
+     persists it via `update_tool_app_screenshot_source`/
+     `update_community_app_screenshot_source` in the same request,
+     regardless of whether the capture succeeds — a failed capture never
+     loses the typed URL. Still a synchronous full-page-reload form submit,
+     same shape as the homepage "Generate" button — which has the
+     identical "discards other unsaved edits" trade-off, mitigated only by
+     the pre-existing `confirm()` warning either way; not redesigned here.
+  3. **"Mark verified" appears the moment a Generate call returns a
+     draft**, for Description/Short summary and Competitive
+     differentiation — both are stateless AJAX calls
+     (`generateDescription`/`generateDifferentiation`) that never touch
+     the database, so the server-rendered badge/button (driven by
+     `description_needs_verification`/
+     `competitive_differentiation_needs_verification`) couldn't reflect an
+     unsaved draft; only a full Save-then-reload round trip made it show.
+     **Agent taxonomy already worked in one click** — its "Generate
+     summary" is a real synchronous form submit
+     (`research-refresh-form` → `/research/refresh` →
+     `_run_tool_research`) that persists `agent_taxonomy_needs_
+     verification` to the DB directly, before redirecting back to the
+     edit page, so the claim that it also needed a Save round trip didn't
+     hold; a regression test pins this as a control. Fixed for the two
+     stateless fields with a new "Save and mark verified" action
+     (`showSaveAndMarkVerified`/`saveAndMarkVerified`, injected right into
+     the description/differentiation verify-widget host `<span>`s) that
+     submits the real edit form with the field name added to a new hidden
+     `confirm_verified_fields` input — `admin_tools_edit_submit` forces
+     that field's `*_needs_verification` to 0 in the SAME request that
+     saves its (freshly drafted) text and writes a real
+     `narrative_review_log` row, so the save and the verification always
+     happen together against whatever text is actually in the textarea
+     that submit — never a stale, previously-saved value. A hand-edit
+     right after Generate (Description only — the one field with an
+     existing `onEdit` citation-guard listener) retracts the injected
+     badge/button via `hideSaveAndMarkVerified`, since the field is no
+     longer AI-drafted-this-session and an ordinary Save clears
+     `needs_verification` on its own. The two-tier length guard
+     (`_check_text_field_length`) is untouched — `confirm_verified_fields`
+     only changes which flag value gets written, never which write method
+     runs, so an over-max draft is still refused whole regardless of
+     whether it's also being confirmed.
+  4. **A new "Upload homepage screenshot…" control** (Software edit page
+     only — Communities' own homepage-screenshot section is hand-rolled,
+     not shared markup, so it's untouched), for a case like Payhawk's
+     (a Generate-captured homepage screenshot that caught a cookie
+     banner). Reuses the App screenshot slot's exact Cropper.js flow
+     rather than building a second one: `_APP_SCREENSHOT_CROP_JS`
+     generalized to a `slot` parameter (`'app'`/`'home'`) — `slot='app'`
+     reproduces the app slot's own existing `app-screenshot-*` element ids
+     verbatim (zero markup change for that slot), `slot='home'` gives the
+     new homepage upload its own non-colliding `home-screenshot-*` ids for
+     free, and both crop to the identical fixed size
+     (`.tp-shot-frame`'s 4:3 ratio — the same frame both slots render
+     inside on the public profile). New
+     `POST /admin/tools/software/{tool_id}/screenshot/upload` calls
+     `update_tool_screenshot_url` — the SAME method the hand-typed
+     Screenshot URL field already uses — so an uploaded image reads
+     "Manually set—no capture date," exactly like a pasted URL, never a
+     stamped "Captured {date}" the way Recapture's own
+     `set_tool_screenshot_capture` claims. `screenshot_is_product` is left
+     untouched, same as the existing hand-pasted-URL path — it's a frozen,
+     non-behavioral historical marker (see its own schema comment), not
+     something an upload needs to set.
+
+  See `tests/test_homepage_screenshot_upload.py`,
+  `tests/test_save_and_mark_verified.py`, and the extended
+  `tests/test_app_screenshot.py` for the regression coverage — every new
+  test proven to fail against the pre-fix code before being trusted.
+
 
 ## Authentication & security
 
@@ -10472,7 +10566,7 @@ for 8 further weeks, deleting the rest, so the folder doesn't grow without limit
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
 | `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's preferred web retrieval mechanism (`linklib/agent.py`'s `retrieve_exa`). Absent, or the `exa_enabled` setting toggled off at `/admin/system/ai` (merged there from the retired standalone `/admin/exa-settings`, PR 10) → Claude's native `web_search_20250305` tool handles the web tier instead (Phase 7 kill switch); web search itself is never disabled, only which engine runs. No error either way. |
-| `LOGODEV_API_KEY` | — | Logo.dev image-endpoint token, required for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D) and for the admin edit page's "Revert & re-fetch from Logo.dev" live re-fetch action (2026-08 follow-up) — both go through `linklib/logodev.py`. The active logo source since 2026-09, replacing Brandfetch (see the Key architecture decisions bullet above). Absent → the batch script errors out on `--apply`; the button still reverts a manual override to automatic but reports it couldn't re-fetch live. |
+| `LOGODEV_API_KEY` | — | Logo.dev image-endpoint token, required for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D) and for the admin edit page's "Pull from Logo.dev" live re-fetch action (2026-08 follow-up; renamed from "Revert & re-fetch from Logo.dev" in the software edit page's four-fix pass below) — both go through `linklib/logodev.py`. The active logo source since 2026-09, replacing Brandfetch (see the Key architecture decisions bullet above). Absent → the batch script errors out on `--apply`; the button still reverts a manual override to automatic but reports it couldn't re-fetch live. |
 | `BRANDFETCH_API_KEY` | — | Brandfetch **Brand API** Bearer token. **Dormant since 2026-09** — Brandfetch's one-time 100-credit free tier is permanently exhausted, so `linklib/brandfetch.py` is no longer called by either the batch script or the admin re-fetch button; kept only so Brandfetch can be restored (swap the import back) if credits are ever renewed. A different product/credential from `BRANDFETCH_CLIENT_ID` below — do not confuse them. |
 | `BRANDFETCH_CLIENT_ID` | — | Public client ID for Brandfetch's free CDN Logo API (`cdn.brandfetch.io`). Kept for reference/potential future browser-embed use, but **not** used by the logo backfill — that product is browser-embed-only and blocks programmatic access (see the Key architecture decisions bullet above). |
 | `LINKLIB_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model for `linklib/embeddings.py` |
