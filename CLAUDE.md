@@ -10974,24 +10974,43 @@ mechanism for anything that has to survive across turns**, and **confirm a
 long-running background job's liveness rather than assuming it** — a stale
 log timestamp plus an empty `ps` result means dead, not slow, and a PR body
 or chat report should say so plainly rather than projecting an ETA from
-partial progress.
+partial progress. **A verification claim isn't communicable until it
+carries a number and a SHA** — a chat line saying "running now, will report
+when done," or a PR-body placeholder saying the same, reads to a human
+skimming it as a completed result even when it explicitly isn't; state
+"in progress, no result yet" plainly enough that it can't be mistaken for
+one (PR #604's rebase-and-reverify cycle nearly got a merge approved on
+exactly this misreading, even though the placeholder itself never claimed
+completion).
 
-**A performance claim measured in this sandbox needs a controlled run, and
-should be stated with a margin, not a bare precise figure.** Four full-suite
-timings measured across the #605/#606/#604 workstream — a 4143.49s (1:09:03)
-pre-#606 baseline, a 2550.73s (0:42:30) post-#606 "after" figure (the one
-written into #606's own PR body and into this file), a 3645s (1:00:45) run
-on a different branch, and a 3271.72s (0:54:32) run on this branch
-post-rebase — spread across more than a 20-minute range with no single
-controlled variable holding constant between them (CPU count is fixed at 4
-in this sandbox, but what else is running alongside the suite is not,
-and at least one of these runs had a brief concurrent `pyflakes`/`grep`
-overlap at its start). Until a genuinely solo run — nothing else executing
-on the sandbox for the run's full duration — pins down a real number, treat
-any of these four as directional, not exact, and say so when citing one.
-The 42:30 figure specifically has not yet been re-measured under fully
-controlled conditions as of this writing; if it's cited again, check
-whether it's been confirmed since.
+**A performance claim measured in this sandbox needs a genuinely solo,
+controlled run — an uncontrolled figure will materially overstate an
+improvement, not just wobble around the true number.** #606's merged PR
+body and this file both originally claimed a 26.5-minute saving (4143.49s
+pre-#606 baseline down to a 2550.73s/0:42:30 "after" figure) from caching
+five source-only checks. **That 42:30 figure does not hold under a
+controlled measurement and should be treated as corrected, not merely
+disputed.** Two genuinely solo runs against the identical post-#606 code
+path, both confirmed uncontaminated from the tool-call sequence (nothing
+else executing alongside either one for its full duration, not merely
+assumed) — 3271.72s (0:54:31) and 3258.94s (0:54:18), 13 seconds apart —
+land close together and both well above 42:30, about 11-12 minutes
+(≈27-28%) slower than the claim. **What isn't known: whether #606's own
+original 42:30 measurement was itself contaminated.** This PR's own
+attempts did hit exactly that failure mode once (a `pyflakes`/`grep`
+overlap that contaminated a since-discarded confirmation attempt, caught
+and the run redone rather than reported) — real, useful evidence that this
+class of contamination is easy to introduce by accident in this sandbox —
+but that specific incident is not evidence about how #606's figure was
+produced; its original conditions are unknown, not confirmed contaminated.
+The caching itself is real and still worth having — 4143.49s → ~3265s
+(averaging the two clean runs) is a genuine ~14.6-minute (≈21%) improvement
+over the pre-#606 baseline — it's just materially smaller than what got
+written down. A third, less-controlled figure from a different branch in
+this same workstream (3645s/1:00:45) also sits closer to the clean
+~54-minute range than to 42:30. Whether #606's own merged PR body should
+carry a correcting comment is Brian's call, not something to post
+unilaterally — flagged for him in the PR #604 chat.
 
 ## Testing standard for UI-facing changes
 
