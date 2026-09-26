@@ -1,10 +1,15 @@
 """Homepage Restructure phase: the homepage's consolidated Thought
-Leadership section (flagship cards + "Recent highlights" one-per-type grid +
-bullets, replacing both the old standalone card and the Phase 3 addendum's
-separate recency-pin teaser), the repurposed "Feature on homepage" checkbox
-that now selects each type's representative entry, the sidebar Toolbox panel
-and admin-only Reader-access placeholder, and the "Speaking &amp; Events"
-double-escaping fix on /thought-leadership.
+Leadership section (flagship cards + "Recent highlights" grid + bullets,
+replacing both the old standalone card and the Phase 3 addendum's separate
+recency-pin teaser), the sidebar Toolbox panel and admin-only Reader-access
+placeholder, and the "Speaking &amp; Events" double-escaping fix on
+/thought-leadership.
+
+"Recent highlights" itself (originally one-per-type via the now-deleted
+Library.get_thought_leadership_representative fallback mechanism) was
+replaced by a hand-curated 4-slot featured set, any mix of types, selected
+by the same "Feature on homepage" checkbox — see the featured-cap section
+below.
 """
 import pathlib
 import sys
@@ -230,76 +235,25 @@ def test_featured_home_checkbox_persists_via_add_and_edit_routes(env):
     assert it["featured_home"] == 0
 
 
-def test_representative_prefers_checked_entry_over_more_recent_unchecked(env):
+def test_get_thought_leadership_representative_no_longer_exists(env):
+    # Deleted outright, not renamed or kept as a dead alias — the per-type
+    # representative/fallback mechanism it implemented is gone, replaced by
+    # a hand-curated 4-slot featured set (Library.list_thought_leadership_featured_home).
     lib = env._lib()
     try:
-        lib.add_thought_leadership("writing", "Newer Unchecked", "https://example.com/newer",
-                                   "Forbes", "Aug 2026", "2026-08", featured_home=False)
-        lib.add_thought_leadership("writing", "Older Checked", "https://example.com/older",
-                                   "Forbes", "Jan 2020", "2020-01", featured_home=True)
+        assert not hasattr(lib, "get_thought_leadership_representative")
     finally:
         lib.close()
-    rep = env._lib()
-    try:
-        result = rep.get_thought_leadership_representative("writing")
-    finally:
-        rep.close()
-    assert result["title"] == "Older Checked"
 
 
-def test_representative_falls_back_to_most_recent_when_none_checked(env):
-    lib = env._lib()
-    try:
-        lib.add_thought_leadership("podcast", "Old Pod", "https://example.com/old",
-                                   "Cash Flow Show", "Jan 2020", "2020-01")
-        lib.add_thought_leadership("podcast", "New Pod", "https://example.com/new",
-                                   "Cash Flow Show", "Aug 2026", "2026-08")
-    finally:
-        lib.close()
-    rep = env._lib()
-    try:
-        result = rep.get_thought_leadership_representative("podcast")
-    finally:
-        rep.close()
-    assert result["title"] == "New Pod"
-
-
-def test_representative_is_none_when_type_has_no_entries(env):
-    lib = env._lib()
-    try:
-        result = lib.get_thought_leadership_representative("press")
-    finally:
-        lib.close()
-    assert result is None
-
-
-def test_two_checked_entries_same_type_most_recently_updated_wins(env):
-    lib = env._lib()
-    try:
-        a_id = lib.add_thought_leadership("press", "A", "https://example.com/a",
-                                          "TechCrunch", "Jan 2026", "2026-01", featured_home=True)
-        lib.add_thought_leadership("press", "B", "https://example.com/b",
-                                   "Forbes", "Feb 2026", "2026-02", featured_home=True)
-        # Re-save A so it's now the most recently updated of the two checked entries.
-        lib.update_thought_leadership(a_id, "press", "A", "https://example.com/a", "TechCrunch",
-                                      "Jan 2026", "2026-01", "", False, 0, featured_home=True)
-    finally:
-        lib.close()
-    rep = env._lib()
-    try:
-        result = rep.get_thought_leadership_representative("press")
-    finally:
-        rep.close()
-    assert result["title"] == "A"
-
-
-def test_homepage_type_breakdown_renders_representative_and_handles_empty_type(env):
+def test_homepage_renders_a_single_featured_piece(env):
     lib = env._lib()
     try:
         lib.add_thought_leadership("writing", "Featured Writing Piece", "https://example.com/w",
                                    "Forbes", "Jan 2026", "2026-01", featured_home=True)
-        # No "speaking", "podcast", or "press" entries at all — those columns
-        # must not break the page.
+        # No "speaking", "podcast", or "press" entries at all — an empty
+        # type must not break the page (there's no per-type column anymore
+        # to break; the featured set is just whatever's checked, any mix).
     finally:
         lib.close()
     resp = _client(env).get("/")
@@ -309,7 +263,7 @@ def test_homepage_type_breakdown_renders_representative_and_handles_empty_type(e
     assert 'href="https://example.com/w"' in html
 
 
-def test_homepage_type_breakdown_empty_db_does_not_break_page(env):
+def test_homepage_empty_db_does_not_break_page(env):
     resp = _client(env).get("/")
     assert resp.status_code == 200
     assert ">Thought leadership<" in resp.text
@@ -445,3 +399,183 @@ def test_hero_headline_underlines_strategic_partner_not_last_word(env):
     assert h1_html.count("strategic partner") == 1
     assert "leadership team leans on" in h1_html
     assert "the scorekeeper." in h1_html
+
+
+# --- Featured-homepage cap of 4 (any mix of types), replacing the deleted
+# per-type representative/fallback mechanism above. ---
+
+_CAP_ERROR_TEXT = "Four pieces are already featured on the homepage"
+
+
+def _feature_four(lib):
+    """4 already-featured rows, spread across types on purpose (the cap is
+    on the total, not per type) — returns their ids in insertion order."""
+    return [
+        lib.add_thought_leadership("writing", "Feat A", "https://example.com/a",
+                                   "Forbes", "Jan 2026", "2026-01", featured_home=True),
+        lib.add_thought_leadership("speaking", "Feat B", "https://example.com/b",
+                                   "SaaStr", "Feb 2026", "2026-02", featured_home=True),
+        lib.add_thought_leadership("podcast", "Feat C", "https://example.com/c",
+                                   "Cash Flow Show", "Mar 2026", "2026-03", featured_home=True),
+        lib.add_thought_leadership("press", "Feat D", "https://example.com/d",
+                                   "TechCrunch", "Apr 2026", "2026-04", featured_home=True),
+    ]
+
+
+def test_fifth_featured_is_refused(env):
+    """Regression for correction 2/3: LIMIT 4 makes a 5th row harmless on
+    the public homepage, but the ADMIN WRITE PATH must still refuse it —
+    shown failing against pre-fix code (no cap check at all: the add
+    would have silently succeeded, creating a 5th featured=1 row)."""
+    lib = env._lib()
+    try:
+        _feature_four(lib)
+        before_count = len(lib.list_thought_leadership())
+        featured_before = lib.count_featured_home()
+    finally:
+        lib.close()
+    assert featured_before == 4
+
+    c = _admin_client(env)
+    resp = c.post("/admin/thought-leadership/third-party/new", data={
+        "type": "writing", "title": "Fifth Wheel", "url": "https://example.com/fifth",
+        "venue": "Forbes", "date_label": "May 2026", "display_order": "",
+        "featured_home": "1",
+    }, follow_redirects=False)
+    assert resp.status_code == 400
+    assert _CAP_ERROR_TEXT in resp.text
+    # The submitted title survives in the re-rendered form.
+    assert 'value="Fifth Wheel"' in resp.text
+    # A real bug found mid-build: _tl_form_fields's display_order field used
+    # to do `item.get('display_order', '')`, which returns None (not the
+    # default '') for a dict that HAS the key with value None — exactly
+    # what _tl_form_values produces for a blank display_order. Rendered as
+    # the literal string "value=\"None\"", harmless only by browser
+    # coincidence (a <input type="number"> silently discards an invalid
+    # value and falls back to the placeholder) — real broken markup either
+    # way. Pinned here since this exact refusal path is what exposed it.
+    assert 'value="None"' not in resp.text
+
+    lib = env._lib()
+    try:
+        after_count = len(lib.list_thought_leadership())
+        featured_after = lib.count_featured_home()
+    finally:
+        lib.close()
+    # DB unchanged: no row was inserted at all, and the featured count
+    # didn't move.
+    assert after_count == before_count
+    assert featured_after == 4
+
+
+def test_editing_already_featured_row_at_cap_succeeds(env):
+    """The exclude_id case — the one most likely to be built wrong.
+    Re-saving an already-featured row while all 4 slots are full must
+    succeed, not be refused against itself. Shown failing against a
+    naive `count_featured_home()` with no exclude_id: that count would
+    already be 4 before this save, refusing every edit to any of the 4
+    currently-featured rows forever."""
+    lib = env._lib()
+    try:
+        ids = _feature_four(lib)
+    finally:
+        lib.close()
+    item_id = ids[0]
+
+    c = _admin_client(env)
+    resp = c.post(f"/admin/thought-leadership/third-party/{item_id}/edit", data={
+        "type": "writing", "title": "Feat A Renamed", "url": "https://example.com/a",
+        "venue": "Forbes", "date_label": "Jan 2026", "display_order": "0",
+        "featured_home": "1",
+    }, follow_redirects=False)
+    assert resp.status_code == 303
+
+    lib = env._lib()
+    try:
+        it = lib.get_thought_leadership(item_id)
+        featured_after = lib.count_featured_home()
+    finally:
+        lib.close()
+    assert it["title"] == "Feat A Renamed"
+    assert it["featured_home"] == 1
+    assert featured_after == 4
+
+
+def test_zero_featured_omits_recent_highlights_section_heading(env):
+    """No featured_home=1 rows at all — the "Recent highlights" heading
+    and grid must be absent entirely, not rendered empty. The "See all
+    thought leadership" nav link (a sibling of the wrap, not inside it)
+    must still render — it's the homepage's only path to
+    /thought-leadership, and correction accepted this plan specifically
+    on the condition that omitting the wrap doesn't remove it."""
+    html = _client(env).get("/").text
+    assert "Recent highlights" not in html
+    assert "See all thought leadership" in html
+
+
+def test_undated_featured_piece_does_not_sort_to_slot_one(env):
+    """Pins the actual defect that motivated this build. Same TYPE for both
+    pieces on purpose — under the old per-type get_thought_leadership_
+    representative, a same-type pair never both rendered at all (its
+    featured branch was `LIMIT 1` per type, `ORDER BY updated_at DESC`):
+    only the most-recently-SAVED one showed, with no notion of date_label
+    ordering, and the other's checkbox was silently inert (id 34's actual
+    production defect). Fails against that old mechanism for two
+    independent reasons — it renders only one title, not both, and even
+    when both happen to survive it never orders by date. The new featured
+    SET query (_TL_FEATURED_ORDER_SQL: sort_key DESC, display_order ASC,
+    no undated-first clause — unlike _TL_ORDER_SQL) renders both, dated
+    piece first."""
+    lib = env._lib()
+    try:
+        lib.add_thought_leadership("podcast", "Standing Feed", "https://example.com/feed",
+                                   "Cash Flow Show", "", "", featured_home=True)
+        lib.add_thought_leadership("podcast", "Newer Dated Piece", "https://example.com/newer",
+                                   "Cash Flow Show", "Sep 2026", "2026-09", featured_home=True)
+    finally:
+        lib.close()
+    html = _client(env).get("/").text
+    assert "Standing Feed" in html
+    assert "Newer Dated Piece" in html
+    assert html.index("Newer Dated Piece") < html.index("Standing Feed")
+
+
+def test_admin_list_shows_featured_slot_and_count(env):
+    """The admin list's Featured column shows the homepage RENDER slot
+    (1-4), not a plain yes/no badge — computed from the same query the
+    homepage uses, so it can't disagree with what's actually live. Also
+    covers the "N of 4 slots used" line."""
+    lib = env._lib()
+    try:
+        ids = [
+            lib.add_thought_leadership("writing", "Newest Featured", "https://example.com/newest",
+                                       "Forbes", "Sep 2026", "2026-09", featured_home=True),
+            lib.add_thought_leadership("writing", "Older Featured", "https://example.com/older",
+                                       "Forbes", "Jan 2026", "2026-01", featured_home=True),
+            lib.add_thought_leadership("press", "Not Featured", "https://example.com/not",
+                                       "TechCrunch", "Aug 2026", "2026-08", featured_home=False),
+        ]
+    finally:
+        lib.close()
+    html = _admin_client(env).get("/admin/thought-leadership/third-party").text
+    assert "Homepage highlights: 2 of 4 slots used." in html
+    # Newest sort_key renders first (slot 1); older featured piece is slot 2.
+    newest_idx = html.index("Newest Featured")
+    older_idx = html.index("Older Featured")
+    not_featured_idx = html.index("Not Featured")
+    assert ">1<" in html[newest_idx:newest_idx + 700]
+    assert ">2<" in html[older_idx:older_idx + 700]
+    # The unfeatured row's Featured cell is blank, not "0" or a dash.
+    row_slice = html[not_featured_idx:not_featured_idx + 700]
+    assert ">0<" not in row_slice
+
+
+def test_checkbox_helper_text_describes_the_four_slot_cap(env):
+    """The old per-type helper text ("Represents this entry's type... in
+    the homepage's 4-column breakdown") described the deleted mechanism —
+    replaced with copy describing the actual rule: 4 slots, any mix of
+    types, refused when full."""
+    html = _admin_client(env).get("/admin/thought-leadership/third-party/new").text
+    assert "4 slots total, any mix of" in html
+    assert "Represents this entry's type" not in html
+    assert "4-column breakdown" not in html
