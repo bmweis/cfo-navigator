@@ -10951,6 +10951,48 @@ completely isolated app/DB, on purpose. Worth a look if suite runtime
 becomes a problem again, but secondary to whatever's dominating the `call`
 phase at the time (see the next section for how big that split can get).
 
+**Background a long run with the environment's native background mechanism,
+never a manual `nohup ... & disown`.** A long-running verification command
+(the full suite is the standing example, but this applies to any command
+expected to outlive the current turn) has to survive across tool calls and
+notification turns — the native mechanism (this harness's own
+`run_in_background` parameter, or the equivalent in whatever environment is
+running the command) is built and tracked for exactly that; `nohup`/`disown`
+bypasses that tracking entirely. Found the hard way (2026-09, PR #604's
+rebase-and-reverify cycle): three consecutive full-suite runs launched via
+manual `nohup ... & disown` were silently reaped between check-ins — no
+error, no traceback, just a process that stopped existing and a log that
+stopped growing, indistinguishable from a genuinely slow run until an
+explicit liveness check (`ps aux | grep ...`) came back empty. **A reaped
+process and a slow one look identical from outside, with zero output
+either way** — that's what makes this dangerous rather than merely
+annoying: it can turn an unverified/incomplete run into an apparent
+"verification" if the incompleteness isn't checked for and disclosed.
+Switching to the native mechanism fixed it immediately, on the very next
+attempt. Two standing rules follow from this: **use the native background
+mechanism for anything that has to survive across turns**, and **confirm a
+long-running background job's liveness rather than assuming it** — a stale
+log timestamp plus an empty `ps` result means dead, not slow, and a PR body
+or chat report should say so plainly rather than projecting an ETA from
+partial progress.
+
+**A performance claim measured in this sandbox needs a controlled run, and
+should be stated with a margin, not a bare precise figure.** Four full-suite
+timings measured across the #605/#606/#604 workstream — a 4143.49s (1:09:03)
+pre-#606 baseline, a 2550.73s (0:42:30) post-#606 "after" figure (the one
+written into #606's own PR body and into this file), a 3645s (1:00:45) run
+on a different branch, and a 3271.72s (0:54:32) run on this branch
+post-rebase — spread across more than a 20-minute range with no single
+controlled variable holding constant between them (CPU count is fixed at 4
+in this sandbox, but what else is running alongside the suite is not,
+and at least one of these runs had a brief concurrent `pyflakes`/`grep`
+overlap at its start). Until a genuinely solo run — nothing else executing
+on the sandbox for the run's full duration — pins down a real number, treat
+any of these four as directional, not exact, and say so when citing one.
+The 42:30 figure specifically has not yet been re-measured under fully
+controlled conditions as of this writing; if it's cited again, check
+whether it's been confirmed since.
+
 ## Testing standard for UI-facing changes
 
 **Live-verify with a real headless-browser session (Playwright — pre-installed in
