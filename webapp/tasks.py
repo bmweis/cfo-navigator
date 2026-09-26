@@ -200,6 +200,14 @@ def _failing_checks_count() -> int:
 # all, since these read real files) and needs to prove the NEXT call
 # recomputes fresh. It is not called anywhere in the standard per-test env
 # fixture, and should not be.
+#
+# STANDING RULE for any future test: this isn't limited to the five
+# function names above. A test that monkeypatches ANYTHING reachable from
+# one of them — a helper it calls, a file it reads — must call
+# reset_static_check_cache() around the patch, or the cache can silently
+# serve a stale result over it. A test asserting the ABSENCE of a finding
+# won't fail either way, so "the suite is green" doesn't prove this rule
+# was followed.
 _static_check_cache: dict[str, object] | None = None
 _static_check_cache_lock = threading.Lock()
 

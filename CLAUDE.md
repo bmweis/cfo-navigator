@@ -10108,7 +10108,14 @@ it supersedes the old "`/save` is token-gated" note.
   around the plant (forces the monkeypatch to take effect) and again in
   `finally` (stops the synthetic finding from leaking into later tests as
   a false positive) — see `tests/test_static_check_cache.py` for the same
-  plant/reset/prove-fresh pattern covered generically.
+  plant/reset/prove-fresh pattern covered generically. **Standing rule for
+  any future test**: a test that monkeypatches anything reachable from one
+  of the five cached checks — not just the five function names
+  themselves, but a helper or file read one of them calls into — must call
+  `reset_static_check_cache()` around the patch, or the cache can silently
+  serve a stale result over it. A test asserting the *absence* of a
+  finding won't fail either way, so this can't be caught by "the suite is
+  green" alone.
 
   **A second, unrelated real bug found while wiring the cache through, not
   by this cache itself**: the "One table format" check's `detail` field
