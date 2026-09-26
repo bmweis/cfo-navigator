@@ -10316,6 +10316,100 @@ it supersedes the old "`/save` is token-gated" note.
   the task's own instruction. See BRAND.md §5's width-tier table for the
   corrected `.page-form` row.
 
+- **Software edit page — four admin fixes (2026-09).** Four independent
+  live-use gaps on `/tools/software/{slug}/edit`, fixed in one PR.
+  1. **Logo controls split into two rows** (`_logo_admin_section`, shared
+     with the Community edit page) — URL input + "Fetch from URL" +
+     "Pull from Logo.dev" (renamed from "Revert and re-fetch from
+     Logo.dev") on row one, file chooser + "Upload" on row two, preview to
+     the left of both. Every input on both rows carries `min-width:0` (a
+     flex item's default `min-width:auto` resists shrinking below its
+     intrinsic content — the same file-input-intrinsic-width lesson the
+     Overhead Spend investigation documented for date inputs, applied here
+     to the same failure class) so neither row can overlap or clip at a
+     narrower viewport (verified live at 1280/960/390px).
+  2. **"Generate app screenshot" no longer requires a prior Save**
+     (`admin_tools_app_screenshot_recapture`/
+     `admin_communities_app_screenshot_recapture`, both `_app_screenshot_
+     admin_section` call sites). Root cause: the route read
+     `app_screenshot_source_url` back from the DB, and the hidden
+     recapture `<form>` it submits carried no fields at all — a URL just
+     typed but never Saved was invisible to the request. Fixed
+     client-side: `submitAppScreenshotRecapture` reads the visible input's
+     live value, copies it into a new hidden field on the recapture form,
+     and refuses an empty value with a visible inline error (never a
+     disabled-button tooltip — invisible to a screen reader and
+     unreachable on touch) before `confirmDiscardsUnsavedEdits`/
+     `startGenAnim` run. The route itself now reads that posted field and
+     persists it via `update_tool_app_screenshot_source`/
+     `update_community_app_screenshot_source` in the same request,
+     regardless of whether the capture succeeds — a failed capture never
+     loses the typed URL. Still a synchronous full-page-reload form submit,
+     same shape as the homepage "Generate" button — which has the
+     identical "discards other unsaved edits" trade-off, mitigated only by
+     the pre-existing `confirm()` warning either way; not redesigned here.
+  3. **"Mark verified" appears the moment a Generate call returns a
+     draft**, for Description/Short summary and Competitive
+     differentiation — both are stateless AJAX calls
+     (`generateDescription`/`generateDifferentiation`) that never touch
+     the database, so the server-rendered badge/button (driven by
+     `description_needs_verification`/
+     `competitive_differentiation_needs_verification`) couldn't reflect an
+     unsaved draft; only a full Save-then-reload round trip made it show.
+     **Agent taxonomy already worked in one click** — its "Generate
+     summary" is a real synchronous form submit
+     (`research-refresh-form` → `/research/refresh` →
+     `_run_tool_research`) that persists `agent_taxonomy_needs_
+     verification` to the DB directly, before redirecting back to the
+     edit page, so the claim that it also needed a Save round trip didn't
+     hold; a regression test pins this as a control. Fixed for the two
+     stateless fields with a new "Save and mark verified" action
+     (`showSaveAndMarkVerified`/`saveAndMarkVerified`, injected right into
+     the description/differentiation verify-widget host `<span>`s) that
+     submits the real edit form with the field name added to a new hidden
+     `confirm_verified_fields` input — `admin_tools_edit_submit` forces
+     that field's `*_needs_verification` to 0 in the SAME request that
+     saves its (freshly drafted) text and writes a real
+     `narrative_review_log` row, so the save and the verification always
+     happen together against whatever text is actually in the textarea
+     that submit — never a stale, previously-saved value. A hand-edit
+     right after Generate (Description only — the one field with an
+     existing `onEdit` citation-guard listener) retracts the injected
+     badge/button via `hideSaveAndMarkVerified`, since the field is no
+     longer AI-drafted-this-session and an ordinary Save clears
+     `needs_verification` on its own. The two-tier length guard
+     (`_check_text_field_length`) is untouched — `confirm_verified_fields`
+     only changes which flag value gets written, never which write method
+     runs, so an over-max draft is still refused whole regardless of
+     whether it's also being confirmed.
+  4. **A new "Upload homepage screenshot…" control** (Software edit page
+     only — Communities' own homepage-screenshot section is hand-rolled,
+     not shared markup, so it's untouched), for a case like Payhawk's
+     (a Generate-captured homepage screenshot that caught a cookie
+     banner). Reuses the App screenshot slot's exact Cropper.js flow
+     rather than building a second one: `_APP_SCREENSHOT_CROP_JS`
+     generalized to a `slot` parameter (`'app'`/`'home'`) — `slot='app'`
+     reproduces the app slot's own existing `app-screenshot-*` element ids
+     verbatim (zero markup change for that slot), `slot='home'` gives the
+     new homepage upload its own non-colliding `home-screenshot-*` ids for
+     free, and both crop to the identical fixed size
+     (`.tp-shot-frame`'s 4:3 ratio — the same frame both slots render
+     inside on the public profile). New
+     `POST /admin/tools/software/{tool_id}/screenshot/upload` calls
+     `update_tool_screenshot_url` — the SAME method the hand-typed
+     Screenshot URL field already uses — so an uploaded image reads
+     "Manually set—no capture date," exactly like a pasted URL, never a
+     stamped "Captured {date}" the way Recapture's own
+     `set_tool_screenshot_capture` claims. `screenshot_is_product` is left
+     untouched, same as the existing hand-pasted-URL path — it's a frozen,
+     non-behavioral historical marker (see its own schema comment), not
+     something an upload needs to set.
+
+  See `tests/test_homepage_screenshot_upload.py`,
+  `tests/test_save_and_mark_verified.py`, and the extended
+  `tests/test_app_screenshot.py` for the regression coverage — every new
+  test proven to fail against the pre-fix code before being trusted.
+
 
 ## Authentication & security
 
@@ -10472,7 +10566,7 @@ for 8 further weeks, deleting the rest, so the folder doesn't grow without limit
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
 | `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's preferred web retrieval mechanism (`linklib/agent.py`'s `retrieve_exa`). Absent, or the `exa_enabled` setting toggled off at `/admin/system/ai` (merged there from the retired standalone `/admin/exa-settings`, PR 10) → Claude's native `web_search_20250305` tool handles the web tier instead (Phase 7 kill switch); web search itself is never disabled, only which engine runs. No error either way. |
-| `LOGODEV_API_KEY` | — | Logo.dev image-endpoint token, required for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D) and for the admin edit page's "Revert & re-fetch from Logo.dev" live re-fetch action (2026-08 follow-up) — both go through `linklib/logodev.py`. The active logo source since 2026-09, replacing Brandfetch (see the Key architecture decisions bullet above). Absent → the batch script errors out on `--apply`; the button still reverts a manual override to automatic but reports it couldn't re-fetch live. |
+| `LOGODEV_API_KEY` | — | Logo.dev image-endpoint token, required for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D) and for the admin edit page's "Pull from Logo.dev" live re-fetch action (2026-08 follow-up; renamed from "Revert & re-fetch from Logo.dev" in the software edit page's four-fix pass below) — both go through `linklib/logodev.py`. The active logo source since 2026-09, replacing Brandfetch (see the Key architecture decisions bullet above). Absent → the batch script errors out on `--apply`; the button still reverts a manual override to automatic but reports it couldn't re-fetch live. |
 | `BRANDFETCH_API_KEY` | — | Brandfetch **Brand API** Bearer token. **Dormant since 2026-09** — Brandfetch's one-time 100-credit free tier is permanently exhausted, so `linklib/brandfetch.py` is no longer called by either the batch script or the admin re-fetch button; kept only so Brandfetch can be restored (swap the import back) if credits are ever renewed. A different product/credential from `BRANDFETCH_CLIENT_ID` below — do not confuse them. |
 | `BRANDFETCH_CLIENT_ID` | — | Public client ID for Brandfetch's free CDN Logo API (`cdn.brandfetch.io`). Kept for reference/potential future browser-embed use, but **not** used by the logo backfill — that product is browser-embed-only and blocks programmatic access (see the Key architecture decisions bullet above). |
 | `LINKLIB_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model for `linklib/embeddings.py` |
@@ -10856,6 +10950,67 @@ in this suite use a module- or session-scoped fixture (`grep -rn
 completely isolated app/DB, on purpose. Worth a look if suite runtime
 becomes a problem again, but secondary to whatever's dominating the `call`
 phase at the time (see the next section for how big that split can get).
+
+**Background a long run with the environment's native background mechanism,
+never a manual `nohup ... & disown`.** A long-running verification command
+(the full suite is the standing example, but this applies to any command
+expected to outlive the current turn) has to survive across tool calls and
+notification turns — the native mechanism (this harness's own
+`run_in_background` parameter, or the equivalent in whatever environment is
+running the command) is built and tracked for exactly that; `nohup`/`disown`
+bypasses that tracking entirely. Found the hard way (2026-09, PR #604's
+rebase-and-reverify cycle): three consecutive full-suite runs launched via
+manual `nohup ... & disown` were silently reaped between check-ins — no
+error, no traceback, just a process that stopped existing and a log that
+stopped growing, indistinguishable from a genuinely slow run until an
+explicit liveness check (`ps aux | grep ...`) came back empty. **A reaped
+process and a slow one look identical from outside, with zero output
+either way** — that's what makes this dangerous rather than merely
+annoying: it can turn an unverified/incomplete run into an apparent
+"verification" if the incompleteness isn't checked for and disclosed.
+Switching to the native mechanism fixed it immediately, on the very next
+attempt. Two standing rules follow from this: **use the native background
+mechanism for anything that has to survive across turns**, and **confirm a
+long-running background job's liveness rather than assuming it** — a stale
+log timestamp plus an empty `ps` result means dead, not slow, and a PR body
+or chat report should say so plainly rather than projecting an ETA from
+partial progress. **A verification claim isn't communicable until it
+carries a number and a SHA** — a chat line saying "running now, will report
+when done," or a PR-body placeholder saying the same, reads to a human
+skimming it as a completed result even when it explicitly isn't; state
+"in progress, no result yet" plainly enough that it can't be mistaken for
+one (PR #604's rebase-and-reverify cycle nearly got a merge approved on
+exactly this misreading, even though the placeholder itself never claimed
+completion).
+
+**A performance claim measured in this sandbox needs a genuinely solo,
+controlled run — an uncontrolled figure will materially overstate an
+improvement, not just wobble around the true number.** #606's merged PR
+body and this file both originally claimed a 26.5-minute saving (4143.49s
+pre-#606 baseline down to a 2550.73s/0:42:30 "after" figure) from caching
+five source-only checks. **That 42:30 figure does not hold under a
+controlled measurement and should be treated as corrected, not merely
+disputed.** Two genuinely solo runs against the identical post-#606 code
+path, both confirmed uncontaminated from the tool-call sequence (nothing
+else executing alongside either one for its full duration, not merely
+assumed) — 3271.72s (0:54:31) and 3258.94s (0:54:18), 13 seconds apart —
+land close together and both well above 42:30, about 11-12 minutes
+(≈27-28%) slower than the claim. **What isn't known: whether #606's own
+original 42:30 measurement was itself contaminated.** This PR's own
+attempts did hit exactly that failure mode once (a `pyflakes`/`grep`
+overlap that contaminated a since-discarded confirmation attempt, caught
+and the run redone rather than reported) — real, useful evidence that this
+class of contamination is easy to introduce by accident in this sandbox —
+but that specific incident is not evidence about how #606's figure was
+produced; its original conditions are unknown, not confirmed contaminated.
+The caching itself is real and still worth having — 4143.49s → ~3265s
+(averaging the two clean runs) is a genuine ~14.6-minute (≈21%) improvement
+over the pre-#606 baseline — it's just materially smaller than what got
+written down. A third, less-controlled figure from a different branch in
+this same workstream (3645s/1:00:45) also sits closer to the clean
+~54-minute range than to 42:30. Whether #606's own merged PR body should
+carry a correcting comment is Brian's call, not something to post
+unilaterally — flagged for him in the PR #604 chat.
 
 ## Testing standard for UI-facing changes
 

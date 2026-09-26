@@ -272,8 +272,17 @@ def test_research_refresh_banner_drops_verify_clause_when_confident(env, monkeyp
     r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
     assert "Drafted. Review the" in r.text   # shrunk from "AI research refreshed" banner (2026-08 design fix)
     assert "before marking it verified" not in r.text
-    # And, matching that: no verify button/badge should be on the page either.
-    assert "Mark verified" not in r.text
+    # And, matching that: no verify button/badge/hidden-form should render for
+    # Agent taxonomy either. Target the actual widget markup
+    # (_narrative_verify_widget's own "agent-taxonomy-verify-form" id, shared
+    # by its hidden <form> and its button's form= attribute — see
+    # webapp/app.py's _narrative_verify_widget call for agent taxonomy), not
+    # a bare "Mark verified" substring: that string can also appear in
+    # unrelated page prose or JS comments (e.g. the Save-and-mark-verified
+    # feature's own client-side helper functions, always present on this
+    # page regardless of this field's state) with no discriminating power
+    # over whether the real control rendered.
+    assert 'agent-taxonomy-verify-form' not in r.text
     assert 'background:#fef3c7' not in r.text   # the needs-verification badge's styling
 
 
@@ -290,7 +299,10 @@ def test_research_refresh_banner_keeps_verify_clause_when_unconfident(env, monke
 
     r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
     assert "before marking it verified" in r.text
-    assert "Mark verified" in r.text
+    # Symmetric with the confident case above: assert the real widget markup
+    # rendered (the hidden form/button pair sharing "agent-taxonomy-verify-
+    # form"), not just that the phrase "Mark verified" appears somewhere.
+    assert 'agent-taxonomy-verify-form' in r.text
 
 
 # -- Phase G: narrative_review_log audit trail --------------------------------
