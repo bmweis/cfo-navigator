@@ -12473,11 +12473,11 @@ function unmarkAiDrafted(fieldName) {
     lowConfEl.value = lcPairs.join(',');
   }
 }
-// Edit-page-fixes item 3: "Mark verified" used to only appear after a
-// round trip through Save (the badge/button were server-rendered from the
-// DB's own needs_verification column, which a stateless Generate call
-// never touches — see generateDescription/generateDifferentiation below).
-// These three functions build the identical badge/button markup
+// Edit-page-fixes item 3: the verify badge/button used to only appear
+// after a round trip through Save (the badge/button were server-rendered
+// from the DB's own needs_verification column, which a stateless Generate
+// call never touches — see generateDescription/generateDifferentiation
+// below). These three functions build the identical badge/button markup
 // _narrative_verify_widget renders server-side, client-side, so a fresh
 // draft shows it immediately. saveAndMarkVerified never marks the OLD
 // saved text verified — it marks confirm-verified-fields (a hidden input
@@ -12670,9 +12670,9 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
         markAiConfidence('summary', d.confident); markAiLowConfidence('summary', d.low_confidence);
       }
     }
-    // Edit-page-fixes item 3: show "Mark verified" (as "Save and mark
-    // verified" — there's no saved draft yet for a plain verify click to
-    // point at) the moment this draft lands, not after a separate Save
+    // Edit-page-fixes item 3: show the verify badge/button (as "Save and
+    // mark verified" — there's no saved draft yet for a plain verify click
+    // to point at) the moment this draft lands, not after a separate Save
     // round trip. Short summary has no verify widget of its own — this one
     // badge/button already covers both fields, same as the server-rendered
     // version does via description_needs_verification.
