@@ -16533,9 +16533,9 @@ def _tl_form_fields(item: dict | None = None) -> str:
       Feature on homepage
     </label>
     <p style="margin:4px 0 0 26px;font-size:12px;color:var(--muted);">
-      Shows this entry in the homepage's "Recent highlights" grid—4 slots total, any mix of
+      Shows this entry in the homepage's "Recent highlights" grid: 4 slots total, any mix of
       types, ordered newest first by Date label. Featuring a 5th entry while all 4 slots are
-      full is refused—uncheck one first.
+      full is refused, so uncheck one first.
     </p>
   </div>"""
 
