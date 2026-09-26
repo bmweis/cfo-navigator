@@ -560,6 +560,7 @@ def run_all() -> list[dict]:
     """Each check as {name, what, where ('Live + CI'|'CI'), ok (bool|None), detail}."""
     src = _app_src()
     from linklib import brand_check, voice_review
+    from webapp import tasks as _tasks
     results: list[dict] = []
 
     bf = brand_check.findings(src)
@@ -571,19 +572,31 @@ def run_all() -> list[dict]:
     # Both the buzzword/filler/performative sweep and the ampersand/em-dash
     # sweep run over the identical VOICE_SCANNED_FILES list — see that
     # tuple's own comment for why the two rules share one file scope.
-    vf = []
-    for _path, _src in _voice_scanned_sources():
-        vf.extend((_path.name, rule, phrase) for rule, phrase in voice_review.mechanical_findings(_src))
+    #
+    # Cached (2026-09 test-suite-runtime PR): both scans are pure functions
+    # of on-disk source (VOICE_SCANNED_FILES — Python files, never database
+    # content, confirmed via mechanical_findings'/typography_findings' own
+    # docstrings) — see webapp.tasks.cached_static_check's own module
+    # comment for why that's safe to compute once per process.
+    def _compute_vf():
+        out = []
+        for _path, _src in _voice_scanned_sources():
+            out.extend((_path.name, rule, phrase) for rule, phrase in voice_review.mechanical_findings(_src))
+        return out
+    vf = _tasks.cached_static_check("voice_standards", _compute_vf)
     results.append({
         "name": "Voice standards", "where": "Live + CI", "ok": not vf,
         "what": "No banned buzzwords, filler, or performative phrases in site copy or prompts.",
         "detail": "; ".join(f"{fname} {rule}: “{phrase}”" for fname, rule, phrase in vf[:6])
                   if vf else "Copy is on-voice."})
 
-    tf = []
-    for _path, _src in _voice_scanned_sources():
-        tf.extend((_path.name, rule, line, excerpt)
-                  for rule, line, excerpt in voice_review.typography_findings(_src))
+    def _compute_tf():
+        out = []
+        for _path, _src in _voice_scanned_sources():
+            out.extend((_path.name, rule, line, excerpt)
+                      for rule, line, excerpt in voice_review.typography_findings(_src))
+        return out
+    tf = _tasks.cached_static_check("typography", _compute_tf)
     results.append({
         "name": "Typography (ampersands, em dashes)", "where": "Live + CI", "ok": not tf,
         "what": "Copy spells out \"and\" (terms like FP&A excepted) and never spaces an em dash.",
@@ -659,11 +672,17 @@ def run_all() -> list[dict]:
                   else "Every hand-written outbound link opens in a new tab."})
 
     from webapp.app import _CSS as _app_css
-    tf = brand_check.table_standard_problems(_app_css) + brand_check.table_override_problems(src)
+    # Cached (2026-09): both halves are pure functions of on-disk source —
+    # table_override_problems specifically is ~6.3s of run_all()'s ~15s
+    # total (a regex scan of the full webapp/app.py source, see the PR
+    # description), the single most expensive individual check.
+    tbf = _tasks.cached_static_check(
+        "table_format",
+        lambda: brand_check.table_standard_problems(_app_css) + brand_check.table_override_problems(src))
     results.append({
-        "name": "One table format", "where": "Live + CI", "ok": not tf,
+        "name": "One table format", "where": "Live + CI", "ok": not tbf,
         "what": "Every table uses the one standard: light-blue header, white rows, row lines, navy-light rounded border.",
-        "detail": "; ".join(tf[:6]) if tf
+        "detail": "; ".join(tbf[:6]) if tbf
                   else f"The standard is whole and nothing overrides it ({len(brand_check.TABLE_SCOPE_EXCLUSIONS)} approved exceptions)."})
 
     op = open_source_problems()
@@ -716,7 +735,11 @@ def run_all() -> list[dict]:
         "what": "Each public page uses coral at most once. Checks inline styles on signed-out pages only.",
         "detail": "; ".join(cm) if cm else "Every checked page has at most one coral moment."})
 
-    pf = _pyflakes_problems()
+    # Cached (2026-09): a pure function of the .py files on disk under
+    # linklib/webapp/scripts — see webapp.tasks.cached_static_check's
+    # module comment. The None-when-not-installed case caches correctly
+    # too (cached_static_check keys on membership, not truthiness).
+    pf = _tasks.cached_static_check("pyflakes", _pyflakes_problems)
     if pf is None:
         results.append({
             "name": "Dead code / unused imports", "where": "CI", "ok": None,
@@ -728,7 +751,10 @@ def run_all() -> list[dict]:
             "what": "No unused code or imports.",
             "detail": "; ".join(pf[:6]) if pf else "No unused imports or dead code."})
 
-    sp = script_syntax_problems()
+    # Cached (2026-09): a pure function of the shared _JS source constants
+    # (webapp.app module attributes, loaded from source at import time) —
+    # see webapp.tasks.cached_static_check's module comment.
+    sp = _tasks.cached_static_check("script_syntax", script_syntax_problems)
     if sp is None:
         results.append({
             "name": "Script blocks are valid JavaScript", "where": "CI", "ok": None,
