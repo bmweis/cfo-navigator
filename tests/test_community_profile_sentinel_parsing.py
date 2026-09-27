@@ -80,9 +80,17 @@ def test_without_terminal_key_the_collision_would_actually_corrupt_data():
 # -- layer 2: full generation pipeline, mocked Claude call --------------------
 
 def _mock_fetch_page(monkeypatch, contents: dict):
-    from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(
-        content=contents.get(url, "")))
+    """Mocks at the _fetch_grounding_page layer, not extract.fetch_page —
+    see tests/test_enrich_sentinel_parsing.py's identical helper for why:
+    these tests prove the sentinel-parsing contract, not the 2026-09
+    JS-render grounding-fetch/quality-gate behavior."""
+    def _fake_fetch_grounding_page(url, exa_enabled=True):
+        content = contents.get(url, "")
+        if content.strip():
+            return enrich.GroundingFetch(content=content.strip(), ok=True, status="fetched")
+        return enrich.GroundingFetch(status="unreadable", reason="no content")
+
+    monkeypatch.setattr(enrich, "_fetch_grounding_page", _fake_fetch_grounding_page)
 
 
 def _mock_anthropic_blocks(monkeypatch, blocks):

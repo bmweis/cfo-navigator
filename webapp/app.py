@@ -25669,7 +25669,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                                   "enrichment_cost", "manual_overhead", "field_reviews",
                                   "narrative_review_log", "entity_citations", "matchmaker_questions",
                                   "compare_summary_cache", "compare_summary_feedback",
-                                  "voice_review_queue", "voice_approved_terms"]),
+                                  "voice_review_queue", "voice_approved_terms",
+                                  "thin_fetch_audit_dismissals"]),
 ]
 
 
