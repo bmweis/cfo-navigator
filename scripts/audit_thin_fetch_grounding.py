@@ -1,15 +1,28 @@
 #!/usr/bin/env python3
 """Read-only diagnostic for the JS-render vendor-research grounding defect
-(Lumera, 2026-09-25): `generate_tool_description`/`generate_tool_agent_taxonomy`/
-`generate_community_profile`/`generate_community_listing` (linklib/enrich.py) all
-decide "did the page fetch succeed" with `not bool(page.content.strip())` — ANY
-non-empty text counts as success, including the near-empty shell a client-
-rendered (JS) page returns to a plain HTTP GET. A vendor whose homepage needs
-JavaScript to render can end up with a "Source page fetch: Succeeded" badge, an
-empty Sources list, and a low-confidence draft that reads as a real finding
-("this vendor's workflows aren't established") rather than a failed fetch.
+(Lumera, 2026-09-25). Phase 2a (this script, unchanged in shape): find every
+tool/community field whose stored signals still look like the defect. Phase
+2b (linklib/enrich.py) fixed the actual cause — `generate_tool_description`/
+`generate_tool_agent_taxonomy`/`generate_community_profile`/
+`generate_community_listing` now gate every fetch through
+`extract.assess_extraction_quality` (a real word-count floor plus paywall/
+bot-challenge detection) with an Exa fallback when the direct fetch is
+blocked/thin/unreachable, and refuse to draft at all — raising
+`GroundingUnavailable` — when neither can produce anything usable. This
+script's own job is unchanged by that fix: it still finds records drafted
+under the OLD, buggy check (`not bool(page.content.strip())` — ANY non-empty
+text counted as success, including a JS-rendered page's near-empty shell), a
+backlog no code fix can retroactively repair without re-generating each one
+(explicitly out of scope — see the NULL/UNKNOWABLE note below).
 
-Two modes, no writes either way:
+Three modes, no writes to `tools`/`community_profiles`/`entity_citations`
+in any of them — only `--dismiss`/`--undismiss` write anything, and only to
+`thin_fetch_audit_dismissals`, a dedicated table for this script's own
+per-record review state (see linklib/db.py's schema comment on that table
+for why a persistent, explicit dismissal is the right fix here rather than
+an attempt to auto-detect "already fixed" — verified against real
+production data, Lumera vs. Paylocity, that neither `needs_verification`
+nor `low_confidence`/`ai_confident` actually distinguishes the two):
 
 1. Default — audits `tools`/`community_profiles` for the exact triple Lumera
    showed: fetch marked "succeeded" (`*_low_confidence=0`), the model's own
@@ -19,7 +32,9 @@ Two modes, no writes either way:
    '[]'` rather than deleting the row on a clear — so "no sources recorded"
    means EITHER no row at all OR a row present with `citations_json='[]'`, and
    this query treats both as the same thing (`citations_json != '[]'` as the
-   "has real citations" test, not a bare `IS NULL` check on the join).
+   "has real citations" test, not a bare `IS NULL` check on the join). A
+   finding with a matching row in `thin_fetch_audit_dismissals` is excluded —
+   see `--dismiss` below.
 
    Reports two numbers, not one: IDENTIFIABLE (rows that have actually been
    through this exact instrumented code path — the `*_low_confidence` column is
@@ -28,7 +43,8 @@ Two modes, no writes either way:
    never regenerated under it). A single combined count would understate the
    real backlog by roughly 4x per the 2026-09-26 sample (~24% of tools carry
    any `description_low_confidence` signal at all). Resolving the unknowable
-   bucket means re-fetching and comparing — a separate job, not built here.
+   bucket means re-fetching and comparing — a separate job, not built here
+   (see issue filed alongside this fix for the NULL backlog).
 
 2. `--probe <url>` — runs the real `extract.fetch_page()` + `extract.
    assess_extraction_quality()` against one URL and prints what a human would
@@ -47,11 +63,24 @@ Two modes, no writes either way:
    generate_*() functions above) has the same gap or not. This makes a REAL,
    PAID Exa API call (a few cents) — never run in tests or CI, opt-in only.
 
+3. `--dismiss ENTITY_TYPE ENTITY_ID FIELD [--note TEXT]` — after reviewing a
+   flagged record and confirming the current content is actually fine (a
+   hand-edit, or a regeneration under the fixed pipeline), record that so the
+   next run of the default audit stops reporting it. ENTITY_TYPE is
+   'tool'|'community'; FIELD is 'description'|'agent_taxonomy' for a tool or
+   'community_profile' for the one whole-profile community field.
+   `--undismiss ENTITY_TYPE ENTITY_ID FIELD` reverses it — a finding
+   reappears on the next run only if it still matches the query above.
+   `--list-dismissals` prints every currently-recorded dismissal.
+
 Usage:
     python -m scripts.audit_thin_fetch_grounding --db /data/library.db
     python -m scripts.audit_thin_fetch_grounding --probe https://www.lumerahq.com
     python -m scripts.audit_thin_fetch_grounding --probe https://www.lumerahq.com \\
         --exa --name Lumera
+    python -m scripts.audit_thin_fetch_grounding --dismiss tool 19 description \\
+        --note "Hand-fixed 2026-09-26, verified against a live probe"
+    python -m scripts.audit_thin_fetch_grounding --list-dismissals
 """
 from __future__ import annotations
 
@@ -78,6 +107,18 @@ _NO_SOURCES_PREDICATE = """NOT EXISTS (
           AND ec.citations_json != '[]'
     )"""
 
+# A human has already reviewed this exact (entity, field) finding and
+# confirmed the current content is fine — see linklib/db.py's schema
+# comment on thin_fetch_audit_dismissals for why this is a real, separate
+# table rather than an attempt to derive "already fixed" from a signal that
+# turns out not to distinguish it (needs_verification, low_confidence,
+# ai_confident were all checked against real production data and none of
+# them work — see that comment for the Lumera-vs-Paylocity finding).
+_NOT_DISMISSED_PREDICATE = """NOT EXISTS (
+        SELECT 1 FROM thin_fetch_audit_dismissals d
+        WHERE d.entity_type = ? AND d.entity_id = {id_expr} AND d.field_name = ?
+    )"""
+
 
 def _tool_field_audit(lib: Library, field: str) -> dict:
     """One field's counts + affected rows for `tools` (field is 'description'
@@ -98,8 +139,9 @@ def _tool_field_audit(lib: Library, field: str) -> dict:
         f"""SELECT id, name, slug FROM tools
             WHERE approved=1 AND {lc_col}=0 AND {conf_col}=0
               AND {_NO_SOURCES_PREDICATE.format(id_expr='id')}
+              AND {_NOT_DISMISSED_PREDICATE.format(id_expr='id')}
             ORDER BY name""",
-        ("tool", field),
+        ("tool", field, "tool", field),
     ).fetchall()
 
     return {
@@ -135,8 +177,9 @@ def _community_audit(lib: Library) -> dict:
             JOIN communities c ON c.id = cp.community_id
             WHERE c.approved=1 AND cp.low_confidence=0
               AND {_NO_SOURCES_PREDICATE.format(id_expr='cp.community_id')}
+              AND {_NOT_DISMISSED_PREDICATE.format(id_expr='cp.community_id')}
             ORDER BY not_confident_count DESC, c.name""",
-        ("community", "community_profile"),
+        ("community", "community_profile", "community", "community_profile"),
     ).fetchall()
 
     return {
@@ -233,6 +276,48 @@ def _run_probe(url: str, exa: bool, name: str | None) -> None:
         print(f"    text length: {len(h.text)} chars — {h.text[:200]!r}")
 
 
+_DISMISS_ENTITY_TYPES = ("tool", "community")
+_DISMISS_FIELDS = ("description", "agent_taxonomy", "community_profile")
+
+
+def _run_dismiss(db_path: str, entity_type: str, entity_id: int, field_name: str, note: str) -> None:
+    if entity_type not in _DISMISS_ENTITY_TYPES:
+        sys.exit(f"ENTITY_TYPE must be one of {_DISMISS_ENTITY_TYPES}, got {entity_type!r}")
+    if field_name not in _DISMISS_FIELDS:
+        sys.exit(f"FIELD must be one of {_DISMISS_FIELDS}, got {field_name!r}")
+    lib = Library(db_path)
+    try:
+        lib.dismiss_thin_fetch_audit_finding(entity_type, entity_id, field_name, note=note)
+    finally:
+        lib.close()
+    print(f"Dismissed: {entity_type} #{entity_id} / {field_name}"
+          + (f" — {note}" if note else ""))
+
+
+def _run_undismiss(db_path: str, entity_type: str, entity_id: int, field_name: str) -> None:
+    lib = Library(db_path)
+    try:
+        lib.undismiss_thin_fetch_audit_finding(entity_type, entity_id, field_name)
+    finally:
+        lib.close()
+    print(f"Undismissed: {entity_type} #{entity_id} / {field_name} "
+          "(will reappear on the next audit run if it still matches)")
+
+
+def _run_list_dismissals(db_path: str) -> None:
+    lib = Library(db_path)
+    try:
+        rows = lib.list_thin_fetch_audit_dismissals()
+    finally:
+        lib.close()
+    if not rows:
+        print("No dismissals recorded.")
+        return
+    for r in rows:
+        print(f"  {r['entity_type']} #{r['entity_id']} / {r['field_name']}  "
+              f"(dismissed {r['dismissed_at']}){': ' + r['note'] if r['note'] else ''}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
@@ -243,7 +328,30 @@ def main() -> None:
                          help="With --probe: also run a REAL, PAID Exa search (research_vendor_domain) "
                               "against the same URL. Requires --name and EXA_API_KEY.")
     parser.add_argument("--name", default=None, help="Vendor name, required by --probe --exa.")
+    parser.add_argument("--dismiss", nargs=3, metavar=("ENTITY_TYPE", "ENTITY_ID", "FIELD"), default=None,
+                         help="Record that a flagged (entity, field) finding has been reviewed and "
+                              "confirmed fine, so future audit runs stop reporting it. "
+                              "ENTITY_TYPE is 'tool'|'community'; FIELD is "
+                              "'description'|'agent_taxonomy'|'community_profile'.")
+    parser.add_argument("--note", default="", help="Optional note to attach to --dismiss.")
+    parser.add_argument("--undismiss", nargs=3, metavar=("ENTITY_TYPE", "ENTITY_ID", "FIELD"), default=None,
+                         help="Reverse a prior --dismiss — the finding reappears on the next audit "
+                              "run if it still matches.")
+    parser.add_argument("--list-dismissals", action="store_true",
+                         help="Print every currently-recorded dismissal and exit.")
     args = parser.parse_args()
+
+    if args.dismiss:
+        entity_type, entity_id, field_name = args.dismiss
+        _run_dismiss(resolve_db_path(args.db), entity_type, int(entity_id), field_name, args.note)
+        return
+    if args.undismiss:
+        entity_type, entity_id, field_name = args.undismiss
+        _run_undismiss(resolve_db_path(args.db), entity_type, int(entity_id), field_name)
+        return
+    if args.list_dismissals:
+        _run_list_dismissals(resolve_db_path(args.db))
+        return
 
     if args.probe:
         _run_probe(args.probe, exa=args.exa, name=args.name)

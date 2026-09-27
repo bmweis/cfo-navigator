@@ -109,7 +109,10 @@ VERDICT_SUMMARY: false
 
 def test_generate_community_profile_parses_confidence_dict(monkeypatch):
     from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
+    LONG_TEXT = ("Real page text describing the community in enough detail to clear the "
+             "site's own extraction quality floor for grounding purposes. " * 6)
+    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(
+        content=LONG_TEXT, raw_html=LONG_TEXT, blocked=False, fetch_error=""))
     _mock_anthropic(monkeypatch, PROFILE_TEXT)
 
     draft = enrich.generate_community_profile("Acme Circle", "https://acme.example", voice_core="Test voice guide.")
@@ -123,7 +126,10 @@ def test_generate_community_profile_parses_confidence_dict(monkeypatch):
 
 def test_generate_community_profile_defaults_missing_confidence_to_false(monkeypatch):
     from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
+    LONG_TEXT = ("Real page text describing the community in enough detail to clear the "
+             "site's own extraction quality floor for grounding purposes. " * 6)
+    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(
+        content=LONG_TEXT, raw_html=LONG_TEXT, blocked=False, fetch_error=""))
     _mock_anthropic(monkeypatch, "IDEAL_MEMBER:\nX\nVERDICT_SUMMARY:\nY\n")   # no CONFIDENCE: block at all
 
     draft = enrich.generate_community_profile("Acme Circle", "https://acme.example", voice_core="Test voice guide.")

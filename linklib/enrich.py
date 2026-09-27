@@ -170,6 +170,104 @@ def _parse_labeled_blocks(text: str, keys: list[str], terminal_key: str | None =
     return {k.lower(): "\n".join(v).strip() for k, v in found.items()}
 
 
+class GroundingUnavailable(Exception):
+    """Raised by generate_tool_description/generate_tool_agent_taxonomy/
+    generate_community_profile/generate_community_listing when neither a
+    direct fetch nor the Exa fallback (see _fetch_grounding_page) could get
+    anything usable to ground a draft on. The caller refuses to draft rather
+    than silently falling back to "write this from your own knowledge"
+    (the pre-2026-09 behavior) — this site's radical-transparency review
+    standard renders a pending/low-confidence field to every visitor with a
+    badge, it never hides it, so a hedge drafted from nothing would still be
+    live, public copy about a real vendor, not a safely-quarantined draft.
+    `reason` is one of GroundingFetch.status's failure values ("failed" —
+    the URL itself never loaded; "unreadable" — it loaded but was paywalled/
+    bot-challenged/too thin, and Exa couldn't recover it either); `url` is
+    whichever URL the fetch was actually for, so the caller can show both in
+    a single, specific error message."""
+    def __init__(self, reason: str, url: str):
+        self.reason = reason
+        self.url = url
+        super().__init__(f"could not fetch usable grounding content for {url} ({reason})")
+
+
+@dataclass
+class GroundingFetch:
+    """Result of fetching one page to ground an AI-drafted directory field,
+    with an Exa recovery attempt when the direct fetch comes back blocked,
+    bot-challenged, too thin, or doesn't load at all. Reuses the exact
+    quality gate the Reader content-backfill pipeline already trusts
+    (extract.assess_extraction_quality — a real word-count floor plus
+    paywall/bot-challenge marker checks), not a bare truthiness check on
+    whatever text came back — that bare check (`not bool(page.content.
+    strip())`) is the 2026-09 defect this exists to fix: a JS-rendered
+    homepage returns a near-empty shell to a plain HTTP GET, and that shell
+    is still non-empty text, so it read as "fetch succeeded."
+
+    `status` is an honest, specific label, never a bare Succeeded/Failed
+    boolean:
+      "fetched"          — the direct fetch passed the quality gate.
+      "fetched_via_exa"  — the direct fetch didn't, but Exa's own crawl
+                            (which renders JS the way a plain GET never
+                            does) got something that passed the same gate.
+      "unreadable"        — the URL loaded (or Exa found something) but
+                            nothing usable came back either way (`reason`
+                            names why — paywall/bot-challenge/too-thin).
+      "failed"            — the URL itself never loaded at all (a fetch_
+                            error — timeout, DNS, connection refused, a
+                            non-2xx status) and Exa had nothing either.
+    `ok` is True only for "fetched"/"fetched_via_exa" — the two states a
+    caller may actually ground a draft on; the other two are always a
+    GroundingUnavailable, never a returned GroundingFetch a caller sees
+    directly (see _fetch_grounding_page)."""
+    content: str = ""
+    ok: bool = False
+    status: str = "failed"
+    reason: str = ""
+    exa_cost_usd: float = 0.0
+
+
+def _fetch_grounding_page(url: str, exa_enabled: bool = True) -> GroundingFetch:
+    """Fetch one page for AI-drafted-content grounding — see GroundingFetch
+    for the status/reason contract. Never raises (a caller decides whether
+    an unusable result is fatal via GroundingUnavailable); the Exa fallback
+    is only attempted when the direct fetch actually LOADED (HTTP 200) but
+    wasn't usable — a fetch_error (404, timeout, connection refused) means
+    the URL itself is unreachable/doesn't exist, and Exa's own crawl can't
+    produce real content for a page that was never there, so there's
+    nothing to gain by spending an Exa call on it.
+
+    `exa_enabled` mirrors this module's existing `voice_core`-style contract
+    (enrich.py has no Library handle of its own — see _resolve_voice_core's
+    docstring): the caller resolves `lib.get_exa_enabled()` (the site's Exa
+    kill switch, /admin/system/ai) and passes the result in, rather than
+    this module reading it itself. Defaults to True so a direct caller (a
+    test, a script) that doesn't thread it through still gets today's
+    behavior when EXA_API_KEY is set."""
+    from . import extract
+
+    page = extract.fetch_page(url)
+    if page.fetch_error:
+        return GroundingFetch(status="failed", reason=page.fetch_error)
+
+    ok, reason = extract.assess_extraction_quality(page.raw_html, page.content, page.blocked)
+    if ok:
+        return GroundingFetch(content=page.content.strip(), ok=True, status="fetched")
+
+    if not exa_enabled:
+        return GroundingFetch(status="unreadable", reason=reason)
+
+    from .medium_platform import fetch_content_by_url
+    exa_text, exa_cost = fetch_content_by_url(None, url)
+    if exa_text.strip():
+        exa_ok, exa_reason = extract.assess_extraction_quality(exa_text, exa_text, False)
+        if exa_ok:
+            return GroundingFetch(content=exa_text.strip(), ok=True, status="fetched_via_exa",
+                                   exa_cost_usd=exa_cost)
+        return GroundingFetch(status="unreadable", reason=exa_reason, exa_cost_usd=exa_cost)
+    return GroundingFetch(status="unreadable", reason=reason, exa_cost_usd=exa_cost)
+
+
 # Shared structure guidance for the AI-drafted Software directory fields
 # (Description, Agent taxonomy) that are long enough to read as one dense
 # block otherwise — voice_core covers tone/mechanics (including the em dash
@@ -386,34 +484,48 @@ Tool URL: {url}
 class ToolDescriptionDraft:
     description: str
     summary: str = ""
-    low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    low_confidence: bool = False   # the page needed the Exa fallback to ground on — see
+                                    # generate_tool_description's docstring; a fetch that
+                                    # produced nothing usable at all is a GroundingUnavailable,
+                                    # never a returned draft (2026-09 JS-render grounding fix)
     confident: bool = False   # the model's own self-reported certainty (see prompt above)
     citations: list = field(default_factory=list)   # Citations-API grounding fix, Phase 2
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    exa_cost_usd: float = 0.0   # 0.0 unless the Exa fallback (GroundingFetch.exa_cost_usd)
+                                 # actually fired — recorded as its own enrichment_cost row
+                                 # by the caller (webapp/app.py), never folded into cost_usd,
+                                 # so it isn't misattributed to `model`'s own per-token rate
 
 
 def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
-                               voice_core: str = "") -> ToolDescriptionDraft | None:
+                               voice_core: str = "", exa_enabled: bool = True) -> ToolDescriptionDraft | None:
     """Draft a CFO Toolbox description (full profile-page write-up) plus a
     short summary (directory card / search) for a vendor from its name +
     URL, or None if the SDK/key is unavailable or the call fails. Fetches
-    the URL's page text (best-effort, same fetch as article extraction) as
-    grounding; when that fetch comes back empty, `low_confidence=True`
-    flags the draft as based on the model's own knowledge rather than the
-    live page, so the caller can warn whoever reviews it. Never infers
-    acquisition status — see rule 4 above.
+    the URL's page text as grounding via `_fetch_grounding_page` — a real
+    quality gate (extract.assess_extraction_quality), not the old bare
+    truthiness check on whatever text came back, with an Exa fallback when
+    the direct fetch is blocked/thin/unreachable (2026-09 JS-render
+    grounding fix — see GroundingFetch's own docstring for the full defect
+    this replaces). `low_confidence=True` means the Exa fallback was needed
+    to ground this draft, not "drafted with no grounding at all" — when
+    NEITHER the direct fetch nor Exa can produce anything usable, this
+    raises GroundingUnavailable instead of drafting from nothing: the
+    site's radical-transparency standard renders a pending/low-confidence
+    field to every visitor with a badge rather than hiding it, so an
+    ungrounded hedge would still be live, public copy about a real vendor,
+    not a safely-quarantined draft. Never infers acquisition status — see
+    rule 4 above.
 
     Citations-API grounding fix, Phase 2: single-page grounding (unlike
-    Agent taxonomy's multi-page nav crawl) — the one fetched page, when
-    non-empty, rides as a real Citations-API `document` block instead of
-    being flattened into the prompt, so `citations` reflects what the
-    model actually cited, mechanically verified by the API. `confident`
-    is a separate, independently-checkable self-report, as before.
-    `citations` is empty when the fetch failed (`low_confidence=True`),
-    since there's nothing to cite.
+    Agent taxonomy's multi-page nav crawl) — the one fetched page rides as
+    a real Citations-API `document` block instead of being flattened into
+    the prompt, so `citations` reflects what the model actually cited,
+    mechanically verified by the API. `confident` is a separate,
+    independently-checkable self-report, as before.
 
     Citation-tag investigation follow-up (2026-08, see CLAUDE.md): the
     response is plain prose, not JSON — citations and the API's own
@@ -462,19 +574,16 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
         _logger.warning("generate_tool_description() aborted: voice_core is empty")
         return None
 
-    from . import extract
-    page = extract.fetch_page(url)
-    low_confidence = not bool(page.content.strip())
+    fetch = _fetch_grounding_page(url, exa_enabled=exa_enabled)
+    if not fetch.ok:
+        raise GroundingUnavailable(fetch.reason, url)
+    low_confidence = fetch.status == "fetched_via_exa"
     doc_blocks: list[dict] = []
     sent_docs: list[dict] = []
-    if low_confidence:
-        content_block = ("(Could not fetch page content—draft from your own knowledge of this "
-                          "company/product if you have it, keeping to the rules above.)")
-    else:
-        content_block = ""
-        body = page.content.strip()[:15000]
-        doc_blocks.append(make_document_block(name, body))
-        sent_docs.append({"title": name, "url": url, "type": "tool_page"})
+    content_block = ""
+    body = fetch.content[:15000]
+    doc_blocks.append(make_document_block(name, body))
+    sent_docs.append({"title": name, "url": url, "type": "tool_page"})
 
     prompt = _TOOL_DESC_PROMPT.format(
         name=name, url=url, content_block=content_block,
@@ -534,6 +643,7 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
             low_confidence=low_confidence, confident=confident,
             citations=citations, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+            exa_cost_usd=fetch.exa_cost_usd,
         )
     except Exception as e:
         _logger.warning("generate_tool_description() failed: %s: %s", type(e).__name__, e)
@@ -840,16 +950,28 @@ def _discover_nav_pages(base_url: str, max_pages: int = 10) -> list[tuple[str, s
     return found
 
 
-def _fetch_taxonomy_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]]:
+def _fetch_taxonomy_grounding(url: str, exa_enabled: bool = True
+                              ) -> tuple[str, list[tuple[str, str, str]], bool, float]:
     """Fetches the tool's homepage plus its real Product/Solutions-type nav
     pages (_discover_nav_pages) — falling back to guessed paths (pricing,
     solutions, product) only if nav discovery finds nothing, e.g. a blocked
     fetch or a site with no matching nav text. Returns (content_block,
-    fetched) where fetched is [(label, url, content)] for whichever pages
-    actually returned content — a failed fetch (404, empty page, blocked) is
-    silently dropped, not treated as an error, since that's expected across
-    ~150+ external sites."""
-    from . import extract
+    fetched, used_exa, exa_cost_usd) where fetched is [(label, url, content)]
+    for whichever pages actually returned USABLE content and used_exa is
+    True if any of them needed the Exa fallback to get there.
+
+    2026-09 JS-render grounding fix: each candidate is fetched via the
+    shared `_fetch_grounding_page` (the real quality gate, not a bare
+    truthiness check on whatever text came back), applied per page inside
+    this loop rather than only once on the aggregated result — a homepage
+    that returns a near-empty JS shell and a guessed `/pricing` path that
+    genuinely 404s are different failure shapes, and `_fetch_grounding_page`
+    already treats them differently (only the former is worth an Exa
+    retry — see its own docstring). A candidate that's unusable even after
+    that (or a fetch_error the gate never reaches) is still silently
+    dropped, not treated as an error — expected across ~150+ external
+    sites, and the caller (generate_tool_agent_taxonomy) only raises
+    GroundingUnavailable when literally every candidate came back empty."""
     base = url.rstrip("/")
     nav_pages = _discover_nav_pages(url)
     if nav_pages:
@@ -859,17 +981,22 @@ def _fetch_taxonomy_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]
             (label.capitalize(), f"{base}/{label}") for label in _AGENT_TAXONOMY_PAGE_GUESSES
         ]
     fetched = []
+    used_exa = False
+    exa_cost_total = 0.0
     for label, page_url in candidates:
         try:
-            page = extract.fetch_page(page_url)
+            fetch = _fetch_grounding_page(page_url, exa_enabled=exa_enabled)
         except Exception:
             continue
-        if page.content.strip():
-            fetched.append((label, page_url, page.content[:10000]))
+        exa_cost_total += fetch.exa_cost_usd
+        if fetch.ok:
+            if fetch.status == "fetched_via_exa":
+                used_exa = True
+            fetched.append((label, page_url, fetch.content[:10000]))
     content_block = "\n\n".join(
         f"--- {label} ({page_url}) ---\n{content}" for label, page_url, content in fetched
     )[:60000]
-    return content_block, fetched
+    return content_block, fetched, used_exa, exa_cost_total
 
 
 _AGENT_TAXONOMY_PROMPT = """You are researching a vendor listed in the CFO Toolbox's Software
@@ -945,15 +1072,17 @@ class AgentTaxonomyResult:
                                # follow-up so the UI can show a genuine, permanent "Claude
                                # confidence: Yes/No" line matching Description/Differentiation,
                                # independent of needs_verification's own review-status meaning.
-    low_confidence: bool = False   # no page content could be fetched at all
+    low_confidence: bool = False   # at least one fetched page needed the Exa fallback (2026-09
+                                    # JS-render grounding fix) — a candidate crawl where NOTHING
+                                    # could be fetched at all is a GroundingUnavailable, never a
+                                    # returned result; see generate_tool_agent_taxonomy's docstring
     # API-verified citations (Citations-API grounding fix, Phase 1b,
     # 2026-08): [{n, title, url, type: "tool_page"}], deduped by url,
     # first-use order, UNCAPPED — the caller (webapp/app.py) persists this
     # to the shared entity_citations table (Library.set_entity_citations)
     # and a public render site applies the 5-source display cap; this
-    # field itself always holds everything. Empty whenever nothing was
-    # fetched at all (low_confidence=True — no documents were sent, so
-    # nothing could be cited) or the model simply didn't cite anything.
+    # field itself always holds everything. Empty whenever the model simply
+    # didn't cite anything from whatever pages were fetched.
     # Resolved from real document blocks (linklib.citations), not
     # self-reported — independent of `confident` above.
     citations: list = field(default_factory=list)
@@ -961,6 +1090,9 @@ class AgentTaxonomyResult:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    exa_cost_usd: float = 0.0   # summed across every candidate page that needed the Exa
+                                 # fallback (0.0 when none did) — see ToolDescriptionDraft's
+                                 # matching field for where this gets recorded
 
 
 # Total grounding text budget across every fetched page for one agent-
@@ -999,15 +1131,20 @@ def _build_taxonomy_documents(fetched: list[tuple[str, str, str]]
 
 def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
                                  model: str = DEFAULT_MODEL,
-                                 voice_core: str = "") -> AgentTaxonomyResult | None:
+                                 voice_core: str = "", exa_enabled: bool = True) -> AgentTaxonomyResult | None:
     """Draft an agent-taxonomy summary for a Software entry. Grounds on the
     homepage plus its real Product/Solutions-type nav pages
     (_fetch_taxonomy_grounding — falls back to guessed paths only if nav
-    discovery finds nothing). The returned note is a first-pass draft: the
-    caller is expected to write it with needs_verification set from the
-    "confident" flag and source='llm_enrichment', never auto-confirmed.
-    Returns None if the SDK/key is unavailable or the call fails — same
-    contract as generate_tool_description.
+    discovery finds nothing), each fetched through the real quality gate
+    with an Exa fallback (2026-09 JS-render grounding fix — see
+    GroundingFetch's own docstring). When literally every candidate page
+    comes back unusable, raises GroundingUnavailable rather than drafting
+    from nothing — see generate_tool_description's matching docstring note
+    for why. The returned note is a first-pass draft: the caller is
+    expected to write it with needs_verification set from the "confident"
+    flag and source='llm_enrichment', never auto-confirmed. Returns None if
+    the SDK/key is unavailable or the call fails — same contract as
+    generate_tool_description.
 
     Used to also draft standalone-vs-bundled tool_features rows in the same
     call, before that table was retired (Feature Taxonomy Phase 1b PR 2—
@@ -1057,17 +1194,14 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
         _logger.warning("generate_tool_agent_taxonomy() aborted: voice_core is empty")
         return None
 
-    _, fetched = _fetch_taxonomy_grounding(url)
-    low_confidence = not fetched
-    doc_blocks, sent_docs = _build_taxonomy_documents(fetched) if fetched else ([], [])
-    content_note = "" if doc_blocks else (
-        f"(Could not fetch any page content for {url}—draft from your own "
-        f"knowledge of {name} if you have it, keeping to the rules above.)"
-    )
+    _, fetched, low_confidence, exa_cost_total = _fetch_taxonomy_grounding(url, exa_enabled=exa_enabled)
+    if not fetched:
+        raise GroundingUnavailable("no usable content on the homepage or its Product/Solutions pages", url)
+    doc_blocks, sent_docs = _build_taxonomy_documents(fetched)
 
     prompt = _AGENT_TAXONOMY_PROMPT.format(
         name=name, url=url, description=description.strip() or "(none provided)",
-        content_block=content_note,
+        content_block="",
         voice_core=resolved_voice_core, structure_guidance=_STRUCTURE_GUIDANCE,
     )
     # Documents (when any) ride first, the drafting instructions last — same
@@ -1112,6 +1246,7 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
             confident=confident,
             low_confidence=low_confidence, citations=citations, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+            exa_cost_usd=exa_cost_total,
         )
     except Exception as e:
         _logger.warning("generate_tool_agent_taxonomy() failed: %s: %s", type(e).__name__, e)
@@ -1297,23 +1432,32 @@ class CommunityProfileDraft:
     meeting_format: str = ""
     event_style: str = ""
     cpe_eligible: str = ""
-    low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    low_confidence: bool = False   # the page needed the Exa fallback to ground on (2026-09
+                                    # JS-render grounding fix) — a fetch that produced nothing
+                                    # usable at all is a GroundingUnavailable, never a returned
+                                    # draft; see generate_community_profile's docstring
     confidence: dict = field(default_factory=dict)   # {field_name: bool}, COMMUNITY_CONFIDENCE_FIELDS keys only
     citations: list = field(default_factory=list)   # Citations-API grounding fix, Phase 3
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    exa_cost_usd: float = 0.0   # see ToolDescriptionDraft's matching field
 
 
 def generate_community_profile(name: str, url: str, existing: dict | None = None,
                                model: str = DEFAULT_MODEL,
-                               voice_core: str = "") -> CommunityProfileDraft | None:
+                               voice_core: str = "", exa_enabled: bool = True) -> CommunityProfileDraft | None:
     """Draft every Community Profile field (COMMUNITY_PROFILE_FIELDS — the
     original 13 narrative fields plus the short factual/categorical ones
     added later) from a community's name + URL in one Claude call, mirroring
-    generate_tool_description exactly (same page-fetch grounding, same
-    low_confidence rule) but sized for the larger field count. `existing`,
+    generate_tool_description exactly (same page-fetch grounding, real
+    quality gate + Exa fallback, same low_confidence rule — see
+    GroundingFetch's docstring for the 2026-09 JS-render grounding fix)
+    but sized for the larger field count. Raises GroundingUnavailable
+    rather than drafting from nothing when neither the direct fetch nor
+    Exa can produce anything usable — same non-negotiable refusal as
+    generate_tool_description. `existing`,
     when given, feeds back any already-drafted
     or admin-edited fields as context so a regenerate refines rather than
     starts from scratch. Never auto-saved — same review contract as the tool
@@ -1342,8 +1486,8 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     mechanically verified by the API. Unlike Description/Agent taxonomy,
     this is ONE citation set for the whole 23-field draft (decision 5,
     Phase 0) — not per field — since every field is drafted from the same
-    single page in the same call. `citations` is empty when the fetch
-    failed (`low_confidence=True`), since there's nothing to cite.
+    single page in the same call. `citations` can be empty even on success
+    (the model simply didn't cite anything from the fetched page).
 
     Community profile citation fix (2026-08, see CLAUDE.md — the second
     generate_*() rewritten this way, after Description/Agent taxonomy):
@@ -1381,19 +1525,16 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
         _logger.warning("generate_community_profile() aborted: voice_core is empty")
         return None
 
-    from . import extract
-    page = extract.fetch_page(url)
-    low_confidence = not bool(page.content.strip())
+    fetch = _fetch_grounding_page(url, exa_enabled=exa_enabled)
+    if not fetch.ok:
+        raise GroundingUnavailable(fetch.reason, url)
+    low_confidence = fetch.status == "fetched_via_exa"
     doc_blocks: list[dict] = []
     sent_docs: list[dict] = []
-    if low_confidence:
-        content_block = ("(Could not fetch page content—draft from your own knowledge of this "
-                          "community if you have it, keeping to the rules above.)")
-    else:
-        content_block = ""
-        body = page.content.strip()[:15000]
-        doc_blocks.append(make_document_block(name, body))
-        sent_docs.append({"title": name, "url": url, "type": "community_page"})
+    content_block = ""
+    body = fetch.content[:15000]
+    doc_blocks.append(make_document_block(name, body))
+    sent_docs.append({"title": name, "url": url, "type": "community_page"})
     existing = existing or {}
     existing_lines = "\n".join(
         f"  {field}: {existing[field]}" for field in COMMUNITY_PROFILE_FIELDS
@@ -1501,6 +1642,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             citations=citations,
             model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+            exa_cost_usd=fetch.exa_cost_usd,
         )
     except Exception as e:
         _logger.warning("generate_community_profile() failed: %s: %s", type(e).__name__, e)
@@ -1606,11 +1748,15 @@ class CommunityListingDraft:
     access: str = ""
     format: str = ""
     categories: list[str] = field(default_factory=list)
-    low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    low_confidence: bool = False   # the page needed the Exa fallback to ground on (2026-09
+                                    # JS-render grounding fix) — see ToolDescriptionDraft's
+                                    # matching field; a fetch that produced nothing usable at
+                                    # all is a GroundingUnavailable, never a returned draft
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    exa_cost_usd: float = 0.0   # see ToolDescriptionDraft's matching field
 
 
 def generate_community_listing(name: str, url: str, *, reach_options: list[str],
@@ -1618,10 +1764,13 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
                                 access_options: list[str], format_options: list[str],
                                 category_options: list[str],
                                 model: str = DEFAULT_MODEL,
-                                voice_core: str = "") -> CommunityListingDraft | None:
+                                voice_core: str = "", exa_enabled: bool = True) -> CommunityListingDraft | None:
     """Draft the basic directory-listing fields (distinct from the deeper
     generate_community_profile above) for a community from its name + URL,
-    mirroring generate_tool_description's fetch/prompt/cost-tracking pattern.
+    mirroring generate_tool_description's fetch/prompt/cost-tracking pattern
+    — including its real quality gate + Exa fallback (2026-09 JS-render
+    grounding fix) and its refusal (GroundingUnavailable) rather than
+    drafting from nothing when neither can get anything usable.
     The enum fields are constrained to caller-supplied controlled
     vocabularies (webapp/app.py owns those lists — reach/cost_band/
     sponsorship_type/access/format options and the category checklist)
@@ -1657,14 +1806,11 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
         _logger.warning("generate_community_listing() aborted: voice_core is empty")
         return None
 
-    from . import extract
-    page = extract.fetch_page(url)
-    low_confidence = not bool(page.content.strip())
-    content_block = (
-        f"Page content (fetched from the URL):\n{page.content[:15000]}" if not low_confidence
-        else "(Could not fetch page content—draft from your own knowledge of this "
-             "community if you have it, keeping to the rules above.)"
-    )
+    fetch = _fetch_grounding_page(url, exa_enabled=exa_enabled)
+    if not fetch.ok:
+        raise GroundingUnavailable(fetch.reason, url)
+    low_confidence = fetch.status == "fetched_via_exa"
+    content_block = f"Page content (fetched from the URL):\n{fetch.content[:15000]}"
 
     prompt = _COMMUNITY_LISTING_PROMPT.format(
         needs_verification=NEEDS_VERIFICATION,
@@ -1720,6 +1866,7 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
             categories=_subset_of(data.get("categories"), category_options),
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+            exa_cost_usd=fetch.exa_cost_usd,
         )
     except Exception as e:
         _logger.warning("generate_community_listing() failed: %s: %s", type(e).__name__, e)

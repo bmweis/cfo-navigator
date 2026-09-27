@@ -41,17 +41,64 @@ def _mock_anthropic(monkeypatch, raw_text, input_tokens=200, output_tokens=150):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
 
 
+# Padding filler so a short, readable test content string (e.g. "Homepage
+# content about Runway.") still clears extract.assess_extraction_quality's
+# real 60-word floor (2026-09 JS-render grounding fix) — appended, never
+# prepended, so every existing "starts with ..." assertion still holds and
+# a body-content substring check (e.g. `"Pricing tiers..." in body`) still
+# finds the original text intact.
+_PAD = (
+    "This page also describes how finance teams evaluate the product, what "
+    "onboarding looks like, and how pricing scales with usage across a "
+    "typical growth-stage company's planning cycle from quarter to quarter."
+)
+
+
 def _mock_fetch_page(monkeypatch, contents: dict):
-    """contents: url -> content string. Missing urls return empty content.
-    Also stubs out _discover_nav_pages (real network via `requests.get`) so it
-    falls back to the guessed-path candidates these tests are written
+    """contents: url -> content string. Missing urls simulate a genuine 404
+    (fetch_error set, no Exa attempt — see _fetch_grounding_page's own
+    docstring for why a fetch_error skips the Exa fallback entirely), the
+    expected shape for a guessed Product/Solutions path that doesn't exist.
+    A present, non-empty value is padded to clear the real 60-word floor
+    (extract.assess_extraction_quality) unless it's already long enough.
+    Also stubs out _discover_nav_pages (real network via `requests.get`) so
+    it falls back to the guessed-path candidates these tests are written
     against, instead of making a real HTTP call in the test process."""
     from linklib import extract
 
     def _fetch(url, **kw):
-        return types.SimpleNamespace(content=contents.get(url, ""))
+        raw = contents.get(url)
+        if raw is None:
+            return types.SimpleNamespace(content="", raw_html="", blocked=False, fetch_error="HTTP 404")
+        if not raw:
+            # A genuinely thin/empty 200 OK — the JS-shell shape, deliberately
+            # left unpadded so the real quality gate fails it and the Exa
+            # fallback actually gets a chance to run.
+            return types.SimpleNamespace(content="", raw_html="", blocked=False, fetch_error="")
+        content = raw
+        while len(content.split()) < 65:
+            content = f"{content} {_PAD}"
+        return types.SimpleNamespace(content=content, raw_html=content, blocked=False, fetch_error="")
     monkeypatch.setattr(extract, "fetch_page", _fetch)
     monkeypatch.setattr(enrich, "_discover_nav_pages", lambda base_url, max_pages=10: [])
+
+
+def _mock_exa_fallback(monkeypatch, text="", cost=0.0):
+    from linklib import medium_platform
+    monkeypatch.setattr(medium_platform, "fetch_content_by_url", lambda lib, url: (text, cost))
+
+
+# A realistic ~90-word page body — long enough to clear extract.
+# assess_extraction_quality's real 60-word floor on its own, for every test
+# that mocks a successful Exa-fallback recovery.
+EXA_RECOVERED_CONTENT = (
+    "Obscure Co builds a finance automation product for small teams that need help "
+    "closing the books each month without hiring a full accounting staff. The platform "
+    "connects to a company's bank feeds and general ledger, then reconciles transactions "
+    "and flags anything that looks unusual before a human ever has to look at it. Finance "
+    "leads use it to close faster and to spend less time on manual reconciliation work "
+    "every month, freeing them up to focus on forecasting and planning instead of data entry."
+)
 
 
 TAXONOMY_RESPONSE = (
@@ -86,13 +133,36 @@ def test_generate_tool_agent_taxonomy_parses_confident_false(monkeypatch):
     assert result.agent_taxonomy_needs_verification is True
 
 
-def test_generate_tool_agent_taxonomy_low_confidence_when_no_pages_fetch(monkeypatch):
-    _mock_fetch_page(monkeypatch, {})   # every fetch returns empty content
+def test_generate_tool_agent_taxonomy_low_confidence_when_homepage_fetched_via_exa(monkeypatch):
+    """2026-09 JS-render grounding fix: every candidate's direct fetch is a
+    genuine 404 (guessed paths — see _mock_fetch_page) except the homepage,
+    which is a too-thin JS shell that recovers via the Exa fallback.
+    low_confidence=True (a second-choice route), but the draft still
+    succeeds and is still grounded on real content."""
+    _mock_fetch_page(monkeypatch, {"https://obscure.example": ""})   # homepage: 200 OK, empty body
+    _mock_exa_fallback(monkeypatch, EXA_RECOVERED_CONTENT, cost=0.007)
     _mock_anthropic(monkeypatch, TAXONOMY_RESPONSE)
 
     result = enrich.generate_tool_agent_taxonomy("Obscure Co", "https://obscure.example", voice_core="Test voice guide.")
     assert result is not None
     assert result.low_confidence is True
+    assert result.exa_cost_usd == 0.007
+
+
+def test_generate_tool_agent_taxonomy_raises_when_nothing_fetches(monkeypatch):
+    """The non-negotiable refusal (2026-09 JS-render grounding fix): every
+    candidate 404s (a genuine fetch_error, so Exa is never even tried for
+    the guessed paths — see _fetch_grounding_page), and the homepage's own
+    Exa fallback also finds nothing — generate_tool_agent_taxonomy raises
+    GroundingUnavailable instead of drafting a hedge from the model's own
+    knowledge."""
+    _mock_fetch_page(monkeypatch, {"https://obscure.example": ""})
+    _mock_exa_fallback(monkeypatch, "", cost=0.0)
+    _mock_anthropic(monkeypatch, TAXONOMY_RESPONSE)
+
+    with pytest.raises(enrich.GroundingUnavailable) as exc_info:
+        enrich.generate_tool_agent_taxonomy("Obscure Co", "https://obscure.example", voice_core="Test voice guide.")
+    assert exc_info.value.url == "https://obscure.example"
 
 
 def test_generate_tool_agent_taxonomy_marks_unconfident_as_needing_verification(monkeypatch):
@@ -166,8 +236,8 @@ def test_generate_tool_agent_taxonomy_sends_real_document_blocks(monkeypatch):
     assert len(doc_blocks) == 2
     assert all(b["citations"] == {"enabled": True} for b in doc_blocks)
     bodies = [b["source"]["data"] for b in doc_blocks]
-    assert "Homepage content about Runway." in bodies
-    assert "Pricing tiers: Starter, Growth, Enterprise." in bodies
+    assert any("Homepage content about Runway." in b for b in bodies)
+    assert any("Pricing tiers: Starter, Growth, Enterprise." in b for b in bodies)
     assert content[-1]["type"] == "text"   # drafting instructions ride last
 
 
@@ -212,16 +282,21 @@ def test_generate_tool_agent_taxonomy_confident_still_parses_when_citations_pres
     assert result.agent_taxonomy_needs_verification is False
 
 
-def test_generate_tool_agent_taxonomy_no_citations_when_low_confidence(monkeypatch):
-    """No page content fetched at all → no documents sent → nothing to cite,
-    regardless of what the (mocked) response claims."""
-    _mock_fetch_page(monkeypatch, {})
+def test_generate_tool_agent_taxonomy_still_cites_a_page_fetched_via_exa(monkeypatch):
+    """2026-09 JS-render grounding fix: a page recovered via the Exa
+    fallback still rides as a real Citations-API document block — the
+    fallback doesn't mean "ungrounded," only "needed a second-choice
+    route." See test_generate_tool_agent_taxonomy_raises_when_nothing_
+    fetches for the case where nothing at all could be recovered."""
+    _mock_fetch_page(monkeypatch, {"https://obscure.example": ""})
+    _mock_exa_fallback(monkeypatch, EXA_RECOVERED_CONTENT, cost=0.007)
     _mock_anthropic_citing(monkeypatch, [(TAXONOMY_RESPONSE, [0])])
 
     result = enrich.generate_tool_agent_taxonomy("Obscure Co", "https://obscure.example", voice_core="Test voice guide.")
     assert result is not None
     assert result.low_confidence is True
-    assert result.citations == []
+    assert len(result.citations) == 1
+    assert result.citations[0]["url"] == "https://obscure.example"
 
 
 # -- scripts/enrich_agent_taxonomy.py (dry-run + selection) -------------------
