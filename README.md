@@ -1,47 +1,93 @@
 # CFO Navigator
 
-_Brian Weisberg's personal site + FP&A research toolkit, live on Railway._
+CFO Navigator is Brian Weisberg's personal site, and the home for the tools he's
+built for the finance leader community. It's live at [bmweis.com](https://bmweis.com).
 
-One FastAPI app with a public face (bio, thought leadership, Growth Engine
-Ratio, CFO Toolbox, contact) and a login-gated back office (article archive,
-feed reader, FP&A Buddy, and a ~40-page admin hub). SQLite + FTS5 full-text
-search is the spine; everything reads and writes through it.
+It started as a creative exploration, with tools built for his own use. Easy
+access to the writing he reads every week. Somewhere to keep the piece he'll
+want to reference six months from now, when the question finally comes up.
 
-## What's in the box
+That grew into a toolbox. Which software to look at when the close process needs
+replacing, which community is worth the membership fee, which benchmark to trust.
+Those were questions he was working through for himself anyway. Other finance
+leaders turned out to be working through the same ones, so the whole thing is
+open now.
 
-**Public site**
-- `/` — bio homepage
-- `/thought-leadership` — talks, podcasts, events, writing, and the three
-  showcase pages below
-- `/thought-leadership/growth-engine-ratio` — the GER essay + interactive
-  calculator (and the song)
-- `/tools` — CFO Toolbox landing page, linking to:
-  - `/tools/software` — curated vendor directory with categories, reader
-    submissions, and Warm Intro requests
-  - `/tools/resources` — benchmarking resources
-  - `/tools/communities` — CFO/finance communities directory (placeholder)
-- `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp` — guides
-- `/contact` — contact form (submissions stored, and emailed once Google
-  OAuth is configured — see `.env.example`)
-- (`/growth-engine-ratio`, `/finops-ai-hackathon`, `/netsuite-mcp` 301-redirect
-  to the nested paths above)
+The other half of the exercise was seeing what's possible building this way, with
+AI doing real work alongside him rather than around the edges. The site is honest
+about where that holds up and where it doesn't.
 
-**Private (login or token)**
-- `/library/archive` — 1,500+ saved articles, imported from Feedly and
-  captured going forward, searchable via FTS5 (admin-only)
-- `/library/feed` — RSS/Atom reader over `preferred_sites.opml`, with category
-  tabs and save-to-library (admin-only)
-- `/read` — Instapaper-style article reader (admin-only)
-- `/tools/fpa-buddy` — **FP&A Buddy**: retrieval-augmented Q&A over the library
-  plus domain-restricted web search, with cited answers and per-user cost caps,
-  plus a "search past questions" section (helpful-rated answers other members
-  already got) — member-gated
-- (`/archive`, `/feed` 301-redirect to the nested paths above; the old
-  `/library` hub, `/library/ask`, and `/library/past-questions` were retired
-  outright — no redirect)
-- `/admin` — the back office: archive queue and enrichment, dedupe, tag
-  cleanup, CFO Toolbox management, users, brand/voice standards, checks,
-  backups, and more
+If you're here for the tools, start at the site. This repo is the code behind it.
+
+If you're here as a developer: one FastAPI app, one SQLite database with
+FTS5 full-text search as the spine, no separate backend or frontend build.
+Public pages, a login-gated back office, and a remote MCP server all live in
+the same process.
+
+## What it does
+
+- **CFO Toolbox** (`/tools`): the working reference. A curated directory of
+  finance software, spanning ERP and close management through billing, tax and
+  spend, plus a second directory of finance communities. Both carry full profile
+  pages and a side-by-side Compare view. Alongside them: the benchmarking sources
+  worth using, and a short reading list. Vendor profiles add an AI-assisted read
+  on how much of the work the product really automates. Anyone can submit a
+  vendor or a community, and Brian reviews and approves them. More sections get
+  added as they earn their place.
+- **FP&A Buddy** (`/tools/fpa-buddy`): retrieval-augmented Q&A. It answers
+  from Brian's saved article archive plus web search restricted to a curated
+  list of trusted finance sites, cites every claim, and remembers the thread
+  so you can follow up. Member-gated; every answer carries a per-user
+  monthly dollar cap.
+- **The Reader** (`/read`, admin-only): a personal reader and archive for online
+  content, pulling the saved archive, an RSS feed and a read-later list into one
+  three-pane view.
+- **Thought leadership** (`/thought-leadership`): talks, podcasts, press,
+  writing, and a handful of long-form original pieces with their own pages.
+- **The public site**: a bio homepage, a contact form, and
+  [`/how-this-is-built`](https://bmweis.com/how-this-is-built), which
+  explains where AI actually does work on this site and where a human still
+  signs off.
+
+## Site map
+
+**Public**
+- `/`: bio homepage
+- `/about`: the fuller bio
+- `/thought-leadership`: talks, podcasts, press, writing, and the featured
+  long-form pieces
+- `/thought-leadership/{slug}`: an individual piece (Growth Engine Ratio,
+  the AI hackathon playbook, connecting Claude to NetSuite, and any new one
+  added through the admin) plus a standalone
+  `/thought-leadership/growth-engine-calculator`
+- `/tools`: the CFO Toolbox landing page, linking to `/tools/software` and
+  `/tools/communities` (each with its own directory, profile pages, and a
+  Compare view) and `/tools/resources` (benchmarking and book recommendations)
+- `/current-feed`: the writers and publications Brian actually subscribes
+  to, as a mixtape tracklist
+- `/how-this-is-built` and `/how-this-is-built/{slug}`: where AI does real
+  work on this site, and where it doesn't
+- `/tools/fpa-buddy/how-it-works`: the FP&A Buddy explainer
+- `/play` and `/play/leaderboard`: a small arcade game
+- `/contact`, `/privacy`
+
+**Login-gated**
+- `/tools/fpa-buddy` and `/ask/history`: FP&A Buddy and your own question
+  history (member)
+- `/read` and `/read/{article_id}`: the merged Feed/Archive/Read Later
+  reader (admin)
+- `/admin`: the back office: article enrichment, dedupe, tag cleanup, the
+  Toolbox admin, user management, brand/voice standards, `/admin/checks`,
+  backups, and more, grouped by area
+
+**API**
+- `/mcp`: a remote MCP server (bearer-token auth), covering read access to
+  the Toolbox directory and Compare, the article archive and feed, FP&A
+  Buddy and the Toolbox matchmakers, and read-only database introspection.
+  Separately, `scripts/mcp_server.py` is a small stdio MCP server that wraps
+  `GET /api/search` for Claude Desktop/Code.
+- `/save` and `/save-later`: the bookmarklet's save endpoints (token-only,
+  since the bookmarklet runs cross-origin on someone else's page)
 
 ## Quick start (local)
 
@@ -52,8 +98,8 @@ uvicorn webapp.app:app --reload     # http://localhost:8000
 ```
 
 Set `ANTHROPIC_API_KEY` to enable enrichment and FP&A Buddy. With no
-`LINKLIB_SAVE_TOKEN`/`LINKLIB_PASSWORD` set, the private section is open —
-local-dev convenience.
+`LINKLIB_SAVE_TOKEN`/`LINKLIB_PASSWORD` set, the private section is
+open—local-dev convenience.
 
 ## The library pipeline
 
@@ -67,21 +113,22 @@ python -m scripts.import_archive --zip feedly-archive.zip --db library.db
 Board names become tags; re-running merges rather than duplicates (URL is
 the natural key).
 
-**Ongoing capture:** the `/save` endpoint + bookmarklet (grab it at
-`/bookmarklet` when logged in), the CLI (`python -m scripts.add_link <url>`),
-reader submissions at `/library/submit`, and the admin Archive Queue, which
-scans your feeds and sitemaps for candidates to approve.
+**Ongoing capture:** the `/save` endpoint plus a bookmarklet (grab it at
+`/bookmarklet` when logged in) or an iOS Share Sheet shortcut, and the CLI
+(`python -m scripts.add_link <url>`).
 
-**Enrichment** — Claude writes a clean summary + consistent tags for every
-article; this is the material FP&A Buddy reads from:
+**Enrichment.** Claude writes a clean summary and consistent tags for every
+article. This is the material FP&A Buddy reads from:
 
 ```bash
 python -m scripts.enrich_backfill --db library.db
 ```
 
-Defaults to Haiku (cheap at ~1,500-article scale); override with
-`LINKLIB_ENRICH_MODEL`. To judge whether a pricier model is worth it before
-a full re-enrich, compare models side by side on one article:
+Defaults to `claude-opus-5`, chosen for summary quality over per-article
+cost; override with `LINKLIB_ENRICH_MODEL`, or change it live from
+`/admin/system/ai` without a redeploy. To judge whether a different model is
+worth it before a full re-enrich, compare models side by side on one
+article:
 
 ```bash
 python -m scripts.enrich_compare --url https://example.com/some-article
@@ -89,34 +136,65 @@ python -m scripts.enrich_compare --url https://example.com/some-article
 
 ## FP&A Buddy (Q&A)
 
-Web UI at `/tools/fpa-buddy`, CLI at `python -m scripts.ask "your question"`. Answers
-are grounded in your saved articles **plus** fresh web results restricted to
-the domains in `preferred_sites.opml`, with every citation linked. Model
-pickers are dynamic (`linklib/models.py`) — new Claude models surface
-automatically; enrichment models stay curated.
+Web UI at `/tools/fpa-buddy`, CLI at `python -m scripts.ask "your question"`.
+Answers are grounded in the saved article archive plus fresh web results
+restricted to the domains in `preferred_sites.opml`, with every citation
+linked. FP&A Buddy takes a Quick, Standard or Deep effort choice, which maps
+to a model and token budget internally. Model pickers used elsewhere
+(re-enrich, backfill) are dynamic (`linklib/models.py`), reconciled against
+the live Anthropic Models API so a new Claude model surfaces on its own; the
+enrichment picker stays curated so a whole-archive re-enrich can't land on
+an unexpectedly pricey model by accident.
+
+## MCP server
+
+Two separate MCP surfaces, for two different jobs:
+
+- **`scripts/mcp_server.py`**: a stdio server (`pip install mcp`) wrapping
+  `GET /api/search`, for a local Claude Desktop or Claude Code session to
+  search the archive.
+- **`/mcp`**: a remote MCP server mounted in the same FastAPI process,
+  authenticated per-user with a bearer token (`scripts/mint_api_token.py`
+  mints one). It's a real tool surface, not a search wrapper: database
+  introspection (`list_tables`, `describe_table`, `sample_rows`,
+  `get_rows`), the Toolbox directory and Compare (`search_software`,
+  `get_software`, `compare_software`, plus the `communities` and
+  `resources`/`books` equivalents), the article archive and RSS feed
+  (`search_archive`, `get_article`, `browse_feed`, `search_feed`), and two
+  proxy tools onto FP&A Buddy and the Toolbox matchmakers
+  (`ask_fpa_buddy`, `ask_matchmaker`) that respect the same per-user dollar
+  caps the web UI does. Three of the introspection tools are admin-only;
+  the rest follow whatever access level the equivalent web page has.
 
 ## Other CLI tools
 
+The full, current inventory: purpose, cadence, required env vars, exact
+invocation, lives at `/admin/system/scripts`, the live reference this repo
+keeps in sync with `scripts/`. A couple of highlights:
+
 ```
-scripts/voice_review.py   check any text against the writing-voice standards
-scripts/backfill_queue.py one-time sitemap sweep to queue historical articles
-scripts/mcp_server.py     stdio MCP server wrapping /api/search — lets Claude
-                          Desktop/Code search the library (pip install mcp)
+scripts/voice_review.py    check any text against the writing-voice standards
+scripts/mcp_server.py      stdio MCP server wrapping /api/search (see above)
 ```
 
 ## Project layout
 
 ```
-linklib/    core library — db.py (SQLite+FTS5 spine), agent.py (FP&A Buddy),
-            enrich/extract/pipeline (ingest), feed.py (RSS), dedupe.py,
-            queue.py, suggest.py, tagstyle.py, models.py, pricing.py,
-            backup.py (Drive backup), email_utils.py (Gmail API email),
-            passwords.py, authcheck.py, brand_check.py, voice_review.py,
-            sources.py, archive.py
-scripts/    CLI entry points (see above)
-webapp/     app.py (all routes + inline HTML/CSS/JS), checks.py (/admin/checks),
-            tasks.py (admin badges), thought_leadership_data.py, static/
-tests/      pytest suite — runs in CI alongside a secret scan
+linklib/    core library: db.py (SQLite+FTS5 spine), agent.py (FP&A Buddy),
+            matchmaker.py (Toolbox matchmakers), compare.py/gates.py
+            (Compare + review-state gating), enrich/extract/pipeline
+            (ingest), feed.py (RSS), dedupe.py, tagstyle.py, models.py,
+            pricing.py, backup.py (Drive backup), email_utils.py (Gmail API
+            email), passwords.py, authcheck.py, brand_check.py,
+            voice_review.py/voice_db_scan.py/voice_mechanics.py (voice
+            enforcement), sources.py, archive.py, and more
+scripts/    CLI entry points (see above); scripts/archive/ holds retired
+            one-time migrations, kept for history
+webapp/     app.py (nearly every route, HTML/CSS/JS inline), mcp_server.py/
+            mcp_toolbox.py/mcp_library.py/mcp_qa.py (the /mcp server, see
+            above), checks.py (/admin/checks), tasks.py (admin badges),
+            static/
+tests/      pytest suite, runs in CI alongside a secret scan
 ```
 
 `library.db` is deliberately **not** in the repo (personal reading history);
@@ -126,9 +204,19 @@ conventions; `BRAND.md` holds the visual/voice standards, enforced by CI and
 
 ## Hosting
 
-Railway, building from the `Dockerfile`, auto-deploying from `main` — **if it
-isn't on `main`, it isn't live.** All changes ship via PR (branch protection
-requires passing `tests` + `secret-scan` checks). The database lives on a
-Railway volume; off-site weekly backups go to Google Drive when the
-`GOOGLE_OAUTH_*` vars are set (same OAuth client powers outbound email —
-setup steps in `.env.example`).
+Railway, building from the `Dockerfile`, auto-deploying from `main`. If it
+isn't on `main`, it isn't live. Changes ship via PR: a branch ruleset on
+`main` requires a PR, requires the `tests` and `secret-scan` checks, and
+blocks force-pushes and branch deletion. The database lives on a Railway
+volume; daily off-site backups go to Google Drive when the `GOOGLE_OAUTH_*`
+vars are set (the same OAuth client also powers outbound email—setup steps
+in `.env.example`).
+
+## License
+
+[AGPL-3.0](LICENSE). You're free to use, study, modify, and redistribute this
+code, including commercially. The one real obligation: if you run a modified
+version of this app as a network service, you have to offer that modified
+source to the people using it, not just to whoever you hand a copy to
+directly. That's the "affero" part, and it's the reason this license was
+picked over a plain GPL for a web app.

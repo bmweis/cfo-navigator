@@ -10613,7 +10613,7 @@ tables, no third-party dependency.
 
 ## `library.db` is intentionally not in the repo
 
-It's Brian's personal reading history (~1,500+ articles). It lives beside the code
+It's Brian's personal reading history. It lives beside the code
 locally (on a Railway volume in production) and should never be committed —
 `.gitignore` covers it (`library.db` + `*.db`). Off-site daily backups (bumped from
 weekly, 2026-08 — Railway-native volume snapshots turned out unavailable on the
@@ -11156,14 +11156,20 @@ appear.
 Work on a feature branch, push it, and open a PR into `main`; let the QA workflow
 (`tests` + `secret-scan`) run, then merge the PR. This keeps every change reviewable
 and traceable, and the **Checks** admin page (`/admin/checks`) mirrors what the PR
-must pass. **Mechanically enforced** (2026-08) by a GitHub ruleset (`main-protection`)
-on `main`: requires a PR before merging (0 required approvals — solo repo), requires
-the `tests` and `secret-scan` status checks to pass, requires the PR branch to be up
-to date with `main` before merge, blocks force pushes, restricts branch deletion, and
-has an empty bypass list — direct commits to `main` are blocked outright, not just
-discouraged by convention. (Before this, "requires a PR and passing checks" was
+must pass. **Mechanically enforced** by a GitHub ruleset (`main-protection`) on
+`main`, created 2026-09-26: requires a PR before merging (0 required approvals —
+solo repo), requires the `tests` and `secret-scan` status checks to pass, requires
+the PR branch to be up to date with `main` before merge, blocks force pushes, and
+restricts branch deletion. The ruleset carries "Repository admin — Always allow" on
+its bypass list — a deliberate escape hatch so a GitHub Actions quota outage can't
+lock Brian out when required checks can never go green, not an oversight. It guards
+against an accidental direct push, not a gate on the sole committer. Issue #631
+tracks removing that bypass once the repo is public and Actions minutes are
+unrestricted; that's Brian's call, on his own timeline, once CI has run green for a
+week. (Before this ruleset existed, "requires a PR and passing checks" was
 convention only, not a real gate — worth knowing if a future investigation finds a
-commit that looks like it skipped review; anything from before this date could have.)
+commit that looks like it skipped review; anything from before 2026-09-26 could
+have.)
 
 **Open the PR as soon as there's a reviewable chunk — don't wait until a multi-phase
 task is fully done.** For work that's naturally sequenced into phases (e.g. a phased
@@ -12484,7 +12490,7 @@ except the first one:
    sufficient — for those three. `models_for(allow_new=True)` also auto-surfaces
    a genuinely new model on the two chat-oriented pickers without a code change,
    but the enrichment pickers stay curated on purpose (no auto-surfacing, so a
-   1,500-article re-enrich pass can't land on an unexpectedly pricey model by
+   whole-archive re-enrich pass can't land on an unexpectedly pricey model by
    accident).
 2. **`linklib/agent.py`'s `EFFORT_SETTINGS`** — FP&A Buddy's actual Quick/
    Standard/Deep -> model mapping, a completely separate hardcoded dict with no
