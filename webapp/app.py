@@ -25100,6 +25100,33 @@ _SCRIPT_REGISTRY = [
      ["python -m scripts.trace_medium_tier --db /data/library.db --ids 437 142",
       "python -m scripts.trace_medium_tier --db /data/library.db --ids 437 142 --auto 3",
       "python -m scripts.trace_medium_tier --db /data/library.db --inspect-wayback --url \"https://example.com/x\""]),
+    ("audit_thin_fetch_grounding.py", "scripts.audit_thin_fetch_grounding", "Reusable diagnostic",
+     "Read-only: audits Software/Communities vendor-research drafts for the JS-render grounding "
+     "defect (Lumera, 2026-09-25)—generate_tool_description/generate_tool_agent_taxonomy/"
+     "generate_community_profile/generate_community_listing (linklib/enrich.py) all decide a "
+     "page fetch \"succeeded\" via `not bool(page.content.strip())`, so a client-rendered "
+     "(JS-only) vendor site can be marked Succeeded with an empty Sources list and a low-"
+     "confidence draft read as a real finding. Default mode reports, per field, IDENTIFIABLE "
+     "(has actually been through this code path) vs. UNKNOWABLE (predates the low_confidence "
+     "column or was never regenerated) counts, plus the affected rows (fetch \"succeeded\" + "
+     "the model's own confident=false + nothing recorded in entity_citations, treating a "
+     "missing row and a cleared citations_json='[]' row as the same \"no sources\" state). "
+     "`--probe <url>` makes no DB call at all—runs the real extract.fetch_page()+"
+     "assess_extraction_quality() against one URL and prints the character/word count, verdict, "
+     "and first 300 characters, which is how the Lumera reproduction actually has to happen "
+     "(this sandbox has no outbound network egress at all). `--probe <url> --exa --name X` "
+     "additionally spends a real, paid Exa search call to check whether the canonical feature "
+     "scan's separate Exa-based fetch mechanism (linklib/feature_scan.py) already gets past the "
+     "same JS shell where a plain fetch can't.",
+     "Reusable diagnostic—run the default audit before scoping the fix (the number decides its "
+     "urgency), then --probe against any specific vendor site under investigation.",
+     ["LINKLIB_DB (or pass --db) for the default audit",
+      "None for --probe; needs real network egress (railway ssh or a dev machine, not a "
+      "sandboxed build session)",
+      "EXA_API_KEY for --probe --exa only—that mode makes a real, paid Exa call"],
+     ["python -m scripts.audit_thin_fetch_grounding --db /data/library.db",
+      "python -m scripts.audit_thin_fetch_grounding --probe https://www.lumerahq.com",
+      "python -m scripts.audit_thin_fetch_grounding --probe https://www.lumerahq.com --exa --name Lumera"]),
     ("diagnose_reader_backfill_failures.py", "scripts.diagnose_reader_backfill_failures", "Reusable diagnostic",
      "Built for the Reader backfill's failure-cluster cleanup (2026-08): reports, for a small "
      "hand-picked host list, every saved article's URL plus its most recent content_refetch_log "
