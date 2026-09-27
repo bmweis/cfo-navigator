@@ -1,10 +1,23 @@
 # CFO Navigator
 
-CFO Navigator is Brian Weisberg's personal FP&A research tool and public site,
-live at [bmweis.com](https://bmweis.com). If you're a finance leader looking
-for the vendor directory, the community reviews, or FP&A Buddy (a Q&A tool
-grounded in a curated archive of finance writing plus live web search), start
-at the site itself. This repo is the code behind it.
+CFO Navigator is Brian Weisberg's personal site, and the home for the tools he's
+built for the finance leader community. It's live at [bmweis.com](https://bmweis.com).
+
+It started as a creative exploration, with tools built for his own use. Easy
+access to the writing he reads every week. Somewhere to keep the piece he'll
+want to reference six months from now, when the question finally comes up.
+
+That grew into a toolbox. Which software to look at when the close process needs
+replacing, which community is worth the membership fee, which benchmark to trust.
+Those were questions he was working through for himself anyway. Other finance
+leaders turned out to be working through the same ones, so the whole thing is
+open now.
+
+The other half of the exercise was seeing what's possible building this way, with
+AI doing real work alongside him rather than around the edges. The site is honest
+about where that holds up and where it doesn't.
+
+If you're here for the tools, start at the site. This repo is the code behind it.
 
 If you're here as a developer: one FastAPI app, one SQLite database with
 FTS5 full-text search as the spine, no separate backend or frontend build.
@@ -13,22 +26,25 @@ the same process.
 
 ## What it does
 
-- **CFO Toolbox** (`/tools`)—a curated directory of FP&A software vendors
-  and finance communities, each with a full profile page and a side-by-side
-  Compare view. Vendor profiles add an AI-assisted agent-taxonomy summary.
-  Vendor and community submissions come in from the public; Brian reviews
-  and approves them.
-- **FP&A Buddy** (`/tools/fpa-buddy`)—retrieval-augmented Q&A. It answers
+- **CFO Toolbox** (`/tools`): the working reference. A curated directory of
+  finance software, spanning ERP and close management through billing, tax and
+  spend, plus a second directory of finance communities. Both carry full profile
+  pages and a side-by-side Compare view. Alongside them: the benchmarking sources
+  worth using, and a short reading list. Vendor profiles add an AI-assisted read
+  on how much of the work the product really automates. Anyone can submit a
+  vendor or a community, and Brian reviews and approves them. More sections get
+  added as they earn their place.
+- **FP&A Buddy** (`/tools/fpa-buddy`): retrieval-augmented Q&A. It answers
   from Brian's saved article archive plus web search restricted to a curated
   list of trusted finance sites, cites every claim, and remembers the thread
   so you can follow up. Member-gated; every answer carries a per-user
   monthly dollar cap.
-- **The Reader** (`/read`, admin-only)—an Instapaper-style reader over
-  Brian's saved archive, RSS feed, and read-later list, all in one
+- **The Reader** (`/read`, admin-only): a personal reader and archive for online
+  content, pulling the saved archive, an RSS feed and a read-later list into one
   three-pane view.
-- **Thought leadership** (`/thought-leadership`)—talks, podcasts, press,
+- **Thought leadership** (`/thought-leadership`): talks, podcasts, press,
   writing, and a handful of long-form original pieces with their own pages.
-- **The public site**—a bio homepage, a contact form, and
+- **The public site**: a bio homepage, a contact form, and
   [`/how-this-is-built`](https://bmweis.com/how-this-is-built), which
   explains where AI actually does work on this site and where a human still
   signs off.
@@ -36,42 +52,41 @@ the same process.
 ## Site map
 
 **Public**
-- `/`—bio homepage
-- `/about`—the fuller bio
-- `/thought-leadership`—talks, podcasts, press, writing, and the featured
+- `/`: bio homepage
+- `/about`: the fuller bio
+- `/thought-leadership`: talks, podcasts, press, writing, and the featured
   long-form pieces
-- `/thought-leadership/{slug}`—an individual piece (Growth Engine Ratio,
+- `/thought-leadership/{slug}`: an individual piece (Growth Engine Ratio,
   the AI hackathon playbook, connecting Claude to NetSuite, and any new one
   added through the admin) plus a standalone
   `/thought-leadership/growth-engine-calculator`
-- `/tools`—the CFO Toolbox landing page, linking to `/tools/software`,
-  `/tools/resources` (benchmarking + book recommendations), and
-  `/tools/communities`, each with its own directory, profile pages, and a
-  Compare view
-- `/current-feed`—the writers and publications Brian actually subscribes
+- `/tools`: the CFO Toolbox landing page, linking to `/tools/software` and
+  `/tools/communities` (each with its own directory, profile pages, and a
+  Compare view) and `/tools/resources` (benchmarking and book recommendations)
+- `/current-feed`: the writers and publications Brian actually subscribes
   to, as a mixtape tracklist
-- `/how-this-is-built` and `/how-this-is-built/{slug}`—where AI does real
+- `/how-this-is-built` and `/how-this-is-built/{slug}`: where AI does real
   work on this site, and where it doesn't
-- `/tools/fpa-buddy/how-it-works`—the FP&A Buddy explainer
-- `/play` and `/play/leaderboard`—a small arcade game
+- `/tools/fpa-buddy/how-it-works`: the FP&A Buddy explainer
+- `/play` and `/play/leaderboard`: a small arcade game
 - `/contact`, `/privacy`
 
 **Login-gated**
-- `/tools/fpa-buddy` and `/ask/history`—FP&A Buddy and your own question
+- `/tools/fpa-buddy` and `/ask/history`: FP&A Buddy and your own question
   history (member)
-- `/read` and `/read/{article_id}`—the merged Feed/Archive/Read Later
+- `/read` and `/read/{article_id}`: the merged Feed/Archive/Read Later
   reader (admin)
-- `/admin`—the back office: article enrichment, dedupe, tag cleanup, the
+- `/admin`: the back office: article enrichment, dedupe, tag cleanup, the
   Toolbox admin, user management, brand/voice standards, `/admin/checks`,
   backups, and more, grouped by area
 
 **API**
-- `/mcp`—a remote MCP server (bearer-token auth), covering read access to
+- `/mcp`: a remote MCP server (bearer-token auth), covering read access to
   the Toolbox directory and Compare, the article archive and feed, FP&A
   Buddy and the Toolbox matchmakers, and read-only database introspection.
   Separately, `scripts/mcp_server.py` is a small stdio MCP server that wraps
   `GET /api/search` for Claude Desktop/Code.
-- `/save` and `/save-later`—the bookmarklet's save endpoints (token-only,
+- `/save` and `/save-later`: the bookmarklet's save endpoints (token-only,
   since the bookmarklet runs cross-origin on someone else's page)
 
 ## Quick start (local)
@@ -135,10 +150,10 @@ an unexpectedly pricey model by accident.
 
 Two separate MCP surfaces, for two different jobs:
 
-- **`scripts/mcp_server.py`**—a stdio server (`pip install mcp`) wrapping
+- **`scripts/mcp_server.py`**: a stdio server (`pip install mcp`) wrapping
   `GET /api/search`, for a local Claude Desktop or Claude Code session to
   search the archive.
-- **`/mcp`**—a remote MCP server mounted in the same FastAPI process,
+- **`/mcp`**: a remote MCP server mounted in the same FastAPI process,
   authenticated per-user with a bearer token (`scripts/mint_api_token.py`
   mints one). It's a real tool surface, not a search wrapper: database
   introspection (`list_tables`, `describe_table`, `sample_rows`,
@@ -153,8 +168,8 @@ Two separate MCP surfaces, for two different jobs:
 
 ## Other CLI tools
 
-The full, current inventory—purpose, cadence, required env vars, exact
-invocation—lives at `/admin/system/scripts`, the live reference this repo
+The full, current inventory: purpose, cadence, required env vars, exact
+invocation, lives at `/admin/system/scripts`, the live reference this repo
 keeps in sync with `scripts/`. A couple of highlights:
 
 ```
@@ -165,7 +180,7 @@ scripts/mcp_server.py      stdio MCP server wrapping /api/search (see above)
 ## Project layout
 
 ```
-linklib/    core library—db.py (SQLite+FTS5 spine), agent.py (FP&A Buddy),
+linklib/    core library: db.py (SQLite+FTS5 spine), agent.py (FP&A Buddy),
             matchmaker.py (Toolbox matchmakers), compare.py/gates.py
             (Compare + review-state gating), enrich/extract/pipeline
             (ingest), feed.py (RSS), dedupe.py, tagstyle.py, models.py,
