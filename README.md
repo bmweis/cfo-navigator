@@ -196,3 +196,12 @@ blocks force-pushes and branch deletion. The database lives on a Railway
 volume; daily off-site backups go to Google Drive when the `GOOGLE_OAUTH_*`
 vars are set (the same OAuth client also powers outbound email—setup steps
 in `.env.example`).
+
+## License
+
+[AGPL-3.0](LICENSE). You're free to use, study, modify, and redistribute this
+code, including commercially. The one real obligation: if you run a modified
+version of this app as a network service, you have to offer that modified
+source to the people using it, not just to whoever you hand a copy to
+directly. That's the "affero" part, and it's the reason this license was
+picked over a plain GPL for a web app.
