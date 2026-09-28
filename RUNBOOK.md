@@ -166,9 +166,23 @@ passwords are their own (scrypt, in the DB).
    `LINKLIB_PUBLIC_BASE` ever changes — the base URL is baked in too.)
 
 4. **Update every other place the token lives:**
-   - The MCP server config for Claude Desktop / Claude Code
+   - The stdio MCP server config for Claude Desktop / Claude Code
      (`scripts/mcp_server.py` reads `LINKLIB_SAVE_TOKEN` from its env —
      it's set in the client's MCP config JSON).
+   - **The remote `/mcp` server's bearer tokens are a SEPARATE credential
+     family—rotating `LINKLIB_SAVE_TOKEN` does not touch them.** They
+     live in the `api_tokens` table (sha256-hashed, one row per minted
+     token, each bound to a real user), not this env var. If you're
+     rotating because the save token leaked, that leak says nothing about
+     whether an `api_tokens` row also leaked—check separately:
+     ```bash
+     railway ssh
+     python -m scripts.mint_api_token --db /data/library.db --list
+     python -m scripts.mint_api_token --db /data/library.db --revoke <TOKEN_ID>
+     ```
+     Revoke and re-mint any token you don't have a specific reason to
+     trust; a signed-in `/mcp` client just needs its config updated with
+     the new value, same as any other credential rotation.
    - The daily backup Railway Cron Service's `LINKLIB_SAVE_TOKEN` (§7,
      Phase O) — if it's set up as a direct Railway variable reference to
      the main web service's own `LINKLIB_SAVE_TOKEN` (as §7.1 recommends),
@@ -493,7 +507,7 @@ LINKLIB_<AREA>[_<SUBAREA>]_<SETTING-OR-TYPE>
 
 General to specific, left to right, with a trailing suffix that names the
 value's role when there is an obvious one: `_MODEL` (`LINKLIB_ENRICH_MODEL`,
-`LINKLIB_CHAT_MODEL`, `LINKLIB_QUEUE_ENRICH_MODEL`), `_TOKEN`/`_KEY`
+`LINKLIB_CHAT_MODEL`, `LINKLIB_EMBED_MODEL`), `_TOKEN`/`_KEY`
 (`LINKLIB_SAVE_TOKEN`, `LINKLIB_SECRET_KEY`), `_EMAIL`
 (`LINKLIB_CONTACT_EMAIL`, `LINKLIB_FROM_EMAIL`), `_BASE`
 (`LINKLIB_PUBLIC_BASE`), `_OPML` (`LINKLIB_SITES_OPML`), or a unit
@@ -527,8 +541,9 @@ Two dead variables were also found and are **not** part of any active
 convention: `LINKLIB_AUTHOR_TITLE` (`.env.example` only, leftover from the
 removed LinkedIn-drafting feature, never read by any code—safe to delete
 from `.env.example` whenever someone's next in that file) and
-`LINKLIB_QUEUE_EXCLUDE_CATEGORIES` (already correctly documented elsewhere
-as retired in favor of `feeds.exclude_from_queue`).
+`LINKLIB_QUEUE_EXCLUDE_CATEGORIES` (retired outright in PR 3, 2026-09,
+with the Archive Queue itself; `feeds.exclude_from_queue` is frozen too,
+so there's nothing left to point at).
 
 ---
 
@@ -630,3 +645,81 @@ not a new failure mode of its own:
   Cloudflare, not redirect, but is still the wrong target for the same
   underlying "don't go through the CDN for this call" reason), and confirm
   `/admin/backup-now` isn't returning a 3xx anywhere in the chain.
+
+---
+
+## 8. Exa—outage, missing/revoked key, or the toggle
+
+**Background:** Exa is a paid third-party search API, gated in most places
+by both `EXA_API_KEY` and a live admin toggle (`Library.get_exa_enabled()`,
+flipped at `/admin/system/ai`). Five call sites read it as of the 2026-09
+fetch-error follow-up (`linklib.enrich._fetch_grounding_page`'s new
+block-shaped-error fallback); two of them have no substitute at all when
+Exa is unavailable.
+
+### 8.1 Every call site, and what happens without Exa
+
+| Call site | Module | Falls back to |
+|---|---|---|
+| FP&A Buddy web tier | `linklib/agent.py` | Claude's native `web_search_20250305`, same trusted-sites allowlist either way—the only surface with a real substitute |
+| Reader backfill: domain migration | `linklib/domain_migration.py` | Nothing of its own—the pipeline's existing Wayback Machine tier still catches the miss, same as any other backfill failure, but a real hit this tier would have found is simply not tried |
+| Reader backfill: Medium-platform | `linklib/medium_platform.py` | Same as domain migration—Wayback only, no substitute of its own |
+| Vendor profile drafting's grounding fallback (Description, Agent taxonomy, Community profile, Community listing) | `linklib/enrich.py::_fetch_grounding_page` | **Nothing—refuses to draft rather than saving anything**, when the direct fetch is blocked/thin and this can't recover it. The admin writes the field by hand instead. |
+| Feature Taxonomy vendor research | `linklib/feature_scan.py::research_vendor_domain` | **Nothing—but doesn't refuse either.** The draft still runs against the model's own knowledge, flagged `low_confidence=True`, same as a genuinely thin vendor site. Real, just weaker grounding. |
+
+`/admin/system/ai`'s Configuration card and Usage index both list all five
+with this same fallback-or-nothing distinction—that page's copy is the
+live source, this table is a snapshot of it for offline reading.
+
+### 8.2 How to tell Exa is the problem
+
+1. **`/admin/system/ai`**—Configuration → the Exa card shows the toggle's
+   current state (On/Off) and, if `EXA_API_KEY` is unset, a banner saying
+   every row is on its fallback regardless of the toggle. Press **Test
+   connection** to fire one real, minimal Exa search—confirms the key
+   itself works (or names the error) without waiting for a real backfill/
+   drafting run to hit it.
+2. **`content_refetch_log`** (Reader backfill's two tiers)—a successful
+   Exa-sourced fetch logs `source='migration'` or `source='medium-fetch'`/
+   `'medium-search'`. If a batch is landing only Wayback/failure rows where
+   you'd expect one of those three, Exa isn't being reached or isn't
+   finding anything.
+3. **`ask_questions.exa_cost_usd`** (Buddy)—`0` on a turn that should
+   have used Exa (and didn't error) means it fell through to Claude's
+   native search instead—check the toggle and the key before assuming
+   the web tier itself is broken.
+4. **`enrichment_cost` where `model='exa-fetch'`** (vendor profile
+   drafting)—a real row here means the grounding fallback fired and
+   cost something; its absence on a run that should have needed it is the
+   signal, same idea as `content_refetch_log` above.
+5. **Feature Taxonomy vendor research has no database cost trail at all.**
+   `scripts/originate_category_features.py` prints its own
+   `Cost: Exa $X.XXXX Claude $X.XXXX` line per run—that printed output
+   is the only record; nothing persists it anywhere you can check later.
+   The script also prints a loud `WARNING` line naming the toggle
+   (`/admin/system/ai`) and its off state, specifically, whenever
+   `EXA_API_KEY` is present but the toggle is off—a missing key alone
+   gets a quieter note, since a missing key is otherwise self-explanatory.
+
+### 8.3 The toggle is the immediate stop
+
+Flipping the switch off at `/admin/system/ai`—Configuration → the Exa
+card → **Use Exa for web search**—takes effect immediately, no deploy,
+and is the right first move the moment you suspect a billing lapse, a
+revoked/expired key, or an Exa-side outage, while you sort out the real
+fix. Every consumer already degrades the way §8.1's table describes the
+moment it's off; nothing needs a code change to stop spending against a
+key that might not be good.
+
+### 8.4 Rotating or replacing `EXA_API_KEY`
+
+1. Railway dashboard → the `cfo-navigator` service → **Variables** →
+   set/update `EXA_API_KEY` to the new value → save. Saving triggers a
+   redeploy, same as any other Railway variable change in this runbook.
+2. Once the new deploy is live, use **Test connection** on
+   `/admin/system/ai` to confirm the new key actually works before
+   trusting it—don't wait for a real backfill/drafting run to find out.
+3. If you're removing Exa entirely rather than replacing it (no
+   replacement key), just delete the variable—every call site already
+   treats a missing `EXA_API_KEY` as a normal, best-effort "not available"
+   condition (never raises), so there's nothing else to change.

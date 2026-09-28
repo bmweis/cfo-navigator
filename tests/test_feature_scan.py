@@ -93,7 +93,7 @@ def _mock_anthropic(monkeypatch, payload_json):
 
 def test_research_vendor_domain_no_key_returns_empty(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
-    hits, cost = feature_scan.research_vendor_domain("Mercury", "https://mercury.com")
+    hits, cost = feature_scan.research_vendor_domain("Mercury", "https://mercury.com", exa_enabled=True)
     assert hits == []
     assert cost == 0.0
 
@@ -112,7 +112,7 @@ def test_research_vendor_domain_dedupes_and_sorts_by_tier(monkeypatch):
           "text": "Mercury banking product overview."}],
         [],  # press query: nothing
     ])
-    hits, cost = feature_scan.research_vendor_domain("Mercury", "https://mercury.com")
+    hits, cost = feature_scan.research_vendor_domain("Mercury", "https://mercury.com", exa_enabled=True)
     urls = [h.url for h in hits]
     assert urls == [
         "https://mercury.com/help/multi-entity",  # tier 2, kept from first sighting
@@ -122,9 +122,80 @@ def test_research_vendor_domain_dedupes_and_sorts_by_tier(monkeypatch):
     assert cost > 0
 
 
+def test_research_vendor_domain_respects_exa_toggle_off(monkeypatch):
+    """2026-09 fetch-error follow-up gate: research_vendor_domain was the
+    one real Exa consumer with no admin-toggle check at all—EXA_API_KEY
+    alone gated it, so a scan spent real money regardless of the site's
+    Exa kill switch (/admin/system/ai). exa_enabled=False must short-
+    circuit before any HTTP call, even with a real key present—proven
+    with a raising mock, not just a call-count assertion, so this test
+    genuinely fails (AssertionError from inside _post, not from the
+    exa_enabled assert below it) against the pre-fix code rather than
+    passing by coincidence."""
+    monkeypatch.setenv("EXA_API_KEY", "x")
+
+    def _post(*a, **kw):
+        raise AssertionError("Exa must not be called when exa_enabled=False")
+
+    monkeypatch.setattr(feature_scan.requests, "post", _post)
+    hits, cost = feature_scan.research_vendor_domain(
+        "Mercury", "https://mercury.com", exa_enabled=False)
+    assert hits == []
+    assert cost == 0.0
+
+
+def test_research_vendor_domain_exa_enabled_is_required(monkeypatch):
+    """2026-09 follow-up to the toggle-off gate above: exa_enabled=True
+    was rejected as the default, because a future call site that forgets
+    to pass it would silently reintroduce the exact bug this gate exists
+    to close, with no error anywhere. A required keyword-only parameter
+    makes that impossible—omitting it must raise TypeError, not fall
+    back to any default (True or otherwise)."""
+    with pytest.raises(TypeError):
+        feature_scan.research_vendor_domain("Mercury", "https://mercury.com")
+
+
+def test_research_vendor_domain_exa_enabled_true_still_calls_exa(monkeypatch):
+    """Explicitly passing exa_enabled=True (the real call shape every
+    caller now uses) still behaves exactly as before the toggle existed."""
+    _mock_exa(monkeypatch, [
+        [{"url": "https://mercury.com/changelog", "title": "Changelog", "text": "Shipped X."}],
+        [], [], [],
+    ])
+    hits, cost = feature_scan.research_vendor_domain(
+        "Mercury", "https://mercury.com", exa_enabled=True)
+    assert len(hits) == 1
+    assert cost > 0
+
+
+def test_draft_respects_exa_toggle_off(monkeypatch):
+    """draft_tool_features_for_category threads exa_enabled straight
+    through to research_vendor_domain—same raising-mock proof as above,
+    plus confirms the draft still completes (low_confidence=True, grounded
+    on the model's own knowledge) rather than failing outright, matching
+    the existing no-EXA_API_KEY behavior exactly."""
+    monkeypatch.setenv("EXA_API_KEY", "x")
+
+    def _post(*a, **kw):
+        raise AssertionError("Exa must not be called when exa_enabled=False")
+
+    monkeypatch.setattr(feature_scan.requests, "post", _post)
+    _mock_anthropic(monkeypatch, '{"features": ['
+        '{"name": "Some feature", "definition": "A definition.", "availability": "native", '
+        '"ai_enabled": false, "confident": false, "source_url": "", "note": ""}'
+        ']}')
+
+    draft = feature_scan.draft_tool_features_for_category(
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=False)
+    assert draft is not None
+    assert draft.low_confidence is True
+    assert draft.exa_cost_usd == 0.0
+
+
 def test_draft_returns_none_without_anthropic_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    draft = feature_scan.draft_tool_features_for_category("Mercury", "https://mercury.com", "Neobanking")
+    draft = feature_scan.draft_tool_features_for_category("Mercury", "https://mercury.com", "Neobanking", exa_enabled=True)
     assert draft is None
 
 
@@ -139,7 +210,7 @@ def test_draft_aborts_without_voice_core(monkeypatch):
         raise AssertionError("Exa must not be called when voice_core is empty")
 
     monkeypatch.setattr(feature_scan.requests, "post", _post)
-    draft = feature_scan.draft_tool_features_for_category("Mercury", "https://mercury.com", "Neobanking")
+    draft = feature_scan.draft_tool_features_for_category("Mercury", "https://mercury.com", "Neobanking", exa_enabled=True)
     assert draft is None
 
 
@@ -157,7 +228,7 @@ def test_draft_parses_features_and_tags_source_tier(monkeypatch):
 
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", roster_size=10,
-        voice_core="Test voice guide.",
+        voice_core="Test voice guide.", exa_enabled=True,
     )
     assert draft is not None
     assert draft.low_confidence is False
@@ -193,6 +264,7 @@ def test_uncited_source_url_resolves_to_uncited_tier_with_label(monkeypatch):
         ']}')
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=True,
     )
     f = draft.features[0]
     assert f.source_tier == feature_scan.UNCITED_TIER == 0
@@ -214,6 +286,7 @@ def test_source_url_trailing_slash_mismatch_still_resolves_real_tier(monkeypatch
         ']}')
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=True,
     )
     f = draft.features[0]
     assert f.source_tier == 1
@@ -225,6 +298,7 @@ def test_no_source_url_resolves_to_uncited_tier(monkeypatch):
     _mock_anthropic(monkeypatch, '{"features": [{"name": "Some feature"}]}')
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=True,
     )
     assert draft.features[0].source_tier == feature_scan.UNCITED_TIER
 
@@ -234,6 +308,7 @@ def test_draft_is_low_confidence_with_no_grounding(monkeypatch):
     _mock_anthropic(monkeypatch, '{"features": []}')
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=True,
     )
     assert draft is not None
     assert draft.low_confidence is True
@@ -247,6 +322,7 @@ def test_draft_defaults_unknown_availability_to_native(monkeypatch):
         ']}')
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=True,
     )
     assert draft.features[0].availability == "native"
 
@@ -256,6 +332,7 @@ def test_draft_skips_features_with_no_name(monkeypatch):
     _mock_anthropic(monkeypatch, '{"features": [{"name": ""}, {"name": "Real feature"}]}')
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=True,
     )
     assert [f.name for f in draft.features] == ["Real feature"]
 
@@ -287,7 +364,7 @@ def test_thin_roster_note_reflected_in_prompt(monkeypatch, roster_size, expect_t
 
     feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", roster_size=roster_size,
-        voice_core="Test voice guide.",
+        voice_core="Test voice guide.", exa_enabled=True,
     )
     assert ("SKIP the differentiator criterion" in captured["prompt"]) is expect_thin_language
 
@@ -368,6 +445,7 @@ def test_draft_retries_once_on_truncation_and_uses_full_retry_result(monkeypatch
 
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=True,
     )
     assert calls["n"] == 2   # confirms the retry actually happened, not just returned early
     assert draft is not None
@@ -387,6 +465,7 @@ def test_draft_never_hard_crashes_when_both_attempts_truncate(monkeypatch):
 
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=True,
     )
     assert calls["n"] == 2
     assert draft is not None   # never falls into the generic except-Exception -> None path
@@ -401,6 +480,7 @@ def test_draft_does_not_retry_when_first_response_parses_cleanly(monkeypatch):
 
     draft = feature_scan.draft_tool_features_for_category(
         "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=True,
     )
     assert calls["n"] == 1   # no wasted retry call when the first response was fine
     assert draft.truncated is False

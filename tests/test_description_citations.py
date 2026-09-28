@@ -21,8 +21,41 @@ from linklib.db import Library
 
 
 def _mock_fetch_page(monkeypatch, content=""):
+    """2026-09 JS-render grounding fix: generate_tool_description now gates
+    every fetch through extract.assess_extraction_quality (a real word-count
+    floor plus paywall/bot-challenge checks), not a bare truthiness check —
+    so the mocked PageData needs raw_html/blocked/fetch_error too, not just
+    content. `content` must be >=60 words for a test that expects a
+    successful, direct (not Exa-fallback) draft — see LONG_PAGE_CONTENT."""
     from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content=content))
+    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(
+        content=content, raw_html=content, blocked=False, fetch_error=""))
+
+
+def _mock_exa_fallback(monkeypatch, text="", cost=0.0):
+    """Mocks the Exa fallback generate_tool_description/generate_tool_agent_
+    taxonomy/generate_community_profile/generate_community_listing all fall
+    back to when the direct fetch is blocked/thin/unreachable — see
+    linklib.enrich._fetch_grounding_page. Not mocking this at all (the
+    default in every other test here) exercises the real function, which
+    safely no-ops to ("", 0.0) with no EXA_API_KEY set — exactly the "Exa
+    fallback also produced nothing" case those tests need."""
+    from linklib import medium_platform
+    monkeypatch.setattr(medium_platform, "fetch_content_by_url", lambda lib, url: (text, cost))
+
+
+# A realistic ~110-word page body — long enough to clear
+# extract.assess_extraction_quality's real 60-word floor, for every test
+# below that expects a successful DIRECT (non-Exa-fallback) fetch.
+LONG_PAGE_CONTENT = (
+    "Runway is a financial planning platform for finance teams at growth-stage companies. "
+    "It consolidates budgeting, forecasting, and headcount planning into one collaborative "
+    "workspace built for FP&A analysts and controllers who need to model scenarios quickly. "
+    "Teams connect their general ledger and payroll systems, then build driver-based models "
+    "that update automatically as actuals come in from month to month. The platform is used "
+    "by finance leaders who need to answer board questions about runway, burn, and hiring "
+    "plans without waiting on a spreadsheet rebuild every single time a number changes."
+)
 
 
 def _mock_anthropic_citing(monkeypatch, blocks, input_tokens=200, output_tokens=150):
@@ -75,7 +108,7 @@ DESC_TAIL = (
 # -- generate_tool_description: real document-block grounding ----------------
 
 def test_generate_tool_description_sends_real_document_block(monkeypatch):
-    _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     captured = _mock_anthropic_citing(monkeypatch, [(DESC_BODY + DESC_TAIL, [])])
 
     enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
@@ -85,12 +118,12 @@ def test_generate_tool_description_sends_real_document_block(monkeypatch):
     doc_blocks = [b for b in content if b.get("type") == "document"]
     assert len(doc_blocks) == 1
     assert doc_blocks[0]["citations"] == {"enabled": True}
-    assert doc_blocks[0]["source"]["data"] == "Runway is an FP&A platform for finance teams."
+    assert doc_blocks[0]["source"]["data"] == LONG_PAGE_CONTENT
     assert content[-1]["type"] == "text"   # drafting instructions ride last
 
 
 def test_generate_tool_description_returns_verified_citations_tagged_tool_page(monkeypatch):
-    _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
     draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
@@ -107,13 +140,14 @@ def test_generate_tool_description_returns_verified_citations_tagged_tool_page(m
     # The trailing sentinel lines are stripped out, not left dangling.
     assert "SUMMARY" not in draft.description
     assert "CONFIDENT" not in draft.description
+    assert draft.low_confidence is False   # a real direct fetch, no Exa fallback needed
 
 
 def test_generate_tool_description_confident_still_parses_when_citations_present(monkeypatch):
     """The real risk this fix targets: citations enabled alongside trailing
     SUMMARY/CONFIDENT sentinel lines. Confirms both sentinels still parse
     correctly even with a real citation attached earlier in the response."""
-    _mock_fetch_page(monkeypatch, "Homepage content.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
     draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
@@ -122,16 +156,42 @@ def test_generate_tool_description_confident_still_parses_when_citations_present
     assert draft.summary == "Runway is an FP&A platform for growth-stage finance teams."
 
 
-def test_generate_tool_description_no_citations_when_low_confidence(monkeypatch):
-    """No page content fetched at all → no document sent → nothing to
-    cite, regardless of what the (mocked) response claims."""
-    _mock_fetch_page(monkeypatch, "")
+def test_generate_tool_description_low_confidence_and_still_cited_when_fetched_via_exa(monkeypatch):
+    """2026-09 JS-render grounding fix: a direct fetch that's too thin (the
+    JS-shell shape — the page loaded, but the plain-text extraction is way
+    under the 60-word floor) falls back to Exa. When Exa recovers real,
+    substantive content, the draft still succeeds — low_confidence=True
+    (a second-choice fetch route, worth a second look) but NOT ungrounded:
+    the Exa-recovered text still rides as a real Citations-API document
+    block, so citations are populated exactly like a direct-fetch draft."""
+    _mock_fetch_page(monkeypatch, "Loading…")   # a near-empty JS shell — 1 word, fails the gate
+    _mock_exa_fallback(monkeypatch, LONG_PAGE_CONTENT, cost=0.007)
     _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
-    draft = enrich.generate_tool_description("Obscure Co", "https://obscure.example", voice_core="Test voice guide.")
+    draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.low_confidence is True
-    assert draft.citations == []
+    assert draft.exa_cost_usd == 0.007
+    assert len(draft.citations) == 1
+    assert draft.citations[0]["url"] == "https://runway.com"
+
+
+def test_generate_tool_description_raises_when_direct_and_exa_both_unusable(monkeypatch):
+    """The non-negotiable refusal (2026-09 JS-render grounding fix): when
+    neither the direct fetch nor the Exa fallback can produce anything
+    usable, generate_tool_description raises GroundingUnavailable instead
+    of silently drafting a hedge from the model's own knowledge — this
+    site's radical-transparency standard renders a pending/low-confidence
+    field to every visitor with a badge, never hides it, so an ungrounded
+    hedge would still be live, public copy about a real vendor."""
+    _mock_fetch_page(monkeypatch, "")   # empty direct fetch
+    _mock_exa_fallback(monkeypatch, "", cost=0.0)   # Exa also finds nothing
+    _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
+
+    with pytest.raises(enrich.GroundingUnavailable) as exc_info:
+        enrich.generate_tool_description("Obscure Co", "https://obscure.example", voice_core="Test voice guide.")
+    assert exc_info.value.url == "https://obscure.example"
+    assert exc_info.value.reason == "too-thin"
 
 
 # -- _validate_citations_payload (server-side guard on browser input) --------
@@ -217,7 +277,7 @@ def _login(client):
 
 
 def test_generate_description_route_returns_citations_and_model(app_module, monkeypatch):
-    _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     _mock_anthropic_citing(monkeypatch, [(DESC_BODY, [0]), (DESC_TAIL, [])])
 
     client = _client(app_module)

@@ -1528,6 +1528,41 @@ CREATE TABLE IF NOT EXISTS voice_approved_terms (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_approved_terms_unique
     ON voice_approved_terms(rule, term COLLATE NOCASE);
+
+-- Thin-fetch audit dismissals (2026-09, JS-render grounding fix, Phase 2b) --
+-- a per-record, per-field "reviewed and confirmed fine, stop flagging"
+-- marker for scripts/audit_thin_fetch_grounding.py, the diagnostic that
+-- surfaces Software/Community rows whose stored low_confidence/ai_confident/
+-- entity_citations signals still look like the pre-fix JS-render defect
+-- (fetch reported "succeeded" on a near-empty page, the model wasn't
+-- confident, and no real citations were ever recorded). Verified against
+-- real production data (Lumera, since fixed by hand, vs. Paylocity, a
+-- confirmed still-open defect) that NEITHER candidate the investigation
+-- started with actually works: needs_verification is unreliable (Paylocity
+-- already reads needs_verification=0 despite being genuinely broken -- a
+-- human can clear that flag without truly re-checking the content), and
+-- low_confidence/ai_confident are usually already 0/0 either way (a hand-
+-- edit that fixes the text doesn't change either column -- ai_confident is
+-- deliberately permanent, see CLAUDE.md's Confidence indicator bullets, and
+-- low_confidence was already 0 under the OLD buggy "any non-empty text
+-- counts as succeeded" check). There is no existing signal that
+-- distinguishes "already fixed" from "still broken" without a bulk
+-- regeneration pass (explicitly out of scope -- only 7 records are
+-- affected and Brian is fixing them by hand), so this is a genuinely new,
+-- small, explicit per-record dismissal -- the same shape as
+-- voice_review_queue's own row-scoped "Allow once" exception above, not an
+-- attempt to auto-derive "fixed" from data that can't actually tell the
+-- two cases apart. field_name is 'description'|'agent_taxonomy' for a tool
+-- row or 'community_profile' for the one whole-profile community row (see
+-- the audit script's own COMMUNITY_CONFIDENCE_FIELDS comment).
+CREATE TABLE IF NOT EXISTS thin_fetch_audit_dismissals (
+    entity_type  TEXT NOT NULL,
+    entity_id    INTEGER NOT NULL,
+    field_name   TEXT NOT NULL,
+    dismissed_at TEXT NOT NULL,
+    note         TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (entity_type, entity_id, field_name)
+);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -4912,6 +4947,47 @@ class Library:
                 closed += 1
         self.conn.commit()
         return {"added": added, "closed": closed}
+
+    # --- thin-fetch audit dismissals (2026-09, JS-render grounding fix) ---
+    # See thin_fetch_audit_dismissals's own schema comment for why this
+    # exists as a genuinely new, explicit per-record marker rather than an
+    # attempt to derive "already fixed" from needs_verification/
+    # low_confidence/ai_confident — verified against real production data
+    # (Lumera vs. Paylocity) that none of those three actually distinguish
+    # the two cases.
+
+    def dismiss_thin_fetch_audit_finding(self, entity_type: str, entity_id: int,
+                                         field_name: str, note: str = "") -> None:
+        """Record that a human has reviewed this exact (entity, field)
+        finding from scripts/audit_thin_fetch_grounding.py and confirmed the
+        current content is fine — an upsert, since re-dismissing (e.g. with
+        a fresher note) after a later regeneration is a normal, expected
+        action, not an error."""
+        self.conn.execute(
+            """INSERT INTO thin_fetch_audit_dismissals
+                   (entity_type, entity_id, field_name, dismissed_at, note)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(entity_type, entity_id, field_name)
+               DO UPDATE SET dismissed_at=excluded.dismissed_at, note=excluded.note""",
+            (entity_type, entity_id, field_name, _now(), (note or "").strip()),
+        )
+        self.conn.commit()
+
+    def undismiss_thin_fetch_audit_finding(self, entity_type: str, entity_id: int,
+                                           field_name: str) -> None:
+        """Removing a dismissal makes the finding reappear on the audit's
+        next run (if it still matches) — never automatic; only a human
+        deciding a prior dismissal was wrong should call this."""
+        self.conn.execute(
+            "DELETE FROM thin_fetch_audit_dismissals WHERE entity_type=? AND entity_id=? AND field_name=?",
+            (entity_type, entity_id, field_name),
+        )
+        self.conn.commit()
+
+    def list_thin_fetch_audit_dismissals(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM thin_fetch_audit_dismissals ORDER BY dismissed_at DESC"
+        ).fetchall()]
 
     # --- near-duplicate feedback ------------------------------------------
 

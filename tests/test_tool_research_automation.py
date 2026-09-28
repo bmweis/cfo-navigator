@@ -54,7 +54,7 @@ def _mock_generate_tool_agent_taxonomy(monkeypatch, *, taxonomy="Uses an agent c
                                         taxonomy_confident=True, result=None):
     calls = []
 
-    def _fake(name, url, description="", model="", voice_core=""):
+    def _fake(name, url, description="", model="", voice_core="", exa_enabled=True):
         calls.append((name, url, description))
         if result is not None:
             return result
@@ -78,7 +78,7 @@ def test_run_tool_research_writes_taxonomy_draft(env, monkeypatch):
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.close()
 
-    ok = env._run_tool_research(tool_id)
+    ok, reason, url = env._run_tool_research(tool_id)
     assert ok is True
     assert calls == [("Runway", "https://runway.com", "FP&A")]
 
@@ -96,14 +96,14 @@ def test_run_tool_research_returns_false_when_generate_fails(env, monkeypatch):
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.close()
 
-    assert env._run_tool_research(tool_id) is False
+    assert env._run_tool_research(tool_id)[0] is False
 
 
 def test_run_tool_research_returns_false_for_missing_tool(env, monkeypatch):
     import linklib.enrich as enrich_mod
     monkeypatch.setattr(enrich_mod, "generate_tool_agent_taxonomy",
                          lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not be called")))
-    assert env._run_tool_research(999999) is False
+    assert env._run_tool_research(999999)[0] is False
 
 
 # -- auto-trigger on tool creation ----------------------------------------------
@@ -415,7 +415,7 @@ def test_run_tool_research_persists_citations(env, monkeypatch):
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.close()
 
-    assert env._run_tool_research(tool_id) is True
+    assert env._run_tool_research(tool_id)[0] is True
 
     lib = Library(os.environ["LINKLIB_DB"])
     assert lib.get_entity_citations("tool", tool_id, "agent_taxonomy") == citations

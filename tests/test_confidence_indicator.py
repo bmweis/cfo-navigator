@@ -39,9 +39,28 @@ def _mock_anthropic(monkeypatch, payload_json):
 
 # -- linklib.enrich: confident field parsing ---------------------------------
 
-def test_generate_tool_description_parses_confident_true(monkeypatch):
+# 2026-09 JS-render grounding fix: >=60 words, so these tests exercise the
+# model's own CONFIDENT self-report (what they're actually testing), not
+# extract.assess_extraction_quality's real word-count floor — see
+# test_description_citations.py's LONG_PAGE_CONTENT for the same pattern.
+LONG_PAGE_TEXT = (
+    "Real page text describing the product in enough detail to clear the "
+    "site's own extraction quality floor for grounding purposes, the same "
+    "way a genuine vendor homepage would read to a human visitor evaluating "
+    "whether to buy. It covers what the product does, who it's built for, "
+    "and how it differs from the alternatives a buyer would otherwise consider, "
+    "along with a short note on pricing and how teams typically get started."
+)
+
+
+def _mock_fetch_page(monkeypatch, content=LONG_PAGE_TEXT):
     from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
+    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(
+        content=content, raw_html=content, blocked=False, fetch_error=""))
+
+
+def test_generate_tool_description_parses_confident_true(monkeypatch):
+    _mock_fetch_page(monkeypatch)
     _mock_anthropic(monkeypatch, "A tool.\n\nSUMMARY: Short.\n\nCONFIDENT: true")
     draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
@@ -50,8 +69,7 @@ def test_generate_tool_description_parses_confident_true(monkeypatch):
 
 
 def test_generate_tool_description_parses_confident_false(monkeypatch):
-    from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Thin page text."))
+    _mock_fetch_page(monkeypatch)
     _mock_anthropic(monkeypatch, "A tool.\n\nSUMMARY: Short.\n\nCONFIDENT: false")
     draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
@@ -59,8 +77,7 @@ def test_generate_tool_description_parses_confident_false(monkeypatch):
 
 
 def test_generate_tool_description_defaults_confident_false_when_missing(monkeypatch):
-    from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content="Real page text."))
+    _mock_fetch_page(monkeypatch)
     _mock_anthropic(monkeypatch, "A tool.\n\nSUMMARY: Short.")   # no CONFIDENT sentinel line
     draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None

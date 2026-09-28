@@ -213,7 +213,7 @@ def test_generate_description_route_uses_stored_model(env, monkeypatch):
 
     captured = {}
 
-    def _fake_generate_tool_description(name, url, model=None, voice_core=""):
+    def _fake_generate_tool_description(name, url, model=None, voice_core="", exa_enabled=True):
         captured["model"] = model
         from linklib.enrich import ToolDescriptionDraft
         return ToolDescriptionDraft(description="D", summary="S", model=model,

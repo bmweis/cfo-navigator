@@ -107,12 +107,33 @@ def _mock_anthropic(monkeypatch, payload_json):
 
 
 def _mock_fetch_page(monkeypatch, content=""):
+    """2026-09 JS-render grounding fix: needs raw_html/blocked/fetch_error
+    too, not just content — see test_description_citations.py's identical
+    helper. `content` must be >=60 words for a "successful direct fetch"
+    test — see LONG_PAGE_CONTENT."""
     from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content=content))
+    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(
+        content=content, raw_html=content, blocked=False, fetch_error=""))
+
+
+def _mock_exa_fallback(monkeypatch, text="", cost=0.0):
+    from linklib import medium_platform
+    monkeypatch.setattr(medium_platform, "fetch_content_by_url", lambda lib, url: (text, cost))
+
+
+LONG_PAGE_CONTENT = (
+    "Runway is a financial planning platform for finance teams at growth-stage companies. "
+    "It consolidates budgeting, forecasting, and headcount planning into one collaborative "
+    "workspace built for FP&A analysts and controllers who need to model scenarios quickly. "
+    "Teams connect their general ledger and payroll systems, then build driver-based models "
+    "that update automatically as actuals come in from month to month. The platform is used "
+    "by finance leaders who need to answer board questions about runway, burn, and hiring "
+    "plans without waiting on a spreadsheet rebuild every single time a number changes."
+)
 
 
 def test_generate_tool_description_parses_both_fields(monkeypatch):
-    _mock_fetch_page(monkeypatch, "Runway is an FP&A platform for finance teams.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     _mock_anthropic(monkeypatch,
         "Runway is a financial planning platform built for finance teams at "
         "growth-stage companies. It centralizes headcount, revenue, and expense planning "
@@ -128,12 +149,29 @@ def test_generate_tool_description_parses_both_fields(monkeypatch):
     assert draft.cost_usd > 0
 
 
-def test_generate_tool_description_low_confidence_when_no_page_content(monkeypatch):
+def test_generate_tool_description_low_confidence_when_fetched_via_exa(monkeypatch):
+    """2026-09 JS-render grounding fix: a too-thin direct fetch falls back
+    to Exa; when Exa recovers real content, low_confidence=True (a
+    second-choice route, not "no grounding at all" — see
+    test_description_citations.py's matching test for the full docstring).
+    A direct fetch that produces nothing usable, AND an Exa fallback that
+    also finds nothing, now refuses to draft — see
+    test_generate_tool_description_raises_when_fetch_totally_fails below."""
     _mock_fetch_page(monkeypatch, "")
+    _mock_exa_fallback(monkeypatch, LONG_PAGE_CONTENT, cost=0.007)
     _mock_anthropic(monkeypatch, "A finance tool.\n\nSUMMARY: A finance tool.\n\nCONFIDENT: false")
     draft = enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.low_confidence is True
+    assert draft.exa_cost_usd == 0.007
+
+
+def test_generate_tool_description_raises_when_fetch_totally_fails(monkeypatch):
+    _mock_fetch_page(monkeypatch, "")
+    _mock_exa_fallback(monkeypatch, "", cost=0.0)
+    _mock_anthropic(monkeypatch, "A finance tool.\n\nSUMMARY: A finance tool.\n\nCONFIDENT: false")
+    with pytest.raises(enrich.GroundingUnavailable):
+        enrich.generate_tool_description("Runway", "https://runway.com", voice_core="Test voice guide.")
 
 
 def test_generate_tool_description_returns_none_without_api_key(monkeypatch):
@@ -254,7 +292,7 @@ def test_quick_edit_route_saves_summary(env):
 
 
 def test_generate_description_route_returns_summary(env, monkeypatch):
-    _mock_fetch_page(monkeypatch, "Runway is an FP&A platform.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     _mock_anthropic(monkeypatch, "A long description.\n\nSUMMARY: A short summary.\n\nCONFIDENT: true")
     client = _client(env)
     _login(client)

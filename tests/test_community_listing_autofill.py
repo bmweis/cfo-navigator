@@ -39,10 +39,29 @@ def _mock_anthropic(monkeypatch, payload_json, input_tokens=100, output_tokens=4
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
 
 
-def _mock_fetch_page(monkeypatch, content="Some community page content."):
+LONG_PAGE_CONTENT = (
+    "This community brings together finance leaders at growth-stage companies for peer "
+    "learning, tactical playbooks, and a private space to compare notes on the same "
+    "problems everyone in the role eventually runs into. Members meet in small groups, "
+    "attend regular virtual sessions, and get access to a shared library of templates and "
+    "benchmarking data contributed by the group itself rather than a vendor. It's positioned "
+    "as a working peer group for people already doing the job, not a general networking event."
+)
+
+
+def _mock_fetch_page(monkeypatch, content=LONG_PAGE_CONTENT):
+    """2026-09 JS-render grounding fix: needs raw_html/blocked/fetch_error
+    too, not just content — see test_description_citations.py's identical
+    helper. `content` must be >=60 words for a "successful direct fetch"
+    test — the default (LONG_PAGE_CONTENT) already clears it."""
     from linklib import extract
-    page = types.SimpleNamespace(content=content)
+    page = types.SimpleNamespace(content=content, raw_html=content, blocked=False, fetch_error="")
     monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: page)
+
+
+def _mock_exa_fallback(monkeypatch, text="", cost=0.0):
+    from linklib import medium_platform
+    monkeypatch.setattr(medium_platform, "fetch_content_by_url", lambda lib, url: (text, cost))
 
 
 REACH = ["Regional", "National", "Global"]
@@ -149,8 +168,14 @@ def test_generate_listing_rejects_hallucinated_enum_values(monkeypatch):
     assert draft.categories == []
 
 
-def test_generate_listing_low_confidence_when_fetch_fails(monkeypatch):
+def test_generate_listing_low_confidence_when_fetched_via_exa(monkeypatch):
+    """2026-09 JS-render grounding fix: a too-thin direct fetch falls back
+    to Exa; low_confidence=True when Exa is what actually grounded the
+    draft (a second-choice route), not "no grounding at all" — see
+    test_generate_listing_raises_when_fetch_totally_fails for the case
+    where nothing at all could be recovered."""
     _mock_fetch_page(monkeypatch, content="")
+    _mock_exa_fallback(monkeypatch, LONG_PAGE_CONTENT, cost=0.007)
     _mock_anthropic(monkeypatch, """{
         "demographic": "Needs verification", "reach": "Needs verification", "local_markets": "",
         "cost_band": "Needs verification", "cost_note": "", "sponsorship_type": "Needs verification",
@@ -164,6 +189,28 @@ def test_generate_listing_low_confidence_when_fetch_fails(monkeypatch):
     )
     assert draft is not None
     assert draft.low_confidence is True
+    assert draft.exa_cost_usd == 0.007
+
+
+def test_generate_listing_raises_when_fetch_totally_fails(monkeypatch):
+    """The non-negotiable refusal (2026-09 JS-render grounding fix): when
+    neither the direct fetch nor Exa can produce anything usable,
+    generate_community_listing raises GroundingUnavailable rather than
+    drafting a hedge from the model's own knowledge."""
+    _mock_fetch_page(monkeypatch, content="")
+    _mock_exa_fallback(monkeypatch, "", cost=0.0)
+    _mock_anthropic(monkeypatch, """{
+        "demographic": "Needs verification", "reach": "Needs verification", "local_markets": "",
+        "cost_band": "Needs verification", "cost_note": "", "sponsorship_type": "Needs verification",
+        "sponsor_name": "", "access": "Needs verification", "format": "Needs verification", "categories": []
+    }""")
+    with pytest.raises(enrich.GroundingUnavailable):
+        enrich.generate_community_listing(
+            "Test Community", "https://example.com",
+            reach_options=REACH, cost_band_options=COST_BANDS,
+            sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
+            category_options=CATEGORIES, voice_core="Test voice guide.",
+        )
 
 
 def test_generate_listing_without_api_key_returns_none(monkeypatch):

@@ -281,6 +281,50 @@ def _describe_fetch_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+# HTTP status codes that are the standard shape of an active anti-bot/WAF
+# response (Cloudflare, PerimeterX, ...) rather than a genuinely dead or
+# misconfigured URL — 403 (Forbidden, the most common explicit block), 429
+# (Too Many Requests, rate-limiting/anti-bot), 503 (Service Unavailable,
+# Cloudflare's own default status for its "checking your browser"/
+# under-attack-mode challenge). Deliberately excludes 404 (the resource
+# itself is gone, not blocked — a second fetch of the identical dead URL
+# from a different crawler has no more chance of finding it) and every
+# other 5xx (500/502/504 read as a genuine origin/gateway error, not a
+# deliberate block — a materially weaker signal than these three).
+_LIKELY_BOT_BLOCK_HTTP_STATUSES = frozenset({403, 429, 503})
+
+
+def is_likely_bot_block_error(fetch_error: str) -> bool:
+    """Whether a fetch_error string (see _describe_fetch_error) looks like
+    active anti-bot blocking rather than a genuinely dead/unreachable URL —
+    the signal linklib.enrich._fetch_grounding_page uses to decide whether
+    a failed direct fetch is worth an Exa retry (2026-09 JS-render
+    grounding fix, fetch-error follow-up). HTTP 403/429/503 are the
+    standard status-code shape of a WAF/anti-bot response — the same class
+    of blocking looks_like_bot_challenge already recognizes when it arrives
+    as a 200 response carrying an interstitial page instead of a raised
+    status.
+
+    "timeout" is included too, on a different rationale: unlike a DNS
+    failure or a refused connection (nothing there to answer at all — and
+    fetch_page's own bare-domain www retry already gives a connection-level
+    failure its one legitimate second chance before this is ever checked),
+    a timeout means something DID respond, just not fast or cleanly enough
+    — closer in kind to an active-defense response (a slow bot-check
+    handshake) than to a dead URL.
+
+    Deliberately excludes a bare "HTTP 404" (the URL itself is wrong or
+    gone; Exa fetching the identical dead URL has no more chance of
+    success), any connection-level failure (DNS/refused — see fetch_page's
+    own www retry, already exhausted by the time this is checked), an SSL
+    error, and any other 5xx (a genuine origin error, not a block
+    signature) — spending an Exa call on any of those is a near-certain
+    miss, not a second chance."""
+    if fetch_error == "timeout":
+        return True
+    return any(fetch_error == f"HTTP {code}" for code in _LIKELY_BOT_BLOCK_HTTP_STATUSES)
+
+
 def _page_data_from_html(html: str) -> PageData:
     """Build a PageData from already-fetched HTML — the shared back half of
     fetch_page(), factored out so a caller with HTML from somewhere OTHER

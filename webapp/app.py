@@ -1306,23 +1306,42 @@ def _low_confidence_indicator_html(low_confidence: object) -> str:
     successful fetch of a thin page can still yield a low-confidence
     self-report, or vice versa).
 
-    Phrased as what actually happened ("Source page fetch:
-    Succeeded/Failed"), not as a literal "Low confidence: Yes/No" — a
-    literal mirror would put two "Yes/No" lines back to back whose "Yes"
-    means opposite things (Claude confidence: Yes is good; low_confidence:
-    Yes is bad), which reads as confusing rather than clarifying. Same
-    three-state/permanent-display/sanctioned-color convention as
-    _confidence_indicator_html: NULL (no signal — a hand-written field, or
-    one drafted before this column existed) -> a neutral "Not recorded"
-    state, never hidden."""
+    2026-09 JS-render grounding fix: `low_confidence=1` no longer means "no
+    page content at all — drafted from the model's own knowledge" (that
+    case now refuses to draft rather than saving anything — see
+    linklib.enrich.GroundingUnavailable). It means "the direct fetch was
+    blocked/thin/unreachable and the Exa fallback recovered it instead" —
+    still worth a second look, but not the "Failed" it used to render as,
+    which would now be actively misleading (real, usable content WAS
+    fetched, just via a second-choice route). Phrased as what actually
+    happened ("Source page fetch: Direct/Via Exa fallback"), not as a
+    literal "Low confidence: Yes/No" — a literal mirror would put two
+    "Yes/No" lines back to back whose "Yes" means opposite things (Claude
+    confidence: Yes is good; low_confidence: Yes is bad), which reads as
+    confusing rather than clarifying. Same three-state/permanent-display/
+    sanctioned-color convention as _confidence_indicator_html: NULL (no
+    signal — a hand-written field, or one drafted before this column
+    existed) -> a neutral "Not recorded" state, never hidden."""
     if low_confidence is None:
         return ('<p style="font-size:12px;color:var(--muted);margin:2px 0 0;font-weight:500;">'
                 'Source page fetch: Not recorded</p>')
-    failed = bool(int(low_confidence))
-    value = "Failed" if failed else "Succeeded"
-    color = "#92400e" if failed else "#065f46"
+    via_exa = bool(int(low_confidence))
+    value = "Via Exa fallback" if via_exa else "Direct"
+    color = "#92400e" if via_exa else "#065f46"
     return (f'<p style="font-size:12px;color:{color};margin:2px 0 0;font-weight:500;">'
             f'Source page fetch: {value}</p>')
+
+
+def _grounding_unavailable_error(e: Exception) -> str:
+    """Shared, honest error message for the four AJAX Generate routes and
+    _run_tool_research when neither a direct fetch nor the Exa fallback
+    could get anything usable to ground a draft on (linklib.enrich.
+    GroundingUnavailable, 2026-09 JS-render grounding fix) — names the
+    reason and the URL, per the standing "refuse rather than draft from
+    nothing" requirement, rather than the old generic "missing
+    ANTHROPIC_API_KEY, or the request failed" message, which couldn't
+    distinguish this case from an unrelated SDK/key problem."""
+    return f"Couldn't fetch usable content from {e.url} ({e.reason}). Write it by hand, or fix the URL and try again."
 
 
 # Real Markdown/List Rendering for Narrative Fields (2026-09) — shared CSS
@@ -12706,7 +12725,7 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
       descEl.addEventListener('input', onEdit);
     })();
     status.textContent = d.low_confidence
-      ? 'Drafted. Could not fetch the page, so verify facts before saving.'
+      ? 'Drafted from a fallback fetch (the direct page fetch needed help rendering). Verify facts before saving.'
       : 'Drafted. Review before saving.';
   } catch (e) {
     status.textContent = '';
@@ -12800,7 +12819,7 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
       el.addEventListener('input', onEdit);
     });
     status.textContent = d.low_confidence
-      ? 'Drafted. Could not fetch the page, so verify facts before saving.'
+      ? 'Drafted from a fallback fetch (the direct page fetch needed help rendering). Verify facts before saving.'
       : 'Drafted. Review before saving.';
   } catch (e) {
     status.textContent = '';
@@ -12844,7 +12863,7 @@ async function generateCommunityListing(name, url, statusId, errBoxId, hostId) {
     });
     if ((d.categories || []).length) markAiDrafted('categories');
     status.textContent = d.low_confidence
-      ? 'Drafted. Could not fetch the page, so verify facts before saving.'
+      ? 'Drafted from a fallback fetch (the direct page fetch needed help rendering). Verify facts before saving.'
       : 'Drafted. Review before saving—anything marked "Needs verification" needs a manual check.';
   } catch (e) {
     status.textContent = '';
@@ -19497,10 +19516,15 @@ async def admin_communities_generate_profile(request: Request):
             voice_core = require_voice_setting(lib, "voice_core")
         except VoicePromptMissing as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
+        exa_enabled = lib.get_exa_enabled()
     finally:
         lib.close()
-    from linklib.enrich import generate_community_profile
-    draft = generate_community_profile(name, url, existing=existing, model=model, voice_core=voice_core)
+    from linklib import enrich as enrich_mod
+    try:
+        draft = enrich_mod.generate_community_profile(name, url, existing=existing, model=model,
+                                                        voice_core=voice_core, exa_enabled=exa_enabled)
+    except enrich_mod.GroundingUnavailable as e:
+        return JSONResponse({"ok": False, "error": _grounding_unavailable_error(e)}, status_code=503)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Profile generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -19509,6 +19533,8 @@ async def admin_communities_generate_profile(request: Request):
     lib = _lib()
     try:
         lib.record_enrichment_cost(None, draft.model, draft.input_tokens, draft.output_tokens, draft.cost_usd)
+        if draft.exa_cost_usd:
+            lib.record_enrichment_cost(None, "exa-fetch", 0, 0, draft.exa_cost_usd)
     finally:
         lib.close()
 
@@ -19562,6 +19588,7 @@ async def admin_communities_generate_listing(request: Request):
     try:
         category_names = [cat["name"] for cat in lib.list_community_categories()]
         model = lib.get_enrich_model()
+        exa_enabled = lib.get_exa_enabled()
         try:
             voice_core = require_voice_setting(lib, "voice_core")
         except VoicePromptMissing as e:
@@ -19569,15 +19596,18 @@ async def admin_communities_generate_listing(request: Request):
     finally:
         lib.close()
 
-    from linklib.enrich import generate_community_listing
-    draft = generate_community_listing(
-        name, url,
-        reach_options=_COMMUNITY_REACH, cost_band_options=_COMMUNITY_COST_BANDS,
-        sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES,
-        access_options=_COMMUNITY_ACCESS, format_options=_COMMUNITY_FORMAT,
-        category_options=category_names,
-        model=model, voice_core=voice_core,
-    )
+    from linklib import enrich as enrich_mod
+    try:
+        draft = enrich_mod.generate_community_listing(
+            name, url,
+            reach_options=_COMMUNITY_REACH, cost_band_options=_COMMUNITY_COST_BANDS,
+            sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES,
+            access_options=_COMMUNITY_ACCESS, format_options=_COMMUNITY_FORMAT,
+            category_options=category_names,
+            model=model, voice_core=voice_core, exa_enabled=exa_enabled,
+        )
+    except enrich_mod.GroundingUnavailable as e:
+        return JSONResponse({"ok": False, "error": _grounding_unavailable_error(e)}, status_code=503)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Listing generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -19586,6 +19616,8 @@ async def admin_communities_generate_listing(request: Request):
     lib = _lib()
     try:
         lib.record_enrichment_cost(None, draft.model, draft.input_tokens, draft.output_tokens, draft.cost_usd)
+        if draft.exa_cost_usd:
+            lib.record_enrichment_cost(None, "exa-fetch", 0, 0, draft.exa_cost_usd)
     finally:
         lib.close()
 
@@ -19710,7 +19742,7 @@ def admin_tools_new(request: Request):
     return HTMLResponse(_page("Add software—CFO Toolbox", "", body, authed=True))
 
 
-def _run_tool_research(tool_id: int) -> bool:
+def _run_tool_research(tool_id: int) -> tuple[bool, str, str]:
     """Automated agent-taxonomy research for one Software entry — the shared
     drafting logic behind both trigger points confirmed for the
     search-overhaul automation follow-up: fired off-request via
@@ -19723,6 +19755,12 @@ def _run_tool_research(tool_id: int) -> bool:
     The field it writes lands via the needs_verification-flagged draft path
     (set_tool_agent_taxonomy_draft), never auto-confirmed.
 
+    Returns (ok, reason, url) — reason/url are only ever populated when ok is
+    False AND the failure was a GroundingUnavailable refusal (2026-09
+    JS-render grounding fix), so the on-demand "Refresh" route can show an
+    honest, specific error instead of a generic "couldn't complete the
+    research pass" for every kind of failure alike.
+
     Used to also draft standalone-vs-bundled tool_features rows in the same
     call — dropped in the Feature Taxonomy Phase 1b PR 2 legacy retirement
     (CLAUDE.md's "no dead data" note) along with the table itself."""
@@ -19730,19 +19768,24 @@ def _run_tool_research(tool_id: int) -> bool:
     try:
         tool = lib.get_tool(tool_id)
         if not tool:
-            return False
+            return False, "", ""
         from linklib import enrich as enrich_mod
         from linklib.voice_settings import VoicePromptMissing, require_voice_setting
         try:
             voice_core = require_voice_setting(lib, "voice_core")
         except VoicePromptMissing as e:
             print(f"[_run_tool_research:{tool_id}] aborted: {e}")
-            return False
-        result = enrich_mod.generate_tool_agent_taxonomy(
-            tool["name"], tool["url"], tool.get("description", ""), model=lib.get_enrich_model(),
-            voice_core=voice_core)
+            return False, "", ""
+        exa_enabled = lib.get_exa_enabled()
+        try:
+            result = enrich_mod.generate_tool_agent_taxonomy(
+                tool["name"], tool["url"], tool.get("description", ""), model=lib.get_enrich_model(),
+                voice_core=voice_core, exa_enabled=exa_enabled)
+        except enrich_mod.GroundingUnavailable as e:
+            print(f"[_run_tool_research:{tool_id}] aborted: {e}")
+            return False, e.reason, e.url
         if result is None:
-            return False
+            return False, "", ""
         wrote_anything = False
         if result.agent_taxonomy_note.strip():
             lib.set_tool_agent_taxonomy_draft(
@@ -19767,10 +19810,12 @@ def _run_tool_research(tool_id: int) -> bool:
         if wrote_anything or result.cost_usd:
             lib.record_enrichment_cost(None, result.model, result.input_tokens,
                                        result.output_tokens, result.cost_usd)
+        if result.exa_cost_usd:
+            lib.record_enrichment_cost(None, "exa-fetch", 0, 0, result.exa_cost_usd)
         backup.maybe_backup(DB_PATH)
-        return True
+        return True, "", ""
     except Exception:
-        return False
+        return False, "", ""
     finally:
         lib.close()
 
@@ -19868,6 +19913,7 @@ def admin_tools_reject(request: Request, tool_id: int):
 
 @app.get("/tools/software/{slug}/edit", response_class=HTMLResponse)
 def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "", research_refreshed: str = "",
+                      research_reason: str = "", research_url: str = "",
                       app_screenshot_captured: str = "",
                       logo_refetched: str = "", logo_refetch_msg: str = "",
                       feature_links_error: str = ""):
@@ -20114,6 +20160,17 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             '<p style="color:var(--muted);font-size:13px;margin:0 0 10px;">Drafted. Review the '
             'agent taxonomy below'
             + (' before marking it verified.</p>' if _research_needs_review else '.</p>')
+        )
+    elif research_refreshed == "grounding":
+        # GroundingUnavailable (2026-09 JS-render grounding fix) — an honest,
+        # specific reason+URL rather than the generic "couldn't complete the
+        # research pass" message below, which can't tell this apart from an
+        # unrelated SDK/key problem.
+        _research_banner_html = (
+            f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+            f'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t fetch usable content from '
+            f'{_esc(research_url)} ({_esc(research_reason)}). Write the agent taxonomy by hand, or fix '
+            f'the URL and try again.</p>'
         )
     elif research_refreshed == "0":
         _research_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
@@ -21029,8 +21086,17 @@ def admin_tools_research_refresh(request: Request, tool_id: int):
     lib.close()
     if not tool:
         raise HTTPException(status_code=404, detail="Tool not found")
-    ok = _run_tool_research(tool_id)
-    msg = "research_refreshed=1" if ok else "research_refreshed=0"
+    ok, reason, url = _run_tool_research(tool_id)
+    if ok:
+        msg = "research_refreshed=1"
+    elif reason:
+        # GroundingUnavailable (2026-09 JS-render grounding fix) — an honest,
+        # specific reason+URL instead of the generic "couldn't complete the
+        # research pass" every other failure still falls back to.
+        from urllib.parse import quote
+        msg = f"research_refreshed=grounding&research_reason={quote(reason)}&research_url={quote(url)}"
+    else:
+        msg = "research_refreshed=0"
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
 
 
@@ -21334,14 +21400,19 @@ async def admin_tools_generate_description(request: Request):
     lib = _lib()
     try:
         model = lib.get_enrich_model()
+        exa_enabled = lib.get_exa_enabled()
         try:
             voice_core = require_voice_setting(lib, "voice_core")
         except VoicePromptMissing as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=503)
     finally:
         lib.close()
-    from linklib.enrich import generate_tool_description
-    draft = generate_tool_description(name, url, model=model, voice_core=voice_core)
+    from linklib import enrich as enrich_mod
+    try:
+        draft = enrich_mod.generate_tool_description(name, url, model=model, voice_core=voice_core,
+                                                      exa_enabled=exa_enabled)
+    except enrich_mod.GroundingUnavailable as e:
+        return JSONResponse({"ok": False, "error": _grounding_unavailable_error(e)}, status_code=503)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Description generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -21350,6 +21421,8 @@ async def admin_tools_generate_description(request: Request):
     lib = _lib()
     try:
         lib.record_enrichment_cost(None, draft.model, draft.input_tokens, draft.output_tokens, draft.cost_usd)
+        if draft.exa_cost_usd:
+            lib.record_enrichment_cost(None, "exa-fetch", 0, 0, draft.exa_cost_usd)
     finally:
         lib.close()
 
@@ -25596,7 +25669,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                                   "enrichment_cost", "manual_overhead", "field_reviews",
                                   "narrative_review_log", "entity_citations", "matchmaker_questions",
                                   "compare_summary_cache", "compare_summary_feedback",
-                                  "voice_review_queue", "voice_approved_terms"]),
+                                  "voice_review_queue", "voice_approved_terms",
+                                  "thin_fetch_audit_dismissals"]),
 ]
 
 
@@ -26575,8 +26649,10 @@ def _ai_exa_config_html(exa_enabled: bool, has_key: bool) -> str:
 <li><strong>FP&amp;A Buddy's web tier.</strong> Turning Exa off here doesn't disable web search&mdash;it switches to Claude's own <code>web_search_20250305</code> tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</li>
 <li><strong>Reader content backfill's domain-migration tier</strong> (a URL on a confirmed migrated domain, e.g. avc.com&nbsp;&rarr;&nbsp;avc.xyz).</li>
 <li><strong>Reader content backfill's Medium-platform tier</strong> (medium.com and other recognized Cloudflare-blocked hosts).</li>
+<li><strong>Vendor profile drafting's grounding fallback</strong> (Description, Agent taxonomy, Community profile, and Community listing generation&mdash;whenever the direct page fetch is blocked, too thin, or returns a WAF-style error).</li>
 </ul>
-<p style="color:var(--ink-soft);margin:0 0 16px;font-size:13.5px;line-height:1.6;"><strong>Unlike Buddy's web tier, the two backfill tiers have no fallback&mdash;turning Exa off here turns them off too, with no substitute mechanism.</strong> A backfill attempt that would have used either tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried.</p>
+<p style="color:var(--ink-soft);margin:0 0 12px;font-size:13.5px;line-height:1.6;"><strong>Unlike Buddy's web tier, none of the other three have a substitute.</strong> Turning Exa off here turns them off too, with nothing standing in. A backfill attempt that would have used either Reader tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried.</p>
+<p style="color:var(--ink-soft);margin:0 0 16px;font-size:13.5px;line-height:1.6;"><strong>Vendor profile drafting is the one case where this blocks work rather than narrowing it.</strong> Most modern software marketing sites are either behind a WAF or rendered client-side, so a plain fetch can't read them. With Exa off, drafting refuses outright rather than degrading to a lower-confidence draft, and there's no fallback engine the way Buddy's web tier has Claude's native search. You write the field by hand instead.</p>
 {key_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Web search engine</div>
@@ -26736,6 +26812,10 @@ def admin_system_ai(request: Request):
                "No fallback (other than the existing Wayback tier)&mdash;a real hit is simply not tried when Exa is off.")
         + _row("Reader backfill: Medium-platform", "Tracked in <code>content_refetch_log</code>",
                "No fallback (other than the existing Wayback tier)&mdash;same as domain migration above.")
+        + _row("Vendor profile drafting's grounding fallback", 'Tracked in <code>enrichment_cost</code> (<code>model="exa-fetch"</code>)',
+               "<strong>No fallback and no degrade.</strong> Refuses to draft rather than saving anything when the direct "
+               "fetch is blocked or thin and this can't recover it. Description, Agent taxonomy, Community profile, and "
+               "Community listing generation all go through this.")
         + _row("Feature Taxonomy vendor research", "Per-run script output only",
                "<strong>Not tracked in a database table like the three above</strong>&mdash;cost prints to the "
                "console each time <code>scripts/enrich_agent_taxonomy.py</code> (or a feature-drafting tool) runs, "

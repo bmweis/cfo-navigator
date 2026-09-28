@@ -68,6 +68,7 @@ def main() -> int:
         except VoicePromptMissing as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 1
+        exa_enabled = lib.get_exa_enabled()
     finally:
         lib.close()
 
@@ -77,7 +78,7 @@ def main() -> int:
           f"[roster_size={args.roster_size or 'unknown'}]...\n")
 
     draft = draft_tool_features_for_category(
-        args.tool, args.url, args.category,
+        args.tool, args.url, args.category, exa_enabled=exa_enabled,
         existing_feature_names=existing, roster_size=args.roster_size, model=args.model,
         voice_core=voice_core,
     )

@@ -27,8 +27,27 @@ from linklib.db import Library
 
 
 def _mock_fetch_page(monkeypatch, content=""):
+    """2026-09 JS-render grounding fix: needs raw_html/blocked/fetch_error
+    too — see test_description_citations.py's identical helper. `content`
+    must be >=60 words for a "successful direct fetch" test."""
     from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(content=content))
+    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(
+        content=content, raw_html=content, blocked=False, fetch_error=""))
+
+
+def _mock_exa_fallback(monkeypatch, text="", cost=0.0):
+    from linklib import medium_platform
+    monkeypatch.setattr(medium_platform, "fetch_content_by_url", lambda lib, url: (text, cost))
+
+
+LONG_PAGE_CONTENT = (
+    "Chief is a private membership network for senior executive women built to give them a "
+    "confidential peer group of others operating at a similar level. Members join small "
+    "curated groups called Cores that meet regularly to work through real leadership "
+    "challenges together, alongside a broader calendar of programming, mentorship, and "
+    "in-person events across several major cities. The network is positioned as a career "
+    "accelerant for women already in senior roles, not an entry-level networking group."
+)
 
 
 def _mock_anthropic_citing(monkeypatch, blocks, input_tokens=200, output_tokens=150):
@@ -159,7 +178,7 @@ VERDICT_SUMMARY: true"""
 # -- generate_community_profile: real document-block grounding ---------------
 
 def test_generate_community_profile_sends_real_document_block(monkeypatch):
-    _mock_fetch_page(monkeypatch, "Chief is a private membership network for senior executive women.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     captured = _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY + PROFILE_TAIL, [])])
 
     enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
@@ -169,12 +188,12 @@ def test_generate_community_profile_sends_real_document_block(monkeypatch):
     doc_blocks = [b for b in content if b.get("type") == "document"]
     assert len(doc_blocks) == 1
     assert doc_blocks[0]["citations"] == {"enabled": True}
-    assert doc_blocks[0]["source"]["data"] == "Chief is a private membership network for senior executive women."
+    assert doc_blocks[0]["source"]["data"] == LONG_PAGE_CONTENT
     assert content[-1]["type"] == "text"   # drafting instructions ride last
 
 
 def test_generate_community_profile_returns_verified_citations_tagged_community_page(monkeypatch):
-    _mock_fetch_page(monkeypatch, "Chief is a private membership network for senior executive women.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
     draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
@@ -186,13 +205,14 @@ def test_generate_community_profile_returns_verified_citations_tagged_community_
     # itself (inject_markers=True) — the new intended footnote rendering.
     assert "[1]" in draft.ideal_member
     assert "Seed-stage operator CFOs." in draft.ideal_member
+    assert draft.low_confidence is False   # a real direct fetch, no Exa fallback needed
 
 
 def test_generate_community_profile_confidence_still_parses_when_citations_present(monkeypatch):
     """The real risk this fix targets: citations enabled alongside the
     trailing CONFIDENCE: block. Confirms the sentinel block still parses
     correctly even with a real citation attached earlier in the response."""
-    _mock_fetch_page(monkeypatch, "Homepage content.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
     draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
@@ -202,16 +222,35 @@ def test_generate_community_profile_confidence_still_parses_when_citations_prese
     assert draft.confidence["notable_members"] is False
 
 
-def test_generate_community_profile_no_citations_when_low_confidence(monkeypatch):
-    """No page content fetched at all → no document sent → nothing to
-    cite, regardless of what the (mocked) response claims."""
+def test_generate_community_profile_low_confidence_and_still_cited_when_fetched_via_exa(monkeypatch):
+    """2026-09 JS-render grounding fix: a too-thin direct fetch falls back
+    to Exa; a successful recovery still rides as a real Citations-API
+    document block — low_confidence=True (a second-choice route) but not
+    ungrounded. See test_generate_community_profile_raises_when_direct_and_
+    exa_both_unusable for the case where nothing at all could be found."""
     _mock_fetch_page(monkeypatch, "")
+    _mock_exa_fallback(monkeypatch, LONG_PAGE_CONTENT, cost=0.007)
     _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
-    draft = enrich.generate_community_profile("Obscure Community", "https://obscure.example", voice_core="Test voice guide.")
+    draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
     assert draft is not None
     assert draft.low_confidence is True
-    assert draft.citations == []
+    assert draft.exa_cost_usd == 0.007
+    assert len(draft.citations) == 1
+
+
+def test_generate_community_profile_raises_when_direct_and_exa_both_unusable(monkeypatch):
+    """The non-negotiable refusal (2026-09 JS-render grounding fix): when
+    neither the direct fetch nor Exa can produce anything usable,
+    generate_community_profile raises GroundingUnavailable rather than
+    drafting a hedge from the model's own knowledge — same reasoning as
+    generate_tool_description's matching refusal."""
+    _mock_fetch_page(monkeypatch, "")
+    _mock_exa_fallback(monkeypatch, "", cost=0.0)
+    _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
+
+    with pytest.raises(enrich.GroundingUnavailable):
+        enrich.generate_community_profile("Obscure Community", "https://obscure.example", voice_core="Test voice guide.")
 
 
 # -- app fixture + client helpers ---------------------------------------------
@@ -252,7 +291,7 @@ def _add_community(lib):
 # -- generate-profile AJAX route: returns citations + model ------------------
 
 def test_generate_profile_route_returns_citations_and_model(app_module, monkeypatch):
-    _mock_fetch_page(monkeypatch, "Chief is a private membership network for senior executive women.")
+    _mock_fetch_page(monkeypatch, LONG_PAGE_CONTENT)
     _mock_anthropic_citing(monkeypatch, [(PROFILE_BODY, [0]), (PROFILE_TAIL, [])])
 
     client = _client(app_module)

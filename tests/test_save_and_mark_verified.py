@@ -275,6 +275,7 @@ def test_agent_taxonomy_generate_summary_shows_mark_verified_with_no_extra_save(
         input_tokens = 10
         output_tokens = 10
         cost_usd = 0.0
+        exa_cost_usd = 0.0
 
     monkeypatch.setattr(enrich_mod, "generate_tool_agent_taxonomy", lambda *a, **k: _FakeResult())
 

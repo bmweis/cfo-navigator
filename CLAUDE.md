@@ -10473,6 +10473,170 @@ it supersedes the old "`/save` is token-gated" note.
   `tests/test_app_screenshot.py` for the regression coverage — every new
   test proven to fail against the pre-fix code before being trusted.
 
+- **JS-rendered vendor pages, grounding fetch defect (2026-09) — the four
+  AI vendor-research functions decided a page fetch "succeeded" via a bare
+  `not bool(page.content.strip())`, so a client-rendered homepage that
+  loaded fine but left the page shell nearly empty read as a real,
+  substantive fetch, producing a low-confidence draft that looked like a
+  genuine finding rather than a failed one.** Found via Lumera's real
+  homepage — its actual content only ever loads client-side, so
+  `extract.fetch_page()` returned a few dozen words of shell markup, non-
+  empty enough to pass the old check but nowhere near a real page. Phase 1
+  (investigation) and Phase 2a (`scripts/audit_thin_fetch_grounding.py`,
+  PR #633 — a read-only diagnostic, no fix) confirmed the actual production
+  blast radius: 7 records with a real, specific issue (1 confirmed
+  thin-fetch defect — Paylocity; 1 confirmed instance of a separate
+  `[1]`-pseudo-citation-marker bug, tracked as its own follow-up issue —
+  Vena; 4 "stale flag" false positives the audit can't tell apart from an
+  already-fixed record, see below) out of a much larger NULL backlog
+  (115/118 tool rows with no `low_confidence` signal at all — a second
+  follow-up issue tracks re-fetching and comparing that backlog).
+  **Phase 2b is the fix**, applied identically at all four call sites
+  (`generate_tool_description`, `generate_tool_agent_taxonomy`'s
+  `_fetch_taxonomy_grounding`, `generate_community_profile`,
+  `generate_community_listing`) via one new shared helper,
+  `linklib.enrich._fetch_grounding_page(url, exa_enabled)`: the direct
+  fetch is gated through the SAME `extract.assess_extraction_quality()`
+  bar the Reader's own content backfill already holds a fetch to (a real
+  60-word floor, plus paywall/bot-challenge detection — see the "Reader
+  content-structure backfill" section above for where that gate came
+  from) instead of a bare truthiness check. When the direct fetch loaded
+  but failed that gate, or — 2026-09 fetch-error follow-up, below — it
+  failed outright with a fetch_error that itself looks like active
+  blocking (`extract.is_likely_bot_block_error`: HTTP 403/429/503, or a
+  timeout), a single Exa fallback is tried, `linklib.medium_platform.fetch_content_by_url` — the
+  existing Reader-backfill fetch tier, reused rather than a new Playwright
+  path (a Phase 1 routing note originally pointed at Playwright; reversed
+  once Exa's own rendering was confirmed to already solve the same
+  problem for JS-heavy pages, with no new headless-browser dependency to
+  maintain) — re-gated through the identical quality check. A successful
+  Exa recovery still drafts, flagged `low_confidence=True` (a genuinely
+  grounded second-choice route, not "no content at all"). **When BOTH
+  tiers fail the gate, the function raises `enrich.GroundingUnavailable
+  (reason, url)` and nothing is drafted or saved** — non-negotiable, per
+  this site's own radical-transparency standard: a pending/unverified
+  field's content still RENDERS to every visitor with a badge, never
+  hidden, so a hedge drafted from zero real page content would be live,
+  wrong, public copy about a real vendor, not a safely quarantined draft.
+  The three AJAX Generate routes and `_run_tool_research` all catch this
+  exception and surface an honest, specific coral error via a new shared
+  `webapp.app._grounding_unavailable_error` helper, naming the real reason
+  (fetched/fetched via Exa/loaded but unreadable/blocked/unreachable) and
+  the URL — never a generic "couldn't complete the research pass." The old
+  boolean "Source page fetch: Succeeded/Failed" status line
+  (`_low_confidence_indicator_html`) is retired in favor of an honest,
+  specific one — "Direct" / "Via Exa fallback" / "Not recorded" — since
+  "Succeeded" was exactly the misleading word for a fetch that recovered
+  content via a second-choice route, and "Failed" no longer describes what
+  `low_confidence=1` means at all (that state is now unreachable — see the
+  refusal above). Exa's cost is recorded as a second `enrichment_cost` row
+  (`model="exa-fetch"`), kept separate from the Claude call's own
+  per-token rate rather than misattributed to it. `exa_enabled` (the site's
+  existing Exa kill switch, `/admin/system/ai`) is honored throughout —
+  threaded as a plain `bool` parameter through every affected function and
+  its caller, matching `voice_core`'s own established "no `Library` handle
+  inside `enrich.py`" convention exactly; when off (or `EXA_API_KEY` is
+  unset), the fallback tier is a safe no-op and a thin direct fetch goes
+  straight to refusal. **`linklib.feature_scan.research_vendor_domain`
+  (the canonical Feature Taxonomy vendor-research scan) was investigated
+  and confirmed to need no fix** — it was already Exa-`/search`-based from
+  the start and handles a JS-rendered page correctly; it's a structurally
+  separate mechanism from the four `enrich.py` functions this defect lived
+  in, not a fifth call site sharing the same bug.
+
+  **The "stale flag" problem — investigated against real production data,
+  not decided in the abstract.** Once a record like Lumera is fixed by
+  hand (Brian re-generating its draft, or editing it directly), the same
+  audit script would re-flag it forever, since nothing about
+  `needs_verification`/`low_confidence`/`ai_confident` changes just because
+  the underlying page later became fetchable. Two candidate fixes were
+  proposed up front — (a) update `low_confidence` on a later successful
+  regeneration/hand-edit, or (b) exclude from the audit any field whose
+  last save postdates its last generation. **Both were tested against real
+  Lumera (fixed) vs. Paylocity (confirmed still broken) tool rows via the
+  site's own read-only `/mcp` introspection tools, and both failed**:
+  `needs_verification`, `low_confidence`, and `ai_confident` are all
+  identical (`0`/`0`/`0`) between the two records — neither candidate signal
+  can tell "already fixed" apart from "still broken," so building either
+  one would have produced a mechanism that looks like it works but doesn't
+  actually resolve the false positive it was built for. Built instead: a
+  new `thin_fetch_audit_dismissals` table (entity_type/entity_id/
+  field_name/dismissed_at/note, composite PK), the same explicit
+  human-confirms-and-persists pattern `voice_review_queue`/
+  `voice_approved_terms` already establish for "a flagged finding is
+  reviewed and marked fine" — no attempt to auto-derive "already fixed"
+  from data that provably can't support that inference.
+  `scripts/audit_thin_fetch_grounding.py` gained `--dismiss`/`--undismiss`/
+  `--list-dismissals` CLI modes (mirroring `Library.
+  dismiss_thin_fetch_audit_finding`/`undismiss_thin_fetch_audit_finding`/
+  `list_thin_fetch_audit_dismissals`), and the default audit excludes any
+  currently-dismissed (entity, field) pair from its report. **No bulk
+  regeneration** — only 7 records are actually affected by real issues
+  (not dozens), and Brian hand-fixes each one himself via the existing
+  admin edit page, the same review path every other AI-drafted field
+  already goes through; this fix's job is stopping the defect from
+  recurring, not correcting the historical 7.
+
+  **Fetch-error follow-up (2026-09, same day) — Exa never fired on a
+  fetch error at all, which was the wrong line to draw.** Phase 2b's own
+  `_fetch_grounding_page` tried Exa only when the direct request LOADED
+  but failed the quality gate; a request that failed outright
+  (`page.fetch_error` set) always refused immediately, no Exa attempt.
+  That left the actual case `linklib.medium_platform`'s whole Exa tier was
+  built for unreachable: a Cloudflare-style WAF commonly returns a
+  non-2xx status (raising before `assess_extraction_quality` is ever
+  reached), not a 200-with-thin-shell — so a WAF-blocked vendor page
+  refused to draft at all, the one failure shape the fallback exists to
+  recover from. Fixed by classifying the `fetch_error` string itself
+  (`linklib.extract.is_likely_bot_block_error`) rather than treating every
+  fetch error the same: HTTP 403 (Forbidden — the standard explicit
+  anti-bot signature), 429 (Too Many Requests — rate-limiting/anti-bot),
+  503 (Service Unavailable — Cloudflare's own default status for its
+  browser-check challenge), and a timeout (something DID respond, just
+  not cleanly — closer in kind to a slow bot-check handshake than to a
+  dead URL) now get the Exa attempt; a bare 404, a DNS failure, a refused
+  connection, an SSL error, or any other 5xx still refuse immediately, on
+  the reasoning that these are high-confidence "the URL is wrong or
+  nothing is there" signals where a second crawler has no real chance of
+  finding anything the first one didn't — spending an Exa call there is
+  waste, not a second chance. A refused connection specifically has
+  already had its one legitimate second chance by the time this check
+  runs: `extract.fetch_page`'s own bare-domain `www.` retry (2026-08,
+  see the Key architecture decisions bullet above) already re-attempts a
+  `ConnectionError` once before giving up, so a `fetch_error` shaped like
+  "connection error: ..." reaching `_fetch_grounding_page` has already
+  failed twice, not once. The two Exa-attempt paths (thin-content,
+  block-shaped fetch-error) now share one `_try_exa_grounding_fallback`
+  tail rather than duplicating the attempt-and-classify logic. The
+  refusal banner (`_grounding_unavailable_error`) already distinguished
+  "loaded but unreadable" (`reason` in `paywall`/`bot-challenge`/
+  `too-thin`) from "never loaded at all" (`reason` is the raw
+  `page.fetch_error` string, e.g. `"HTTP 403"`/`"timeout"`) — no separate
+  change was needed there; the two vocabularies were already distinct.
+  See `tests/test_fetch_grounding_error_fallback.py` — the pure
+  classifier's boundary cases, `_fetch_grounding_page`'s branching with
+  explicit call-tracking proving Exa is genuinely never invoked on a
+  404/DNS/connection-error/other-5xx (not just that the end result
+  happens to match what "never called" would look like), and one
+  end-to-end test per direction through `generate_tool_description`.
+
+  **`fetch_content_by_url`'s current home in `linklib/medium_platform.py`
+  will read oddly now that a non-Medium caller (Tool/Community research)
+  uses it** — flagged as a known naming/organization debt, not fixed here
+  per explicit instruction: renaming or moving it is deferred to its own
+  follow-up issue rather than folded into this fix, since a rename touches
+  every existing Medium-platform caller too and isn't itself part of the
+  grounding-defect fix.
+
+  See `tests/test_description_citations.py`, `tests/
+  test_agent_taxonomy_enrichment.py`, `tests/test_community_profile_citations.py`,
+  and `tests/test_community_listing_autofill.py` for the regression
+  coverage — each of the four call sites has both a "loaded-but-thin,
+  recovered via Exa" test and a "both direct fetch and Exa fail, raises
+  `GroundingUnavailable`" test, with the direct fetch and the Exa call both
+  mocked (never touching the network), each one confirmed to fail against
+  the pre-fix `enrich.py` before being trusted.
+
 
 ## Authentication & security
 

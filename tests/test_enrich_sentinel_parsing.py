@@ -49,9 +49,21 @@ def test_split_trailing_sentinels_matches_spec(case):
 # -- layer 2: full generation pipeline, mocked Claude call --------------------
 
 def _mock_fetch_page(monkeypatch, contents: dict):
-    from linklib import extract
-    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: types.SimpleNamespace(
-        content=contents.get(url, "")))
+    """Mocks at the _fetch_grounding_page layer, not extract.fetch_page —
+    these tests exist to prove the sentinel-parsing contract (layer 2/3),
+    not the 2026-09 JS-render grounding-fetch/quality-gate behavior
+    (see GroundingFetch's own docstring), so bypass that gate entirely
+    rather than trying to craft mock HTML that happens to clear a real
+    word-count/paywall/bot-challenge check. A URL with no entry (or empty
+    content) in `contents` mimics the old "nothing usable came back, drop
+    this candidate" behavior via a plain unreadable GroundingFetch."""
+    def _fake_fetch_grounding_page(url, exa_enabled=True):
+        content = contents.get(url, "")
+        if content.strip():
+            return enrich.GroundingFetch(content=content.strip(), ok=True, status="fetched")
+        return enrich.GroundingFetch(status="unreadable", reason="no content")
+
+    monkeypatch.setattr(enrich, "_fetch_grounding_page", _fake_fetch_grounding_page)
     monkeypatch.setattr(enrich, "_discover_nav_pages", lambda base_url, max_pages=10: [])
 
 

@@ -85,6 +85,7 @@ class _FakeTaxonomyResult:
         self.cost_usd = 0.0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.exa_cost_usd = 0.0
 
 
 # -- Library layer: default state, manual toggle, mark-reviewed -----------------
@@ -313,7 +314,7 @@ def test_run_tool_research_forces_needs_review_on_unconfident_draft(env):
 
     with patch("linklib.enrich.generate_tool_agent_taxonomy",
                return_value=_FakeTaxonomyResult(needs_verification=True, confident=False)):
-        assert env._run_tool_research(tool_id) is True
+        assert env._run_tool_research(tool_id)[0] is True
 
     lib = Library(os.environ["LINKLIB_DB"])
     tool = lib.get_tool(tool_id)
@@ -335,7 +336,7 @@ def test_run_tool_research_does_not_force_needs_review_on_confident_draft(env):
 
     with patch("linklib.enrich.generate_tool_agent_taxonomy",
                return_value=_FakeTaxonomyResult(needs_verification=False, confident=True)):
-        assert env._run_tool_research(tool_id) is True
+        assert env._run_tool_research(tool_id)[0] is True
 
     lib = Library(os.environ["LINKLIB_DB"])
     tool = lib.get_tool(tool_id)
