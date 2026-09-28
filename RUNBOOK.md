@@ -541,10 +541,9 @@ Two dead variables were also found and are **not** part of any active
 convention: `LINKLIB_AUTHOR_TITLE` (`.env.example` only, leftover from the
 removed LinkedIn-drafting feature, never read by any code—safe to delete
 from `.env.example` whenever someone's next in that file) and
-`LINKLIB_QUEUE_EXCLUDE_CATEGORIES` (retired outright, 2026-09, PR 3, along
-with the Archive Queue itself—the `feeds.exclude_from_queue` column it was
-once superseded by is itself now frozen/unread, not a live redirect
-target, so there's nothing left for this variable to point at).
+`LINKLIB_QUEUE_EXCLUDE_CATEGORIES` (retired outright in PR 3, 2026-09,
+with the Archive Queue itself; `feeds.exclude_from_queue` is frozen too,
+so there's nothing left to point at).
 
 ---
 

@@ -120,8 +120,8 @@ class GroundingHit:
     tier: int   # §8 hierarchy tier this hit was found/classified under (1-4; 0 = unclassified)
 
 
-def research_vendor_domain(tool_name: str, tool_url: str, max_results_per_query: int = 3,
-                            exa_enabled: bool = True
+def research_vendor_domain(tool_name: str, tool_url: str, *, exa_enabled: bool,
+                            max_results_per_query: int = 3,
                            ) -> tuple[list[GroundingHit], float]:
     """§8-ordered, vendor-domain-scoped Exa search for one tool.
 
@@ -139,9 +139,11 @@ def research_vendor_domain(tool_name: str, tool_url: str, max_results_per_query:
     contract every other Exa-consuming module uses (this function has no
     Library handle of its own—the caller resolves `lib.get_exa_enabled()`
     and passes the result in, same as `_fetch_grounding_page`'s own
-    `exa_enabled` parameter). Defaults to True so a direct caller (a test,
-    the manual QA script) that doesn't thread it through still gets
-    today's behavior when EXA_API_KEY is set.
+    `exa_enabled` parameter). Required, keyword-only, no default—a
+    permissive True default was rejected on the same reasoning: a future
+    call site that forgets to pass it would silently reintroduce this
+    exact bug, with no error anywhere. Every caller (this module's own
+    internal call, both scripts, every test) passes it explicitly.
 
     Runs one Exa call per §8 tier query (changelog, help center, product,
     press), each restricted to the tool's own domain via includeDomains,
@@ -491,12 +493,12 @@ class ToolOriginationDraft:
 
 
 def draft_tool_features_for_category(
-    tool_name: str, tool_url: str, category_name: str,
+    tool_name: str, tool_url: str, category_name: str, *,
+    exa_enabled: bool,
     existing_feature_names: list[str] | None = None,
     roster_size: int = 0,
     model: str = DEFAULT_MODEL,
     voice_core: str = "",
-    exa_enabled: bool = True,
 ) -> ToolOriginationDraft | None:
     """Origination-mode research + drafting for ONE tool in ONE category
     (docs/FEATURE_TAXONOMY.md §10). Returns None if the SDK/key is

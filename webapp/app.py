@@ -26651,7 +26651,8 @@ def _ai_exa_config_html(exa_enabled: bool, has_key: bool) -> str:
 <li><strong>Reader content backfill's Medium-platform tier</strong> (medium.com and other recognized Cloudflare-blocked hosts).</li>
 <li><strong>Vendor profile drafting's grounding fallback</strong> (Description, Agent taxonomy, Community profile, and Community listing generation&mdash;whenever the direct page fetch is blocked, too thin, or returns a WAF-style error).</li>
 </ul>
-<p style="color:var(--ink-soft);margin:0 0 16px;font-size:13.5px;line-height:1.6;"><strong>Unlike Buddy's web tier, none of the other three have a substitute&mdash;turning Exa off here turns them off too, with nothing standing in.</strong> A backfill attempt that would have used either Reader tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried. Vendor profile drafting is the one case where this actually blocks work rather than just narrowing it: a site that's blocked or too thin for a plain fetch to read&mdash;most modern software marketing sites, whether behind a WAF or rendered client-side&mdash;refuses to draft at all with Exa off, rather than degrading to a lower-confidence draft. There's no fallback engine here the way Buddy's web tier has Claude's native search; the admin has to write the field by hand instead.</p>
+<p style="color:var(--ink-soft);margin:0 0 12px;font-size:13.5px;line-height:1.6;"><strong>Unlike Buddy's web tier, none of the other three have a substitute.</strong> Turning Exa off here turns them off too, with nothing standing in. A backfill attempt that would have used either Reader tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried.</p>
+<p style="color:var(--ink-soft);margin:0 0 16px;font-size:13.5px;line-height:1.6;"><strong>Vendor profile drafting is the one case where this blocks work rather than narrowing it.</strong> Most modern software marketing sites are either behind a WAF or rendered client-side, so a plain fetch can't read them. With Exa off, drafting refuses outright rather than degrading to a lower-confidence draft, and there's no fallback engine the way Buddy's web tier has Claude's native search. You write the field by hand instead.</p>
 {key_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Web search engine</div>
@@ -26812,8 +26813,8 @@ def admin_system_ai(request: Request):
         + _row("Reader backfill: Medium-platform", "Tracked in <code>content_refetch_log</code>",
                "No fallback (other than the existing Wayback tier)&mdash;same as domain migration above.")
         + _row("Vendor profile drafting's grounding fallback", 'Tracked in <code>enrichment_cost</code> (<code>model="exa-fetch"</code>)',
-               "<strong>No fallback and no degrade&mdash;refuses to draft rather than saving anything</strong> when the direct "
-               "fetch is blocked/thin and this can't recover it. Description, Agent taxonomy, Community profile, and "
+               "<strong>No fallback and no degrade.</strong> Refuses to draft rather than saving anything when the direct "
+               "fetch is blocked or thin and this can't recover it. Description, Agent taxonomy, Community profile, and "
                "Community listing generation all go through this.")
         + _row("Feature Taxonomy vendor research", "Per-run script output only",
                "<strong>Not tracked in a database table like the three above</strong>&mdash;cost prints to the "

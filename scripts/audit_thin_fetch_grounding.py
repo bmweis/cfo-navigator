@@ -268,7 +268,12 @@ def _run_probe(url: str, exa: bool, name: str | None) -> None:
           f"credit (a few cents) ...")
     from linklib.feature_scan import research_vendor_domain
 
-    hits, cost = research_vendor_domain(name, url)
+    # exa_enabled=True: this is an explicit, human-initiated --exa opt-in
+    # (already gated above on --name and EXA_API_KEY being present), and
+    # --probe touches no DB, so there's no `lib`/settings row to resolve
+    # the toggle from. Always-on here matches this diagnostic's prior
+    # behavior before exa_enabled existed.
+    hits, cost = research_vendor_domain(name, url, exa_enabled=True)
     print(f"Exa cost: ${cost:.4f}")
     print(f"Exa hits: {len(hits)}")
     for h in hits:
