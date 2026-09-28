@@ -195,7 +195,10 @@ class GroundingUnavailable(Exception):
 class GroundingFetch:
     """Result of fetching one page to ground an AI-drafted directory field,
     with an Exa recovery attempt when the direct fetch comes back blocked,
-    bot-challenged, too thin, or doesn't load at all. Reuses the exact
+    bot-challenged, too thin, or fails outright in a way that itself looks
+    like active blocking (see extract.is_likely_bot_block_error) — never
+    for a fetch_error that looks like a genuinely dead/wrong URL (a bare
+    404, DNS failure, refused connection). Reuses the exact
     quality gate the Reader content-backfill pipeline already trusts
     (extract.assess_extraction_quality — a real word-count floor plus
     paywall/bot-challenge marker checks), not a bare truthiness check on
@@ -214,8 +217,12 @@ class GroundingFetch:
                             nothing usable came back either way (`reason`
                             names why — paywall/bot-challenge/too-thin).
       "failed"            — the URL itself never loaded at all (a fetch_
-                            error — timeout, DNS, connection refused, a
-                            non-2xx status) and Exa had nothing either.
+                            error). For a block-shaped error (see
+                            is_likely_bot_block_error) this means Exa was
+                            tried too and had nothing; for anything else
+                            (404, DNS, connection refused, SSL, other 5xx)
+                            Exa is never attempted — reason is the raw
+                            fetch_error either way.
     `ok` is True only for "fetched"/"fetched_via_exa" — the two states a
     caller may actually ground a draft on; the other two are always a
     GroundingUnavailable, never a returned GroundingFetch a caller sees
@@ -227,15 +234,50 @@ class GroundingFetch:
     exa_cost_usd: float = 0.0
 
 
+def _try_exa_grounding_fallback(url: str, miss_status: str, miss_reason: str) -> GroundingFetch:
+    """Shared Exa-attempt-and-classify tail for _fetch_grounding_page's two
+    fallback paths (a thin/blocked-looking direct fetch, and — 2026-09
+    follow-up — a direct fetch that failed outright with a block-shaped
+    HTTP status). `miss_status`/`miss_reason` are what to return if Exa
+    itself comes back empty, so each caller can report the SAME failure
+    shape GroundingFetch.status's own docstring already promises for that
+    path ("failed" when the direct fetch never loaded at all and Exa also
+    had nothing; "unreadable" when it loaded but wasn't usable and Exa
+    didn't help either)."""
+    from .medium_platform import fetch_content_by_url
+    from . import extract
+
+    exa_text, exa_cost = fetch_content_by_url(None, url)
+    if exa_text.strip():
+        exa_ok, exa_reason = extract.assess_extraction_quality(exa_text, exa_text, False)
+        if exa_ok:
+            return GroundingFetch(content=exa_text.strip(), ok=True, status="fetched_via_exa",
+                                   exa_cost_usd=exa_cost)
+        return GroundingFetch(status="unreadable", reason=exa_reason, exa_cost_usd=exa_cost)
+    return GroundingFetch(status=miss_status, reason=miss_reason, exa_cost_usd=exa_cost)
+
+
 def _fetch_grounding_page(url: str, exa_enabled: bool = True) -> GroundingFetch:
     """Fetch one page for AI-drafted-content grounding — see GroundingFetch
     for the status/reason contract. Never raises (a caller decides whether
-    an unusable result is fatal via GroundingUnavailable); the Exa fallback
-    is only attempted when the direct fetch actually LOADED (HTTP 200) but
-    wasn't usable — a fetch_error (404, timeout, connection refused) means
-    the URL itself is unreachable/doesn't exist, and Exa's own crawl can't
-    produce real content for a page that was never there, so there's
-    nothing to gain by spending an Exa call on it.
+    an unusable result is fatal via GroundingUnavailable).
+
+    The Exa fallback is attempted in two cases: (1) the direct fetch
+    LOADED (a 2xx status) but wasn't usable per assess_extraction_quality
+    — the original 2026-09 JS-render grounding fix; and (2) the direct
+    fetch failed outright with a fetch_error that LOOKS LIKE active
+    anti-bot blocking rather than a genuinely dead URL (see
+    extract.is_likely_bot_block_error — HTTP 403/429/503, or a timeout).
+    Case 2 closes a real gap the original fix left: a Cloudflare-blocked
+    vendor page commonly returns a non-2xx status (raising before
+    assess_extraction_quality is ever reached), not a 200-with-thin-shell
+    — exactly the shape linklib.medium_platform's whole Exa tier exists to
+    recover from (see its own module docstring on recognized blocked
+    hosts). Every OTHER fetch_error (a bare 404, a DNS failure, a refused
+    connection, an SSL error, any other 5xx) skips Exa — those are
+    high-confidence "the URL is wrong or nothing is there to fetch"
+    signals, where a second call has no real chance of finding anything a
+    different crawler wouldn't also miss.
 
     `exa_enabled` mirrors this module's existing `voice_core`-style contract
     (enrich.py has no Library handle of its own — see _resolve_voice_core's
@@ -248,6 +290,8 @@ def _fetch_grounding_page(url: str, exa_enabled: bool = True) -> GroundingFetch:
 
     page = extract.fetch_page(url)
     if page.fetch_error:
+        if exa_enabled and extract.is_likely_bot_block_error(page.fetch_error):
+            return _try_exa_grounding_fallback(url, "failed", page.fetch_error)
         return GroundingFetch(status="failed", reason=page.fetch_error)
 
     ok, reason = extract.assess_extraction_quality(page.raw_html, page.content, page.blocked)
@@ -257,15 +301,7 @@ def _fetch_grounding_page(url: str, exa_enabled: bool = True) -> GroundingFetch:
     if not exa_enabled:
         return GroundingFetch(status="unreadable", reason=reason)
 
-    from .medium_platform import fetch_content_by_url
-    exa_text, exa_cost = fetch_content_by_url(None, url)
-    if exa_text.strip():
-        exa_ok, exa_reason = extract.assess_extraction_quality(exa_text, exa_text, False)
-        if exa_ok:
-            return GroundingFetch(content=exa_text.strip(), ok=True, status="fetched_via_exa",
-                                   exa_cost_usd=exa_cost)
-        return GroundingFetch(status="unreadable", reason=exa_reason, exa_cost_usd=exa_cost)
-    return GroundingFetch(status="unreadable", reason=reason, exa_cost_usd=exa_cost)
+    return _try_exa_grounding_fallback(url, "unreadable", reason)
 
 
 # Shared structure guidance for the AI-drafted Software directory fields
@@ -964,13 +1000,14 @@ def _fetch_taxonomy_grounding(url: str, exa_enabled: bool = True
     shared `_fetch_grounding_page` (the real quality gate, not a bare
     truthiness check on whatever text came back), applied per page inside
     this loop rather than only once on the aggregated result — a homepage
-    that returns a near-empty JS shell and a guessed `/pricing` path that
-    genuinely 404s are different failure shapes, and `_fetch_grounding_page`
-    already treats them differently (only the former is worth an Exa
-    retry — see its own docstring). A candidate that's unusable even after
-    that (or a fetch_error the gate never reaches) is still silently
-    dropped, not treated as an error — expected across ~150+ external
-    sites, and the caller (generate_tool_agent_taxonomy) only raises
+    that returns a near-empty JS shell, a homepage a Cloudflare-style WAF
+    blocks outright (a fetch_error, not thin content), and a guessed
+    `/pricing` path that genuinely 404s are three different failure
+    shapes, and `_fetch_grounding_page` treats them differently (the first
+    two are worth an Exa retry; a bare 404 isn't — see its own docstring
+    and extract.is_likely_bot_block_error). A candidate that's unusable
+    even after that is still silently dropped, not treated as an error —
+    expected across ~150+ external sites, and the caller (generate_tool_agent_taxonomy) only raises
     GroundingUnavailable when literally every candidate came back empty."""
     base = url.rstrip("/")
     nav_pages = _discover_nav_pages(url)

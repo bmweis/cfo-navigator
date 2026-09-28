@@ -1275,6 +1275,34 @@ call's own per-token cost. The call's cost lands in the same
 `enrichment_cost` ledger as article enrichment (`article_id=NULL`) —
 overhead, not a user-facing budget.
 
+**2026-09 JS-render grounding fix, fetch-error follow-up**: the fix above
+shipped with a real gap — the Exa fallback was tried ONLY when the direct
+request itself loaded (a 2xx status) but failed the quality gate, never
+when the request failed outright (`page.fetch_error` set). That left
+exactly the case the Exa/Medium-platform tier was originally built for
+unreachable: a Cloudflare-style WAF commonly returns a non-2xx status
+(raising before `assess_extraction_quality` is ever reached), not a
+200-with-thin-shell — so a blocked vendor page refused to draft at all
+instead of recovering via Exa the way a JS-shell page already did. Fixed
+by classifying the `fetch_error` string itself
+(`linklib.extract.is_likely_bot_block_error`) into "looks like active
+blocking" — HTTP 403 (Forbidden), 429 (Too Many Requests), 503 (Service
+Unavailable, Cloudflare's own default status for its browser-check
+challenge), or a timeout — versus "looks like a genuinely dead/wrong URL"
+— a bare 404, a DNS failure, a refused connection, an SSL error, or any
+other 5xx. Only the former now tries the Exa fallback; the latter still
+refuses immediately, exactly as before, since a second fetch of a
+confirmed-dead URL from a different crawler has no real chance of finding
+anything. `_fetch_grounding_page` is unchanged in shape (still one gate,
+one fallback, one refusal) — the new classification only widens *when*
+the fallback is attempted, via a small shared `_try_exa_grounding_fallback`
+helper so the two trigger paths (thin content, block-shaped fetch error)
+share one Exa-attempt-and-classify tail rather than duplicating it. See
+`tests/test_fetch_grounding_error_fallback.py` for the regression coverage
+— including explicit call-tracking proving Exa is genuinely never invoked
+on a 404/DNS/connection-error/other-5xx fetch_error, not just that the
+end result happens to match.
+
 `POST /admin/tools/communities/generate-profile` (admin-only) mirrors that
 exact contract for `community_profiles`, sized up for a much larger field
 count: one Claude call (`linklib/enrich.py::generate_community_profile`)

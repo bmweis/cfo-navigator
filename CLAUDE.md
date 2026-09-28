@@ -10501,10 +10501,10 @@ it supersedes the old "`/save` is token-gated" note.
   60-word floor, plus paywall/bot-challenge detection — see the "Reader
   content-structure backfill" section above for where that gate came
   from) instead of a bare truthiness check. When the direct fetch loaded
-  but failed that gate (never when it flat-out failed to load — a genuine
-  404/timeout skips the fallback entirely, since there's nothing a second
-  fetch attempt of the same broken URL would recover), a single Exa
-  fallback is tried, `linklib.medium_platform.fetch_content_by_url` — the
+  but failed that gate, or — 2026-09 fetch-error follow-up, below — it
+  failed outright with a fetch_error that itself looks like active
+  blocking (`extract.is_likely_bot_block_error`: HTTP 403/429/503, or a
+  timeout), a single Exa fallback is tried, `linklib.medium_platform.fetch_content_by_url` — the
   existing Reader-backfill fetch tier, reused rather than a new Playwright
   path (a Phase 1 routing note originally pointed at Playwright; reversed
   once Exa's own rendering was confirmed to already solve the same
@@ -10576,6 +10576,49 @@ it supersedes the old "`/save` is token-gated" note.
   admin edit page, the same review path every other AI-drafted field
   already goes through; this fix's job is stopping the defect from
   recurring, not correcting the historical 7.
+
+  **Fetch-error follow-up (2026-09, same day) — Exa never fired on a
+  fetch error at all, which was the wrong line to draw.** Phase 2b's own
+  `_fetch_grounding_page` tried Exa only when the direct request LOADED
+  but failed the quality gate; a request that failed outright
+  (`page.fetch_error` set) always refused immediately, no Exa attempt.
+  That left the actual case `linklib.medium_platform`'s whole Exa tier was
+  built for unreachable: a Cloudflare-style WAF commonly returns a
+  non-2xx status (raising before `assess_extraction_quality` is ever
+  reached), not a 200-with-thin-shell — so a WAF-blocked vendor page
+  refused to draft at all, the one failure shape the fallback exists to
+  recover from. Fixed by classifying the `fetch_error` string itself
+  (`linklib.extract.is_likely_bot_block_error`) rather than treating every
+  fetch error the same: HTTP 403 (Forbidden — the standard explicit
+  anti-bot signature), 429 (Too Many Requests — rate-limiting/anti-bot),
+  503 (Service Unavailable — Cloudflare's own default status for its
+  browser-check challenge), and a timeout (something DID respond, just
+  not cleanly — closer in kind to a slow bot-check handshake than to a
+  dead URL) now get the Exa attempt; a bare 404, a DNS failure, a refused
+  connection, an SSL error, or any other 5xx still refuse immediately, on
+  the reasoning that these are high-confidence "the URL is wrong or
+  nothing is there" signals where a second crawler has no real chance of
+  finding anything the first one didn't — spending an Exa call there is
+  waste, not a second chance. A refused connection specifically has
+  already had its one legitimate second chance by the time this check
+  runs: `extract.fetch_page`'s own bare-domain `www.` retry (2026-08,
+  see the Key architecture decisions bullet above) already re-attempts a
+  `ConnectionError` once before giving up, so a `fetch_error` shaped like
+  "connection error: ..." reaching `_fetch_grounding_page` has already
+  failed twice, not once. The two Exa-attempt paths (thin-content,
+  block-shaped fetch-error) now share one `_try_exa_grounding_fallback`
+  tail rather than duplicating the attempt-and-classify logic. The
+  refusal banner (`_grounding_unavailable_error`) already distinguished
+  "loaded but unreadable" (`reason` in `paywall`/`bot-challenge`/
+  `too-thin`) from "never loaded at all" (`reason` is the raw
+  `page.fetch_error` string, e.g. `"HTTP 403"`/`"timeout"`) — no separate
+  change was needed there; the two vocabularies were already distinct.
+  See `tests/test_fetch_grounding_error_fallback.py` — the pure
+  classifier's boundary cases, `_fetch_grounding_page`'s branching with
+  explicit call-tracking proving Exa is genuinely never invoked on a
+  404/DNS/connection-error/other-5xx (not just that the end result
+  happens to match what "never called" would look like), and one
+  end-to-end test per direction through `generate_tool_description`.
 
   **`fetch_content_by_url`'s current home in `linklib/medium_platform.py`
   will read oddly now that a non-Medium caller (Tool/Community research)
