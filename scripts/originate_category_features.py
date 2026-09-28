@@ -79,6 +79,21 @@ def main() -> int:
 
     lib = Library(db_path)
     try:
+        # A missing key already prints above and is self-explanatory. A
+        # DELIBERATE toggle-off is the case worth a loud, specific line—
+        # the key works, so nothing about the run itself looks broken;
+        # every tool just silently drafts from the model's own knowledge
+        # (low_confidence) instead of real vendor content, same as a
+        # missing key, but for a reason nothing else on this page would
+        # tell you. Without this, that reads as "the research quality is
+        # just bad this run," not "a switch is off"—easy to re-run two
+        # or three times chasing a quality problem that isn't one.
+        if os.environ.get("EXA_API_KEY") and not lib.get_exa_enabled():
+            print("WARNING: EXA_API_KEY is set, but Exa is toggled OFF at /admin/system/ai—"
+                  "every tool's research will ground on the model's own knowledge only "
+                  "(low_confidence), the same as if the key were missing. Flip the toggle on "
+                  "there to use real vendor-domain research.", file=sys.stderr)
+
         try:
             voice_core = require_voice_setting(lib, "voice_core")
         except VoicePromptMissing as e:

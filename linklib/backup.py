@@ -16,8 +16,11 @@ Design notes
   the Workspace account that should own backups and send mail. Setup steps
   live in .env.example.
 - **Debounced.** ``maybe_backup`` only uploads if it's been longer than
-  ``min_interval_hours`` (default one week) since the last successful backup
-  (tracked by a marker file beside the database, so it survives restarts).
+  ``min_interval_hours`` (default one week) since the last successful
+  backup—read from ``backup_log`` (via ``Library.list_backup_log``), the
+  same already-authoritative record every trigger writes to, not a
+  standalone marker file (removed—see ``maybe_backup``'s own docstring
+  for why one existed and went stale).
 - **Every attempt is logged to `backup_log`** (success or failure), via
   ``Library.record_backup_attempt`` — not just printed to stdout. This is
   what powers the status banner + history table on ``/admin/library-backup``

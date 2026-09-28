@@ -122,6 +122,66 @@ def test_research_vendor_domain_dedupes_and_sorts_by_tier(monkeypatch):
     assert cost > 0
 
 
+def test_research_vendor_domain_respects_exa_toggle_off(monkeypatch):
+    """2026-09 fetch-error follow-up gate: research_vendor_domain was the
+    one real Exa consumer with no admin-toggle check at all—EXA_API_KEY
+    alone gated it, so a scan spent real money regardless of the site's
+    Exa kill switch (/admin/system/ai). exa_enabled=False must short-
+    circuit before any HTTP call, even with a real key present—proven
+    with a raising mock, not just a call-count assertion, so this test
+    genuinely fails (AssertionError from inside _post, not from the
+    exa_enabled assert below it) against the pre-fix code rather than
+    passing by coincidence."""
+    monkeypatch.setenv("EXA_API_KEY", "x")
+
+    def _post(*a, **kw):
+        raise AssertionError("Exa must not be called when exa_enabled=False")
+
+    monkeypatch.setattr(feature_scan.requests, "post", _post)
+    hits, cost = feature_scan.research_vendor_domain(
+        "Mercury", "https://mercury.com", exa_enabled=False)
+    assert hits == []
+    assert cost == 0.0
+
+
+def test_research_vendor_domain_default_still_calls_exa(monkeypatch):
+    """The other half of the same gate: omitting exa_enabled (every
+    pre-existing caller) must still behave exactly as before—real
+    callers that haven't been updated to pass it keep working."""
+    _mock_exa(monkeypatch, [
+        [{"url": "https://mercury.com/changelog", "title": "Changelog", "text": "Shipped X."}],
+        [], [], [],
+    ])
+    hits, cost = feature_scan.research_vendor_domain("Mercury", "https://mercury.com")
+    assert len(hits) == 1
+    assert cost > 0
+
+
+def test_draft_respects_exa_toggle_off(monkeypatch):
+    """draft_tool_features_for_category threads exa_enabled straight
+    through to research_vendor_domain—same raising-mock proof as above,
+    plus confirms the draft still completes (low_confidence=True, grounded
+    on the model's own knowledge) rather than failing outright, matching
+    the existing no-EXA_API_KEY behavior exactly."""
+    monkeypatch.setenv("EXA_API_KEY", "x")
+
+    def _post(*a, **kw):
+        raise AssertionError("Exa must not be called when exa_enabled=False")
+
+    monkeypatch.setattr(feature_scan.requests, "post", _post)
+    _mock_anthropic(monkeypatch, '{"features": ['
+        '{"name": "Some feature", "definition": "A definition.", "availability": "native", '
+        '"ai_enabled": false, "confident": false, "source_url": "", "note": ""}'
+        ']}')
+
+    draft = feature_scan.draft_tool_features_for_category(
+        "Mercury", "https://mercury.com", "Neobanking", voice_core="Test voice guide.",
+        exa_enabled=False)
+    assert draft is not None
+    assert draft.low_confidence is True
+    assert draft.exa_cost_usd == 0.0
+
+
 def test_draft_returns_none_without_anthropic_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     draft = feature_scan.draft_tool_features_for_category("Mercury", "https://mercury.com", "Neobanking")

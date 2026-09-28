@@ -120,7 +120,8 @@ class GroundingHit:
     tier: int   # §8 hierarchy tier this hit was found/classified under (1-4; 0 = unclassified)
 
 
-def research_vendor_domain(tool_name: str, tool_url: str, max_results_per_query: int = 3
+def research_vendor_domain(tool_name: str, tool_url: str, max_results_per_query: int = 3,
+                            exa_enabled: bool = True
                            ) -> tuple[list[GroundingHit], float]:
     """§8-ordered, vendor-domain-scoped Exa search for one tool.
 
@@ -130,6 +131,18 @@ def research_vendor_domain(tool_name: str, tool_url: str, max_results_per_query:
     across a whole roster shouldn't die because one tool's domain search
     failed.
 
+    `exa_enabled` (2026-09, JS-render grounding fix fetch-error follow-up—
+    closes a real gap that investigation surfaced: this was the one real
+    Exa consumer with no admin-toggle gate at all, so a scan spent real
+    money on every run regardless of the site's Exa kill switch,
+    /admin/system/ai) mirrors the same `enrich.py`-style bool-parameter
+    contract every other Exa-consuming module uses (this function has no
+    Library handle of its own—the caller resolves `lib.get_exa_enabled()`
+    and passes the result in, same as `_fetch_grounding_page`'s own
+    `exa_enabled` parameter). Defaults to True so a direct caller (a test,
+    the manual QA script) that doesn't thread it through still gets
+    today's behavior when EXA_API_KEY is set.
+
     Runs one Exa call per §8 tier query (changelog, help center, product,
     press), each restricted to the tool's own domain via includeDomains,
     then dedupes by URL — the loop runs in hierarchy order, so a URL
@@ -138,7 +151,7 @@ def research_vendor_domain(tool_name: str, tool_url: str, max_results_per_query:
     """
     api_key = os.environ.get("EXA_API_KEY")
     domain = _domain_of(tool_url)
-    if not api_key or not domain:
+    if not api_key or not domain or not exa_enabled:
         return [], 0.0
 
     seen_urls: set[str] = set()
@@ -483,6 +496,7 @@ def draft_tool_features_for_category(
     roster_size: int = 0,
     model: str = DEFAULT_MODEL,
     voice_core: str = "",
+    exa_enabled: bool = True,
 ) -> ToolOriginationDraft | None:
     """Origination-mode research + drafting for ONE tool in ONE category
     (docs/FEATURE_TAXONOMY.md §10). Returns None if the SDK/key is
@@ -501,12 +515,15 @@ def draft_tool_features_for_category(
     Grounds on research_vendor_domain()'s vendor-domain-scoped Exa search
     (§8 sourcing hierarchy tiers 1-4 — see module docstring for why tiers
     5-6 are out of scope for a domain-restricted search). When Exa finds
-    nothing (no EXA_API_KEY, a blocked/empty domain, or a genuinely thin
+    nothing (no EXA_API_KEY, a blocked/empty domain, the Exa toggle is
+    off—see `exa_enabled` on research_vendor_domain—or a genuinely thin
     web presence), the draft still runs against the model's own knowledge
     with low_confidence=True, matching generate_tool_description's
     existing convention for a failed-fetch grounding gap — a
     low_confidence draft is still returned, not skipped, so the caller can
-    decide how much weight to give it.
+    decide how much weight to give it. `exa_enabled` is threaded straight
+    through to research_vendor_domain, same "no Library handle in here"
+    contract as `voice_core` above.
 
     roster_size is the category's FULL tool count (not how many tools
     you've researched so far in a run) — below 4, the prompt drops the
@@ -535,7 +552,7 @@ def draft_tool_features_for_category(
         _logger.warning("draft_tool_features_for_category() aborted: voice_core is empty")
         return None
 
-    hits, exa_cost = research_vendor_domain(tool_name, tool_url)
+    hits, exa_cost = research_vendor_domain(tool_name, tool_url, exa_enabled=exa_enabled)
     low_confidence = not hits
     if hits:
         content_block = "\n\n".join(
@@ -994,7 +1011,15 @@ def originate_category_features(
     Returns None only if EVERY tool's research failed (nothing to
     cluster/judge/queue) — a partial-failure run (some tools succeeded)
     still returns a summary covering what did work, with tools_failed
-    counting the rest."""
+    counting the rest.
+
+    Resolves `lib.get_exa_enabled()` once here (2026-09 fetch-error
+    follow-up—this function already holds a real Library handle, unlike
+    research_vendor_domain/draft_tool_features_for_category below it,
+    which don't and take the resolved bool instead) and threads it through
+    every per-tool draft call, so the whole roster's run respects the same
+    toggle every other Exa consumer in the app already does."""
+    exa_enabled = lib.get_exa_enabled()
     roster_size = len(tool_roster)
     candidates: list[CandidateFeature] = []
     clusters: list[list[int]] = []          # global indices into `candidates`, one list per
@@ -1012,7 +1037,7 @@ def originate_category_features(
         draft = draft_tool_features_for_category(
             tool["name"], tool["url"], category_name,
             existing_feature_names=existing_feature_names, roster_size=roster_size, model=model,
-            voice_core=voice_core,
+            voice_core=voice_core, exa_enabled=exa_enabled,
         )
         if draft is None:
             tools_failed += 1
