@@ -122,8 +122,6 @@ EMPTY_COPY: dict[str, EmptyCopy] = {
         "This field is written by hand, not auto-drafted. Add one from the edit page."),
     "tool_competitors": EmptyCopy(
         "Competitors not available.", "Curate them from the edit page."),
-    "community_description": EmptyCopy(
-        "Description coming soon.", "Add one from the edit page."),
     "community_bottom_line": EmptyCopy(
         "Bottom line not available.", "Generate a draft from the edit page."),
     "community_profile_group": EmptyCopy(
