@@ -419,11 +419,12 @@ def test_edit_submit_clears_citations_on_hand_edit(app_module):
     lib.close()
 
 
-def test_edit_submit_clears_citations_when_only_other_fields_change(app_module):
+def test_edit_submit_keeps_citations_when_only_other_fields_change(app_module):
     """Resaving the form for an unrelated reason (no fresh description
-    draft this session) is itself treated as a review — needs_verification
-    and citations both clear, matching description_needs_verification's own
-    existing convention."""
+    draft this session) is itself treated as a review, so
+    needs_verification clears — but the description text is unchanged, so
+    its citations still describe it and stay (#634; this test used to
+    assert they were cleared, which was the bug)."""
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = _add_tool(lib)
     slug = lib.get_tool(tool_id)["slug"]
@@ -446,7 +447,7 @@ def test_edit_submit_clears_citations_when_only_other_fields_change(app_module):
     lib = Library(os.environ["LINKLIB_DB"])
     tool = lib.get_tool(tool_id)
     assert tool["description_needs_verification"] == 0
-    assert lib.get_entity_citations("tool", tool_id, "description") == []
+    assert [c["url"] for c in lib.get_entity_citations("tool", tool_id, "description")] == ["https://runway.com"]
     lib.close()
 
 

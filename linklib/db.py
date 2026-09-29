@@ -21,6 +21,7 @@ from typing import Iterator, Optional
 
 from .voice_mechanics import normalize_voice_mechanics as _voice_fix
 from .voice_mechanics import correction_rule_for as _voice_fix_rule
+from .voice_mechanics import norm_for_compare
 
 
 def resolve_db_path(cli_db: Optional[str], *, allow_missing: bool = False) -> str:
@@ -3282,6 +3283,13 @@ class Library:
         view can show the full list. Pass an empty list to clear (e.g. a
         human hand-edited the field and its prior AI citations no longer
         apply — see update_tool_agent_taxonomy)."""
+        self._write_entity_citations(entity_type, entity_id, field_name, citations, model)
+        self.conn.commit()
+
+    def _write_entity_citations(self, entity_type: str, entity_id: int, field_name: str,
+                                citations: list[dict], model: str) -> None:
+        """The upsert behind set_entity_citations, without the commit — for
+        a caller that needs it inside its own transaction."""
         self.conn.execute(
             """INSERT INTO entity_citations (entity_type, entity_id, field_name, citations_json, model, generated_at)
                VALUES (?,?,?,?,?,?)
@@ -3290,7 +3298,6 @@ class Library:
                              generated_at=excluded.generated_at""",
             (entity_type, entity_id, field_name, json.dumps(citations or []), model, _now()),
         )
-        self.conn.commit()
 
     def clear_entity_citations(self, entity_type: str, entity_id: int, field_name: str) -> None:
         """Shorthand for set_entity_citations(..., [], model='') — used
@@ -6289,19 +6296,43 @@ class Library:
         A human editing/saving this field is itself a confirmation, so this
         always clears agent_taxonomy_needs_verification — same convention the
         retired tool_features rows used to follow (editing a row implied
-        review). Also clears entity_citations (Citations-API grounding fix,
-        Phase 1b) — a hand-typed note has no citation trace to keep, and
-        leaving a prior AI draft's citations attached to text a human just
-        overwrote would misattribute the human's own words as
-        machine-grounded."""
+        review).
+
+        entity_citations (Citations-API grounding fix, Phase 1b): cleared
+        only when the note's text actually changed (see
+        voice_mechanics.norm_for_compare — whitespace-only edits, CRLF vs LF
+        and NULL vs "" all count as unchanged). A hand-typed note has no
+        citation trace to keep, and leaving a prior AI draft's citations
+        attached to text a human just overwrote would misattribute the
+        human's own words as machine-grounded. But an UNCHANGED note (the
+        admin form re-posts the whole note on every Save, including right
+        after "Generate summary" persisted a fresh draft and its sources in
+        a separate request) is still exactly the text those citations
+        describe, so its rows are left alone. The stored-value read, the
+        UPDATE and the clear happen in one transaction so a concurrent
+        Generate can't land between the compare and the clear."""
         self._check_text_field_length("Agent taxonomy", agent_taxonomy_note.strip(), self.TOOL_AGENT_TAXONOMY_MAX)
-        self.conn.execute(
-            "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
-            "updated_at=? WHERE id=?",
-            (self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip(), source=source), _now(), tool_id),
-        )
-        self.conn.commit()
-        self.clear_entity_citations("tool", tool_id, "agent_taxonomy")
+        # _vf may commit its own queue-log row, so run it before the
+        # transaction below opens.
+        new_note = self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip(), source=source)
+        if not self.conn.in_transaction:
+            self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.conn.execute(
+                "SELECT agent_taxonomy_note FROM tools WHERE id=?", (tool_id,)
+            ).fetchone()
+            changed = norm_for_compare(row["agent_taxonomy_note"] if row else None) != norm_for_compare(new_note)
+            self.conn.execute(
+                "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
+                "updated_at=? WHERE id=?",
+                (new_note, _now(), tool_id),
+            )
+            if changed:
+                self._write_entity_citations("tool", tool_id, "agent_taxonomy", [], "")
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def set_tool_agent_taxonomy_draft(self, tool_id: int, agent_taxonomy_note: str,
                                       needs_verification: int = 1,

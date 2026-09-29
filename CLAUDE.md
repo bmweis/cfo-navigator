@@ -10637,6 +10637,27 @@ it supersedes the old "`/save` is token-gated" note.
   mocked (never touching the network), each one confirmed to fail against
   the pre-fix `enrich.py` before being trusted.
 
+- **Save no longer wipes citations Generate just wrote (#634, 2026-09).**
+  Vena and Paylocity showed `[1]`/`[2]` markers with no Sources list: both
+  `entity_citations` rows were `'[]'` with `model=""` (the signature of
+  `clear_entity_citations`, milliseconds apart). Cause: every admin edit
+  save cleared citations unless fresh ones rode along in the hidden
+  `ai-drafted-citations` field, which is empty on every page load. Agent
+  taxonomy was the loudest case, since its Generate persists in a separate
+  request and the next Save cleared it unconditionally. One rule now covers
+  Agent taxonomy (`Library.update_tool_agent_taxonomy`, compare inside the
+  same transaction as the UPDATE), tool Description and the community
+  profile (route-level): fresh validated citations write; else clear only
+  if the text changed; else leave the rows alone. "Changed" is
+  `voice_mechanics.norm_for_compare` (None = "", CRLF = LF, whitespace-only
+  edits ignored, spaced-em-dash normalization applied to both sides). Missing
+  row and `'[]'` row both read as "no sources" via `get_entity_citations`;
+  the changed-no-fresh branch keeps the unconditional clear. The community
+  compare is derived from `_COMMUNITY_PROFILE_FIELD_IDS`, never a hardcoded
+  list. `scripts/regen_ai_drafted_fields.py` is untouched on purpose: it
+  always rewrites the text, so its set-or-clear is already correct. No data
+  repair shipped; existing `'[]'` rows stay until those fields are
+  regenerated.
 
 ## Authentication & security
 

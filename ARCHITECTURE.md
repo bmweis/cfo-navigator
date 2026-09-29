@@ -4484,11 +4484,21 @@ Details worth knowing:
   table with a different `field_name`. `Library.set_entity_citations`
   writes directly (not COALESCE'd, unlike `agent_taxonomy_ai_confident`) —
   a fresh draft's citations should always replace a stale prior draft's,
-  never blend with it. `Library.update_tool_agent_taxonomy` (the human
-  hand-edit path) calls `clear_entity_citations` — a hand-typed note has
-  no citation trace to keep, and leaving a prior AI draft's sources
-  attached to text a person just overwrote would misattribute the human's
-  own words as machine-grounded.
+  never blend with it. `Library.update_tool_agent_taxonomy` (the admin
+  edit form's save path) calls `clear_entity_citations` only when the
+  note's text actually changed (#634) — a hand-typed note has no citation
+  trace to keep, and leaving a prior AI draft's sources attached to text a
+  person just overwrote would misattribute the human's own words as
+  machine-grounded, but an unchanged note (the form re-posts it on every
+  Save, including right after "Generate summary" persisted a fresh draft
+  and its sources in a separate request) still matches its citations. The
+  stored-value read, the UPDATE and the clear share one transaction.
+  **All three citation-bearing fields follow one rule (#634)**: fresh
+  validated citations arriving with the save are written; otherwise clear
+  only if the text changed; otherwise leave the rows alone. "Changed" is
+  `voice_mechanics.norm_for_compare` on stored vs submitted (None = "",
+  CRLF = LF, whitespace-only edits ignored, `normalize_voice_mechanics`
+  applied to both since every write path stores the normalized form).
   **Rendering, and the standing review-gate rule**: citations never
   bypass the existing review gate — they only ever render alongside the
   note in whichever visibility branch the note itself is already in
@@ -4544,10 +4554,11 @@ Details worth knowing:
   entry is dropped rather than failing the save; `n` is renumbered
   sequentially over what survives so a dropped entry never leaves a gap in
   the rendered Sources list). Citations persist only when `"description"`
-  is in this submit's `ai_drafted_fields` — any other save (a hand-edit,
-  or a resave that never touched Generate) calls `clear_entity_citations`,
-  same "editing/saving is itself a confirmation" convention
-  `update_tool_agent_taxonomy` already applies to its own citations.
+  is in this submit's `ai_drafted_fields` — any other save clears them
+  only if the description's text actually changed (#634; compared with
+  `norm_for_compare` against the row as it was before the save), since
+  the hidden field is empty on every fresh page load and an unrelated
+  resave used to wipe them. Same rule as `update_tool_agent_taxonomy`.
   **A hand-edit to the description textarea after Generate is now also
   detected client-side**, not just at save time: a new one-time `input`
   listener calls `unmarkAiDrafted('description')` (removing it from both
@@ -4618,7 +4629,10 @@ Details worth knowing:
   `_COMMUNITY_PROFILE_FIELD_IDS` is in the submitted `ai_drafted_fields`
   (the same `profile_ai_drafted` boolean the route already computes for
   `needs_review`); any other save clears the row via
-  `clear_entity_citations`.
+  `clear_entity_citations` only if any of those fields' text changed
+  (#634; `webapp.app._community_profile_text_changed`, derived from
+  `_COMMUNITY_PROFILE_FIELD_IDS`, `founded_year` compared as the saved
+  int) and otherwise leaves the shared set alone.
   **The one real behavioral difference from Description, flowing directly
   from the one-row-per-draft decision**: a hand-edit to ANY of the 23
   fields has to invalidate the whole shared set, not just its own field —
