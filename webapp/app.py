@@ -19494,7 +19494,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             clear_verification_stamp=profile_ai_drafted,
             source="admin-edit",
         )
-        # Same three branches as the tool Description route (PR for #634):
+        # Same three branches as the tool Description route (issue #634):
         # fresh citations write; else clear only if any profile field's text
         # actually changed (`existing_profile` is the row before this save);
         # else leave the shared set alone.
@@ -20796,7 +20796,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         description_low_confidence=description_low_confidence,
                         clear_description_verification_stamp=bool(description_needs_verification),
                         source="admin-edit")
-        # Three branches (PR for #634): fresh validated citations from this
+        # Three branches (issue #634): fresh validated citations from this
         # submit's Generate write; otherwise clear only if the description's
         # text actually changed (`tool` is the row as it was BEFORE this
         # save); otherwise leave the stored rows alone. The hidden
