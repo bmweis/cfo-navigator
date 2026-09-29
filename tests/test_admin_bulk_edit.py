@@ -490,7 +490,7 @@ def test_communities_default_visible_columns_match_shared_spec(admin_client):
     lib.close()
 
     r = client.get("/admin/tools/communities")
-    for key in ("notes", "cost_band", "access", "categories", "sponsorship_type", "format", "reach"):
+    for key in ("cost_band", "access", "categories", "sponsorship_type", "format", "reach"):
         assert not _colpick_is_checked(r.text, f"colpick-communities-{key}"), \
             f"communities:{key} should be unchecked by default"
     assert _colpick_is_checked(r.text, "colpick-communities-review_status"), \

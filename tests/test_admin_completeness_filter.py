@@ -125,7 +125,7 @@ def _complete_community(lib, name="Complete Community", url="https://complete-co
         application_friction="Light vetting.",
         cost_value_verdict="Worth it for the network.", sponsor_relationship_note="Independent, no sponsor influence.",
         business_model="Membership dues.", public_criticism="Some say it's too US-centric.",
-        team_or_individual="Individual", verdict_summary="A solid peer community for CFOs.",
+        cpe_eligible="Yes", verdict_summary="A solid peer community for CFOs.",
     )
     other = lib.add_community(name="Other Community", url="https://other-comm.example",
                                demographic="CFOs", cost_band="Free", categories=["Peer Group"],
