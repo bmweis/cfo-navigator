@@ -112,9 +112,8 @@ _COMMUNITY_PROSE_COLUMNS = [
     "ideal_member", "anti_fit", "value_prop", "format_reality",
     "engagement_level", "sponsor_relationship_note", "application_friction",
     "cost_value_verdict", "notable_members", "public_criticism",
-    "verdict_summary", "business_model", "primary_purpose", "cpe_eligible",
-    "platform_type", "meeting_format", "event_style", "seniority_band",
-    "resources_included", "stage_focus", "jobs_program", "team_or_individual",
+    "verdict_summary", "business_model", "cpe_eligible",
+    "resources_included", "jobs_program",
 ]
 _COMMUNITY_FIELD_TO_COLUMNS = {"community_profile": _COMMUNITY_PROSE_COLUMNS}
 

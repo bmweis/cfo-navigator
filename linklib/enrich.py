@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass, field
 
 from .citations import extract_citations, make_document_block
+from .community_profile import coerce_cpe_eligible
 
 _logger = logging.getLogger(__name__)
 
@@ -1302,20 +1303,22 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
 COMMUNITY_PROFILE_FIELDS = [
     "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
     "sponsor_relationship_note", "business_model", "application_friction", "cost_value_verdict",
-    "notable_members", "founded_year", "public_criticism", "verdict_summary",
-    "stage_focus", "jobs_program", "team_or_individual",
-    "seniority_band", "primary_purpose", "resources_included",
-    "platform_type", "meeting_format", "event_style", "cpe_eligible",
+    "notable_members", "public_criticism", "verdict_summary",
+    "resources_included", "jobs_program", "cpe_eligible",
 ]
+
+# PR 2a (2026-09) retired eight profile fields from generation, collection and
+# display (frozen in the schema; see linklib/community_profile.py's
+# RETIRED_PROFILE_FIELDS). Company stage folds into IDEAL_MEMBER; event style
+# and meeting cadence fold into FORMAT_REALITY, which is now labeled
+# "Programming".
 
 # The 12 long-form/narrative Community profile fields judged to carry real
 # fabrication risk (Phase 0 investigation + Brian's approval, 2026-08)—
-# deliberately a SUBSET of COMMUNITY_PROFILE_FIELDS above, not all 23:
-# excludes founded_year (a bare int, not prose) and the eleven short
-# factual/categorical fields (stage_focus/jobs_program/team_or_individual
-# included — judged categorical-not-narrative-risk despite being in
-# VOICE_REWRITE_FIELDS below, since matching that boundary wasn't the goal;
-# matching actual fabrication risk was). Shared with webapp/app.py so the
+# deliberately a SUBSET of COMMUNITY_PROFILE_FIELDS above, not all 15:
+# excludes the short factual/categorical fields (jobs_program,
+# resources_included, cpe_eligible)—judged categorical-not-narrative-risk;
+# the boundary is actual fabrication risk, not field length. Shared with webapp/app.py so the
 # confidence hidden-input wiring and the JSON schema above stay in lockstep.
 COMMUNITY_CONFIDENCE_FIELDS = [
     "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
@@ -1334,92 +1337,90 @@ Write about the community named below. Follow these rules exactly:
    "vibrant," "world-class," or similar adjective stacking. No exclamation points.
 2. Ground every claim in the page content provided below (or your own knowledge,
    if the page content is unavailable)—never invent specifics you can't support.
-3. FOUNDED_YEAR must be a four-digit integer, or the literal word "Unclear"—
-   only give a year if you're confident of it.
-4. NOTABLE_MEMBERS must be "None publicly reported" unless you know of
+3. NOTABLE_MEMBERS must be "None publicly reported" unless you know of
    PUBLICLY reported members or alumni—never guess or infer private
    membership from indirect signals.
-5. PUBLIC_CRITICISM is a drawback that's actually been reported or is visible
-   from the page/your knowledge (e.g. pay-to-play concerns, inconsistent chapter
-   quality)—"None reported" if you don't know of any, never a fabricated nitpick.
-6. VERDICT_SUMMARY is one short sentence in the shape "Best for X, not for Y."
-7. Every prose field (see below) is 2-5 plain-prose sentences—budget and
-   depth are not a constraint here, so use the page content below thoroughly
-   rather than settling for a thin one-liner.
-8. SENIORITY_BAND/PRIMARY_PURPOSE/RESOURCES_INCLUDED/PLATFORM_TYPE/
-   MEETING_FORMAT/EVENT_STYLE/STAGE_FOCUS/JOBS_PROGRAM/TEAM_OR_INDIVIDUAL
-   are short factual/categorical values (a phrase, not a paragraph, well
-   under 50 words)—deliberately brief, distinct from the prose fields
-   above.
-9. CPE_ELIGIBLE must be one of "Yes", "No", or "Unclear", optionally with a
+4. PUBLIC_CRITICISM is shown to readers as "Trade-offs to weigh": a drawback
+   or trade-off that's actually been reported or is visible from the page/your
+   knowledge (e.g. pay-to-play concerns, inconsistent chapter quality), framed
+   as something a reader should weigh when judging fit, not as an accusation.
+   Write "None reported" if you don't know of any, never a fabricated nitpick.
+5. VERDICT_SUMMARY is one short sentence in the shape "Best for X, not for Y."
+6. Every prose field (see below) is 2-5 plain-prose sentences. Stay under the
+   length ceiling given for each field in the list below; a tight, specific
+   paragraph beats a long one.
+7. RESOURCES_INCLUDED/JOBS_PROGRAM are short factual values (a phrase, not a
+   paragraph, well under 50 words)—deliberately brief, distinct from the
+   prose fields above.
+8. CPE_ELIGIBLE must be one of "Yes", "No", or "Unclear", optionally with a
    short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)")—
    never guess "Yes" without a specific reason to believe it.
-10. In the CONFIDENCE: block at the very end, for EACH of its twelve lines,
-    report true only if the page content (or your own knowledge) gave you a
-    real, specific basis for that field's answer; false if you had to draft
-    it thin, generic, or largely inferred. Judge each independently—a
-    community's VALUE_PROP can be well-grounded while its NOTABLE_MEMBERS
-    is a guess, and the confidence for each should reflect that, not a
-    single blanket judgment repeated twelve times.
-11. Write directly to the CFO Toolbox reader. Never reference "the page
+9. In the CONFIDENCE: block at the very end, for EACH of its twelve lines,
+   report true only if the page content (or your own knowledge) gave you a
+   real, specific basis for that field's answer; false if you had to draft
+   it thin, generic, or largely inferred. Judge each independently—a
+   community's VALUE_PROP can be well-grounded while its NOTABLE_MEMBERS
+   is a guess, and the confidence for each should reflect that, not a
+   single blanket judgment repeated twelve times.
+10. Write directly to the CFO Toolbox reader. Never reference "the page
     content," "the provided page," or your own research process—if the
     page is thin or ambiguous, simply write around it rather than
     narrating that in the text.
-12. Never mention review scores, star ratings, testimonials, awards,
+11. Never mention review scores, star ratings, testimonials, awards,
     sponsor/customer logos, or a community's self-reported/marketing
     results (member counts, revenue figures, named-company case-study
     numbers). This is a factual, opinionated read, not a pitch.
 
 Write your response as plain prose only—no JSON, no markdown syntax (no
 **bold**, no _italics_, no # headings), no quotes, no markdown code fences.
-Structure it as exactly 23 labeled blocks, each starting with the field's
+Structure it as exactly 15 labeled blocks, each starting with the field's
 name in capital letters followed by a colon, on its own line, then the
 field's value on the following line(s)—in this exact order:
 
-IDEAL_MEMBER: who this community is actually for.
-ANTI_FIT: who should probably skip it.
-VALUE_PROP: the primary thing members get out of it.
-FORMAT_REALITY: the actual cadence and mix of in-person vs. virtual.
-ENGAGEMENT_LEVEL: how much active participation membership expects or rewards.
+IDEAL_MEMBER: who this community is actually for, including the company
+  stage it fits when that matters (growth-stage, late-stage, public)
+  (stay under about 145 words, roughly 900 characters).
+ANTI_FIT: who should probably skip it (under about 95 words, roughly 600
+  characters).
+VALUE_PROP: the primary thing members get out of it (under about 130 words,
+  roughly 800 characters).
+FORMAT_REALITY: shown to readers as "Programming": the actual events,
+  cadence and mix of in-person vs. virtual, including the feel of its
+  events (under about 110 words, roughly 700 characters).
+ENGAGEMENT_LEVEL: how much active participation membership expects or
+  rewards (under about 110 words, roughly 700 characters).
 SPONSOR_RELATIONSHIP_NOTE: whether sponsor presence (if any) reads as
   value-add or a sales funnel for members—a qualitative read, distinct from
-  the factual sponsor name/sponsorship type recorded elsewhere.
+  the factual sponsor name/sponsorship type recorded elsewhere (under about
+  110 words, roughly 700 characters).
 BUSINESS_MODEL: how the community structurally sustains itself, e.g. a
   gated, dues-funded peer group insulated from a sales pitch by design, vs.
   a wide-funnel free-to-join community monetized via paid tiers, events, or
   sponsorships. Distinct from SPONSOR_RELATIONSHIP_NOTE above, which judges
   whether a sponsor's presence feels value-add or salesy, not how the
-  community itself makes money.
+  community itself makes money (under about 110 words, roughly 700
+  characters).
 APPLICATION_FRICTION: the real barrier to entry, not just the access-model
-  label (e.g. "invite-only in name, but any VP with a LinkedIn intro gets in").
+  label (e.g. "invite-only in name, but any VP with a LinkedIn intro gets in")
+  (under about 95 words, roughly 600 characters).
 COST_VALUE_VERDICT: whether the price is justified by what members report
-  getting out of it.
-NOTABLE_MEMBERS: publicly known alumni/members, per rule 4 above.
-FOUNDED_YEAR: four-digit year, per rule 3 above.
-PUBLIC_CRITICISM: any visible/reported drawback, per rule 5 above.
-VERDICT_SUMMARY: one short "best for X, not for Y" line.
-STAGE_FOCUS: whether the community targets growth-stage, late-stage, or
-  public companies, or has no particular stage focus—or "Unclear."
+  getting out of it (under about 110 words, roughly 700 characters).
+NOTABLE_MEMBERS: publicly known alumni/members, per rule 3 above (under
+  about 110 words, roughly 700 characters).
+PUBLIC_CRITICISM: the "Trade-offs to weigh," per rule 4 above (under about
+  95 words, roughly 600 characters).
+VERDICT_SUMMARY: one short "best for X, not for Y" line (under about 40
+  words, roughly 250 characters).
+RESOURCES_INCLUDED: templates, benchmarking data, research, job boards,
+  etc. actually provided to members, or "No" if none, or "Unclear" (under
+  about 48 words, roughly 300 characters).
 JOBS_PROGRAM: whether there's a FORMAL job-placement/transition program
   (not just informal networking that happens to help with job searches)—
-  or "Unclear."
-TEAM_OR_INDIVIDUAL: whether membership is individual-only, team/company-
-  based, or supports both—or "Unclear."
-SENIORITY_BAND: who it targets by seniority (e.g. "CFO and VP Finance
-  only," "open to Controllers and up")—or "Unclear."
-PRIMARY_PURPOSE: the community's main purpose in a few words, e.g.
-  "networking," "peer learning," or "both"—or "Unclear."
-RESOURCES_INCLUDED: templates, benchmarking data, research, job boards,
-  etc. actually provided to members, or "No" if none, or "Unclear."
-PLATFORM_TYPE: the technical platform members actually use, e.g. "Slack,"
-  "proprietary app," "in-person only"—or "Unclear."
-MEETING_FORMAT: in-person, virtual, or hybrid cadence—or "Unclear."
-EVENT_STYLE: the feel of its events, e.g. "large-format conferences,"
-  "intimate small-group," "forum-only, no events"—or "Unclear."
-CPE_ELIGIBLE: "Yes"/"No"/"Unclear", per rule 9 above.
+  or "Unclear" (under about 48 words, roughly 300 characters).
+CPE_ELIGIBLE: "Yes"/"No"/"Unclear", per rule 8 above.
 CONFIDENCE: exactly twelve lines, one per the long-form/narrative fields
   above that carry real fabrication risk (the short factual/categorical
-  fields above are not included—see rule 10), each in the form
+  fields above are not included—see rule 9), each in the form
   "FIELD_NAME: true" or "FIELD_NAME: false":
   IDEAL_MEMBER: true|false
   ANTI_FIT: true|false
@@ -1456,18 +1457,10 @@ class CommunityProfileDraft:
     application_friction: str = ""
     cost_value_verdict: str = ""
     notable_members: str = ""
-    founded_year: int | None = None
     public_criticism: str = ""
     verdict_summary: str = ""
-    stage_focus: str = ""
-    jobs_program: str = ""
-    team_or_individual: str = ""
-    seniority_band: str = ""
-    primary_purpose: str = ""
     resources_included: str = ""
-    platform_type: str = ""
-    meeting_format: str = ""
-    event_style: str = ""
+    jobs_program: str = ""
     cpe_eligible: str = ""
     low_confidence: bool = False   # the page needed the Exa fallback to ground on (2026-09
                                     # JS-render grounding fix) — a fetch that produced nothing
@@ -1521,7 +1514,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     as a real Citations-API `document` block instead of being flattened into
     the prompt, so `citations` reflects what the model actually cited,
     mechanically verified by the API. Unlike Description/Agent taxonomy,
-    this is ONE citation set for the whole 23-field draft (decision 5,
+    this is ONE citation set for the whole 15-field draft (decision 5,
     Phase 0) — not per field — since every field is drafted from the same
     single page in the same call. `citations` can be empty even on success
     (the model simply didn't cite anything from the fetched page).
@@ -1636,12 +1629,6 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             normalized = value.strip().lower().rstrip(".")
             return "" if normalized in _COMMUNITY_NULL_PLACEHOLDERS else value
 
-        founded_year_raw = _field("founded_year")
-        try:
-            founded_year = int(founded_year_raw) if founded_year_raw else None
-        except (TypeError, ValueError):
-            founded_year = None
-
         from .pricing import compute_cost
         usage = getattr(resp, "usage", None)
         in_tok = getattr(usage, "input_tokens", 0) or 0
@@ -1661,19 +1648,11 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             application_friction=_field("application_friction"),
             cost_value_verdict=_field("cost_value_verdict"),
             notable_members=_field_or_placeholder_empty("notable_members"),
-            founded_year=founded_year,
             public_criticism=_field_or_placeholder_empty("public_criticism"),
             verdict_summary=_field("verdict_summary"),
-            stage_focus=_field_or_placeholder_empty("stage_focus"),
             jobs_program=_field_or_placeholder_empty("jobs_program"),
-            team_or_individual=_field_or_placeholder_empty("team_or_individual"),
-            seniority_band=_field_or_placeholder_empty("seniority_band"),
-            primary_purpose=_field_or_placeholder_empty("primary_purpose"),
             resources_included=_field_or_placeholder_empty("resources_included"),
-            platform_type=_field_or_placeholder_empty("platform_type"),
-            meeting_format=_field_or_placeholder_empty("meeting_format"),
-            event_style=_field_or_placeholder_empty("event_style"),
-            cpe_eligible=_field("cpe_eligible"),   # "Unclear" is a real value here — never coerced
+            cpe_eligible=coerce_cpe_eligible(_field("cpe_eligible")),   # "Unclear" is a real value here — never coerced to ""
             low_confidence=low_confidence,
             confidence=_parse_community_confidence(confidence_pairs),
             citations=citations,
@@ -1734,8 +1713,6 @@ clearly does not apply at all (e.g. there is no sponsor), use an empty string
 instead of the sentinel.
 
 Fields:
-  "demographic": who this community is for, e.g. "CFOs & VP Finance at
-     Series B+ SaaS companies"—one short phrase. "{needs_verification}" if unclear.
   "reach": exactly one value from this list, verbatim: {reach_options}.
      "{needs_verification}" if unclear.
   "local_markets": a short comma-separated list of city/region names where
@@ -1745,8 +1722,6 @@ Fields:
      Never invent a city the page doesn't name.
   "cost_band": exactly one value from this list, verbatim: {cost_band_options}.
      "{needs_verification}" if unclear.
-  "cost_note": a short free-text note on pricing specifics (exact dues,
-     multi-seat pricing) if known, else an empty string.
   "sponsorship_type": exactly one value from this list, verbatim:
      {sponsorship_options}. "{needs_verification}" if unclear.
   "sponsor_name": the sponsor's name, only if sponsorship_type indicates one
@@ -1760,10 +1735,10 @@ Fields:
      applies—never a value outside this list.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly these
-keys: demographic, reach, local_markets, cost_band, cost_note, sponsorship_type,
-sponsor_name, access, format, categories.
+keys: reach, local_markets, cost_band, sponsorship_type, sponsor_name, access,
+format, categories.
 
-Voice guide—write any free-text fields (demographic, cost_note) in this voice:
+Voice guide—write any free-text fields (local_markets, sponsor_name) in this voice:
 {voice_core}
 
 Community name: {name}
@@ -1775,11 +1750,9 @@ Community URL: {url}
 
 @dataclass
 class CommunityListingDraft:
-    demographic: str = ""
     reach: str = ""
     local_markets: str = ""
     cost_band: str = ""
-    cost_note: str = ""
     sponsorship_type: str = ""
     sponsor_name: str = ""
     access: str = ""
@@ -1891,11 +1864,9 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
             return [v for v in values if isinstance(v, str) and v in allowed]
 
         return CommunityListingDraft(
-            demographic=str(data.get("demographic", "")).strip(),
             reach=_one_of(data.get("reach"), reach_options),
             local_markets=str(data.get("local_markets", "")).strip(),
             cost_band=_one_of(data.get("cost_band"), cost_band_options),
-            cost_note=str(data.get("cost_note", "")).strip(),
             sponsorship_type=_one_of(data.get("sponsorship_type"), sponsorship_options),
             sponsor_name=str(data.get("sponsor_name", "")).strip(),
             access=_one_of(data.get("access"), access_options),

@@ -6523,6 +6523,69 @@ never reads as something to tap.
   (group placement, verified/pending/empty on both the profile page and
   Compare).
 
+- **Community profile cleanup, PR 2a (2026-09) — one edit page, eleven retired
+  fields, five groups of three, and a citation rule that follows the text.**
+  `/tools/communities/{slug}/edit` now holds the listing AND the profile;
+  `GET/POST /admin/tools/communities/{id}/profile` are gone (no redirect, same
+  cutover convention as every admin route move). Two tables stay (`communities`,
+  `community_profiles`); merging them was considered and rejected as a bigger
+  data-model change than the page merge needed (Option A).
+  - **Retired, frozen in the schema, never dropped**: `community_profiles.`
+    `founded_year`, `event_style`, `seniority_band`, `platform_type`,
+    `team_or_individual`, `primary_purpose`, `meeting_format`, `stage_focus`,
+    and `communities.demographic`, `cost_note`, `notes`. Nothing renders,
+    collects, generates or reads them. `linklib/community_profile.py` is the one
+    list (`RETIRED_PROFILE_FIELDS`, `RETIRED_COMMUNITY_FIELDS`) plus the
+    `PROFILE_LIMITS` and CPE vocabulary. `Library.upsert_community_profile` and
+    `Library.update_community` treat a retired argument of `None` as "leave the
+    stored value alone", so the merged page's save can never blank one; a test
+    seeds every retired column, saves the page, and asserts nothing moved
+    (`tests/test_community_profile_merged_edit.py`, shown failing first against a
+    plain full replace). `communities.format`, `low_confidence` and the sponsorship
+    columns stay.
+  - **Five groups of three**, named once in `linklib/compare.py`
+    (`GROUP_TARGET_AUDIENCE` and its four siblings) and read by the admin form,
+    the public page, Compare and MCP: Target audience, Member experience,
+    Economics, Key points, Additional benefits. Programming is the old
+    `format_reality`; Trade-offs to weigh is the old `public_criticism`; Bottom
+    line (`verdict_summary`) sits in Key points on the admin page, and stays the
+    first section on Compare and MCP.
+  - **Public page**: no subhead, category chips under the name, no Description or
+    Categories card, Bottom line callout on top, Key points, then one Additional
+    benefits card. The Details card's Format row is `communities.format` only.
+    Founded and Cost detail are gone from Compare key facts and MCP.
+  - **Directory card blurb is the Bottom line**, joined in by one query
+    (`Library.list_communities_for_directory`); a community with no profile shows
+    the muted empty blurb, never an error. `search_communities` matches name,
+    Bottom line and Ideal member (was name, demographic, notes).
+  - **`communities.notes` is no longer synced from the seed list**, so boot opens
+    no seed-disagreement item for a frozen column. The matchmaker context lost
+    its Who it's for, Cost detail, Notes and Founded lines and still carries
+    Ideal member.
+  - **Limits**: every live prose field has a soft target and a hard max in
+    `PROFILE_LIMITS`; each max is above the longest value in production when it
+    was set (a test pins that). Over the max is refused whole, naming the limit,
+    and every limit is checked before any write. CPE is a dropdown (Not assessed,
+    Yes, No, Unclear); a stored qualifier such as "Yes (NASBA sponsor)" survives a
+    save while the leading word is unchanged, and legacy outliers are coerced to
+    their leading word.
+  - **Citation invariant (community profile only)**: the shared set is never
+    cleared while at least one `[n]` marker remains in any profile field, and is
+    cleared once none remain. The profile is grounded on one page, so every marker
+    points at that page and editing one cited box can't orphan the others (the Vena
+    shape). Fresh citations arriving with a save replace the whole set; markers with
+    no stored and no fresh set change nothing. Replaces the tool-style "clear when
+    the text changed" rule for this one entity (`_community_citation_action`);
+    Agent taxonomy and Description keep the PR #640 rules. Shown failing first: on
+    the pre-change route, editing one of two cited boxes cleared the set.
+  - **Confidence**: a tracked field whose text you changed by hand saves as NULL
+    ("Not yet assessed"), since the model never judged that text.
+  - **Restore previous** (page-level, vanilla JS): one snapshot of the boxes, the
+    hidden citations and the drafted-this-session state, taken right before a
+    Generate overwrites them. Per-group Generate and per-group Restore are PR 2b,
+    not built yet.
+  See ARCHITECTURE.md's matching section.
+
 - **Admin menu default-state + badge coverage (2026-09) — every admin-hub group
   now defaults to collapsed on load, reversing the 2026-08 "Inbox always open,
   any group with a nonzero badge also starts open" fix; plus a real Software
@@ -8228,9 +8291,10 @@ it supersedes the old "`/save` is token-gated" note.
      Deliberately untouched: `stage_focus`/`jobs_program`/
      `team_or_individual`'s own collected-but-never-publicly-rendered
      status (see the "Surface Hidden Community Profile Fields" bullet
-     above for two of these three, and the standing note that
-     `team_or_individual` is still unaddressed) — this PR is layout only,
-     not a content-scope change.
+     above for two of these three; `team_or_individual`, `stage_focus`
+     and the rest were later retired outright in PR 2a, see the community
+     profile cleanup bullet) — this PR is layout only, not a content-scope
+     change.
   4. **Three copy-length fixes, approved before shipping** (per the
      standing em-dash/new-copy review discipline): the third-party content
      admin form's (`/admin/thought-leadership/third-party/new` and its edit

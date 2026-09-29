@@ -40,57 +40,65 @@ from .enrich import NEEDS_VERIFICATION
 # instead of guessing a char count that's wrong at some width.
 EXCERPT_LINE_CLAMP = 4
 
-# The deep Community profile fields, grouped by theme — moved here from
-# webapp/app.py (Compare Redesign Phase 1) so the profile page's own card
-# grouping and Compare's section grouping can never drift apart; the same
-# comment that used to live on this constant in webapp/app.py already said
-# Compare's old flat list was "Phase 8.5's job to rebuild" against exactly
-# this grouping — this is that phase. webapp/app.py imports this name
-# instead of keeping a second copy.
+# The live Community profile fields, grouped by theme. The profile page's card
+# grouping and Compare's section grouping both read this list, so they can
+# never drift apart (it moved here from webapp/app.py in Compare Redesign
+# Phase 1). No gating logic lives here: every field goes through
+# `_narrative_field`/`gates.field_state` off the whole-profile `needs_review`
+# flag, exactly like every other entry.
 #
-# Surface Hidden Community Profile Fields (2026-09) added Stage focus,
-# Jobs program, and Individual or team — three admin-collected Quick-facts
-# fields (`stage_focus`/`jobs_program`/`team_or_individual`) that had never
-# rendered anywhere public. Step 0 investigation found real, substantive
-# content already stored for 36 of 40 communities (not the placeholder
-# text the edit-page's own `placeholder=` attribute might suggest), so this
-# is mostly "surface content that already exists," not "build empty-state
-# scaffolding for an unpopulated field" — though the standard applies
-# either way. Placed by semantic fit, not to balance group sizes: Stage
-# focus is a company-stage targeting fact, a natural peer of the existing
-# seniority-band ("Who it targets") entry; Jobs program is a member
-# benefit, same category as Resources included; Individual or team is a
-# membership-structure/purchasing fact, closer to Business model's "how
-# this sustains itself" than to who it's personally for. No new gating —
-# `_narrative_field`/`gates.field_state` handle these exactly like every
-# other entry here, off the same whole-profile `needs_review` flag.
+# PR 2a (2026-09) — the five group names below are the ONE place these words
+# live. The admin edit page, the public profile page, Compare and the MCP
+# tools all read them from here, so a rename is a one-line change. They were
+# four titles here ("Who it's for", "What you get", "How it works", "Cost and
+# structure") and five separate literals on the admin page before this pass.
+GROUP_TARGET_AUDIENCE = "Target audience"
+GROUP_MEMBER_EXPERIENCE = "Member experience"
+GROUP_ECONOMICS = "Economics"
+GROUP_KEY_POINTS = "Key points"
+GROUP_ADDITIONAL_BENEFITS = "Additional benefits"
+
+# Bottom line is its own leading section on the public page, Compare and MCP
+# (a callout, then the groups). The admin edit page lists it inside Key points
+# instead; `community_admin_groups()` below builds that view from this list.
+BOTTOM_LINE = ("Bottom line", "verdict_summary")
+
 COMMUNITY_PROFILE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
-    ("Who it's for", [
+    (GROUP_TARGET_AUDIENCE, [
         ("Ideal member", "ideal_member"),
         ("Who should skip it", "anti_fit"),
-        ("Who it targets", "seniority_band"),
-        ("Stage focus", "stage_focus"),
-    ]),
-    ("What you get", [
         ("Value proposition", "value_prop"),
-        ("Primary purpose", "primary_purpose"),
-        ("Resources included", "resources_included"),
-        ("Notable members", "notable_members"),
-        ("Jobs program", "jobs_program"),
     ]),
-    ("How it works", [
-        ("Format, in practice", "format_reality"),
+    (GROUP_MEMBER_EXPERIENCE, [
+        ("Programming", "format_reality"),
         ("Engagement level", "engagement_level"),
         ("Application friction", "application_friction"),
     ]),
-    ("Cost and structure", [
-        ("Cost vs. value", "cost_value_verdict"),
-        ("Sponsor relationship", "sponsor_relationship_note"),
+    (GROUP_ECONOMICS, [
         ("Business model", "business_model"),
-        ("Public criticism", "public_criticism"),
-        ("Individual or team", "team_or_individual"),
+        ("Sponsor relationship", "sponsor_relationship_note"),
+        ("Cost vs. value", "cost_value_verdict"),
+    ]),
+    (GROUP_KEY_POINTS, [
+        ("Notable members", "notable_members"),
+        ("Trade-offs to weigh", "public_criticism"),
+    ]),
+    (GROUP_ADDITIONAL_BENEFITS, [
+        ("Resources included", "resources_included"),
+        ("Jobs program", "jobs_program"),
+        ("CPE eligible", "cpe_eligible"),
     ]),
 ]
+
+
+def community_admin_groups() -> list[tuple[str, list[tuple[str, str]]]]:
+    """The admin edit page's view of COMMUNITY_PROFILE_GROUPS: the same five
+    groups in the same order, with Bottom line added as the last field of Key
+    points, so admin and public use the same words for every group and field."""
+    return [
+        (title, fields + [BOTTOM_LINE] if title == GROUP_KEY_POINTS else list(fields))
+        for title, fields in COMMUNITY_PROFILE_GROUPS
+    ]
 
 
 def community_geo_line(c: dict) -> str:
@@ -310,8 +318,6 @@ def build_communities_compare(
             ("Access", c.get("access")),
             ("Sponsor", sponsorship),
             ("Cost", c.get("cost_band")),
-            ("Cost detail", c.get("cost_note")),
-            ("Founded", str(profile.get("founded_year") or "") or None),
         ]:
             kf = _key_fact(label, raw_value)
             if kf:

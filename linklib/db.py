@@ -22,6 +22,7 @@ from typing import Iterator, Optional
 from .voice_mechanics import normalize_voice_mechanics as _voice_fix
 from .voice_mechanics import correction_rule_for as _voice_fix_rule
 from .voice_mechanics import norm_for_compare
+from .community_profile import PROFILE_LIMITS, coerce_cpe_eligible as _coerce_cpe
 
 
 def resolve_db_path(cli_db: Optional[str], *, allow_missing: bool = False) -> str:
@@ -5904,24 +5905,6 @@ class Library:
     TOOL_AGENT_TAXONOMY_MAX = 4_000
     TOOL_DIFFERENTIATION_TARGET = 600
     TOOL_DIFFERENTIATION_MAX = 1_200
-    # Shared by stage_focus/jobs_program/team_or_individual only — the three
-    # community_profiles "Quick facts" fields _COMMUNITY_PROFILE_PROMPT's own
-    # rule 8 never marked "a phrase, not a paragraph—deliberately brief" (this
-    # PR adds them to that rule too, which is the actual root cause of
-    # stage_focus's 440-character overflow — see CLAUDE.md). The other six
-    # Quick facts fields (primary_purpose/cpe_eligible/platform_type/
-    # meeting_format/event_style/seniority_band) were already covered by rule
-    # 8 (or, for cpe_eligible, rule 9's own bounded "Yes/No/Unclear, optional
-    # short qualifier" format) and keep their existing maxlength="300"
-    # unchanged. Confirmed directly against production (2026-09, PR 600
-    # review, all 40 live community_profiles rows via the /mcp introspection
-    # tools), not just inferred from the prompt: real longest values are
-    # 79/91/90/116/100/128 chars respectively — none within even half the
-    # 300 cap. See tests/test_char_budget_targets.py's
-    # test_other_quick_facts_fields_stay_well_under_their_unenforced_cap.
-    COMMUNITY_SHORT_FIELD_TARGET = 300
-    COMMUNITY_SHORT_FIELD_MAX = 800
-
     @classmethod
     def _check_text_field_length(cls, label: str, value: str, limit: int) -> None:
         """Shared hard-limit refusal for a character-budgeted field, generalizing
@@ -7866,6 +7849,21 @@ class Library:
             ).fetchall()
         return [self._community_to_dict(r) for r in rows]
 
+    def list_communities_for_directory(self) -> list[dict]:
+        """Approved communities for the public directory, with each one's profile
+        Bottom line joined in by a single query (PR 2a): `bottom_line` (the
+        profile's verdict_summary), `bottom_line_pending` (the whole-profile
+        needs_review flag, for the "under review" tag) and `ideal_member`
+        (search text only). A community with no profile row gets None/0 for
+        these, never an error."""
+        rows = self.conn.execute(
+            """SELECT c.*, p.verdict_summary AS bottom_line, p.ideal_member AS ideal_member,
+                      COALESCE(p.needs_review, 0) AS bottom_line_pending
+               FROM communities c LEFT JOIN community_profiles p ON p.community_id = c.id
+               WHERE c.approved=1 ORDER BY c.name"""
+        ).fetchall()
+        return [self._community_to_dict(r) for r in rows]
+
     def get_community(self, community_id: int) -> dict | None:
         row = self.conn.execute("SELECT * FROM communities WHERE id=?", (community_id,)).fetchone()
         return self._community_to_dict(row) if row else None
@@ -7880,31 +7878,39 @@ class Library:
         return self._community_to_dict(row) if row else None
 
     def update_community(self, community_id: int, name: str, url: str,
-                         demographic: str, cost_band: str, categories: list[str],
-                         cost_note: str = "", sponsorship_type: str = "Independent",
+                         demographic: Optional[str], cost_band: str, categories: list[str],
+                         cost_note: Optional[str] = None, sponsorship_type: str = "Independent",
                          sponsor_name: str = "", access: str = "", format: str = "",
-                         notes: str = "", reach: str = "National",
+                         notes: Optional[str] = None, reach: str = "National",
                          local_markets: str = "", featured: int = 0,
                          advisor: int = 0, source: str | None = None) -> None:
+        """Update a community's listing fields.
+
+        `demographic`, `cost_note` and `notes` are RETIRED (PR 2a, 2026-09; see
+        `linklib.community_profile.RETIRED_COMMUNITY_FIELDS`) and frozen in the
+        schema: passing `None` — what the merged edit page does — leaves the
+        stored value untouched, so a save can never blank them. A caller that
+        passes a string still writes it (tests, old scripts); the running app
+        does not."""
         # Only check when the URL is actually changing — see update_tool for why.
         current = self.get_community(community_id)
         if current and normalize_url(url) != normalize_url(current["url"]):
             dup = self._find_community_by_normalized_url(url, exclude_id=community_id)
             if dup:
                 raise DuplicateURLError("community", dup["id"], dup["name"], dup["slug"])
-        self.conn.execute(
-            """UPDATE communities SET name=?, url=?, demographic=?, cost_band=?,
-               cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
-               notes=?, categories_json=?, updated_at=?, reach=?, local_markets=?,
-               featured=?, advisor=? WHERE id=?""",
-            (name.strip(), url.strip(), self._vf("communities", community_id, "demographic", demographic.strip(), source=source),
-             cost_band, self._vf("communities", community_id, "cost_note", cost_note.strip(), source=source),
-             sponsorship_type, sponsor_name.strip(), access.strip(),
-             format.strip(), self._vf("communities", community_id, "notes", notes.strip(), source=source),
-             json.dumps(categories), _now(),
-             reach, self._vf("communities", community_id, "local_markets", local_markets.strip(), source=source),
-             featured, advisor, community_id),
-        )
+        sets = ["name=?", "url=?", "cost_band=?", "sponsorship_type=?", "sponsor_name=?",
+                "access=?", "format=?", "categories_json=?", "updated_at=?", "reach=?",
+                "local_markets=?", "featured=?", "advisor=?"]
+        params: list = [name.strip(), url.strip(), cost_band, sponsorship_type, sponsor_name.strip(),
+                        access.strip(), format.strip(), json.dumps(categories), _now(), reach,
+                        self._vf("communities", community_id, "local_markets", local_markets.strip(), source=source),
+                        featured, advisor]
+        for col, val in (("demographic", demographic), ("cost_note", cost_note), ("notes", notes)):
+            if val is not None:
+                sets.append(f"{col}=?")
+                params.append(self._vf("communities", community_id, col, val.strip(), source=source))
+        params.append(community_id)
+        self.conn.execute(f"UPDATE communities SET {', '.join(sets)} WHERE id=?", params)
         self.conn.commit()
         # Manual logo override staleness — mirrors update_tool exactly.
         if current and current.get("logo_manual_override") and _url_domain_changed(current["url"], url):
@@ -7913,21 +7919,19 @@ class Library:
             )
             self.conn.commit()
 
-    def update_community_content(self, community_id: int, name: str, notes: str = "", source: str | None = None) -> None:
-        """Narrow update for scripts/seed_communities.py's re-sync pass (and the startup
-        seeder): touches only name and notes — the two fields sourced straight from the
-        underlying research, same role as name/description for tools and benchmarks.
-        `advisor` re-syncs from the same COMMUNITIES source list too, mirroring
-        tools.advisor exactly, but via a separate direct UPDATE in the caller
-        (webapp/app.py's _seed_toolbox, scripts/seed_communities.py's main) —
-        not through this method. demographic/cost_band/cost_note/
-        sponsorship_type/sponsor_name/access/format/categories_json/approved/
-        reach/local_markets/featured are admin-owned, edited at
-        /admin/tools/communities, and never touched here — otherwise an admin's edit
-        would get silently reverted on the next deploy's re-sync."""
+    def update_community_content(self, community_id: int, name: str, source: str | None = None) -> None:
+        """Narrow update for scripts/seed_communities.py's re-sync pass: touches
+        only `name`. `notes` (the retired "Short description") used to sync here
+        too; PR 2a froze it, so the seed no longer touches it. `advisor`
+        re-syncs from the same COMMUNITIES source list via a separate direct
+        UPDATE in the caller. demographic/cost_band/cost_note/sponsorship_type/
+        sponsor_name/access/format/categories_json/approved/reach/local_markets/
+        featured are admin-owned, edited on the community edit page, and never
+        touched here — otherwise an admin's edit would get silently reverted on
+        the next deploy's re-sync."""
         self.conn.execute(
-            "UPDATE communities SET name=?, notes=?, updated_at=? WHERE id=?",
-            (name.strip(), self._vf("communities", community_id, "notes", notes.strip(), source=source), _now(), community_id),
+            "UPDATE communities SET name=?, updated_at=? WHERE id=?",
+            (name.strip(), _now(), community_id),
         )
         self.conn.commit()
 
@@ -8164,25 +8168,53 @@ class Library:
         ).fetchone()
         return dict(row) if row else None
 
+    # The live prose columns upsert_community_profile writes, in the order the
+    # INSERT lists them, plus the twelve `*_ai_confident` columns after them.
+    # Retired columns (linklib.community_profile.RETIRED_PROFILE_FIELDS) are
+    # deliberately NOT here: they are written only when a caller passes one.
+    _PROFILE_TEXT_COLUMNS = (
+        "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
+        "sponsor_relationship_note", "application_friction", "cost_value_verdict",
+        "notable_members", "public_criticism", "verdict_summary", "business_model",
+        "cpe_eligible", "resources_included", "jobs_program",
+    )
+
     def upsert_community_profile(self, community_id: int, ideal_member: str = "",
                                  anti_fit: str = "", value_prop: str = "",
                                  format_reality: str = "", engagement_level: str = "",
                                  sponsor_relationship_note: str = "",
                                  application_friction: str = "", cost_value_verdict: str = "",
-                                 notable_members: str = "", founded_year: Optional[int] = None,
+                                 notable_members: str = "",
                                  public_criticism: str = "", verdict_summary: str = "",
                                  low_confidence: int = 0, business_model: str = "",
-                                 primary_purpose: str = "", cpe_eligible: str = "",
-                                 platform_type: str = "", meeting_format: str = "",
-                                 event_style: str = "", seniority_band: str = "",
+                                 cpe_eligible: str = "",
                                  resources_included: str = "", needs_review: int = 0,
-                                 stage_focus: str = "", jobs_program: str = "",
-                                 team_or_individual: str = "",
+                                 jobs_program: str = "",
                                  confidence: Optional[dict] = None,
-                                 clear_verification_stamp: bool = False, source: str | None = None) -> None:
-        """Insert or fully replace a community's profile row. There's no partial
-        update here (unlike update_community_content's narrow sync) — the admin
-        edit form always submits every field, generated or hand-written.
+                                 clear_verification_stamp: bool = False, source: str | None = None,
+                                 *, founded_year: Optional[int] = None,
+                                 primary_purpose: Optional[str] = None,
+                                 platform_type: Optional[str] = None,
+                                 meeting_format: Optional[str] = None,
+                                 event_style: Optional[str] = None,
+                                 seniority_band: Optional[str] = None,
+                                 stage_focus: Optional[str] = None,
+                                 team_or_individual: Optional[str] = None) -> None:
+        """Insert or fully replace a community's LIVE profile fields. There's no
+        partial update here (unlike update_community_content's narrow sync) — the
+        admin edit form always submits every live field, generated or hand-written.
+
+        RETIRED columns (PR 2a, 2026-09 — the keyword-only arguments at the end,
+        listed in `linklib.community_profile.RETIRED_PROFILE_FIELDS`) are frozen:
+        the default `None` means "leave whatever is stored untouched", so a save
+        from the merged edit page, which no longer carries them, can never blank
+        a retired column. A caller that passes one explicitly (a test, an old
+        seed) still writes it; nothing in the running app does.
+
+        Every live prose field has a hard maximum in
+        `linklib.community_profile.PROFILE_LIMITS`; a value over it raises and
+        nothing is saved. `cpe_eligible` is coerced to the Yes/No/Unclear
+        vocabulary (see `coerce_cpe_eligible`).
 
         clear_verification_stamp (2026-08, stale-stamp fix) must be an
         EXPLICIT, separate signal from needs_review — needs_review can be 1
@@ -8197,129 +8229,83 @@ class Library:
         `confidence` (2026-08 confidence indicator): an optional
         {field_name: 0|1|None} dict covering
         `linklib.enrich.COMMUNITY_CONFIDENCE_FIELDS` — since this whole method
-        is a full replace on every save (unlike the tools table's COALESCE-
-        based narrow updates), the caller is responsible for deciding each
-        field's value on every call, not this method: pass the fresh
-        model-reported value for a field that was just (re)drafted this save,
-        or the field's own previous value (read back from `get_community_profile`
-        first) to carry it forward unchanged, or `None` to write NULL (no
-        signal). A missing key defaults to `None`/NULL.
+        is a full replace of the live columns on every save (unlike the tools
+        table's COALESCE-based narrow updates), the caller is responsible for
+        deciding each field's value on every call, not this method: pass the
+        fresh model-reported value for a field that was just (re)drafted this
+        save, or the field's own previous value (read back from
+        `get_community_profile` first) to carry it forward unchanged, or `None`
+        to write NULL (no signal). A missing key defaults to `None`/NULL.
 
-        The Recommender's controlled-vocabulary `*_tags` columns (seniority_band_
-        tags, cpe_eligible_tags, platform_type_tags, function_tags, looking_for_
-        tags, programming_tags, paid_free_tags, industry_tags) were dropped
+        The Recommender's controlled-vocabulary `*_tags` columns were dropped
         entirely once the quiz they existed for was replaced by the Chat
-        Matchmaker (which reads these free-text columns directly, needing no
-        controlled vocabulary) — removed by Brian's explicit call rather than
-        left as dead weight, alongside the admin panel that edited them and
-        scripts/backfill_community_weight_tags.py. The four *_tags columns
-        retired even earlier than that (primary_purpose_tags,
-        resources_included_tags, meeting_format_tags, event_style_tags) went
-        the same way in the same migration."""
-        for label, value in (
-            ("Stage focus", stage_focus), ("Jobs program", jobs_program),
-            ("Individual or team", team_or_individual),
-        ):
-            self._check_text_field_length(label, value.strip(), self.COMMUNITY_SHORT_FIELD_MAX)
+        Matchmaker, alongside the admin panel that edited them."""
+        values = {
+            "ideal_member": ideal_member, "anti_fit": anti_fit, "value_prop": value_prop,
+            "format_reality": format_reality, "engagement_level": engagement_level,
+            "sponsor_relationship_note": sponsor_relationship_note,
+            "application_friction": application_friction,
+            "cost_value_verdict": cost_value_verdict, "notable_members": notable_members,
+            "public_criticism": public_criticism, "verdict_summary": verdict_summary,
+            "business_model": business_model, "cpe_eligible": cpe_eligible,
+            "resources_included": resources_included, "jobs_program": jobs_program,
+        }
+        labels = {
+            "ideal_member": "Ideal member", "anti_fit": "Who should skip it",
+            "value_prop": "Value proposition", "format_reality": "Programming",
+            "engagement_level": "Engagement level", "application_friction": "Application friction",
+            "business_model": "Business model", "sponsor_relationship_note": "Sponsor relationship",
+            "cost_value_verdict": "Cost vs. value", "notable_members": "Notable members",
+            "public_criticism": "Trade-offs to weigh", "verdict_summary": "Bottom line",
+            "resources_included": "Resources included", "jobs_program": "Jobs program",
+        }
+        for col, (_target, limit) in PROFILE_LIMITS.items():
+            self._check_text_field_length(labels[col], (values.get(col) or "").strip(), limit)
+        values["cpe_eligible"] = _coerce_cpe(values["cpe_eligible"])
         confidence = confidence or {}
-        conf = [confidence.get(f) for f in (
-            "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
-            "engagement_level", "sponsor_relationship_note", "application_friction",
-            "cost_value_verdict", "notable_members", "public_criticism", "verdict_summary",
-        )]
+        conf_cols = [f"{f}_ai_confident" for f in self._COMMUNITY_CONFIDENCE_FIELDS]
+        conf_vals = [confidence.get(f) for f in self._COMMUNITY_CONFIDENCE_FIELDS]
+
+        cols = ["community_id"]
+        params: list = [community_id]
+        for col in self._PROFILE_TEXT_COLUMNS:
+            cols.append(col)
+            params.append(self._vf("community_profiles", community_id, col,
+                                    (values.get(col) or "").strip(), source=source))
+        cols += ["low_confidence", "updated_at", "needs_review"]
+        params += [low_confidence, _now(), needs_review]
+        cols += conf_cols
+        params += conf_vals
+        # Retired columns: written only when a caller passed one explicitly.
+        retired = {
+            "founded_year": founded_year, "primary_purpose": primary_purpose,
+            "platform_type": platform_type, "meeting_format": meeting_format,
+            "event_style": event_style, "seniority_band": seniority_band,
+            "stage_focus": stage_focus, "team_or_individual": team_or_individual,
+        }
+        for col, val in retired.items():
+            if val is None:
+                continue
+            cols.append(col)
+            params.append(self._vf("community_profiles", community_id, col, val.strip(), source=source)
+                          if isinstance(val, str) else val)
+        placeholders = ",".join("?" for _ in cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != "community_id")
         self.conn.execute(
-            """INSERT INTO community_profiles
-               (community_id, ideal_member, anti_fit, value_prop, format_reality,
-                engagement_level, sponsor_relationship_note, application_friction,
-                cost_value_verdict, notable_members, founded_year, public_criticism,
-                verdict_summary, low_confidence, updated_at, business_model,
-                primary_purpose, cpe_eligible, platform_type, meeting_format,
-                event_style, seniority_band, resources_included, needs_review,
-                stage_focus, jobs_program, team_or_individual,
-                ideal_member_ai_confident, anti_fit_ai_confident, value_prop_ai_confident,
-                business_model_ai_confident, format_reality_ai_confident,
-                engagement_level_ai_confident, sponsor_relationship_note_ai_confident,
-                application_friction_ai_confident, cost_value_verdict_ai_confident,
-                notable_members_ai_confident, public_criticism_ai_confident,
-                verdict_summary_ai_confident)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(community_id) DO UPDATE SET
-                 ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
-                 value_prop=excluded.value_prop, format_reality=excluded.format_reality,
-                 engagement_level=excluded.engagement_level,
-                 sponsor_relationship_note=excluded.sponsor_relationship_note,
-                 application_friction=excluded.application_friction,
-                 cost_value_verdict=excluded.cost_value_verdict,
-                 notable_members=excluded.notable_members,
-                 founded_year=excluded.founded_year,
-                 public_criticism=excluded.public_criticism,
-                 verdict_summary=excluded.verdict_summary,
-                 low_confidence=excluded.low_confidence,
-                 updated_at=excluded.updated_at,
-                 business_model=excluded.business_model,
-                 primary_purpose=excluded.primary_purpose,
-                 cpe_eligible=excluded.cpe_eligible,
-                 platform_type=excluded.platform_type,
-                 meeting_format=excluded.meeting_format,
-                 event_style=excluded.event_style,
-                 seniority_band=excluded.seniority_band,
-                 resources_included=excluded.resources_included,
-                 needs_review=excluded.needs_review,
-                 stage_focus=excluded.stage_focus, jobs_program=excluded.jobs_program,
-                 team_or_individual=excluded.team_or_individual,
-                 ideal_member_ai_confident=excluded.ideal_member_ai_confident,
-                 anti_fit_ai_confident=excluded.anti_fit_ai_confident,
-                 value_prop_ai_confident=excluded.value_prop_ai_confident,
-                 business_model_ai_confident=excluded.business_model_ai_confident,
-                 format_reality_ai_confident=excluded.format_reality_ai_confident,
-                 engagement_level_ai_confident=excluded.engagement_level_ai_confident,
-                 sponsor_relationship_note_ai_confident=excluded.sponsor_relationship_note_ai_confident,
-                 application_friction_ai_confident=excluded.application_friction_ai_confident,
-                 cost_value_verdict_ai_confident=excluded.cost_value_verdict_ai_confident,
-                 notable_members_ai_confident=excluded.notable_members_ai_confident,
-                 public_criticism_ai_confident=excluded.public_criticism_ai_confident,
-                 verdict_summary_ai_confident=excluded.verdict_summary_ai_confident""",
-            (community_id,
-             self._vf("community_profiles", community_id, "ideal_member", ideal_member.strip(), source=source),
-             self._vf("community_profiles", community_id, "anti_fit", anti_fit.strip(), source=source),
-             self._vf("community_profiles", community_id, "value_prop", value_prop.strip(), source=source),
-             self._vf("community_profiles", community_id, "format_reality", format_reality.strip(), source=source),
-             self._vf("community_profiles", community_id, "engagement_level", engagement_level.strip(), source=source),
-             self._vf("community_profiles", community_id, "sponsor_relationship_note",
-                       sponsor_relationship_note.strip(), source=source),
-             self._vf("community_profiles", community_id, "application_friction",
-                       application_friction.strip(), source=source),
-             self._vf("community_profiles", community_id, "cost_value_verdict", cost_value_verdict.strip(), source=source),
-             self._vf("community_profiles", community_id, "notable_members", notable_members.strip(), source=source),
-             founded_year,
-             self._vf("community_profiles", community_id, "public_criticism", public_criticism.strip(), source=source),
-             self._vf("community_profiles", community_id, "verdict_summary", verdict_summary.strip(), source=source),
-             low_confidence, _now(),
-             self._vf("community_profiles", community_id, "business_model", business_model.strip(), source=source),
-             self._vf("community_profiles", community_id, "primary_purpose", primary_purpose.strip(), source=source),
-             self._vf("community_profiles", community_id, "cpe_eligible", cpe_eligible.strip(), source=source),
-             self._vf("community_profiles", community_id, "platform_type", platform_type.strip(), source=source),
-             self._vf("community_profiles", community_id, "meeting_format", meeting_format.strip(), source=source),
-             self._vf("community_profiles", community_id, "event_style", event_style.strip(), source=source),
-             self._vf("community_profiles", community_id, "seniority_band", seniority_band.strip(), source=source),
-             self._vf("community_profiles", community_id, "resources_included", resources_included.strip(), source=source),
-             needs_review,
-             self._vf("community_profiles", community_id, "stage_focus", stage_focus.strip(), source=source),
-             self._vf("community_profiles", community_id, "jobs_program", jobs_program.strip(), source=source),
-             self._vf("community_profiles", community_id, "team_or_individual", team_or_individual.strip(), source=source),
-             *conf),
+            f"INSERT INTO community_profiles ({', '.join(cols)}) VALUES ({placeholders}) "
+            f"ON CONFLICT(community_id) DO UPDATE SET {updates}",
+            params,
         )
         self.conn.commit()
         if clear_verification_stamp:
             self._supersede_narrative_review("community", "community_profile", community_id)
 
     def update_community_profile_research_fields(
-        self, community_id: int, *, founded_year: Optional[int] = None,
+        self, community_id: int, *,
         notable_members: Optional[str] = None, low_confidence: Optional[int] = None,
         anti_fit: Optional[str] = None, sponsor_relationship_note: Optional[str] = None,
         public_criticism: Optional[str] = None, needs_review: Optional[int] = None,
-        stage_focus: Optional[str] = None, jobs_program: Optional[str] = None,
-        team_or_individual: Optional[str] = None,
+        jobs_program: Optional[str] = None,
         source: str | None = None,
     ) -> None:
         """Narrow, partial update for a deepened-research pass on a subset of
@@ -8329,18 +8315,17 @@ class Library:
         whose keyword argument was actually passed (not None), leaving every
         other field on the row untouched. A no-op on a field is "omit the
         argument," not "pass None" — every parameter here is a column that
-        can legitimately hold NULL/empty (`founded_year` in particular), so
+        can legitimately hold NULL/empty, so
         there's no way to distinguish "leave alone" from "set to null" other
         than by omission. Caller is responsible for not passing None for a
         field it actually wants nulled out; today's only caller
         (scripts/archive/patch_round3_community_profiles.py) never needs to."""
         fields = {
-            "founded_year": founded_year, "notable_members": notable_members,
+            "notable_members": notable_members,
             "low_confidence": low_confidence, "anti_fit": anti_fit,
             "sponsor_relationship_note": sponsor_relationship_note,
             "public_criticism": public_criticism, "needs_review": needs_review,
-            "stage_focus": stage_focus, "jobs_program": jobs_program,
-            "team_or_individual": team_or_individual,
+            "jobs_program": jobs_program,
         }
         fields = {k: v for k, v in fields.items() if v is not None}
         if not fields:
@@ -8460,16 +8445,16 @@ class Library:
 
     # The full set of Community-profile narrative fields the admin
     # completeness filter (2026-09) checks for emptiness — mirrors
-    # linklib.compare.COMMUNITY_PROFILE_GROUPS' 17 grouped fields plus
+    # linklib.compare.COMMUNITY_PROFILE_GROUPS' 14 grouped fields plus
     # Bottom line (verdict_summary), hand-duplicated here rather than
     # imported, same "keep linklib.db free of a sibling-module dependency"
     # convention as _COMMUNITY_CONFIDENCE_FIELDS just above.
     _COMMUNITY_NARRATIVE_FIELDS = (
-        "ideal_member", "anti_fit", "seniority_band", "stage_focus",
-        "value_prop", "primary_purpose", "resources_included", "notable_members", "jobs_program",
+        "ideal_member", "anti_fit", "value_prop",
         "format_reality", "engagement_level", "application_friction",
-        "cost_value_verdict", "sponsor_relationship_note", "business_model", "public_criticism",
-        "team_or_individual", "verdict_summary",
+        "business_model", "sponsor_relationship_note", "cost_value_verdict",
+        "notable_members", "public_criticism", "verdict_summary",
+        "resources_included", "jobs_program", "cpe_eligible",
     )
 
     def community_profile_quality_flags(self) -> dict[int, dict]:

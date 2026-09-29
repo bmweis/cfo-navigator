@@ -88,17 +88,14 @@ def _build_communities_context(lib: Library) -> tuple[str, bool]:
         profile_unverified = bool(profile.get("needs_review"))
         lines = [f"### {c['name']} (slug: {c['slug']})"]
         lines.append(_line("URL", c.get("url")))
-        lines.append(_line("Who it's for", c.get("demographic")))
         lines.append(_line("Categories", ", ".join(c.get("categories") or [])))
         lines.append(_line("Cost", c.get("cost_band")))
-        lines.append(_line("Cost detail", c.get("cost_note")))
         lines.append(_line("Access", c.get("access")))
         lines.append(_line("Format", c.get("format")))
         lines.append(_line("Reach", c.get("reach")))
         lines.append(_line("Local markets", c.get("local_markets")))
         lines.append(_line("Sponsorship", c.get("sponsorship_type")))
         lines.append(_line("Sponsor", c.get("sponsor_name")))
-        lines.append(_line("Notes", c.get("notes")))
         if profile:
             if profile_unverified:
                 has_unverified = True
@@ -111,7 +108,6 @@ def _build_communities_context(lib: Library) -> tuple[str, bool]:
             lines.append(_line("Application friction", profile.get("application_friction")))
             lines.append(_line("Cost vs. value", profile.get("cost_value_verdict")))
             lines.append(_line("Business model", profile.get("business_model")))
-            lines.append(_line("Founded", profile.get("founded_year")))
         blocks.append("".join(l for l in lines if l))
     return "\n".join(blocks), has_unverified
 

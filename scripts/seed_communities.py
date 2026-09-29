@@ -502,7 +502,7 @@ def main():
                 format=c.get("format", ""), notes=c.get("notes", ""),
             )
             if existing:
-                # name/notes/advisor re-sync — cost_band/access/categories/
+                # name/advisor re-sync — cost_band/access/categories/
                 # featured/etc. are admin-owned once seeded (edited at
                 # /admin/tools/communities), same contract as the benchmarks/
                 # name+description re-sync (advisor mirrors tools.advisor: only
@@ -511,8 +511,9 @@ def main():
                     lib.conn.execute("UPDATE communities SET advisor=1 WHERE id=?", (existing["id"],))
                     lib.conn.commit()
                     print(f"  UPDATED advisor flag: {c['name']}")
-                if existing["name"] != fields["name"] or existing["notes"] != fields["notes"]:
-                    lib.update_community_content(existing["id"], fields["name"], fields["notes"], source="script")
+                # notes (the retired "Short description") is frozen: never re-synced.
+                if existing["name"] != fields["name"]:
+                    lib.update_community_content(existing["id"], fields["name"], source="script")
                     print(f"  UPDATED: {c['name']}")
                     updated += 1
                 else:

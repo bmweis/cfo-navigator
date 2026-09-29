@@ -74,7 +74,10 @@ from linklib.voice_review import (
     validate_ampersand_term,
 )
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
-from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS
+from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS, COMMUNITY_PROFILE_FIELDS
+from linklib.community_profile import (
+    CPE_OPTIONS, PROFILE_LIMITS, cpe_token, resolve_cpe_submission,
+)
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.manual_review_csv import parse_manual_review_corrections_csv
 from linklib.purge_csv import parse_purge_confirmations_csv, MAX_PURGE_PER_RUN
@@ -749,7 +752,9 @@ def _seed_toolbox():
                     "True" if new_adv else "False",
                     source="startup-sync",
                 )
-            notes = c.get("notes", "")
+            # `communities.notes` (the retired "Short description", PR 2a) is
+            # frozen: it is neither synced nor queued here, so a boot can never
+            # open a seed-disagreement item for it. Only `name` is checked.
             # 2026-09 fix — a divergence no longer overwrites the stored
             # value on every boot (that was the exact mechanism behind the
             # seed-sync infinite-loop investigation, re-syncing raw
@@ -761,9 +766,6 @@ def _seed_toolbox():
             if crow["name"] != c["name"]:
                 lib.add_seed_disagreement_item("communities", crow["id"], "name",
                                                 crow["name"], c["name"], source="startup-sync")
-            if crow["notes"] != notes:
-                lib.add_seed_disagreement_item("communities", crow["id"], "notes",
-                                                crow["notes"], notes, source="startup-sync")
         for b in _DEFAULT_BENCHMARKS:
             brow = lib.conn.execute(
                 "SELECT id, name, description FROM benchmarks WHERE url = ?", (b["url"],)
@@ -10701,6 +10703,7 @@ def _set_visitor_cookie(request: Request, resp, session_id: str) -> None:
 @app.get("/tools/communities", response_class=HTMLResponse)
 def tools_communities(request: Request):
     is_member = _is_member(request)  # submit is account-only
+    authed = _is_authed(request)
     lib = _lib()
     try:
         # Gate-Extraction PR B: `_public_community()` (a shallow-copy
@@ -10709,7 +10712,10 @@ def tools_communities(request: Request):
         # 3 callers only ever reads fields afterward, never mutates in a
         # way that depended on it being a distinct dict object — and
         # retired outright.
-        communities = lib.list_communities(approved_only=True)
+        # One query joins each community's Bottom line in (PR 2a) — the card
+        # blurb — instead of a lookup per card. A community with no profile row
+        # comes back with an empty blurb, not an error.
+        communities = lib.list_communities_for_directory()
         categories = lib.list_community_categories()
     finally:
         lib.close()
@@ -10724,14 +10730,17 @@ def tools_communities(request: Request):
             "slug": c["slug"],
             "reach": c.get("reach") or "National",
             "local_markets": c.get("local_markets") or "",
-            "demographic": c["demographic"],
+            # The card blurb is the profile's Bottom line (the retired
+            # demographic/short description used to fill it). ideal_member
+            # rides along for search only; it is never shown on the card.
+            "bottom_line": c.get("bottom_line") or "",
+            "bottom_line_pending": bool(c.get("bottom_line_pending")),
+            "ideal_member": c.get("ideal_member") or "",
             "cost_band": c["cost_band"],
-            "cost_note": c.get("cost_note") or "",
             "sponsorship_type": c.get("sponsorship_type") or "",
             "sponsor_name": c.get("sponsor_name") or "",
             "access": c.get("access") or "",
             "format": c.get("format") or "",
-            "notes": c.get("notes") or "",
             "logo_url": _community_logo_url(c),
             "categories": c["categories"],
             "featured": bool(c.get("featured")),
@@ -10835,8 +10844,9 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
    (webapp/app.py:4916-4931): every variable-length field is clamped to a fixed
    number of lines with a matching min-height, so every card in the grid ends up
    the same height regardless of content length — name, meta line, and the
-   demographic+notes description (folded into one clamped paragraph rather than
-   an optional extra row, which used to add its own height variance). */
+   Bottom line blurb (one clamped paragraph, with the "under review" tag inline
+   inside it rather than as an extra row, which would add its own height
+   variance). */
 .comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
   line-height:1.3;min-height:44px;margin-bottom:6px;letter-spacing:-0.01em;}}
@@ -10845,6 +10855,11 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;}}
 .comm-demo{{font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;min-height:63px;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}}
+.comm-demo-empty{{color:var(--muted);font-style:italic;}}
+/* Same coral-wash/navy pending tag as .tool-desc-verify, inline so it sits
+   inside the clamped paragraph. */
+.comm-desc-verify{{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--navy);background:var(--coral-wash);border-radius:5px;padding:1px 6px;margin-right:6px;}}
 .comm-cats{{display:flex;flex-wrap:wrap;gap:6px;min-height:24px;}}
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
@@ -10856,6 +10871,10 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 
 <script>
 var ALL_COMMUNITIES = {communities_json};
+var AUTHED = {'true' if authed else 'false'};
+var DIRECTORY_BADGE_ADMIN = {_json.dumps(gates.DIRECTORY_JS_BADGE_TEXT_ADMIN)};
+var DIRECTORY_BADGE_VISITOR = {_json.dumps(gates.DIRECTORY_JS_BADGE_TEXT_VISITOR)};
+var COMM_EMPTY_BLURB = {_json.dumps(gates.EMPTY_COPY["community_bottom_line"].visitor_text)};
 var NEEDS_VERIFICATION = {_json.dumps(_NEEDS_VERIFICATION)};
 var activeCommCats = new Set();
 var activeCommCost = '';
@@ -10997,11 +11016,11 @@ function renderCommunities(list) {{
         ? commVerify(c.sponsorship_type)
         : commEsc(c.sponsorship_type) + (c.sponsor_name ? ' (' + commEsc(c.sponsor_name) + ')' : ''));
     }}
-    var demoParts = [];
-    if (c.demographic) demoParts.push(commVerify(c.demographic));
-    if (c.notes) demoParts.push(commEsc(c.notes));
-    if (c.cost_note) demoParts.push(commEsc(c.cost_note));
-    var demoHtml = demoParts.join(' &middot; ');
+    var demoHtml = c.bottom_line
+      ? (c.bottom_line_pending
+          ? '<span class="comm-desc-verify">' + (AUTHED ? DIRECTORY_BADGE_ADMIN : DIRECTORY_BADGE_VISITOR) + '</span>'
+          : '') + commEsc(c.bottom_line)
+      : '<span class="comm-demo-empty">' + commEsc(COMM_EMPTY_BLURB) + '</span>';
     var featuredBadge = c.featured
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
@@ -11058,7 +11077,7 @@ function commFiltered() {{
       if (!hit) return false;
     }}
     if (!q) return true;
-    return (c.name + ' ' + c.demographic + ' ' + c.notes + ' ' + (c.local_markets || '') + ' ' + (c.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
+    return (c.name + ' ' + c.bottom_line + ' ' + c.ideal_member + ' ' + (c.local_markets || '') + ' ' + (c.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
   }});
 }}
 
@@ -12059,14 +12078,6 @@ def tools_community_profile(request: Request, slug: str):
     finally:
         lib.close()
 
-    # event_style is texture on format_reality, not its own fact — merged
-    # into that field's text at render time rather than given its own row
-    # (see _COMMUNITY_PROFILE_GROUPS docstring).
-    if profile.get("event_style"):
-        base = (profile.get("format_reality") or "").strip()
-        profile = dict(profile)
-        profile["format_reality"] = f"{base} {profile['event_style']}".strip() if base else profile["event_style"]
-
     cats = community.get("categories") or []
     featured_badge = (
         '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
@@ -12091,7 +12102,6 @@ def tools_community_profile(request: Request, slug: str):
         )
     action_row = "".join(action_row_parts)
 
-    demographic_html = _verify_html(community["demographic"], "tp-verify-inline")
     community_logo_url = _community_logo_url(community)
 
     # Review status (2026-08 consolidation) — same shared pill+action as
@@ -12119,11 +12129,18 @@ def tools_community_profile(request: Request, slug: str):
         )
         review_status_html = f'<div style="margin:2px 0 14px;">{_rs_block}</div>'
 
+    # PR 2a: no subhead (the retired demographic used to fill it; the Bottom
+    # line callout directly below says the same thing better). Category chips
+    # sit under the name instead, the same treatment as the Software profile
+    # page's hero. They are plain labels, not links; the Categories card they
+    # replace was a plain list too.
+    cats_html = "".join(f'<span class="tp-cat-pill">{_esc(x)}</span>' for x in cats)
+    hero_cats_html = f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ""
     hero_text = f"""<div class="tp-header-row">
   {_logo_box(community['name'], community_logo_url, 56, radius=12)}
   <div>
     <h1 class="tp-h1">{featured_badge} {_esc(community['name'])}{advisor_mark_html}</h1>
-    <p class="tp-subhead">{demographic_html}</p>
+    {hero_cats_html}
   </div>
 </div>
 {review_status_html}
@@ -12147,23 +12164,6 @@ def tools_community_profile(request: Request, slug: str):
     # sidebar column below, alongside Details/Categories/Similar
     # communities — same reference-sidebar pattern this page already used
     # for those three, just extended to the screenshot too.
-
-    # "Description coming soon." / "...Add one from the edit page." joins
-    # the cross-entity approved empty-state string family (empty-state
-    # visual QA pass, PR A.1) — was the fourth, unapproved "No description
-    # yet." phrasing, the one string in this whole standard that never
-    # matched any of the others. Still rendered inside the same `.tp-card`
-    # it always used, matching the target treatment applied everywhere
-    # else on this pass.
-    notes_text = " ".join(filter(None, [community.get("notes"), community.get("cost_note")]))
-    _comm_desc_copy = gates.EMPTY_COPY["community_description"]
-    _desc_body = (f'<p style="margin:0;">{_esc(notes_text)}</p>' if notes_text else
-                  f'<p style="margin:0;color:var(--muted);font-style:italic;">'
-                  f'{_esc(_empty_state_text(_comm_desc_copy.visitor_text, _comm_desc_copy.admin_suffix, authed))}</p>')
-    description_card = f"""<div class="tp-card">
-  <h2 class="tp-card-h">Description</h2>
-  {_desc_body}
-</div>"""
 
     # Radical-transparency review standard (supersedes the old Abacum-
     # fabrication-finding whole-profile publish gate): `needs_review` is a
@@ -12254,13 +12254,11 @@ def tools_community_profile(request: Request, slug: str):
                 _group_copy.visitor_text, _group_copy.admin_suffix, authed)))
     profile_cards = "\n".join(cards)
 
-    # Details card: the fixed directory-metadata fields as label/value rows,
-    # same pattern as the Software profile page's future equivalent. Format
-    # folds in platform_type/meeting_format (near-duplicates of format's own
-    # fixed vocabulary — no separate section), Reach folds in local_markets,
-    # Founded moves here from its own narrative section (a single number
-    # doesn't earn a whole card), and CPE eligibility is a single line, not
-    # a section (Phase 3b.0 follow-up resolutions).
+    # Details card: the fixed directory-metadata fields as label/value rows.
+    # PR 2a: Format is the listing's own Format value only (the profile's
+    # platform/meeting-format bits are retired), and Founded and CPE eligible
+    # are gone from here (Founded is retired; CPE eligible is a field of the
+    # Additional benefits card now).
     detail_rows = []
     def _detail_row(label: str, value: str, badge: str = "") -> None:
         if not value:
@@ -12273,38 +12271,14 @@ def tools_community_profile(request: Request, slug: str):
     if sponsorship and sponsorship != _NEEDS_VERIFICATION and community.get("sponsor_name"):
         sponsorship += f" ({community['sponsor_name']})"
     _detail_row("Sponsorship", sponsorship)
-    fmt = community.get("format") or ""
-    # platform_type/meeting_format come from the community_profiles draft
-    # (_display_profile) — under the whole-profile review standard above,
-    # always visible now; not individually badged here since the two bits
-    # are blended into one composite Format string, not a standalone value
-    # (Founded/CPE eligible below get the inline badge since each is its
-    # own atomic profile-sourced value).
-    extra_fmt_bits = [b for b in [_display_profile.get("platform_type"), _display_profile.get("meeting_format")]
-                       if (b or "").strip()]
-    if fmt and fmt != _NEEDS_VERIFICATION and extra_fmt_bits:
-        fmt = f"{fmt} ({'; '.join(extra_fmt_bits)})"
-    elif (not fmt or fmt == _NEEDS_VERIFICATION) and extra_fmt_bits:
-        fmt = "; ".join(extra_fmt_bits)
-    _detail_row("Format", fmt)
+    _detail_row("Format", community.get("format") or "")
     geo_line = _community_geo_line(community)
     _detail_row("Reach", geo_line)
-    if _display_profile.get("founded_year"):
-        _detail_row("Founded", str(_display_profile["founded_year"]), _profile_badge)
-    if (_display_profile.get("cpe_eligible") or "").strip():
-        _detail_row("CPE eligible", _display_profile["cpe_eligible"], _profile_badge)
     details_card = ""
     if detail_rows:
         details_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Details</h2>
   {''.join(detail_rows)}
-</div>"""
-
-    categories_card = ""
-    if cats:
-        categories_card = f"""<div class="tp-card">
-  <h2 class="tp-card-h">Categories</h2>
-  <ul class="tp-cat-list">{''.join(f'<li>{_esc(x)}</li>' for x in cats)}</ul>
 </div>"""
 
     # Similar communities—same tp-chip-row treatment as Software's
@@ -12341,13 +12315,11 @@ def tools_community_profile(request: Request, slug: str):
   <div class="tp-col-stack">
     {verdict_block}
     {profile_citations_block}
-    {description_card}
     {profile_cards}
   </div>
   <div class="tp-col-stack">
     {screenshot_block}
     {details_card}
-    {categories_card}
     {similar_communities_block}
   </div>
 </div>"""
@@ -12382,7 +12354,8 @@ def tools_community_profile(request: Request, slug: str):
 .tp-header-row>div{{min-width:0;}}
 .tp-h1{{margin:0 0 8px;display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;overflow-wrap:break-word;word-break:break-word;}}
 .tp-fn-mark{{font-size:18px;color:var(--navy-light);font-weight:600;margin-left:3px;transform:translateY(2px);line-height:1;}}
-.tp-subhead{{font-size:17px;color:var(--ink-soft);margin:0 0 18px;overflow-wrap:break-word;word-break:break-word;}}
+.tp-hero-cats{{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px;}}
+.tp-cat-pill{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;overflow-wrap:break-word;word-break:break-word;}}
 .tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
 .tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
@@ -12737,31 +12710,45 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
 }
 """
 
-# The Community Profile draft has 13 fields rather than one description
+# The Community Profile draft has 15 live fields rather than one description
 # string, so it can't reuse generateDescription's single-field contract above
 # — same fetch/status pattern, but fills every "cp-<field>" input by id and
 # feeds back whatever's already on the form as context for a regenerate.
-_COMMUNITY_PROFILE_FIELD_IDS = [
-    "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
-    "sponsor_relationship_note", "business_model", "application_friction", "cost_value_verdict",
-    "notable_members", "founded_year", "public_criticism", "verdict_summary",
-    "stage_focus", "jobs_program", "team_or_individual",
-    "seniority_band", "primary_purpose", "resources_included",
-    "platform_type", "meeting_format", "event_style", "cpe_eligible",
-]
+# (PR 2a retired eight more columns; see linklib.community_profile.)
+_COMMUNITY_PROFILE_FIELD_IDS = list(COMMUNITY_PROFILE_FIELDS)
 
-def _community_profile_text_changed(existing: dict, form, founded_year) -> bool:
-    """True when any field in _COMMUNITY_PROFILE_FIELD_IDS differs between
-    the stored profile row (`existing`, {} if none yet) and this submit,
-    compared with norm_for_compare. Derived from the field-id list, never a
-    hardcoded set, so adding or removing a profile field can't silently
-    break it. founded_year is compared as the parsed int the route saves
-    (a non-numeric entry saves as None), not the raw form string."""
-    for f in _COMMUNITY_PROFILE_FIELD_IDS:
-        submitted = founded_year if f == "founded_year" else form.get(f)
-        if norm_for_compare(existing.get(f)) != norm_for_compare(submitted):
-            return True
-    return False
+# A citation marker as it appears in AI-drafted profile text: "[1]", "[2]".
+# Same shape the FP&A Buddy renderer already links.
+_CITE_MARKER_RE = re.compile(r"\[\d{1,2}\]")
+
+
+def _profile_text_has_citation_markers(values) -> bool:
+    """True when at least one of the given profile field texts carries a
+    citation marker ("[1]")."""
+    return any(_CITE_MARKER_RE.search(v or "") for v in values)
+
+
+def _community_citation_action(submitted_texts, fresh_citations: list, stored_citations: list) -> str:
+    """What a profile save does with the community's ONE shared citation set
+    (PR 2a, 2026-09; replaces issue #640's "clear when any field changed").
+
+    The invariant governs CLEARING, not creating: the set is never cleared
+    while at least one `[n]` marker remains in some profile field, and is
+    cleared once no marker remains anywhere. Every profile marker points at
+    the one page the profile was grounded on, so editing one cited field can't
+    orphan the markers in the others (the Vena shape: markers with no Sources).
+
+      "clear"  no marker anywhere and a set is stored
+      "write"  markers remain and fresh citations arrived with this save (a
+               full Generate replaces every box, so it replaces the whole set)
+      "keep"   markers remain and nothing fresh arrived
+      "none"   nothing to do (no markers, nothing stored)
+
+    Markers with no stored and no fresh set change nothing: that is the
+    model's own prose."""
+    if not _profile_text_has_citation_markers(submitted_texts):
+        return "clear" if stored_citations else "none"
+    return "write" if fresh_citations else "keep"
 
 
 # Phase G PR 2: (entity_type, field_name) pairs that no longer get a
@@ -12784,6 +12771,75 @@ _RETIRED_FIELD_REVIEW_FIELDS = (
 _GENERATE_PROFILE_JS = _MARK_AI_DRAFTED_JS + """
 var COMMUNITY_PROFILE_FIELDS = """ + json.dumps(_COMMUNITY_PROFILE_FIELD_IDS) + """;
 var COMMUNITY_CONFIDENCE_FIELDS = """ + json.dumps(COMMUNITY_CONFIDENCE_FIELDS) + """;
+// The hidden inputs that record what this page session drafted: which fields,
+// the model's per-field confidence, and the citations riding with the draft.
+var CP_STATE_HIDDEN = ['ai-drafted-fields', 'ai-drafted-confidence',
+                       'ai-drafted-citations', 'ai-drafted-citations-model'];
+var cpSnapshot = null;
+var cpEditListeners = {};
+function cpEl(k) { return document.getElementById('cp-' + k); }
+function cpLeadingWord(v) {
+  var m = /^\\s*(Yes|No|Unclear)\\b/i.exec(v || '');
+  return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '';
+}
+// "Restore previous" (PR 2a): one snapshot of everything a Generate is about
+// to overwrite, taken right before the drafted text lands in the boxes. It has
+// to cover the box text, the hidden citations and the "drafted this session"
+// state together; restoring only the text would put the old words back under
+// the new draft's sources and the wrong confidence.
+function cpTakeSnapshot() {
+  var snap = {values: {}, hidden: {}, lowConfidence: null};
+  COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
+    var el = cpEl(k);
+    if (el) snap.values[k] = el.value;
+  });
+  var full = document.getElementById('cp-cpe_eligible_full');
+  if (full) snap.values['cpe_eligible_full'] = full.value;
+  CP_STATE_HIDDEN.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) snap.hidden[id] = el.value;
+  });
+  var lc = document.getElementById('cp-low_confidence');
+  if (lc) snap.lowConfidence = lc.checked;
+  return snap;
+}
+function cpDetachEditListeners() {
+  Object.keys(cpEditListeners).forEach(function(k) {
+    var el = cpEl(k);
+    if (el) {
+      el.removeEventListener('input', cpEditListeners[k]);
+      el.removeEventListener('change', cpEditListeners[k]);
+    }
+  });
+  cpEditListeners = {};
+}
+function cpRestorePrevious() {
+  var snap = cpSnapshot;
+  if (!snap) return;
+  cpDetachEditListeners();
+  COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
+    var el = cpEl(k);
+    if (el && Object.prototype.hasOwnProperty.call(snap.values, k)) {
+      el.value = snap.values[k];
+      el.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+  });
+  var full = document.getElementById('cp-cpe_eligible_full');
+  if (full && Object.prototype.hasOwnProperty.call(snap.values, 'cpe_eligible_full')) {
+    full.value = snap.values['cpe_eligible_full'];
+  }
+  CP_STATE_HIDDEN.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && Object.prototype.hasOwnProperty.call(snap.hidden, id)) el.value = snap.hidden[id];
+  });
+  var lc = document.getElementById('cp-low_confidence');
+  if (lc && snap.lowConfidence !== null) lc.checked = snap.lowConfidence;
+  cpSnapshot = null;
+  var btn = document.getElementById('cp-restore-btn');
+  if (btn) btn.hidden = true;
+  var status = document.getElementById('cp-gen-status');
+  if (status) status.textContent = 'Restored the text from before the last Generate.';
+}
 async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
   name = (name || '').trim();
   url = (url || '').trim();
@@ -12794,9 +12850,11 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
   if (hostId) startGenAnim(hostId);
   var existing = {};
   COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
-    var el = document.getElementById('cp-' + k);
+    var el = cpEl(k);
     if (el && el.value) existing[k] = el.value;
   });
+  var fullEl = document.getElementById('cp-cpe_eligible_full');
+  if (fullEl && fullEl.value) existing['cpe_eligible'] = fullEl.value;
   try {
     var r = await fetch('/admin/tools/communities/generate-profile', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -12804,12 +12862,25 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
     });
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
+    // Snapshot right before overwriting, so a failed request never leaves a
+    // Restore button behind, and a second Generate keeps the state from just
+    // before IT (the accidental double click this control exists for).
+    cpSnapshot = cpTakeSnapshot();
+    cpDetachEditListeners();
     COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
-      var el = document.getElementById('cp-' + k);
+      var el = cpEl(k);
       if (!el) return;
-      el.value = (d[k] === null || d[k] === undefined) ? '' : d[k];
+      var v = (d[k] === null || d[k] === undefined) ? '' : d[k];
+      if (k === 'cpe_eligible') {
+        // The dropdown carries the leading word; the full value, with its
+        // qualifier, rides along in a hidden field so a save can keep it.
+        el.value = cpLeadingWord(v);
+        if (fullEl) fullEl.value = v;
+      } else {
+        el.value = v;
+      }
       el.dispatchEvent(new Event('input', {bubbles: true}));
-      if (el.value) markAiDrafted(k);
+      if (v) markAiDrafted(k);
     });
     var conf = d.confidence || {};
     COMMUNITY_CONFIDENCE_FIELDS.forEach(function(k) {
@@ -12818,21 +12889,27 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
     var lowConf = document.getElementById('cp-low_confidence');
     if (lowConf) lowConf.checked = !!d.low_confidence;
     markAiCitations(d.citations || [], d.model || '');
-    // One shared citation set grounds all 23 fields (decision 5, Phase 0)—
-    // a hand-edit to ANY of them after this Generate call means the set may
-    // no longer describe what's on the form, so every field gets the same
-    // one-time clear-on-edit guard generateDescription() uses for its single
-    // field. Re-attached on every successful Generate, same convention.
+    // A hand-edit after this Generate unmarks just that field (so its
+    // confidence line stops claiming the model's certainty about text you
+    // rewrote). It leaves the citations alone: every marker in the profile
+    // points at the same grounded page, and the server decides whether a set
+    // is still needed from the markers left in the text.
     COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
-      var el = document.getElementById('cp-' + k);
+      var el = cpEl(k);
       if (!el) return;
       function onEdit() {
         unmarkAiDrafted(k);
-        clearAiCitations();
+        if (k === 'cpe_eligible' && fullEl && cpLeadingWord(fullEl.value) !== el.value) fullEl.value = '';
         el.removeEventListener('input', onEdit);
+        el.removeEventListener('change', onEdit);
+        delete cpEditListeners[k];
       }
+      cpEditListeners[k] = onEdit;
       el.addEventListener('input', onEdit);
+      el.addEventListener('change', onEdit);
     });
+    var btn = document.getElementById('cp-restore-btn');
+    if (btn) btn.hidden = false;
     status.textContent = d.low_confidence
       ? 'Drafted from a fallback fetch (the direct page fetch needed help rendering). Verify facts before saving.'
       : 'Drafted. Review before saving.';
@@ -12843,6 +12920,15 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
     if (hostId) stopGenAnim(hostId);
   }
 }
+// A hand-picked CPE answer that no longer matches the generated qualifier
+// drops the qualifier (it described the old answer).
+document.addEventListener('DOMContentLoaded', function() {
+  var sel = document.getElementById('cp-cpe_eligible');
+  var full = document.getElementById('cp-cpe_eligible_full');
+  if (sel && full) sel.addEventListener('change', function() {
+    if (cpLeadingWord(full.value) !== sel.value) full.value = '';
+  });
+});
 """
 
 # Shared by /admin/tools/communities/new and /{id}/edit — auto-fills the
@@ -12868,7 +12954,7 @@ async function generateCommunityListing(name, url, statusId, errBoxId, hostId) {
     });
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
-    ['demographic', 'reach', 'local_markets', 'cost_band', 'cost_note', 'sponsorship_type',
+    ['reach', 'local_markets', 'cost_band', 'sponsorship_type',
      'sponsor_name', 'access', 'format'].forEach(function(k) {
       var el = document.querySelector('[name="' + k + '"]');
       if (el && d[k]) { el.value = d[k]; markAiDrafted(k); }
@@ -17367,14 +17453,14 @@ _COMMUNITY_FORMAT = ["Hybrid", "In-person", "Slack", "Online", "LinkedIn group"]
 # focus — a National/Global community can still carry local markets (e.g.
 # FEI has 55+ US chapters). Visitors find a specific city via the public
 # search bar (comm-search), which indexes local_markets alongside name/
-# demographic/notes/categories — there's no dedicated click-to-filter control
+# bottom line/ideal member/categories — there's no dedicated click-to-filter control
 # for it (see the Metros -> free text migration in ARCHITECTURE.md).
 _COMMUNITY_REACH = ["Regional", "National", "Global"]
 
 # Fields the "Auto-fill from URL" draft (generate_community_listing) can mark
 # with the _NEEDS_VERIFICATION sentinel instead of guessing.
 _COMMUNITY_VERIFIABLE_FIELDS = (
-    "reach", "demographic", "cost_band", "cost_note",
+    "reach", "cost_band",
     "sponsorship_type", "sponsor_name", "access", "format",
 )
 
@@ -17500,18 +17586,11 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
       </select>
     </div>
     <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Demographic *</label>
-      <input name="demographic" required maxlength="300" value="{_esc(c.get('demographic', ''))}"
-        placeholder="e.g. CFOs and VP Finance"
+      <label for="comm-local-markets" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Specified markets (if known)</label>
+      <input id="comm-local-markets" name="local_markets" maxlength="300" value="{_esc(c.get('local_markets', ''))}"
+        placeholder="e.g. Boston, New York, SF Bay Area"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
     </div>
-  </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Local markets</label>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Cities/areas where this community has a chapter, hub, or local focus, e.g. "Boston, New York, SF Bay Area". Leave empty for a purely online/national community with no local footprint.</p>
-    <input name="local_markets" maxlength="300" value="{_esc(c.get('local_markets', ''))}"
-      placeholder="e.g. Boston, New York, SF Bay Area"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px 14px;">
     <div>
@@ -17522,12 +17601,6 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
           <select name="cost_band" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
             {cost_opts}
           </select>
-        </div>
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost note</label>
-          <input name="cost_note" maxlength="300" value="{_esc(c.get('cost_note', ''))}"
-            placeholder="Exact dues, multi-seat pricing, etc."
-            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
         </div>
       </div>
     </div>
@@ -17564,12 +17637,6 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
         </div>
       </div>
     </div>
-  </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short description</label>
-    <textarea name="notes" maxlength="500" rows="3"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(c.get('notes', ''))}</textarea>
-    <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Shown on the public directory card and in search results.</p>
   </div>"""
 
     categories_html = f"""  <div>
@@ -17639,58 +17706,66 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     }
 
 
+# Placeholder text for each live profile field on the merged edit page.
+_COMMUNITY_PROFILE_PLACEHOLDERS = {
+    "ideal_member": "Who this community is actually for, and the company stage it fits",
+    "anti_fit": "Who should probably skip it",
+    "value_prop": "The primary thing members get out of it",
+    "format_reality": "Events, cadence, and how it runs",
+    "engagement_level": "How much active participation membership expects or rewards",
+    "application_friction": "The real barrier to entry, not just the access-model label",
+    "business_model": "How it makes money, e.g. paid membership vs. free to join with revenue from sponsors or events",
+    "sponsor_relationship_note": "Do sponsors mainly add value for members, or is this really a sales channel for them?",
+    "cost_value_verdict": "Is the price justified by what members report getting",
+    "notable_members": "Publicly known alumni or members, if any. Leave blank otherwise.",
+    "public_criticism": "Any drawback that has been publicly reported. Leave blank if none known.",
+    "verdict_summary": 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"',
+    "resources_included": 'Templates, benchmarking, research, job boards, etc., or "No".',
+    "jobs_program": "A formal job-placement or transition program, if any.",
+}
+_COMMUNITY_PROFILE_REQUIRED = {"ideal_member", "verdict_summary"}
+# Label per limited field, for the server-side "too long" refusal message.
+_COMMUNITY_PROFILE_LABELS = {
+    key: label
+    for _title, _fields in compare.community_admin_groups()
+    for label, key in _fields
+}
+# Two-row one-liners; every other prose field is a taller narrative box.
+_COMMUNITY_PROFILE_SHORT_FIELDS = {"resources_included", "jobs_program"}
+_COMMUNITY_NARRATIVE_ROWS = 6
+
+
 def _community_profile_form_fields(p: dict | None, community: dict,
                                     latest_review: dict | None = None,
                                     citations: list | None = None) -> str:
-    """The Community Profile edit form (deep qualitative fields, distinct from
-    the directory metadata in _community_form_fields_parts above). Field ids are
-    'cp-<column name>' — generateCommunityProfile (_GENERATE_PROFILE_JS)
-    reads/writes them by that convention.
+    """The five profile groups of the merged community edit page (PR 2a,
+    2026-09): Target audience, Member experience, Economics, Key points and
+    Additional benefits, read from `compare.community_admin_groups()` so the
+    admin page and the public page can never use different words. Field ids are
+    'cp-<column name>'; generateCommunityProfile (_GENERATE_PROFILE_JS)
+    reads and writes them by that convention.
 
-    The whole-record needs_review checkbox/"Mark reviewed" widget that used
-    to live at the bottom of this field list (Phase G PR 2) moved to the
-    TOP of the edit page in the 2026-08 Review-status consolidation — see
-    admin_community_profile_edit, which renders the shared
-    _review_status_block_html there instead. This function only renders the
-    23 profile fields plus the uncapped citations list now, hence the
-    single-string return (was a tuple, for a hidden verify-form the caller
-    no longer needs to render separately).
+    Every prose field carries the live character counter from
+    `linklib.community_profile.PROFILE_LIMITS` (soft target turns the count
+    amber, hard max is refused server-side). Narrative boxes are six rows;
+    Resources included and Jobs program stay at two. CPE eligible is a
+    dropdown. Only the 12 fields in COMMUNITY_CONFIDENCE_FIELDS carry a "Claude
+    confidence" badge.
 
-    citations (Citations-API grounding fix, Phase 3): the FULL, uncapped
-    list from Library.get_entity_citations("community", id,
-    "community_profile") — ONE shared set covering the whole 23-field draft
-    (decision 5, Phase 0), not one per field. Rendered once, uncapped, at
-    the end of this field list — an admin reviewing the draft sees every
-    source before deciding to sign off, same placement logic as Agent
-    taxonomy/Description's own uncapped admin lists."""
+    The needs_review checkbox that once lived here moved to the verification
+    pill at the top of the page (2026-08); the Generate button moved there in
+    PR 2a. `citations` is the ONE shared, uncapped citation set for the whole
+    draft (decision 5), listed at the end so a reviewer sees every source
+    before signing off."""
     p = p or {}
     citations = citations or []
     _admin_citations_html = _citations_list_html(
         citations, empty_note="No citations recorded for this draft (hand-written, "
                                "regenerated without a successful page fetch, or predates this feature).")
 
-    # Confidence indicator (2026-08) — a genuine self-report from the model,
-    # distinct from needs_review (human review status). Displays permanently
-    # (2026-08 policy revision — not gated on needs_review at all anymore;
-    # Brian's explicit call: verification and confidence are independent
-    # facts, both always visible). Covers only the 12 fields in
-    # COMMUNITY_CONFIDENCE_FIELDS; every other field on this page passes no
-    # confidence_key and renders exactly as before.
-    #
-    # Layout pass (2026-08 follow-up): the confidence line moved from a
-    # block-level paragraph below the textarea to a compact inline badge
-    # beside the label — 12 stacked "Claude confidence: Not yet assessed"
-    # sentences read as noisy/repetitive once the page was grouped into
-    # labeled sections; a small trailing pill matches the "Needs
-    # verification" badge's own inline-next-to-label precedent
-    # (_narrative_verify_widget) rather than inventing a new position. Text
-    # is unchanged ("Claude confidence: Yes/No/Not yet assessed" — still
-    # naming Claude specifically, not generic "AI," same reasoning as
-    # _confidence_indicator_html) — only where and how it's styled changes.
-    # This is a Community-profile-only variant: the 3-field Software profile
-    # (Description/Differentiation/Agent taxonomy) keeps
-    # _confidence_indicator_html's block treatment, since crowding was never
-    # reported there and those pages weren't part of this layout pass.
+    # Confidence badge: the model's own self-report, distinct from needs_review
+    # (human review status); permanent, never gated. Community-profile-only
+    # variant of _confidence_indicator_html, sized as an inline badge.
     def _confidence_badge_html(confident: object) -> str:
         if confident is None:
             value, bg, color = "Not yet assessed", "var(--surface-2)", "var(--muted)"
@@ -17702,123 +17777,68 @@ def _community_profile_form_fields(p: dict | None, community: dict,
                 f'background:{bg};color:{color};border-radius:5px;padding:2px 7px;">'
                 f'Claude confidence: {value}</span>')
 
-    def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2,
-               confidence_key: str | None = None, budgeted: bool = False) -> str:
-        req_mark = " *" if required else ""
-        req_attr = " required" if required else ""
-        ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
-        confidence_html = ""
-        if confidence_key:
-            confidence_html = _confidence_badge_html(p.get(f"{confidence_key}_ai_confident"))
-        # budgeted=True (community quick-facts width fix, 2026-09) — the
-        # three longer Quick-facts fields (stage_focus/jobs_program/
-        # team_or_individual) moved here from _short_field's narrow
-        # multi-column grid: they carry the same live character-budget
-        # counter (Library.COMMUNITY_SHORT_FIELD_TARGET/_MAX) as before,
-        # just on this full-width textarea layout instead of a ~230px-wide
-        # single-line input, matching the software edit page's own
-        # roomier narrative-field treatment. No other _field caller passes
-        # this — every narrative field above has no character cap at all.
-        if budgeted:
-            attrs, counter = _char_budget(
-                Library.COMMUNITY_SHORT_FIELD_MAX, p.get(key, ""), f"cp-{key}",
-                target=Library.COMMUNITY_SHORT_FIELD_TARGET)
-            field_attrs = f"{req_attr} {attrs}"
-        else:
-            field_attrs = req_attr
-            counter = ""
+    def _label_row(key: str, label: str, confidence_html: str = "") -> str:
+        req_mark = " *" if key in _COMMUNITY_PROFILE_REQUIRED else ""
         # flex-wrap so the confidence badge drops to its own line rather than
-        # crowding a required field's "*" on a narrow/mobile viewport, instead
-        # of forcing both onto one cramped row.
+        # crowding a required field's "*" on a narrow viewport.
+        return (f'<div style="display:flex;align-items:baseline;justify-content:space-between;'
+                f'flex-wrap:wrap;gap:4px 10px;margin-bottom:6px;">'
+                f'<label for="cp-{key}" style="font-size:14px;font-weight:500;color:var(--navy);">'
+                f'{_esc(label)}{req_mark}</label>{confidence_html}</div>')
+
+    def _field(key: str, label: str) -> str:
+        confidence_html = (_confidence_badge_html(p.get(f"{key}_ai_confident"))
+                           if key in COMMUNITY_CONFIDENCE_FIELDS else "")
+        target, limit = PROFILE_LIMITS[key]
+        attrs, counter = _char_budget(limit, p.get(key, ""), f"cp-{key}", target=target)
+        rows = 2 if key in _COMMUNITY_PROFILE_SHORT_FIELDS else _COMMUNITY_NARRATIVE_ROWS
+        req_attr = " required" if key in _COMMUNITY_PROFILE_REQUIRED else ""
+        ph = _COMMUNITY_PROFILE_PLACEHOLDERS.get(key, "")
+        ph_attr = f' placeholder="{_esc(ph)}"' if ph else ""
         return f"""  <div>
-    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 10px;margin-bottom:6px;">
-      <label for="cp-{key}" style="font-size:14px;font-weight:500;color:var(--navy);">{_esc(label)}{req_mark}</label>
-      {confidence_html}
-    </div>
-    <textarea id="cp-{key}" name="{key}" rows="{rows}"{field_attrs}{ph}
+    {_label_row(key, label, confidence_html)}
+    <textarea id="cp-{key}" name="{key}" rows="{rows}"{req_attr} {attrs}{ph_attr}
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(p.get(key, ''))}</textarea>
     {counter}
   </div>"""
 
-    def _short_field(key: str, label: str, placeholder: str = "") -> str:
-        """A single-line variant of _field for the short factual/categorical
-        fields (backfilled alongside the 13 narrative fields, not part of the
-        voice-rewrite pass) — a plain input, not a textarea, since these are
-        short values, not prose. Always the plain unenforced maxlength="300" —
-        no comparable overflow risk to close for these six genuinely short/
-        enum-like fields (Primary purpose, CPE eligible, Platform, Programming,
-        Event style, Who it targets). stage_focus/jobs_program/
-        team_or_individual moved to the full-width, character-budgeted _field()
-        instead (community quick-facts width fix, 2026-09) — they can run up
-        to Library.COMMUNITY_SHORT_FIELD_MAX (800) characters, which never fit
-        this field's narrow multi-column layout."""
-        ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
+    def _cpe_field(key: str, label: str) -> str:
+        stored = p.get(key) or ""
+        token = cpe_token(stored)
+        opts = "".join(
+            f'<option value="{_esc(v)}"{" selected" if v == token else ""}>{_esc(t)}</option>'
+            for v, t in [("", "Not assessed")] + [(o, o) for o in CPE_OPTIONS]
+        )
+        # The dropdown carries only the leading word. A stored qualifier such as
+        # "Yes (NASBA-approved sponsor)" is shown here and kept on save while the
+        # word is unchanged; the hidden field carries a freshly generated value.
+        note = ""
+        if stored and stored != token:
+            note = (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
+                    f'Stored as: {_esc(stored)}. The qualifier is kept while the answer stays the same.</p>')
         return f"""  <div>
-    <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}</label>
-    <input id="cp-{key}" name="{key}" type="text" maxlength="300"{ph}
-      value="{_esc(p.get(key, ''))}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>"""
-
-    def _num_field(key: str, label: str, min_val: int, max_val: int) -> str:
-        """Founded year's numeric counterpart to _short_field — same label/
-        sizing/grid fit as every other Quick facts field, so it can join the
-        paired 2-column grid instead of sitting alone outside it."""
-        return f"""  <div>
-    <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}</label>
-    <input id="cp-{key}" name="{key}" type="number" min="{min_val}" max="{max_val}"
-      value="{p.get(key) or ''}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    {_label_row(key, label)}
+    <select id="cp-{key}" name="{key}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">{opts}</select>
+    <input type="hidden" id="cp-{key}_full" name="{key}_full" value="">
+    {note}
   </div>"""
 
     def _section_header(title: str) -> str:
-        """Same h2/border-top pattern the Software edit page already uses
-        between "Business summary" and "Screenshots" — reused here, not a
-        new admin section-header style."""
+        """Same h2/border-top pattern the Software edit page uses between
+        sections — reused, not a new admin section-header style."""
         return (f'  <h2 style="font-size:16px;font-weight:600;margin:32px 0 16px;'
                 f'padding-top:24px;border-top:1px solid var(--line);">{_esc(title)}</h2>')
 
-    return f"""  <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;">
-    <p style="color:var(--muted);margin:0;max-width:520px;">The deep, opinionated read behind the directory listing: who it's for, what it's actually like, and whether it's worth it. Empty is fine until this is written or generated.</p>
-    <span style="white-space:nowrap;">
-      <input type="hidden" id="cp-name" value="{_esc(community.get('name', ''))}">
-      <input type="hidden" id="cp-url" value="{_esc(community.get('url', ''))}">
-      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status', 'cp-gen-err', 'gen-host-community-profile')">Generate summary</button>
-      <span id="cp-gen-status" class="qe-status"></span>
-    </span>
-  </div>
-  <p id="cp-gen-err" style="display:none;"></p>
-  <div id="gen-host-community-profile" style="display:grid;gap:20px;">
-{_section_header("Who it's for")}
-{_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True, confidence_key='ideal_member')}
-{_field('anti_fit', 'Who should skip it', 'Who should probably skip it', confidence_key='anti_fit')}
-{_field('value_prop', 'Value proposition', 'The primary thing members get out of it', confidence_key='value_prop')}
-{_section_header('The member experience')}
-{_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual', confidence_key='format_reality')}
-{_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards', confidence_key='engagement_level')}
-{_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label', confidence_key='application_friction')}
-{_section_header('Business and sponsorship')}
-{_field('business_model', 'Business model', "How it makes money—e.g. paid membership vs. free to join with revenue from sponsors/events.", confidence_key='business_model')}
-{_field('sponsor_relationship_note', 'Sponsor relationship', "Do sponsors mainly add value for members, or is this really a sales channel for them?", confidence_key='sponsor_relationship_note')}
-{_field('cost_value_verdict', 'Cost vs. value', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
-{_section_header('Reputation and verdict')}
-{_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.', confidence_key='notable_members')}
-{_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.', confidence_key='public_criticism')}
-{_field('verdict_summary', 'Bottom line', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
-{_section_header('Quick facts')}
-{_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc.—or "No".', rows=2)}
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
-{_num_field('founded_year', 'Founded', 1800, 2100)}
-{_short_field('primary_purpose', 'Primary purpose', 'e.g. networking, learning, both')}
-{_short_field('cpe_eligible', 'CPE eligible', 'Yes / No / Unclear, with any qualifier')}
-{_short_field('platform_type', 'Platform', 'Slack, proprietary app, in-person only, …')}
-{_short_field('meeting_format', 'Programming', 'In-person / virtual / hybrid')}
-{_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
-{_short_field('seniority_band', 'Who it targets', 'e.g. C-suite, VP-level, first-time managers')}
-  </div>
-  {_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus.', budgeted=True)}
-  {_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any.', budgeted=True)}
-  {_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both.', budgeted=True)}
+    parts = []
+    for title, fields in compare.community_admin_groups():
+        parts.append(_section_header(title))
+        for label, key in fields:
+            parts.append(_cpe_field(key, label) if key == "cpe_eligible" else _field(key, label))
+    groups_html = "\n".join(parts)
+
+    return f"""  <div id="gen-host-community-profile" style="display:grid;gap:20px;">
+{groups_html}
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" id="cp-low_confidence" name="low_confidence" value="1"{' checked' if p.get('low_confidence') else ''}>
@@ -17909,7 +17929,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Auto-fill from URL (/admin/tools/communities/new and /{id}/edit)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
-<li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, on the Add/Edit Community form&mdash;drafts the basic listing fields (demographic, reach, local markets, cost band, cost note, sponsorship, sponsor name, access, format, categories) from Claude reading the community's own site. Different from &ldquo;Generate&rdquo; on the Community Profile edit page, which drafts the deeper write-up instead.</li>
+<li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, on the Add/Edit Community form&mdash;drafts the basic listing fields (reach, local markets, cost band, sponsorship, sponsor name, access, format, categories) from Claude reading the community's own site. Different from &ldquo;Generate full profile&rdquo; on the same page, which drafts the deeper write-up instead.</li>
 <li><strong>While running:</strong> &ldquo;Generating&hellip;&rdquo;, then &ldquo;Drafted. Review before saving&mdash;anything marked &lsquo;Needs verification&rsquo; needs a manual check.&rdquo; (or, if the page couldn't be fetched, a note saying so).</li>
 <li><strong>&ldquo;Needs verification&rdquo;:</strong> shown on any field the draft couldn't confidently fill in, instead of guessing. Different from the &ldquo;Needs review&rdquo; badge elsewhere, which is your own manual sign-off on the whole profile, not a per-field gap.</li>
 <li><strong>Table badge:</strong> &ldquo;N fields need verification&rdquo;&mdash;a nudge to go check that community's Edit page; nothing is blocked. Never shown to a visitor.</li>
@@ -17952,7 +17972,6 @@ def admin_communities(request: Request, filter: str = ""):
         return f"""<tr>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(c['created_at'][:10])}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;"><a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a></td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px;">{_esc(c['notes'] or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(c['submitted_by'] or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
@@ -18011,7 +18030,6 @@ def admin_communities(request: Request, filter: str = ""):
       <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{low_conf_badge}
     </div>
   </td>
-  <td data-col="communities:notes" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:320px;">{_esc(c['notes'] or '—')}</td>
   <td data-col="communities:cost_band" data-label="Cost band" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td data-col="communities:access" data-label="Access" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
   <td data-col="communities:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
@@ -18034,7 +18052,7 @@ def admin_communities(request: Request, filter: str = ""):
 </tr>"""
 
     pending_rows = "".join(_pending_row(c) for c in pending) or \
-        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
+        '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
     # Parenthesized deliberately (2026-08 amendment fix) — `A or B if C else
     # D` parses as `(A or B) if C else D` in Python, which showed the
     # empty-state fallback unconditionally whenever filter=="needs_review"
@@ -18044,13 +18062,13 @@ def admin_communities(request: Request, filter: str = ""):
     # `"".join(...) or (X if C else Y)` evaluates the join first and only
     # picks between the two empty-state messages when it's genuinely empty.
     approved_rows = "".join(_approved_row(c) for c in approved) or (
-        '<tr><td colspan="11" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>'
+        '<tr><td colspan="10" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>'
         if filter != "needs_review" else
-        '<tr><td colspan="11" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
+        '<tr><td colspan="10" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
     )
 
     communities_cols = [
-        ("notes", "Short description"), ("cost_band", "Cost band"), ("access", "Access"), ("categories", "Categories"),
+        ("cost_band", "Cost band"), ("access", "Access"), ("categories", "Categories"),
         ("sponsorship_type", "Sponsorship type"), ("format", "Format"), ("reach", "Reach"),
         ("review_status", "Review status"),
     ]
@@ -18122,7 +18140,6 @@ def admin_communities(request: Request, filter: str = ""):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Description</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Submitted by</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
@@ -18142,7 +18159,6 @@ def admin_communities(request: Request, filter: str = ""):
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
   <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_NAME}px;">Name</th>
-  <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;min-width:320px;">Short description</th>
   <th data-col="communities:cost_band" style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th data-col="communities:access" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th data-col="communities:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
@@ -18162,8 +18178,8 @@ initAdminScrollHint();
 </script>
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
-  Editing <code>scripts/seed_communities.py</code> updates a community&rsquo;s <strong>name</strong> and
-  <strong>notes</strong> here automatically on the next deploy. No manual re-seed needed.
+  Editing <code>scripts/seed_communities.py</code> updates a community&rsquo;s <strong>name</strong>
+  here automatically on the next deploy. No manual re-seed needed.
   <strong>Everything else is database-only</strong>: edit it here (Edit above), and this sync will never touch it.
 </p>
 
@@ -18360,9 +18376,9 @@ async def admin_communities_bulk_edit(request: Request):
             if not c:
                 continue
             kwargs = dict(
-                name=c["name"], url=c["url"], demographic=c["demographic"], cost_band=c["cost_band"],
-                categories=c["categories"], cost_note=c["cost_note"], sponsorship_type=c["sponsorship_type"],
-                sponsor_name=c["sponsor_name"], access=c["access"], format=c["format"], notes=c["notes"],
+                name=c["name"], url=c["url"], demographic=None, cost_band=c["cost_band"],
+                categories=c["categories"], sponsorship_type=c["sponsorship_type"],
+                sponsor_name=c["sponsor_name"], access=c["access"], format=c["format"],
                 reach=c["reach"], local_markets=c["local_markets"], featured=c["featured"], advisor=c["advisor"],
             )
             if field == "categories":
@@ -18617,27 +18633,26 @@ async def admin_communities_new_submit(request: Request):
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
-    demographic = (form.get("demographic") or "").strip()
     cost_band = (form.get("cost_band") or "Undisclosed dues").strip()
-    cost_note = (form.get("cost_note") or "").strip()
     sponsorship_type = (form.get("sponsorship_type") or "Independent").strip()
     sponsor_name = (form.get("sponsor_name") or "").strip()
     access = (form.get("access") or "").strip()
     format_ = (form.get("format") or "").strip()
-    notes = (form.get("notes") or "").strip()
     categories = form.getlist("categories")
     reach = (form.get("reach") or "National").strip()
     local_markets = (form.get("local_markets") or "").strip()
     featured = 1 if form.get("featured") == "1" else 0
     advisor = 1 if form.get("advisor") == "1" else 0
-    if not (name and demographic):
-        raise HTTPException(status_code=400, detail="Name and demographic are required.")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
     lib = _lib()
     try:
-        lib.add_community(name=name, url=url, demographic=demographic,
-                          cost_band=cost_band, categories=categories, cost_note=cost_note,
+        # demographic/cost_note/notes are retired (PR 2a) and stay empty for a
+        # new community; the profile is drafted on the edit page afterwards.
+        lib.add_community(name=name, url=url, demographic="",
+                          cost_band=cost_band, categories=categories,
                           sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
-                          access=access, format=format_, notes=notes, approved=1,
+                          access=access, format=format_, approved=1,
                           reach=reach, local_markets=local_markets, featured=featured, advisor=advisor,
                           source="admin-edit")
     except DuplicateURLError as e:
@@ -18664,6 +18679,12 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
             x for x in lib.list_communities(approved_only=True)
             if x["id"] != community_id and x["id"] not in {comp["id"] for comp in competitors}
         ] if c else []
+        # The profile lives on this same page now (PR 2a), so its rows are
+        # fetched with everything else, in one connection.
+        p = (lib.get_community_profile(community_id) or {}) if c else {}
+        latest_review = lib.get_latest_narrative_review("community", "community_profile", community_id) if c else None
+        profile_citations = lib.get_entity_citations("community", community_id, "community_profile") if c else []
+        quality_flags = lib.community_profile_quality_flags().get(community_id) if c else None
     finally:
         lib.close()
     if not c:
@@ -18829,20 +18850,61 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # mirror. The Community profile page has always said "Similar
     # communities" instead, on the reasoning that communities don't compete
     # for a buyer's dollar the way software tools do, so there's no matching
-    # display-label rename to mirror here. The 23-field Community profile
-    # draft (ideal member, value prop, etc.) lives on its own separate page
-    # (/admin/tools/communities/{id}/profile, linked from this page's meta
-    # line below) and is out of scope for this reorg — flagged in the PR
-    # rather than restructured on assumption.
+    # display-label rename to mirror here. PR 2a (2026-09) folded the separate
+    # /admin/tools/communities/{id}/profile page into this one: the five
+    # profile groups (Target audience, Member experience, Economics, Key points,
+    # Additional benefits) render inside the same form, after Program details.
     _logo_in_form_html, _logo_after_form_html = _logo_admin_section(
         c, c['id'], "communities", logo_refetch_banner_html)
     _parts = _community_form_fields_parts(c, categories, logo_in_form_html=_logo_in_form_html)
+
+    # Verification status (2026-08 consolidation, moved here from the retired
+    # /profile page in PR 2a): the same shared pill+action as the admin list
+    # and the public profile page, shown only once a profile draft exists.
+    _profile_review_status_html = ""
+    if p:
+        _needs_review = bool(p.get("needs_review"))
+        _comm_breakdown = (quality_flags["unconfident_count"], 12) if (_needs_review and quality_flags) else None
+        _rs_block = _review_status_block_html(
+            not _needs_review, f"/admin/tools/communities/{community_id}/mark-reviewed",
+            f"/admin/tools/communities/{community_id}/flag-for-review",
+            f"/tools/communities/{slug}/edit", _comm_breakdown,
+        )
+        _review_line_html = ""
+        if latest_review:
+            _reviewer = latest_review.get("admin_username") or "admin"
+            _reviewed_date = (latest_review.get("created_at") or "")[:10]
+            _review_line_html = (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
+                                  f'Reviewed by {_esc(_reviewer)} on {_esc(_reviewed_date)}</p>')
+        _profile_review_status_html = f"""<div style="flex:1 1 320px;min-width:0;">
+    <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
+    {_rs_block}
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Turns on automatically any time this profile is AI-drafted or refreshed, or you can flag it yourself anytime.</p>
+    {_review_line_html}
+  </div>"""
+    _generate_panel_html = f"""<div style="margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;display:flex;flex-wrap:wrap;gap:16px 24px;align-items:flex-start;">
+  {_profile_review_status_html}
+  <div style="flex:1 1 320px;min-width:0;">
+    <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Profile draft</h2>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;">
+      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'cp-gen-status', 'cp-gen-err', 'gen-host-community-profile')">Generate full profile</button>
+      <button type="button" id="cp-restore-btn" class="tool-admin-btn" onclick="cpRestorePrevious()" hidden>Restore previous</button>
+      <span id="cp-gen-status" class="qe-status" role="status" aria-live="polite"></span>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Fills every profile box below for review. Nothing is saved until you click Save changes.</p>
+    <p id="cp-gen-err" style="display:none;"></p>
+  </div>
+</div>"""
+    _profile_fields_html = _community_profile_form_fields(p, c, latest_review, citations=profile_citations)
     body = f"""<div class="page page-standard">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
-<p style="margin:-8px 0 24px;"><a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn">Write the full community profile &rarr;</a></p>
+{_generate_panel_html}
 <form id="comm-edit-form" method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
+  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
+  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
 
 {_parts['identity_block']}
 
@@ -18854,6 +18916,8 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 {_parts['details']}
     </div>
   </div>
+
+{_profile_fields_html}
 </form>
 {_logo_after_form_html}
 
@@ -18895,7 +18959,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 {_SHOT_CROP_CSS}
 </style>
-<script>{_GENERATE_LISTING_JS}{_APP_SCREENSHOT_CROP_JS}</script>"""
+<script>{_GENERATE_LISTING_JS}{_GENERATE_PROFILE_JS}{_APP_SCREENSHOT_CROP_JS}</script>"""
     return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True, request=request))
 
 
@@ -18914,14 +18978,11 @@ async def admin_communities_edit_submit(request: Request, slug: str):
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
-    demographic = (form.get("demographic") or "").strip()
     cost_band = (form.get("cost_band") or "Undisclosed dues").strip()
-    cost_note = (form.get("cost_note") or "").strip()
     sponsorship_type = (form.get("sponsorship_type") or "Independent").strip()
     sponsor_name = (form.get("sponsor_name") or "").strip()
     access = (form.get("access") or "").strip()
     format_ = (form.get("format") or "").strip()
-    notes = (form.get("notes") or "").strip()
     categories = form.getlist("categories")
     reach = (form.get("reach") or "National").strip()
     local_markets = (form.get("local_markets") or "").strip()
@@ -18929,21 +18990,86 @@ async def admin_communities_edit_submit(request: Request, slug: str):
     advisor = 1 if form.get("advisor") == "1" else 0
     screenshot_url = (form.get("screenshot_url") or "").strip()
     app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
-    if not (name and demographic):
-        raise HTTPException(status_code=400, detail="Name and demographic are required.")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
+
+    # Profile fields (PR 2a: the profile lives on this page now). Every live
+    # prose field is read as submitted; the retired columns are never read, so
+    # they can never be blanked by a save.
+    texts = {f: (form.get(f) or "").strip() for f in PROFILE_LIMITS}
+    # Validate every hard limit BEFORE writing anything, so a refused profile
+    # never leaves the listing half-saved.
+    try:
+        for f, (_target, limit) in PROFILE_LIMITS.items():
+            Library._check_text_field_length(_COMMUNITY_PROFILE_LABELS[f], texts[f], limit)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     lib = _lib()
     try:
-        lib.update_community(community_id, name=name, url=url, demographic=demographic,
-                             cost_band=cost_band, categories=categories, cost_note=cost_note,
+        existing_profile = lib.get_community_profile(community_id) or {}
+        cpe = resolve_cpe_submission(
+            form.get("cpe_eligible"), form.get("cpe_eligible_full"), existing_profile.get("cpe_eligible"))
+        ai_drafted = _ai_drafted_field_names(form)
+        profile_ai_drafted = bool(ai_drafted & set(_COMMUNITY_PROFILE_FIELD_IDS))
+        has_profile_content = bool(existing_profile) or cpe or any(texts.values())
+
+        lib.update_community(community_id, name=name, url=url, demographic=None,
+                             cost_band=cost_band, categories=categories, cost_note=None,
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
-                             access=access, format=format_, notes=notes,
+                             access=access, format=format_, notes=None,
                              reach=reach, local_markets=local_markets, featured=featured, advisor=advisor,
                              source="admin-edit")
         lib.update_community_screenshot_url(community_id, screenshot_url)
         lib.update_community_app_screenshot_source(community_id, app_screenshot_source_url)
+
+        if has_profile_content:
+            # needs_review is the whole-profile signoff: this save carries the
+            # currently-persisted value forward, OR'd with a fresh draft on any
+            # profile field, so a save can only ever ADD the flag here, never
+            # clear one a one-click button set for an unrelated reason.
+            needs_review = 1 if (bool(existing_profile.get("needs_review")) or profile_ai_drafted) else 0
+            # Confidence (the model's own self-report, per tracked field): the
+            # fresh value for a field drafted this session; NULL ("Not yet
+            # assessed") for a field whose text you changed by hand, since the
+            # model never judged that text; otherwise the stored value carried
+            # forward unchanged.
+            ai_confidence_submitted = _ai_drafted_field_confidence(form)
+            confidence = {}
+            for f in COMMUNITY_CONFIDENCE_FIELDS:
+                if f in ai_drafted and f in ai_confidence_submitted:
+                    confidence[f] = int(ai_confidence_submitted[f])
+                elif norm_for_compare(existing_profile.get(f)) != norm_for_compare(texts[f]):
+                    confidence[f] = None
+                else:
+                    confidence[f] = existing_profile.get(f"{f}_ai_confident")
+            lib.upsert_community_profile(
+                community_id,
+                low_confidence=1 if form.get("low_confidence") == "1" else 0,
+                cpe_eligible=cpe,
+                needs_review=needs_review,
+                confidence=confidence,
+                clear_verification_stamp=profile_ai_drafted,
+                source="admin-edit",
+                **texts,
+            )
+            # The community's ONE shared citation set, governed by the
+            # invariant in _community_citation_action.
+            fresh = (_validate_citations_payload(form.get("ai_drafted_citations") or "")
+                     if profile_ai_drafted else [])
+            action = _community_citation_action(
+                list(texts.values()), fresh,
+                lib.get_entity_citations("community", community_id, "community_profile"))
+            if action == "write":
+                lib.set_entity_citations("community", community_id, "community_profile", fresh,
+                                         model=(form.get("ai_drafted_citations_model") or "").strip())
+            elif action == "clear":
+                lib.clear_entity_citations("community", community_id, "community_profile")
         _record_ai_drafted_reviews(lib, request, "community", community_id, form)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/communities/{e.slug}/edit"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         lib.close()
     # "Save and continue" mirrors the Software edit page's own handling
@@ -19040,13 +19166,20 @@ def admin_communities_generate_competitor_matches(request: Request, community_id
             raise HTTPException(status_code=404, detail="Community not found")
         candidates = lib.suggest_community_competitors(community_id, limit=8)
         model = lib.get_enrich_model()
+        # `communities.notes` is retired (PR 2a); the Bottom line is the
+        # one-line description now.
+        def _bl(cid: int) -> str:
+            prof = lib.get_community_profile(cid) or {}
+            return prof.get("verdict_summary") or ""
+        own_desc = _bl(community_id)
+        cand_desc = {x["id"]: _bl(x["id"]) for x in candidates}
     finally:
         lib.close()
 
     from linklib.enrich import generate_competitor_matches
     result = generate_competitor_matches(
-        community["name"], community.get("notes", ""),
-        [{"id": x["id"], "name": x["name"], "description": x.get("notes", "")} for x in candidates],
+        community["name"], own_desc,
+        [{"id": x["id"], "name": x["name"], "description": cand_desc.get(x["id"], "")} for x in candidates],
         model=model,
     )
     if result is None:
@@ -19260,15 +19393,18 @@ async def admin_communities_mark_reviewed(request: Request, community_id: int):
     try:
         community = lib.get_community(community_id)
         # Called from the admin list row (no redirect_to — stay on the
-        # list, its original behavior), the profile edit page (Phase G PR 2),
+        # list, its original behavior), the community edit page (Phase G PR 2),
         # and now the public profile VIEW page too (2026-08 consolidation—
         # the same "Review status" component's action button) — validated
         # against an allowlist since it echoes into a redirect, same
         # convention as admin_tools_delete.
         redirect_to = form.get("redirect_to") or "/admin/tools/communities"
-        _allowed = {"/admin/tools/communities", f"/admin/tools/communities/{community_id}/profile"}
+        _allowed = {"/admin/tools/communities"}
         if community:
+            # The public profile view, and the merged edit page (PR 2a: the
+            # profile lives there now, so its verification buttons return to it).
             _allowed.add(f"/tools/communities/{community['slug']}")
+            _allowed.add(f"/tools/communities/{community['slug']}/edit")
         if redirect_to not in _allowed:
             redirect_to = "/admin/tools/communities"
         profile = lib.get_community_profile(community_id)
@@ -19299,9 +19435,12 @@ async def admin_communities_flag_for_review(request: Request, community_id: int)
     try:
         community = lib.get_community(community_id)
         redirect_to = form.get("redirect_to") or "/admin/tools/communities"
-        _allowed = {"/admin/tools/communities", f"/admin/tools/communities/{community_id}/profile"}
+        _allowed = {"/admin/tools/communities"}
         if community:
+            # The public profile view, and the merged edit page (PR 2a: the
+            # profile lives there now, so its verification buttons return to it).
             _allowed.add(f"/tools/communities/{community['slug']}")
+            _allowed.add(f"/tools/communities/{community['slug']}/edit")
         if redirect_to not in _allowed:
             redirect_to = "/admin/tools/communities"
         lib.flag_community_profile_needs_review(community_id)
@@ -19329,12 +19468,17 @@ def admin_communities_approve(request: Request, community_id: int):
     lib = _lib()
     try:
         lib.approve_community(community_id)
+        approved = lib.get_community(community_id)
     finally:
         lib.close()
-    # Straight to the profile editor rather than back to the list—so
-    # the profile's "Generate summary" button is right there for a
-    # newly-approved community instead of it sitting thin in the directory.
-    return RedirectResponse(f"/admin/tools/communities/{community_id}/profile", status_code=303)
+    if not approved:
+        raise HTTPException(status_code=404, detail="Community not found")
+    slug = approved["slug"]
+    # Straight to the edit page rather than back to the list—so the
+    # "Generate full profile" button is right there for a newly-approved
+    # community instead of it sitting thin in the directory. (The profile lives
+    # on the community edit page now; PR 2a retired the separate profile page.)
+    return RedirectResponse(f"/tools/communities/{slug}/edit", status_code=303)
 
 
 @app.post("/admin/tools/communities/{community_id}/reject")
@@ -19344,168 +19488,6 @@ def admin_communities_reject(request: Request, community_id: int):
     lib = _lib()
     try:
         lib.delete_community(community_id, admin_id=_current_user_id(lib, request), action="reject")
-    finally:
-        lib.close()
-    return RedirectResponse("/admin/tools/communities", status_code=303)
-
-
-@app.get("/admin/tools/communities/{community_id}/profile", response_class=HTMLResponse)
-def admin_community_profile_edit(request: Request, community_id: int):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        c = lib.get_community(community_id)
-        p = lib.get_community_profile(community_id)
-        latest_review = lib.get_latest_narrative_review("community", "community_profile", community_id)
-        profile_citations = lib.get_entity_citations("community", community_id, "community_profile")
-        quality_flags = lib.community_profile_quality_flags().get(community_id)
-    finally:
-        lib.close()
-    if not c:
-        raise HTTPException(status_code=404, detail="Community not found")
-    _profile_fields_html = _community_profile_form_fields(p, c, latest_review, citations=profile_citations)
-
-    # Review status (2026-08 consolidation) — moved to the TOP of this page
-    # (was a checkbox + "Mark reviewed" widget at the bottom of the field
-    # list), on the same shared pill+action component used on the admin
-    # list and the public profile VIEW page. Shown only once a profile
-    # actually exists (`p` non-empty) — nothing to flag/review before then.
-    _profile_review_status_html = ""
-    if p:
-        _needs_review = bool(p.get("needs_review"))
-        _comm_breakdown = (quality_flags["unconfident_count"], 12) if (_needs_review and quality_flags) else None
-        _rs_block = _review_status_block_html(
-            not _needs_review, f"/admin/tools/communities/{community_id}/mark-reviewed",
-            f"/admin/tools/communities/{community_id}/flag-for-review",
-            f"/admin/tools/communities/{community_id}/profile", _comm_breakdown,
-        )
-        _review_line_html = ""
-        if latest_review:
-            _reviewer = latest_review.get("admin_username") or "admin"
-            _reviewed_date = (latest_review.get("created_at") or "")[:10]
-            _review_line_html = (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
-                                  f'Reviewed by {_esc(_reviewer)} on {_esc(_reviewed_date)}</p>')
-        _profile_review_status_html = f"""<div style="margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
-  <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
-  {_rs_block}
-  <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Turns on automatically any time this profile is AI-drafted or refreshed, or you can flag it yourself anytime.</p>
-  {_review_line_html}
-</div>"""
-
-    body = f"""<div class="page page-standard">
-<p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
-<h1>Profile: {_esc(c['name'])}</h1>
-{_profile_review_status_html}
-<form method="post" action="/admin/tools/communities/{community_id}/profile" style="display:grid;gap:20px;">
-  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
-  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
-  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
-  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
-{_profile_fields_html}
-  <div>
-    <button type="submit" class="btn">Save profile</button>
-    <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
-  </div>
-</form>
-</div>
-<script>{_GENERATE_PROFILE_JS}</script>"""
-    return HTMLResponse(_page(f"Profile: {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
-
-
-@app.post("/admin/tools/communities/{community_id}/profile")
-async def admin_community_profile_submit(request: Request, community_id: int):
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    lib = _lib()
-    try:
-        if not lib.get_community(community_id):
-            raise HTTPException(status_code=404, detail="Community not found")
-        existing_profile = lib.get_community_profile(community_id) or {}
-        form = await request.form()
-        founded_year_raw = (form.get("founded_year") or "").strip()
-        founded_year = int(founded_year_raw) if founded_year_raw.isdigit() else None
-        # Phase G PR 2 / 2026-08 consolidation: needs_review is the whole-
-        # profile signoff, now driven by the shared Review-status pill's
-        # Flag for review/Mark reviewed buttons (top of this edit page,
-        # profile view page, admin list) rather than a checkbox on this
-        # form — so this save carries the CURRENTLY-persisted value
-        # (`existing_profile`, fetched above) forward, OR'd with a fresh
-        # draft on any of the 23 profile fields this submit, so a save can
-        # only ever ADD the flag here, never silently clear a value one of
-        # those one-click buttons set for an unrelated reason.
-        ai_drafted = _ai_drafted_field_names(form)
-        profile_ai_drafted = bool(ai_drafted & set(_COMMUNITY_PROFILE_FIELD_IDS))
-        needs_review = 1 if (bool(existing_profile.get("needs_review")) or profile_ai_drafted) else 0
-        # Citations-API grounding fix, Phase 3: one shared citation set for
-        # the whole 23-field draft (decision 5) — persisted only when this
-        # exact save follows a fresh Generate click on at least one profile
-        # field (profile_ai_drafted, computed above — _validate_citations_payload
-        # is trusted only in that case); any other save (hand-edit, or a
-        # resave with no fresh draft this session) clears it, same
-        # hand-edit-invalidates-citations convention update_tool_agent_taxonomy/
-        # the Description submit routes already apply.
-        profile_citations = (
-            _validate_citations_payload(form.get("ai_drafted_citations") or "")
-            if profile_ai_drafted else []
-        )
-        citations_model = (form.get("ai_drafted_citations_model") or "").strip()
-        # Confidence indicator (2026-08): upsert_community_profile is a full
-        # replace on every save (see its own docstring), so this route
-        # decides each of the 12 tracked fields' value explicitly — the
-        # fresh model-reported value for a field just (re)drafted this save,
-        # else its own previous stored value carried forward unchanged (not
-        # cleared just because an unrelated field was regenerated).
-        ai_confidence_submitted = _ai_drafted_field_confidence(form)
-        confidence = {}
-        for f in COMMUNITY_CONFIDENCE_FIELDS:
-            if f in ai_drafted and f in ai_confidence_submitted:
-                confidence[f] = int(ai_confidence_submitted[f])
-            else:
-                confidence[f] = existing_profile.get(f"{f}_ai_confident")
-        lib.upsert_community_profile(
-            community_id,
-            ideal_member=(form.get("ideal_member") or "").strip(),
-            anti_fit=(form.get("anti_fit") or "").strip(),
-            value_prop=(form.get("value_prop") or "").strip(),
-            format_reality=(form.get("format_reality") or "").strip(),
-            engagement_level=(form.get("engagement_level") or "").strip(),
-            sponsor_relationship_note=(form.get("sponsor_relationship_note") or "").strip(),
-            business_model=(form.get("business_model") or "").strip(),
-            application_friction=(form.get("application_friction") or "").strip(),
-            cost_value_verdict=(form.get("cost_value_verdict") or "").strip(),
-            notable_members=(form.get("notable_members") or "").strip(),
-            founded_year=founded_year,
-            public_criticism=(form.get("public_criticism") or "").strip(),
-            verdict_summary=(form.get("verdict_summary") or "").strip(),
-            low_confidence=1 if form.get("low_confidence") == "1" else 0,
-            primary_purpose=(form.get("primary_purpose") or "").strip(),
-            cpe_eligible=(form.get("cpe_eligible") or "").strip(),
-            platform_type=(form.get("platform_type") or "").strip(),
-            meeting_format=(form.get("meeting_format") or "").strip(),
-            event_style=(form.get("event_style") or "").strip(),
-            seniority_band=(form.get("seniority_band") or "").strip(),
-            resources_included=(form.get("resources_included") or "").strip(),
-            needs_review=needs_review,
-            stage_focus=(form.get("stage_focus") or "").strip(),
-            jobs_program=(form.get("jobs_program") or "").strip(),
-            team_or_individual=(form.get("team_or_individual") or "").strip(),
-            confidence=confidence,
-            clear_verification_stamp=profile_ai_drafted,
-            source="admin-edit",
-        )
-        # Same three branches as the tool Description route (issue #634):
-        # fresh citations write; else clear only if any profile field's text
-        # actually changed (`existing_profile` is the row before this save);
-        # else leave the shared set alone.
-        if profile_citations:
-            lib.set_entity_citations("community", community_id, "community_profile",
-                                     profile_citations, model=citations_model)
-        elif _community_profile_text_changed(existing_profile, form, founded_year):
-            lib.clear_entity_citations("community", community_id, "community_profile")
-        _record_ai_drafted_reviews(lib, request, "community", community_id, form)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -19570,18 +19552,10 @@ async def admin_communities_generate_profile(request: Request):
         "application_friction": draft.application_friction,
         "cost_value_verdict": draft.cost_value_verdict,
         "notable_members": draft.notable_members,
-        "founded_year": draft.founded_year,
         "public_criticism": draft.public_criticism,
         "verdict_summary": draft.verdict_summary,
-        "stage_focus": draft.stage_focus,
         "jobs_program": draft.jobs_program,
-        "team_or_individual": draft.team_or_individual,
-        "seniority_band": draft.seniority_band,
-        "primary_purpose": draft.primary_purpose,
         "resources_included": draft.resources_included,
-        "platform_type": draft.platform_type,
-        "meeting_format": draft.meeting_format,
-        "event_style": draft.event_style,
         "cpe_eligible": draft.cpe_eligible,
         "confidence": draft.confidence,
         "citations": draft.citations,
@@ -19643,11 +19617,9 @@ async def admin_communities_generate_listing(request: Request):
     return JSONResponse({
         "ok": True,
         "low_confidence": draft.low_confidence,
-        "demographic": draft.demographic,
         "reach": draft.reach,
         "local_markets": draft.local_markets,
         "cost_band": draft.cost_band,
-        "cost_note": draft.cost_note,
         "sponsorship_type": draft.sponsorship_type,
         "sponsor_name": draft.sponsor_name,
         "access": draft.access,
@@ -25048,7 +25020,7 @@ _SCRIPT_REGISTRY = [
      ["python -m scripts.seed_tools --db /data/library.db"]),
     ("seed_communities.py", "scripts.seed_communities", "Recurring and actively useful",
      "Seeds the CFO Toolbox Communities directory from a curated list. Safe to re-run—"
-     "adds any community missing by URL and syncs name/notes/advisor on existing rows; "
+     "adds any community missing by URL and syncs name/advisor on existing rows; "
      "every admin-owned field (reach, categories, approved, etc.) is left untouched.",
      "Recurring-manual—run by hand whenever the curated seed list changes, and once "
      "against a brand-new database.",
@@ -35735,7 +35707,8 @@ def _voice_admin_edit_link(lib, table: str, row_id) -> tuple[str, str]:
         elif table == "community_profiles":
             row = lib.get_community(row_id)
             if row:
-                return (row["name"], f"/admin/tools/communities/{row_id}/profile")
+                # The profile lives on the community edit page (PR 2a).
+                return (row["name"], f"/tools/communities/{row['slug']}/edit")
         elif table == "benchmarks":
             row = lib.get_benchmark(row_id)
             if row:

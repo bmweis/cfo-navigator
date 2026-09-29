@@ -600,15 +600,12 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
         format_reality=draft.format_reality, engagement_level=draft.engagement_level,
         sponsor_relationship_note=draft.sponsor_relationship_note,
         application_friction=draft.application_friction, cost_value_verdict=draft.cost_value_verdict,
-        notable_members=draft.notable_members, founded_year=draft.founded_year,
+        notable_members=draft.notable_members,
         public_criticism=draft.public_criticism, verdict_summary=draft.verdict_summary,
         low_confidence=int(bool(draft.low_confidence)), business_model=draft.business_model,
-        primary_purpose=draft.primary_purpose, cpe_eligible=draft.cpe_eligible,
-        platform_type=draft.platform_type, meeting_format=draft.meeting_format,
-        event_style=draft.event_style, seniority_band=draft.seniority_band,
+        cpe_eligible=draft.cpe_eligible,
         resources_included=draft.resources_included, needs_review=0,
-        stage_focus=draft.stage_focus, jobs_program=draft.jobs_program,
-        team_or_individual=draft.team_or_individual, confidence=draft.confidence,
+        jobs_program=draft.jobs_program, confidence=draft.confidence,
         # Stale-stamp fix (2026-08) — same reasoning as the tool-side calls
         # above: needs_review=0 is this script's own bypass, but this is
         # still a fresh draft, so any old "Reviewed by X on Y" stamp must be
