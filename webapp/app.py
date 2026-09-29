@@ -12739,16 +12739,18 @@ def _community_citation_action(submitted_texts, fresh_citations: list, stored_ci
     orphan the markers in the others (the Vena shape: markers with no Sources).
 
       "clear"  no marker anywhere and a set is stored
-      "write"  markers remain and fresh citations arrived with this save (a
-               full Generate replaces every box, so it replaces the whole set)
+      "write"  fresh citations arrived with this save (a full Generate
+               replaces every box, so it replaces the whole set)
       "keep"   markers remain and nothing fresh arrived
       "none"   nothing to do (no markers, nothing stored)
 
     Markers with no stored and no fresh set change nothing: that is the
     model's own prose."""
+    if fresh_citations:
+        return "write"
     if not _profile_text_has_citation_markers(submitted_texts):
         return "clear" if stored_citations else "none"
-    return "write" if fresh_citations else "keep"
+    return "keep"
 
 
 # Phase G PR 2: (entity_type, field_name) pairs that no longer get a

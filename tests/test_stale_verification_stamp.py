@@ -22,6 +22,7 @@ import sys
 import tempfile
 
 import pytest
+from tests.community_edit_helpers import post_profile, get_profile  # noqa: F401
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -262,7 +263,7 @@ def test_community_profile_submit_clears_stale_stamp_on_fresh_draft(env):
 
     client = _client(env)
     _login(client, "brian", "pw")
-    client.post(f"/admin/tools/communities/{community_id}/profile", data={
+    post_profile(client, community_id, data={
         "ideal_member": "CFOs", "verdict_summary": "fresh verdict",
         "ai_drafted_fields": "ideal_member,verdict_summary",
     }, follow_redirects=False)
@@ -286,7 +287,7 @@ def test_mark_reviewed_after_community_regeneration_sets_fresh_stamp(env):
 
     client = _client(env)
     _login(client, "brian", "pw")
-    client.post(f"/admin/tools/communities/{community_id}/profile", data={
+    post_profile(client, community_id, data={
         "ideal_member": "CFOs", "verdict_summary": "fresh verdict",
         "ai_drafted_fields": "ideal_member,verdict_summary",
     }, follow_redirects=False)

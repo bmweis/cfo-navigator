@@ -100,7 +100,6 @@ def test_path_param_routes_are_never_flagged():
         "/admin/reader/feeds/{feed_id}/edit",
         "/admin/thought-leadership/original/{item_id}/edit",
         "/admin/thought-leadership/third-party/{item_id}/edit",
-        "/admin/tools/communities/{community_id}/profile",
         "/admin/tools/resources/{benchmark_id}/edit",
     }
     from fastapi.routing import APIRoute

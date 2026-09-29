@@ -14,6 +14,7 @@ import tempfile
 import types
 
 import pytest
+from tests.community_edit_helpers import post_profile, get_profile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -63,30 +64,14 @@ COST_VALUE_VERDICT:
 Worth it.
 NOTABLE_MEMBERS:
 None reported.
-FOUNDED_YEAR:
-2019
 PUBLIC_CRITICISM:
 None publicly reported.
 VERDICT_SUMMARY:
 Best for seed-stage CFOs.
-STAGE_FOCUS:
-Seed
 JOBS_PROGRAM:
 No
-TEAM_OR_INDIVIDUAL:
-Individual
-SENIORITY_BAND:
-CFO only
-PRIMARY_PURPOSE:
-Peer learning
 RESOURCES_INCLUDED:
 Benchmarking data
-PLATFORM_TYPE:
-Slack
-MEETING_FORMAT:
-Virtual
-EVENT_STYLE:
-Small-group
 CPE_ELIGIBLE:
 No
 CONFIDENCE:
@@ -213,7 +198,7 @@ def test_profile_submit_saves_confidence_for_freshly_drafted_field(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/communities/{cid}/profile", data={
+    r = post_profile(client, cid, data={
         "ideal_member": "Seed-stage CFOs.", "verdict_summary": "Best for X.",
         "ai_drafted_fields": "ideal_member,verdict_summary",
         "ai_drafted_confidence": "ideal_member:1,verdict_summary:0",
@@ -243,7 +228,7 @@ def test_profile_submit_carries_forward_confidence_for_untouched_field(env):
     client = _client(env)
     _login(client)
     # This save only (re)drafts verdict_summary — ideal_member is untouched.
-    r = client.post(f"/admin/tools/communities/{cid}/profile", data={
+    r = post_profile(client, cid, data={
         "ideal_member": "Old draft.", "verdict_summary": "Freshly drafted.",
         "ai_drafted_fields": "verdict_summary",
         "ai_drafted_confidence": "verdict_summary:0",
@@ -288,7 +273,7 @@ def test_regenerate_single_field_preserves_all_others_byte_for_byte(env):
     form_data[regenerated_field] = "Freshly regenerated text."
     form_data["ai_drafted_fields"] = regenerated_field
     form_data["ai_drafted_confidence"] = f"{regenerated_field}:{fresh_value}"
-    r = client.post(f"/admin/tools/communities/{cid}/profile", data=form_data, follow_redirects=False)
+    r = post_profile(client, cid, data=form_data, follow_redirects=False)
     assert r.status_code == 303
 
     lib_ = Library(os.environ["LINKLIB_DB"])
@@ -319,7 +304,7 @@ def test_profile_submit_ignores_stray_confidence_for_hand_edited_field(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/communities/{cid}/profile", data={
+    r = post_profile(client, cid, data={
         "ideal_member": "Hand-written.",
         "ai_drafted_fields": "",   # nothing drafted this save
         "ai_drafted_confidence": "ideal_member:1",   # stray pair
@@ -349,7 +334,7 @@ def test_confidence_line_shown_on_profile_page_regardless_of_needs_review(env):
 
     client = _client(env)
     _login(client)
-    r = client.get(f"/admin/tools/communities/{cid}/profile")
+    r = get_profile(client, cid)
     assert "Claude confidence: No" in r.text
 
 
@@ -367,7 +352,7 @@ def test_confidence_line_still_shown_once_reviewed(env):
 
     client = _client(env)
     _login(client)
-    r = client.get(f"/admin/tools/communities/{cid}/profile")
+    r = get_profile(client, cid)
     assert "Claude confidence: No" in r.text
 
 
@@ -383,5 +368,5 @@ def test_confidence_line_shows_not_yet_assessed_when_no_signal_ever_reported(env
 
     client = _client(env)
     _login(client)
-    r = client.get(f"/admin/tools/communities/{cid}/profile")
+    r = get_profile(client, cid)
     assert "Claude confidence: Not yet assessed" in r.text

@@ -204,6 +204,7 @@ def test_invariant_helper_branches(app_module):
     act = app_module._community_citation_action
     assert act(["a [1]"], [], CITES) == "keep"
     assert act(["a [1]"], CITES, CITES) == "write"
+    assert act(["a"], CITES, CITES) == "write"
     assert act(["a"], [], CITES) == "clear"
     assert act(["a"], [], []) == "none"
     assert act(["a [1]"], [], []) == "keep"

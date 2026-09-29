@@ -9,6 +9,7 @@ import sys
 import tempfile, os
 
 import pytest
+from tests.community_edit_helpers import post_profile, get_profile  # noqa: F401
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -41,7 +42,7 @@ def test_profile_page_renders_full_profile(env):
     lib.upsert_community_profile(
         cid, ideal_member="Solo CFOs at Series A/B", anti_fit="Enterprise CFOs",
         verdict_summary="Best for scrappy operators, not late-stage teams.",
-        founded_year=2019, business_model="Gated subscription, insulated by design.",
+        business_model="Gated subscription, insulated by design.",
     )
     community = lib.get_community(cid)
     lib.close()
@@ -53,7 +54,6 @@ def test_profile_page_renders_full_profile(env):
     assert "Solo CFOs at Series A/B" in r.text
     assert "Bottom line" in r.text
     assert "Best for scrappy operators" in r.text
-    assert "2019" in r.text
     assert "Tell us why" in r.text
     assert f"/tools/communities/gap?community_id={cid}" in r.text
     assert "Suggest a correction" in r.text
@@ -80,10 +80,9 @@ def test_admin_profile_save_persists_narrative_fields(env):
 
     c = _client(env)
     c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
-    r = c.post(f"/admin/tools/communities/{cid}/profile", data={
+    r = post_profile(c, cid, data={
         "ideal_member": "Updated: Solo CFOs at Series A/B",
-        "seniority_band": "CFO",
-        "platform_type": "Slack",
+        "cpe_eligible": "Yes",
     }, follow_redirects=False)
     assert r.status_code == 303
 
@@ -91,8 +90,7 @@ def test_admin_profile_save_persists_narrative_fields(env):
     profile = lib.get_community_profile(cid)
     lib.close()
     assert profile["ideal_member"] == "Updated: Solo CFOs at Series A/B"
-    assert profile["seniority_band"] == "CFO"
-    assert profile["platform_type"] == "Slack"
+    assert profile["cpe_eligible"] == "Yes"
     assert "seniority_band_tags" not in profile
     assert "industry_tags" not in profile
 

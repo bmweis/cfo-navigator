@@ -414,7 +414,8 @@ def test_pending_community_badge_clears_on_approval(admin_client):
     # draft" is immediately in front of Brian, rather than back to the list.
     r3 = client.post(f"/admin/tools/communities/{community_id}/approve", follow_redirects=False)
     assert r3.status_code == 303
-    assert r3.headers["location"] == f"/admin/tools/communities/{community_id}/profile"
+    from tests.community_edit_helpers import edit_url
+    assert r3.headers["location"] == edit_url(community_id)
 
     r4 = client.get("/admin")
     assert '<span class="task-badge">1</span>' not in r4.text

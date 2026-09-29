@@ -21,6 +21,7 @@ import sys
 import tempfile
 
 import pytest
+from tests.community_edit_helpers import post_profile, get_profile, edit_url
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -336,7 +337,7 @@ def test_profile_submit_sets_needs_review_when_ai_drafted(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/admin/tools/communities/{community_id}/profile", data=_profile_form_data(
+    post_profile(client, community_id, data=_profile_form_data(
         ai_drafted_fields="ideal_member,verdict_summary",
     ), follow_redirects=False)
 
@@ -363,8 +364,7 @@ def test_profile_submit_ignores_stray_needs_review_form_field(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/admin/tools/communities/{community_id}/profile",
-                data=_profile_form_data(needs_review="1"), follow_redirects=False)
+    post_profile(client, community_id, data=_profile_form_data(needs_review="1"), follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
     assert lib.get_community_profile(community_id)["needs_review"] == 0
@@ -390,8 +390,7 @@ def test_profile_submit_persists_existing_needs_review_without_ai_draft(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/admin/tools/communities/{community_id}/profile",
-                data=_profile_form_data(), follow_redirects=False)
+    post_profile(client, community_id, data=_profile_form_data(), follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
     assert lib.get_community_profile(community_id)["needs_review"] == 1
@@ -409,7 +408,7 @@ def test_field_reviews_not_written_for_community_profile_fields(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/admin/tools/communities/{community_id}/profile", data=_profile_form_data(
+    post_profile(client, community_id, data=_profile_form_data(
         ai_drafted_fields="ideal_member,verdict_summary",
     ), follow_redirects=False)
 
@@ -485,9 +484,9 @@ def test_mark_reviewed_redirects_to_profile_page_when_asked(env):
     client = _client(env)
     _login(client)
     r = client.post(f"/admin/tools/communities/{community_id}/mark-reviewed",
-                     data={"redirect_to": f"/admin/tools/communities/{community_id}/profile"},
+                     data={"redirect_to": edit_url(community_id)},
                      follow_redirects=False)
-    assert r.headers["location"] == f"/admin/tools/communities/{community_id}/profile"
+    assert r.headers["location"] == edit_url(community_id)
 
 
 def test_mark_reviewed_rejects_unknown_redirect_to(env):
@@ -520,7 +519,7 @@ def test_profile_edit_page_shows_mark_reviewed_button_when_needs_review(env):
 
     client = _client(env)
     _login(client)
-    r = client.get(f"/admin/tools/communities/{community_id}/profile")
+    r = get_profile(client, community_id)
     assert "Mark reviewed" in r.text
     assert f"/admin/tools/communities/{community_id}/mark-reviewed" in r.text
 
@@ -540,5 +539,5 @@ def test_profile_edit_page_shows_reviewed_by_line_after_mark_reviewed(env):
     _login(client, "brian", "pw")
     client.post(f"/admin/tools/communities/{community_id}/mark-reviewed", follow_redirects=False)
 
-    r = client.get(f"/admin/tools/communities/{community_id}/profile")
+    r = get_profile(client, community_id)
     assert "Reviewed by brian on" in r.text

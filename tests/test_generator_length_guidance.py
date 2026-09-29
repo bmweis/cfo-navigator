@@ -12,6 +12,7 @@ MIN_GENERATE_MAX_TOKENS note). Only the prose's own stated length ceiling
 moved; these tests pin that, not a token-count change.
 """
 import pathlib
+import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -54,21 +55,15 @@ def test_differentiation_prompt_and_budget_untouched_already_under_target():
     assert "_checked_max_tokens(1200)" in src
 
 
-def test_community_profile_rule_8_now_covers_stage_focus_jobs_program_team():
-    """Root cause of stage_focus's 440-char overflow: rule 8 marked six
-    Quick facts fields "a phrase, not a paragraph—deliberately brief" but
-    never stage_focus/jobs_program/team_or_individual. Now it does."""
-    rule8 = [line for line in enrich._COMMUNITY_PROFILE_PROMPT.splitlines() if line.strip().startswith("8.")]
-    assert rule8, "rule 8 not found"
-    # Rule 8 may wrap onto the following indented line(s); grab the whole
-    # numbered clause, not just its first line.
-    lines = enrich._COMMUNITY_PROFILE_PROMPT.splitlines()
-    start = next(i for i, l in enumerate(lines) if l.strip().startswith("8."))
-    end = next(i for i in range(start + 1, len(lines)) if lines[i].strip().startswith("9."))
-    clause = " ".join(lines[start:end])
-    for field in ("SENIORITY_BAND", "PRIMARY_PURPOSE", "PLATFORM_TYPE", "MEETING_FORMAT",
-                  "EVENT_STYLE", "STAGE_FOCUS", "JOBS_PROGRAM", "TEAM_OR_INDIVIDUAL"):
-        assert field in clause, f"{field} missing from rule 8"
+def test_community_profile_prompt_gives_every_limited_field_a_ceiling_under_its_target():
+    """PR 2a: every live prose field is asked to stay under a word/character
+    ceiling that sits at or below its soft target in PROFILE_LIMITS."""
+    from linklib.community_profile import PROFILE_LIMITS
+    prompt = enrich._COMMUNITY_PROFILE_PROMPT
+    for field, (target, _mx) in PROFILE_LIMITS.items():
+        m = re.search(rf"^{field.upper()}:.*?roughly (\d+)\s+characters", prompt, re.M | re.S)
+        assert m, f"{field} has no character ceiling in the prompt"
+        assert int(m.group(1)) <= target, (field, m.group(1), target)
 
 
 def test_community_profile_max_tokens_unchanged_shared_across_23_fields():
