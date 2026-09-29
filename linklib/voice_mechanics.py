@@ -143,3 +143,19 @@ def normalize_voice_mechanics(text: str) -> str:
     text = fix_spaced_em_dashes(text)
     text = strip_safe_invisible_chars(text)
     return text
+
+
+def norm_for_compare(text) -> str:
+    """Canonical form for asking "did this field's text actually change?"
+    between a stored value and a just-submitted one. None and "" are the
+    same empty string; CRLF (what a browser submits for a textarea) and LF
+    (what may be stored) are the same; any whitespace-only difference
+    (leading/trailing, runs, line/paragraph breaks) is ignored; and
+    `normalize_voice_mechanics` is applied to both sides, since every
+    Library write path runs it before storing (so a raw submitted value
+    with a spaced em dash would otherwise always differ from what it was
+    stored as). Used to decide whether a save invalidates a field's
+    entity_citations."""
+    if text is None:
+        return ""
+    return " ".join(normalize_voice_mechanics(str(text)).split())

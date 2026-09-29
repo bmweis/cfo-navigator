@@ -68,6 +68,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 
 from linklib import compare, gates
 from linklib.db import DuplicateURLError, Library, normalize_url
+from linklib.voice_mechanics import norm_for_compare
 from linklib.voice_review import (
     guess_ampersand_terms as _voice_guess_ampersand_terms,
     validate_ampersand_term,
@@ -12749,6 +12750,20 @@ _COMMUNITY_PROFILE_FIELD_IDS = [
     "platform_type", "meeting_format", "event_style", "cpe_eligible",
 ]
 
+def _community_profile_text_changed(existing: dict, form, founded_year) -> bool:
+    """True when any field in _COMMUNITY_PROFILE_FIELD_IDS differs between
+    the stored profile row (`existing`, {} if none yet) and this submit,
+    compared with norm_for_compare. Derived from the field-id list, never a
+    hardcoded set, so adding or removing a profile field can't silently
+    break it. founded_year is compared as the parsed int the route saves
+    (a non-numeric entry saves as None), not the raw form string."""
+    for f in _COMMUNITY_PROFILE_FIELD_IDS:
+        submitted = founded_year if f == "founded_year" else form.get(f)
+        if norm_for_compare(existing.get(f)) != norm_for_compare(submitted):
+            return True
+    return False
+
+
 # Phase G PR 2: (entity_type, field_name) pairs that no longer get a
 # field_reviews row on save — they moved to a stricter needs_verification +
 # narrative_review_log "Mark verified" gate instead (Description,
@@ -19479,10 +19494,14 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             clear_verification_stamp=profile_ai_drafted,
             source="admin-edit",
         )
+        # Same three branches as the tool Description route (issue #634):
+        # fresh citations write; else clear only if any profile field's text
+        # actually changed (`existing_profile` is the row before this save);
+        # else leave the shared set alone.
         if profile_citations:
             lib.set_entity_citations("community", community_id, "community_profile",
                                      profile_citations, model=citations_model)
-        else:
+        elif _community_profile_text_changed(existing_profile, form, founded_year):
             lib.clear_entity_citations("community", community_id, "community_profile")
         _record_ai_drafted_reviews(lib, request, "community", community_id, form)
     except ValueError as e:
@@ -20777,9 +20796,17 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         description_low_confidence=description_low_confidence,
                         clear_description_verification_stamp=bool(description_needs_verification),
                         source="admin-edit")
+        # Three branches (issue #634): fresh validated citations from this
+        # submit's Generate write; otherwise clear only if the description's
+        # text actually changed (`tool` is the row as it was BEFORE this
+        # save); otherwise leave the stored rows alone. The hidden
+        # ai-drafted-citations field is empty on every fresh page load, so
+        # "no fresh citations" alone can't mean "the text changed" — an
+        # unrelated save used to wipe them. Description only: summary has
+        # no citations of its own.
         if "description" in ai_drafted and description_citations:
             lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
-        else:
+        elif norm_for_compare(tool.get("description")) != norm_for_compare(description):
             lib.clear_entity_citations("tool", tool_id, "description")
         lib.update_tool_differentiation(tool_id, competitive_differentiation,
                                         needs_verification=competitive_differentiation_needs_verification,
