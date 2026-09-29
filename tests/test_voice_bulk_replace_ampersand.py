@@ -50,9 +50,9 @@ def test_preview_route_shows_diff_and_writes_nothing(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_community("Amp Route Preview Co", "https://amp-route-preview.com",
-                                 "Finance & Operations leaders", "", [])
+                                 "", "", [], local_markets="Finance & Operations leaders")
         item_id = lib.add_voice_review_item(
-            "communities", cid, "demographic", "bare-ampersand", "Finance & Operations leaders",
+            "communities", cid, "local_markets", "bare-ampersand", "Finance & Operations leaders",
         )
     finally:
         lib.close()
@@ -71,7 +71,7 @@ def test_preview_route_shows_diff_and_writes_nothing(env):
         item = lib2.get_voice_review_item(item_id)
     finally:
         lib2.close()
-    assert row["demographic"] == "Finance & Operations leaders", "preview must never write"
+    assert row["local_markets"] == "Finance & Operations leaders", "preview must never write"
     assert item["status"] == "open"
 
 
@@ -79,9 +79,9 @@ def test_preview_route_shows_left_as_is_section_for_unspaced_field(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_community("Amp Route Unspaced Co", "https://amp-route-unspaced.com",
-                                 "A firm doing S&M consulting", "", [])
+                                 "", "", [], local_markets="A firm doing S&M consulting")
         item_id = lib.add_voice_review_item(
-            "communities", cid, "demographic", "bare-ampersand", "A firm doing S&M consulting",
+            "communities", cid, "local_markets", "bare-ampersand", "A firm doing S&M consulting",
         )
     finally:
         lib.close()
@@ -106,9 +106,9 @@ def test_apply_route_writes_and_resolves(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_community("Amp Route Apply Co", "https://amp-route-apply.com",
-                                 "Finance & Operations leaders", "", [])
+                                 "", "", [], local_markets="Finance & Operations leaders")
         item_id = lib.add_voice_review_item(
-            "communities", cid, "demographic", "bare-ampersand", "Finance & Operations leaders",
+            "communities", cid, "local_markets", "bare-ampersand", "Finance & Operations leaders",
         )
     finally:
         lib.close()
@@ -125,7 +125,7 @@ def test_apply_route_writes_and_resolves(env):
         item = lib2.get_voice_review_item(item_id)
     finally:
         lib2.close()
-    assert row["demographic"] == "Finance and Operations leaders"
+    assert row["local_markets"] == "Finance and Operations leaders"
     assert item["status"] == "resolved"
 
 
@@ -133,9 +133,9 @@ def test_apply_route_leaves_unspaced_row_open(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_community("Amp Route Apply Unspaced Co", "https://amp-route-apply-unspaced.com",
-                                 "A firm doing S&M consulting", "", [])
+                                 "", "", [], local_markets="A firm doing S&M consulting")
         item_id = lib.add_voice_review_item(
-            "communities", cid, "demographic", "bare-ampersand", "A firm doing S&M consulting",
+            "communities", cid, "local_markets", "bare-ampersand", "A firm doing S&M consulting",
         )
     finally:
         lib.close()
@@ -150,7 +150,7 @@ def test_apply_route_leaves_unspaced_row_open(env):
         item = lib2.get_voice_review_item(item_id)
     finally:
         lib2.close()
-    assert row["demographic"] == "A firm doing S&M consulting"
+    assert row["local_markets"] == "A firm doing S&M consulting"
     assert item["status"] == "open"
 
 
@@ -179,14 +179,14 @@ def test_ampersand_group_shows_replace_button_only_for_bare_ampersand(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid1 = lib.add_community("Amp Button Co", "https://amp-button.com",
-                                  "Finance & Operations leaders", "", [])
+                                  "", "", [], local_markets="Finance & Operations leaders")
         lib.add_voice_review_item(
-            "communities", cid1, "demographic", "bare-ampersand", "Finance & Operations leaders",
+            "communities", cid1, "local_markets", "bare-ampersand", "Finance & Operations leaders",
         )
         cid2 = lib.add_community("Amp Button Co 2", "https://amp-button-2.com",
-                                  "Widgets & Gadgets only", "", [])
+                                  "", "", [], local_markets="Widgets & Gadgets only")
         lib.add_voice_review_item(
-            "communities", cid2, "demographic", "bare-ampersand", "Widgets & Gadgets only",
+            "communities", cid2, "local_markets", "bare-ampersand", "Widgets & Gadgets only",
         )
         tid1 = lib.add_tool("Buzzword Tool", "This is seamless.", "https://buzzword-tool.example", [], approved=1)
         lib.add_voice_review_item("tools", tid1, "description", "buzzword", "seamless")
@@ -210,9 +210,9 @@ def test_approve_term_input_not_rendered_in_actions_cell_on_first_load(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_community("Amp Panel Co", "https://amp-panel.com",
-                                 "Finance & Operations leaders", "", [])
+                                 "", "", [], local_markets="Finance & Operations leaders")
         item_id = lib.add_voice_review_item(
-            "communities", cid, "demographic", "bare-ampersand", "Finance & Operations leaders",
+            "communities", cid, "local_markets", "bare-ampersand", "Finance & Operations leaders",
         )
     finally:
         lib.close()
@@ -249,9 +249,9 @@ def test_approve_term_panel_is_full_width_and_only_appears_there(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_community("Amp Panel Co 2", "https://amp-panel-2.com",
-                                 "Sales & Marketing team", "", [])
+                                 "", "", [], local_markets="Sales & Marketing team")
         item_id = lib.add_voice_review_item(
-            "communities", cid, "demographic", "bare-ampersand", "Sales & Marketing team",
+            "communities", cid, "local_markets", "bare-ampersand", "Sales & Marketing team",
         )
     finally:
         lib.close()
@@ -295,22 +295,22 @@ def test_every_row_action_button_uses_the_shared_button_class(env):
         # An "open" bare-ampersand row (Edit / Allow once / Approve term
         # + the Approve/Cancel panel).
         cid = lib.add_community("Amp Class Co", "https://amp-class.com",
-                                 "Ops & Finance", "", [])
-        lib.add_voice_review_item("communities", cid, "demographic", "bare-ampersand", "Ops & Finance")
+                                 "", "", [], local_markets="Ops & Finance")
+        lib.add_voice_review_item("communities", cid, "local_markets", "bare-ampersand", "Ops & Finance")
 
         # An auto_corrected row (Accept / Revert).
         tid = lib.add_tool("Class Tool", "A tool.", "https://class-tool.example", [], approved=1)
         lib.log_voice_correction("tools", tid, "description", "A tool — with a dash.", "A tool—with a dash.")
 
         # A seed-disagreement row (Use seed version / Keep mine).
-        cid2 = lib.add_community("Class Seed Co", "https://class-seed.com", "Old text", "", [])
-        lib.add_seed_disagreement_item("communities", cid2, "notes", "Old text", "New seed text")
+        cid2 = lib.add_community("Class Seed Co", "https://class-seed.com", "", "", [], local_markets="Old text")
+        lib.add_seed_disagreement_item("communities", cid2, "local_markets", "Old text", "New seed text")
 
         # A second bare-ampersand row so the group bulk bar (Select all /
         # Accept selected / Allow selected once / Replace & with and)
         # actually renders.
-        cid3 = lib.add_community("Amp Class Co 2", "https://amp-class-2.com", "R&D team", "", [])
-        lib.add_voice_review_item("communities", cid3, "demographic", "bare-ampersand", "R&D team")
+        cid3 = lib.add_community("Amp Class Co 2", "https://amp-class-2.com", "", "", [], local_markets="R&D team")
+        lib.add_voice_review_item("communities", cid3, "local_markets", "bare-ampersand", "R&D team")
     finally:
         lib.close()
 

@@ -7929,9 +7929,10 @@ class Library:
         featured are admin-owned, edited on the community edit page, and never
         touched here — otherwise an admin's edit would get silently reverted on
         the next deploy's re-sync."""
+        name_fixed = self._vf("communities", community_id, "name", name.strip(), source=source)
         self.conn.execute(
             "UPDATE communities SET name=?, updated_at=? WHERE id=?",
-            (name.strip(), _now(), community_id),
+            (name_fixed, _now(), community_id),
         )
         self.conn.commit()
 

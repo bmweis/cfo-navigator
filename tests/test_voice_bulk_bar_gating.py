@@ -221,8 +221,8 @@ def test_no_button_on_the_page_has_a_dashed_border_or_grey_text(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid1 = lib.add_community("Style Check Co", "https://style-check-1.example",
-                                  "Finance & Operations leaders", "", [])
-        lib.add_voice_review_item("communities", cid1, "demographic", "bare-ampersand",
+                                  "", "", [], local_markets="Finance & Operations leaders")
+        lib.add_voice_review_item("communities", cid1, "local_markets", "bare-ampersand",
                                    "Finance & Operations leaders")
         tid1 = lib.add_tool("Style Check Tool One", "Live description one.",
                              "https://style-check-seed-1.example", [], approved=1)
@@ -255,8 +255,8 @@ def test_only_approve_and_save_edit_are_filled_buttons(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_community("Filled Button Co", "https://filled-button.example",
-                                 "Finance & Operations leaders", "", [])
-        lib.add_voice_review_item("communities", cid, "demographic", "bare-ampersand",
+                                 "", "", [], local_markets="Finance & Operations leaders")
+        lib.add_voice_review_item("communities", cid, "local_markets", "bare-ampersand",
                                    "Finance & Operations leaders")
     finally:
         lib.close()
@@ -285,8 +285,8 @@ def test_allow_everywhere_button_and_caption_use_brians_exact_wording(env):
     lib = Library(os.environ["LINKLIB_DB"])
     try:
         cid = lib.add_community("Label Check Co", "https://label-check.example",
-                                 "Finance & Operations leaders", "", [])
-        lib.add_voice_review_item("communities", cid, "demographic", "bare-ampersand",
+                                 "", "", [], local_markets="Finance & Operations leaders")
+        lib.add_voice_review_item("communities", cid, "local_markets", "bare-ampersand",
                                    "Finance & Operations leaders")
     finally:
         lib.close()

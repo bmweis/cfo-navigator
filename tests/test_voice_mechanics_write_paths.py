@@ -121,10 +121,10 @@ def test_update_community_fixes_prose_fields(lib):
     assert row["local_markets"] == FIXED
 
 
-def test_update_community_content_fixes_notes(lib):
+def test_update_community_content_fixes_name(lib):
     cid = lib.add_community("Acme Circle", "https://acme.example", "orig", "Free", [])
-    lib.update_community_content(cid, "Acme Circle", notes=DASH)
-    assert lib.get_community(cid)["notes"] == FIXED
+    lib.update_community_content(cid, DASH)
+    assert lib.get_community(cid)["name"] == FIXED
 
 
 # --- community_profiles ----------------------------------------------------
@@ -138,19 +138,15 @@ def test_upsert_community_profile_fixes_every_prose_field(lib):
         sponsor_relationship_note=DASH, application_friction=DASH,
         cost_value_verdict=DASH, notable_members=DASH,
         public_criticism=DASH, verdict_summary=DASH,
-        business_model=DASH, primary_purpose=DASH, cpe_eligible=DASH,
-        platform_type=DASH, meeting_format=DASH, event_style=DASH,
-        seniority_band=DASH, resources_included=DASH,
-        stage_focus=DASH, jobs_program=DASH, team_or_individual=DASH,
+        business_model=DASH, resources_included=DASH, jobs_program=DASH,
     )
     row = lib.get_community_profile(cid)
     prose_fields = [
         "ideal_member", "anti_fit", "value_prop", "format_reality",
         "engagement_level", "sponsor_relationship_note", "application_friction",
         "cost_value_verdict", "notable_members", "public_criticism",
-        "verdict_summary", "business_model", "primary_purpose", "cpe_eligible",
-        "platform_type", "meeting_format", "event_style", "seniority_band",
-        "resources_included", "stage_focus", "jobs_program", "team_or_individual",
+        "verdict_summary", "business_model",
+        "resources_included", "jobs_program",
     ]
     for field in prose_fields:
         assert row[field] == FIXED, f"{field} was not fixed: {row[field]!r}"
@@ -161,12 +157,11 @@ def test_update_community_profile_research_fields_fixes_passed_fields(lib):
     lib.upsert_community_profile(cid)  # seed a row so the narrow UPDATE has something to hit
     lib.update_community_profile_research_fields(
         cid, notable_members=DASH, anti_fit=DASH, sponsor_relationship_note=DASH,
-        public_criticism=DASH, stage_focus=DASH, jobs_program=DASH,
-        team_or_individual=DASH,
+        public_criticism=DASH, jobs_program=DASH,
     )
     row = lib.get_community_profile(cid)
     for field in (
         "notable_members", "anti_fit", "sponsor_relationship_note",
-        "public_criticism", "stage_focus", "jobs_program", "team_or_individual",
+        "public_criticism", "jobs_program",
     ):
         assert row[field] == FIXED, f"{field} was not fixed: {row[field]!r}"
