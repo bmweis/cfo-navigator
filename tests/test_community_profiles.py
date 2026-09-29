@@ -9,7 +9,7 @@ import sys
 import tempfile, os
 
 import pytest
-from tests.community_edit_helpers import post_profile, get_profile  # noqa: F401
+from tests.community_edit_helpers import post_profile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 

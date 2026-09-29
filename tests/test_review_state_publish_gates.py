@@ -391,7 +391,7 @@ def test_community_profile_unverified_shown_under_review_to_public(env):
     lib.upsert_community_profile(
         c, ideal_member="A drafted ideal-member note.",
         verdict_summary="A drafted bottom-line verdict.",
-        founded_year=2019, cpe_eligible="Yes",
+        cpe_eligible="Yes",
         needs_review=1,
     )
     lib.close()
@@ -400,7 +400,6 @@ def test_community_profile_unverified_shown_under_review_to_public(env):
     assert r.status_code == 200
     assert "A drafted ideal-member note." in r.text
     assert "A drafted bottom-line verdict." in r.text
-    assert "2019" in r.text
     assert "CPE eligible" in r.text
     assert "under review" in r.text
     assert "unverified, visible to visitors" not in r.text
@@ -415,7 +414,7 @@ def test_community_profile_unverified_visible_to_admin_labeled_unverified(env):
     lib.upsert_community_profile(
         c, ideal_member="A drafted ideal-member note.",
         verdict_summary="A drafted bottom-line verdict.",
-        founded_year=2019, cpe_eligible="Yes",
+        cpe_eligible="Yes",
         needs_review=1,
     )
     lib.close()
@@ -425,7 +424,6 @@ def test_community_profile_unverified_visible_to_admin_labeled_unverified(env):
     r = client.get(f"/tools/communities/{slug}")
     assert "A drafted ideal-member note." in r.text
     assert "A drafted bottom-line verdict." in r.text
-    assert "2019" in r.text
     assert "CPE eligible" in r.text
     assert "unverified, visible to visitors" in r.text
 
@@ -499,16 +497,14 @@ def test_compare_shows_unverified_community_profile_under_review_to_public(env):
     b = lib.add_community("Finance Guild", "https://financeguild.example", "Late-stage CFOs",
                            "Free", [], approved=1)
     lib.upsert_community_profile(a, ideal_member="Drafted note for Peer CFOs.",
-                                  founded_year=2020, needs_review=1)
+                                  needs_review=1)
     lib.upsert_community_profile(b, ideal_member="Confirmed note for Finance Guild.",
-                                  founded_year=2015, needs_review=0)
+                                  needs_review=0)
     lib.close()
 
     r = _client(env).get(f"/tools/communities/compare?ids={a},{b}")
     assert "Drafted note for Peer CFOs." in r.text
-    assert "2020" in r.text
     assert "Confirmed note for Finance Guild." in r.text
-    assert "2015" in r.text
     assert "under review" in r.text
     assert "unverified, visible to visitors" not in r.text
 

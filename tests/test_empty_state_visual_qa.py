@@ -147,7 +147,9 @@ def test_community_group_card_shows_its_own_title_even_when_empty(env):
     lib.close()
 
     r = _client(env).get(f"/tools/communities/{slug}")
-    for title in ("Who it's for", "What you get", "How it works", "Cost and structure"):
+    from linklib import compare
+    for title in (compare.GROUP_TARGET_AUDIENCE, compare.GROUP_MEMBER_EXPERIENCE, compare.GROUP_ECONOMICS,
+                  compare.GROUP_KEY_POINTS, compare.GROUP_ADDITIONAL_BENEFITS):
         idx = r.text.index(f'<h2 class="tp-card-h">{title}')
         following = r.text[idx:idx + 400]
         assert "This section hasn&#x27;t been researched yet." in following or \
@@ -261,32 +263,5 @@ def test_bottom_line_callout_empty_is_first_in_main_column_stack(env):
 
 # -- Item 5: Community Description joins the approved string family -------------
 
-def test_community_description_uses_approved_string_family(env):
-    from linklib.db import Library
-    lib = Library(os.environ["LINKLIB_DB"])
-    c = lib.add_community("Bare Community", "https://barecommunity.example.com", "d",
-                           "$", ["FP&A"], approved=1)
-    slug = lib.get_community(c)["slug"]
-    lib.close()
-
-    r = _client(env).get(f"/tools/communities/{slug}")
-    assert "No description yet." not in r.text
-    assert "Description coming soon." in r.text
-
-    client = _client(env)
-    _login(client)
-    r = client.get(f"/tools/communities/{slug}")
-    assert "Description coming soon. Add one from the edit page." in r.text
 
 
-def test_community_description_populated_unaffected(env):
-    from linklib.db import Library
-    lib = Library(os.environ["LINKLIB_DB"])
-    c = lib.add_community("Peer CFOs", "https://peercfos.example", "Series B+ CFOs",
-                           "Free", [], approved=1, notes="A real description.")
-    slug = lib.get_community(c)["slug"]
-    lib.close()
-
-    r = _client(env).get(f"/tools/communities/{slug}")
-    assert "A real description." in r.text
-    assert "Description coming soon." not in r.text

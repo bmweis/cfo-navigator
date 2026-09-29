@@ -147,4 +147,7 @@ def test_communities_public_directory_has_no_admin_delete_affordance(admin_clien
     assert "tool-admin-del" not in body
     render_fn = body.split("function renderCommunities")[1].split("function commFiltered")[0]
     assert "delete" not in render_fn.lower()
-    assert "AUTHED" not in render_fn
+    # AUTHED only picks the wording of the Bottom line "under review" tag
+    # (PR 2a); it never gates an edit/delete control.
+    assert render_fn.count("AUTHED") == 1
+    assert "Edit" not in render_fn

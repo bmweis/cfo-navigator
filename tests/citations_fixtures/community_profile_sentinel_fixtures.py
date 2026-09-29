@@ -141,18 +141,10 @@ _CLEAN_RESPONSE_BLOCKS = [
         "APPLICATION_FRICTION:\nLight vetting, most qualified applicants get in within a week.\n\n"
         "COST_VALUE_VERDICT:\nWorth it for the network alone.\n\n"
         "NOTABLE_MEMBERS:\nNone publicly reported.\n\n"
-        "FOUNDED_YEAR:\n2019\n\n"
         "PUBLIC_CRITICISM:\nNone reported.\n\n"
         "VERDICT_SUMMARY:\nBest for growth-stage operator CFOs, not for public-company controllers.\n\n"
-        "STAGE_FOCUS:\nGrowth-stage\n\n"
         "JOBS_PROGRAM:\nNo\n\n"
-        "TEAM_OR_INDIVIDUAL:\nIndividual\n\n"
-        "SENIORITY_BAND:\nCFO and VP Finance only\n\n"
-        "PRIMARY_PURPOSE:\nPeer learning\n\n"
         "RESOURCES_INCLUDED:\nTemplates, benchmarking data\n\n"
-        "PLATFORM_TYPE:\nSlack\n\n"
-        "MEETING_FORMAT:\nVirtual\n\n"
-        "EVENT_STYLE:\nIntimate small-group\n\n"
         "CPE_ELIGIBLE:\nNo\n\n"
         "CONFIDENCE:\n"
         "IDEAL_MEMBER: true\nANTI_FIT: true\nVALUE_PROP: true\nBUSINESS_MODEL: true\n"
@@ -170,7 +162,6 @@ COMMUNITY_PROFILE_RESPONSES = [
         "expected_fields": {
             "anti_fit": "Early-career finance managers — the discussion assumes a seat at the table already.",
             "value_prop": "Peer benchmarking data and direct vendor introductions.",
-            "founded_year": 2019,
             "verdict_summary": "Best for growth-stage operator CFOs, not for public-company controllers.",
             "cpe_eligible": "No",
         },
@@ -198,16 +189,6 @@ COMMUNITY_PROFILE_RESPONSES = [
             "engagement_level", "sponsor_relationship_note", "application_friction",
             "cost_value_verdict", "notable_members", "public_criticism", "verdict_summary",
         ]},
-        "expected_citation_count": 0,
-    },
-    {
-        "name": "founded_year_non_numeric_coerces_to_none",
-        "blocks": [(
-            "IDEAL_MEMBER:\nSeed-stage operator CFOs.\n\nFOUNDED_YEAR:\nUnclear from the page.",
-            [],
-        )],
-        "expected_fields": {"founded_year": None},
-        "expected_confidence": {},   # not asserted field-by-field for this case
         "expected_citation_count": 0,
     },
     {
