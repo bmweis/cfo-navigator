@@ -14763,8 +14763,9 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     <input type="text" name="description" form="{add_form_id}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
       style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
   </td>
-  <td style="padding:9px 12px;vertical-align:top;">
-    <button type="submit" form="{add_form_id}" class="btn" style="font-size:13px;padding:6px 14px;white-space:nowrap;">+ Add category</button>
+  <td style="padding:9px 12px;"></td>
+  <td style="padding:9px 12px;vertical-align:top;white-space:nowrap;">
+    <button type="submit" form="{add_form_id}" class="btn" style="font-size:12px;padding:5px 12px;white-space:nowrap;">+ Add category</button>
   </td>
 </tr>"""
 
@@ -14800,7 +14801,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
   </td>
 </tr>"""
     if not categories:
-        rows += '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one above.</td></tr>'
+        rows += '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one above.</td></tr>'
     rows = add_row + rows
 
     body = f"""<div class="page page-standard">
@@ -18556,8 +18557,9 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
     <input type="text" name="description" form="{add_form_id}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
       style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
   </td>
-  <td style="padding:9px 12px;vertical-align:top;">
-    <button type="submit" form="{add_form_id}" class="btn" style="font-size:13px;padding:6px 14px;white-space:nowrap;">+ Add category</button>
+  <td style="padding:9px 12px;"></td>
+  <td style="padding:9px 12px;vertical-align:top;white-space:nowrap;">
+    <button type="submit" form="{add_form_id}" class="btn" style="font-size:12px;padding:5px 12px;white-space:nowrap;">+ Add category</button>
   </td>
 </tr>"""
 
@@ -18576,9 +18578,11 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
     <input type="text" name="description" form="{edit_form_id}" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
       style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
   </td>
-  <td style="padding:9px 12px;vertical-align:top;">
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span style="font-size:13px;color:var(--muted);white-space:nowrap;">{c['community_count']} communit{'y' if c['community_count'] == 1 else 'ies'}</span>
+  <td style="padding:9px 12px;vertical-align:middle;white-space:nowrap;">
+    <span style="font-size:13px;color:var(--muted);">{c['community_count']} communit{'y' if c['community_count'] == 1 else 'ies'}</span>
+  </td>
+  <td style="padding:9px 12px;vertical-align:top;white-space:nowrap;">
+    <div style="display:flex;align-items:center;justify-content:flex-start;gap:6px;">
       <button type="submit" form="{edit_form_id}" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
       <form method="post" action="/admin/tools/communities/categories/{cid}/delete" style="margin:0;"
             onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['community_count']} communit{'y' if c['community_count'] == 1 else 'ies'}, which stay in the directory under All, just untagged for this category.');">
@@ -18588,7 +18592,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
   </td>
 </tr>"""
     if not categories:
-        rows += '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one above.</td></tr>'
+        rows += '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one above.</td></tr>'
     rows = add_row + rows
 
     body = f"""<div class="page page-standard">
@@ -18602,11 +18606,12 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
   <div style="overflow-x:auto;">
-  <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;">
+  <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Description</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Communities</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:1%;white-space:nowrap;">Communities</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:1%;white-space:nowrap;">Actions</th>
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
