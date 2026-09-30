@@ -316,3 +316,21 @@ def test_checks_row_is_ok_when_nothing_is_over(admin):
     _full_community()
     html = admin.get("/admin/checks").text
     assert "Profile fields over their limit" in html and "None over" in html
+
+
+def test_refusal_rerender_preserves_submitted_state(admin):
+    """Old main cannot pass this by construction: it answered an over-max save
+    with a bare error page, so none of the submitted text, the hidden citations
+    or the drafted-state markers came back in the body. Uses a field over the
+    NEW max only (801 characters, over 800)."""
+    _cid, slug = _full_community()
+    typed = "t" * 801
+    r = _post(admin, slug, value_prop=typed, ai_drafted_fields="value_prop,ideal_member",
+              ai_drafted_confidence="value_prop:1", ai_drafted_citations='[{"n":1,"url":"https://x.example"}]',
+              ai_drafted_citations_model="model-x")
+    assert r.status_code == 400
+    body = r.text
+    assert typed in body
+    assert 'name="ai_drafted_fields" value="value_prop,ideal_member"' in body
+    assert 'name="ai_drafted_confidence" value="value_prop:1"' in body
+    assert "https://x.example" in body and 'value="model-x"' in body
