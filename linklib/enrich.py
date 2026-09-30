@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 
 from .citations import extract_citations, make_document_block
-from .community_profile import coerce_cpe_eligible
+from .community_profile import generated_cpe
 
 _logger = logging.getLogger(__name__)
 
@@ -1352,9 +1352,14 @@ Write about the community named below. Follow these rules exactly:
 7. RESOURCES_INCLUDED/JOBS_PROGRAM are short factual values (a phrase, not a
    paragraph, well under 50 words)—deliberately brief, distinct from the
    prose fields above.
-8. CPE_ELIGIBLE must be one of "Yes", "No", or "Unclear", optionally with a
-   short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)")—
-   never guess "Yes" without a specific reason to believe it.
+8. CPE_ELIGIBLE must be exactly one of "Yes", "No" or "Unclear", decided
+   only from the page content you were given. "Yes" only when the page
+   states CPE, CPE credit, NASBA sponsorship or an equivalent for this
+   community. "No" only when the page explicitly says there is no CPE;
+   silence is never "No". "Unclear" when the page does not settle it.
+   Never write "Not assessed". An optional note may follow in parentheses,
+   40 characters or fewer, stating the qualifier and not the evidence (e.g.
+   "Yes (NASBA sponsor)"); add one only when it is a real qualifier.
 9. In the CONFIDENCE: block at the very end, for EACH of its twelve lines,
    report true only if the page content (or your own knowledge) gave you a
    real, specific basis for that field's answer; false if you had to draft
@@ -1378,37 +1383,33 @@ name in capital letters followed by a colon, on its own line, then the
 field's value on the following line(s)—in this exact order:
 
 IDEAL_MEMBER: who this community is actually for, including the company
-  stage it fits when that matters (growth-stage, late-stage, public)
-  (stay under about 145 words, roughly 900 characters).
-ANTI_FIT: who should probably skip it (under about 95 words, roughly 600
-  characters).
-VALUE_PROP: the primary thing members get out of it (under about 130 words,
-  roughly 800 characters).
+  stage it fits when that matters (growth-stage, late-stage, public) as a
+  clause, not a second paragraph (under about 95 words, roughly 600
+  characters; this field runs long more often than any other, so write two
+  or three tight sentences and stop).
+ANTI_FIT: who should probably skip it (under about 95 words, roughly 600 characters).
+VALUE_PROP: the primary thing members get out of it (under about 95 words, roughly 600 characters).
 FORMAT_REALITY: shown to readers as "Programming": the actual events,
   cadence and mix of in-person vs. virtual, including the feel of its
-  events (under about 110 words, roughly 700 characters).
+  events (under about 95 words, roughly 600 characters).
 ENGAGEMENT_LEVEL: how much active participation membership expects or
-  rewards (under about 110 words, roughly 700 characters).
+  rewards (under about 95 words, roughly 600 characters).
 SPONSOR_RELATIONSHIP_NOTE: whether sponsor presence (if any) reads as
   value-add or a sales funnel for members—a qualitative read, distinct from
-  the factual sponsor name/sponsorship type recorded elsewhere (under about
-  110 words, roughly 700 characters).
+  the factual sponsor name/sponsorship type recorded elsewhere (under about 95 words, roughly 600 characters).
 BUSINESS_MODEL: how the community structurally sustains itself, e.g. a
   gated, dues-funded peer group insulated from a sales pitch by design, vs.
   a wide-funnel free-to-join community monetized via paid tiers, events, or
   sponsorships. Distinct from SPONSOR_RELATIONSHIP_NOTE above, which judges
   whether a sponsor's presence feels value-add or salesy, not how the
-  community itself makes money (under about 110 words, roughly 700
-  characters).
+  community itself makes money (under about 95 words, roughly 600 characters).
 APPLICATION_FRICTION: the real barrier to entry, not just the access-model
   label (e.g. "invite-only in name, but any VP with a LinkedIn intro gets in")
   (under about 95 words, roughly 600 characters).
 COST_VALUE_VERDICT: whether the price is justified by what members report
-  getting out of it (under about 110 words, roughly 700 characters).
-NOTABLE_MEMBERS: publicly known alumni/members, per rule 3 above (under
-  about 110 words, roughly 700 characters).
-PUBLIC_CRITICISM: the "Trade-offs to weigh," per rule 4 above (under about
-  95 words, roughly 600 characters).
+  getting out of it (under about 95 words, roughly 600 characters).
+NOTABLE_MEMBERS: publicly known alumni/members, per rule 3 above (under about 95 words, roughly 600 characters).
+PUBLIC_CRITICISM: the "Trade-offs to weigh," per rule 4 above (under about 95 words, roughly 600 characters).
 VERDICT_SUMMARY: one short "best for X, not for Y" line (under about 40
   words, roughly 250 characters).
 RESOURCES_INCLUDED: templates, benchmarking data, research, job boards,
@@ -1417,7 +1418,7 @@ RESOURCES_INCLUDED: templates, benchmarking data, research, job boards,
 JOBS_PROGRAM: whether there's a FORMAL job-placement/transition program
   (not just informal networking that happens to help with job searches)—
   or "Unclear" (under about 48 words, roughly 300 characters).
-CPE_ELIGIBLE: "Yes"/"No"/"Unclear", per rule 8 above.
+CPE_ELIGIBLE: "Yes"/"No"/"Unclear" with an optional short note, per rule 8 above.
 CONFIDENCE: exactly twelve lines, one per the long-form/narrative fields
   above that carry real fabrication risk (the short factual/categorical
   fields above are not included—see rule 9), each in the form
@@ -1652,7 +1653,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             verdict_summary=_field("verdict_summary"),
             jobs_program=_field_or_placeholder_empty("jobs_program"),
             resources_included=_field_or_placeholder_empty("resources_included"),
-            cpe_eligible=coerce_cpe_eligible(_field("cpe_eligible")),   # "Unclear" is a real value here — never coerced to ""
+            cpe_eligible=generated_cpe(_field("cpe_eligible")),   # only Yes/No/Unclear can be written by a run, never Not assessed
             low_confidence=low_confidence,
             confidence=_parse_community_confidence(confidence_pairs),
             citations=citations,

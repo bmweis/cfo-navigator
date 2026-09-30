@@ -376,13 +376,13 @@ def test_summary_renders_exactly_two_tables_with_the_right_rows(env, monkeypatch
     site_table = summary[site_start:ai_start]
     ai_table = summary[ai_start:]
 
-    for check in ("Live checks", "Database copy", "Review queue", "Disk space", "Badge refresh"):
+    for check in ("Live checks", "Database copy", "Review queue", "Profile fields over their limit", "Disk space", "Badge refresh"):
         assert check in site_table, check
         assert check not in ai_table, check
     for check in ("Anthropic pricing", "Anthropic models", "Exa pricing"):
         assert check in ai_table, check
         assert check not in site_table, check
-    assert site_table.count("<tr") == 6   # 1 header row + 5 body rows
+    assert site_table.count("<tr") == 7   # 1 header row + 6 body rows
     assert ai_table.count("<tr") == 4     # 1 header row + 3 body rows
 
 
@@ -464,7 +464,7 @@ def test_every_summary_status_dot_has_a_non_empty_aria_label(env, monkeypatch):
     summary = _summary_grid_html(r.text)
     import re
     dots = re.findall(r'<span role="img"[^>]*>', summary)
-    assert len(dots) == 8   # 5 Site checks rows + 3 AI providers rows
+    assert len(dots) == 9   # 6 Site checks rows + 3 AI providers rows
     for dot in dots:
         m = re.search(r'aria-label="([^"]*)"', dot)
         assert m and m.group(1).strip(), dot
@@ -544,7 +544,7 @@ def test_summary_every_row_including_the_last_has_the_ordinary_divider(env, monk
     # 2 header rows + 5 Site checks rows + 3 AI providers rows = 8 body
     # rows all carrying the divider, plus the 2 header rows' own tr has no
     # border-bottom at all (it has a background instead) — so exactly 8.
-    assert summary.count("border-bottom:1px solid var(--line);") == 8
+    assert summary.count("border-bottom:1px solid var(--line);") == 9
 
 
 def test_summary_contains_no_outbound_links_only_internal_section_links(env, monkeypatch):

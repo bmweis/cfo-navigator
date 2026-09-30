@@ -153,3 +153,67 @@ def test_run_sample_narrowed_fields_only_samples_those(monkeypatch, capsys, tmp_
     regen._run_sample(_FakeLib(), [tool], [], "model", "voice", log_path, 5,
                        fields=("competitive_differentiation",))
     assert seen_fields == ["competitive_differentiation"]
+
+
+# -- over-limit drafts (2a.1) ---------------------------------------------------
+
+def test_communities_run_skips_an_over_limit_draft_and_continues(monkeypatch, tmp_path, capsys):
+    """generate_community_profile can return a field over its hard limit, which
+    the library refuses whole. The run must skip that community, report it and
+    carry on with the next one."""
+    from linklib import enrich
+    from linklib.db import Library
+
+    lib = Library(str(tmp_path / "t.db"))
+    a = lib.add_community("Alpha", "https://alpha.example", "d", "Free", ["FP&A"], approved=1)
+    b = lib.add_community("Beta", "https://beta.example", "d", "Free", ["FP&A"], approved=1)
+
+    def _fake(name, url, existing=None, model="", voice_core=""):
+        return enrich.CommunityProfileDraft(
+            ideal_member="x" * 900 if name == "Alpha" else "Fine.", anti_fit="", value_prop="",
+            format_reality="", engagement_level="", sponsor_relationship_note="", business_model="",
+            application_friction="", cost_value_verdict="", notable_members="", public_criticism="",
+            verdict_summary="Best for X.", jobs_program="", cpe_eligible="", resources_included="",
+            low_confidence=False, model="claude-opus-5", input_tokens=1, output_tokens=1, cost_usd=0.01)
+
+    monkeypatch.setattr(regen, "generate_community_profile", _fake)
+    monkeypatch.setattr(regen, "INTER_CALL_SLEEP", 0)
+    monkeypatch.setattr(regen, "INTER_BATCH_SLEEP", 0)
+    regen._SKIPPED_OVER_LIMIT.clear()
+    log = str(tmp_path / "log.jsonl")
+    communities = [lib.get_community(a), lib.get_community(b)]
+    regen._run_communities(lib, communities, "m", "voice", log, True, set())
+    out = capsys.readouterr().out
+    assert not (lib.get_community_profile(a) or {}).get("ideal_member")
+    assert (lib.get_community_profile(b) or {}).get("verdict_summary") == "Best for X."
+    assert len(regen._SKIPPED_OVER_LIMIT) == 1 and "Alpha" in regen._SKIPPED_OVER_LIMIT[0][0]
+    assert "skipped, over limit" in out
+    lib.close()
+
+
+@pytest.mark.parametrize("stored,expected", [
+    ("Yes (NASBA sponsor)", "Yes (NASBA sponsor)"), ("No", "No"), ("", "Unclear"),
+])
+def test_communities_run_keeps_a_stored_cpe_answer(monkeypatch, tmp_path, stored, expected):
+    from linklib import enrich
+    from linklib.db import Library
+
+    lib = Library(str(tmp_path / "t.db"))
+    cid = lib.add_community("Alpha", "https://alpha.example", "d", "Free", ["FP&A"], approved=1)
+    lib.upsert_community_profile(cid, cpe_eligible=stored, ideal_member="Old.", verdict_summary="Old.")
+
+    def _fake(name, url, existing=None, model="", voice_core=""):
+        return enrich.CommunityProfileDraft(
+            ideal_member="New.", anti_fit="", value_prop="", format_reality="", engagement_level="",
+            sponsor_relationship_note="", business_model="", application_friction="",
+            cost_value_verdict="", notable_members="", public_criticism="", verdict_summary="Best for X.",
+            jobs_program="", cpe_eligible="Unclear", resources_included="", low_confidence=False,
+            model="claude-opus-5", input_tokens=1, output_tokens=1, cost_usd=0.01)
+
+    monkeypatch.setattr(regen, "generate_community_profile", _fake)
+    monkeypatch.setattr(regen, "INTER_CALL_SLEEP", 0)
+    monkeypatch.setattr(regen, "INTER_BATCH_SLEEP", 0)
+    regen._run_communities(lib, [lib.get_community(cid)], "m", "voice", str(tmp_path / "l.jsonl"), True, set())
+    prof = lib.get_community_profile(cid)
+    assert prof["cpe_eligible"] == expected and prof["ideal_member"] == "New."
+    lib.close()

@@ -29,7 +29,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from linklib import compare
 from linklib.community_profile import (
     PRODUCTION_LONGEST, PROFILE_LIMITS, RETIRED_COMMUNITY_FIELDS, RETIRED_PROFILE_FIELDS,
-    coerce_cpe_eligible, resolve_cpe_submission,
+    CPE_NOTE_LIMITS, assemble_cpe, coerce_cpe_eligible, cpe_note, resolve_cpe_submission,
 )
 from linklib.db import Library
 
@@ -103,6 +103,7 @@ def _post(client, slug, cid=None, **over):
     for f in PROFILE_LIMITS:
         data[f] = prof.get(f, "") or ""
     data["cpe_eligible"] = compare_token(prof.get("cpe_eligible"))
+    data["cpe_note"] = cpe_note(prof.get("cpe_eligible"))
     data.update(over)
     return client.post(f"/tools/communities/{slug}/edit", data=data, follow_redirects=False)
 
@@ -238,10 +239,21 @@ def test_field_drafted_this_session_keeps_the_fresh_confidence(client):
 
 # -- limits ------------------------------------------------------------------
 
-def test_every_hard_max_clears_the_longest_production_value():
+def test_limits_are_the_2a1_budget():
+    """2a.1 sets the maxes below some stored text on purpose (Brian trims by
+    hand; /admin/checks lists the over-limit fields), so this pins the values
+    instead of the old "above every stored value" rule."""
+    narrative = ("ideal_member", "anti_fit", "value_prop", "format_reality",
+                 "engagement_level", "application_friction", "business_model",
+                 "sponsor_relationship_note", "cost_value_verdict",
+                 "notable_members", "public_criticism")
+    for f in narrative:
+        assert PROFILE_LIMITS[f] == (600, 800), f
+    assert PROFILE_LIMITS["verdict_summary"] == (250, 400)
+    assert PROFILE_LIMITS["resources_included"] == (300, 600)
+    assert PROFILE_LIMITS["jobs_program"] == (300, 600)
     for f, (target, mx) in PROFILE_LIMITS.items():
         assert target < mx, f
-        assert mx > PRODUCTION_LONGEST[f], (f, mx, PRODUCTION_LONGEST[f])
 
 
 def test_over_max_is_refused_whole_naming_the_limit(client):
@@ -283,12 +295,25 @@ def test_cpe_coercion_vocabulary():
     assert coerce_cpe_eligible("") == ""
 
 
-def test_cpe_qualifier_kept_when_word_unchanged_dropped_when_changed():
-    assert resolve_cpe_submission("Yes", "", "Yes (NASBA sponsor)") == "Yes (NASBA sponsor)"
-    assert resolve_cpe_submission("No", "", "Yes (NASBA sponsor)") == "No"
-    assert resolve_cpe_submission("Yes", "Yes (fresh qualifier)", "Yes (old)") == "Yes (fresh qualifier)"
-    assert resolve_cpe_submission("", "", "Yes") == ""
-    assert resolve_cpe_submission("Bogus", "", "Yes") == ""
+def test_cpe_note_parse_and_assemble_round_trip():
+    """No column: the stored string is "Word (note)", parsed on load and
+    assembled on save. Every shape must survive the round trip."""
+    for stored in ("Yes", "No", "Unclear", "Yes (NASBA sponsor)", "No (a (b))",
+                   "Yes ((a) (b))", "Yes (x, y; z)"):
+        assert assemble_cpe(cpe_token_of(stored), cpe_note(stored)) == stored, stored
+    # A legacy value with prose after the word keeps its text as the note.
+    assert cpe_note("Yes - NASBA sponsor") == "NASBA sponsor"
+    assert resolve_cpe_submission("Yes", "NASBA sponsor") == "Yes (NASBA sponsor)"
+    assert resolve_cpe_submission("No", "") == "No"
+    # Not assessed never carries a note, and an empty or invalid word is Not assessed.
+    assert resolve_cpe_submission("", "orphan note") == "Not assessed"
+    assert resolve_cpe_submission("Not assessed", "x") == "Not assessed"
+    assert resolve_cpe_submission("Bogus", "x") == "Not assessed"
+    assert CPE_NOTE_LIMITS == (40, 60)
+
+
+def cpe_token_of(v):
+    return compare_token(v)
 
 
 def test_cpe_save_round_trip_keeps_stored_qualifier(client):
@@ -315,7 +340,7 @@ def test_edit_page_has_five_named_groups_and_no_retired_fields(client):
     html = client.get(f"/tools/communities/{slug}/edit").text
     for g in ("Target audience", "Member experience", "Economics", "Key points", "Additional benefits"):
         assert g in html, g
-    for label in ("Trade-offs to weigh", "Programming", "Specified markets (if known)", "Bottom line",
+    for label in ("Trade-offs to weigh", "Programming", "Specified markets", "Program details", "Bottom line",
                   "Generate full profile"):
         assert label in html, label
     for retired in (*RETIRED_PROFILE_FIELDS, "demographic", "cost_note"):
@@ -336,8 +361,10 @@ def test_group_names_come_from_one_place():
     assert titles == [compare.GROUP_TARGET_AUDIENCE, compare.GROUP_MEMBER_EXPERIENCE,
                       compare.GROUP_ECONOMICS, compare.GROUP_KEY_POINTS,
                       compare.GROUP_ADDITIONAL_BENEFITS]
-    for _t, rows in compare.community_admin_groups():
-        assert len(rows) == 3
+    sizes = {t: len(rows) for t, rows in compare.community_admin_groups()}
+    # CPE eligible moved to Program details (2a.1), so Additional benefits has two.
+    assert sizes[compare.GROUP_ADDITIONAL_BENEFITS] == 2
+    assert all(n >= 2 for n in sizes.values())
 
 
 def test_generated_output_carries_no_retired_field(app_module):
@@ -503,3 +530,24 @@ def test_restore_previous_restores_text_citations_and_drafted_state(client):
         assert page.eval_on_selector("#ai-drafted-fields", "e=>e.value") == ""
         assert not page.is_visible("#cp-restore-btn")
         browser.close()
+
+
+def test_cpe_note_input_lives_inside_the_cpe_control_and_saves(client):
+    cid, slug = _community()
+    html = client.get(f"/tools/communities/{slug}/edit").text
+    assert 'id="cp-cpe_note"' in html and 'value="NASBA sponsor"' in html
+    assert 'data-char-limit="60"' in html and 'data-char-target="40"' in html
+    _post(client, slug, cpe_eligible="No", cpe_note="Not offered")
+    lib = _lib()
+    assert lib.get_community_profile(cid)["cpe_eligible"] == "No (Not offered)"
+    lib.close()
+
+
+def test_cpe_note_over_max_is_refused_and_named_in_the_banner(client):
+    cid, slug = _community()
+    r = _post(client, slug, cpe_note="n" * 61)
+    assert r.status_code == 400
+    assert "CPE eligible note" in r.text and "61 characters, limit 60" in r.text
+    lib = _lib()
+    assert lib.get_community_profile(cid)["cpe_eligible"] == "Yes (NASBA sponsor)"
+    lib.close()

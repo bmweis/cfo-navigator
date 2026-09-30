@@ -239,3 +239,59 @@ def test_requires_communities_or_limit(db):
     lib.close()
     sys.argv = ["enrich_community_profiles", "--db", db]
     assert script.main() == 2
+
+
+# -- over-limit drafts (2a.1) ---------------------------------------------------
+
+def test_over_limit_draft_is_skipped_and_the_run_continues(db, monkeypatch, capsys):
+    """A draft over a field's hard limit is refused whole by the library. The
+    run must skip that community, say why and carry on, not abort."""
+    lib = Library(db)
+    a = _add_community(lib, "Alpha", "https://alpha.example")
+    b = _add_community(lib, "Beta", "https://beta.example")
+    lib.close()
+
+    def _fake(name, url, existing=None, model="", voice_core=""):
+        too_long = "x" * 900 if name == "Alpha" else "Fine."
+        return enrich.CommunityProfileDraft(
+            ideal_member=too_long, anti_fit="", value_prop="", format_reality="", engagement_level="",
+            sponsor_relationship_note="", business_model="", application_friction="",
+            cost_value_verdict="", notable_members="", public_criticism="",
+            verdict_summary="Best for X.", jobs_program="", cpe_eligible="", resources_included="",
+            low_confidence=False, model="claude-opus-5", input_tokens=1, output_tokens=1, cost_usd=0.01)
+
+    monkeypatch.setattr(enrich, "generate_community_profile", _fake)
+    monkeypatch.setattr(sys, "argv", ["x", "--db", db, "--communities", "Alpha,Beta"])
+    monkeypatch.setattr(script.time, "sleep", lambda s: None)
+    rc = script.main()
+    out = capsys.readouterr().out
+    assert rc == 0
+    lib = Library(db)
+    assert not (lib.get_community_profile(a) or {}).get("ideal_member")   # refused whole
+    assert (lib.get_community_profile(b) or {}).get("verdict_summary") == "Best for X."
+    lib.close()
+    assert "skipped, over limit" in out and "Ideal member" in out and "900" in out
+    assert "Skipped, over limit: 1" in out
+
+
+# -- a run never downgrades an existing CPE answer (2a.1) --------------------------
+
+@pytest.mark.parametrize("stored,expected", [
+    ("Yes (NASBA sponsor)", "Yes (NASBA sponsor)"), ("No", "No"), ("Unclear", "Unclear"),
+    ("", "Unclear"), ("Not assessed", "Unclear"),
+])
+def test_script_writes_cpe_only_when_stored_is_not_assessed(db, monkeypatch, capsys, stored, expected):
+    lib = Library(db)
+    cid = _add_community(lib, "Alpha", "https://alpha.example")
+    lib.upsert_community_profile(cid, cpe_eligible=stored, ideal_member="Old text.", verdict_summary="Old.")
+    lib.close()
+    _mock_generate_community_profile(monkeypatch, cpe_eligible="Unclear", ideal_member="New text.")
+    monkeypatch.setattr(sys, "argv", ["x", "--db", db, "--communities", "Alpha", "--force"])
+    monkeypatch.setattr(script.time, "sleep", lambda s: None)
+    script.main()
+    lib = Library(db)
+    prof = lib.get_community_profile(cid)
+    lib.close()
+    assert prof["cpe_eligible"] == expected
+    assert prof["ideal_member"] == "New text."          # everything else is still redrafted
+    assert ("CPE kept as stored" in capsys.readouterr().out) == (stored not in ("", "Not assessed"))
