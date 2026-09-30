@@ -76,8 +76,8 @@ from linklib.voice_review import (
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS, COMMUNITY_PROFILE_FIELDS
 from linklib.community_profile import (
-    CPE_NOTE_LIMITS, CPE_OPTIONS, CPE_STATES, NOT_ASSESSED, PROFILE_LIMITS, cpe_note, cpe_state,
-    cpe_token, resolve_cpe_submission,
+    CPE_NOTE_LIMITS, CPE_STATES, NOT_ASSESSED, PROFILE_LIMITS, cpe_note, cpe_state,
+    resolve_cpe_submission,
 )
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.manual_review_csv import parse_manual_review_corrections_csv
