@@ -11022,7 +11022,11 @@ grid only.
 
 CPE eligible has no new column: the stored value is `Word (note)`, parsed on load and
 assembled on save by `cpe_note` and `assemble_cpe`. The note has a target of 40 and a max of
-60 (`CPE_NOTE_LIMITS`).
+60 (`CPE_NOTE_LIMITS`). It has four states (`CPE_STATES`: Not assessed, Yes, No, Unclear);
+every surface reads it through `cpe_state`, so an empty stored value shows as Not assessed
+and the next save writes "Not assessed". `generated_cpe` is what a generation run may write:
+Yes, No or Unclear only, with a note over 40 characters dropped. Generation grounds CPE on the
+same single fetched page as the other profile fields (no Exa search).
 
 Profile limits are now 600/800 for the eleven narrative fields, 250/400 for Bottom line
 and 300/600 for Resources included and Jobs program. A save with any field over its max is

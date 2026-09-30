@@ -34,6 +34,7 @@ from dataclasses import dataclass, field as _dc_field
 
 from . import gates
 from .enrich import NEEDS_VERIFICATION
+from .community_profile import NOT_ASSESSED
 
 # Approved in Compare Redesign Phase 1 Step 0: CSS line-clamp over a fixed
 # character count, so the clamp adapts to each table's actual column width
@@ -341,7 +342,7 @@ def build_communities_compare(
             (LABEL_COST_BAND, c.get("cost_band")),
             (LABEL_SPONSORSHIP, sponsorship),
             (LABEL_ACCESS, c.get("access")),
-            (LABEL_CPE, profile.get("cpe_eligible")),
+            (LABEL_CPE, profile.get("cpe_eligible") or NOT_ASSESSED),
             (LABEL_FORMAT, c.get("format")),
         ]:
             kf = _key_fact(label, raw_value)

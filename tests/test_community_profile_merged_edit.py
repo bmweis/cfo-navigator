@@ -305,8 +305,10 @@ def test_cpe_note_parse_and_assemble_round_trip():
     assert cpe_note("Yes - NASBA sponsor") == "NASBA sponsor"
     assert resolve_cpe_submission("Yes", "NASBA sponsor") == "Yes (NASBA sponsor)"
     assert resolve_cpe_submission("No", "") == "No"
-    assert resolve_cpe_submission("", "orphan note") == ""
-    assert resolve_cpe_submission("Bogus", "x") == ""
+    # Not assessed never carries a note, and an empty or invalid word is Not assessed.
+    assert resolve_cpe_submission("", "orphan note") == "Not assessed"
+    assert resolve_cpe_submission("Not assessed", "x") == "Not assessed"
+    assert resolve_cpe_submission("Bogus", "x") == "Not assessed"
     assert CPE_NOTE_LIMITS == (40, 60)
 
 

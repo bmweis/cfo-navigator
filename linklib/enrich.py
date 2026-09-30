@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 
 from .citations import extract_citations, make_document_block
-from .community_profile import coerce_cpe_eligible
+from .community_profile import generated_cpe
 
 _logger = logging.getLogger(__name__)
 
@@ -1352,11 +1352,14 @@ Write about the community named below. Follow these rules exactly:
 7. RESOURCES_INCLUDED/JOBS_PROGRAM are short factual values (a phrase, not a
    paragraph, well under 50 words)—deliberately brief, distinct from the
    prose fields above.
-8. CPE_ELIGIBLE must be one of "Yes", "No", or "Unclear", optionally with a
-   short note in parentheses of 40 characters or fewer (e.g. "Yes (NASBA
-   sponsor)"). Add a note only when it is a real qualifier, never a
-   sentence—
-   never guess "Yes" without a specific reason to believe it.
+8. CPE_ELIGIBLE must be exactly one of "Yes", "No" or "Unclear", decided
+   only from the page content you were given. "Yes" only when the page
+   states CPE, CPE credit, NASBA sponsorship or an equivalent for this
+   community. "No" only when the page explicitly says there is no CPE;
+   silence is never "No". "Unclear" when the page does not settle it.
+   Never write "Not assessed". An optional note may follow in parentheses,
+   40 characters or fewer, stating the qualifier and not the evidence (e.g.
+   "Yes (NASBA sponsor)"); add one only when it is a real qualifier.
 9. In the CONFIDENCE: block at the very end, for EACH of its twelve lines,
    report true only if the page content (or your own knowledge) gave you a
    real, specific basis for that field's answer; false if you had to draft
@@ -1415,7 +1418,7 @@ RESOURCES_INCLUDED: templates, benchmarking data, research, job boards,
 JOBS_PROGRAM: whether there's a FORMAL job-placement/transition program
   (not just informal networking that happens to help with job searches)—
   or "Unclear" (under about 48 words, roughly 300 characters).
-CPE_ELIGIBLE: "Yes"/"No"/"Unclear", per rule 8 above.
+CPE_ELIGIBLE: "Yes"/"No"/"Unclear" with an optional short note, per rule 8 above.
 CONFIDENCE: exactly twelve lines, one per the long-form/narrative fields
   above that carry real fabrication risk (the short factual/categorical
   fields above are not included—see rule 9), each in the form
@@ -1650,7 +1653,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             verdict_summary=_field("verdict_summary"),
             jobs_program=_field_or_placeholder_empty("jobs_program"),
             resources_included=_field_or_placeholder_empty("resources_included"),
-            cpe_eligible=coerce_cpe_eligible(_field("cpe_eligible")),   # "Unclear" is a real value here — never coerced to ""
+            cpe_eligible=generated_cpe(_field("cpe_eligible")),   # only Yes/No/Unclear can be written by a run, never Not assessed
             low_confidence=low_confidence,
             confidence=_parse_community_confidence(confidence_pairs),
             citations=citations,

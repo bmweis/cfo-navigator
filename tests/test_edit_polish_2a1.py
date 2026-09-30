@@ -334,3 +334,110 @@ def test_refusal_rerender_preserves_submitted_state(admin):
     assert 'name="ai_drafted_fields" value="value_prop,ideal_member"' in body
     assert 'name="ai_drafted_confidence" value="value_prop:1"' in body
     assert "https://x.example" in body and 'value="model-x"' in body
+
+
+# -- CPE eligible: four states, default Not assessed ---------------------------------
+
+from linklib import enrich  # noqa: E402
+from linklib.community_profile import (  # noqa: E402
+    CPE_OPTIONS, CPE_STATES, NOT_ASSESSED, cpe_state, generated_cpe,
+)
+
+
+def test_cpe_states_and_their_order():
+    assert CPE_STATES == ("Not assessed", "Yes", "No", "Unclear")
+    assert CPE_OPTIONS == ("Yes", "No", "Unclear")   # the only words a run may write
+    assert cpe_state("") == cpe_state(None) == NOT_ASSESSED
+
+
+def test_empty_stored_cpe_loads_as_not_assessed_on_the_edit_page(admin):
+    _cid, slug = _full_community(cpe_eligible="")
+    html = admin.get(f"/tools/communities/{slug}/edit").text
+    sel = re.search(r'<select[^>]*id="cp-cpe_eligible".*?</select>', html, re.S).group(0)
+    assert re.findall(r"<option[^>]*>([^<]*)</option>", sel) == list(CPE_STATES)
+    assert '<option value="Not assessed" selected>' in sel
+    assert re.search(r'<input id="cp-cpe_note"[^>]* hidden', html)   # no note is offered on Not assessed
+
+
+def test_empty_stored_cpe_renders_as_not_assessed_on_the_public_page(visitor):
+    _cid, slug = _full_community(cpe_eligible="")
+    html = visitor.get(f"/tools/communities/{slug}").text
+    row = re.search(r'CPE eligible</span><span class="tp-detail-value">(.*?)</span></div>', html, re.S).group(1)
+    assert "<strong>Not assessed</strong>" in row
+
+
+@pytest.mark.parametrize("stored,word,note", [
+    ("", "Not assessed", ""), ("Not assessed", "Not assessed", ""),
+    ("Yes (NASBA sponsor)", "Yes", "NASBA sponsor"), ("No", "No", ""),
+    ("Unclear (leans No)", "Unclear", "leans No"),
+])
+def test_all_four_states_render_the_same_way_on_public_and_compare(visitor, stored, word, note):
+    cid, slug = _full_community(needs_review=1, cpe_eligible=stored)
+    row = re.search(r'CPE eligible</span><span class="tp-detail-value">(.*?)</span></div>',
+                    visitor.get(f"/tools/communities/{slug}").text, re.S).group(1)
+    assert f"<strong>{word}</strong>" in row and "tp-verify" in row     # bold word, under-review label
+    assert (f"({note})" in row) if note else ("(" not in row.split("</strong>")[1].split("<span class=\"tp-verify")[0])
+    lib = _lib()
+    entities, _ = compare.build_communities_compare(
+        [lib.get_community(cid)], {cid: lib.get_community_profile(cid)}, {}, {})
+    lib.close()
+    fact = {kf.label: kf.value for kf in entities[0].key_facts}[compare.LABEL_CPE]
+    assert fact == (stored or "Not assessed")
+
+
+def test_saving_writes_not_assessed_but_creates_no_profile_for_a_bare_community(admin):
+    cid, slug = _full_community(cpe_eligible="")
+    _post(admin, slug, cpe_eligible="Not assessed", cpe_note="ignored")
+    lib = _lib()
+    assert lib.get_community_profile(cid)["cpe_eligible"] == "Not assessed"
+    bare = lib.add_community(name="Bare", url="https://bare.example", demographic="", cost_band="Free",
+                             categories=["FP&A"], approved=1)
+    bare_slug = lib.get_community(bare)["slug"]
+    lib.close()
+    data = {"name": "Bare", "url": "https://bare.example", "cost_band": "Free", "categories": ["FP&A"],
+            "cpe_eligible": "Not assessed", "cpe_note": ""}
+    for f in PROFILE_LIMITS:
+        data[f] = ""
+    assert admin.post(f"/tools/communities/{bare_slug}/edit", data=data, follow_redirects=False).status_code == 303
+    lib = _lib()
+    assert not lib.get_community_profile(bare)
+    lib.close()
+
+
+def test_a_generation_run_can_only_write_yes_no_or_unclear():
+    assert generated_cpe("Not assessed") == "Unclear"
+    assert generated_cpe("Not assessed (x)") == "Unclear"
+    assert generated_cpe("") == generated_cpe(None) == generated_cpe("garbled") == "Unclear"
+    assert generated_cpe("Yes (NASBA sponsor)") == "Yes (NASBA sponsor)"
+    assert generated_cpe("No") == "No"
+    assert generated_cpe("Yes (" + "n" * 41 + ")") == "Yes"          # a note over 40 is dropped, the word kept
+
+
+@pytest.mark.parametrize("answer,expected", [
+    ("Not assessed", "Unclear"), ("", "Unclear"), ("Yes (NASBA sponsor)", "Yes (NASBA sponsor)"),
+    ("No", "No"), ("Yes (" + "n" * 45 + ")", "Yes"),
+])
+def test_generate_community_profile_never_returns_not_assessed(monkeypatch, answer, expected):
+    from tests.test_community_profile_sentinel_parsing import _mock_anthropic_blocks, _mock_fetch_page
+    _mock_fetch_page(monkeypatch, {"https://chief.com": "Homepage content."})
+    _mock_anthropic_blocks(monkeypatch, [(f"IDEAL_MEMBER:\nSeed-stage CFOs.\n\nCPE_ELIGIBLE:\n{answer}", [])])
+    draft = enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
+    assert draft is not None and draft.cpe_eligible == expected
+    assert draft.cpe_eligible.split(" (")[0] in CPE_OPTIONS
+
+
+def test_generation_prompt_states_the_cpe_rules():
+    p = enrich._COMMUNITY_PROFILE_PROMPT
+    assert 'exactly one of "Yes", "No" or "Unclear"' in p
+    assert 'silence is never "No"' in p
+    assert 'Never write "Not assessed"' in p
+    assert "40 characters or fewer" in p
+
+
+def test_failed_grounding_raises_so_the_stored_cpe_is_left_untouched(monkeypatch):
+    def _nothing(url, exa_enabled=True):
+        return enrich.GroundingFetch(status="failed", reason="HTTP 500")
+    monkeypatch.setattr(enrich, "_fetch_grounding_page", _nothing)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    with pytest.raises(enrich.GroundingUnavailable):
+        enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")

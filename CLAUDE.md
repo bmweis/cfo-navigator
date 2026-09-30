@@ -10733,8 +10733,16 @@ it supersedes the old "`/save` is token-gated" note.
   key facts; `tests/test_edit_polish_2a1.py` is the drift test. The review pill
   now reads "Under review" (was "Needs review") to match the visitor label; this
   shared component also changed the Software page and admin lists.
-  CPE eligible stays one stored string, `Word (note)`, with a note target 40 and
-  max 60 (no column, no split script). Profile prose limits are 600/800 (Bottom
+  CPE eligible has four states in this order: Not assessed, Yes, No, Unclear.
+  Not assessed is the default and what an empty stored value reads as on load;
+  the next save writes "Not assessed" (no migration, nothing changes until a
+  profile is saved). It stays one stored string, `Word (note)`, with a note
+  target 40 and max 60 and no note on Not assessed (no column, no split
+  script). Generation (the Generate button and the two scripts) decides CPE
+  from the single page it already fetches (direct crawl, Exa `/contents` as
+  the fallback; there is no Exa search step in profile generation) and can
+  only write Yes, No or Unclear (`generated_cpe`), never Not assessed; a
+  failed grounding raises and leaves the stored value untouched. Profile prose limits are 600/800 (Bottom
   line 250/400, Resources included and Jobs program 300/600); 23 profiles over
   800 are a hand-trim to-do, listed on `/admin/checks` as a warning, not a merge
   gate. An over-max save re-renders the page from the submitted values (status

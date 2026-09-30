@@ -76,7 +76,8 @@ from linklib.voice_review import (
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS, COMMUNITY_PROFILE_FIELDS
 from linklib.community_profile import (
-    CPE_NOTE_LIMITS, CPE_OPTIONS, PROFILE_LIMITS, cpe_note, cpe_token, resolve_cpe_submission,
+    CPE_NOTE_LIMITS, CPE_OPTIONS, CPE_STATES, NOT_ASSESSED, PROFILE_LIMITS, cpe_note, cpe_state,
+    cpe_token, resolve_cpe_submission,
 )
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.manual_review_csv import parse_manual_review_corrections_csv
@@ -12273,17 +12274,15 @@ def tools_community_profile(request: Request, slug: str):
         sponsorship += f" ({community['sponsor_name']})"
     # CPE eligible lives on the profile, so it carries the same "under review"
     # label the group cards carry while the profile is pending (2a.1).
+    # Every profile shows one of the four states; an empty stored value reads
+    # as Not assessed, in the same bold word plus muted note form (2a.1).
     cpe_value = (_display_profile.get("cpe_eligible") or "").strip()
-    cpe_html = ""
-    if cpe_value:
-        cpe_tok = cpe_token(cpe_value)
-        cpe_note = cpe_value[len(cpe_tok):].strip() if cpe_tok else ""
-        if cpe_tok and cpe_note.startswith("(") and cpe_note.endswith(")"):
-            cpe_html = (f'<strong>{_esc(cpe_tok)}</strong> '
-                        f'<span style="color:var(--muted);">{_esc(cpe_note)}</span>')
-        else:
-            cpe_html = _esc(cpe_value)
-        cpe_html += _profile_badge
+    cpe_tok = cpe_state(cpe_value)
+    cpe_note_text = cpe_note(cpe_value)
+    cpe_html = f'<strong>{_esc(cpe_tok)}</strong>'
+    if cpe_note_text:
+        cpe_html += f' <span style="color:var(--muted);">({_esc(cpe_note_text)})</span>'
+    cpe_html += _profile_badge
     _values = {
         compare.LABEL_REACH: _verify_html(_community_geo_line(community), "tp-verify-inline"),
         compare.LABEL_COST_BAND: _verify_html(community.get("cost_band") or "", "tp-verify-inline"),
@@ -12878,7 +12877,7 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
   });
   var noteEl = document.getElementById('cp-cpe_note');
   var cpeSel = document.getElementById('cp-cpe_eligible');
-  if (cpeSel && cpeSel.value) existing['cpe_eligible'] = cpeSel.value + (noteEl && noteEl.value ? ' (' + noteEl.value + ')' : '');
+  if (cpeSel && cpeSel.value && cpeSel.value !== 'Not assessed') existing['cpe_eligible'] = cpeSel.value + (noteEl && noteEl.value ? ' (' + noteEl.value + ')' : '');
   try {
     var r = await fetch('/admin/tools/communities/generate-profile', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -12898,7 +12897,9 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
       if (k === 'cpe_eligible') {
         // The dropdown carries the leading word; the note beside it carries
         // the parenthetical, and a save assembles them back into one value.
-        el.value = cpLeadingWord(v);
+        // A run only ever returns Yes, No or Unclear; anything else leaves the
+        // current choice alone (never Not assessed from a generation run).
+        if (cpLeadingWord(v)) el.value = cpLeadingWord(v);
         var mNote = /\\(([^]*)\\)\\s*$/.exec(v || '');
         if (noteEl) {
           noteEl.value = mNote ? mNote[1].trim() : '';
@@ -17549,31 +17550,44 @@ _PROGRAM_CTL_HEIGHT_PX = 47
 
 
 def _community_cpe_control_html(stored: str | None) -> str:
-    """CPE eligible: a dropdown of the leading word (Not assessed, Yes, No,
-    Unclear) with a short optional note beside it, in the Program details grid
-    (2a.1). There is no column for the note: the stored value is "Yes (note)",
-    parsed on load and assembled on save (linklib.community_profile). The note
-    carries the same two-tier counter as the prose fields, target 40, max 60,
-    and is part of this control rather than a second labeled field, so admin
-    and public share one name for it."""
+    """CPE eligible: a dropdown of four states in this order (Not assessed,
+    Yes, No, Unclear) with a short optional note beside it, in the Program
+    details grid (2a.1). An empty stored value loads as Not assessed and the
+    next save writes "Not assessed". There is no column for the note: the stored
+    value is "Word (note)", parsed on load and assembled on save
+    (linklib.community_profile). The note has the same two-tier counter as the
+    prose fields, target 40, max 60, and is hidden while the state is Not
+    assessed (a note is not offered there). It is part of this control, not a
+    second labeled field, so admin and public share one name for it."""
     stored = stored or ""
-    token = cpe_token(stored)
+    state = cpe_state(stored)
     opts = "".join(
-        f'<option value="{_esc(v)}"{" selected" if v == token else ""}>{_esc(t)}</option>'
-        for v, t in [("", "Not assessed")] + [(o, o) for o in CPE_OPTIONS]
+        f'<option value="{_esc(o)}"{" selected" if o == state else ""}>{_esc(o)}</option>'
+        for o in CPE_STATES
     )
     target, limit = CPE_NOTE_LIMITS
     attrs, counter = _char_budget(limit, cpe_note(stored), "cp-cpe_note", target=target)
     box = ("box-sizing:border-box;height:var(--program-ctl-h);border:1px solid var(--line);"
            "border-radius:10px;font:inherit;font-size:15px;background:#fff;")
+    hidden = " hidden" if state == NOT_ASSESSED else ""
     return f"""    <div>
       <label for="cp-cpe_eligible" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_CPE)}</label>
       <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:8px;">
         <select id="cp-cpe_eligible" name="cpe_eligible" style="width:100%;padding:0 10px;{box}">{opts}</select>
-        <input id="cp-cpe_note" name="cpe_note" type="text" value="{_esc(cpe_note(stored))}" {attrs}
+        <input id="cp-cpe_note" name="cpe_note" type="text" value="{_esc(cpe_note(stored))}" {attrs}{hidden}
           placeholder="Short note, for example NASBA sponsor" style="width:100%;padding:0 12px;{box}">
       </div>
-      {counter}
+      <div id="cp-cpe_counter"{hidden}>{counter}</div>
+      <script>(function(){{
+        var sel = document.getElementById('cp-cpe_eligible'), note = document.getElementById('cp-cpe_note'),
+            box = document.getElementById('cp-cpe_counter');
+        function sync() {{
+          var off = sel.value === 'Not assessed';
+          if (off && note.value) {{ note.value = ''; note.dispatchEvent(new Event('input', {{bubbles: true}})); }}
+          note.hidden = off; box.hidden = off;
+        }}
+        sel.addEventListener('change', sync); sel.addEventListener('input', sync); sync();
+      }})();</script>
     </div>"""
 
 
@@ -19123,7 +19137,7 @@ async def admin_communities_edit_submit(request: Request, slug: str):
         cpe = resolve_cpe_submission(form.get("cpe_eligible"), form.get("cpe_note"))
         ai_drafted = _ai_drafted_field_names(form)
         profile_ai_drafted = bool(ai_drafted & set(_COMMUNITY_PROFILE_FIELD_IDS))
-        has_profile_content = bool(existing_profile) or cpe or any(texts.values())
+        has_profile_content = bool(existing_profile) or cpe != NOT_ASSESSED or any(texts.values())
 
         lib.update_community(community_id, name=name, url=url, demographic=None,
                              cost_band=cost_band, categories=categories, cost_note=None,

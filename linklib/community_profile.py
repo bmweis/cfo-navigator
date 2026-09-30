@@ -65,15 +65,46 @@ PRODUCTION_LONGEST: dict[str, int] = {
     "jobs_program": 266,
 }
 
+# CPE eligible has four states (2a.1). Not assessed means nobody has researched
+# it: the default for a new profile and for any empty stored value (read as Not
+# assessed on load, written as "Not assessed" on the next save). Unclear means it
+# was researched and the evidence does not settle it. Yes, No and Unclear may
+# carry a short note; Not assessed never does. A generation run can only write
+# CPE_OPTIONS (Yes, No, Unclear), never Not assessed.
+NOT_ASSESSED = "Not assessed"
 CPE_OPTIONS = ("Yes", "No", "Unclear")
-_CPE_FULL = re.compile(r"^(Yes|No|Unclear)( \(.{1,120}\))?$", re.DOTALL)
-_CPE_LEAD = re.compile(r"^\s*(Yes|No|Unclear)\b", re.IGNORECASE)
+CPE_STATES = (NOT_ASSESSED,) + CPE_OPTIONS
+_CPE_FULL = re.compile(r"^(Not assessed|(Yes|No|Unclear)( \(.{1,120}\))?)$", re.DOTALL)
+_CPE_LEAD = re.compile(r"^\s*(Not assessed|Yes|No|Unclear)\b", re.IGNORECASE)
 
 
 def cpe_token(value: str | None) -> str:
-    """The leading Yes/No/Unclear of a stored CPE value ("" when it has none)."""
+    """The leading word of a stored CPE value: Not assessed, Yes, No or Unclear
+    ("" when it has none)."""
     m = _CPE_LEAD.match(value or "")
     return m.group(1).capitalize() if m else ""
+
+
+def cpe_state(value: str | None) -> str:
+    """The state a stored value shows as: its leading word, or Not assessed
+    when it is empty or has none. Every surface reads CPE through this."""
+    return cpe_token(value) or NOT_ASSESSED
+
+
+def generated_cpe(value: str | None) -> str:
+    """What a generation run may write: Yes, No or Unclear, plus a note of 40
+    characters or fewer. A missing, garbled or Not assessed answer becomes
+    Unclear, because this is only reached after the page was retrieved but did
+    not settle it; a longer note is dropped rather than cut mid-claim. A run
+    never writes Not assessed."""
+    v = coerce_cpe_eligible(value)
+    tok = cpe_token(v)
+    if tok not in CPE_OPTIONS:
+        return "Unclear"
+    note = cpe_note(v)
+    if len(note) > CPE_NOTE_LIMITS[0]:
+        note = ""
+    return assemble_cpe(tok, note)
 
 
 def coerce_cpe_eligible(value: str | None) -> str:
@@ -117,7 +148,7 @@ def cpe_note(value: str | None) -> str:
     example "Yes - NASBA sponsor") returns that prose, so nothing stored is
     hidden from the admin or lost when the page is saved."""
     v = (value or "").strip()
-    if not cpe_token(v):
+    if cpe_token(v) not in CPE_OPTIONS:
         return ""
     m = _CPE_NOTE_PAREN.match(v)
     if m:
@@ -127,10 +158,11 @@ def cpe_note(value: str | None) -> str:
 
 def assemble_cpe(token: str | None, note: str | None) -> str:
     """Build the stored value from the dropdown word and the note: a bare word,
-    or "Word (note)". No word (Not assessed) stores nothing, note or not."""
+    or "Word (note)". Not assessed (or no valid word) stores "Not assessed" and
+    never a note."""
     t = (token or "").strip()
     if t not in CPE_OPTIONS:
-        return ""
+        return NOT_ASSESSED
     n = _clean_note(note)
     return f"{t} ({n})" if n else t
 
