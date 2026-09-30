@@ -18984,7 +18984,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
   <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Turns on automatically any time this profile is AI-drafted or refreshed, or you can flag it yourself anytime.</p>
   {_review_line_html}
 </div>"""
-    _generate_panel_html = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;">
+    _generate_panel_html = """<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;">
   <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Profile draft</h2>
   <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;">
     <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'cp-gen-status', 'cp-gen-err', 'gen-host-community-profile')">Generate full profile</button>
@@ -19109,7 +19109,7 @@ async def admin_communities_edit_submit(request: Request, slug: str):
         n = Library.text_budget_length(texts[f])
         if n > limit:
             over.append((_COMMUNITY_PROFILE_LABELS[f], n, limit))
-    _cpe_n = Library.text_budget_length(cpe_note_posted := (form.get("cpe_note") or ""))
+    _cpe_n = Library.text_budget_length(form.get("cpe_note") or "")
     if _cpe_n > CPE_NOTE_LIMITS[1]:
         over.append((f"{compare.LABEL_CPE} note", _cpe_n, CPE_NOTE_LIMITS[1]))
     if over:
