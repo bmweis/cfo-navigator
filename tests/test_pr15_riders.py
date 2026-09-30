@@ -101,10 +101,10 @@ def test_software_categories_table_uses_the_narrow_bucket(env):
     assert "min-width:620px" not in body
 
 
-def test_community_categories_table_uses_the_narrow_bucket(env):
+def test_community_categories_table_uses_the_medium_bucket(env):
     admin = _admin_client(env)
     body = admin.get("/admin/tools/communities/categories").text
-    assert f"min-width:{_TABLE_FLOOR_NARROW}px" in body
+    assert f"min-width:{_TABLE_FLOOR_MEDIUM}px" in body
     assert "min-width:620px" not in body
 
 
