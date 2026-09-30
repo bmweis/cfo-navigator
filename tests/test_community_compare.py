@@ -143,7 +143,7 @@ def test_directory_card_has_compare_checkbox(env):
 
 def test_compare_groups_fields_into_the_four_profile_page_themes(env):
     """The old flat 11-row list is gone — Compare now groups the same
-    profile fields into the identical 4 themed sections the profile page's
+    profile fields into the identical 5 themed sections the profile page's
     own COMMUNITY_PROFILE_GROUPS uses, plus a Bottom line section."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
@@ -152,8 +152,10 @@ def test_compare_groups_fields_into_the_four_profile_page_themes(env):
     lib.close()
 
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
-    for title in ("Key facts", "Bottom line", "Who it's for", "What you get", "How it works",
-                  "Cost and structure", "Similar communities"):
+    from linklib import compare
+    for title in ("Key facts", "Bottom line", compare.GROUP_TARGET_AUDIENCE, compare.GROUP_MEMBER_EXPERIENCE,
+                  compare.GROUP_ECONOMICS, compare.GROUP_KEY_POINTS, compare.GROUP_ADDITIONAL_BENEFITS,
+                  "Similar communities"):
         assert f'cc-section" colspan="3"><span class="cmp-sticky-label">{title}</span></td>' in r.text, title
 
 

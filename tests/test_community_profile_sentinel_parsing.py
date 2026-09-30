@@ -169,8 +169,6 @@ def test_placeholder_null_words_coerce_to_empty_string_except_cpe_eligible(monke
         "IDEAL_MEMBER:\nSeed-stage CFOs.\n\n"
         "NOTABLE_MEMBERS:\nNone publicly reported.\n\n"
         "PUBLIC_CRITICISM:\nNone reported.\n\n"
-        "STAGE_FOCUS:\nUnclear\n\n"
-        "PLATFORM_TYPE:\nUnclear\n\n"
         "RESOURCES_INCLUDED:\nNo\n\n"
         "CPE_ELIGIBLE:\nUnclear",
         [],
@@ -180,8 +178,6 @@ def test_placeholder_null_words_coerce_to_empty_string_except_cpe_eligible(monke
     assert draft is not None
     assert draft.notable_members == ""
     assert draft.public_criticism == ""
-    assert draft.stage_focus == ""
-    assert draft.platform_type == ""
     assert draft.resources_included == "No"   # a real value, never a placeholder
     assert draft.cpe_eligible == "Unclear"     # NOT coerced — a legitimate literal value here
 

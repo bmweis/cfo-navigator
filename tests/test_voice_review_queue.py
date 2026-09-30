@@ -212,14 +212,14 @@ def test_update_original_content_logs_a_correction(lib):
 
 
 def test_add_voice_review_item_and_exception_flow(lib):
-    item_id = lib.add_voice_review_item("communities", 5, "demographic", "bare-ampersand", "Bain & Company")
+    item_id = lib.add_voice_review_item("communities", 5, "local_markets", "bare-ampersand", "Bain & Company")
     assert item_id
     assert lib.count_open_voice_review_items() == 1
     # Accept as exception marks it permanently — future adds for the exact
     # same (table, row_id, column, rule) are skipped.
     assert lib.resolve_voice_review_item(item_id, "accept_exception")
-    assert lib.is_voice_exception("communities", 5, "demographic", "bare-ampersand")
-    second = lib.add_voice_review_item("communities", 5, "demographic", "bare-ampersand", "Bain & Company")
+    assert lib.is_voice_exception("communities", 5, "local_markets", "bare-ampersand")
+    second = lib.add_voice_review_item("communities", 5, "local_markets", "bare-ampersand", "Bain & Company")
     assert second == 0
     assert lib.count_open_voice_review_items() == 0
 
@@ -228,7 +228,7 @@ def test_accept_exception_writes_an_allowed_once_resolution_note(lib):
     """PR #595 follow-up: "Allow once" (accept_exception) used to leave
     resolution_note blank — the note now says plainly what happened, in
     the current button's own words, not the old "Allow here" wording."""
-    item_id = lib.add_voice_review_item("communities", 5, "demographic", "bare-ampersand", "Bain & Company")
+    item_id = lib.add_voice_review_item("communities", 5, "local_markets", "bare-ampersand", "Bain & Company")
     lib.resolve_voice_review_item(item_id, "accept_exception")
     item = lib.get_voice_review_item(item_id)
     assert item["resolution_note"] == "Allowed once."
@@ -239,9 +239,9 @@ def test_exception_is_row_scoped_not_global(lib):
     finding on a DIFFERENT record — this is a per-record exception, never a
     global rule change (that's what the source-side AMPERSAND_NAMES/
     AMPERSAND_ACRONYMS allowlists are for)."""
-    item_id = lib.add_voice_review_item("communities", 5, "demographic", "bare-ampersand", "Bain & Company")
+    item_id = lib.add_voice_review_item("communities", 5, "local_markets", "bare-ampersand", "Bain & Company")
     lib.resolve_voice_review_item(item_id, "accept_exception")
-    other = lib.add_voice_review_item("communities", 6, "demographic", "bare-ampersand", "Ernst & Young")
+    other = lib.add_voice_review_item("communities", 6, "local_markets", "bare-ampersand", "Ernst & Young")
     assert other != 0
     assert lib.count_open_voice_review_items() == 1
 
@@ -355,17 +355,17 @@ def test_seed_divergence_no_overwrite(lib):
     longer gets silently overwritten; it's queued as a 'seed-disagreement'
     review item instead, via `add_seed_disagreement_item`, and the live
     value is left untouched until an admin explicitly resolves it."""
-    cid = lib.add_community("Test Community", "https://example-comm.com", "Finance leaders", "", [], notes="Original notes")
+    cid = lib.add_community("Test Community", "https://example-comm.com", "", "", [], local_markets="Original notes")
     community = lib.get_community(cid)
-    assert community["notes"] == "Original notes"
+    assert community["local_markets"] == "Original notes"
 
     seed_value = "Seed-proposed notes text"
-    new_id = lib.add_seed_disagreement_item("communities", cid, "notes", community["notes"], seed_value)
+    new_id = lib.add_seed_disagreement_item("communities", cid, "local_markets", community["local_markets"], seed_value)
     assert new_id
 
     # The live value must be completely untouched — no overwrite happened.
     community_after = lib.get_community(cid)
-    assert community_after["notes"] == "Original notes"
+    assert community_after["local_markets"] == "Original notes"
 
     item = lib.get_voice_review_item(new_id)
     assert item["rule"] == "seed-disagreement"
@@ -379,18 +379,18 @@ def test_dedupe_across_repeated_boots(lib):
     replaces: calling `add_seed_disagreement_item` again for the identical
     (table, row_id, column) — simulating a second app boot / re-sync pass
     against the same divergence — must NOT queue a duplicate open row."""
-    cid = lib.add_community("Test Community 2", "https://example-comm2.com", "Finance leaders", "", [], notes="Stored A")
-    first_id = lib.add_seed_disagreement_item("communities", cid, "notes", "Stored A", "Seed B")
+    cid = lib.add_community("Test Community 2", "https://example-comm2.com", "", "", [], local_markets="Stored A")
+    first_id = lib.add_seed_disagreement_item("communities", cid, "local_markets", "Stored A", "Seed B")
     assert first_id
     assert lib.count_open_voice_review_items() == 1
 
     # A second "boot" proposing the SAME divergence must be a no-op.
-    second_id = lib.add_seed_disagreement_item("communities", cid, "notes", "Stored A", "Seed B")
+    second_id = lib.add_seed_disagreement_item("communities", cid, "local_markets", "Stored A", "Seed B")
     assert second_id == 0
     assert lib.count_open_voice_review_items() == 1
 
     # Even a THIRD boot, still the same divergence, stays deduped.
-    third_id = lib.add_seed_disagreement_item("communities", cid, "notes", "Stored A", "Seed B")
+    third_id = lib.add_seed_disagreement_item("communities", cid, "local_markets", "Stored A", "Seed B")
     assert third_id == 0
     assert lib.count_open_voice_review_items() == 1
 
@@ -398,9 +398,9 @@ def test_dedupe_across_repeated_boots(lib):
 def test_use_seed_applies_and_resolves(lib):
     """Part 1 — the 'use_seed' resolution action applies the seed's own
     proposed text back to the live row and resolves the queue item."""
-    cid = lib.add_community("Test Community 3", "https://example-comm3.com", "Finance leaders", "", [], notes="Stored value")
+    cid = lib.add_community("Test Community 3", "https://example-comm3.com", "", "", [], local_markets="Stored value")
     seed_value = "Seed's proposed value"
-    item_id = lib.add_seed_disagreement_item("communities", cid, "notes", "Stored value", seed_value)
+    item_id = lib.add_seed_disagreement_item("communities", cid, "local_markets", "Stored value", seed_value)
 
     item = lib.get_voice_review_item(item_id)
     from webapp.app import _resolve_voice_item_action
@@ -408,7 +408,7 @@ def test_use_seed_applies_and_resolves(lib):
     assert ok
 
     community = lib.get_community(cid)
-    assert community["notes"] == seed_value
+    assert community["local_markets"] == seed_value
 
     resolved_item = lib.get_voice_review_item(item_id)
     assert resolved_item["status"] == "resolved"
@@ -419,8 +419,8 @@ def test_keep_mine_preserves_and_prevents_reopen(lib):
     stored value untouched (writes NOTHING back) and marks this exact
     location a permanent exception, so the identical divergence can never
     reopen on a future sync/boot."""
-    cid = lib.add_community("Test Community 4", "https://example-comm4.com", "Finance leaders", "", [], notes="My own notes")
-    item_id = lib.add_seed_disagreement_item("communities", cid, "notes", "My own notes", "Seed's version")
+    cid = lib.add_community("Test Community 4", "https://example-comm4.com", "", "", [], local_markets="My own notes")
+    item_id = lib.add_seed_disagreement_item("communities", cid, "local_markets", "My own notes", "Seed's version")
 
     item = lib.get_voice_review_item(item_id)
     from webapp.app import _resolve_voice_item_action
@@ -429,14 +429,14 @@ def test_keep_mine_preserves_and_prevents_reopen(lib):
 
     # The stored value must be completely untouched.
     community = lib.get_community(cid)
-    assert community["notes"] == "My own notes"
+    assert community["local_markets"] == "My own notes"
 
     resolved_item = lib.get_voice_review_item(item_id)
     assert resolved_item["status"] == "exception"
-    assert lib.is_voice_exception("communities", cid, "notes", "seed-disagreement")
+    assert lib.is_voice_exception("communities", cid, "local_markets", "seed-disagreement")
 
     # A future "boot" proposing the same divergence must never reopen it.
-    reopened = lib.add_seed_disagreement_item("communities", cid, "notes", "My own notes", "Seed's version")
+    reopened = lib.add_seed_disagreement_item("communities", cid, "local_markets", "My own notes", "Seed's version")
     assert reopened == 0
     assert lib.count_open_voice_review_items() == 0
 
@@ -479,12 +479,12 @@ def test_reconciliation_tags_new_rows_as_scan_not_script(lib):
     is a periodic background pass, a genuinely different mechanism, and the
     two were indistinguishable under the old shared label."""
     lib.add_community("Amp Scan Label Co", "https://amp-scan-label.com",
-                       "Widgets & Gadgets clients", "", [])
+                       "", "", [], local_markets="Widgets & Gadgets clients")
     result = lib.reconcile_voice_review_queue()
     assert result["added"] >= 1
     open_items = lib.list_voice_review_queue(status="open")
     hits = [i for i in open_items
-            if i["table_name"] == "communities" and i["column_name"] == "demographic"]
+            if i["table_name"] == "communities" and i["column_name"] == "local_markets"]
     assert hits
     assert hits[0]["source"] == "scan"
     assert hits[0]["source"] != "script"
@@ -497,7 +497,7 @@ def test_backfill_script_still_tags_rows_as_script(lib):
     caller doesn't explicitly pass source, exactly like
     scripts/backfill_voice_review_queue.py's own call."""
     item_id = lib.add_voice_review_item(
-        "communities", 999, "demographic", "bare-ampersand", "Widgets & Gadgets",
+        "communities", 999, "local_markets", "bare-ampersand", "Widgets & Gadgets",
     )
     assert item_id
     item = lib.get_voice_review_item(item_id)
@@ -509,11 +509,11 @@ def test_finding_appears_without_backfill(lib):
     the DB via an ordinary write no longer needs a manual backfill-script
     run to reach the queue; `reconcile_voice_review_queue()` (the periodic
     background sync) picks it up on its own."""
-    lib.add_community("Amp Test Co", "https://amp-test.com", "Widgets & Gadgets clients", "", [])
+    lib.add_community("Amp Test Co", "https://amp-test.com", "", "", [], local_markets="Widgets & Gadgets clients")
     result = lib.reconcile_voice_review_queue()
     assert result["added"] >= 1
     open_items = lib.list_voice_review_queue(status="open")
-    hits = [i for i in open_items if i["table_name"] == "communities" and i["column_name"] == "demographic"]
+    hits = [i for i in open_items if i["table_name"] == "communities" and i["column_name"] == "local_markets"]
     assert hits, "reconcile_voice_review_queue did not add a finding for a live ampersand violation with no backfill run"
 
 
@@ -522,7 +522,7 @@ def test_edit_page_fix_auto_closes_queue_row(lib):
     edit page (bypassing the queue's own resolve actions entirely) makes it
     disappear from the live scan, and the next reconciliation pass closes
     the now-stale open queue row instead of leaving it open forever."""
-    cid = lib.add_community("Amp Test Co 2", "https://amp-test2.com", "Widgets & Gadgets clients", "", [])
+    cid = lib.add_community("Amp Test Co 2", "https://amp-test2.com", "", "", [], local_markets="Widgets & Gadgets clients")
     lib.reconcile_voice_review_queue()
     open_before = [i for i in lib.list_voice_review_queue(status="open")
                    if i["table_name"] == "communities" and i["row_id"] == str(cid)]
@@ -533,7 +533,7 @@ def test_edit_page_fix_auto_closes_queue_row(lib):
     # submit path) writes demographic; update_community_content deliberately
     # never touches demographic at all (admin-owned, see its own docstring).
     lib.update_community(cid, "Amp Test Co 2", "https://amp-test2.com",
-                          "Widgets and Gadgets clients", "", [])
+                          None, "", [], local_markets="Widgets and Gadgets clients")
 
     result = lib.reconcile_voice_review_queue()
     assert result["closed"] >= 1
@@ -550,8 +550,8 @@ def test_scan_count_equals_queue_open_count(lib):
     disagreement this whole mechanism was built to close)."""
     from linklib.voice_db_scan import scan_db_copy
 
-    lib.add_community("Amp Test Co 3", "https://amp-test3.com", "Widgets & Gadgets only", "", [])
-    lib.add_community("Amp Test Co 4", "https://amp-test4.com", "Doodads & Sprockets only", "", [])
+    lib.add_community("Amp Test Co 3", "https://amp-test3.com", "", "", [], local_markets="Widgets & Gadgets only")
+    lib.add_community("Amp Test Co 4", "https://amp-test4.com", "", "", [], local_markets="Doodads & Sprockets only")
     lib.reconcile_voice_review_queue()
 
     live = scan_db_copy(lib)
@@ -600,9 +600,9 @@ def test_replace_spaced_ampersands_unit():
 
 def test_preview_ampersand_replacement_shows_before_after_without_writing(lib):
     cid = lib.add_community("Amp Preview Co", "https://amp-preview.com",
-                             "Finance & Operations leaders", "", [])
+                             "", "", [], local_markets="Finance & Operations leaders")
     item_id = lib.add_voice_review_item(
-        "communities", cid, "demographic", "bare-ampersand", "Finance & Operations leaders",
+        "communities", cid, "local_markets", "bare-ampersand", "Finance & Operations leaders",
     )
     preview = lib.preview_ampersand_replacement(item_id)
     assert preview is not None
@@ -612,22 +612,22 @@ def test_preview_ampersand_replacement_shows_before_after_without_writing(lib):
 
     # Nothing was written by preview alone.
     row = lib.get_community(cid)
-    assert row["demographic"] == "Finance & Operations leaders"
+    assert row["local_markets"] == "Finance & Operations leaders"
     item = lib.get_voice_review_item(item_id)
     assert item["status"] == "open"
 
 
 def test_apply_ampersand_replacement_writes_and_resolves(lib):
     cid = lib.add_community("Amp Apply Co", "https://amp-apply.com",
-                             "Finance & Operations leaders", "", [])
+                             "", "", [], local_markets="Finance & Operations leaders")
     item_id = lib.add_voice_review_item(
-        "communities", cid, "demographic", "bare-ampersand", "Finance & Operations leaders",
+        "communities", cid, "local_markets", "bare-ampersand", "Finance & Operations leaders",
     )
     ok = lib.apply_ampersand_replacement(item_id)
     assert ok is True
 
     row = lib.get_community(cid)
-    assert row["demographic"] == "Finance and Operations leaders"
+    assert row["local_markets"] == "Finance and Operations leaders"
 
     item = lib.get_voice_review_item(item_id)
     assert item["status"] == "resolved"
@@ -637,9 +637,9 @@ def test_apply_ampersand_replacement_writes_and_resolves(lib):
 
 def test_apply_ampersand_replacement_leaves_unspaced_field_untouched_and_open(lib):
     cid = lib.add_community("Amp Unspaced Co", "https://amp-unspaced.com",
-                             "A firm doing S&M consulting", "", [])
+                             "", "", [], local_markets="A firm doing S&M consulting")
     item_id = lib.add_voice_review_item(
-        "communities", cid, "demographic", "bare-ampersand", "A firm doing S&M consulting",
+        "communities", cid, "local_markets", "bare-ampersand", "A firm doing S&M consulting",
     )
     preview = lib.preview_ampersand_replacement(item_id)
     assert preview["changed"] is False
@@ -648,7 +648,7 @@ def test_apply_ampersand_replacement_leaves_unspaced_field_untouched_and_open(li
     assert ok is False
 
     row = lib.get_community(cid)
-    assert row["demographic"] == "A firm doing S&M consulting", "unspaced text must never be written to"
+    assert row["local_markets"] == "A firm doing S&M consulting", "unspaced text must never be written to"
 
     item = lib.get_voice_review_item(item_id)
     assert item["status"] == "open", "a no-op selection must leave the row open for a manual decision"
@@ -660,17 +660,17 @@ def test_apply_ampersand_replacement_protects_approved_term_in_same_field(lib):
     lib.approve_voice_term("Bain & Company", rule="bare-ampersand")
     cid = lib.add_community(
         "Amp Mixed Co", "https://amp-mixed.com",
-        "Bain & Company advises on finance & operations for clients.", "", [],
-    )
+        "", "", [],
+    local_markets="Bain & Company advises on finance & operations for clients.")
     item_id = lib.add_voice_review_item(
-        "communities", cid, "demographic", "bare-ampersand",
+        "communities", cid, "local_markets", "bare-ampersand",
         "Bain & Company advises on finance & operations for clients.",
     )
     ok = lib.apply_ampersand_replacement(item_id)
     assert ok is True
 
     row = lib.get_community(cid)
-    assert row["demographic"] == "Bain & Company advises on finance and operations for clients."
+    assert row["local_markets"] == "Bain & Company advises on finance and operations for clients."
 
 
 def test_apply_ampersand_replacement_handles_escaped_amp_in_body_md(lib):

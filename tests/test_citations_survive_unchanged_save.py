@@ -203,75 +203,8 @@ def test_description_spaced_em_dash_is_unchanged(client):
     assert _cites("tool", tid, "description") == CITES
 
 
-# -- Community profile -------------------------------------------------------
-
-def _community(**fields):
-    lib = _lib()
-    cid = lib.add_community(name="Chief", url="https://chief.com", demographic="Senior executive women",
-                            cost_band="Paid", categories=[], approved=1)
-    base = dict(ideal_member="Senior women.", value_prop="Peer network.", verdict_summary="Solid.",
-                founded_year=2019)
-    base.update(fields)
-    lib.upsert_community_profile(cid, **base)
-    lib.set_entity_citations("community", cid, "community_profile", CITES, model="claude-opus-5")
-    lib.close()
-    return cid
-
-
-def _profile_post(client, cid, **over):
-    data = {"ideal_member": "Senior women.", "value_prop": "Peer network.",
-            "verdict_summary": "Solid.", "founded_year": "2019"}
-    data.update(over)
-    r = client.post(f"/admin/tools/communities/{cid}/profile", data=data, follow_redirects=False)
-    assert r.status_code == 303, r.text[:300]
-
-
-def test_profile_unchanged_save_with_empty_hidden_field_keeps_citations(client):
-    cid = _community()
-    _profile_post(client, cid)
-    assert _cites("community", cid, "community_profile") == CITES
-
-
-def test_profile_one_changed_field_invalidates_shared_set(client):
-    cid = _community()
-    _profile_post(client, cid, value_prop="A hand-edited value prop.")
-    assert _cites("community", cid, "community_profile") == []
-
-
-def test_profile_changed_with_fresh_citations_writes_them(client):
-    cid = _community()
-    _profile_post(client, cid, value_prop="Freshly generated.",
-                  ai_drafted_fields="value_prop", ai_drafted_citations=FRESH_JSON,
-                  ai_drafted_citations_model="claude-opus-5")
-    got = _cites("community", cid, "community_profile")
-    assert [c["url"] for c in got] == ["https://fresh.example"]
-
-
-def test_profile_fresh_draft_with_zero_citations_and_changed_text_clears(client):
-    cid = _community()
-    _profile_post(client, cid, value_prop="Ungrounded redraft.",
-                  ai_drafted_fields="value_prop", ai_drafted_citations="[]")
-    assert _cites("community", cid, "community_profile") == []
-
-
-def test_profile_crlf_whitespace_and_founded_year_int_vs_string_unchanged(client):
-    cid = _community(value_prop="Line one.\nLine two.")
-    _profile_post(client, cid, value_prop="Line one.\r\nLine two.  ", founded_year=" 2019 ")
-    assert _cites("community", cid, "community_profile") == CITES
-
-
-def test_profile_compare_is_derived_from_field_id_list(app_module, monkeypatch):
-    """Not a hardcoded 23-field list: shrinking _COMMUNITY_PROFILE_FIELD_IDS
-    (as the next PR will) narrows the compare with it, without error."""
-    existing = {"value_prop": "a", "ideal_member": "x"}
-
-    class F(dict):
-        pass
-
-    form = F(value_prop="CHANGED", ideal_member="x")
-    assert app_module._community_profile_text_changed(existing, form, None) is True
-    monkeypatch.setattr(app_module, "_COMMUNITY_PROFILE_FIELD_IDS", ["ideal_member"])
-    assert app_module._community_profile_text_changed(existing, form, None) is False
+# Community profile: superseded by the marker-based invariant (PR 2a), covered in
+# tests/test_community_profile_merged_edit.py.
 
 
 # -- norm_for_compare unit ---------------------------------------------------

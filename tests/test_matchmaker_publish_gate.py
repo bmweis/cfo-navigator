@@ -97,11 +97,11 @@ def test_communities_context_includes_unreviewed_profile_with_one_note(db):
     db.upsert_community_profile(
         cid, ideal_member="A drafted ideal-member note.",
         verdict_summary="A drafted bottom-line verdict.",
-        founded_year=2019, needs_review=1,
+        needs_review=1,
     )
     ctx, has_unverified = _build_communities_context(db)
     assert "A drafted ideal-member note." in ctx
-    assert "2019" in ctx
+    assert "Ideal member:" in ctx
     assert "Peer CFOs" in ctx
     # One whole-profile note, not a per-line marker — the community's single
     # needs_review flag governs all nine profile lines together.
@@ -116,10 +116,10 @@ def test_communities_context_includes_reviewed_profile_with_no_note(db):
     db.upsert_community_profile(
         cid, ideal_member="A reviewed ideal-member note.",
         verdict_summary="A reviewed bottom-line verdict.",
-        founded_year=2019, needs_review=0,
+        needs_review=0,
     )
     ctx, has_unverified = _build_communities_context(db)
     assert "A reviewed ideal-member note." in ctx
-    assert "2019" in ctx
+    assert "Ideal member:" in ctx
     assert "unverified" not in ctx
     assert has_unverified is False

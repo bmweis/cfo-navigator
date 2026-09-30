@@ -56,12 +56,9 @@ def _mock_generate_community_profile(monkeypatch, **overrides):
             application_friction="Light vetting, approval in days.",
             cost_value_verdict="Worth it for the network alone.",
             notable_members="",
-            founded_year=2019,
             public_criticism="",
             verdict_summary="A solid pick for finance leaders at scale.",
-            stage_focus="Series B+",
-            jobs_program="",
-            team_or_individual="Individual",
+            jobs_program="", cpe_eligible="Yes", resources_included="Templates",
             low_confidence=False, model="claude-opus-5",
             input_tokens=800, output_tokens=600, cost_usd=0.03,
         )
@@ -200,7 +197,8 @@ def test_refresh_does_not_blank_untouched_profile_fields(db, monkeypatch):
         cid, ideal_member="Old draft.", needs_review=0,
         primary_purpose="Networking", cpe_eligible="Yes",
         platform_type="Slack + in-person", meeting_format="Hybrid",
-        event_style="Roundtable", seniority_band="VP+",
+        event_style="Roundtable", seniority_band="VP+", founded_year=1999,
+        stage_focus="Series B+", team_or_individual="Individual",
         resources_included="Vendor directory",
     )
     lib.close()
@@ -214,12 +212,14 @@ def test_refresh_does_not_blank_untouched_profile_fields(db, monkeypatch):
     lib.close()
     assert profile["ideal_member"] == "CFOs at Series B+ SaaS companies."   # refreshed
     assert profile["primary_purpose"] == "Networking"                       # preserved
-    assert profile["cpe_eligible"] == "Yes"
+    assert profile["founded_year"] == 1999
+    assert profile["stage_focus"] == "Series B+"
+    assert profile["team_or_individual"] == "Individual"
     assert profile["platform_type"] == "Slack + in-person"
     assert profile["meeting_format"] == "Hybrid"
     assert profile["event_style"] == "Roundtable"
     assert profile["seniority_band"] == "VP+"
-    assert profile["resources_included"] == "Vendor directory"
+    assert profile["resources_included"] == "Templates"                     # live field, regenerated
 
 
 # -- CLI guardrails ---------------------------------------------------------------

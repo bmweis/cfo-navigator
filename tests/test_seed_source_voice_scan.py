@@ -248,13 +248,13 @@ def test_the_scan_actually_fires_on_a_real_violation():
     record with a spaced em dash in a non-exempt column must be caught,
     the same shape as the real Proformative/Bioscience communities.py bug
     this whole investigation started from."""
-    records = [{"name": "Example Community", "notes": "Some notes — with a spaced em dash."}]
+    records = [{"name": "Example Community", "local_markets": "Boston — with a spaced em dash."}]
     violations = _scan_records("communities", records)
-    assert violations, "expected the spaced em dash in `notes` to be flagged"
-    assert any(v.column == "notes" for v in violations)
+    assert violations, "expected the spaced em dash in `local_markets` to be flagged"
+    assert any(v.column == "local_markets" for v in violations)
 
 
 def test_the_scan_does_not_flag_a_clean_record():
-    records = [{"name": "Clean Co & Associates", "notes": "Some notes—with a correct unspaced em dash."}]
+    records = [{"name": "Clean Co & Associates", "local_markets": "Boston—with a correct unspaced em dash."}]
     violations = _scan_records("communities", records)
     assert not violations

@@ -403,20 +403,22 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         limit = max(1, min(int(limit), _MAX_SEARCH_RESULTS))
         lib = lib_factory()
         try:
-            communities = lib.list_communities(approved_only=True)
+            communities = lib.list_communities_for_directory()
         finally:
             lib.close()
         out = []
         for c in communities:
             if category and category not in (c.get("categories") or []):
                 continue
-            if not _matches(query, c.get("name"), c.get("demographic"), c.get("notes")):
+            # PR 2a: matches on name, Bottom line and Ideal member (the two
+            # profile fields that replaced the retired demographic/notes).
+            if not _matches(query, c.get("name"), c.get("bottom_line"), c.get("ideal_member")):
                 continue
             out.append({
                 "id": c["id"], "slug": c["slug"], "name": c["name"],
                 "profile_url": f"/tools/communities/{c['slug']}",
                 "categories": c.get("categories") or [],
-                "demographic": (c.get("demographic") or "").strip(),
+                "bottom_line": (c.get("bottom_line") or "").strip(),
                 "promoted": bool(c.get("featured")), "advisor": bool(c.get("advisor")),
             })
             if len(out) >= limit:

@@ -86,9 +86,8 @@ def test_no_other_column_min_width_shrank_at_the_new_shared_floor(env):
     communities = admin.get("/admin/tools/communities").text
     # Software's Short description column kept its own 260px floor.
     assert "min-width:260px" in software
-    # Communities' Short description (320px) and Format (220px) columns
-    # both kept their own declared floors.
-    assert "min-width:320px" in communities
+    # Communities' Format column kept its own declared floor (the Short
+    # description column, 320px, was retired in PR 2a).
     assert "min-width:220px" in communities
 
 

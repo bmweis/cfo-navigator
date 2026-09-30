@@ -19,6 +19,7 @@ import tempfile
 import types
 
 import pytest
+from tests.community_edit_helpers import post_profile, get_profile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -121,41 +122,17 @@ Worth it for the network alone.
 NOTABLE_MEMBERS:
 None publicly reported.
 
-FOUNDED_YEAR:
-2019
-
 PUBLIC_CRITICISM:
 None reported.
 
 VERDICT_SUMMARY:
 Best for seed-stage operator CFOs, not for public-company controllers.
 
-STAGE_FOCUS:
-Growth-stage
-
 JOBS_PROGRAM:
 No
 
-TEAM_OR_INDIVIDUAL:
-Individual
-
-SENIORITY_BAND:
-CFO and VP Finance only
-
-PRIMARY_PURPOSE:
-Peer learning
-
 RESOURCES_INCLUDED:
 Templates, benchmarking data
-
-PLATFORM_TYPE:
-Slack
-
-MEETING_FORMAT:
-Virtual
-
-EVENT_STYLE:
-Intimate small-group
 
 CPE_ELIGIBLE:
 No
@@ -316,7 +293,7 @@ def test_profile_submit_persists_one_citations_row_for_fresh_draft(app_module):
     client = _client(app_module)
     _login(client)
     citations_json = '[{"n": 1, "title": "Chief", "url": "https://chief.com", "type": "community_page"}]'
-    r = client.post(f"/admin/tools/communities/{community_id}/profile", data={
+    r = post_profile(client, community_id, data={
         "ideal_member": "Freshly generated ideal member.",
         "verdict_summary": "Freshly generated verdict.",
         # Only 2 of the 23 fields were actually (re)drafted this session —
@@ -347,7 +324,7 @@ def test_profile_submit_hand_written_draft_records_no_citations(app_module):
 
     client = _client(app_module)
     _login(client)
-    r = client.post(f"/admin/tools/communities/{community_id}/profile", data={
+    r = post_profile(client, community_id, data={
         "ideal_member": "Hand-written ideal member.",
         "verdict_summary": "Hand-written verdict.",
     }, follow_redirects=False)
@@ -365,7 +342,7 @@ def test_profile_submit_malformed_citations_payload_persists_nothing(app_module)
 
     client = _client(app_module)
     _login(client)
-    r = client.post(f"/admin/tools/communities/{community_id}/profile", data={
+    r = post_profile(client, community_id, data={
         "ideal_member": "Freshly generated ideal member.",
         "ai_drafted_fields": "ideal_member",
         "ai_drafted_citations": "not json",
@@ -391,7 +368,7 @@ def test_profile_submit_clears_citations_on_hand_edit(app_module):
 
     client = _client(app_module)
     _login(client)
-    r = client.post(f"/admin/tools/communities/{community_id}/profile", data={
+    r = post_profile(client, community_id, data={
         "ideal_member": "Hand-edited ideal member, no Generate this session.",
         "verdict_summary": "Hand-edited verdict.",
     }, follow_redirects=False)
@@ -419,7 +396,7 @@ def test_profile_submit_clears_citations_when_unrelated_field_edited(app_module)
     _login(client)
     # Only resources_included changes by hand; ideal_member/verdict_summary
     # are resubmitted unchanged, and no ai_drafted_fields this time.
-    r = client.post(f"/admin/tools/communities/{community_id}/profile", data={
+    r = post_profile(client, community_id, data={
         "ideal_member": "AI ideal member.",
         "verdict_summary": "AI verdict.",
         "resources_included": "Hand-added resource list.",
@@ -465,7 +442,7 @@ def test_admin_edit_page_shows_uncapped_sources_list(app_module):
 
     client = _client(app_module)
     _login(client)
-    r = client.get(f"/admin/tools/communities/{community_id}/profile")
+    r = get_profile(client, community_id)
     assert r.status_code == 200
     assert "source6.example" in r.text   # uncapped for the admin reviewer
 
@@ -477,7 +454,7 @@ def test_admin_edit_page_shows_empty_note_when_no_citations(app_module):
 
     client = _client(app_module)
     _login(client)
-    r = client.get(f"/admin/tools/communities/{community_id}/profile")
+    r = get_profile(client, community_id)
     assert r.status_code == 200
     assert "No citations recorded for this draft" in r.text
 

@@ -197,6 +197,26 @@ def test_search_communities_matches_query_and_respects_approval(live_server):
     assert unapproved_id
 
 
+def test_search_communities_matches_ideal_member_and_bottom_line_only(live_server):
+    """PR 2a: the retired demographic/notes no longer feed search; the profile's
+    Ideal member and Bottom line do. Text that appears ONLY in ideal_member (or
+    only in verdict_summary) must still return the community."""
+    lib = Library(live_server.db_path)
+    _seed_community(lib, "Alpha Group", ideal_member="Zebrafish controllers at biotech startups.",
+                    verdict_summary="A steady peer group.")
+    _seed_community(lib, "Beta Group", ideal_member="Generic finance leaders.",
+                    verdict_summary="Best for quokka-sized budgets.")
+    lib.close()
+    hit = _list_result(_call_tool(live_server.base_url, live_server.member, "search_communities",
+                                   {"query": "zebrafish"}))
+    assert [c["name"] for c in hit] == ["Alpha Group"]
+    hit = _list_result(_call_tool(live_server.base_url, live_server.member, "search_communities",
+                                   {"query": "quokka"}))
+    assert [c["name"] for c in hit] == ["Beta Group"]
+    assert hit[0]["bottom_line"] == "Best for quokka-sized budgets."
+    assert "demographic" not in hit[0]
+
+
 # ---------------------------------------------------------------------------
 # get_software — resolution and non-admin-gated auth
 # ---------------------------------------------------------------------------

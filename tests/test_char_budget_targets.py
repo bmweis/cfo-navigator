@@ -144,13 +144,6 @@ def test_differentiation_hard_limit_and_headroom_over_longest(env):
         Library._check_text_field_length("Bottom line", "d" * 1201, Library.TOOL_DIFFERENTIATION_MAX)
 
 
-def test_community_short_field_hard_limit_and_headroom_over_longest(env):
-    from linklib.db import Library
-    assert Library.COMMUNITY_SHORT_FIELD_TARGET == 300
-    assert Library.COMMUNITY_SHORT_FIELD_MAX == 800
-    assert Library.COMMUNITY_SHORT_FIELD_MAX > 440   # the real longest stage_focus value
-    with pytest.raises(ValueError):
-        Library._check_text_field_length("Stage focus", "s" * 801, Library.COMMUNITY_SHORT_FIELD_MAX)
 
 
 def test_feature_link_public_note_target_added_max_unchanged(env):
@@ -246,20 +239,6 @@ def test_quick_update_tool_refuses_over_limit(env):
         lib.close()
 
 
-def test_upsert_community_profile_refuses_over_limit_stage_focus_jobs_team(env):
-    appmod, db = env
-    from linklib.db import Library
-    lib = Library(db)
-    try:
-        cid = lib.add_community("Peer CFOs", "https://peercfos.example", "CFOs", "Free", [], approved=1)
-        lib.upsert_community_profile(cid, verdict_summary="Great fit.", stage_focus="Keep me.")
-        for field in ("stage_focus", "jobs_program", "team_or_individual"):
-            with pytest.raises(ValueError):
-                lib.upsert_community_profile(cid, verdict_summary="Great fit.",
-                                              **{field: "s" * (Library.COMMUNITY_SHORT_FIELD_MAX + 1)})
-        assert lib.get_community_profile(cid)["stage_focus"] == "Keep me."
-    finally:
-        lib.close()
 
 
 # --- Routes: refuse the save, keep the stored value, name limit + length ---
@@ -302,21 +281,6 @@ def test_tool_edit_route_refuses_over_limit_agent_taxonomy(env):
     lib2.close()
 
 
-def test_community_profile_route_refuses_over_limit_stage_focus(env):
-    appmod, db = env
-    from linklib.db import Library
-    lib = Library(db)
-    cid = lib.add_community("Peer CFOs", "https://peercfos.example", "CFOs", "Free", [], approved=1)
-    lib.upsert_community_profile(cid, verdict_summary="Great fit.", stage_focus="Keep me.")
-    lib.close()
-    over = "s" * (Library.COMMUNITY_SHORT_FIELD_MAX + 1)
-    r = _client(appmod).post(f"/admin/tools/communities/{cid}/profile", data={
-        "verdict_summary": "Great fit.", "stage_focus": over,
-    })
-    assert r.status_code == 400
-    lib2 = Library(db)
-    assert lib2.get_community_profile(cid)["stage_focus"] == "Keep me."
-    lib2.close()
 
 
 # --- Round-trip: a value longer than today's real-world longest saves fine -
@@ -395,34 +359,6 @@ def test_no_maxlength_on_tool_add_fields(env):
         assert "data-char-limit=" in m.group(0)
 
 
-def test_no_maxlength_on_community_short_fields(env):
-    """stage_focus/jobs_program/team_or_individual moved from a single-line
-    <input> to a full-width <textarea> in the community quick-facts width
-    fix (2026-09, see test_community_profile_layout.py) — same character-
-    budget mechanism (data-char-limit, no maxlength), just a different tag,
-    since a 233px-wide input truncated a real saved value and wrapped its
-    own counter text to two lines."""
-    appmod, db = env
-    from linklib.db import Library
-    lib = Library(db)
-    cid = lib.add_community("Peer CFOs", "https://peercfos.example", "CFOs", "Free", [], approved=1)
-    lib.close()
-    page = _client(appmod).get(f"/admin/tools/communities/{cid}/profile").text
-    for name in ("stage_focus", "jobs_program", "team_or_individual"):
-        m = re.search(rf'<textarea[^>]*\bname="{name}"[^>]*>', page)
-        assert m, f"{name} textarea not found"
-        assert "maxlength" not in m.group(0)
-        assert "data-char-limit=" in m.group(0)
-    # The other six Quick facts fields deliberately keep their unenforced
-    # maxlength="300" — confirmed against production (see
-    # test_other_quick_facts_fields_stay_well_under_their_unenforced_cap
-    # below), not just assumed, and none of them is close.
-    for name in ("primary_purpose", "cpe_eligible", "platform_type",
-                  "meeting_format", "event_style", "seniority_band"):
-        m = re.search(rf'<input[^>]*\bname="{name}"[^>]*>', page)
-        assert m, f"{name} input not found"
-        assert 'maxlength="300"' in m.group(0)
-        assert "data-char-limit" not in m.group(0)
 
 
 # --- The counter always comes from the shared helper -----------------------
@@ -560,27 +496,6 @@ def test_summary_legacy_over_old_cap_value_round_trips_via_route(env):
     lib2.close()
 
 
-def test_stage_focus_legacy_value_round_trips_via_route(env):
-    """The real production longest stage_focus (440 chars, over the OLD 300
-    cap) must round-trip through the community profile edit route,
-    unchanged — the community-side analog of the agent_taxonomy_note
-    round-trip test above."""
-    appmod, db = env
-    from linklib.db import Library
-    lib = Library(db)
-    cid = lib.add_community("Peer CFOs", "https://peercfos.example", "CFOs", "Free", [], approved=1)
-    lib.close()
-    value = ("Series B through pre-IPO growth-stage finance leaders, with a "
-              "smaller cohort of later-stage public-company CFOs who join "
-              "mainly for the peer network rather than the curriculum. " * 3).strip()[:440]
-    assert len(value) == 440
-    r = _client(appmod).post(f"/admin/tools/communities/{cid}/profile", data={
-        "verdict_summary": "Great fit.", "stage_focus": value,
-    }, follow_redirects=False)
-    assert r.status_code == 303
-    lib2 = Library(db)
-    assert lib2.get_community_profile(cid)["stage_focus"] == value
-    lib2.close()
 
 
 def test_over_target_under_limit_save_succeeds_summary(env):
@@ -643,54 +558,3 @@ def test_over_target_under_limit_save_succeeds_differentiation(env):
     _attrs, counter = appmod._char_budget(Library.TOOL_DIFFERENTIATION_MAX, value, "x",
                                            target=Library.TOOL_DIFFERENTIATION_TARGET)
     assert "char-budget-warn" in counter
-
-
-def test_over_target_under_limit_save_succeeds_stage_focus(env):
-    appmod, db = env
-    from linklib.db import Library
-    lib = Library(db)
-    cid = lib.add_community("Peer CFOs", "https://peercfos.example", "CFOs", "Free", [], approved=1)
-    lib.close()
-    value = "s" * 500   # over the 300 target, under the 800 limit
-    r = _client(appmod).post(f"/admin/tools/communities/{cid}/profile", data={
-        "verdict_summary": "Great fit.", "stage_focus": value,
-    }, follow_redirects=False)
-    assert r.status_code == 303
-    lib2 = Library(db)
-    assert lib2.get_community_profile(cid)["stage_focus"] == value
-    lib2.close()
-    _attrs, counter = appmod._char_budget(Library.COMMUNITY_SHORT_FIELD_MAX, value, "x",
-                                           target=Library.COMMUNITY_SHORT_FIELD_TARGET)
-    assert "char-budget-warn" in counter
-
-
-# --- Quick facts fields left uncapped: checked against production, not just
-# assumed (PR 600 review, item 1) ------------------------------------------
-#
-# The other six community_profiles Quick facts fields (primary_purpose,
-# cpe_eligible, platform_type, meeting_format, event_style, seniority_band)
-# kept their unenforced maxlength="300" with no budget added. At the time
-# this PR shipped that was stated as "nothing suggested a comparable
-# overflow risk" — true, but not actually checked against production data.
-# It has since been checked directly (all 40 live community_profiles rows,
-# via the /mcp introspection tools): the real longest value across all six
-# fields is seniority_band at 128 characters — well under half the 300-char
-# cap, with every other field's longest well below that. Pinned here as a
-# static ceiling so a future regeneration pass that starts pushing these
-# fields longer gets caught by a failing test rather than a silent surprise.
-
-def test_other_quick_facts_fields_stay_well_under_their_unenforced_cap():
-    """Not a live DB check (this suite runs against a fresh temp DB, not
-    production) — a static ceiling recording what a direct production
-    check found, so a future regression here fails loudly instead of
-    silently reopening the same gap community_profiles.stage_focus had."""
-    observed_production_longest = {
-        "primary_purpose": 79,
-        "cpe_eligible": 91,
-        "platform_type": 90,
-        "meeting_format": 116,
-        "event_style": 100,
-        "seniority_band": 128,
-    }
-    for field, longest in observed_production_longest.items():
-        assert longest < 300, f"{field}'s real longest ({longest}) is approaching its unenforced 300 cap"

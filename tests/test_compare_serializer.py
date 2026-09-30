@@ -159,7 +159,9 @@ def test_communities_compare_every_section_present_even_empty():
     entities, diff = compare.build_communities_compare(communities, {}, {}, {})
     e = entities[0]
     titles = [s.title for s in e.sections]
-    assert titles == ["Bottom line", "Who it's for", "What you get", "How it works", "Cost and structure"]
+    assert titles == ["Bottom line", compare.GROUP_TARGET_AUDIENCE, compare.GROUP_MEMBER_EXPERIENCE,
+                      compare.GROUP_ECONOMICS, compare.GROUP_KEY_POINTS,
+                      compare.GROUP_ADDITIONAL_BENEFITS]
     for s in e.sections:
         for f in s.fields:
             assert f.state == gates.GateState.EMPTY
@@ -207,14 +209,13 @@ def test_communities_compare_citations_attach_only_when_bottom_line_populated():
 def test_communities_compare_key_facts_include_region_access_sponsor_cost():
     c = _community(1, access="Invite-only", sponsorship_type="Vendor-backed", sponsor_name="Acme",
                     cost_band="<$1k/yr", cost_note="Annual dues", reach="Regional", local_markets="NYC")
-    entities, _ = compare.build_communities_compare([c], {1: {"founded_year": 2019}}, {}, {})
+    entities, _ = compare.build_communities_compare([c], {1: {}}, {}, {})
     facts = {kf.label: kf.value for kf in entities[0].key_facts}
     assert facts["Region"] == "NYC"
     assert facts["Access"] == "Invite-only"
     assert facts["Sponsor"] == "Vendor-backed (Acme)"
     assert facts["Cost"] == "<$1k/yr"
-    assert facts["Cost detail"] == "Annual dues"
-    assert facts["Founded"] == "2019"
+    assert "Cost detail" not in facts and "Founded" not in facts   # retired in PR 2a
 
 
 def test_communities_compare_needs_verification_sentinel_on_key_fact():

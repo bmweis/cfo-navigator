@@ -126,8 +126,8 @@ def test_thought_leadership_is_scanned(lib):
 
 
 def test_communities_and_profile_are_scanned(lib):
-    cid = lib.add_community("Acme Community", "https://community.example", "Finance leaders",
-                             "Free", [], cost_note="A seamless membership.")
+    cid = lib.add_community("Acme Community", "https://community.example", "",
+                             "Free", [], local_markets="A seamless market list.")
     lib.upsert_community_profile(cid, ideal_member="A robust fit.", verdict_summary="Seamless overall.")
     violations = scan_db_copy(lib)
     tables = {v.table for v in violations}
@@ -326,11 +326,11 @@ def test_invisible_character_is_scanned_on_a_newly_instrumented_table_when_not_a
     it's load-bearing inside real emoji sequences), so it's still visible
     to the scanner rather than silently auto-corrected away like U+200B."""
     lib.add_community(
-        "Finance Leaders", "https://community.example", "VPs and directors‍",
-        "Free", [],
+        "Finance Leaders", "https://community.example", "",
+        "Free", [], local_markets="Boston and New York‍",
     )
     violations = scan_db_copy(lib)
-    hits = [v for v in violations if v.table == "communities" and v.column == "demographic"]
+    hits = [v for v in violations if v.table == "communities" and v.column == "local_markets"]
     assert len(hits) == 1
     assert hits[0].rule == "invisible-character"
 

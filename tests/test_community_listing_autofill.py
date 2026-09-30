@@ -93,7 +93,6 @@ def test_generate_listing_fills_confident_fields(monkeypatch):
         category_options=CATEGORIES, voice_core="Test voice guide.",
     )
     assert draft is not None
-    assert draft.demographic == "CFOs at Series B+ SaaS companies"
     assert draft.reach == "National"
     assert draft.local_markets == "Boston"
     assert draft.cost_band == "Free"
@@ -128,7 +127,6 @@ def test_generate_listing_uses_needs_verification_sentinel_for_unclear_fields(mo
     assert draft.reach == enrich.NEEDS_VERIFICATION
     assert draft.cost_band == enrich.NEEDS_VERIFICATION
     assert draft.sponsorship_type == enrich.NEEDS_VERIFICATION
-    assert draft.demographic == enrich.NEEDS_VERIFICATION
     assert draft.access == enrich.NEEDS_VERIFICATION
     assert draft.format == enrich.NEEDS_VERIFICATION
     assert draft.local_markets == ""
@@ -289,7 +287,6 @@ def test_generate_listing_route_returns_draft(env, monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True
-    assert body["demographic"] == "CFOs at Series B+ SaaS companies"
     assert body["cost_band"] == "Free"
     assert body["low_confidence"] is False
 

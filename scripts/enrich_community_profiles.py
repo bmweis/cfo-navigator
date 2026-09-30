@@ -139,9 +139,8 @@ def main() -> int:
                     if value not in (None, ""):
                         print(f"    {field}: {value}")
             else:
-                # Every column upsert_community_profile owns but this draft
-                # doesn't produce must be echoed back from the existing row —
-                # it fully replaces the row, it doesn't partially patch it.
+                # PR 2a: only live columns are written; the retired ones are
+                # frozen and upsert_community_profile leaves them untouched.
                 lib.upsert_community_profile(
                     c["id"], source="script",
                     ideal_member=draft.ideal_member, anti_fit=draft.anti_fit,
@@ -151,18 +150,11 @@ def main() -> int:
                     business_model=draft.business_model,
                     application_friction=draft.application_friction,
                     cost_value_verdict=draft.cost_value_verdict,
-                    notable_members=draft.notable_members, founded_year=draft.founded_year,
+                    notable_members=draft.notable_members,
                     public_criticism=draft.public_criticism, verdict_summary=draft.verdict_summary,
-                    stage_focus=draft.stage_focus, jobs_program=draft.jobs_program,
-                    team_or_individual=draft.team_or_individual,
+                    resources_included=draft.resources_included, jobs_program=draft.jobs_program,
+                    cpe_eligible=draft.cpe_eligible,
                     low_confidence=int(draft.low_confidence), needs_review=1,
-                    primary_purpose=existing_profile.get("primary_purpose", ""),
-                    cpe_eligible=existing_profile.get("cpe_eligible", ""),
-                    platform_type=existing_profile.get("platform_type", ""),
-                    meeting_format=existing_profile.get("meeting_format", ""),
-                    event_style=existing_profile.get("event_style", ""),
-                    seniority_band=existing_profile.get("seniority_band", ""),
-                    resources_included=existing_profile.get("resources_included", ""),
                 )
                 lib.record_enrichment_cost(None, draft.model, draft.input_tokens,
                                            draft.output_tokens, draft.cost_usd)

@@ -93,15 +93,13 @@ _SCAN_TABLES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
     ("thought_leadership", "id", ("title", "venue", "date_label", "description"), ("title",)),
     ("tools", "id", ("name", "description", "summary", "agent_taxonomy_note",
                       "competitive_differentiation", "suite_note"), ("name",)),
-    ("communities", "id", ("name", "demographic", "cost_note", "notes", "local_markets"), ("name",)),
+    ("communities", "id", ("name", "local_markets"), ("name",)),
     ("community_profiles", "community_id", (
         "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
         "sponsor_relationship_note", "application_friction", "cost_value_verdict",
         "notable_members", "public_criticism", "verdict_summary", "business_model",
-        "primary_purpose", "cpe_eligible", "platform_type", "meeting_format",
-        "event_style", "seniority_band", "resources_included", "stage_focus",
-        "jobs_program", "team_or_individual",
-    ), ()),
+        "cpe_eligible", "resources_included", "jobs_program",
+    ), ()),  # retired columns (PR 2a) are frozen, no longer written, so not scanned
     # name is the public feature label on the "Key features" card;
     # definition/pointer_note are admin-only (see module docstring) but ARE
     # scanned, since `_voice_fix` already runs against them at write time.
