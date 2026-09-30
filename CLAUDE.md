@@ -10745,7 +10745,7 @@ it supersedes the old "`/save` is token-gated" note.
   failed grounding raises and leaves the stored value untouched. The two bulk
   scripts write CPE only while the stored value is empty or Not assessed
   (`cpe_for_generation_run`) and otherwise keep it and say so; "Generate full
-  profile" persists nothing, it only fills the boxes for review. Profile prose limits are 600/800 (Bottom
+  profile" persists nothing, it only fills the boxes for review, and fills the CPE control only while it reads Not assessed. A POST that omits `cpe_eligible` keeps the stored answer. `upsert_community_profile` is a full replace, so every caller must pass `cpe_eligible`. Profile prose limits are 600/800 (Bottom
   line 250/400, Resources included and Jobs program 300/600); 23 profiles over
   800 are a hand-trim to-do, listed on `/admin/checks` as a warning, not a merge
   gate. An over-max save re-renders the page from the submitted values (status

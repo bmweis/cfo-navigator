@@ -86,7 +86,6 @@ def test_program_details_words_match_on_all_four_surfaces(admin, visitor):
     cid, slug = _full_community()
     edit = admin.get(f"/tools/communities/{slug}/edit").text
     public = visitor.get(f"/tools/communities/{slug}").text
-    cmp_html = visitor.get(f"/tools/communities/compare?ids={cid},{cid}").text if False else ""
     # Edit page: every public label, plus the two admin-only companions.
     for label in (*compare.PROGRAM_DETAILS_LABELS, *ADMIN_ONLY_WORDS,
                   compare.LABEL_FEATURED, compare.LABEL_FORMAL_ADVISOR, compare.PROGRAM_DETAILS_TITLE):
@@ -441,3 +440,71 @@ def test_failed_grounding_raises_so_the_stored_cpe_is_left_untouched(monkeypatch
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     with pytest.raises(enrich.GroundingUnavailable):
         enrich.generate_community_profile("Chief", "https://chief.com", voice_core="Test voice guide.")
+
+
+# -- nothing writes a weaker CPE answer over a stronger one -------------------------------
+
+import shutil  # noqa: E402
+
+_needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node not on PATH in this environment")
+
+
+def _fill_fn_source(app_module):
+    m = re.search(r"function cpShouldFillCpe\(current\) \{.*?\n\}\n", app_module._GENERATE_PROFILE_JS, re.S)
+    assert m
+    return m.group(0)
+
+
+@_needs_node
+@pytest.mark.parametrize("current,expected", [
+    ("", True), ("Not assessed", True), ("Yes", False), ("No", False), ("Unclear", False),
+])
+def test_generate_fills_cpe_only_while_it_reads_not_assessed(app_module, current, expected):
+    """The decision is a pure function so Node can test it (this runs in CI;
+    the real-Chromium Restore test does not, see issue 645)."""
+    script = _fill_fn_source(app_module) + f"console.log(JSON.stringify(cpShouldFillCpe({current!r})));"
+    r = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.strip() == ("true" if expected else "false"), r.stdout + r.stderr
+
+
+def test_generate_loop_skips_cpe_when_it_already_has_an_answer(app_module):
+    js = app_module._GENERATE_PROFILE_JS
+    assert "if (!cpShouldFillCpe(el.value)) return;" in js
+    # The skip happens before anything is written or marked as AI drafted.
+    assert js.index("if (!cpShouldFillCpe(el.value)) return;") < js.index("if (cpLeadingWord(v)) el.value")
+
+
+def test_post_without_cpe_eligible_keeps_the_stored_answer(admin):
+    cid, slug = _full_community(cpe_eligible="Yes (NASBA sponsor)")
+    data = {"name": "Chief", "url": "https://chief.com", "cost_band": "Paid", "categories": ["FP&A"],
+            "ideal_member": "Senior operators.", "verdict_summary": "Solid."}
+    for f in PROFILE_LIMITS:
+        data.setdefault(f, "")
+    assert "cpe_eligible" not in data
+    assert admin.post(f"/tools/communities/{slug}/edit", data=data, follow_redirects=False).status_code == 303
+    lib = _lib()
+    assert lib.get_community_profile(cid)["cpe_eligible"] == "Yes (NASBA sponsor)"
+    lib.close()
+
+
+def test_a_present_but_empty_cpe_field_is_not_assessed(admin):
+    cid, slug = _full_community(cpe_eligible="Yes (NASBA sponsor)")
+    _post(admin, slug, cpe_eligible="", cpe_note="")
+    lib = _lib()
+    assert lib.get_community_profile(cid)["cpe_eligible"] == "Not assessed"
+    lib.close()
+
+
+def test_omitted_cpe_on_a_bare_community_creates_no_profile(admin):
+    lib = _lib()
+    bare = lib.add_community(name="Bare", url="https://bare.example", demographic="", cost_band="Free",
+                             categories=["FP&A"], approved=1)
+    slug = lib.get_community(bare)["slug"]
+    lib.close()
+    data = {"name": "Bare", "url": "https://bare.example", "cost_band": "Free", "categories": ["FP&A"]}
+    for f in PROFILE_LIMITS:
+        data[f] = ""
+    assert admin.post(f"/tools/communities/{slug}/edit", data=data, follow_redirects=False).status_code == 303
+    lib = _lib()
+    assert not lib.get_community_profile(bare)
+    lib.close()

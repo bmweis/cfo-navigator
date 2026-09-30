@@ -12799,6 +12799,12 @@ var CP_STATE_HIDDEN = ['ai-drafted-fields', 'ai-drafted-confidence',
 var cpSnapshot = null;
 var cpEditListeners = {};
 function cpEl(k) { return document.getElementById('cp-' + k); }
+// "Generate full profile" fills the CPE control only while it still reads Not
+// assessed. A Yes, No or Unclear (stored, or picked by hand and not yet saved)
+// is never replaced by a draft: an uncited draft must not overwrite an answer.
+function cpShouldFillCpe(current) {
+  return !current || current === 'Not assessed';
+}
 function cpLeadingWord(v) {
   var m = /^\\s*(Yes|No|Unclear)\\b/i.exec(v || '');
   return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '';
@@ -12895,6 +12901,7 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
       if (!el) return;
       var v = (d[k] === null || d[k] === undefined) ? '' : d[k];
       if (k === 'cpe_eligible') {
+        if (!cpShouldFillCpe(el.value)) return;   // keep the existing answer; everything else still fills
         // The dropdown carries the leading word; the note beside it carries
         // the parenthetical, and a save assembles them back into one value.
         // A run only ever returns Yes, No or Unclear; anything else leaves the
@@ -18784,7 +18791,8 @@ def _community_edit_page(request: Request, slug: str, screenshot_captured: str =
         for _f in PROFILE_LIMITS:
             p[_f] = (form.get(_f) or "").strip()
         p["low_confidence"] = 1 if form.get("low_confidence") == "1" else 0
-        p["cpe_eligible"] = resolve_cpe_submission(form.get("cpe_eligible"), form.get("cpe_note"))
+        if "cpe_eligible" in form:
+            p["cpe_eligible"] = resolve_cpe_submission(form.get("cpe_eligible"), form.get("cpe_note"))
         for _k in _hidden:
             _hidden[_k] = form.get(_k) or ""
     _refusal_html = ""
@@ -19134,10 +19142,15 @@ async def admin_communities_edit_submit(request: Request, slug: str):
     lib = _lib()
     try:
         existing_profile = lib.get_community_profile(community_id) or {}
-        cpe = resolve_cpe_submission(form.get("cpe_eligible"), form.get("cpe_note"))
+        # A POST that omits cpe_eligible (a stale tab, a partial client) keeps
+        # the stored answer; only a field that is present, even empty, is read.
+        if "cpe_eligible" in form:
+            cpe = resolve_cpe_submission(form.get("cpe_eligible"), form.get("cpe_note"))
+        else:
+            cpe = existing_profile.get("cpe_eligible") or ""
         ai_drafted = _ai_drafted_field_names(form)
         profile_ai_drafted = bool(ai_drafted & set(_COMMUNITY_PROFILE_FIELD_IDS))
-        has_profile_content = bool(existing_profile) or cpe != NOT_ASSESSED or any(texts.values())
+        has_profile_content = bool(existing_profile) or cpe_state(cpe) != NOT_ASSESSED or any(texts.values())
 
         lib.update_community(community_id, name=name, url=url, demographic=None,
                              cost_band=cost_band, categories=categories, cost_note=None,
