@@ -120,6 +120,16 @@ def coerce_cpe_eligible(value: str | None) -> str:
     return cpe_token(v)
 
 
+def cpe_for_generation_run(stored: str | None, drafted: str | None) -> tuple[str, bool]:
+    """(value to write, kept_stored) for a run that persists a draft (the two
+    bulk scripts). A run never downgrades or overwrites an answer a human or an
+    earlier run already gave: it writes its draft only while the stored value is
+    empty or Not assessed, and otherwise keeps the stored one."""
+    if cpe_state(stored) != NOT_ASSESSED:
+        return (stored or "").strip(), True
+    return drafted or "", False
+
+
 # The short note beside the CPE answer (2a.1). It is not a column of its own:
 # the stored string already encodes it as "Yes (note)", so the form parses that
 # string on load and assembles it on save. Same two-tier pattern as the prose

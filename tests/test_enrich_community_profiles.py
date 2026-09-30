@@ -272,3 +272,26 @@ def test_over_limit_draft_is_skipped_and_the_run_continues(db, monkeypatch, caps
     lib.close()
     assert "skipped, over limit" in out and "Ideal member" in out and "900" in out
     assert "Skipped, over limit: 1" in out
+
+
+# -- a run never downgrades an existing CPE answer (2a.1) --------------------------
+
+@pytest.mark.parametrize("stored,expected", [
+    ("Yes (NASBA sponsor)", "Yes (NASBA sponsor)"), ("No", "No"), ("Unclear", "Unclear"),
+    ("", "Unclear"), ("Not assessed", "Unclear"),
+])
+def test_script_writes_cpe_only_when_stored_is_not_assessed(db, monkeypatch, capsys, stored, expected):
+    lib = Library(db)
+    cid = _add_community(lib, "Alpha", "https://alpha.example")
+    lib.upsert_community_profile(cid, cpe_eligible=stored, ideal_member="Old text.", verdict_summary="Old.")
+    lib.close()
+    _mock_generate_community_profile(monkeypatch, cpe_eligible="Unclear", ideal_member="New text.")
+    monkeypatch.setattr(sys, "argv", ["x", "--db", db, "--communities", "Alpha", "--force"])
+    monkeypatch.setattr(script.time, "sleep", lambda s: None)
+    script.main()
+    lib = Library(db)
+    prof = lib.get_community_profile(cid)
+    lib.close()
+    assert prof["cpe_eligible"] == expected
+    assert prof["ideal_member"] == "New text."          # everything else is still redrafted
+    assert ("CPE kept as stored" in capsys.readouterr().out) == (stored not in ("", "Not assessed"))

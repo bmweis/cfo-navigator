@@ -189,3 +189,31 @@ def test_communities_run_skips_an_over_limit_draft_and_continues(monkeypatch, tm
     assert len(regen._SKIPPED_OVER_LIMIT) == 1 and "Alpha" in regen._SKIPPED_OVER_LIMIT[0][0]
     assert "skipped, over limit" in out
     lib.close()
+
+
+@pytest.mark.parametrize("stored,expected", [
+    ("Yes (NASBA sponsor)", "Yes (NASBA sponsor)"), ("No", "No"), ("", "Unclear"),
+])
+def test_communities_run_keeps_a_stored_cpe_answer(monkeypatch, tmp_path, stored, expected):
+    from linklib import enrich
+    from linklib.db import Library
+
+    lib = Library(str(tmp_path / "t.db"))
+    cid = lib.add_community("Alpha", "https://alpha.example", "d", "Free", ["FP&A"], approved=1)
+    lib.upsert_community_profile(cid, cpe_eligible=stored, ideal_member="Old.", verdict_summary="Old.")
+
+    def _fake(name, url, existing=None, model="", voice_core=""):
+        return enrich.CommunityProfileDraft(
+            ideal_member="New.", anti_fit="", value_prop="", format_reality="", engagement_level="",
+            sponsor_relationship_note="", business_model="", application_friction="",
+            cost_value_verdict="", notable_members="", public_criticism="", verdict_summary="Best for X.",
+            jobs_program="", cpe_eligible="Unclear", resources_included="", low_confidence=False,
+            model="claude-opus-5", input_tokens=1, output_tokens=1, cost_usd=0.01)
+
+    monkeypatch.setattr(regen, "generate_community_profile", _fake)
+    monkeypatch.setattr(regen, "INTER_CALL_SLEEP", 0)
+    monkeypatch.setattr(regen, "INTER_BATCH_SLEEP", 0)
+    regen._run_communities(lib, [lib.get_community(cid)], "m", "voice", str(tmp_path / "l.jsonl"), True, set())
+    prof = lib.get_community_profile(cid)
+    assert prof["cpe_eligible"] == expected and prof["ideal_member"] == "New."
+    lib.close()

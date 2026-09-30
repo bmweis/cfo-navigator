@@ -195,6 +195,7 @@ import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from linklib.community_profile import cpe_for_generation_run  # noqa: E402
 from linklib.db import Library, resolve_db_path  # noqa: E402
 from linklib.enrich import (
     COMMUNITY_PROFILE_FIELDS,
@@ -594,8 +595,12 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
     # fields populated, a few genuinely blank) is still useful content,
     # unlike a single-field draft going empty.
 
+    cpe_value, cpe_kept = cpe_for_generation_run(
+        (existing_profile or {}).get("cpe_eligible"), draft.cpe_eligible)
+    if cpe_kept:
+        print(f"      CPE kept as stored ({cpe_value!r}); the run only fills CPE when it is Not assessed")
     try:
-        _upsert_community_draft(lib, community_id, draft)
+        _upsert_community_draft(lib, community_id, draft, cpe_value)
     except ValueError as e:
         # A draft over a field's hard limit is refused whole by the library.
         # Skip this community, say why, and carry on with the rest of the run.
@@ -607,7 +612,7 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
     _finish_community_regen(lib, community_id, name, draft, log_file, log_kwargs)
 
 
-def _upsert_community_draft(lib: Library, community_id: int, draft) -> None:
+def _upsert_community_draft(lib: Library, community_id: int, draft, cpe_value: str) -> None:
     lib.upsert_community_profile(
         community_id,
         ideal_member=draft.ideal_member, anti_fit=draft.anti_fit, value_prop=draft.value_prop,
@@ -617,7 +622,7 @@ def _upsert_community_draft(lib: Library, community_id: int, draft) -> None:
         notable_members=draft.notable_members,
         public_criticism=draft.public_criticism, verdict_summary=draft.verdict_summary,
         low_confidence=int(bool(draft.low_confidence)), business_model=draft.business_model,
-        cpe_eligible=draft.cpe_eligible,
+        cpe_eligible=cpe_value,
         resources_included=draft.resources_included, needs_review=0,
         jobs_program=draft.jobs_program, confidence=draft.confidence,
         # Stale-stamp fix (2026-08) — same reasoning as the tool-side calls

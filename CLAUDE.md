@@ -10742,7 +10742,10 @@ it supersedes the old "`/save` is token-gated" note.
   from the single page it already fetches (direct crawl, Exa `/contents` as
   the fallback; there is no Exa search step in profile generation) and can
   only write Yes, No or Unclear (`generated_cpe`), never Not assessed; a
-  failed grounding raises and leaves the stored value untouched. Profile prose limits are 600/800 (Bottom
+  failed grounding raises and leaves the stored value untouched. The two bulk
+  scripts write CPE only while the stored value is empty or Not assessed
+  (`cpe_for_generation_run`) and otherwise keep it and say so; "Generate full
+  profile" persists nothing, it only fills the boxes for review. Profile prose limits are 600/800 (Bottom
   line 250/400, Resources included and Jobs program 300/600); 23 profiles over
   800 are a hand-trim to-do, listed on `/admin/checks` as a warning, not a merge
   gate. An over-max save re-renders the page from the submitted values (status

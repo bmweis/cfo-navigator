@@ -44,6 +44,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib import enrich as enrich_mod
+from linklib.community_profile import cpe_for_generation_run
 from linklib.db import Library, resolve_db_path
 from linklib.voice_settings import VoicePromptMissing, require_voice_setting
 
@@ -142,6 +143,10 @@ def main() -> int:
             else:
                 # PR 2a: only live columns are written; the retired ones are
                 # frozen and upsert_community_profile leaves them untouched.
+                cpe_value, cpe_kept = cpe_for_generation_run(
+                    existing_profile.get("cpe_eligible"), draft.cpe_eligible)
+                if cpe_kept:
+                    print(f"  CPE kept as stored ({cpe_value!r}); a run only fills CPE when it is Not assessed")
                 try:
                     lib.upsert_community_profile(
                         c["id"], source="script",
@@ -155,7 +160,7 @@ def main() -> int:
                         notable_members=draft.notable_members,
                         public_criticism=draft.public_criticism, verdict_summary=draft.verdict_summary,
                         resources_included=draft.resources_included, jobs_program=draft.jobs_program,
-                        cpe_eligible=draft.cpe_eligible,
+                        cpe_eligible=cpe_value,
                         low_confidence=int(draft.low_confidence), needs_review=1,
                     )
                     total_drafted += 1
