@@ -10723,6 +10723,27 @@ it supersedes the old "`/save` is token-gated" note.
   repair shipped; existing `'[]'` rows stay until those fields are
   regenerated.
 
+- **Community and software edit page polish, PR 2a.1 (2026-09).** Standing rule
+  from Brian: a name in the edit view must never differ from the visitor-facing
+  name. Exempt only admin-only controls with no public rendering (Verification
+  status, Profile draft, Save buttons, Logo and Screenshots controls, "Community
+  details"). The words live in `linklib/compare.py` constants (Program details,
+  Reach, Cost band, Sponsorship, Access, CPE eligible, Format, Featured, Formal
+  advisor) read by the edit page, public Details card, Compare band and MCP
+  key facts; `tests/test_edit_polish_2a1.py` is the drift test. The review pill
+  now reads "Under review" (was "Needs review") to match the visitor label; this
+  shared component also changed the Software page and admin lists.
+  CPE eligible stays one stored string, `Word (note)`, with a note target 40 and
+  max 60 (no column, no split script). Profile prose limits are 600/800 (Bottom
+  line 250/400, Resources included and Jobs program 300/600); 23 profiles over
+  800 are a hand-trim to-do, listed on `/admin/checks` as a warning, not a merge
+  gate. An over-max save re-renders the page from the submitted values (status
+  400, nothing written). `scripts/regen_ai_drafted_fields.py` and
+  `scripts/enrich_community_profiles.py` skip and report a community whose draft
+  is over a limit instead of aborting. Note: the voice review queue Edit and the
+  bulk ampersand replace write through `apply_voice_review_write`, which bypasses
+  these limits and can lengthen text past a max.
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a

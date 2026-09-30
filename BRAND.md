@@ -563,6 +563,18 @@ was deliberately left unchanged on the two fields with a documented prior
 truncation incident (Description, Agent taxonomy) — only the prompt's own
 stated word/character ceiling moved.
 
+### Admin and public names match
+
+A control on an admin edit page that produces something a visitor sees carries the
+same word the visitor sees. The words live as constants in `linklib/compare.py`
+(Program details, Reach, Cost band, Sponsorship, Access, CPE eligible, Format,
+Featured, Formal advisor), and the whole-record review pill reads "Under review",
+the visitor's word. Only admin-only controls with no public rendering (Verification
+status, Profile draft, Save buttons, Logo and Screenshots controls) may use their own
+names. The Program details grid on the community edit page sets one explicit control
+height (47px, `--program-ctl-h`) on its inputs and selects, because an input inherits
+the page line height and a select does not.
+
 ### Radius scale
 `10px` buttons & inputs · `12–16px` cards & panels · `6px` tags/chips & inline row-action buttons ·
 `999px` filter pills.

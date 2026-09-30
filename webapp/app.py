@@ -76,7 +76,7 @@ from linklib.voice_review import (
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS, COMMUNITY_PROFILE_FIELDS
 from linklib.community_profile import (
-    CPE_OPTIONS, PROFILE_LIMITS, cpe_token, resolve_cpe_submission,
+    CPE_NOTE_LIMITS, CPE_OPTIONS, PROFILE_LIMITS, cpe_note, cpe_token, resolve_cpe_submission,
 )
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.manual_review_csv import parse_manual_review_corrections_csv
@@ -2234,7 +2234,10 @@ _CHAR_BUDGET_JS = """(function(){
   function buttonsFor(f){
     var b = Array.from(f.querySelectorAll('button[type=submit],button:not([type]),input[type=submit]'));
     if (f.id) b = b.concat(Array.from(document.querySelectorAll('button[form="' + f.id + '"],input[type=submit][form="' + f.id + '"]')));
-    return b;
+    // Only buttons this form OWNS: a button can sit inside the form's markup
+    // yet belong to another form via its form= attribute (Mark reviewed, the
+    // logo and screenshot controls), and a text limit must never disable those.
+    return b.filter(function(x, i){ return x.form === f && b.indexOf(x) === i; });
   }
   function syncForm(f){
     if (!f) return;
@@ -8999,7 +9002,7 @@ function renderTools(tools) {{
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
-    var star = t.advisor ? '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' : '';
+    var star = t.advisor ? '<span class="tool-star" title="Formal advisor (Brian Weisberg)">&#129305;</span>' : '';
     // Radical-transparency review standard: an unverified/unreviewed
     // description used to be hidden from a public visitor entirely, same
     // as the profile page and compare matrix used to. It now always
@@ -9452,7 +9455,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
     {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if e.promoted else ''}
-    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if e.advisor else ''}
+    {'<span class="tool-star" title="Formal advisor (Brian Weisberg)">&#129305;</span>' if e.advisor else ''}
   </div>
   <a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(e.name)}</a>
   {_cmp_tag_chips_html(e, tag_diff)}
@@ -11025,7 +11028,7 @@ function renderCommunities(list) {{
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
-    var advisorStar = c.advisor ? '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' : '';
+    var advisorStar = c.advisor ? '<span class="comm-star" title="Formal advisor (Brian Weisberg)">&#129305;</span>' : '';
     var compareChecked = compareSelected.indexOf(c.id) !== -1;
     var compareDisabled = !compareChecked && compareSelected.length >= COMPARE_MAX;
     var costHtml = c.cost_band === NEEDS_VERIFICATION
@@ -11522,7 +11525,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
     {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if e.promoted else ''}
-    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if e.advisor else ''}
+    {'<span class="comm-star" title="Formal advisor (Brian Weisberg)">&#129305;</span>' if e.advisor else ''}
   </div>
   <a href="{_esc(e.profile_url)}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(e.name)}</a>
   {_cmp_tag_chips_html(e, tag_diff)}
@@ -11531,7 +11534,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
     )
 
     key_facts_row = (
-        _cmp_section_band_row_html("Key facts", len(entities))
+        _cmp_section_band_row_html(compare.PROGRAM_DETAILS_TITLE, len(entities))
         + '<tr><td class="cc-cell cc-label"></td>'
         + "".join(f'<td class="cc-cell">{_cmp_key_facts_cell_html(e)}</td>' for e in entities)
         + "</tr>"
@@ -12260,24 +12263,41 @@ def tools_community_profile(request: Request, slug: str):
     # are gone from here (Founded is retired; CPE eligible is a field of the
     # Additional benefits card now).
     detail_rows = []
-    def _detail_row(label: str, value: str, badge: str = "") -> None:
-        if not value:
+    def _detail_row(label: str, value_html: str) -> None:
+        if not value_html:
             return
         detail_rows.append(f'<div class="tp-detail-row"><span class="tp-detail-label">{_esc(label)}</span>'
-                            f'<span class="tp-detail-value">{_verify_html(value, "tp-verify-inline")}{badge}</span></div>')
-    _detail_row("Cost band", community.get("cost_band"))
-    _detail_row("Access", community.get("access"))
+                            f'<span class="tp-detail-value">{value_html}</span></div>')
     sponsorship = community.get("sponsorship_type") or ""
     if sponsorship and sponsorship != _NEEDS_VERIFICATION and community.get("sponsor_name"):
         sponsorship += f" ({community['sponsor_name']})"
-    _detail_row("Sponsorship", sponsorship)
-    _detail_row("Format", community.get("format") or "")
-    geo_line = _community_geo_line(community)
-    _detail_row("Reach", geo_line)
+    # CPE eligible lives on the profile, so it carries the same "under review"
+    # label the group cards carry while the profile is pending (2a.1).
+    cpe_value = (_display_profile.get("cpe_eligible") or "").strip()
+    cpe_html = ""
+    if cpe_value:
+        cpe_tok = cpe_token(cpe_value)
+        cpe_note = cpe_value[len(cpe_tok):].strip() if cpe_tok else ""
+        if cpe_tok and cpe_note.startswith("(") and cpe_note.endswith(")"):
+            cpe_html = (f'<strong>{_esc(cpe_tok)}</strong> '
+                        f'<span style="color:var(--muted);">{_esc(cpe_note)}</span>')
+        else:
+            cpe_html = _esc(cpe_value)
+        cpe_html += _profile_badge
+    _values = {
+        compare.LABEL_REACH: _verify_html(_community_geo_line(community), "tp-verify-inline"),
+        compare.LABEL_COST_BAND: _verify_html(community.get("cost_band") or "", "tp-verify-inline"),
+        compare.LABEL_SPONSORSHIP: _verify_html(sponsorship, "tp-verify-inline"),
+        compare.LABEL_ACCESS: _verify_html(community.get("access") or "", "tp-verify-inline"),
+        compare.LABEL_CPE: cpe_html,
+        compare.LABEL_FORMAT: _verify_html(community.get("format") or "", "tp-verify-inline"),
+    }
+    for _label in compare.PROGRAM_DETAILS_LABELS:
+        _detail_row(_label, _values[_label])
     details_card = ""
     if detail_rows:
         details_card = f"""<div class="tp-card">
-  <h2 class="tp-card-h">Details</h2>
+  <h2 class="tp-card-h">{_esc(compare.PROGRAM_DETAILS_TITLE)}</h2>
   {''.join(detail_rows)}
 </div>"""
 
@@ -12795,8 +12815,8 @@ function cpTakeSnapshot() {
     var el = cpEl(k);
     if (el) snap.values[k] = el.value;
   });
-  var full = document.getElementById('cp-cpe_eligible_full');
-  if (full) snap.values['cpe_eligible_full'] = full.value;
+  var note = document.getElementById('cp-cpe_note');
+  if (note) snap.values['cpe_note'] = note.value;
   CP_STATE_HIDDEN.forEach(function(id) {
     var el = document.getElementById(id);
     if (el) snap.hidden[id] = el.value;
@@ -12826,9 +12846,10 @@ function cpRestorePrevious() {
       el.dispatchEvent(new Event('input', {bubbles: true}));
     }
   });
-  var full = document.getElementById('cp-cpe_eligible_full');
-  if (full && Object.prototype.hasOwnProperty.call(snap.values, 'cpe_eligible_full')) {
-    full.value = snap.values['cpe_eligible_full'];
+  var note = document.getElementById('cp-cpe_note');
+  if (note && Object.prototype.hasOwnProperty.call(snap.values, 'cpe_note')) {
+    note.value = snap.values['cpe_note'];
+    note.dispatchEvent(new Event('input', {bubbles: true}));
   }
   CP_STATE_HIDDEN.forEach(function(id) {
     var el = document.getElementById(id);
@@ -12855,8 +12876,9 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
     var el = cpEl(k);
     if (el && el.value) existing[k] = el.value;
   });
-  var fullEl = document.getElementById('cp-cpe_eligible_full');
-  if (fullEl && fullEl.value) existing['cpe_eligible'] = fullEl.value;
+  var noteEl = document.getElementById('cp-cpe_note');
+  var cpeSel = document.getElementById('cp-cpe_eligible');
+  if (cpeSel && cpeSel.value) existing['cpe_eligible'] = cpeSel.value + (noteEl && noteEl.value ? ' (' + noteEl.value + ')' : '');
   try {
     var r = await fetch('/admin/tools/communities/generate-profile', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -12874,10 +12896,14 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
       if (!el) return;
       var v = (d[k] === null || d[k] === undefined) ? '' : d[k];
       if (k === 'cpe_eligible') {
-        // The dropdown carries the leading word; the full value, with its
-        // qualifier, rides along in a hidden field so a save can keep it.
+        // The dropdown carries the leading word; the note beside it carries
+        // the parenthetical, and a save assembles them back into one value.
         el.value = cpLeadingWord(v);
-        if (fullEl) fullEl.value = v;
+        var mNote = /\\(([^]*)\\)\\s*$/.exec(v || '');
+        if (noteEl) {
+          noteEl.value = mNote ? mNote[1].trim() : '';
+          noteEl.dispatchEvent(new Event('input', {bubbles: true}));
+        }
       } else {
         el.value = v;
       }
@@ -12901,7 +12927,6 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
       if (!el) return;
       function onEdit() {
         unmarkAiDrafted(k);
-        if (k === 'cpe_eligible' && fullEl && cpLeadingWord(fullEl.value) !== el.value) fullEl.value = '';
         el.removeEventListener('input', onEdit);
         el.removeEventListener('change', onEdit);
         delete cpEditListeners[k];
@@ -12922,15 +12947,6 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
     if (hostId) stopGenAnim(hostId);
   }
 }
-// A hand-picked CPE answer that no longer matches the generated qualifier
-// drops the qualifier (it described the old answer).
-document.addEventListener('DOMContentLoaded', function() {
-  var sel = document.getElementById('cp-cpe_eligible');
-  var full = document.getElementById('cp-cpe_eligible_full');
-  if (sel && full) sel.addEventListener('change', function() {
-    if (cpLeadingWord(full.value) !== sel.value) full.value = '';
-  });
-});
 """
 
 # Shared by /admin/tools/communities/new and /{id}/edit — auto-fills the
@@ -13718,8 +13734,8 @@ def _review_status_pill_html(reviewed: bool, breakdown: tuple[int, int] | None =
     low-confidence" badge — the latter two retired outright per this
     consolidation, not relocated).
 
-    "Reviewed" when the whole-record needs_review flag is false; "Needs
-    review" when true, with an optional "(n/total)" fraction alongside—
+    "Reviewed" when the whole-record needs_review flag is false; "Under
+    review" when true (2a.1: the word a visitor sees on the same profile), with an optional "(n/total)" fraction alongside—
     Communities' Claude-self-reported low-confidence count
     (unconfident_count/12, the one dataset explicitly named to carry over
     into this component) or Software's own count of how many of its 3
@@ -13757,7 +13773,7 @@ def _review_status_pill_html(reviewed: bool, breakdown: tuple[int, int] | None =
     frac = f" ({breakdown[0]}/{breakdown[1]})" if breakdown else ""
     return (f'<span style="display:inline-flex;align-items:center;font-size:11px;font-weight:700;'
             f'letter-spacing:.02em;background:var(--coral-wash);color:var(--navy);border-radius:999px;'
-            f'padding:3px 11px;white-space:nowrap;">Needs review{_esc(frac)}</span>')
+            f'padding:3px 11px;white-space:nowrap;">Under review{_esc(frac)}</span>')
 
 
 def _review_status_action_html(reviewed: bool, mark_reviewed_url: str, flag_url: str,
@@ -17497,8 +17513,73 @@ def _community_category_checkboxes(categories: list[dict], selected: list[str] |
          'No categories yet. <a href="/admin/tools/communities/categories">Add one</a> first.</p>'
 
 
+def _priority_tags_box_html(noun: str, featured_name: str, featured: bool, advisor: bool) -> str:
+    """The Priority tags box, shared by the Community and Software edit pages
+    (2a.1): Featured first, then Formal advisor, the same two words the
+    visitor-facing sticker and badge carry (compare.LABEL_FEATURED and
+    compare.LABEL_FORMAL_ADVISOR). `noun` is "community" or "software vendor";
+    `featured_name` is the checkbox name (communities: featured, software:
+    promoted). Sits in the right column with a small bottom margin so it never
+    touches whatever follows it when the columns stack on a phone."""
+    return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;display:grid;gap:10px;align-content:start;margin-bottom:8px;">
+  <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0;">Priority tags</h2>
+  <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="{featured_name}" value="1"{' checked' if featured else ''}>
+      <span>&#10024; {_esc(compare.LABEL_FEATURED)}</span>
+    </label>
+    <p style="font-size:12px;color:var(--muted);margin:2px 0 0 30px;">Adds a &quot;{_esc(compare.LABEL_FEATURED)}&quot; sticker to this {_esc(noun)}'s directory card.</p>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="advisor" value="1"{' checked' if advisor else ''}>
+      <span>&#129305; {_esc(compare.LABEL_FORMAL_ADVISOR)}</span>
+    </label>
+    <p style="font-size:12px;color:var(--muted);margin:2px 0 0 30px;">Discloses publicly that Brian formally advises this {_esc(noun)}.</p>
+  </div>
+</div>"""
+
+
+# One named height for every control in the Program details grid (2a.1). A text
+# input inherits the page's 1.65 line height and renders about 47px tall while
+# a select ignores it and renders about 41px, so the row looked ragged. Setting
+# the same explicit border-box height on both fixes this grid only; a sitewide
+# control-height pass is a separate, later change.
+_PROGRAM_CTL_HEIGHT_PX = 47
+
+
+def _community_cpe_control_html(stored: str | None) -> str:
+    """CPE eligible: a dropdown of the leading word (Not assessed, Yes, No,
+    Unclear) with a short optional note beside it, in the Program details grid
+    (2a.1). There is no column for the note: the stored value is "Yes (note)",
+    parsed on load and assembled on save (linklib.community_profile). The note
+    carries the same two-tier counter as the prose fields, target 40, max 60,
+    and is part of this control rather than a second labeled field, so admin
+    and public share one name for it."""
+    stored = stored or ""
+    token = cpe_token(stored)
+    opts = "".join(
+        f'<option value="{_esc(v)}"{" selected" if v == token else ""}>{_esc(t)}</option>'
+        for v, t in [("", "Not assessed")] + [(o, o) for o in CPE_OPTIONS]
+    )
+    target, limit = CPE_NOTE_LIMITS
+    attrs, counter = _char_budget(limit, cpe_note(stored), "cp-cpe_note", target=target)
+    box = ("box-sizing:border-box;height:var(--program-ctl-h);border:1px solid var(--line);"
+           "border-radius:10px;font:inherit;font-size:15px;background:#fff;")
+    return f"""    <div>
+      <label for="cp-cpe_eligible" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_CPE)}</label>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:8px;">
+        <select id="cp-cpe_eligible" name="cpe_eligible" style="width:100%;padding:0 10px;{box}">{opts}</select>
+        <input id="cp-cpe_note" name="cpe_note" type="text" value="{_esc(cpe_note(stored))}" {attrs}
+          placeholder="Short note, for example NASBA sponsor" style="width:100%;padding:0 12px;{box}">
+      </div>
+      {counter}
+    </div>"""
+
+
 def _community_form_fields_parts(c: dict | None = None, categories: list[dict] | None = None,
-                                  logo_in_form_html: str = "") -> dict:
+                                  logo_in_form_html: str = "", right_top_html: str = "",
+                                  cpe_html: str = "") -> dict:
     """Phase P (extended by the admin intake form layout pass, and again by
     a follow-up round after live review of that pass's shipped result):
     field markup for Add and Edit community, split into named fragments so
@@ -17580,66 +17661,64 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     <p id="comm-gen-err" style="display:none;"></p>
   </div>"""
 
-    details_html = f"""  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;">
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Reach *</label>
-      <select name="reach" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-        {reach_opts}
-      </select>
+    _cpe_cell = cpe_html or "    <div></div>"
+    details_html = f"""  <div class="program-grid" style="--program-ctl-h:{_PROGRAM_CTL_HEIGHT_PX}px;display:grid;gap:14px;">
+    <div class="program-row program-row-reach">
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_REACH)} *</label>
+        <select name="reach" style="width:100%;height:var(--program-ctl-h);box-sizing:border-box;padding:0 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+          {reach_opts}
+        </select>
+      </div>
+      <div>
+        <label for="comm-local-markets" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_SPECIFIED_MARKETS)} <span style="font-weight:400;color:var(--muted);">(if known)</span></label>
+        <input id="comm-local-markets" name="local_markets" maxlength="300" value="{_esc(c.get('local_markets', ''))}"
+          placeholder="e.g. Boston, New York, SF Bay Area"
+          style="width:100%;height:var(--program-ctl-h);box-sizing:border-box;padding:0 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      </div>
     </div>
-    <div>
-      <label for="comm-local-markets" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Specified markets (if known)</label>
-      <input id="comm-local-markets" name="local_markets" maxlength="300" value="{_esc(c.get('local_markets', ''))}"
-        placeholder="e.g. Boston, New York, SF Bay Area"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    <div class="program-row program-row-3">
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_COST_BAND)}</label>
+        <select name="cost_band" style="width:100%;height:var(--program-ctl-h);box-sizing:border-box;padding:0 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+          {cost_opts}
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_SPONSORSHIP)}</label>
+        <select name="sponsorship_type" style="width:100%;height:var(--program-ctl-h);box-sizing:border-box;padding:0 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+          {sponsor_opts}
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_ACCESS)}</label>
+        <select name="access" style="width:100%;height:var(--program-ctl-h);box-sizing:border-box;padding:0 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+          {access_opts}
+        </select>
+      </div>
+    </div>
+    <div class="program-row program-row-3">
+{_cpe_cell}
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_SPONSOR_NAME)}</label>
+        <input name="sponsor_name" maxlength="200" value="{_esc(c.get('sponsor_name', ''))}"
+          style="width:100%;height:var(--program-ctl-h);box-sizing:border-box;padding:0 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      </div>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_FORMAT)}</label>
+        <select name="format" style="width:100%;height:var(--program-ctl-h);box-sizing:border-box;padding:0 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+          {format_opts}
+        </select>
+      </div>
     </div>
   </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px 14px;">
-    <div>
-      <h3 style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 10px;text-transform:uppercase;letter-spacing:.03em;">Cost</h3>
-      <div style="display:grid;gap:10px;">
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost band</label>
-          <select name="cost_band" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-            {cost_opts}
-          </select>
-        </div>
-      </div>
-    </div>
-    <div>
-      <h3 style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 10px;text-transform:uppercase;letter-spacing:.03em;">Sponsor</h3>
-      <div style="display:grid;gap:10px;">
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sponsorship</label>
-          <select name="sponsorship_type" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-            {sponsor_opts}
-          </select>
-        </div>
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sponsor name</label>
-          <input name="sponsor_name" maxlength="200" value="{_esc(c.get('sponsor_name', ''))}"
-            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-        </div>
-      </div>
-    </div>
-    <div>
-      <h3 style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 10px;text-transform:uppercase;letter-spacing:.03em;">Approach</h3>
-      <div style="display:grid;gap:10px;">
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Access</label>
-          <select name="access" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-            {access_opts}
-          </select>
-        </div>
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Format</label>
-          <select name="format" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-            {format_opts}
-          </select>
-        </div>
-      </div>
-    </div>
-  </div>"""
+  <style>
+    .program-row{{display:grid;gap:14px;min-width:0;}}
+    .program-row>div{{min-width:0;}}
+    .program-row-reach{{grid-template-columns:minmax(0,1fr) minmax(0,2fr);}}
+    .program-row-3{{grid-template-columns:repeat(3,minmax(0,1fr));}}
+    @media(max-width:700px){{.program-row-reach,.program-row-3{{grid-template-columns:minmax(0,1fr);}}}}
+  </style>"""
 
     categories_html = f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:8px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/communities/categories">manage categories</a>)</span></label>
@@ -17648,20 +17727,8 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     </div>
   </div>"""
 
-    disclosures_html = f"""  <div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="featured" value="1"{' checked' if c.get('featured') else ''}>
-      <span>&#10024; Featured</span>
-    </label>
-    <p style="font-size:12px;color:var(--muted);margin:2px 0 0 30px;">Adds a &quot;Featured&quot; sticker to this community's directory card.</p>
-  </div>
-  <div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="advisor" value="1"{' checked' if c.get('advisor') else ''}>
-      <span>&#129305; Formal advisor</span>
-    </label>
-    <p style="font-size:12px;color:var(--muted);margin:2px 0 0 30px;">Discloses publicly that Brian formally advises this community.</p>
-  </div>"""
+    disclosures_html = _priority_tags_box_html(
+        "community", "featured", bool(c.get("featured")), bool(c.get("advisor")))
 
     # Fix 2 (follow-up round after the admin form layout pass's live review): Featured/Advisor
     # used to render stacked below the Auto-fill button, inside the same
@@ -17674,14 +17741,21 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     # still has no Warm-Intro-equivalent fields (see the no-second-column
     # comment on admin_communities_edit below, which this supersedes for
     # layout — Featured/Advisor now get that second column, just unlabeled).
+    # 2a.1: Categories moved up into the left column, directly under the Logo
+    # block (the white space that used to sit there), and the right column is
+    # a stack: Verification status and Profile draft (Edit only, passed in as
+    # right_top_html), then Priority tags. On a phone the columns stack and the
+    # order is the DOM order: identity, logo, categories, then the right stack.
     identity_block_html = f"""  <div>
     <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community details</h2>
     <div class="tool-form-cols">
       <div style="display:grid;gap:14px;align-content:start;">
 {identity_html}
 {logo_in_form_html}
+{categories_html}
       </div>
-      <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:10px;align-content:start;">
+      <div style="display:grid;gap:16px;align-content:start;">
+{right_top_html}
 {disclosures_html}
       </div>
     </div>
@@ -17751,7 +17825,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     `linklib.community_profile.PROFILE_LIMITS` (soft target turns the count
     amber, hard max is refused server-side). Narrative boxes are six rows;
     Resources included and Jobs program stay at two. CPE eligible is a
-    dropdown. Only the 12 fields in COMMUNITY_CONFIDENCE_FIELDS carry a "Claude
+    dropdown that lives in the Program details grid now (2a.1). Only the 12 fields in COMMUNITY_CONFIDENCE_FIELDS carry a "Claude
     confidence" badge.
 
     The needs_review checkbox that once lived here moved to the verification
@@ -17804,28 +17878,6 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     {counter}
   </div>"""
 
-    def _cpe_field(key: str, label: str) -> str:
-        stored = p.get(key) or ""
-        token = cpe_token(stored)
-        opts = "".join(
-            f'<option value="{_esc(v)}"{" selected" if v == token else ""}>{_esc(t)}</option>'
-            for v, t in [("", "Not assessed")] + [(o, o) for o in CPE_OPTIONS]
-        )
-        # The dropdown carries only the leading word. A stored qualifier such as
-        # "Yes (NASBA-approved sponsor)" is shown here and kept on save while the
-        # word is unchanged; the hidden field carries a freshly generated value.
-        note = ""
-        if stored and stored != token:
-            note = (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
-                    f'Stored as: {_esc(stored)}. The qualifier is kept while the answer stays the same.</p>')
-        return f"""  <div>
-    {_label_row(key, label)}
-    <select id="cp-{key}" name="{key}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">{opts}</select>
-    <input type="hidden" id="cp-{key}_full" name="{key}_full" value="">
-    {note}
-  </div>"""
-
     def _section_header(title: str) -> str:
         """Same h2/border-top pattern the Software edit page uses between
         sections — reused, not a new admin section-header style."""
@@ -17836,7 +17888,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     for title, fields in compare.community_admin_groups():
         parts.append(_section_header(title))
         for label, key in fields:
-            parts.append(_cpe_field(key, label) if key == "cpe_eligible" else _field(key, label))
+            parts.append(_field(key, label))
     groups_html = "\n".join(parts)
 
     return f"""  <div id="gen-host-community-profile" style="display:grid;gap:20px;">
@@ -17933,7 +17985,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, on the Add/Edit Community form&mdash;drafts the basic listing fields (reach, local markets, cost band, sponsorship, sponsor name, access, format, categories) from Claude reading the community's own site. Different from &ldquo;Generate full profile&rdquo; on the same page, which drafts the deeper write-up instead.</li>
 <li><strong>While running:</strong> &ldquo;Generating&hellip;&rdquo;, then &ldquo;Drafted. Review before saving&mdash;anything marked &lsquo;Needs verification&rsquo; needs a manual check.&rdquo; (or, if the page couldn't be fetched, a note saying so).</li>
-<li><strong>&ldquo;Needs verification&rdquo;:</strong> shown on any field the draft couldn't confidently fill in, instead of guessing. Different from the &ldquo;Needs review&rdquo; badge elsewhere, which is your own manual sign-off on the whole profile, not a per-field gap.</li>
+<li><strong>&ldquo;Needs verification&rdquo;:</strong> shown on any field the draft couldn't confidently fill in, instead of guessing. Different from the &ldquo;Under review&rdquo; pill elsewhere, which is your own manual sign-off on the whole profile, not a per-field gap.</li>
 <li><strong>Table badge:</strong> &ldquo;N fields need verification&rdquo;&mdash;a nudge to go check that community's Edit page; nothing is blocked. Never shown to a visitor.</li>
 </ul>
 </section>
@@ -18616,7 +18668,6 @@ def admin_communities_new(request: Request):
   <div id="gen-host-community-listing" style="display:grid;gap:20px;">
 {_parts['details']}
   </div>
-{_parts['categories']}
 {_parts['screenshot']}
   <div>
     <button type="submit" class="btn">Add community</button>
@@ -18670,6 +18721,19 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
                             logo_refetched: str = "", logo_refetch_msg: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
+    return _community_edit_page(request, slug, screenshot_captured, app_screenshot_captured,
+                                logo_refetched, logo_refetch_msg)
+
+
+def _community_edit_page(request: Request, slug: str, screenshot_captured: str = "",
+                          app_screenshot_captured: str = "", logo_refetched: str = "",
+                          logo_refetch_msg: str = "", form=None, refusal: list | None = None):
+    """Render the community edit page. `form` (a submitted multipart form) and
+    `refusal` (a list of over-limit fields) are set only when a save was
+    refused for going over a hard limit: the page is then rebuilt from what
+    was submitted (every box, the checkboxes, the hidden citations and
+    drafted-this-session state) so nothing typed or generated is lost, with a
+    banner naming each field. Nothing was written in that case."""
     lib = _lib()
     try:
         c = lib.get_community_by_slug(slug)
@@ -18691,6 +18755,35 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
         lib.close()
     if not c:
         raise HTTPException(status_code=404, detail="Community not found")
+    _hidden = {"ai_drafted_fields": "", "ai_drafted_confidence": "",
+               "ai_drafted_citations": "", "ai_drafted_citations_model": ""}
+    if form is not None:
+        c = dict(c)
+        for _k in ("name", "url", "cost_band", "sponsorship_type", "sponsor_name", "access",
+                   "format", "reach", "local_markets", "screenshot_url"):
+            if _k in form:
+                c[_k] = (form.get(_k) or "").strip()
+        c["categories"] = form.getlist("categories")
+        c["featured"] = 1 if form.get("featured") == "1" else 0
+        c["advisor"] = 1 if form.get("advisor") == "1" else 0
+        p = dict(p)
+        for _f in PROFILE_LIMITS:
+            p[_f] = (form.get(_f) or "").strip()
+        p["low_confidence"] = 1 if form.get("low_confidence") == "1" else 0
+        p["cpe_eligible"] = resolve_cpe_submission(form.get("cpe_eligible"), form.get("cpe_note"))
+        for _k in _hidden:
+            _hidden[_k] = form.get(_k) or ""
+    _refusal_html = ""
+    if refusal:
+        _items = "".join(
+            f'<li><strong>{_esc(lbl)}</strong>: {n:,} characters, limit {lim:,} ({n - lim:,} over)</li>'
+            for lbl, n, lim in refusal)
+        _refusal_html = (
+            '<div role="alert" style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+            'padding:14px 18px;margin:0 0 20px;font-size:14px;">'
+            '<strong>Nothing was saved.</strong> These fields are over their limit. Shorten each one, then save again. '
+            'Everything you typed or generated is still in the boxes below.'
+            f'<ul style="margin:8px 0 0;padding-left:20px;">{_items}</ul></div>')
 
     def _competitor_row(comp: dict) -> str:
         return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;'
@@ -18858,59 +18951,65 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # Additional benefits) render inside the same form, after Program details.
     _logo_in_form_html, _logo_after_form_html = _logo_admin_section(
         c, c['id'], "communities", logo_refetch_banner_html)
-    _parts = _community_form_fields_parts(c, categories, logo_in_form_html=_logo_in_form_html)
-
     # Verification status (2026-08 consolidation, moved here from the retired
     # /profile page in PR 2a): the same shared pill+action as the admin list
     # and the public profile page, shown only once a profile draft exists.
+    # 2a.1: it now sits in the right column stack INSIDE the form, so its
+    # Mark reviewed / Flag for review button is a standalone-form button (a
+    # <form> can't nest in another <form>); the matching hidden form renders
+    # after the main form.
+    _review_form_id = f"review-status-form-communities-{community_id}"
+    _review_hidden_form_html = ""
     _profile_review_status_html = ""
     if p:
         _needs_review = bool(p.get("needs_review"))
         _comm_breakdown = (quality_flags["unconfident_count"], 12) if (_needs_review and quality_flags) else None
+        _mark_url = f"/admin/tools/communities/{community_id}/mark-reviewed"
+        _flag_url = f"/admin/tools/communities/{community_id}/flag-for-review"
         _rs_block = _review_status_block_html(
-            not _needs_review, f"/admin/tools/communities/{community_id}/mark-reviewed",
-            f"/admin/tools/communities/{community_id}/flag-for-review",
-            f"/tools/communities/{slug}/edit", _comm_breakdown,
+            not _needs_review, _mark_url, _flag_url,
+            f"/tools/communities/{slug}/edit", _comm_breakdown, standalone_form_id=_review_form_id,
         )
+        _review_hidden_form_html = _review_status_hidden_form_html(
+            not _needs_review, _mark_url, _flag_url, f"/tools/communities/{slug}/edit", _review_form_id)
         _review_line_html = ""
         if latest_review:
             _reviewer = latest_review.get("admin_username") or "admin"
             _reviewed_date = (latest_review.get("created_at") or "")[:10]
             _review_line_html = (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
                                   f'Reviewed by {_esc(_reviewer)} on {_esc(_reviewed_date)}</p>')
-        _profile_review_status_html = f"""<div style="flex:1 1 320px;min-width:0;">
-    <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
-    {_rs_block}
-    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Turns on automatically any time this profile is AI-drafted or refreshed, or you can flag it yourself anytime.</p>
-    {_review_line_html}
-  </div>"""
-    _generate_panel_html = f"""<div style="margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;display:flex;flex-wrap:wrap;gap:16px 24px;align-items:flex-start;">
-  {_profile_review_status_html}
-  <div style="flex:1 1 320px;min-width:0;">
-    <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Profile draft</h2>
-    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;">
-      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'cp-gen-status', 'cp-gen-err', 'gen-host-community-profile')">Generate full profile</button>
-      <button type="button" id="cp-restore-btn" class="tool-admin-btn" onclick="cpRestorePrevious()" hidden>Restore previous</button>
-      <span id="cp-gen-status" class="qe-status" role="status" aria-live="polite"></span>
-    </div>
-    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Fills every profile box below for review. Nothing is saved until you click Save changes.</p>
-    <p id="cp-gen-err" style="display:none;"></p>
-  </div>
+        _profile_review_status_html = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;">
+  <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Verification status</h2>
+  {_rs_block}
+  <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Turns on automatically any time this profile is AI-drafted or refreshed, or you can flag it yourself anytime.</p>
+  {_review_line_html}
 </div>"""
+    _generate_panel_html = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;">
+  <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Profile draft</h2>
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;">
+    <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'cp-gen-status', 'cp-gen-err', 'gen-host-community-profile')">Generate full profile</button>
+    <button type="button" id="cp-restore-btn" class="tool-admin-btn" onclick="cpRestorePrevious()" hidden>Restore previous</button>
+    <span id="cp-gen-status" class="qe-status" role="status" aria-live="polite"></span>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Fills every profile box below for review. Nothing is saved until you click Save changes.</p>
+  <p id="cp-gen-err" style="display:none;"></p>
+</div>"""
+    _parts = _community_form_fields_parts(
+        c, categories, logo_in_form_html=_logo_in_form_html,
+        right_top_html=_profile_review_status_html + "\n" + _generate_panel_html,
+        cpe_html=_community_cpe_control_html(p.get("cpe_eligible")))
     _profile_fields_html = _community_profile_form_fields(p, c, latest_review, citations=profile_citations)
     body = f"""<div class="page page-standard">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
-{_generate_panel_html}
+{_refusal_html}
 <form id="comm-edit-form" method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
-  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
-  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
-  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
-  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
+  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="{_esc(_hidden['ai_drafted_fields'])}">
+  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="{_esc(_hidden['ai_drafted_confidence'])}">
+  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="{_esc(_hidden['ai_drafted_citations'])}">
+  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="{_esc(_hidden['ai_drafted_citations_model'])}">
 
 {_parts['identity_block']}
-
-{_parts['categories']}
 
   <div>
     <h2 style="font-size:16px;font-weight:600;margin:32px 0 16px;padding-top:24px;border-top:1px solid var(--line);">Program details</h2>
@@ -18921,6 +19020,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 
 {_profile_fields_html}
 </form>
+{_review_hidden_form_html}
 {_logo_after_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
@@ -19000,18 +19100,27 @@ async def admin_communities_edit_submit(request: Request, slug: str):
     # they can never be blanked by a save.
     texts = {f: (form.get(f) or "").strip() for f in PROFILE_LIMITS}
     # Validate every hard limit BEFORE writing anything, so a refused profile
-    # never leaves the listing half-saved.
-    try:
-        for f, (_target, limit) in PROFILE_LIMITS.items():
-            Library._check_text_field_length(_COMMUNITY_PROFILE_LABELS[f], texts[f], limit)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    # never leaves the listing half-saved. Every over-limit field is collected
+    # (not just the first), and the page is re-rendered from what was
+    # submitted with a banner naming each one, so nothing typed or generated
+    # is lost (2a.1). Status 400: nothing was saved.
+    over = []
+    for f, (_target, limit) in PROFILE_LIMITS.items():
+        n = Library.text_budget_length(texts[f])
+        if n > limit:
+            over.append((_COMMUNITY_PROFILE_LABELS[f], n, limit))
+    _cpe_n = Library.text_budget_length(cpe_note_posted := (form.get("cpe_note") or ""))
+    if _cpe_n > CPE_NOTE_LIMITS[1]:
+        over.append((f"{compare.LABEL_CPE} note", _cpe_n, CPE_NOTE_LIMITS[1]))
+    if over:
+        page = _community_edit_page(request, slug, form=form, refusal=over)
+        page.status_code = 400
+        return page
 
     lib = _lib()
     try:
         existing_profile = lib.get_community_profile(community_id) or {}
-        cpe = resolve_cpe_submission(
-            form.get("cpe_eligible"), form.get("cpe_eligible_full"), existing_profile.get("cpe_eligible"))
+        cpe = resolve_cpe_submission(form.get("cpe_eligible"), form.get("cpe_note"))
         ai_drafted = _ai_drafted_field_names(form)
         profile_ai_drafted = bool(ai_drafted & set(_COMMUNITY_PROFILE_FIELD_IDS))
         has_profile_content = bool(existing_profile) or cpe or any(texts.values())
@@ -20326,18 +20435,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       </div>
       {_logo_in_form_html}
       <div>
-        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Priority tags</label>
-        <div style="display:grid;gap:10px;">
-          <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-            <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
-            <span>&#129305; Formal advisor</span>
-          </label>
-          <p style="font-size:12px;color:var(--muted);margin:-6px 0 0 30px;">Discloses publicly that Brian formally advises this vendor.</p>
-          <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-            <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
-            <span>&#10024; Featured</span>
-          </label>
-          <p style="font-size:12px;color:var(--muted);margin:-6px 0 0 30px;">Adds a &quot;Featured&quot; sticker to this tool's directory card.</p>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px 16px;">
+          {_tool_category_checkboxes(categories, tool['categories'])}
         </div>
       </div>
     </div>
@@ -20348,6 +20448,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Marks this profile as needing a full review. Turns on automatically whenever a new tool is added or any AI-drafted field is refreshed, or you can set/clear it by hand here.</p>
         {_profile_review_line_html}
       </div>
+      {_priority_tags_box_html("software vendor", "promoted", bool(tool.get("promoted")), bool(tool.get("advisor")))}
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
         <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
         <div style="display:flex;align-items:center;gap:10px;">
@@ -20367,13 +20468,6 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           <span>&#128232; Offer warm intro</span>
         </label>
       </div>
-    </div>
-  </div>
-
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
-    <div style="display:flex;flex-wrap:wrap;gap:8px 16px;">
-      {_tool_category_checkboxes(categories, tool['categories'])}
     </div>
   </div>
 
@@ -27579,6 +27673,45 @@ def _checks_summary_table_html(heading: str, rows: list) -> str:
     return f'<div>{heading_html}{table_html}</div>'
 
 
+def _profile_fields_over_limit(lib: Library) -> list[dict]:
+    """Every community profile field over its hard max, and every CPE note over
+    its 40 character target (2a.1). Read-only; an item drops off as it is
+    trimmed. Fields over the max are what a save refuses; notes between the
+    target and the max are listed as an aim, not a refusal."""
+    items: list[dict] = []
+    for c in lib.list_communities(approved_only=False):
+        p = lib.get_community_profile(c["id"]) or {}
+        if not p:
+            continue
+        for label, key in [(lbl, k) for _t, fs in compare.community_admin_groups() for lbl, k in fs]:
+            if key not in PROFILE_LIMITS:
+                continue
+            n = Library.text_budget_length(p.get(key))
+            if n > PROFILE_LIMITS[key][1]:
+                items.append({"community": c["name"], "slug": c["slug"], "field": label,
+                              "length": n, "limit": PROFILE_LIMITS[key][1], "kind": "over the limit"})
+        note_n = Library.text_budget_length(cpe_note(p.get("cpe_eligible")))
+        if note_n > CPE_NOTE_LIMITS[0]:
+            kind = "over the limit" if note_n > CPE_NOTE_LIMITS[1] else "over the target"
+            lim = CPE_NOTE_LIMITS[1] if note_n > CPE_NOTE_LIMITS[1] else CPE_NOTE_LIMITS[0]
+            items.append({"community": c["name"], "slug": c["slug"],
+                          "field": f"{compare.LABEL_CPE} note", "length": note_n, "limit": lim, "kind": kind})
+    return items
+
+
+def _over_limit_detail_html(items: list[dict]) -> str:
+    if not items:
+        return '<p style="margin:0;">Nothing is over.</p>'
+    rows = "".join(
+        f'<tr><td><a href="/tools/communities/{_esc(i["slug"])}/edit" style="color:var(--accent);">'
+        f'{_esc(i["community"])}</a></td><td>{_esc(i["field"])}</td>'
+        f'<td>{i["length"]:,}</td><td>{i["limit"]:,} ({_esc(i["kind"])})</td></tr>'
+        for i in items)
+    return ('<div style="overflow-x:auto;"><table style="min-width:520px;"><thead><tr>'
+            '<th>Community</th><th>Field</th><th>Length</th><th>Limit</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>')
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
@@ -27595,6 +27728,7 @@ def admin_checks(request: Request):
         models_last_reviewed = lib.get_setting("models_last_reviewed")
         exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
         db_copy_report = scan_db_copy_report(lib)
+        over_limit_items = _profile_fields_over_limit(lib)
         ci_quota_exhausted = lib.get_setting("ci_quota_exhausted") == "1"
         ci_quota_pr_url = lib.get_setting("ci_quota_pr_url") or ""
     finally:
@@ -27685,6 +27819,12 @@ def admin_checks(request: Request):
     queue_row = {"check": "Review queue", "href": "/admin/voice/review-queue",
                  "status": queue_status, "details": queue_details}
 
+    _n_over = len(over_limit_items)
+    over_row = {"check": "Profile fields over their limit",
+                "href": "#profile-over-limit" if _n_over else None,
+                "status": "warning" if _n_over else "ok",
+                "details": (f"{_n_over} over" if _n_over else "None over")}
+
     if disk_status is None:
         disk_details, disk_row_status, disk_href = "No /data volume (this environment)", "unknown", None
     else:
@@ -27735,7 +27875,7 @@ def admin_checks(request: Request):
                "status": exa_ai["status"], "details": exa_ai["details"]}
 
     site_checks_table = _checks_summary_table_html(
-        "Site checks", [live_row, db_row, queue_row, disk_row, badge_row])
+        "Site checks", [live_row, db_row, queue_row, over_row, disk_row, badge_row])
     ai_providers_table = _checks_summary_table_html(
         "AI providers", [pricing_row, models_row, exa_row])
 
@@ -27910,6 +28050,13 @@ def admin_checks(request: Request):
             db_row,
             '<p style="margin:10px 0 0;font-size:13px;"><a href="/admin/voice/review-queue" '
             'style="color:var(--accent);">Open the review queue &rarr;</a></p>'),
+        _checks_detail_row(
+            "profile-over-limit", "Profile fields over their limit",
+            _p("Community profile text over its hard limit, plus CPE notes over the 40 character "
+               "target. Nothing is changed or blocked: a profile with a field over its limit can't "
+               "be saved until that field is trimmed, and each item leaves this list once it is.")
+            + _over_limit_detail_html(over_limit_items),
+            over_row),
         _checks_detail_row(
             "disk-space", "Disk space",
             _p("How full the production volume is, read live on every load.") + _p(disk_detail),

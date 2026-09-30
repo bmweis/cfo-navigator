@@ -594,6 +594,20 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
     # fields populated, a few genuinely blank) is still useful content,
     # unlike a single-field draft going empty.
 
+    try:
+        _upsert_community_draft(lib, community_id, draft)
+    except ValueError as e:
+        # A draft over a field's hard limit is refused whole by the library.
+        # Skip this community, say why, and carry on with the rest of the run.
+        print(f"      skipped, over limit: {e}")
+        _SKIPPED_OVER_LIMIT.append((name, str(e)))
+        _log(log_file, "community", community_id, name, "community_profile", "failure",
+             f"skipped, over limit: {e}", **log_kwargs)
+        return
+    _finish_community_regen(lib, community_id, name, draft, log_file, log_kwargs)
+
+
+def _upsert_community_draft(lib: Library, community_id: int, draft) -> None:
     lib.upsert_community_profile(
         community_id,
         ideal_member=draft.ideal_member, anti_fit=draft.anti_fit, value_prop=draft.value_prop,
@@ -613,6 +627,10 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
         clear_verification_stamp=True,
         source="script",
     )
+
+
+def _finish_community_regen(lib: Library, community_id: int, name: str, draft,
+                             log_file: str, log_kwargs: dict) -> None:
     # Citations-validation parity (hardening item 6) — same reasoning as
     # Description above: the Community profile's Generate call is also
     # stateless AJAX with no community_id at draft time, so its citations
@@ -645,6 +663,10 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
     print(f"      OK — profile regenerated (23 fields), needs_review=0, verified "
           f"(cost=${draft.cost_usd:.4f}, citations={len(validated_citations)})")
     _log(log_file, "community", community_id, name, "community_profile", "success", **log_kwargs)
+
+
+# Communities skipped because a draft was over a hard limit (reported at the end).
+_SKIPPED_OVER_LIMIT: list[tuple[str, str]] = []
 
 
 # -- Sample preview (hardening item 2) --------------------------------------
@@ -1030,6 +1052,10 @@ def main() -> int:
         if want_communities:
             _run_communities(lib, communities, model, voice_core, args.log_file, args.apply, done)
 
+        if _SKIPPED_OVER_LIMIT:
+            print(f"\nSkipped, over limit: {len(_SKIPPED_OVER_LIMIT)} communities")
+            for _n, _why in _SKIPPED_OVER_LIMIT:
+                print(f"  - {_n}: {_why}")
         print(f"\nDone. Full per-field log at {args.log_file!r} — review it (or grep for "
               f"'\"status\": \"failure\"') before considering this pass complete.")
         return 0

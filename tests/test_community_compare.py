@@ -153,7 +153,7 @@ def test_compare_groups_fields_into_the_four_profile_page_themes(env):
 
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
     from linklib import compare
-    for title in ("Key facts", "Bottom line", compare.GROUP_TARGET_AUDIENCE, compare.GROUP_MEMBER_EXPERIENCE,
+    for title in (compare.PROGRAM_DETAILS_TITLE, "Bottom line", compare.GROUP_TARGET_AUDIENCE, compare.GROUP_MEMBER_EXPERIENCE,
                   compare.GROUP_ECONOMICS, compare.GROUP_KEY_POINTS, compare.GROUP_ADDITIONAL_BENEFITS,
                   "Similar communities"):
         assert f'cc-section" colspan="3"><span class="cmp-sticky-label">{title}</span></td>' in r.text, title
@@ -205,7 +205,7 @@ def test_compare_key_facts_band_shows_region_access_sponsor_cost(env):
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
     assert "Invite-only" in r.text
     assert "&lt;$1k/yr" in r.text
-    assert 'cc-section" colspan="3"><span class="cmp-sticky-label">Key facts</span></td>' in r.text  # Communities keeps this band, unlike Software
+    assert 'cc-section" colspan="3"><span class="cmp-sticky-label">Program details</span></td>' in r.text  # the Key facts band, renamed in 2a.1
 
 
 def test_compare_tags_render_under_entity_name_in_header(env):

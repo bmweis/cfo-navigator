@@ -86,9 +86,32 @@ COMMUNITY_PROFILE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     (GROUP_ADDITIONAL_BENEFITS, [
         ("Resources included", "resources_included"),
         ("Jobs program", "jobs_program"),
-        ("CPE eligible", "cpe_eligible"),
     ]),
 ]
+
+# PR 2a.1 (2026-09) — the Program details words, in ONE place. The admin edit
+# page's Program details grid, the public Details card, Compare's Program
+# details band and the MCP `key_facts` list all read these names, so Brian
+# never sees a name in the edit view that differs from what a visitor sees.
+# tests/test_program_details_labels.py walks every mapped pair.
+PROGRAM_DETAILS_TITLE = "Program details"
+LABEL_REACH = "Reach"
+LABEL_COST_BAND = "Cost band"
+LABEL_SPONSORSHIP = "Sponsorship"
+LABEL_ACCESS = "Access"
+LABEL_CPE = "CPE eligible"
+LABEL_FORMAT = "Format"
+# Admin-only companions that feed a combined public row: Reach shows the
+# Specified markets, Sponsorship shows the Sponsor name in parentheses.
+LABEL_SPECIFIED_MARKETS = "Specified markets"
+LABEL_SPONSOR_NAME = "Sponsor name"
+# Public order, top to bottom (Details card, Compare band, MCP key_facts).
+PROGRAM_DETAILS_LABELS = (
+    LABEL_REACH, LABEL_COST_BAND, LABEL_SPONSORSHIP, LABEL_ACCESS, LABEL_CPE, LABEL_FORMAT,
+)
+# Admin priority-tag names; the public sticker/badge they produce is named the same.
+LABEL_FEATURED = "Featured"
+LABEL_FORMAL_ADVISOR = "Formal advisor"
 
 
 def community_admin_groups() -> list[tuple[str, list[tuple[str, str]]]]:
@@ -314,10 +337,12 @@ def build_communities_compare(
 
         key_facts: list[CompareKeyFact] = []
         for label, raw_value in [
-            ("Region", community_geo_line(c)),
-            ("Access", c.get("access")),
-            ("Sponsor", sponsorship),
-            ("Cost", c.get("cost_band")),
+            (LABEL_REACH, community_geo_line(c)),
+            (LABEL_COST_BAND, c.get("cost_band")),
+            (LABEL_SPONSORSHIP, sponsorship),
+            (LABEL_ACCESS, c.get("access")),
+            (LABEL_CPE, profile.get("cpe_eligible")),
+            (LABEL_FORMAT, c.get("format")),
         ]:
             kf = _key_fact(label, raw_value)
             if kf:

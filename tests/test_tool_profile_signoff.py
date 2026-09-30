@@ -455,7 +455,7 @@ def test_edit_page_shows_review_status_pill_and_mark_reviewed_at_top(env):
     _login(client)
     r = client.get(f"/tools/software/{slug}/edit")
     assert 'name="needs_review"' not in r.text  # the checkbox is gone
-    assert "Needs review" in r.text  # the coral pill text
+    assert "Under review" in r.text  # the coral pill text ("Under review", matching the visitor label)
     assert f'action="/admin/tools/software/{tool_id}/mark-reviewed"' in r.text
     assert "Mark reviewed" in r.text
     assert f'name="redirect_to" value="/tools/software/{slug}/edit"' in r.text
@@ -507,7 +507,7 @@ def test_software_admin_list_shows_needs_review_count_link(env):
     _login(client)
     r = client.get("/admin/tools/software")
     assert "needs review" in r.text  # "1 needs review →" (singular n==1 phrasing)
-    assert "Needs review" in r.text  # the row badge
+    assert "Under review" in r.text  # the row badge
 
 
 def test_software_admin_list_filter_scopes_to_needs_review_only(env):
@@ -766,7 +766,7 @@ def test_software_view_page_shows_review_status_pill_for_admin(env):
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/software/{slug}")
-    assert "Needs review" in r.text
+    assert "Under review" in r.text
     assert "(1/3)" in r.text  # 1 of the 3 per-field flags is set
     assert f'action="/admin/tools/software/{tool_id}/mark-reviewed"' in r.text
     assert f'name="redirect_to" value="/tools/software/{slug}"' in r.text
@@ -781,7 +781,7 @@ def test_software_view_page_hides_review_status_for_anonymous_visitor(env):
 
     client = _client(env)  # no login
     r = client.get(f"/tools/software/{slug}")
-    assert "Needs review" not in r.text
+    assert "Under review" not in r.text
     assert "flag-for-review" not in r.text
     assert "mark-reviewed" not in r.text
 
@@ -813,7 +813,7 @@ def test_community_view_page_shows_review_status_pill_for_admin(env):
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/communities/{slug}")
-    assert "Needs review" in r.text
+    assert "Under review" in r.text
     assert "(2/12)" in r.text  # 2 of the 12 confidence-tracked fields reported low confidence
     assert f'action="/admin/tools/communities/{community_id}/mark-reviewed"' in r.text
 
@@ -830,7 +830,7 @@ def test_community_view_page_hides_review_status_when_no_profile_drafted(env):
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/communities/{slug}")
-    assert "Needs review" not in r.text
+    assert "Under review" not in r.text
     assert "flag-for-review" not in r.text
 
 
@@ -844,7 +844,7 @@ def test_community_view_page_hides_review_status_for_anonymous_visitor(env):
 
     client = _client(env)  # no login
     r = client.get(f"/tools/communities/{slug}")
-    assert "Needs review" not in r.text
+    assert "Under review" not in r.text
     assert "mark-reviewed" not in r.text
 
 
@@ -893,18 +893,18 @@ def test_communities_filter_and_pill_agree(env):
 def test_review_status_pill_html_reviewed_state(env):
     html = env._review_status_pill_html(True)
     assert "Reviewed" in html
-    assert "Needs review" not in html
+    assert "Under review" not in html
 
 
 def test_review_status_pill_html_needs_review_state_with_breakdown(env):
     html = env._review_status_pill_html(False, (2, 3))
-    assert "Needs review" in html
+    assert "Under review" in html
     assert "(2/3)" in html
 
 
 def test_review_status_pill_html_needs_review_state_without_breakdown(env):
     html = env._review_status_pill_html(False)
-    assert "Needs review</span>" in html  # no trailing " (n/total)" fraction
+    assert "Under review</span>" in html  # no trailing " (n/total)" fraction
 
 
 def test_review_status_action_html_polarity():

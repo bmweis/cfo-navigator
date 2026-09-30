@@ -11001,6 +11001,37 @@ single LEFT JOIN onto `community_profiles` giving each card its Bottom line
 `search_communities` (MCP) uses the same join. `_seed_toolbox` no longer syncs
 `communities.notes`.
 
+### Community edit page polish, PR 2a.1 (2026-09)
+
+No schema change. One set of words: `linklib/compare.py` holds `PROGRAM_DETAILS_TITLE`
+("Program details") and the labels `LABEL_REACH`, `LABEL_COST_BAND`, `LABEL_SPONSORSHIP`,
+`LABEL_ACCESS`, `LABEL_CPE`, `LABEL_FORMAT` (public order), plus the admin-only companions
+`LABEL_SPECIFIED_MARKETS` and `LABEL_SPONSOR_NAME` and the priority-tag names
+`LABEL_FEATURED` and `LABEL_FORMAL_ADVISOR`. The edit page, the public Details card,
+Compare's band and the MCP `key_facts` list all read them; `tests/test_edit_polish_2a1.py`
+walks every mapped pair. Compare and MCP key facts are now Reach, Cost band,
+Sponsorship, Access, CPE eligible, Format, and CPE eligible left Additional benefits.
+
+The edit page's left column of the identity block holds name, URL, logo and Categories;
+the right column is a stack: Verification status, Profile draft, Priority tags (Featured,
+then Formal advisor; `_priority_tags_box_html`, shared with the Software page). Both the
+verification button and the profile draft controls sit inside `#comm-edit-form`, so the
+review button is a standalone-form button with its hidden form after the main form. The
+Program details grid uses one named control height (`_PROGRAM_CTL_HEIGHT_PX`, 47) for this
+grid only.
+
+CPE eligible has no new column: the stored value is `Word (note)`, parsed on load and
+assembled on save by `cpe_note` and `assemble_cpe`. The note has a target of 40 and a max of
+60 (`CPE_NOTE_LIMITS`).
+
+Profile limits are now 600/800 for the eleven narrative fields, 250/400 for Bottom line
+and 300/600 for Resources included and Jobs program. A save with any field over its max is
+refused whole, and `_community_edit_page` re-renders from what was submitted (boxes,
+checkboxes, hidden citations and drafted state) with a banner naming every field. Existing
+over-limit text is not touched; `/admin/checks` lists it as a warning row, "Profile fields
+over their limit" (`_profile_fields_over_limit`). `_CHAR_BUDGET_JS` only disables buttons a
+form owns (`button.form === form`).
+
 ## 5. Directory map
 
 ```

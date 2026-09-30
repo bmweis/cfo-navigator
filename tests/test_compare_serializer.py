@@ -211,10 +211,10 @@ def test_communities_compare_key_facts_include_region_access_sponsor_cost():
                     cost_band="<$1k/yr", cost_note="Annual dues", reach="Regional", local_markets="NYC")
     entities, _ = compare.build_communities_compare([c], {1: {}}, {}, {})
     facts = {kf.label: kf.value for kf in entities[0].key_facts}
-    assert facts["Region"] == "NYC"
-    assert facts["Access"] == "Invite-only"
-    assert facts["Sponsor"] == "Vendor-backed (Acme)"
-    assert facts["Cost"] == "<$1k/yr"
+    assert facts[compare.LABEL_REACH] == "NYC"
+    assert facts[compare.LABEL_ACCESS] == "Invite-only"
+    assert facts[compare.LABEL_SPONSORSHIP] == "Vendor-backed (Acme)"
+    assert facts[compare.LABEL_COST_BAND] == "<$1k/yr"
     assert "Cost detail" not in facts and "Founded" not in facts   # retired in PR 2a
 
 
@@ -222,7 +222,7 @@ def test_communities_compare_needs_verification_sentinel_on_key_fact():
     from linklib.enrich import NEEDS_VERIFICATION
     c = _community(1, cost_band=NEEDS_VERIFICATION)
     entities, _ = compare.build_communities_compare([c], {}, {}, {})
-    cost_fact = next(kf for kf in entities[0].key_facts if kf.label == "Cost")
+    cost_fact = next(kf for kf in entities[0].key_facts if kf.label == compare.LABEL_COST_BAND)
     assert cost_fact.needs_verification is True
     assert cost_fact.value == ""
 

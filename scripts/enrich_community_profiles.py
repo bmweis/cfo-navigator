@@ -110,6 +110,7 @@ def main() -> int:
         total_drafted = 0
         total_skipped = 0
         total_failed = 0
+        skipped_over_limit: list[tuple[str, str]] = []
 
         for c in communities:
             existing_profile = lib.get_community_profile(c["id"]) or {}
@@ -141,24 +142,31 @@ def main() -> int:
             else:
                 # PR 2a: only live columns are written; the retired ones are
                 # frozen and upsert_community_profile leaves them untouched.
-                lib.upsert_community_profile(
-                    c["id"], source="script",
-                    ideal_member=draft.ideal_member, anti_fit=draft.anti_fit,
-                    value_prop=draft.value_prop, format_reality=draft.format_reality,
-                    engagement_level=draft.engagement_level,
-                    sponsor_relationship_note=draft.sponsor_relationship_note,
-                    business_model=draft.business_model,
-                    application_friction=draft.application_friction,
-                    cost_value_verdict=draft.cost_value_verdict,
-                    notable_members=draft.notable_members,
-                    public_criticism=draft.public_criticism, verdict_summary=draft.verdict_summary,
-                    resources_included=draft.resources_included, jobs_program=draft.jobs_program,
-                    cpe_eligible=draft.cpe_eligible,
-                    low_confidence=int(draft.low_confidence), needs_review=1,
-                )
+                try:
+                    lib.upsert_community_profile(
+                        c["id"], source="script",
+                        ideal_member=draft.ideal_member, anti_fit=draft.anti_fit,
+                        value_prop=draft.value_prop, format_reality=draft.format_reality,
+                        engagement_level=draft.engagement_level,
+                        sponsor_relationship_note=draft.sponsor_relationship_note,
+                        business_model=draft.business_model,
+                        application_friction=draft.application_friction,
+                        cost_value_verdict=draft.cost_value_verdict,
+                        notable_members=draft.notable_members,
+                        public_criticism=draft.public_criticism, verdict_summary=draft.verdict_summary,
+                        resources_included=draft.resources_included, jobs_program=draft.jobs_program,
+                        cpe_eligible=draft.cpe_eligible,
+                        low_confidence=int(draft.low_confidence), needs_review=1,
+                    )
+                    total_drafted += 1
+                except ValueError as e:
+                    # A draft over a field's hard limit is refused whole by the
+                    # library: skip this community, say why, keep going.
+                    print(f"  skipped, over limit: {e}")
+                    skipped_over_limit.append((c["name"], str(e)))
+                # The call was made either way, so its cost is recorded either way.
                 lib.record_enrichment_cost(None, draft.model, draft.input_tokens,
                                            draft.output_tokens, draft.cost_usd)
-                total_drafted += 1
 
             total_cost += draft.cost_usd
             print(f"  drafted{low_conf_note}, ${draft.cost_usd:.4f}")
@@ -167,6 +175,10 @@ def main() -> int:
         print(f"\n{len(communities)} community(ies) processed: {total_drafted} profile(s) drafted "
               f"(needs_review=1, pending your review), {total_skipped} already-researched skipped, "
               f"{total_failed} failed.")
+        if skipped_over_limit:
+            print(f"Skipped, over limit: {len(skipped_over_limit)}")
+            for n, why in skipped_over_limit:
+                print(f"  - {n}: {why}")
         print(f"Total cost: ${total_cost:.4f}" + (" (dry run — nothing written)" if args.dry_run else ""))
         if communities:
             processed = max(len(communities) - total_failed - total_skipped, 0)

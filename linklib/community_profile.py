@@ -33,29 +33,27 @@ RETIRED_COMMUNITY_FIELDS = ("demographic", "cost_note", "notes")
 
 # (soft target, hard max) in characters, per live prose field. The target only
 # turns the live counter amber; the max is enforced server-side and a save over
-# it is refused whole, never shortened. Every max is above the longest value
-# stored in production when this table was written (read 2026-09-29 from all
-# 40 community_profiles rows: ideal_member 1053, anti_fit 724, value_prop 1017,
-# format_reality 775, engagement_level 820, sponsor_relationship_note 804,
-# application_friction 733, cost_value_verdict 748, notable_members 925,
-# public_criticism 670, verdict_summary 214, business_model 790,
-# resources_included 131, jobs_program 266). tests/test_community_profile_fields.py
-# pins that ceiling so a future edit can't quietly land a max below stored text.
+# it is refused whole, never shortened. As of 2a.1 the maxes are DELIBERATELY
+# below some stored text (production read 2026-09-29: ideal_member 1053,
+# anti_fit 724, value_prop 1017, ..., see PRODUCTION_LONGEST): existing
+# over-limit profiles stay as they are, are listed on /admin/checks ("Profile
+# fields over their limit") and clear as they are trimmed by hand.
 PROFILE_LIMITS: dict[str, tuple[int, int]] = {
-    "ideal_member": (900, 1500),
-    "anti_fit": (600, 1000),
-    "value_prop": (800, 1500),
-    "format_reality": (700, 1200),
-    "engagement_level": (700, 1200),
-    "application_friction": (600, 1200),
-    "business_model": (700, 1300),
-    "sponsor_relationship_note": (700, 1300),
-    "cost_value_verdict": (700, 1300),
-    "notable_members": (700, 1200),
-    "public_criticism": (600, 1000),
+    # The 11 narrative fields in the four groups share one budget (2a.1).
+    "ideal_member": (600, 800),
+    "anti_fit": (600, 800),
+    "value_prop": (600, 800),
+    "format_reality": (600, 800),
+    "engagement_level": (600, 800),
+    "application_friction": (600, 800),
+    "business_model": (600, 800),
+    "sponsor_relationship_note": (600, 800),
+    "cost_value_verdict": (600, 800),
+    "notable_members": (600, 800),
+    "public_criticism": (600, 800),
     "verdict_summary": (250, 400),
     "resources_included": (300, 600),
-    "jobs_program": (300, 800),
+    "jobs_program": (300, 600),
 }
 
 # Longest value stored in production per limited field (same read as above).
@@ -68,7 +66,7 @@ PRODUCTION_LONGEST: dict[str, int] = {
 }
 
 CPE_OPTIONS = ("Yes", "No", "Unclear")
-_CPE_FULL = re.compile(r"^(Yes|No|Unclear)( \(.{1,120}\))?$")
+_CPE_FULL = re.compile(r"^(Yes|No|Unclear)( \(.{1,120}\))?$", re.DOTALL)
 _CPE_LEAD = re.compile(r"^\s*(Yes|No|Unclear)\b", re.IGNORECASE)
 
 
@@ -91,23 +89,52 @@ def coerce_cpe_eligible(value: str | None) -> str:
     return cpe_token(v)
 
 
-def resolve_cpe_submission(posted_token: str | None, posted_full: str | None,
-                           stored: str | None) -> str:
-    """The CPE value to store after a form submit.
+# The short note beside the CPE answer (2a.1). It is not a column of its own:
+# the stored string already encodes it as "Yes (note)", so the form parses that
+# string on load and assembles it on save. Same two-tier pattern as the prose
+# fields: the target only turns the live counter amber, the max refuses a save.
+CPE_NOTE_LIMITS = (40, 60)
+_CPE_NOTE_PAREN = re.compile(r"^\s*(?:Yes|No|Unclear)\s*\((.*)\)\s*$", re.IGNORECASE | re.DOTALL)
+_CPE_NOTE_REST = re.compile(r"^\s*(?:Yes|No|Unclear)\b[\s:;,.\-\u2013\u2014]*", re.IGNORECASE)
 
-    The dropdown only carries the leading word, so on its own a save would erase
-    a stored qualifier such as "Yes (NASBA-approved sponsor)". The qualifier is
-    kept when the posted word still matches it: taken from the freshly generated
-    value the page sends along (`posted_full`), else from what is already stored.
-    Picking a different word by hand drops the qualifier, since it described the
-    old answer."""
-    token = (posted_token or "").strip()
-    if token not in CPE_OPTIONS:
+
+def _clean_note(note: str | None) -> str:
+    n = re.sub(r"\s+", " ", (note or "")).strip()
+    if n.startswith("(") and n.endswith(")"):
+        inner, depth = n[1:-1], 0
+        for ch in inner:
+            depth += (ch == "(") - (ch == ")")
+            if depth < 0:
+                break
+        if depth == 0:
+            n = inner.strip()
+    return n
+
+
+def cpe_note(value: str | None) -> str:
+    """The note part of a stored CPE value: the parenthetical of "Yes (note)".
+    A legacy value with prose after the word instead of a parenthetical (for
+    example "Yes - NASBA sponsor") returns that prose, so nothing stored is
+    hidden from the admin or lost when the page is saved."""
+    v = (value or "").strip()
+    if not cpe_token(v):
         return ""
-    full = coerce_cpe_eligible(posted_full)
-    if full and cpe_token(full) == token:
-        return full
-    kept = coerce_cpe_eligible(stored)
-    if kept and cpe_token(kept) == token:
-        return kept
-    return token
+    m = _CPE_NOTE_PAREN.match(v)
+    if m:
+        return _clean_note(m.group(1))
+    return _clean_note(_CPE_NOTE_REST.sub("", v, count=1))
+
+
+def assemble_cpe(token: str | None, note: str | None) -> str:
+    """Build the stored value from the dropdown word and the note: a bare word,
+    or "Word (note)". No word (Not assessed) stores nothing, note or not."""
+    t = (token or "").strip()
+    if t not in CPE_OPTIONS:
+        return ""
+    n = _clean_note(note)
+    return f"{t} ({n})" if n else t
+
+
+def resolve_cpe_submission(posted_token: str | None, posted_note: str | None) -> str:
+    """The CPE value to store after a form submit (assembled, not merged)."""
+    return assemble_cpe(posted_token, posted_note)
