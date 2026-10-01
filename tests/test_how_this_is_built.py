@@ -161,6 +161,7 @@ def test_page_carries_recognized_width_tier(env):
     assert row["flagged"] is False
 
 
+@pytest.mark.real_coral
 def test_no_coral_moment_on_this_page(env):
     assert not any(p.startswith("/how-this-is-built") for p in env.coral_moment_problems())
 
