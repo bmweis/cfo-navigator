@@ -6167,6 +6167,46 @@ gate-enforcement tests proving a pending field's content and badge, and an
 empty field's placeholder copy, come back identical in shape and wording
 to what the HTML routes render, for both a non-admin and an admin caller.
 
+**MCP field parity (2026-10) — structured Program details, a parity
+registry, and a guard that no profile column reaches (or skips) the MCP by
+accident.** Phase 0 found the premise "Program details is missing from the
+MCP" did not hold: the key-facts band (Reach, Cost band, Sponsorship, Access,
+CPE eligible, Format) was already served as `key_facts`, and Resources
+included and Jobs program (the Additional benefits group) were already in
+`sections`. What was real: CPE came back as one flat string, its
+pending-review state was not carried (the page badges it), and the page's
+Warm Intro button had no MCP signal. Shipped: (1) `compare.build_program_
+details()` and `CompareEntity.program_details` (`CompareProgramDetail`:
+`label`, `value`, `needs_verification`, optional `note`, optional `state`),
+built from `PROGRAM_DETAILS_LABELS`, skipping empty rows the way the page's
+Details card does; CPE goes through `cpe_state()`/`cpe_note()` and is gated
+by the whole-profile `needs_review` flag via `gates.state_for`, so the MCP
+adds the same "under review" / "unverified, visible to visitors" badge the
+page shows. `get_community`, `compare_communities` and every compared entity
+(an empty list for software) carry `program_details`; `key_facts` stays as
+the flat alias, unchanged. (2) `get_software.warm_intro_available`: a boolean
+(`warm_intro_enabled` AND `vendor_email`), never the contact details.
+(3) `linklib.compare.MCP_PARITY`: one entry per stored column on `tools`,
+`communities`, `community_profiles` and `tool_feature_links`, in one of six
+categories. `mcp:`/`mcp-admin:` name where the column is served (admin token
+only for the second); `admin-only:` is never public anywhere; `excluded:` is
+public on the web but deliberately not served over MCP (logos, screenshots
+and their capture dates, Brian's decision: presentation assets); `retired`;
+`internal:` (row/join keys). The registry distinguishes `admin-only` from
+`excluded` by prefix: the permission guard applies to the first (a member
+token must never see the key or the value), while `excluded` is a deliberate
+non-leak, so it only has to stay unserved until someone edits its line.
+`tests/test_mcp_field_parity.py` holds Test 1 (registry equals the live
+schema, so a new column fails until it has a decision), Test 2 (every `mcp:`
+path resolves in a seeded output, including through `compare_communities`),
+Test 3 (the permission guard, scoped per subtree so CPE's `note` is not
+mistaken for `tool_feature_links.note`), Test 4 (the Program details labels
+equal `PROGRAM_DETAILS_LABELS` on the public page, `get_community` and
+`compare_communities`), and a test that excluded entries stay unserved.
+No rendering change: the public profile page is still hand-built in
+`webapp/app.py` and shares only the labels. See CLAUDE.md's MCP field parity
+bullet for the two follow-up issues.
+
 **PR 8 (2026-09) — two additions, one rename, closing a real coverage
 gap.** The Toolbox has five components (software, communities, FP&A Buddy,
 benchmarking resources, book recommendations); only the first three were
