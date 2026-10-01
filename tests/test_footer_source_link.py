@@ -55,3 +55,12 @@ def test_source_link_adds_no_inline_styling(env):
     footer = _footer(client.get("/").text)
     anchor = re.search(r'<a [^>]*href="%s"[^>]*>' % re.escape(REPO_URL), footer).group(0)
     assert "style=" not in anchor and "class=" not in anchor
+
+
+def test_mobile_footer_hides_separators_so_wrapped_rows_cannot_dangle(env):
+    appmod, _ = env
+    css = appmod._CSS
+    i = css.index(".site-footer .links{justify-content:center")
+    block = css[i:i + 500]
+    assert ".site-footer .links span{display:none;}" in block
+    assert "column-gap:16px" in block

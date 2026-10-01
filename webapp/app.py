@@ -1904,7 +1904,9 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
 @media(max-width:640px){
   .site-footer{flex-wrap:wrap;justify-content:center;text-align:center;}
   .site-footer .brand,.site-footer .center,.site-footer .links{flex:none;}
-  .site-footer .links{justify-content:center;flex-wrap:wrap;row-gap:6px;max-width:100%;}
+  .site-footer .links{justify-content:center;flex-wrap:wrap;row-gap:6px;column-gap:16px;max-width:100%;}
+  /* Wrapped rows can't end on a dangling dot: drop the separators here, the gap separates items. */
+  .site-footer .links span{display:none;}
 }
 
 /* Mobile: nav collapses to a navy hamburger drawer */
