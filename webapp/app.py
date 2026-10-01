@@ -2038,6 +2038,10 @@ _COL_WIDTH_STATUS_AGE = 190   # A status word PLUS a relative-age readout on
 # prevent.
 _CARD_WIDTH_DIRECTORY_MIN = 320   # Software + Communities directory cards
 _CARD_WIDTH_RESOURCE_MIN = 260    # Benchmarking + Books cards
+# One page of directory cards. 12 fills a 3-column row 4 times (and 4 columns 3
+# times); the Communities directory had its own literal of 10, which left a
+# ragged last row. Both directory pages read this one constant.
+_DIRECTORY_PAGE_SIZE = 12
 
 # Trailing brand suffixes baked into individual page titles over time — now
 # redundant since _page() prepends a consistent "BMW CFO ·" tab-title prefix
@@ -2588,23 +2592,39 @@ def _cmp_tag_chips_html(entity: "compare.CompareEntity", diff: "compare.CompareT
     return f'<div class="cmp-tag-row">{tag_chips}</div>' if tag_chips else ""
 
 
-def _cmp_key_facts_cell_html(entity: "compare.CompareEntity") -> str:
-    """The Key facts band's one `<td>` per entity — Communities' small
-    Region/Access/Sponsor/Cost/Founded facts, bundled into ONE row instead
-    of five separate ones so Key facts reads as a compact summary band, not
-    another wall of lonely rows. Tags moved out of this band (Compare
-    Redesign Phase 1 follow-up, see `_cmp_tag_chips_html`) — Software has
-    no other key facts, so its Key facts band is retired outright (see
-    `tools_software_compare`); Communities keeps this one, tag-free."""
-    parts = []
-    for kf in entity.key_facts:
-        if kf.needs_verification:
-            parts.append(f'<div class="cmp-fact"><span class="cmp-fact-label">{_esc(kf.label)}</span> '
-                          f'<span class="comm-verify">Needs verification</span></div>')
-        else:
-            parts.append(f'<div class="cmp-fact"><span class="cmp-fact-label">{_esc(kf.label)}</span> '
-                          f'<span class="cmp-fact-value">{_esc(kf.value)}</span></div>')
-    return "".join(parts) if parts else '<span class="cc-empty">Not available.</span>'
+# Width of the field-name column on both Compare tables (px). Sized to the
+# longest field name ("Resources included", "Who should skip it") so neither
+# wraps at desktop width; the 116px mobile figure lives in _CMP_SHARED_CSS.
+_CMP_LABEL_COL_WIDTH = 176
+
+
+def _cmp_row_html(label: str, cells: list[str], bottom_line: bool = False) -> str:
+    """One Compare row: the field name once in the first column, then one
+    value cell per compared entity. `bottom_line` gives the row the seafoam
+    treatment the profile pages' Bottom line callout uses."""
+    bl = " cc-bl" if bottom_line else ""
+    tds = "".join(f'<td class="cc-cell{bl}">{c}</td>' for c in cells)
+    return f'<tr><td class="cc-cell cc-label{bl}">{_esc(label)}</td>{tds}</tr>'
+
+
+def _cmp_key_fact_rows_html(entities: list["compare.CompareEntity"]) -> str:
+    """Program details: one row per field (`compare.PROGRAM_DETAILS_LABELS`
+    order), the field name in the first column and only values in each
+    community's column. A community missing a field (no stored value) reads
+    "Not available."; a value flagged for verification keeps its badge."""
+    rows = []
+    for label in compare.PROGRAM_DETAILS_LABELS:
+        cells = []
+        for entity in entities:
+            kf = next((k for k in entity.key_facts if k.label == label), None)
+            if kf is None:
+                cells.append('<span class="cc-empty">Not available.</span>')
+            elif kf.needs_verification:
+                cells.append('<span class="comm-verify">Needs verification</span>')
+            else:
+                cells.append(_esc(kf.value))
+        rows.append(_cmp_row_html(label, cells))
+    return "".join(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -2731,8 +2751,23 @@ _CMP_SHARED_CSS = f"""
 .cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
 .cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
   color:var(--ink-soft);line-height:1.55;min-width:220px;}}
-.cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  min-width:140px;white-space:nowrap;background:var(--surface);}}
+.cc-label{{width:{_CMP_LABEL_COL_WIDTH}px;min-width:{_CMP_LABEL_COL_WIDTH}px;max-width:{_CMP_LABEL_COL_WIDTH}px;
+  font-size:13px;font-weight:700;color:var(--ink);background:var(--surface);}}
+/* Bottom line row: first row of the body, seafoam like the profile callout,
+   no rules above or below. The selectors are deliberately specific: the
+   sitewide table block in _CSS puts a 1px top border and a surface
+   background on every td with !important. */
+.site-main .table-frame>table.cc-table td.cc-bl{{background:var(--seafoam-wash)!important;border-top:0!important;
+  font-size:15px;color:var(--ink);}}
+.site-main .table-frame>table.cc-table td.cc-label.cc-bl{{background:var(--seafoam-wash)!important;font-size:13px;}}
+/* The sitewide frame rule (.site-main .table-frame>table) sets overflow:visible
+   but loses on specificity to the generic table rule's overflow:hidden, and a
+   table that clips can't let sticky cells move. Doubling .cc-table wins. */
+.site-main .table-frame>table.cc-table.cc-table{{overflow:visible!important;}}
+@media (max-width:700px){{
+  .cc-label{{position:sticky;left:0;z-index:2;border-right:1px solid var(--line);
+    width:116px;min-width:116px;max-width:116px;padding:14px 10px;}}
+}}
 .cc-empty{{color:var(--muted);font-style:italic;}}
 /* Subheading band: the secondary table format (navy-light band, white
    text). The sitewide table block in _CSS enforces the same colors. */
@@ -2786,8 +2821,6 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
    outline shows overlap and contrast without reading every pill. */
 .cmp-tag-shared{{background:var(--seafoam);color:var(--navy);}}
 .cmp-tag-unique{{background:transparent;color:var(--seafoam-deep);border:1px solid var(--seafoam-mid);}}
-.cmp-fact{{font-size:13px;color:var(--ink-soft);margin-bottom:4px;}}
-.cmp-fact-label{{font-weight:600;color:var(--muted);}}
 .cmp-full-link{{display:block;margin-top:4px;font-size:12.5px;font-weight:600;color:var(--navy);text-decoration:none;}}
 .cmp-full-link:hover{{text-decoration:underline;}}
 /* Mobile follow-up: sticky section labels + swipe hint. This table has no
@@ -8934,7 +8967,7 @@ var DIRECTORY_BADGE_ADMIN = {_json.dumps(gates.DIRECTORY_JS_BADGE_TEXT_ADMIN)};
 var DIRECTORY_BADGE_VISITOR = {_json.dumps(gates.DIRECTORY_JS_BADGE_TEXT_VISITOR)};
 var activeCats = new Set();
 var advisorOnly = false;
-var PAGE_SIZE = 12;
+var PAGE_SIZE = {_DIRECTORY_PAGE_SIZE};
 var currentPage = 0;
 var TOOL_COMPARE_MAX = 4;
 var toolCompareSelected = [];
@@ -9485,25 +9518,13 @@ to compare them side by side. Check the box on any card, then use the compare ba
     _section_empty_keys = ["tool_description", "tool_agent_taxonomy", "tool_differentiation"]
     section_rows = []
     for idx, section_title in enumerate(s.title for s in entities[0].sections):
-        empty_key = _section_empty_keys[idx]
-        cells = "".join(
-            f'<td class="cc-cell">{_cmp_section_cell_html(e.sections[idx], _compare_authed, empty_key)}</td>'
-            for e in entities
-        )
-        section_rows.append(
-            _cmp_section_band_row_html(section_title, len(entities))
-            + f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
-        )
+        cells = [_cmp_section_cell_html(e.sections[idx], _compare_authed, _section_empty_keys[idx]) for e in entities]
+        row = _cmp_row_html(section_title, cells, bottom_line=(section_title == "Bottom line"))
+        # Bottom line leads the table, like the profile page's callout.
+        section_rows.insert(0, row) if section_title == "Bottom line" else section_rows.append(row)
 
-    competitors_row = (
-        _cmp_section_band_row_html("Competitors", len(entities))
-        + '<tr><td class="cc-cell cc-label"></td>'
-        + "".join(
-            f'<td class="cc-cell">{_cmp_chip_list_html(e.chip_lists[0], _compare_authed)}</td>'
-            for e in entities
-        )
-        + "</tr>"
-    )
+    competitors_row = _cmp_row_html(
+        "Competitors", [_cmp_chip_list_html(e.chip_lists[0], _compare_authed) for e in entities])
 
     full_profile_row = (
         '<tr><td class="cc-cell cc-label"></td>'
@@ -9520,7 +9541,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
 <h1 style="margin:0;">Compare software</h1>
 <p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">A quick read on overlap and contrast across
 {len(entities)} tools&mdash;not the full profile. Click a name, or "Full profile," to read the whole thing.
-Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
+Sections still marked <span class="cc-verify">under review</span> came from an LLM first pass and haven't been
 confirmed yet.</p>
 
 {_cmp_summary_block_html(request, entities, "tool")}
@@ -10896,7 +10917,7 @@ var NEEDS_VERIFICATION = {_json.dumps(_NEEDS_VERIFICATION)};
 var activeCommCats = new Set();
 var activeCommCost = '';
 var commAdvisorOnly = false;
-var COMM_PAGE_SIZE = 10;
+var COMM_PAGE_SIZE = {_DIRECTORY_PAGE_SIZE};
 var commCurrentPage = 0;
 var COMPARE_MAX = 3;
 var compareSelected = [];
@@ -11547,41 +11568,39 @@ to compare them side by side. Check the box on any card, then use the compare ba
         for e in entities
     )
 
+    # Bottom line first (seafoam row); Program details and each themed group
+    # get a navy band, then one row per field with the name in the first column.
+    _section_empty_keys = ["community_bottom_line"] + ["community_profile_group"] * len(compare.COMMUNITY_PROFILE_GROUPS)
+    bottom_line_row = ""
+    section_rows = []
+    for idx, sec0 in enumerate(entities[0].sections):
+        if sec0.title == "Bottom line":
+            cells = [_cmp_section_cell_html(e.sections[idx], authed, _section_empty_keys[idx]) for e in entities]
+            bottom_line_row = _cmp_row_html("Bottom line", cells, bottom_line=True)
+            continue
+        section_rows.append(_cmp_section_band_row_html(sec0.title, len(entities)))
+        for fi, f0 in enumerate(sec0.fields):
+            # Same two-tier empty handling as _cmp_section_cell_html: a group
+            # with nothing in it shows the group placeholder, a single gap
+            # inside an otherwise-populated group shows "No details available."
+            cells = []
+            for e in entities:
+                fields = e.sections[idx].fields
+                if fields[fi].state != gates.GateState.EMPTY:
+                    cells.append(_cmp_populated_field_html(fields[fi], authed))
+                elif all(f.state == gates.GateState.EMPTY for f in fields):
+                    cells.append(_cmp_empty_html(_section_empty_keys[idx], authed))
+                else:
+                    cells.append('<div class="cmp-tier2">No details available.</div>')
+            section_rows.append(_cmp_row_html(f0.label, cells))
+
     key_facts_row = (
         _cmp_section_band_row_html(compare.PROGRAM_DETAILS_TITLE, len(entities))
-        + '<tr><td class="cc-cell cc-label"></td>'
-        + "".join(f'<td class="cc-cell">{_cmp_key_facts_cell_html(e)}</td>' for e in entities)
-        + "</tr>"
+        + _cmp_key_fact_rows_html(entities)
     )
 
-    # Grouped sections (Compare Redesign Phase 1 — collapses the old flat
-    # 11-field list into the same 4 themed cards the profile page already
-    # groups by, per Step 0's approved plan, instead of 11 ungrouped rows).
-    # Bottom line (verdict_summary) first, then the 4 COMMUNITY_PROFILE_GROUPS
-    # themes — build_communities_compare builds this same fixed order for
-    # every entity, so zipping by index is safe.
-    _section_empty_keys = ["community_bottom_line"] + ["community_profile_group"] * len(compare.COMMUNITY_PROFILE_GROUPS)
-    section_rows = []
-    for idx, section_title in enumerate(s.title for s in entities[0].sections):
-        empty_key = _section_empty_keys[idx]
-        cells = "".join(
-            f'<td class="cc-cell">{_cmp_section_cell_html(e.sections[idx], authed, empty_key)}</td>'
-            for e in entities
-        )
-        section_rows.append(
-            _cmp_section_band_row_html(section_title, len(entities))
-            + f'<tr><td class="cc-cell cc-label"></td>{cells}</tr>'
-        )
-
-    similar_row = (
-        _cmp_section_band_row_html("Similar communities", len(entities))
-        + '<tr><td class="cc-cell cc-label"></td>'
-        + "".join(
-            f'<td class="cc-cell">{_cmp_chip_list_html(e.chip_lists[0], authed)}</td>'
-            for e in entities
-        )
-        + "</tr>"
-    )
+    similar_row = _cmp_row_html(
+        "Similar communities", [_cmp_chip_list_html(e.chip_lists[0], authed) for e in entities])
 
     full_profile_row = (
         '<tr><td class="cc-cell cc-label"></td>'
@@ -11598,7 +11617,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
 <h1 style="margin:0;">Compare communities</h1>
 <p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">A quick read on overlap and contrast across
 {len(entities)} communities&mdash;not the full profile. Click a name, or "Full profile," to read the whole thing.
-Sections still marked <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been
+Sections still marked <span class="cc-verify">under review</span> came from an LLM first pass and haven't been
 confirmed yet.</p>
 
 {_cmp_summary_block_html(request, entities, "community")}
@@ -11607,6 +11626,7 @@ confirmed yet.</p>
 <table class="cc-table">
 <thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
 <tbody>
+{bottom_line_row}
 {key_facts_row}
 {"".join(section_rows)}
 {similar_row}
@@ -27537,7 +27557,7 @@ _SUMMARY_STATUS_META = {
 # in both tables' <colgroup>, so the Status/dot column lines up across the
 # two side-by-side cards regardless of either table's own Check/Details
 # text length.
-_SUMMARY_COL_WIDTH_CHECK = "150px"
+_SUMMARY_COL_WIDTH_CHECK = "260px"
 _SUMMARY_COL_WIDTH_STATUS = "56px"
 
 # The single source of truth for both the column ORDER and the <thead>
@@ -27731,29 +27751,52 @@ def _checks_summary_table_html(heading: str, rows: list) -> str:
     return f'<div>{heading_html}{table_html}</div>'
 
 
+# Software fields the edit form limits, read from the same Library constants
+# the form's counter and the save-time refusal use (never a second copy).
+_TOOL_LIMITED_FIELDS = (
+    ("Description", "description", Library.TOOL_DESCRIPTION_MAX),
+    ("Short summary", "summary", Library.TOOL_SUMMARY_MAX),
+    ("Agent taxonomy", "agent_taxonomy_note", Library.TOOL_AGENT_TAXONOMY_MAX),
+    ("Bottom line", "competitive_differentiation", Library.TOOL_DIFFERENTIATION_MAX),
+)
+
+
 def _profile_fields_over_limit(lib: Library) -> list[dict]:
-    """Every community profile field over its hard max, and every CPE note over
-    its 40 character target (2a.1). Read-only; an item drops off as it is
-    trimmed. Fields over the max are what a save refuses; notes between the
-    target and the max are listed as an aim, not a refusal."""
+    """Every software and community profile field over its hard max, and every
+    CPE note over its 40 character target. Read-only; an item drops off as it
+    is trimmed. A field over the max is what a save refuses (blocking); a CPE
+    note between the target and the max is an aim, not a refusal. Blocking
+    items sort first, then over-target, then by type and name."""
     items: list[dict] = []
+    for t in lib.list_tools(approved_only=False):
+        for label, key, limit in _TOOL_LIMITED_FIELDS:
+            n = Library.text_budget_length(t.get(key))
+            if n > limit:
+                items.append({"type": "Software", "name": t["name"],
+                              "edit_href": f"/tools/software/{t['slug']}/edit",
+                              "field": label, "length": n, "limit": limit,
+                              "kind": "over the limit"})
     for c in lib.list_communities(approved_only=False):
         p = lib.get_community_profile(c["id"]) or {}
         if not p:
             continue
+        href = f"/tools/communities/{c['slug']}/edit"
         for label, key in [(lbl, k) for _t, fs in compare.community_admin_groups() for lbl, k in fs]:
             if key not in PROFILE_LIMITS:
                 continue
             n = Library.text_budget_length(p.get(key))
             if n > PROFILE_LIMITS[key][1]:
-                items.append({"community": c["name"], "slug": c["slug"], "field": label,
-                              "length": n, "limit": PROFILE_LIMITS[key][1], "kind": "over the limit"})
+                items.append({"type": "Community", "name": c["name"], "edit_href": href,
+                              "field": label, "length": n, "limit": PROFILE_LIMITS[key][1],
+                              "kind": "over the limit"})
         note_n = Library.text_budget_length(cpe_note(p.get("cpe_eligible")))
         if note_n > CPE_NOTE_LIMITS[0]:
             kind = "over the limit" if note_n > CPE_NOTE_LIMITS[1] else "over the target"
             lim = CPE_NOTE_LIMITS[1] if note_n > CPE_NOTE_LIMITS[1] else CPE_NOTE_LIMITS[0]
-            items.append({"community": c["name"], "slug": c["slug"],
-                          "field": f"{compare.LABEL_CPE} note", "length": note_n, "limit": lim, "kind": kind})
+            items.append({"type": "Community", "name": c["name"], "edit_href": href,
+                          "field": f"{compare.LABEL_CPE} note", "length": note_n,
+                          "limit": lim, "kind": kind})
+    items.sort(key=lambda i: (i["kind"] != "over the limit", i["type"], i["name"].lower(), i["field"]))
     return items
 
 
@@ -27761,12 +27804,13 @@ def _over_limit_detail_html(items: list[dict]) -> str:
     if not items:
         return '<p style="margin:0;">Nothing is over.</p>'
     rows = "".join(
-        f'<tr><td><a href="/tools/communities/{_esc(i["slug"])}/edit" style="color:var(--accent);">'
-        f'{_esc(i["community"])}</a></td><td>{_esc(i["field"])}</td>'
+        f'<tr><td>{_esc(i["type"])}</td>'
+        f'<td><a href="{_esc(i["edit_href"])}" style="color:var(--accent);">'
+        f'{_esc(i["name"])}</a></td><td>{_esc(i["field"])}</td>'
         f'<td>{i["length"]:,}</td><td>{i["limit"]:,} ({_esc(i["kind"])})</td></tr>'
         for i in items)
-    return ('<div style="overflow-x:auto;"><table style="min-width:520px;"><thead><tr>'
-            '<th>Community</th><th>Field</th><th>Length</th><th>Limit</th></tr></thead>'
+    return ('<div style="overflow-x:auto;"><table style="min-width:620px;"><thead><tr>'
+            '<th>Type</th><th>Name</th><th>Field</th><th>Length</th><th>Limit</th></tr></thead>'
             f'<tbody>{rows}</tbody></table></div>')
 
 
@@ -27940,7 +27984,8 @@ def admin_checks(request: Request):
     summary_box = (
         f'<style>.checks-summary-grid{{display:flex;align-items:flex-start;gap:32px;margin:-4px 0 24px;}}'
         f'.checks-summary-grid>div{{flex:1 1 0;min-width:0;}}'
-        f'@media(max-width:760px){{.checks-summary-grid{{flex-direction:column;gap:24px;}}}}</style>'
+        f'@media(max-width:760px){{.checks-summary-grid{{flex-direction:column;gap:24px;}}'
+        f'.checks-summary-grid col:first-child{{width:150px!important;}}}}</style>'
         f'<div class="checks-summary-grid">{site_checks_table}{ai_providers_table}</div>'
     )
 
@@ -28110,9 +28155,10 @@ def admin_checks(request: Request):
             'style="color:var(--accent);">Open the review queue &rarr;</a></p>'),
         _checks_detail_row(
             "profile-over-limit", "Profile fields over their limit",
-            _p("Community profile text over its hard limit, plus CPE notes over the 40 character "
-               "target. Nothing is changed or blocked: a profile with a field over its limit can't "
-               "be saved until that field is trimmed, and each item leaves this list once it is.")
+            _p("Software and community profile text over its hard limit, plus CPE notes over the 40 "
+               "character target. Text that is already over its limit stays visible, but the field "
+               "can't be saved until it is trimmed. Each item leaves this list once it is. "
+               "Fields over the limit are listed first.")
             + _over_limit_detail_html(over_limit_items),
             over_row),
         _checks_detail_row(

@@ -99,11 +99,12 @@ def test_communities_compare_row_omitted_when_no_community_has_any_content(env):
 
     r = _client(env).get(f"/tools/communities/compare?ids={a},{b}")
     assert r.status_code == 200
-    # Neither community has an ideal_member profile field, so that row is
-    # simply absent (Communities' compare doesn't render an always-present
-    # section header the way Software's Agent-taxonomy section does) —
-    # confirm the page still renders cleanly with nothing to show for it.
-    assert "Ideal member" not in r.text
+    # Compare renders every field row for every community ("nothing ever
+    # disappears"), so the Ideal member label is present with the empty-group
+    # placeholder in each cell and no drafted content or review badge.
+    assert 'cc-label">Ideal member</td>' in r.text
+    assert r.text.count("Not documented.") >= 2
+    assert '<span class="cc-verify">' not in r.text.split("<tbody>")[1]
 
 
 def test_communities_compare_row_present_and_per_cell_gated_when_one_community_has_content(env):
@@ -139,10 +140,12 @@ def test_admin_and_visitor_see_identical_content_differ_only_in_badge_word_softw
 
     assert "A drafted differentiation note." in visitor.text
     assert "A drafted differentiation note." in admin.text
-    assert "under review" in visitor.text
+    # The page intro also says "under review", so check the per-cell badge markup.
+    badge = '<div style="margin-top:4px;"><span class="cc-verify">under review</span></div>'
+    assert badge in visitor.text
     assert "unverified, visible to visitors" not in visitor.text
     assert "unverified, visible to visitors" in admin.text
-    assert "under review" not in admin.text
+    assert badge not in admin.text
 
 
 def test_admin_and_visitor_see_identical_content_differ_only_in_badge_word_communities(env):
@@ -160,10 +163,12 @@ def test_admin_and_visitor_see_identical_content_differ_only_in_badge_word_commu
 
     assert "A drafted ideal-member note." in visitor.text
     assert "A drafted ideal-member note." in admin.text
-    assert "under review" in visitor.text
+    # The page intro also says "under review", so check the per-cell badge markup.
+    badge = '<div style="margin-top:4px;"><span class="cc-verify">under review</span></div>'
+    assert badge in visitor.text
     assert "unverified, visible to visitors" not in visitor.text
     assert "unverified, visible to visitors" in admin.text
-    assert "under review" not in admin.text
+    assert badge not in admin.text
 
 
 # ---------------------------------------------------------------------------

@@ -175,8 +175,14 @@ def test_compare_every_section_gets_a_real_header_band(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    # Software has one field per section, so each is a labelled row (field
+    # name in the first column) and there are no navy bands at all.
     for title in ("Description", "AI / Agent involvement", "Bottom line", "Competitors"):
-        assert f'cc-section" colspan="3"><span class="cmp-sticky-label">{title}</span></td>' in r.text, title
+        assert '<td class="cc-cell cc-label' in r.text and f'>{title}</td>' in r.text, title
+    assert 'class="cc-cell cc-section"' not in r.text
+    body = r.text[r.text.index("<tbody>"):]
+    assert body.index(">Bottom line</td>") < body.index(">Description</td>")   # Bottom line leads, seafoam
+    assert 'cc-label cc-bl">Bottom line</td>' in body
 
 
 def test_compare_no_key_facts_band(env):
@@ -237,9 +243,8 @@ def test_compare_mobile_sticky_section_label_css(env):
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     assert "@media (max-width:700px)" in r.text
-    assert ".cmp-sticky-label{position:sticky;left:16px;" in r.text
-    assert '<span class="cmp-sticky-label">Description</span>' in r.text or \
-           '<span class="cmp-sticky-label">Bottom line</span>' in r.text
+    assert ".cc-label{position:sticky;left:0;" in r.text
+    assert "table.cc-table.cc-table{overflow:visible!important;}" in r.text
 
 
 def test_compare_swipe_hint_present_and_not_styled_like_a_link(env):

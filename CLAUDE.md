@@ -10769,6 +10769,30 @@ it supersedes the old "`/save` is token-gated" note.
   bulk ampersand replace write through `apply_voice_review_write`, which bypasses
   these limits and can lengthen text past a max.
 
+- **PR 2a.1 follow-up (2026-10).** (1) Both public directories read one
+  `_DIRECTORY_PAGE_SIZE` (12); Communities had its own literal of 10, so page 1
+  showed 10 cards and left a ragged last row. (2) `/admin/checks` "Profile fields
+  over their limit" now covers software vendors (Description, Short summary,
+  Agent taxonomy, Bottom line, limits read from the `Library.TOOL_*_MAX`
+  constants the edit form uses) as well as communities, adds a Type column,
+  sorts over-the-limit items (blocking) before over-target, and says plainly
+  that over-limit text stays visible but can't be saved until trimmed. The
+  summary tables' Check column is 260px (150px under the 760px stacking
+  breakpoint, where a wider column would leave Details almost no room).
+  (3) **Compare tables put each field name once in a first column**
+  (`_CMP_LABEL_COL_WIDTH`, 176px; 116px and sticky under 700px) with only
+  values in each entity's column (`_cmp_row_html`). Bottom line is the first
+  body row on both pages, seafoam like the profile callout, with no rules above
+  or below. Communities keep navy bands only on Program details and the five
+  themed groups (one row per field under each); software has one field per
+  section, so it has labelled rows and no bands. Similar communities and
+  Competitors are labelled rows. The two-tier empty handling (group
+  placeholder vs "No details available.") is unchanged. Real bug found on the
+  way: `.site-main .table-frame>table{overflow:visible!important}` lost on
+  specificity to the generic table rule's `overflow:hidden!important`, so
+  sticky cells never moved on Compare; `table.cc-table.cc-table` now wins.
+  The Compare intro says "under review", matching the visitor label.
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a
