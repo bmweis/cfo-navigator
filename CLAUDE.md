@@ -10755,6 +10755,30 @@ it supersedes the old "`/save` is token-gated" note.
   bulk ampersand replace write through `apply_voice_review_write`, which bypasses
   these limits and can lengthen text past a max.
 
+- **Community profile edit page: collapsible field groups (2026-10).** The five
+  groups are native `<details>`/`<summary>` (`.cp-group`), all collapsed on every
+  load, including a profile with a stored over-limit field. The one exception is
+  a refused save (`open_over_max`, passed only when `refusal` is set), which opens
+  just the groups holding an over-max field. The summary row is the group header:
+  caret (`.disclosure-caret`), title (the public name from
+  `compare.community_admin_groups()`), an over-limit flag (amber "N over target",
+  red "N over limit", kept live by `_CHAR_BUDGET_JS` through the opt-in
+  `data-char-group` hook; offending fields get `.cp-field-over`), then an empty
+  `.cp-group-actions` slot reserved for the per-group Generate button queued as
+  2b (it can sit in the slot with no layout change; a button inside a summary does
+  not toggle the group). A required field inside a closed group opens it and takes
+  focus (`_CP_GROUPS_JS`, an `invalid` listener on the form's capture phase),
+  since the browser otherwise blocks the save with no visible cause. The
+  "Over limit" buttons now show `cursor:not-allowed` (`.btn`, declared later,
+  used to win; the shared rule now carries `!important`, which also fixes the
+  other budgeted pages) and an opt-in visible reason sits beside them
+  (`data-char-reason-for`). CPE eligible: fixed-width dropdown
+  (`_CPE_SELECT_WIDTH_PX`), the note takes the rest (`_CPE_NOTE_MIN_PX`), and the
+  two stack when the cell is too narrow. Placeholder shortened to "Note, e.g.
+  NASBA sponsor" so it fits beside the dropdown in the 1280px cell. Saving,
+  limits, refusal and status buttons are unchanged. Software vendor parity is 2a.2.
+  See `tests/test_cp_collapsible_groups.py`.
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a

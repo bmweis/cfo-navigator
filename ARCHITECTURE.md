@@ -11132,6 +11132,17 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
 - **iOS Share Sheet shortcut** (from the original migration plan) remains
   unbuilt; capture from a phone goes through the bookmarklet.
 
+### Community profile edit page: collapsible groups (2026-10)
+
+No schema or route change. `_community_profile_form_fields` renders each of the five
+groups as `<details class="cp-group" data-char-group>`, collapsed unless `open_over_max`
+(set only after a refused save) and the group holds a field over its hard max. The summary
+holds the caret, the title, `[data-cp-flag]` (over-limit chips) and an empty
+`.cp-group-actions` slot for the 2b per-group Generate button. `_CHAR_BUDGET_JS` gained
+`syncGroup` (recomputes a group's chips and marks fields `.cp-field-over`) and a
+`data-char-reason-for` hook that shows a visible reason beside the disabled buttons.
+`_CP_GROUPS_JS` opens a closed group holding an invalid required field and focuses it.
+
 ### Checks-page follow-ups (2026-09): queue decisions honored, white admin rows, a `--db` guard, and the queue's context view
 
 - **Database-backed copy honors review-queue decisions.** `linklib.voice_db_scan.scan_db_copy_report()` reads every row-level `voice_review_queue` exception (`status='exception'`, i.e. "Allow once") once per scan and moves any finding at that exact `(table, row_id, column, rule)` out of `violations` into `DbScanReport.allowed_once`. "Always allow" terms were already masked out of the bare-ampersand scan; the report now also counts how many findings that masking suppressed (`always_allowed_count`, computed by scanning each value with and without the approved terms). Nothing is hidden: `/admin/checks` states both counts on a decisions line linking to the queue history and `/admin/voice#approved-terms`. The summary row's Details and the section body lead with one shared sentence (`_db_copy_count_text`: "0 violations. 2 allowed once, 6 always allowed."), so they can't disagree. Removing a decision (deleting the exception row, or `remove_approved_voice_term`) brings the finding back on the next pass. `reconcile_voice_review_queue()` reads the same filtered list, which changes nothing in practice: `add_voice_review_item` already skipped excepted locations.
