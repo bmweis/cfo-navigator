@@ -4123,6 +4123,20 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   correctly returns the intended `@font-face` stack — confirming the CSS
   itself is right and this is purely a rendering limitation of the
   comparison tooling, not something to chase in the app.
+- **Homepage Original content block is a capped 2x2 grid with a header
+  (2026-10).** The flagship cards rendered three across plus one: measured
+  cause is the shared `.tl-featured` rule (`auto-fill`, 220px floor) fitting
+  only 3 tracks in the ~816-836px homepage column. The homepage now passes a
+  `tl-featured-home` modifier (fixed 2 columns from 560px, 1 below; the
+  `/thought-leadership` row is untouched), the query is capped at 4
+  (`Library.HOME_ORIGINAL_CONTENT_CAP`, newest by the existing
+  `display_order, sort_key DESC` order; the brief's "already capped at
+  four" did not hold, there was no cap), and an "Original content" label
+  (the admin's own name, a fixed label, same style as "Recent highlights")
+  heads it, omitted with the grid when nothing is live. Because the cap
+  would otherwise drop a fifth flagged piece silently, `/admin/thought-leadership/original`
+  shows a note naming the live flagged pieces past the cap (none at four or
+  fewer). See `tests/test_homepage_original_content_grid.py`.
 - **Homepage "Recent highlights" — a hand-curated 4-slot featured set,
   any mix of types, replacing the deleted per-type
   `get_thought_leadership_representative` fallback (2026-09).** The
