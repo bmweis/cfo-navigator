@@ -90,3 +90,35 @@ def test_thought_leadership_page_keeps_its_own_grid(env):
     _seed(env, 4)
     html = TestClient(env.app).get("/thought-leadership").text
     assert "tl-featured-home" not in html.split("</style>")[-1]
+
+
+def _admin_page(appmod):
+    from fastapi.testclient import TestClient
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    return c.get("/admin/thought-leadership/original").text
+
+
+def test_admin_notes_hidden_pieces_when_more_than_four_flagged(env):
+    _seed(env, 5)
+    html = _admin_page(env)
+    assert "Only the first 4, by display order, appear on the homepage." in html
+    assert "Not shown: Piece 4." in html
+
+
+def test_admin_has_no_cap_note_at_four_or_fewer(env):
+    _seed(env, 4)
+    assert "appear on the homepage" not in _admin_page(env)
+
+
+def test_admin_cap_note_ignores_drafts_and_unflagged(env):
+    _seed(env, 4)
+    lib = env._lib()
+    try:
+        lib.add_original_content("draft-x", "Draft X", "t", "Guide", "Read the guide",
+                                 "b", "draft", True, "", "", 9)
+        lib.add_original_content("plain-y", "Plain Y", "t", "Guide", "Read the guide",
+                                 "b", "live", False, "", "", 10)
+    finally:
+        lib.close()
+    assert "appear on the homepage" not in _admin_page(env)

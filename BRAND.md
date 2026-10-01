@@ -910,7 +910,8 @@ shared `.tl-featured` auto-fill rule. The query caps the block at 4 pieces
 and there is no sparse case. Cause of the old three-across layout, measured:
 the shared 220px floor fit only 3 tracks in the ~820px column (4 need 922px).
 `/thought-leadership`'s own `.tl-featured` row is unchanged. The block's
-label reuses the "Recent highlights" label style.
+label reuses the "Recent highlights" label style. The Original content
+admin page notes any flagged pieces the cap hides.
 
 **The height companion**: `-webkit-line-clamp` alone only bounds a
 field's ceiling. CSS Grid still sizes each ROW by its own tallest card, so

@@ -17291,6 +17291,17 @@ def admin_original_content(request: Request, status: str = ""):
         f'/thought-leadership/&lt;slug&gt; page once it&rsquo;s live.</p>'
     ) if no_body_count else ""
 
+    # The homepage shows at most Library.HOME_ORIGINAL_CONTENT_CAP flagged live
+    # pieces; all_items is already in the same display order the homepage
+    # query uses, so anything past the cap is exactly what gets dropped.
+    _home_flagged = [it for it in all_items if it["status"] == "live" and it["featured_home"]]
+    _home_hidden = _home_flagged[Library.HOME_ORIGINAL_CONTENT_CAP:]
+    home_cap_note = (
+        f'<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">'
+        f'Only the first {Library.HOME_ORIGINAL_CONTENT_CAP}, by display order, appear on the homepage. '
+        f'Not shown: {", ".join(_esc(it["title"]) for it in _home_hidden)}.</p>'
+    ) if _home_hidden else ""
+
     def _filter_link(s: str, label: str) -> str:
         active = s == status
         href = "/admin/thought-leadership/original" + (f"?status={s}" if s else "")
@@ -17326,6 +17337,7 @@ def admin_original_content(request: Request, status: str = ""):
 initAdminScrollHint();
 </script>
 {no_body_note}
+{home_cap_note}
 </div>"""
     return HTMLResponse(_page("Original content—Admin", "", body, authed=True))
 

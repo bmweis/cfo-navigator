@@ -4133,8 +4133,10 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `display_order, sort_key DESC` order; the brief's "already capped at
   four" did not hold, there was no cap), and an "Original content" label
   (the admin's own name, a fixed label, same style as "Recent highlights")
-  heads it, omitted with the grid when nothing is live. See
-  `tests/test_homepage_original_content_grid.py`.
+  heads it, omitted with the grid when nothing is live. Because the cap
+  would otherwise drop a fifth flagged piece silently, `/admin/thought-leadership/original`
+  shows a note naming the live flagged pieces past the cap (none at four or
+  fewer). See `tests/test_homepage_original_content_grid.py`.
 - **Homepage "Recent highlights" — a hand-curated 4-slot featured set,
   any mix of types, replacing the deleted per-type
   `get_thought_leadership_representative` fallback (2026-09).** The
