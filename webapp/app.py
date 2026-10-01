@@ -2487,21 +2487,21 @@ def _review_state_badge(unverified: bool, authed: bool, cls: str = "tp-verify") 
 
 
 def _cmp_populated_field_html(f: "compare.CompareField", authed: bool) -> str:
-    """One populated `CompareField`'s inner markup — clamped pre-wrap text
-    (Compare Redesign Phase 1: `.cmp-clamp` applies a CSS
-    `-webkit-line-clamp` matching `compare.EXCERPT_LINE_CLAMP`, so a long
-    draft scans as an excerpt instead of a full essay; the full text is
-    still in the DOM, just visually clamped, so copy/paste and
-    accessibility both see the whole field), the same review-state badge
-    every profile page uses, and — the fix for Compare's dead citation
-    markers — the same `_citations_list_html` "Sources" chip list a
-    profile page renders right alongside the field, fed by the exact
-    `entity_citations` rows the caller already fetched. Caller guarantees
-    `f.state != GateState.EMPTY`."""
+    """One populated `CompareField`'s inner markup: the full pre-wrapped
+    text, the same review-state badge every profile page uses, and the same
+    "Sources" chip list a profile page renders, fed by the exact
+    `entity_citations` rows the caller already fetched.
+
+    Compare shows full field text, never clamped (2026-10; this replaced the
+    Compare Redesign Phase 1 4-line `-webkit-line-clamp`). Nothing here, or
+    in the CSS for `.cmp-text`, may hide text: no overflow, no max-height, no
+    line clamp. The Sources list is uncapped for the same reason: a `[6]`
+    marker in the text needs its chip, and the profile page's cap of five
+    would leave it without one. Caller guarantees `f.state != GateState.EMPTY`."""
     badge = _review_state_badge(f.state == gates.GateState.PENDING, authed, "cc-verify")
     badge_html = f'<div style="margin-top:4px;">{badge.strip()}</div>' if badge else ""
-    citations_html = _citations_list_html(f.citations, cap=5) if f.citations else ""
-    return (f'<div class="cmp-clamp"><div class="cmp-clamp-inner">{_esc(f.text)}</div></div>'
+    citations_html = _citations_list_html(f.citations) if f.citations else ""
+    return (f'<div class="cmp-text">{_esc(f.text)}</div>'
             f'{badge_html}{citations_html}')
 
 
@@ -2790,17 +2790,12 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
 .comm-name:hover{{color:var(--accent);}}
 .tool-star{{font-size:14px;color:#b8860b;}}
-/* Narrative-excerpt clamp (Compare Redesign Phase 1) — ~{compare.EXCERPT_LINE_CLAMP} lines via
-   -webkit-line-clamp, approved over a fixed character count so it adapts
-   to each table's real column width. white-space:pre-wrap on the inner div
-   (not the clamped outer box, which needs display:-webkit-box) is the fix
-   for the flattened-markdown bug: a "- " bulleted line now keeps its own
-   line instead of running together with the next one — the same treatment
-   profile pages already give this text, not a new markdown renderer (a
-   real markdown-to-HTML pass for these fields is scoped as its own
-   follow-up PR, deliberately not built here). */
-.cmp-clamp{{display:-webkit-box;-webkit-line-clamp:{compare.EXCERPT_LINE_CLAMP};-webkit-box-orient:vertical;overflow:hidden;}}
-.cmp-clamp-inner{{white-space:pre-wrap;}}
+/* Compare shows full field text, never clamped (2026-10). white-space:pre-wrap
+   keeps a "- " bulleted line on its own line instead of flattening it into
+   run-on prose. No overflow, max-height or line-clamp may ever be put on this
+   class or on the cells around it: tests/test_compare_full_text.py measures
+   the real layout for exactly that. */
+.cmp-text{{white-space:pre-wrap;}}
 .cmp-subfield{{margin-bottom:14px;}}
 .cmp-subfield:last-child{{margin-bottom:0;}}
 .cmp-subfield-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;}}

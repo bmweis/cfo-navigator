@@ -6143,7 +6143,8 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   just Agent taxonomy). Added: a Key facts band with shared-vs-unique tag
   chips (solid seafoam = every compared entity has it, outline = only this
   one does), and a `-webkit-line-clamp` excerpt (~4 lines, approved over a
-  fixed character count) on the full untruncated text. Communities'
+  fixed character count) on the full untruncated text (**superseded
+  2026-10: Compare now shows full text, see the next bullets**). Communities'
   Compare collapsed its old flat 11-field list into the same 4 themed
   groups (`compare.COMMUNITY_PROFILE_GROUPS`) the profile page already
   uses — that constant, and `community_geo_line()`, moved out of
@@ -6178,6 +6179,29 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   existing convention for a client-only "seen it once" preference, not a
   new mechanism. See ARCHITECTURE.md's matching bullet for the full
   write-up.
+- **Compare shows full field text, never clamped (2026-10) — replaces the
+  Compare Redesign Phase 1 Step 0 decision.** Phase 1 clamped every Compare
+  narrative cell to 4 lines with `-webkit-line-clamp` (`compare.EXCERPT_LINE_
+  CLAMP`). Brian's standing rule is that a profile, a comparison and an MCP
+  response never cut a field off, and a "Show more" control still hides text
+  by default, so the answer is no collapse at all: the clamp, `.cmp-clamp`
+  and `EXCERPT_LINE_CLAMP` are removed, and every character of every field
+  renders on both Compare pages (software Description, AI / Agent
+  involvement and Bottom line; community Bottom line and all the group
+  fields). Measured on the live Abacum and Datarails text before the change,
+  the clamp was a 87px box over 824-3,448px of content, hiding every `[n]`
+  marker after the fourth line while all five Sources chips stayed, so
+  markers and chips disagreed; they now agree by construction. The Compare
+  Sources list is uncapped too (the profile page caps at 5): a sixth marker
+  would otherwise have no chip. Nothing may hide text on these cells: no
+  `overflow`, `max-height` or line-clamp on `.cmp-text` or the cells around
+  it, and `tests/test_compare_full_text.py` measures `scrollHeight ==
+  clientHeight` in real Chromium at 1280px and 390px with a 3,000-character
+  field on both pages (skips where no Chromium exists, as CI does). The
+  cost is tall rows: Datarails' agent text makes one row 984px at 1280px and
+  2,767px at 390px. That was accepted, and no collapse was added to fix it.
+  The only clamps allowed anywhere are the two directory cards
+  (`/tools/software`, `/tools/communities`), each with a "Full profile" link.
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
   overlap/contrast summary above both Compare tables, cached permanently
   and capped by a shared daily dollar budget.** Purely additive on top of
@@ -6230,10 +6254,9 @@ never reads as something to tap.
   HTML-free boundary is enforced by import path specifically so nothing
   HTML-producing is reachable from `linklib` (a future MCP tool safety
   concern), and this module's whole job is producing HTML.
-  **Compare's own clamped excerpt is deliberately NOT rendered through
-  this** — `-webkit-line-clamp` doesn't reliably clamp block-level children
-  the way it clamps a text run, so `_cmp_populated_field_html` still
-  renders plain `_esc()` text; the real rendered version is one click away
+  **Compare's own cells are deliberately NOT rendered through
+  this** — `_cmp_populated_field_html` renders plain `_esc()` text in full
+  (no clamp since 2026-10); the real rendered version is one click away
   via "Full profile →". `linklib/compare.py` and `linklib/gates.py` are
   both untouched by this PR. See ARCHITECTURE.md's matching bullet for the
   full write-up and `tests/test_markdown_render.py`/`tests/
