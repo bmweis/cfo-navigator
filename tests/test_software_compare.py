@@ -97,8 +97,8 @@ def test_agent_taxonomy_shows_placeholder_when_empty(env):
 # old orphaned-header bug — only "AI / Agent involvement" used to get a
 # .cc-section band), a Key facts band with shared/unique tag chips, working
 # citation chips (reusing entity_citations + _citations_list_html, exactly
-# as the profile page does), and a narrative-excerpt clamp
-# (.cmp-clamp/.cmp-clamp-inner, pre-wrap so a bulleted "- " field keeps its
+# as the profile page does), and full, unclamped narrative text
+# (.cmp-text, pre-wrap so a bulleted "- " field keeps its
 # own lines instead of flattening into run-on prose — the objective bug
 # Brian's review flagged). See linklib/compare.py's module docstring and
 # ARCHITECTURE.md's Compare section for the full write-up.
@@ -300,11 +300,11 @@ def test_compare_differentiation_renamed_to_bottom_line(env):
     assert "Keeps teams in a native workflow." in r.text
 
 
-def test_compare_narrative_field_gets_clamp_class_and_preserves_line_breaks(env):
+def test_compare_narrative_field_preserves_line_breaks(env):
     """The flattened-markdown bug: previously Software's compare cells had
     no white-space:pre-wrap at all, so a "- " bulleted agent_taxonomy_note
     ran together into one line. Now every narrative cell wraps its text in
-    .cmp-clamp-inner (white-space:pre-wrap in the page's own <style>), so
+    .cmp-text (white-space:pre-wrap in the page's own <style>), so
     the newline-separated bullets stay on their own lines."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
@@ -315,9 +315,9 @@ def test_compare_narrative_field_gets_clamp_class_and_preserves_line_breaks(env)
     lib.close()
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
-    assert '<div class="cmp-clamp-inner">' in r.text
+    assert '<div class="cmp-text">' in r.text
     assert "- Contract Review Agent—extracts key terms.\n- Close Agent—drafts the memo." in r.text
-    assert "white-space:pre-wrap" in r.text  # .cmp-clamp-inner's own rule, in the page's <style>
+    assert "white-space:pre-wrap" in r.text  # .cmp-text's own rule, in the page's <style>
 
 
 def test_compare_shows_working_citation_chips(env):

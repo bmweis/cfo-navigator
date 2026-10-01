@@ -16,8 +16,7 @@ below were updated to assert the new markup instead of the retired one — see
 `tests/test_narrative_field_markdown.py` for the fuller markdown-specific
 coverage (bold, HTML-escaping, etc.) of the same two surfaces. The
 `/tools/communities/compare` table is the one location that's deliberately
-UNCHANGED by that PR (`-webkit-line-clamp` doesn't reliably clamp block-level
-list markup) — `test_compare_table_cell_has_pre_wrap`/
+UNCHANGED by that PR (Compare cells stay plain pre-wrapped text) — `test_compare_table_cell_has_pre_wrap`/
 `test_compare_table_empty_cell_unaffected` below still assert the original
 pre-wrap markup and still pass unmodified.
 """
@@ -100,11 +99,11 @@ def test_bottom_line_callout_has_pre_wrap(env):
 
 def test_compare_table_cell_has_pre_wrap(env):
     """Compare Redesign Phase 1 moved this fix's markup from an inline
-    style on the <td> to a shared .cmp-clamp-inner CSS class (which
+    style on the <td> to a shared .cmp-text CSS class (which
     declares white-space:pre-wrap in the page's own <style> block) — same
     fix, same guarantee (newlines/bulleted lines survive instead of
     flattening), different mechanism now that every compare cell shares
-    one clamp/pre-wrap treatment rather than a per-cell inline style."""
+    one pre-wrap treatment rather than a per-cell inline style."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     c1 = lib.add_community("Finance Leaders Guild", "https://example.com/one",
@@ -116,8 +115,8 @@ def test_compare_table_cell_has_pre_wrap(env):
 
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
     assert r.status_code == 200
-    assert f'<div class="cmp-clamp-inner">{MULTILINE}</div>' in r.text
-    assert ".cmp-clamp-inner{white-space:pre-wrap;}" in r.text
+    assert f'<div class="cmp-text">{MULTILINE}</div>' in r.text
+    assert ".cmp-text{white-space:pre-wrap;}" in r.text
 
 
 def test_compare_table_empty_cell_unaffected(env):

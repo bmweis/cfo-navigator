@@ -4309,11 +4309,10 @@ Details worth knowing:
   typography exactly (verified via screenshot on the Bottom Line callout
   specifically, since it's the one surface with its own custom seafoam
   typography rather than `.tp-card`'s defaults).
-  **Compare's clamped narrative excerpt is deliberately excluded** — see the
-  Compare Redesign Phase 1 bullet below's own note that `-webkit-line-clamp`
-  doesn't reliably clamp block-level children like `<ul><li>` the way it
-  clamps a text run; `_cmp_populated_field_html` still renders `_esc(f.text)`
-  inside `.cmp-clamp-inner`, completely unchanged by this PR. The real
+  **Compare's narrative cells are deliberately excluded** —
+  `_cmp_populated_field_html` still renders `_esc(f.text)` inside
+  `.cmp-text` (full text; the Phase 1 line clamp was removed 2026-10),
+  completely unchanged by this PR. The real
   rendered version is one click away via the excerpt's own "Full profile →"
   link. `linklib/compare.py` and `linklib/gates.py` are both untouched by
   this PR — this is a rendering-layer change only, with no change to what
@@ -4945,7 +4944,9 @@ Details worth knowing:
   tier requires one site-wide credit link for commercial use, confirmed
   from their own docs to be a single link (a page footer is an explicitly
   named acceptable placement), not something required near each logo —
-  added once, in `_page()`'s shared footer. See CLAUDE.md's matching bullet
+  added once, in `_page()`'s shared footer, which also carries a quiet "Source on GitHub"
+  link to the public AGPL-3.0 repo (`SOURCE_REPO_URL`, hardcoded, not derived from
+  `LINKLIB_PUBLIC_BASE`; go-public chain step 5). See CLAUDE.md's matching bullet
   for the full write-up and `tests/test_logodev.py`/
   `tests/test_logo_override.py` for the regression coverage.
 - **Gate-Extraction PR B (2026-09) — the radical-transparency review-state
@@ -5086,7 +5087,7 @@ Details worth knowing:
   the pages themselves are rebuilt on it: grouped section headers (fixing
   the orphaned-header bug — previously only "AI / Agent involvement" got
   a `.cc-section` band), a Key facts band with shared/unique tag chips,
-  working citation chips, and a narrative-excerpt clamp. Not just an HTML
+  working citation chips, and (until 2026-10) a narrative-excerpt clamp. Not just an HTML
   change — the module is the shared contract this redesign was built to
   establish for two later, separate PRs: Compare Phase 2's AI-summary
   generation prompt, and MCP Phase 3's Toolbox/Communities compare tools —
@@ -5114,7 +5115,7 @@ Details worth knowing:
      `_diff_cell` never did, so a bulleted note's newlines collapsed per
      ordinary HTML whitespace rules into run-on prose. Fix, per Brian's
      explicit instruction: match profile pages' existing pre-wrap
-     treatment (`.cmp-clamp-inner{white-space:pre-wrap;}`) — do NOT build
+     treatment (`.cmp-text{white-space:pre-wrap;}`, named `.cmp-clamp-inner` until 2026-10) — do NOT build
      a real markdown renderer in this PR. A genuine markdown pass (reusing
      `python-markdown`, already a dependency via Original Content) is
      scoped as its own immediate follow-up PR, deliberately not a rider
@@ -5122,22 +5123,21 @@ Details worth knowing:
      deserving its own before/after review. **That follow-up shipped as
      "Real Markdown/List Rendering for Narrative Fields" (2026-09, see the
      dedicated bullet above)** — it deliberately did NOT touch Compare's
-     own clamped excerpt, though: `-webkit-line-clamp` doesn't reliably
-     clamp block-level children (`<ul><li>`) the way it clamps a text run,
-     so `_cmp_populated_field_html` still renders plain `_esc()`'d text
-     here. Only the profile pages (and the community profile group fields)
+     own cells, though: `_cmp_populated_field_html` still renders plain
+     `_esc()`'d text here. Only the profile pages (and the community profile group fields)
      got the real renderer.
   3. **Orphaned section header** — real, fixed by giving every section
      (Key facts, Description, AI / Agent involvement, Bottom line,
      Competitors/Similar communities, and Communities' 4 themed groups)
      the identical `.cc-section` teal band, not just Agent taxonomy.
-  4. **Wall-of-text cells** — real; fixed with a pure-CSS
-     `-webkit-line-clamp` (`compare.EXCERPT_LINE_CLAMP = 4`, approved by
-     Brian over a fixed character count so the clamp adapts to each
-     table's real column width) on the full, untruncated text — the
-     serializer never truncates `CompareField.text` itself, so citations,
-     accessibility, and copy/paste all still see the whole field; only the
-     visual presentation is clamped.
+  4. **Wall-of-text cells** — Phase 1 fixed this with a pure-CSS
+     `-webkit-line-clamp` (`compare.EXCERPT_LINE_CLAMP = 4`). **Replaced
+     2026-10: Compare shows full field text, never clamped.** The clamp,
+     `.cmp-clamp` and `EXCERPT_LINE_CLAMP` are gone; the Sources list is
+     uncapped so every `[n]` marker has its chip; and
+     `tests/test_compare_full_text.py` measures in real Chromium that no
+     Compare text cell is taller than its box. Rows follow their tallest
+     cell (Datarails' agent text: 984px at 1280px, 2,767px at 390px).
 
   **`linklib/compare.py`** is deliberately HTML-free (the `linklib/gates.py`
   precedent, enforced by import path — MCP Phase 3's tools import this
@@ -8453,7 +8453,7 @@ docstrings excluded, embedded CSS/JS/HTML comments stripped per literal:
   ` — ` spans. Those get stripped before scanning.
 * Literals are read as **source segments**, not evaluated `ast.Constant`
   values. An f-string's value arrives as one Constant per `{...}` boundary,
-  so a comment that interpolates something (`/* ... — ~{compare.EXCERPT_LINE_CLAMP}
+  so a comment that interpolates something (`/* ... — ~{some.CONSTANT}
   lines */`) lands with its opener in one fragment and its closer in another,
   and no per-fragment stripper can pair them. Both such comments in
   `webapp/app.py` were flagged as copy by a value-based scan before this was
