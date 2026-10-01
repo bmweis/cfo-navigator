@@ -903,6 +903,15 @@ exists to prevent:
   "Recent highlights" bullet), and collapses entirely (heading and grid
   both) rather than stretching when there's nothing to show.
 
+**Homepage Original content block** (`.tl-featured-home`): the homepage's
+flagship cards are a fixed 2-column grid (one column below 560px), not the
+shared `.tl-featured` auto-fill rule. The query caps the block at 4 pieces
+(`Library.HOME_ORIGINAL_CONTENT_CAP`), so item count always matches shape
+and there is no sparse case. Cause of the old three-across layout, measured:
+the shared 220px floor fit only 3 tracks in the ~820px column (4 need 922px).
+`/thought-leadership`'s own `.tl-featured` row is unchanged. The block's
+label reuses the "Recent highlights" label style.
+
 **The height companion**: `-webkit-line-clamp` alone only bounds a
 field's ceiling. CSS Grid still sizes each ROW by its own tallest card, so
 without a matching `min-height` on the same element, a row of short

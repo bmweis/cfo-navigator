@@ -7499,13 +7499,17 @@ class Library:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    HOME_ORIGINAL_CONTENT_CAP = 4
+
     def list_original_content_for_home(self) -> list[dict]:
-        """The homepage's flagship row: live pieces flagged featured_home=1
-        only. (/thought-leadership itself shows every live piece regardless
-        of this flag — see list_original_content(status='live').)"""
+        """The homepage's Original content block: live pieces flagged
+        featured_home=1, capped at HOME_ORIGINAL_CONTENT_CAP (a 2x2 grid),
+        in the _OC_ORDER_SQL order. (/thought-leadership itself shows every
+        live piece regardless of this flag or cap — see
+        list_original_content(status='live').)"""
         rows = self.conn.execute(
             f"SELECT * FROM original_content WHERE status = 'live' AND featured_home = 1 "
-            f"ORDER BY {self._OC_ORDER_SQL}"
+            f"ORDER BY {self._OC_ORDER_SQL} LIMIT {int(self.HOME_ORIGINAL_CONTENT_CAP)}"
         ).fetchall()
         return [dict(r) for r in rows]
 
