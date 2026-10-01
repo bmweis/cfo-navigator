@@ -153,10 +153,43 @@ def test_compare_groups_fields_into_the_four_profile_page_themes(env):
 
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
     from linklib import compare
-    for title in (compare.PROGRAM_DETAILS_TITLE, "Bottom line", compare.GROUP_TARGET_AUDIENCE, compare.GROUP_MEMBER_EXPERIENCE,
-                  compare.GROUP_ECONOMICS, compare.GROUP_KEY_POINTS, compare.GROUP_ADDITIONAL_BENEFITS,
-                  "Similar communities"):
+    for title in (compare.PROGRAM_DETAILS_TITLE, compare.GROUP_TARGET_AUDIENCE, compare.GROUP_MEMBER_EXPERIENCE,
+                  compare.GROUP_ECONOMICS, compare.GROUP_KEY_POINTS, compare.GROUP_ADDITIONAL_BENEFITS):
         assert f'cc-section" colspan="3"><span class="cmp-sticky-label">{title}</span></td>' in r.text, title
+    # Single-field sections are label rows, not navy bands.
+    for title in ("Bottom line", "Similar communities"):
+        assert '<td class="cc-cell cc-label' in r.text and f'>{title}</td>' in r.text, title
+        assert f'<span class="cmp-sticky-label">{title}</span>' not in r.text, title
+
+
+def test_compare_label_column_and_seafoam_bottom_line_first(env):
+    """Field names sit once in the first column; Bottom line is the first body
+    row, seafoam, with no rules of its own above or below."""
+    from linklib.db import Library
+    from linklib import compare
+    lib = Library(os.environ["LINKLIB_DB"])
+    c1 = lib.add_community("Community One", "https://example.com/one", "Finance leaders", "Free", [], approved=1)
+    c2 = lib.add_community("Community Two", "https://example.com/two", "Finance leaders", "Free", [], approved=1)
+    for cid in (c1, c2):
+        lib.upsert_community_profile(cid, verdict_summary="A solid peer group.", resources_included="Templates",
+                                     cpe_eligible="Yes (NASBA sponsor)")
+    lib.close()
+
+    t = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}").text
+    body = t[t.index("<tbody>"):]
+    first_row = body[:body.index("</tr>")]
+    assert ">Bottom line</td>" in first_row and "cc-bl" in first_row
+    assert body.index(">Bottom line</td>") < body.index(compare.PROGRAM_DETAILS_TITLE)
+    # each field name appears exactly once, not once per community
+    for label in ("Reach", "Resources included", "CPE eligible"):
+        assert body.count(f'cc-label">{label}</td>') == 1, label
+    assert "Yes (NASBA sponsor)" in t
+    # no top/bottom rule on the Bottom line row, and the width is the named constant
+    assert "td.cc-bl{background:var(--seafoam-wash)!important;border-top:0!important;" in t
+    assert "border-bottom:1px solid var(--seafoam" not in t
+    from webapp import app as appmod
+    assert f"width:{appmod._CMP_LABEL_COL_WIDTH}px" in t
+    assert ">under review</span> came from an LLM" in t
 
 
 def test_compare_whole_group_empty_shows_group_placeholder(env):
@@ -236,8 +269,10 @@ def test_compare_mobile_sticky_section_label_css(env):
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
     assert "@media (max-width:700px)" in r.text
     assert ".cmp-sticky-label{position:sticky;left:16px;" in r.text
-    assert '<span class="cmp-sticky-label">Description</span>' in r.text or \
-           '<span class="cmp-sticky-label">Bottom line</span>' in r.text
+    assert '<span class="cmp-sticky-label">Program details</span>' in r.text
+    # the label column is sticky on mobile, and the table can actually scroll it
+    assert ".cc-label{position:sticky;left:0;" in r.text
+    assert "table.cc-table.cc-table{overflow:visible!important;}" in r.text
 
 
 def test_compare_swipe_hint_present_and_not_styled_like_a_link(env):
