@@ -1453,7 +1453,10 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Added once, in `_page()`'s shared footer, rather than resolving the
   genuinely ambiguous "is a personal site with a working directory
   commercial" question — the link costs nothing either way, so it ships
-  regardless of which answer is technically correct. See ARCHITECTURE.md's
+  regardless of which answer is technically correct. The same footer row also
+  carries "Source on GitHub" (`SOURCE_REPO_URL` in `webapp/app.py`, a hardcoded
+  constant, new tab, no styling of its own; there is one `<footer>` in the app, so
+  every `_page()` page has it). See ARCHITECTURE.md's
   matching bullet and `tests/test_logodev.py`/`tests/test_logo_override.py`
   for the full write-up and regression coverage.
 - **Gate-Extraction PR B (2026-09) — the radical-transparency review-state
