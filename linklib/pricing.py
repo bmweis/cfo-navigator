@@ -52,34 +52,45 @@ def pricing_review_is_stale(last_verified_iso: str, *, now: datetime | None = No
 
 
 # USD per million tokens. cache_write is the 5-minute-TTL rate (1.25x input);
-# nothing in this codebase sets a 1-hour cache TTL, so the 2x rate isn't
-# modeled. cache_read is ~0.1x input, per Anthropic's published cache
-# economics. Add a row here whenever a new model becomes selectable in the Ask
+# cache_write_1h is the 1-hour-TTL rate (2x input). Nothing in this codebase
+# requests the 1-hour TTL today (linklib.matchmaker's cache_control sets no
+# ttl, so it gets the 5-minute default), but the rate is modeled so a caller
+# that does is billed correctly instead of silently at the 5-minute rate; see
+# compute_cost's cache_creation_1h_tokens. cache_read is ~0.1x input, per
+# Anthropic's published cache economics. Add a row here whenever a new model becomes selectable in the Ask
 # picker (linklib/models.py) — an unlisted model silently falls back to
 # Sonnet 4.6 rates rather than recording $0.
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00,  "cache_write": 1.25, "cache_read": 0.10},
-    "claude-sonnet-4-6":         {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_read": 0.30},
-    "claude-sonnet-5":           {"input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_read": 0.20},  # permanent rate (was introductory; the planned $3/$15 increase was cancelled — see module docstring)
-    "claude-opus-4-8":           {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
-    "claude-opus-5":             {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
+    "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00,  "cache_write": 1.25, "cache_write_1h": 2.00, "cache_read": 0.10},
+    "claude-sonnet-4-6":         {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_write_1h": 6.00, "cache_read": 0.30},
+    "claude-sonnet-5":           {"input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_write_1h": 4.00, "cache_read": 0.20},  # permanent rate (was introductory; the planned $3/$15 increase was cancelled — see module docstring)
+    "claude-opus-4-8":           {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_write_1h": 10.00, "cache_read": 0.50},
+    "claude-opus-5":             {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_write_1h": 10.00, "cache_read": 0.50},
 }
 
 _FALLBACK = MODEL_PRICING["claude-sonnet-4-6"]
 
 
 def compute_cost(model: str, input_tokens: int = 0, output_tokens: int = 0,
-                 cache_creation_tokens: int = 0, cache_read_tokens: int = 0) -> float:
+                 cache_creation_tokens: int = 0, cache_read_tokens: int = 0,
+                 cache_creation_1h_tokens: int = 0) -> float:
     """Exact USD cost for one API call from its real token usage.
 
     Falls back to Sonnet 4.6 rates for a model not in `MODEL_PRICING` so an
     unrecognized model ID never silently records a $0 cost.
+
+    `cache_creation_tokens` are priced at the 5-minute-TTL write rate;
+    `cache_creation_1h_tokens` (the 1-hour-TTL share of cache writes, a
+    separate bucket in the API's usage breakdown) at the higher 1-hour rate.
+    Pass each bucket once: a 1-hour token must not also be counted in
+    `cache_creation_tokens`.
     """
     rates = MODEL_PRICING.get(model, _FALLBACK)
     return (
         input_tokens * rates["input"]
         + output_tokens * rates["output"]
         + cache_creation_tokens * rates["cache_write"]
+        + cache_creation_1h_tokens * rates["cache_write_1h"]
         + cache_read_tokens * rates["cache_read"]
     ) / 1_000_000
 
