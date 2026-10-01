@@ -10755,6 +10755,17 @@ it supersedes the old "`/save` is token-gated" note.
   bulk ampersand replace write through `apply_voice_review_write`, which bypasses
   these limits and can lengthen text past a max.
 
+- **PR 2a.1 follow-up (2026-10).** (1) Both public directories read one
+  `_DIRECTORY_PAGE_SIZE` (12); Communities had its own literal of 10, so page 1
+  showed 10 cards and left a ragged last row. (2) `/admin/checks` "Profile fields
+  over their limit" now covers software vendors (Description, Short summary,
+  Agent taxonomy, Bottom line, limits read from the `Library.TOOL_*_MAX`
+  constants the edit form uses) as well as communities, adds a Type column,
+  sorts over-the-limit items (blocking) before over-target, and says plainly
+  that over-limit text stays visible but can't be saved until trimmed. The
+  summary tables' Check column is 260px (150px under the 760px stacking
+  breakpoint, where a wider column would leave Details almost no room).
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a

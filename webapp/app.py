@@ -2038,6 +2038,10 @@ _COL_WIDTH_STATUS_AGE = 190   # A status word PLUS a relative-age readout on
 # prevent.
 _CARD_WIDTH_DIRECTORY_MIN = 320   # Software + Communities directory cards
 _CARD_WIDTH_RESOURCE_MIN = 260    # Benchmarking + Books cards
+# One page of directory cards. 12 fills a 3-column row 4 times (and 4 columns 3
+# times); the Communities directory had its own literal of 10, which left a
+# ragged last row. Both directory pages read this one constant.
+_DIRECTORY_PAGE_SIZE = 12
 
 # Trailing brand suffixes baked into individual page titles over time — now
 # redundant since _page() prepends a consistent "BMW CFO ·" tab-title prefix
@@ -8921,7 +8925,7 @@ var DIRECTORY_BADGE_ADMIN = {_json.dumps(gates.DIRECTORY_JS_BADGE_TEXT_ADMIN)};
 var DIRECTORY_BADGE_VISITOR = {_json.dumps(gates.DIRECTORY_JS_BADGE_TEXT_VISITOR)};
 var activeCats = new Set();
 var advisorOnly = false;
-var PAGE_SIZE = 12;
+var PAGE_SIZE = {_DIRECTORY_PAGE_SIZE};
 var currentPage = 0;
 var TOOL_COMPARE_MAX = 4;
 var toolCompareSelected = [];
@@ -10883,7 +10887,7 @@ var NEEDS_VERIFICATION = {_json.dumps(_NEEDS_VERIFICATION)};
 var activeCommCats = new Set();
 var activeCommCost = '';
 var commAdvisorOnly = false;
-var COMM_PAGE_SIZE = 10;
+var COMM_PAGE_SIZE = {_DIRECTORY_PAGE_SIZE};
 var commCurrentPage = 0;
 var COMPARE_MAX = 3;
 var compareSelected = [];
@@ -27511,7 +27515,7 @@ _SUMMARY_STATUS_META = {
 # in both tables' <colgroup>, so the Status/dot column lines up across the
 # two side-by-side cards regardless of either table's own Check/Details
 # text length.
-_SUMMARY_COL_WIDTH_CHECK = "150px"
+_SUMMARY_COL_WIDTH_CHECK = "260px"
 _SUMMARY_COL_WIDTH_STATUS = "56px"
 
 # The single source of truth for both the column ORDER and the <thead>
@@ -27705,29 +27709,52 @@ def _checks_summary_table_html(heading: str, rows: list) -> str:
     return f'<div>{heading_html}{table_html}</div>'
 
 
+# Software fields the edit form limits, read from the same Library constants
+# the form's counter and the save-time refusal use (never a second copy).
+_TOOL_LIMITED_FIELDS = (
+    ("Description", "description", Library.TOOL_DESCRIPTION_MAX),
+    ("Short summary", "summary", Library.TOOL_SUMMARY_MAX),
+    ("Agent taxonomy", "agent_taxonomy_note", Library.TOOL_AGENT_TAXONOMY_MAX),
+    ("Bottom line", "competitive_differentiation", Library.TOOL_DIFFERENTIATION_MAX),
+)
+
+
 def _profile_fields_over_limit(lib: Library) -> list[dict]:
-    """Every community profile field over its hard max, and every CPE note over
-    its 40 character target (2a.1). Read-only; an item drops off as it is
-    trimmed. Fields over the max are what a save refuses; notes between the
-    target and the max are listed as an aim, not a refusal."""
+    """Every software and community profile field over its hard max, and every
+    CPE note over its 40 character target. Read-only; an item drops off as it
+    is trimmed. A field over the max is what a save refuses (blocking); a CPE
+    note between the target and the max is an aim, not a refusal. Blocking
+    items sort first, then over-target, then by type and name."""
     items: list[dict] = []
+    for t in lib.list_tools(approved_only=False):
+        for label, key, limit in _TOOL_LIMITED_FIELDS:
+            n = Library.text_budget_length(t.get(key))
+            if n > limit:
+                items.append({"type": "Software", "name": t["name"],
+                              "edit_href": f"/tools/software/{t['slug']}/edit",
+                              "field": label, "length": n, "limit": limit,
+                              "kind": "over the limit"})
     for c in lib.list_communities(approved_only=False):
         p = lib.get_community_profile(c["id"]) or {}
         if not p:
             continue
+        href = f"/tools/communities/{c['slug']}/edit"
         for label, key in [(lbl, k) for _t, fs in compare.community_admin_groups() for lbl, k in fs]:
             if key not in PROFILE_LIMITS:
                 continue
             n = Library.text_budget_length(p.get(key))
             if n > PROFILE_LIMITS[key][1]:
-                items.append({"community": c["name"], "slug": c["slug"], "field": label,
-                              "length": n, "limit": PROFILE_LIMITS[key][1], "kind": "over the limit"})
+                items.append({"type": "Community", "name": c["name"], "edit_href": href,
+                              "field": label, "length": n, "limit": PROFILE_LIMITS[key][1],
+                              "kind": "over the limit"})
         note_n = Library.text_budget_length(cpe_note(p.get("cpe_eligible")))
         if note_n > CPE_NOTE_LIMITS[0]:
             kind = "over the limit" if note_n > CPE_NOTE_LIMITS[1] else "over the target"
             lim = CPE_NOTE_LIMITS[1] if note_n > CPE_NOTE_LIMITS[1] else CPE_NOTE_LIMITS[0]
-            items.append({"community": c["name"], "slug": c["slug"],
-                          "field": f"{compare.LABEL_CPE} note", "length": note_n, "limit": lim, "kind": kind})
+            items.append({"type": "Community", "name": c["name"], "edit_href": href,
+                          "field": f"{compare.LABEL_CPE} note", "length": note_n,
+                          "limit": lim, "kind": kind})
+    items.sort(key=lambda i: (i["kind"] != "over the limit", i["type"], i["name"].lower(), i["field"]))
     return items
 
 
@@ -27735,12 +27762,13 @@ def _over_limit_detail_html(items: list[dict]) -> str:
     if not items:
         return '<p style="margin:0;">Nothing is over.</p>'
     rows = "".join(
-        f'<tr><td><a href="/tools/communities/{_esc(i["slug"])}/edit" style="color:var(--accent);">'
-        f'{_esc(i["community"])}</a></td><td>{_esc(i["field"])}</td>'
+        f'<tr><td>{_esc(i["type"])}</td>'
+        f'<td><a href="{_esc(i["edit_href"])}" style="color:var(--accent);">'
+        f'{_esc(i["name"])}</a></td><td>{_esc(i["field"])}</td>'
         f'<td>{i["length"]:,}</td><td>{i["limit"]:,} ({_esc(i["kind"])})</td></tr>'
         for i in items)
-    return ('<div style="overflow-x:auto;"><table style="min-width:520px;"><thead><tr>'
-            '<th>Community</th><th>Field</th><th>Length</th><th>Limit</th></tr></thead>'
+    return ('<div style="overflow-x:auto;"><table style="min-width:620px;"><thead><tr>'
+            '<th>Type</th><th>Name</th><th>Field</th><th>Length</th><th>Limit</th></tr></thead>'
             f'<tbody>{rows}</tbody></table></div>')
 
 
@@ -27914,7 +27942,8 @@ def admin_checks(request: Request):
     summary_box = (
         f'<style>.checks-summary-grid{{display:flex;align-items:flex-start;gap:32px;margin:-4px 0 24px;}}'
         f'.checks-summary-grid>div{{flex:1 1 0;min-width:0;}}'
-        f'@media(max-width:760px){{.checks-summary-grid{{flex-direction:column;gap:24px;}}}}</style>'
+        f'@media(max-width:760px){{.checks-summary-grid{{flex-direction:column;gap:24px;}}'
+        f'.checks-summary-grid col:first-child{{width:150px!important;}}}}</style>'
         f'<div class="checks-summary-grid">{site_checks_table}{ai_providers_table}</div>'
     )
 
@@ -28084,9 +28113,10 @@ def admin_checks(request: Request):
             'style="color:var(--accent);">Open the review queue &rarr;</a></p>'),
         _checks_detail_row(
             "profile-over-limit", "Profile fields over their limit",
-            _p("Community profile text over its hard limit, plus CPE notes over the 40 character "
-               "target. Nothing is changed or blocked: a profile with a field over its limit can't "
-               "be saved until that field is trimmed, and each item leaves this list once it is.")
+            _p("Software and community profile text over its hard limit, plus CPE notes over the 40 "
+               "character target. Text that is already over its limit stays visible, but the field "
+               "can't be saved until it is trimmed. Each item leaves this list once it is. "
+               "Fields over the limit are listed first.")
             + _over_limit_detail_html(over_limit_items),
             over_row),
         _checks_detail_row(
