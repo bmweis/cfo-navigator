@@ -4944,7 +4944,9 @@ Details worth knowing:
   tier requires one site-wide credit link for commercial use, confirmed
   from their own docs to be a single link (a page footer is an explicitly
   named acceptable placement), not something required near each logo —
-  added once, in `_page()`'s shared footer. See CLAUDE.md's matching bullet
+  added once, in `_page()`'s shared footer, which also carries a quiet "Source on GitHub"
+  link to the public AGPL-3.0 repo (`SOURCE_REPO_URL`, hardcoded, not derived from
+  `LINKLIB_PUBLIC_BASE`; go-public chain step 5). See CLAUDE.md's matching bullet
   for the full write-up and `tests/test_logodev.py`/
   `tests/test_logo_override.py` for the regression coverage.
 - **Gate-Extraction PR B (2026-09) — the radical-transparency review-state

@@ -291,6 +291,10 @@ _DEFAULT_BENCHMARKS = [
 _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
+# The public source repo, linked from the shared footer. Hardcoded on
+# purpose: it is a fixed external destination, not a function of the
+# deployment's own base URL.
+SOURCE_REPO_URL = "https://github.com/bmweis/cfo-navigator"
 
 # --- Social share cards (Open Graph / Twitter Card, Phase 1) ----------------
 # Committed 1200x630 PNGs live in webapp/static/og/, slug-keyed
@@ -1900,7 +1904,9 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
 @media(max-width:640px){
   .site-footer{flex-wrap:wrap;justify-content:center;text-align:center;}
   .site-footer .brand,.site-footer .center,.site-footer .links{flex:none;}
-  .site-footer .links{justify-content:center;flex-wrap:wrap;row-gap:6px;max-width:100%;}
+  .site-footer .links{justify-content:center;flex-wrap:wrap;row-gap:6px;column-gap:16px;max-width:100%;}
+  /* Wrapped rows can't end on a dangling dot: drop the separators here, the gap separates items. */
+  .site-footer .links span{display:none;}
 }
 
 /* Mobile: nav collapses to a navy hamburger drawer */
@@ -2419,7 +2425,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
-  <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a><span>&middot;</span><a href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a></span>
+  <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a><span>&middot;</span><a href="{SOURCE_REPO_URL}" target="_blank" rel="noopener">Source on GitHub</a><span>&middot;</span><a href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a></span>
 </footer>
 </body></html>"""
 
