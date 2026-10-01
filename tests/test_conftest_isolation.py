@@ -12,7 +12,7 @@ import time
 import pytest
 
 
-# -- #609: module globals that survive a test's own reload of webapp.app ------
+# -- issue 609: module globals that survive a test's own reload of webapp.app ------
 
 def test_globals_leak_step_one_dirty_everything():
     from webapp import tasks
@@ -57,7 +57,7 @@ def test_static_check_cache_survived_the_previous_tests_reset():
     tasks.reset_static_check_cache()
 
 
-# -- #610: coral scan stub, re-applied after reloads, with an opt-in ----------
+# -- issue 610: coral scan stub, re-applied after reloads, with an opt-in ----------
 
 def _fresh_app(monkeypatch, tmp_path):
     monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "t.db"))
