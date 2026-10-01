@@ -212,6 +212,21 @@ def _compare_key_fact(kf: "compare.CompareKeyFact") -> dict:
     return {"label": kf.label, "value": kf.value, "needs_verification": kf.needs_verification}
 
 
+def _program_detail(d: "compare.CompareProgramDetail", authed: bool) -> dict:
+    """One Program details row. CPE eligible carries a structured `note` and
+    the profile's review `state` (with the same badge copy as the page); the
+    other rows come from the listing and have no review state."""
+    out: dict = {"label": d.label, "value": d.value, "needs_verification": d.needs_verification}
+    if d.note:
+        out["note"] = d.note
+    if d.state is not None:
+        out["state"] = d.state.value
+        badge = gates.badge_text(d.state, authed)
+        if badge:
+            out["badge"] = badge
+    return out
+
+
 def _serialize_compare_entity(e: "compare.CompareEntity", authed: bool) -> dict:
     return {
         "id": e.id,
@@ -222,6 +237,7 @@ def _serialize_compare_entity(e: "compare.CompareEntity", authed: bool) -> dict:
         "advisor": e.advisor,
         "tags": e.tags,
         "key_facts": [_compare_key_fact(kf) for kf in e.key_facts],
+        "program_details": [_program_detail(d, authed) for d in e.program_details],
         "sections": [
             {"title": sec.title, "fields": [_compare_field(f, authed) for f in sec.fields]}
             for sec in e.sections
@@ -329,7 +345,12 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         transparency standard: content always renders, only the badge
         differs by audience). An admin caller additionally sees the
         whole-record `needs_review` flag, which has no visitor-facing
-        rendering on the web page either. Any valid token, any role."""
+        rendering on the web page either. Citation markers like `[1]` in
+        the text resolve against that field's `citations` list (`[n]` is
+        the `n` of a citation), and the `advisor` boolean is the advisor
+        fact (Brian is a formal advisor to this vendor). `warm_intro_available`
+        says whether the page offers a Warm Intro button; the vendor's
+        contact details are never returned. Any valid token, any role."""
         caller = require_caller(ctx, lib_factory)
         authed = caller.get("role") == "admin"
         lib = lib_factory()
@@ -349,6 +370,10 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
             "url": tool.get("url") or "", "profile_url": f"/tools/software/{tool['slug']}",
             "categories": tool.get("categories") or [],
             "promoted": bool(tool.get("promoted")), "advisor": bool(tool.get("advisor")),
+            # The public profile shows a Warm Intro button when both are set.
+            # Only the boolean is served: the vendor's contact details are
+            # private and stay out of every MCP response.
+            "warm_intro_available": bool(tool.get("warm_intro_enabled") and tool.get("vendor_email")),
             "summary": (tool.get("summary") or "").strip(),
             "description": _gated_field(
                 "description", "Description", "tool_description",
@@ -435,7 +460,14 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         the web Compare page runs, not a re-derived approximation.
         `slug_or_id` may be the slug or numeric id; an unapproved community
         is refused. An admin caller additionally sees the whole-profile
-        `needs_review` flag. Any valid token, any role."""
+        `needs_review` flag. `program_details` is the page's Program details
+        card as structured rows (`label`, `value`, optional `note`; CPE
+        eligible also carries the profile's review `state` and `badge`);
+        `key_facts` is the older flat form of the same rows. Citation markers
+        like `[1]` in the text resolve against the Bottom line field's
+        `citations` list (`[n]` is the `n` of a citation), and the `advisor`
+        boolean is the advisor fact (Brian is a formal advisor to this
+        community). Any valid token, any role."""
         caller = require_caller(ctx, lib_factory)
         authed = caller.get("role") == "admin"
         lib = lib_factory()
@@ -459,6 +491,7 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
             "url": community.get("url") or "", "profile_url": entity.profile_url,
             "categories": entity.tags, "promoted": entity.promoted, "advisor": entity.advisor,
             "key_facts": [_compare_key_fact(kf) for kf in entity.key_facts],
+            "program_details": [_program_detail(d, authed) for d in entity.program_details],
             "sections": [
                 {"title": sec.title,
                  "fields": [_gated_field_from_compare(f, authed) for f in sec.fields]}
