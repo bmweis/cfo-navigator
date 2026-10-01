@@ -109,7 +109,7 @@ def test_compare_wrappers_carry_the_frame(env):
     html = c.get(f"/tools/software/compare?ids={ids[0]},{ids[1]}").text
     i = html.index('id="cmp-scroll-wrap"')
     assert 'class="table-frame"' in html[i - 120:i]
-    assert 'class="cc-cell cc-section"' in html
+    assert 'class="cc-cell cc-label' in html  # software Compare now has label rows, no bands
 
 
 def test_sticky_admin_tables_frame_their_wrapper(env):

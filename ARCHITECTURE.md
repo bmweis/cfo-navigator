@@ -3811,6 +3811,19 @@ screenshot showing the header sitting flush against the wrapper's rounded top co
 new regression test (`test_growth_engine_ratio_table_wrap_has_no_visible_gap`) asserting the
 fixed CSS rule renders in the response.
 
+**Homepage Original content block: a capped 2x2 grid with a header.**
+`Library.list_original_content_for_home()` returns live `featured_home=1`
+pieces in `_OC_ORDER_SQL` order (`display_order ASC, sort_key DESC`),
+now `LIMIT`ed to `HOME_ORIGINAL_CONTENT_CAP` (4); it had no cap before.
+`homepage()` renders them under an "Original content" label (the admin's
+own name for the table; a fixed label, not editable copy) through
+`_oc_featured_cards_html(rows, "tl-featured-home")`, which fixes the grid to
+two columns at 560px and up, one below. `/thought-leadership` keeps the
+shared auto-fill `.tl-featured` rule. With no live featured pieces the label
+and grid are omitted together. `/admin/thought-leadership/original` lists any
+live flagged pieces past the cap in a note below the table, derived from the
+same display order, so a dropped piece is never silent.
+
 **Recent highlights: a hand-curated 4-slot featured set, not a per-type
 fallback (superseded the Homepage Restructure phase's original design).**
 The homepage's "Recent highlights" grid used to be one tile per Thought
@@ -11163,3 +11176,7 @@ Four independent, live-use gaps on `/tools/software/{slug}/edit`, none touching 
 - **"Upload homepage screenshot…"** — Software edit page only (Communities' own homepage-screenshot section is a separate, hand-rolled block, not shared markup with Software's, so it wasn't touched). `_APP_SCREENSHOT_CROP_JS` (Cropper.js-driven crop-to-fixed-size flow, previously App-screenshot-only) generalized to a `slot` parameter: every function (`handleShotFile`, `cancelShotCrop`, `confirmShotCrop`) now keys its element ids and its `_shotCroppers` cache off `slot + '-screenshot-*-' + idsfx` rather than a hardcoded `'app-screenshot-*'` prefix. `slot='app'` reproduces the App screenshot slot's pre-existing ids exactly (zero markup change there); `slot='home'` gives the new homepage-upload control (button, hidden file input, crop overlay, hidden upload `<form>`) its own non-colliding `home-screenshot-*` ids, reusing the identical 4:3-ratio crop (`.tp-shot-frame`'s own aspect ratio, the frame both slots render inside on the public profile) with no second implementation. New `POST /admin/tools/software/{tool_id}/screenshot/upload` mirrors `admin_tools_app_screenshot_upload`'s validate-magic-bytes-not-Pillow shape exactly (`_sniff_image_mime`, `_APP_SCREENSHOT_MAX_BYTES`), but calls `Library.update_tool_screenshot_url` — the same method the hand-typed Screenshot URL field already uses, which clears `screenshot_captured_at` — rather than `set_tool_screenshot_capture` (which always stamps a fresh time, generate or upload alike, on the App slot). That's deliberate: an uploaded homepage image reads "Manually set—no capture date," matching a hand-pasted URL; only Recapture's own `set_tool_screenshot_capture` call ever claims "Captured {date}" for this slot. `screenshot_is_product` is untouched by the new route, same as the pre-existing hand-pasted-URL path.
 
 See `tests/test_homepage_screenshot_upload.py`, `tests/test_save_and_mark_verified.py`, and the extended `tests/test_app_screenshot.py` (two existing recapture-success tests updated to post the form field the new client now sends, plus new tests proving the fix directly against a tool/community with NO source URL ever saved to the DB) for the regression coverage. Every new/changed test was confirmed to fail against the pre-fix code (`git stash` the `webapp/app.py` diff, re-run) before being trusted.
+
+<!-- 2026-10: directory page size is one shared constant (`_DIRECTORY_PAGE_SIZE`); /admin/checks over-limit row covers software and communities. See CLAUDE.md. -->
+
+<!-- 2026-10: Compare tables use a first-column label (`_CMP_LABEL_COL_WIDTH`), Bottom line first in seafoam; see CLAUDE.md. -->

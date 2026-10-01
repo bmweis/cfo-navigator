@@ -4123,6 +4123,20 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   correctly returns the intended `@font-face` stack — confirming the CSS
   itself is right and this is purely a rendering limitation of the
   comparison tooling, not something to chase in the app.
+- **Homepage Original content block is a capped 2x2 grid with a header
+  (2026-10).** The flagship cards rendered three across plus one: measured
+  cause is the shared `.tl-featured` rule (`auto-fill`, 220px floor) fitting
+  only 3 tracks in the ~816-836px homepage column. The homepage now passes a
+  `tl-featured-home` modifier (fixed 2 columns from 560px, 1 below; the
+  `/thought-leadership` row is untouched), the query is capped at 4
+  (`Library.HOME_ORIGINAL_CONTENT_CAP`, newest by the existing
+  `display_order, sort_key DESC` order; the brief's "already capped at
+  four" did not hold, there was no cap), and an "Original content" label
+  (the admin's own name, a fixed label, same style as "Recent highlights")
+  heads it, omitted with the grid when nothing is live. Because the cap
+  would otherwise drop a fifth flagged piece silently, `/admin/thought-leadership/original`
+  shows a note naming the live flagged pieces past the cap (none at four or
+  fewer). See `tests/test_homepage_original_content_grid.py`.
 - **Homepage "Recent highlights" — a hand-curated 4-slot featured set,
   any mix of types, replacing the deleted per-type
   `get_thought_leadership_representative` fallback (2026-09).** The
@@ -10778,6 +10792,30 @@ it supersedes the old "`/save` is token-gated" note.
   NASBA sponsor" so it fits beside the dropdown in the 1280px cell. Saving,
   limits, refusal and status buttons are unchanged. Software vendor parity is 2a.2.
   See `tests/test_cp_collapsible_groups.py`.
+
+- **PR 2a.1 follow-up (2026-10).** (1) Both public directories read one
+  `_DIRECTORY_PAGE_SIZE` (12); Communities had its own literal of 10, so page 1
+  showed 10 cards and left a ragged last row. (2) `/admin/checks` "Profile fields
+  over their limit" now covers software vendors (Description, Short summary,
+  Agent taxonomy, Bottom line, limits read from the `Library.TOOL_*_MAX`
+  constants the edit form uses) as well as communities, adds a Type column,
+  sorts over-the-limit items (blocking) before over-target, and says plainly
+  that over-limit text stays visible but can't be saved until trimmed. The
+  summary tables' Check column is 260px (150px under the 760px stacking
+  breakpoint, where a wider column would leave Details almost no room).
+  (3) **Compare tables put each field name once in a first column**
+  (`_CMP_LABEL_COL_WIDTH`, 176px; 116px and sticky under 700px) with only
+  values in each entity's column (`_cmp_row_html`). Bottom line is the first
+  body row on both pages, seafoam like the profile callout, with no rules above
+  or below. Communities keep navy bands only on Program details and the five
+  themed groups (one row per field under each); software has one field per
+  section, so it has labelled rows and no bands. Similar communities and
+  Competitors are labelled rows. The two-tier empty handling (group
+  placeholder vs "No details available.") is unchanged. Real bug found on the
+  way: `.site-main .table-frame>table{overflow:visible!important}` lost on
+  specificity to the generic table rule's `overflow:hidden!important`, so
+  sticky cells never moved on Compare; `table.cc-table.cc-table` now wins.
+  The Compare intro says "under review", matching the visitor label.
 
 ## Authentication & security
 
