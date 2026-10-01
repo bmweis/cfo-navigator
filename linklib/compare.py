@@ -19,14 +19,14 @@ this PR ships:
      PR) — so "compare HubiFi and RightRev" answered via Claude returns the
      same curated shape as the web page.
 
-Narrative-field truncation is deliberately NOT done here. `CompareField.text`
-is always the full, untruncated field text — clamping to ~4 lines is a pure
-CSS `-webkit-line-clamp` presentation concern the HTML layer applies
-(`EXCERPT_LINE_CLAMP` below is the agreed line count, exposed so the HTML
-layer and any future consumer stay in sync on the number). Keeping the full
-text here means citations, accessibility, and copy/paste all see the real
-content, and a future MCP tool or the Phase 2 summarizer — neither of which
-wants a *visual* clamp — get the whole field for free.
+Compare shows full field text, never clamped (2026-10). `CompareField.text`
+is always the full, untruncated field text, and the HTML layer renders every
+character of it. This replaced the Compare Redesign Phase 1 Step 0 decision
+(a 4-line CSS `-webkit-line-clamp` and its `EXCERPT_LINE_CLAMP` constant,
+both removed): Brian's standing rule is that a profile, a comparison and an
+MCP response never cut a field off. Keeping the full text here also means
+citations, accessibility, copy/paste, the MCP tools and the Phase 2
+summarizer all see the real content.
 """
 from __future__ import annotations
 
@@ -35,11 +35,6 @@ from dataclasses import dataclass, field as _dc_field
 from . import gates
 from .enrich import NEEDS_VERIFICATION
 from .community_profile import NOT_ASSESSED, cpe_note, cpe_state
-
-# Approved in Compare Redesign Phase 1 Step 0: CSS line-clamp over a fixed
-# character count, so the clamp adapts to each table's actual column width
-# instead of guessing a char count that's wrong at some width.
-EXCERPT_LINE_CLAMP = 4
 
 # The live Community profile fields, grouped by theme. The profile page's card
 # grouping and Compare's section grouping both read this list, so they can

@@ -464,7 +464,7 @@ def _copy_literals(source: str) -> list[tuple[int, str]]:
     Deliberately returns each literal's SOURCE SEGMENT, not the evaluated
     `ast.Constant` value. An f-string's value is split into one Constant per
     fragment at each `{...}` boundary, so an embedded CSS or JS comment that
-    happens to interpolate something — `/* ... — ~{compare.EXCERPT_LINE_CLAMP}
+    happens to interpolate something — `/* ... — ~{some.CONSTANT}
     lines */`, `// (`/admin/tools/{id}/delete`) ... — a plain 404` — arrives as
     two fragments with the comment's opener in one and its closer in the other,
     and no per-fragment stripper can pair them up. Both of those are real

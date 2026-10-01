@@ -343,7 +343,7 @@ def test_compare_narrative_field_preserves_line_breaks(env):
     lib.close()
 
     r = _client(env).get(f"/tools/communities/compare?ids={c1},{c2}")
-    assert '<div class="cmp-clamp-inner">' in r.text
+    assert '<div class="cmp-text">' in r.text
     assert "- Monthly roundtable.\n- Quarterly in-person summit." in r.text
 
 

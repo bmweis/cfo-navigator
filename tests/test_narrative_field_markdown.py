@@ -133,8 +133,8 @@ def test_community_bottom_line_renders_markdown_and_escapes_html(env):
 
 # ---------------------------------------------------------------------------
 # Compare pages — deliberately EXCLUDED from markdown rendering (Step 0 §3):
-# the clamped excerpt stays plain _esc() text so -webkit-line-clamp keeps
-# working; the real rendering only happens via the "Full profile →" link.
+# Compare cells stay plain _esc() text (full, never clamped); the markdown
+# rendering only happens on the profile pages, reached via "Full profile →".
 # ---------------------------------------------------------------------------
 
 def test_software_compare_excerpt_stays_plain_text_not_markdown(env):
@@ -146,7 +146,7 @@ def test_software_compare_excerpt_stays_plain_text_not_markdown(env):
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     assert r.status_code == 200
-    # The raw "- " dash literally survives in the clamped excerpt — no <ul>.
+    # The raw "- " dash literally survives in the Compare cell — no <ul>.
     assert "- Contract Review Agent" in r.text
     assert "<li>Contract Review Agent" not in r.text
 
