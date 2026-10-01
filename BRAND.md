@@ -545,6 +545,10 @@ below — no soft target, since there's no generator output to nudge):
   form's submit button reads "Over limit" and disables. The server refuses
   the save outright and writes nothing.
 
+The disabled "Over limit" button uses `cursor:not-allowed`, and a form may add a visible
+sentence beside it saying why (`.char-budget-reason`, `--alert` text). The reason is never
+only a tooltip.
+
 Never coral for either state — both are warning states, not accents.
 
 | Field | Target | Max |

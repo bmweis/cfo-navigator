@@ -1636,7 +1636,27 @@ body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:v
 .char-budget{font-size:12px;line-height:1.4;color:var(--muted);margin-top:4px;}
 .char-budget-warn .char-budget-count{color:var(--caution);font-weight:600;}
 .char-budget-over .char-budget-count{color:var(--alert);font-weight:600;}
-[data-char-budget-label]{color:var(--alert)!important;border-color:var(--alert)!important;background:transparent!important;cursor:not-allowed;opacity:.85;}
+[data-char-budget-label]{color:var(--alert)!important;border-color:var(--alert)!important;background:transparent!important;cursor:not-allowed!important;opacity:.85;}
+/* A budgeted submit button reads "Over limit" and is disabled. The cursor needs !important: .btn (declared later,
+   same specificity) otherwise wins and the button shows a pointer. The reason sits next to the button as visible
+   text (.char-budget-reason), never only in a tooltip. */
+.char-budget-reason{font-size:13px;line-height:1.4;color:var(--alert);align-self:center;}
+.char-budget-reason[hidden]{display:none;}
+/* Collapsible field groups (community profile edit page). The summary row is the group header: caret, title, an
+   over-limit flag, then an empty actions slot pushed to the right for a per-group button. */
+.cp-group{display:block;}
+.cp-group-summary{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;cursor:pointer;padding:24px 0 12px;
+  border-top:1px solid var(--line);}
+.cp-group-summary:focus-visible{outline:2px solid var(--navy);outline-offset:2px;}
+.cp-group-title{font-size:16px;font-weight:600;margin:0;}
+.cp-group-flag{display:inline-flex;flex-wrap:wrap;gap:6px;}
+.cp-flag{font-size:12px;font-weight:600;line-height:1;white-space:nowrap;border-radius:999px;padding:4px 9px;border:1px solid currentColor;}
+.cp-flag-target{color:var(--caution);background:#fff;}
+.cp-flag-max{color:var(--alert);background:var(--alert-wash);}
+.cp-group-actions{margin-left:auto;display:inline-flex;align-items:center;gap:8px;}
+.cp-group-actions:empty{display:none;}
+.cp-group-body{display:grid;gap:20px;padding:8px 0 4px;}
+.cp-field-over{border-color:var(--alert)!important;}
 /* Tables: ONE format for every table on the site (2026-09). Light-blue
    header row, white rows, a line between rows, and a rounded
    --table-border (navy-light) frame. The rules are !important on purpose:
@@ -2244,9 +2264,26 @@ _CHAR_BUDGET_JS = """(function(){
     // logo and screenshot controls), and a text limit must never disable those.
     return b.filter(function(x, i){ return x.form === f && b.indexOf(x) === i; });
   }
+  function syncGroup(el){
+    var g = el.closest && el.closest('[data-char-group]');
+    if (!g) return;
+    var max = 0, tgt = 0;
+    g.querySelectorAll('[data-char-limit]').forEach(function(x){
+      var n = len(x.value), limit = +x.getAttribute('data-char-limit'), t = x.getAttribute('data-char-target');
+      var isMax = n > limit;
+      x.classList.toggle('cp-field-over', isMax);
+      if (isMax) max++; else if (t !== null && n > +t) tgt++;
+    });
+    var flag = g.querySelector('[data-cp-flag]');
+    if (!flag) return;
+    flag.textContent = '';
+    if (max) { var a = document.createElement('span'); a.className = 'cp-flag cp-flag-max'; a.textContent = max + ' over limit'; flag.appendChild(a); }
+    if (tgt) { var b = document.createElement('span'); b.className = 'cp-flag cp-flag-target'; b.textContent = tgt + ' over target'; flag.appendChild(b); }
+  }
   function syncForm(f){
     if (!f) return;
     var over = Array.from(f.elements).some(function(e){ return e.hasAttribute && e.hasAttribute('data-char-limit') && isOver(e); });
+    if (f.id) document.querySelectorAll('[data-char-reason-for="' + f.id + '"]').forEach(function(r){ r.hidden = !over; });
     buttonsFor(f).forEach(function(b){
       if (over) {
         if (!b.hasAttribute('data-char-budget-label')) b.setAttribute('data-char-budget-label', b.textContent);
@@ -2282,6 +2319,7 @@ _CHAR_BUDGET_JS = """(function(){
       c.classList.toggle('char-budget-over', over > 0);
       c.classList.toggle('char-budget-warn', warn);
     }
+    syncGroup(el);
     syncForm(el.form);
   }
   document.addEventListener('input', function(e){
@@ -17598,6 +17636,13 @@ def _priority_tags_box_html(noun: str, featured_name: str, featured: bool, advis
 _PROGRAM_CTL_HEIGHT_PX = 47
 
 
+# CPE eligible control widths. The dropdown holds Not assessed, Yes, No and
+# Unclear (the longest is about 100px of text), so it is a fixed width; the note
+# input gets the rest and never shrinks below the width its placeholder needs.
+_CPE_SELECT_WIDTH_PX = 132
+_CPE_NOTE_MIN_PX = 232
+
+
 def _community_cpe_control_html(stored: str | None) -> str:
     """CPE eligible: a dropdown of four states in this order (Not assessed,
     Yes, No, Unclear) with a short optional note beside it, in the Program
@@ -17619,12 +17664,15 @@ def _community_cpe_control_html(stored: str | None) -> str:
     box = ("box-sizing:border-box;height:var(--program-ctl-h);border:1px solid var(--line);"
            "border-radius:10px;font:inherit;font-size:15px;background:#fff;")
     hidden = " hidden" if state == NOT_ASSESSED else ""
+    # The dropdown is a fixed width (it only ever holds four short words) and
+    # the note takes everything else; flex-wrap stacks the two when the cell is
+    # too narrow for the placeholder to be readable beside the dropdown.
     return f"""    <div>
       <label for="cp-cpe_eligible" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(compare.LABEL_CPE)}</label>
-      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:8px;">
-        <select id="cp-cpe_eligible" name="cpe_eligible" style="width:100%;padding:0 10px;{box}">{opts}</select>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <select id="cp-cpe_eligible" name="cpe_eligible" style="flex:0 0 {_CPE_SELECT_WIDTH_PX}px;width:{_CPE_SELECT_WIDTH_PX}px;padding:0 10px;{box}">{opts}</select>
         <input id="cp-cpe_note" name="cpe_note" type="text" value="{_esc(cpe_note(stored))}" {attrs}{hidden}
-          placeholder="Short note, for example NASBA sponsor" style="width:100%;padding:0 12px;{box}">
+          placeholder="Note, e.g. NASBA sponsor" style="flex:1 1 {_CPE_NOTE_MIN_PX}px;min-width:0;padding:0 12px;{box}">
       </div>
       <div id="cp-cpe_counter"{hidden}>{counter}</div>
       <script>(function(){{
@@ -17870,13 +17918,34 @@ _COMMUNITY_PROFILE_LABELS = {
     for label, key in _fields
 }
 # Two-row one-liners; every other prose field is a taller narrative box.
+# A required field inside a closed <details> would make the browser block the
+# save with no visible cause (the control is not focusable while hidden). This
+# opens every closed group that holds an invalid control and focuses the first
+# one, so the browser's own message shows on a visible field. The invalid event
+# does not bubble, so it is caught on the capture phase of the form.
+_CP_GROUPS_JS = """(function(){
+  var form = document.getElementById('comm-edit-form');
+  if (!form) return;
+  var focused = false;
+  form.addEventListener('invalid', function(e){
+    var el = e.target, d = el.closest ? el.closest('details') : null;
+    while (d) { if (!d.open) d.open = true; d = d.parentElement ? d.parentElement.closest('details') : null; }
+    if (!focused) {
+      focused = true;
+      el.focus();
+      setTimeout(function(){ focused = false; }, 0);
+    }
+  }, true);
+})();"""
+
 _COMMUNITY_PROFILE_SHORT_FIELDS = {"resources_included", "jobs_program"}
 _COMMUNITY_NARRATIVE_ROWS = 6
 
 
 def _community_profile_form_fields(p: dict | None, community: dict,
                                     latest_review: dict | None = None,
-                                    citations: list | None = None) -> str:
+                                    citations: list | None = None,
+                                    open_over_max: bool = False) -> str:
     """The five profile groups of the merged community edit page (PR 2a,
     2026-09): Target audience, Member experience, Economics, Key points and
     Additional benefits, read from `compare.community_admin_groups()` so the
@@ -17941,18 +18010,46 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     {counter}
   </div>"""
 
-    def _section_header(title: str) -> str:
-        """Same h2/border-top pattern the Software edit page uses between
-        sections — reused, not a new admin section-header style."""
-        return (f'  <h2 style="font-size:16px;font-weight:600;margin:32px 0 16px;'
-                f'padding-top:24px;border-top:1px solid var(--line);">{_esc(title)}</h2>')
+    def _group_counts(fields: list) -> tuple[int, int]:
+        """(fields over their hard max, fields over target but within the
+        max), from the values being rendered. Mirrors the live script."""
+        over_max = over_target = 0
+        for _label, key in fields:
+            target, limit = PROFILE_LIMITS[key]
+            n = Library.text_budget_length(p.get(key, ""))
+            if n > limit:
+                over_max += 1
+            elif n > target:
+                over_target += 1
+        return over_max, over_target
 
-    parts = []
-    for title, fields in compare.community_admin_groups():
-        parts.append(_section_header(title))
-        for label, key in fields:
-            parts.append(_field(key, label))
-    groups_html = "\n".join(parts)
+    def _flag_html(over_max: int, over_target: int) -> str:
+        chips = ""
+        if over_max:
+            chips += f'<span class="cp-flag cp-flag-max">{over_max} over limit</span>'
+        if over_target:
+            chips += f'<span class="cp-flag cp-flag-target">{over_target} over target</span>'
+        return f'<span class="cp-group-flag" data-cp-flag>{chips}</span>'
+
+    def _group_html(title: str, fields: list) -> str:
+        """One collapsible group. Native <details>/<summary>, no JS to open or
+        close; the caret is the shared .disclosure-caret (points right,
+        rotates when open). Admin-only controls (the flag, the reserved
+        actions slot) sit in the summary; the title is the public name."""
+        over_max, over_target = _group_counts(fields)
+        open_attr = " open" if (open_over_max and over_max) else ""
+        inner = "\n".join(_field(key, label) for label, key in fields)
+        return (f'  <details class="cp-group" data-char-group{open_attr}>\n'
+                f'    <summary class="cp-group-summary">'
+                f'<span class="disclosure-caret" aria-hidden="true">&#9654;</span>'
+                f'<h2 class="cp-group-title">{_esc(title)}</h2>'
+                f'{_flag_html(over_max, over_target)}'
+                f'<span class="cp-group-actions"></span>'
+                f'</summary>\n'
+                f'    <div class="cp-group-body">\n{inner}\n    </div>\n'
+                f'  </details>')
+
+    groups_html = "\n".join(_group_html(title, fields) for title, fields in compare.community_admin_groups())
 
     return f"""  <div id="gen-host-community-profile" style="display:grid;gap:20px;">
 {groups_html}
@@ -19066,7 +19163,8 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
         c, categories, logo_in_form_html=_logo_in_form_html,
         right_top_html=_profile_review_status_html + "\n" + _generate_panel_html,
         cpe_html=_community_cpe_control_html(p.get("cpe_eligible")))
-    _profile_fields_html = _community_profile_form_fields(p, c, latest_review, citations=profile_citations)
+    _profile_fields_html = _community_profile_form_fields(p, c, latest_review, citations=profile_citations,
+                                                          open_over_max=bool(refusal))
     body = f"""<div class="page page-standard">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
@@ -19121,6 +19219,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
   <button type="submit" form="comm-edit-form" class="btn">Save changes</button>
   <button type="submit" form="comm-edit-form" name="save_action" value="continue" class="btn btn-ghost">Save and continue</button>
   <a href="/admin/tools/communities" class="btn btn-ghost">Cancel</a>
+  <span class="char-budget-reason" data-char-reason-for="comm-edit-form" role="status" hidden>Saving is off while a field is over its limit. Shorten the fields flagged in the groups above, then save.</span>
 </div>
 </div>
 <style>
@@ -19129,7 +19228,8 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 {_SHOT_CROP_CSS}
 </style>
-<script>{_GENERATE_LISTING_JS}{_GENERATE_PROFILE_JS}{_APP_SCREENSHOT_CROP_JS}</script>"""
+<script>{_GENERATE_LISTING_JS}{_GENERATE_PROFILE_JS}{_APP_SCREENSHOT_CROP_JS}</script>
+<script>{_CP_GROUPS_JS}</script>"""
     return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True, request=request))
 
 

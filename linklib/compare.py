@@ -34,7 +34,7 @@ from dataclasses import dataclass, field as _dc_field
 
 from . import gates
 from .enrich import NEEDS_VERIFICATION
-from .community_profile import NOT_ASSESSED
+from .community_profile import NOT_ASSESSED, cpe_note, cpe_state
 
 # The live Community profile fields, grouped by theme. The profile page's card
 # grouping and Compare's section grouping both read this list, so they can
@@ -89,7 +89,7 @@ COMMUNITY_PROFILE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
 # page's Program details grid, the public Details card, Compare's Program
 # details band and the MCP `key_facts` list all read these names, so Brian
 # never sees a name in the edit view that differs from what a visitor sees.
-# tests/test_program_details_labels.py walks every mapped pair.
+# tests/test_edit_polish_2a1.py walks every mapped pair; tests/test_mcp_field_parity.py checks them against the page and the MCP.
 PROGRAM_DETAILS_TITLE = "Program details"
 LABEL_REACH = "Reach"
 LABEL_COST_BAND = "Cost band"
@@ -201,6 +201,23 @@ class CompareKeyFact:
 
 
 @dataclass
+class CompareProgramDetail:
+    """One Program details row for a Community (MCP field parity, 2026-10):
+    the structured twin of a `CompareKeyFact`, labelled from
+    `PROGRAM_DETAILS_LABELS` so the page, Compare and MCP use the same words.
+    `value` is blank when `needs_verification` (the never-researched
+    sentinel). Only CPE eligible carries `note` and `state`: it lives on the
+    profile, so it is gated by the whole-profile `needs_review` flag exactly
+    like the page's CPE row; every other row comes from the listing and has
+    no review state (`state` is None)."""
+    label: str
+    value: str
+    needs_verification: bool = False
+    note: str = ""
+    state: gates.GateState | None = None
+
+
+@dataclass
 class CompareEntity:
     id: int
     slug: str
@@ -212,6 +229,7 @@ class CompareEntity:
     key_facts: list[CompareKeyFact]
     sections: list[CompareSection]
     chip_lists: list[CompareChipList]
+    program_details: list[CompareProgramDetail] = _dc_field(default_factory=list)
 
 
 @dataclass
@@ -247,6 +265,40 @@ def _key_fact(label: str, raw_value: str | None) -> CompareKeyFact | None:
     if value == NEEDS_VERIFICATION:
         return CompareKeyFact(label=label, value="", needs_verification=True)
     return CompareKeyFact(label=label, value=value)
+
+
+def build_program_details(c: dict, profile: dict) -> list[CompareProgramDetail]:
+    """Program details rows in `PROGRAM_DETAILS_LABELS` order. Empty rows are
+    skipped, as the page's Details card skips them; CPE eligible always shows
+    (an empty stored value reads as Not assessed)."""
+    sponsorship = ""
+    if c.get("sponsorship_type"):
+        sponsorship = c["sponsorship_type"]
+        if c.get("sponsor_name"):
+            sponsorship += f" ({c['sponsor_name']})"
+    raw = {
+        LABEL_REACH: community_geo_line(c),
+        LABEL_COST_BAND: c.get("cost_band"),
+        LABEL_SPONSORSHIP: sponsorship,
+        LABEL_ACCESS: c.get("access"),
+        LABEL_FORMAT: c.get("format"),
+    }
+    cpe_raw = (profile.get("cpe_eligible") or "").strip()
+    out: list[CompareProgramDetail] = []
+    for label in PROGRAM_DETAILS_LABELS:
+        if label == LABEL_CPE:
+            out.append(CompareProgramDetail(
+                label=label, value=cpe_state(cpe_raw), note=cpe_note(cpe_raw),
+                state=gates.state_for(bool(profile.get("needs_review")))))
+            continue
+        value = (raw[label] or "").strip()
+        if not value:
+            continue
+        if value == NEEDS_VERIFICATION:
+            out.append(CompareProgramDetail(label=label, value="", needs_verification=True))
+        else:
+            out.append(CompareProgramDetail(label=label, value=value))
+    return out
 
 
 def build_software_compare(
@@ -364,6 +416,7 @@ def build_communities_compare(
             promoted=bool(c.get("featured")), advisor=bool(c.get("advisor")),
             tags=tags_by_id[cid],
             key_facts=key_facts,
+            program_details=build_program_details(c, profile),
             sections=sections,
             chip_lists=[CompareChipList(
                 "Similar communities", "community_similar_communities",
@@ -371,3 +424,150 @@ def build_communities_compare(
             )],
         ))
     return entities, tag_diff(tags_by_id)
+
+
+# ---------------------------------------------------------------------------
+# MCP parity registry (2026-10). One entry per stored column on the four
+# profile tables, deciding how (or whether) the MCP serves it. A new column
+# fails tests/test_mcp_field_parity.py until someone adds a line here, so a
+# field can never reach a profile without an MCP decision.
+#
+# Categories (the text before the first colon):
+#   mcp:<tool>.<path>        served to every token. <path> is a dotted key path
+#                            in that tool's output, with `field[<key>]` (a
+#                            profile section field), `program_details[<Label>]`
+#                            or a trailing `[]` (first list item).
+#   mcp-admin:<tool>.<path>  served to an admin token only.
+#   admin-only:<reason>      never public anywhere (web or MCP); the guard test
+#                            proves a member token never sees the key or value.
+#   excluded:<reason>        public on the web but deliberately not served over
+#                            MCP. Not a leak, so the permission guard does not
+#                            apply; a separate test keeps it unserved until
+#                            someone changes this line.
+#   retired                  frozen in the schema, rendered and collected nowhere.
+#   internal:<reason>        row or join key, not a field.
+# ---------------------------------------------------------------------------
+MCP_PARITY_KINDS = ("mcp", "mcp-admin", "admin-only", "excluded", "retired", "internal")
+
+_EXCLUDED_ASSET = "excluded: presentation asset, Brian's decision"
+_ADMIN_TS = "admin-only: audit timestamp"
+_ADMIN_FLAG = "admin-only: edit-page review/confidence signal, never public"
+_RETIRED = "retired: frozen in the schema, rendered and collected nowhere"
+
+MCP_PARITY: dict[str, str] = {
+    # --- tools ---------------------------------------------------------
+    "tools.id": "mcp:get_software.id",
+    "tools.name": "mcp:get_software.name",
+    "tools.slug": "mcp:get_software.slug",
+    "tools.description": "mcp:get_software.description.text",
+    "tools.url": "mcp:get_software.url",
+    "tools.categories_json": "mcp:get_software.categories",
+    "tools.approved": "admin-only: approval gate; an unapproved record is refused, the flag is never emitted",
+    "tools.advisor": "mcp:get_software.advisor",
+    "tools.submitted_by": "admin-only: submitter name",
+    "tools.created_at": _ADMIN_TS,
+    "tools.updated_at": _ADMIN_TS,
+    "tools.vendor_email": "admin-only: vendor contact email, private",
+    "tools.promoted": "mcp:get_software.promoted",
+    "tools.warm_intro_enabled": "mcp:get_software.warm_intro_available",
+    "tools.vendor_name": "admin-only: vendor contact name, private",
+    "tools.competitive_differentiation": "mcp:get_software.bottom_line.text",
+    "tools.agent_taxonomy_note": "mcp:get_software.agent_taxonomy.text",
+    "tools.screenshot_url": _EXCLUDED_ASSET,
+    "tools.screenshot_is_product": _RETIRED,
+    "tools.screenshot_captured_at": _EXCLUDED_ASSET,
+    "tools.agent_taxonomy_needs_verification": "mcp:get_software.agent_taxonomy.state",
+    "tools.summary": "mcp:get_software.summary",
+    "tools.logo_path": _EXCLUDED_ASSET,
+    "tools.app_screenshot_source_url": "admin-only: capture input, not rendered",
+    "tools.app_screenshot_url": _EXCLUDED_ASSET,
+    "tools.app_screenshot_captured_at": _EXCLUDED_ASSET,
+    "tools.description_needs_verification": "mcp:get_software.description.state",
+    "tools.competitive_differentiation_needs_verification": "mcp:get_software.bottom_line.state",
+    "tools.suite_note": "admin-only: stored, not rendered, decision pending",
+    "tools.description_ai_confident": _ADMIN_FLAG,
+    "tools.competitive_differentiation_ai_confident": _ADMIN_FLAG,
+    "tools.agent_taxonomy_ai_confident": _ADMIN_FLAG,
+    "tools.description_low_confidence": _ADMIN_FLAG,
+    "tools.competitive_differentiation_low_confidence": _ADMIN_FLAG,
+    "tools.agent_taxonomy_low_confidence": _ADMIN_FLAG,
+    "tools.logo_manual_override": "admin-only: logo override bookkeeping",
+    "tools.logo_override_stale": "admin-only: logo override bookkeeping",
+    "tools.needs_review": "mcp-admin:get_software.needs_review",
+    # --- communities ---------------------------------------------------
+    "communities.id": "mcp:get_community.id",
+    "communities.name": "mcp:get_community.name",
+    "communities.slug": "mcp:get_community.slug",
+    "communities.url": "mcp:get_community.url",
+    "communities.demographic": _RETIRED,
+    "communities.cost_band": "mcp:get_community.program_details[Cost band]",
+    "communities.cost_note": _RETIRED,
+    "communities.sponsorship_type": "mcp:get_community.program_details[Sponsorship]",
+    "communities.sponsor_name": "mcp:get_community.program_details[Sponsorship]",
+    "communities.access": "mcp:get_community.program_details[Access]",
+    "communities.format": "mcp:get_community.program_details[Format]",
+    "communities.notes": _RETIRED,
+    "communities.categories_json": "mcp:get_community.categories",
+    "communities.approved": "admin-only: approval gate; an unapproved record is refused, the flag is never emitted",
+    "communities.submitted_by": "admin-only: submitter name",
+    "communities.created_at": _ADMIN_TS,
+    "communities.updated_at": _ADMIN_TS,
+    "communities.reach": "mcp:get_community.program_details[Reach]",
+    "communities.metros_json": _RETIRED,
+    "communities.local_markets": "mcp:get_community.program_details[Reach]",
+    "communities.featured": "mcp:get_community.promoted",
+    "communities.advisor": "mcp:get_community.advisor",
+    "communities.screenshot_url": _EXCLUDED_ASSET,
+    "communities.screenshot_is_product": _RETIRED,
+    "communities.screenshot_captured_at": _EXCLUDED_ASSET,
+    "communities.logo_path": _EXCLUDED_ASSET,
+    "communities.app_screenshot_source_url": "admin-only: capture input, not rendered",
+    "communities.app_screenshot_url": _EXCLUDED_ASSET,
+    "communities.app_screenshot_captured_at": _EXCLUDED_ASSET,
+    "communities.logo_manual_override": "admin-only: logo override bookkeeping",
+    "communities.logo_override_stale": "admin-only: logo override bookkeeping",
+    # --- community_profiles --------------------------------------------
+    "community_profiles.community_id": "internal: row key",
+    "community_profiles.ideal_member": "mcp:get_community.field[ideal_member]",
+    "community_profiles.anti_fit": "mcp:get_community.field[anti_fit]",
+    "community_profiles.value_prop": "mcp:get_community.field[value_prop]",
+    "community_profiles.format_reality": "mcp:get_community.field[format_reality]",
+    "community_profiles.engagement_level": "mcp:get_community.field[engagement_level]",
+    "community_profiles.sponsor_relationship_note": "mcp:get_community.field[sponsor_relationship_note]",
+    "community_profiles.application_friction": "mcp:get_community.field[application_friction]",
+    "community_profiles.cost_value_verdict": "mcp:get_community.field[cost_value_verdict]",
+    "community_profiles.notable_members": "mcp:get_community.field[notable_members]",
+    "community_profiles.founded_year": _RETIRED,
+    "community_profiles.public_criticism": "mcp:get_community.field[public_criticism]",
+    "community_profiles.verdict_summary": "mcp:get_community.field[verdict_summary]",
+    "community_profiles.low_confidence": _ADMIN_FLAG,
+    "community_profiles.updated_at": _ADMIN_TS,
+    "community_profiles.business_model": "mcp:get_community.field[business_model]",
+    "community_profiles.primary_purpose": _RETIRED,
+    "community_profiles.cpe_eligible": "mcp:get_community.program_details[CPE eligible]",
+    "community_profiles.platform_type": _RETIRED,
+    "community_profiles.meeting_format": _RETIRED,
+    "community_profiles.event_style": _RETIRED,
+    "community_profiles.seniority_band": _RETIRED,
+    "community_profiles.resources_included": "mcp:get_community.field[resources_included]",
+    "community_profiles.needs_review": "mcp-admin:get_community.needs_review",
+    "community_profiles.stage_focus": _RETIRED,
+    "community_profiles.jobs_program": "mcp:get_community.field[jobs_program]",
+    "community_profiles.team_or_individual": _RETIRED,
+    **{f"community_profiles.{f}_ai_confident": _ADMIN_FLAG for f in (
+        "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
+        "engagement_level", "sponsor_relationship_note", "application_friction",
+        "cost_value_verdict", "notable_members", "public_criticism", "verdict_summary")},
+    # --- tool_feature_links --------------------------------------------
+    "tool_feature_links.id": "internal: row key",
+    "tool_feature_links.tool_id": "internal: join key",
+    "tool_feature_links.feature_id": "internal: join key",
+    "tool_feature_links.availability": "mcp:get_software.key_features[].availability",
+    "tool_feature_links.ai_enabled": "mcp:get_software.key_features[].ai_enabled",
+    "tool_feature_links.verified_as_of": "admin-only: curation date, edit page only",
+    "tool_feature_links.note": "admin-only: curation log with reviewer caveats",
+    "tool_feature_links.source_url": "admin-only: curation source, edit page only",
+    "tool_feature_links.created_at": _ADMIN_TS,
+    "tool_feature_links.updated_at": _ADMIN_TS,
+    "tool_feature_links.public_note": "mcp:get_software.key_features[].public_note",
+}

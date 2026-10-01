@@ -6091,6 +6091,35 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   the disclosed, uncapped query-embedding cost on a non-empty
   `search_archive` call) and `tests/test_mcp_library.py` for the
   auth-model regression coverage.
+- **MCP field parity (2026-10) — `program_details`, `warm_intro_available`,
+  and a registry that forces an MCP decision for every profile column.** The
+  Phase 0 report found "Program details is missing from the MCP" was wrong:
+  the key-facts band and the Additional benefits group were already served.
+  The real gaps were CPE as one flat string with no review state,
+  and no Warm Intro signal. `get_community`/`compare_communities` now return
+  `program_details` (`label`, `value`, optional `note`; CPE also `state` and
+  `badge`, gated by the whole-profile `needs_review` exactly like the page),
+  `key_facts` stays as the flat alias, and `get_software` returns
+  `warm_intro_available` (a boolean, never the vendor's email or name).
+  `linklib.compare.MCP_PARITY` classifies every column on `tools`,
+  `communities`, `community_profiles` and `tool_feature_links` as `mcp:`,
+  `mcp-admin:`, `admin-only:`, `excluded:`, `retired` or `internal:`;
+  `tests/test_mcp_field_parity.py` fails on a column with no entry, on an
+  `mcp:` path the output lacks, and on any `admin-only`/`mcp-admin` value or
+  key reaching a member token. **`excluded` is not `admin-only`**: logos,
+  screenshots and their capture dates are public on the web and deliberately
+  not served over MCP (Brian's decision, presentation assets); the guard
+  does not treat them as a leak, and a separate test keeps them unserved
+  until their registry line is changed on purpose. `tools.suite_note` is
+  registered `admin-only: stored, not rendered, decision pending`. **Not in
+  this PR, issue text ready to file (owner Brian):** (1) "Community profile
+  Details card is hand-built; move into `compare.py`" — the public page
+  assembles its Program details rows itself in `webapp/app.py` and shares only
+  the labels with Compare and MCP; trigger: the next change to Program
+  details. (2) "`suite_note` is stored and rendered nowhere: render or
+  remove" — the NetSuite placeholder seeded by
+  `scripts/seed_feature_taxonomy.py` has no reader. See ARCHITECTURE.md's
+  "MCP field parity" paragraph in the Phase 3 section.
 - **MCP server, Phase 5 (2026-09) — FP&A Buddy & Matchmaker proxy tools
   (`ask_fpa_buddy`, `ask_matchmaker(kind, ...)`), a new `webapp/mcp_qa.py`.**
   Neither `/ask` nor the two matchmaker routes' identity resolution
@@ -10791,6 +10820,30 @@ it supersedes the old "`/save` is token-gated" note.
   is over a limit instead of aborting. Note: the voice review queue Edit and the
   bulk ampersand replace write through `apply_voice_review_write`, which bypasses
   these limits and can lengthen text past a max.
+
+- **Community profile edit page: collapsible field groups (2026-10).** The five
+  groups are native `<details>`/`<summary>` (`.cp-group`), all collapsed on every
+  load, including a profile with a stored over-limit field. The one exception is
+  a refused save (`open_over_max`, passed only when `refusal` is set), which opens
+  just the groups holding an over-max field. The summary row is the group header:
+  caret (`.disclosure-caret`), title (the public name from
+  `compare.community_admin_groups()`), an over-limit flag (amber "N over target",
+  red "N over limit", kept live by `_CHAR_BUDGET_JS` through the opt-in
+  `data-char-group` hook; offending fields get `.cp-field-over`), then an empty
+  `.cp-group-actions` slot reserved for the per-group Generate button queued as
+  2b (it can sit in the slot with no layout change; a button inside a summary does
+  not toggle the group). A required field inside a closed group opens it and takes
+  focus (`_CP_GROUPS_JS`, an `invalid` listener on the form's capture phase),
+  since the browser otherwise blocks the save with no visible cause. The
+  "Over limit" buttons now show `cursor:not-allowed` (`.btn`, declared later,
+  used to win; the shared rule now carries `!important`, which also fixes the
+  other budgeted pages) and an opt-in visible reason sits beside them
+  (`data-char-reason-for`). CPE eligible: fixed-width dropdown
+  (`_CPE_SELECT_WIDTH_PX`), the note takes the rest (`_CPE_NOTE_MIN_PX`), and the
+  two stack when the cell is too narrow. Placeholder shortened to "Note, e.g.
+  NASBA sponsor" so it fits beside the dropdown in the 1280px cell. Saving,
+  limits, refusal and status buttons are unchanged. Software vendor parity is 2a.2.
+  See `tests/test_cp_collapsible_groups.py`.
 
 - **PR 2a.1 follow-up (2026-10).** (1) Both public directories read one
   `_DIRECTORY_PAGE_SIZE` (12); Communities had its own literal of 10, so page 1
