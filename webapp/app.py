@@ -4568,6 +4568,16 @@ def homepage(request: Request):
 .home-tl-bullet{{display:flex;gap:12px;font-size:15.5px;line-height:1.55;color:var(--ink-soft);}}
 .home-tl-bullet-mark{{color:var(--navy);flex-shrink:0;font-size:18px;line-height:1.3;}}
 .home-tl-highlights-wrap{{border-top:1px solid var(--line);padding-top:28px;}}
+/* Original content block: a fixed 2x2 (one column on mobile). The block is
+   capped at 4 pieces in the query, so its item count always matches its
+   shape and there is no sparse case; auto-fill at the shared 220px floor
+   fit only 3 tracks in this column (816-836px) and stranded the 4th card. */
+.home-oc-wrap{{margin:0 0 28px;}}
+.home-oc-wrap .tl-featured{{margin:0;}}
+.tl-featured.tl-featured-home{{grid-template-columns:minmax(0,1fr);}}
+@media(min-width:560px){{
+  .tl-featured.tl-featured-home{{grid-template-columns:repeat(2,minmax(0,1fr));}}
+}}
 .home-tl-highlights-label{{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin-bottom:20px;}}
 .home-tl-highlights{{display:grid;grid-template-columns:1fr;gap:32px 40px;}}
 /* 1024px, not the sitewide-standard 900px other sections on this page use—
@@ -4621,7 +4631,10 @@ def homepage(request: Request):
       <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
     </ul>
 
-    {_oc_featured_cards_html(original_content_home)}
+    {f'''<div class="home-oc-wrap">
+      <div class="home-tl-highlights-label">Original content</div>
+      {_oc_featured_cards_html(original_content_home, "tl-featured-home")}
+    </div>''' if original_content_home else ''}
 
     {f'''<div class="home-tl-highlights-wrap">
       <div class="home-tl-highlights-label">Recent highlights</div>
@@ -16000,8 +16013,9 @@ _TL_FEATURED_CARDS = (
 )
 
 
-def _tl_featured_cards_html(cards) -> str:
-    return '<div class="tl-featured">' + "".join(_tl_fcard(*c) for c in cards) + '</div>'
+def _tl_featured_cards_html(cards, extra_class: str = "") -> str:
+    cls = "tl-featured" + (f" {extra_class}" if extra_class else "")
+    return f'<div class="{cls}">' + "".join(_tl_fcard(*c) for c in cards) + '</div>'
 
 
 # Original Content tag taxonomy (2026-09) — a closed, three-value set.
@@ -16137,13 +16151,13 @@ def _oc_card_tuple(row: dict, idx: int) -> tuple:
     )
 
 
-def _oc_featured_cards_html(rows: list[dict]) -> str:
+def _oc_featured_cards_html(rows: list[dict], extra_class: str = "") -> str:
     """Shared renderer for both the homepage's flagship row and
     /thought-leadership's featured row — same _tl_fcard/.tl-card markup as
     the pre-DB version, now driven by `original_content` rows instead of the
     hardcoded _TL_FEATURED_CARDS tuple, so the two surfaces still can't drift
     apart in content."""
-    return _tl_featured_cards_html([_oc_card_tuple(r, i) for i, r in enumerate(rows)])
+    return _tl_featured_cards_html([_oc_card_tuple(r, i) for i, r in enumerate(rows)], extra_class)
 
 
 # Original Content Phase 2 — markdown rendering + the shared article template
@@ -17297,6 +17311,17 @@ def admin_original_content(request: Request, status: str = ""):
         f'/thought-leadership/&lt;slug&gt; page once it&rsquo;s live.</p>'
     ) if no_body_count else ""
 
+    # The homepage shows at most Library.HOME_ORIGINAL_CONTENT_CAP flagged live
+    # pieces; all_items is already in the same display order the homepage
+    # query uses, so anything past the cap is exactly what gets dropped.
+    _home_flagged = [it for it in all_items if it["status"] == "live" and it["featured_home"]]
+    _home_hidden = _home_flagged[Library.HOME_ORIGINAL_CONTENT_CAP:]
+    home_cap_note = (
+        f'<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">'
+        f'Only the first {Library.HOME_ORIGINAL_CONTENT_CAP}, by display order, appear on the homepage. '
+        f'Not shown: {", ".join(_esc(it["title"]) for it in _home_hidden)}.</p>'
+    ) if _home_hidden else ""
+
     def _filter_link(s: str, label: str) -> str:
         active = s == status
         href = "/admin/thought-leadership/original" + (f"?status={s}" if s else "")
@@ -17332,6 +17357,7 @@ def admin_original_content(request: Request, status: str = ""):
 initAdminScrollHint();
 </script>
 {no_body_note}
+{home_cap_note}
 </div>"""
     return HTMLResponse(_page("Original content—Admin", "", body, authed=True))
 

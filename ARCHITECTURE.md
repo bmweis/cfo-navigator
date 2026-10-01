@@ -3811,6 +3811,19 @@ screenshot showing the header sitting flush against the wrapper's rounded top co
 new regression test (`test_growth_engine_ratio_table_wrap_has_no_visible_gap`) asserting the
 fixed CSS rule renders in the response.
 
+**Homepage Original content block: a capped 2x2 grid with a header.**
+`Library.list_original_content_for_home()` returns live `featured_home=1`
+pieces in `_OC_ORDER_SQL` order (`display_order ASC, sort_key DESC`),
+now `LIMIT`ed to `HOME_ORIGINAL_CONTENT_CAP` (4); it had no cap before.
+`homepage()` renders them under an "Original content" label (the admin's
+own name for the table; a fixed label, not editable copy) through
+`_oc_featured_cards_html(rows, "tl-featured-home")`, which fixes the grid to
+two columns at 560px and up, one below. `/thought-leadership` keeps the
+shared auto-fill `.tl-featured` rule. With no live featured pieces the label
+and grid are omitted together. `/admin/thought-leadership/original` lists any
+live flagged pieces past the cap in a note below the table, derived from the
+same display order, so a dropped piece is never silent.
+
 **Recent highlights: a hand-curated 4-slot featured set, not a per-type
 fallback (superseded the Homepage Restructure phase's original design).**
 The homepage's "Recent highlights" grid used to be one tile per Thought
