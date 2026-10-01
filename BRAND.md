@@ -502,6 +502,8 @@ graffiti marks on admin tables, forms, or the chat UI.
   - **Secondary format, for a table with subheading rows** (the Compare
     pages' section bands): the band is `--table-border` navy-light with
     white text, and the label column stays white rather than beige.
+    On Compare, field names live in that first column (bold, sentence case),
+    and the Bottom line row leads in `--seafoam-wash` with no rules around it.
   - It all lives in one `!important` block in `_CSS`, scoped to
     `main.site-main`, so a new table gets the format without anyone
     remembering it, and older inline styles (including article HTML stored

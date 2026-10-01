@@ -10765,6 +10765,19 @@ it supersedes the old "`/save` is token-gated" note.
   that over-limit text stays visible but can't be saved until trimmed. The
   summary tables' Check column is 260px (150px under the 760px stacking
   breakpoint, where a wider column would leave Details almost no room).
+  (3) **Compare tables put each field name once in a first column**
+  (`_CMP_LABEL_COL_WIDTH`, 176px; 116px and sticky under 700px) with only
+  values in each entity's column (`_cmp_row_html`). Bottom line is the first
+  body row on both pages, seafoam like the profile callout, with no rules above
+  or below. Communities keep navy bands only on Program details and the five
+  themed groups (one row per field under each); software has one field per
+  section, so it has labelled rows and no bands. Similar communities and
+  Competitors are labelled rows. The two-tier empty handling (group
+  placeholder vs "No details available.") is unchanged. Real bug found on the
+  way: `.site-main .table-frame>table{overflow:visible!important}` lost on
+  specificity to the generic table rule's `overflow:hidden!important`, so
+  sticky cells never moved on Compare; `table.cc-table.cc-table` now wins.
+  The Compare intro says "under review", matching the visitor label.
 
 ## Authentication & security
 

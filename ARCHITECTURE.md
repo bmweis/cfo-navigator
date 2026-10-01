@@ -11154,3 +11154,5 @@ Four independent, live-use gaps on `/tools/software/{slug}/edit`, none touching 
 See `tests/test_homepage_screenshot_upload.py`, `tests/test_save_and_mark_verified.py`, and the extended `tests/test_app_screenshot.py` (two existing recapture-success tests updated to post the form field the new client now sends, plus new tests proving the fix directly against a tool/community with NO source URL ever saved to the DB) for the regression coverage. Every new/changed test was confirmed to fail against the pre-fix code (`git stash` the `webapp/app.py` diff, re-run) before being trusted.
 
 <!-- 2026-10: directory page size is one shared constant (`_DIRECTORY_PAGE_SIZE`); /admin/checks over-limit row covers software and communities. See CLAUDE.md. -->
+
+<!-- 2026-10: Compare tables use a first-column label (`_CMP_LABEL_COL_WIDTH`), Bottom line first in seafoam; see CLAUDE.md. -->
