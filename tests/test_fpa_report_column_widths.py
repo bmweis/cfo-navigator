@@ -11,6 +11,22 @@ import tempfile
 import pytest
 
 
+def _browser():
+    """(playwright, chromium) or None. Stops Playwright when the launch fails:
+    a started sync Playwright leaves an asyncio loop running in this thread,
+    which breaks every later test that calls asyncio.run() (the MCP tests)."""
+    try:
+        from playwright.sync_api import sync_playwright
+        pw = sync_playwright().start()
+    except Exception:
+        return None
+    try:
+        return pw, pw.chromium.launch()
+    except Exception:
+        pw.stop()
+        return None
+
+
 @pytest.fixture
 def admin_client(monkeypatch):
     db = tempfile.mktemp(suffix=".db")
@@ -45,12 +61,10 @@ def test_asker_header_uses_the_short_label_width(admin_client):
 
 @pytest.mark.parametrize("width,minimum", [(900, 260), (800, 170)])
 def test_question_column_keeps_room_at_half_desktop_widths(admin_client, tmp_path, width, minimum):
-    try:
-        from playwright.sync_api import sync_playwright
-        pw = sync_playwright().start()
-        browser = pw.chromium.launch()
-    except Exception:
+    launched = _browser()
+    if launched is None:
         pytest.skip("Chromium not installed in this environment")
+    pw, browser = launched
     try:
         client, appmod, db = admin_client
         _seed(appmod, db)

@@ -46,11 +46,18 @@ def env(monkeypatch):
 
 
 def _browser():
+    """(playwright, chromium) or None. Stops Playwright when the launch fails:
+    a started sync Playwright leaves an asyncio loop running in this thread,
+    which breaks every later test that calls asyncio.run() (the MCP tests)."""
     try:
         from playwright.sync_api import sync_playwright
         pw = sync_playwright().start()
+    except Exception:
+        return None
+    try:
         return pw, pw.chromium.launch()
     except Exception:
+        pw.stop()
         return None
 
 
