@@ -54,18 +54,15 @@ def test_software_and_communities_tables_share_the_xwide_floor(env):
 
 
 def test_software_and_communities_tables_share_the_same_name_column_width(env):
-    """Software's sticky Name column widened from 220px to 280px, matching
-    Communities' own — both the <th> and the row <td> declare it, on both
-    tables, so this is a genuine structural match, not just a matching
-    outer floor."""
+    """Both lists pin the same single sticky Name column, sized by one named
+    constant (the checkbox sits inside it since Refs 655, B1), so a width change
+    can't reach one table and miss the other."""
     admin = _admin_client(env)
     software = admin.get("/admin/tools/software").text
     communities = admin.get("/admin/tools/communities").text
-    # <th> and <td> both carry it, on both tables.
-    assert software.count("admin-sticky-col-2") >= 2
-    assert communities.count("admin-sticky-col-2") >= 2
-    assert software.count('min-width:280px;">Name') >= 1
-    assert communities.count('min-width:280px;">Name') >= 1
+    for html in (software, communities):
+        assert 'class="admin-sticky-col"' in html
+        assert "width:230px;min-width:230px;max-width:230px" in html
 
 
 def test_no_other_column_min_width_shrank_at_the_new_shared_floor(env):

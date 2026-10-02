@@ -598,6 +598,15 @@ TABLE_OVERRIDE_ALLOWLIST = {
         "removes the frame stored on article table wrappers so the table's own frame is the only one",
     ".admin-table-responsive tr": "mobile card layout, where a table's rows become stacked cards",
     ".backup-log-table td": "mobile card layout for the backup history table",
+    # Refs 655, B1. The generic td border rule is !important, so the rule that
+    # drops cell borders in a stacked card has to be too; the earlier
+    # non-lifted version never applied (see _CSS). Two entries, one per card
+    # breakpoint.
+    ".site-main.site-main table.admin-table-responsive.admin-table-responsive td, "
+    ".site-main.site-main table.backup-log-table.backup-log-table td":
+        "mobile card layout: cells carry no top border (replaces the specificity-losing rule below)",
+    ".site-main.site-main table.ff-table.ff-table td, .site-main.site-main table.fs-table.fs-table td":
+        "mobile card layout for the feeds tables: cells carry no top border",
 }
 
 _CSS_RULE_RE = re.compile(r"([^{}]{1,400})\{([^{}]{0,800})\}")
@@ -641,8 +650,7 @@ def table_override_problems(src: str) -> list[str]:
         selector = _last_selector(m.group(1))
         if not _TABLE_TOKEN_RE.search(selector):
             continue
-        in_block = (selector.startswith((TABLE_SCOPE, ".site-main .table-frame"))
-                    or selector == ".site-main table.admin-table-responsive td")
+        in_block = selector.startswith((TABLE_SCOPE, ".site-main .table-frame"))
         if in_block or selector in TABLE_OVERRIDE_ALLOWLIST:
             continue
         line = norm.count("\n", 0, m.start(2)) + 1

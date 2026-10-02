@@ -720,11 +720,10 @@ summary tables sit inside a `flex:1 1 460px` column whose own tight
 Username column (no clean field-type match, always visible with no
 `data-col`) is left unwidthed, while its Name/Email/Last login/Status
 columns do use the shared constants — within the handful this standard's
-own PR anticipated. The Software/Communities approved-tables' own sticky
-Name column (`admin-sticky-col-2`) — the precedent 280px is drawn from —
-now reads `min-width:{_COL_WIDTH_NAME}px` from the same constant rather
-than its own literal, since it's the origin case for the value, not an
-exception.
+own PR anticipated. The Software/Communities approved-tables' sticky
+Name column was the origin case for 280px; since Refs 655 (B1) it is one
+pinned `admin-sticky-col` that holds the checkbox as well as the name, sized
+by `_COL_WIDTH_NAME_STICKY` (230px).
 
 **`/admin/system/scripts`** (System nav group, Phase N) is the opposite design
 choice from the two pages above — a static, hand-maintained registry
@@ -11247,6 +11246,15 @@ No schema or route change. Five fixes, each measured in real Chromium before cha
 - **Grid tracks.** Six admin grids use `minmax(0,...)` tracks (list in BRAND.md section 8). `tests/test_grid_track_zero_minimum.py` injects a wide cell into each real page.
 - **Resources sparse grids.** No code change: `auto-fill` already keeps a lone card at its track width. `tests/test_resources_sparse_grid.py` pins it (a switch to `auto-fit` fails it).
 - **`.table-frame` specificity.** `.site-main .table-frame>table` now repeats the generic table rule's `:not()` chain. Every framed table (ten routes measured) had kept `overflow:hidden` and its own border, so the Software and Communities admin sticky columns did not stick. Compare's local `.cc-table.cc-table` patch is left in place and is now redundant.
+
+### Table frame and card polish on phones (Refs 655, B1)
+
+Measured in Chromium before the change, after PR 660 (which only changed the frame-child rule, so none of this is a 660 regression except that it made the sticky column actually stick).
+
+- **Bare tables.** The pending submissions tables (Software, Communities) and the contact deletion history drew their own border inside a plain `overflow-x:auto` div, so at 390px the table was 800 or 640px wide in a 342px scroller and its right border scrolled out of view. They now sit in `.table-frame` (`overflow-x:auto;overflow-y:hidden`), which carries the border while the table scrolls. 26 other instances on 22 routes have the same shape and are a separate pass.
+- **Stacked cards.** The media rule meant to remove cell top borders read `.site-main table.admin-table-responsive td`, specificity (0,2,2), and lost to the generic td rule at (0,3,3), so every card field kept a hairline and the first card a doubled line under the frame. It now repeats the table class and `.site-main` for four classes (no new `!important`, allowlist untouched), per card system: `.admin-table-responsive` and `.backup-log-table` under 700px, `.ff-table`/`.fs-table` under 820px. Card separators are 1px, none under the last card.
+- **Sticky Name.** The checkbox cell is gone; the checkbox lives inside the Name cell (`admin-sticky-col`, `left:0`, `_COL_WIDTH_NAME_STICKY`=230). Bulk select is unaffected: `selectAllRows` and `updateBulkButton` use the `.{table}-row-cb` class, not column position. In card mode the same cell is the card header, so there is no checkbox-only row.
+- Tests: `tests/test_table_frame_mobile_polish.py` (Chromium; skips where none exists).
 - **Reading-column check.** `brand_check.reading_column_problems()`, a cached source scan wired into `webapp.checks.run_all()` as "Reading column holds its tables and grids" (theme: Brand and design).
 
 ### Software edit page — four admin fixes (2026-09)

@@ -1698,8 +1698,19 @@ body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:v
 .site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>tbody:first-child>tr:first-child>td{border-top:0!important;}
 .site-main table:not(.tp-competitor-table):not(.rr-reader-body table) td.cc-section{background:var(--table-border)!important;color:#fff!important;}
 .site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>tbody td.cc-label{background:var(--surface)!important;}
+/* Stacked-card cells carry no top border. The rule that said so used to read
+   `.site-main table.admin-table-responsive td`, (0,2,2), which loses to the
+   generic td rule above, (0,3,3), so it never applied and every card field kept
+   a hairline. Repeating the table's own class and .site-main lifts these to
+   four classes without adding an !important or touching the allowlist. Each
+   card system has its own breakpoint. */
 @media(max-width:700px){
-  .site-main table.admin-table-responsive td{border-top:0!important;}
+  .site-main.site-main table.admin-table-responsive.admin-table-responsive td,
+  .site-main.site-main table.backup-log-table.backup-log-table td{border-top:0!important;}
+}
+@media(max-width:820px){
+  .site-main.site-main table.ff-table.ff-table td,
+  .site-main.site-main table.fs-table.fs-table td{border-top:0!important;}
 }
 a{color:var(--navy);text-decoration:none;}
 a:hover{text-decoration:underline;}
@@ -2027,6 +2038,12 @@ _TABLE_FLOOR_XWIDE = 960     # 8+ columns
 _COL_WIDTH_NAME = 280        # Name / Title / vendor or tool name — matches
                               # the Software/Communities approved-tables'
                               # own sticky Name column precedent (PR 12/15)
+# Sticky Name column on the Software and Communities lists (Refs 655, B1). The
+# checkbox sits inside the Name cell, so this one column is the whole pinned
+# strip. 230px is 26% of an 874px landscape phone; the old pinned pair was 37%
+# (Software) and 44.5% (Communities) there. Not _COL_WIDTH_NAME on purpose: that
+# is a floor for a free-standing name column, this is a cap for a pinned one.
+_COL_WIDTH_NAME_STICKY = 230
 _COL_WIDTH_EMAIL = 220        # Email address
 _COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
                               # "YYYY-MM-DD HH:MM" value, not just "YYYY-MM-DD"
@@ -13264,7 +13281,7 @@ initAdminScrollHint();
 </script>
 </form>
 <h2 style="font-size:16px;margin:40px 0 12px;">Deletion history</h2>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:8px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">When</th>
@@ -14152,10 +14169,12 @@ def admin_software(request: Request, filter: str = ""):
         # .admin-table-responsive breakpoint (see its CSS)—unused above that
         # breakpoint, where the table renders normally.
         return f"""<tr class="admin-table-row" {row_attrs}>
-          <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
-          <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;min-width:{_COL_WIDTH_NAME}px;">
-            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-              <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}
+          <td class="admin-table-cell admin-sticky-col" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">
+            <div style="display:flex;align-items:flex-start;gap:10px;">
+              <input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" style="margin-top:4px;flex:0 0 auto;" onchange="updateBulkButton('software')">
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-width:0;overflow-wrap:anywhere;">
+                <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}
+              </div>
             </div>
           </td>
           <td data-col="software:summary" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:260px;">{_esc(t.get('summary') or '—')}</td>
@@ -14255,7 +14274,7 @@ def admin_software(request: Request, filter: str = ""):
 </p>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
-<div style="overflow-x:auto;margin-bottom:40px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:40px;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
@@ -14278,8 +14297,7 @@ def admin_software(request: Request, filter: str = ""):
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
-  <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
-  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_NAME}px;">Name</th>
+  <th class="admin-sticky-col" style="padding:10px 12px;text-align:left;font-size:13px;"><div style="display:flex;align-items:center;gap:10px;"><input type="checkbox" aria-label="Select all" onchange="selectAllRows('software',this.checked)"><span>Name</span></div></th>
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
@@ -14392,7 +14410,8 @@ initAdminScrollHint();
      pointless horizontal scroll on an otherwise correctly stacked card). */
   .admin-table-responsive, .admin-table-responsive tbody,
   .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;min-width:0!important;}}
-  .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-responsive tr{{border-bottom:1px solid var(--line);padding:8px 0;}}
+  .admin-table-responsive tbody tr:last-child{{border-bottom:0;}}
   .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
@@ -14448,12 +14467,11 @@ initAdminScrollHint();
    (well above the 700px card-stacking breakpoint) these tables really do
    overflow with no visible cue, so a real hint was built, gated on actual
    overflow rather than a breakpoint.) */
-.admin-sticky-col{{position:sticky;background:#fff;z-index:2;}}
+.admin-sticky-col{{position:sticky;left:0;background:#fff;z-index:2;box-shadow:2px 0 4px -2px rgba(0,0,0,.15);
+  width:{_COL_WIDTH_NAME_STICKY}px;min-width:{_COL_WIDTH_NAME_STICKY}px;max-width:{_COL_WIDTH_NAME_STICKY}px;}}
 thead .admin-sticky-col{{background:var(--accent-light);z-index:3;}}
-.admin-sticky-col-1{{left:0;width:40px;}}
-.admin-sticky-col-2{{left:40px;box-shadow:2px 0 4px -2px rgba(0,0,0,.15);}}
 @media(max-width:700px){{
-  .admin-sticky-col{{position:static;box-shadow:none;width:auto;}}
+  .admin-sticky-col{{position:static;box-shadow:none;width:auto;min-width:0;max-width:none;}}
 }}
 </style>
 </div>"""
@@ -18236,10 +18254,12 @@ def admin_communities(request: Request, filter: str = ""):
                 c, has_empty_field.get(c["id"], True), similar_counts.get(c["id"], 0)),
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
-  <td class="admin-table-cell admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
-  <td class="admin-table-cell admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;font-weight:600;min-width:{_COL_WIDTH_NAME}px;">
-    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{low_conf_badge}
+  <td class="admin-table-cell admin-sticky-col" style="padding:10px 12px;font-weight:600;">
+    <div style="display:flex;align-items:flex-start;gap:10px;">
+      <input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" style="margin-top:4px;flex:0 0 auto;" onchange="updateBulkButton('communities')">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-width:0;overflow-wrap:anywhere;">
+        <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{low_conf_badge}
+      </div>
     </div>
   </td>
   <td data-col="communities:cost_band" data-label="Cost band" class="admin-table-cell" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
@@ -18347,7 +18367,7 @@ def admin_communities(request: Request, filter: str = ""):
 </details>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
-<div style="overflow-x:auto;margin-bottom:40px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:40px;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
@@ -18369,8 +18389,7 @@ def admin_communities(request: Request, filter: str = ""):
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
-  <th class="admin-sticky-col admin-sticky-col-1" style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
-  <th class="admin-sticky-col admin-sticky-col-2" style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_NAME}px;">Name</th>
+  <th class="admin-sticky-col" style="padding:10px 12px;text-align:left;font-size:13px;"><div style="display:flex;align-items:center;gap:10px;"><input type="checkbox" aria-label="Select all" onchange="selectAllRows('communities',this.checked)"><span>Name</span></div></th>
   <th data-col="communities:cost_band" style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th data-col="communities:access" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th data-col="communities:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
@@ -18455,7 +18474,8 @@ initAdminScrollHint();
      pointless horizontal scroll on an otherwise correctly stacked card). */
   .admin-table-responsive, .admin-table-responsive tbody,
   .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;min-width:0!important;}}
-  .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-responsive tr{{border-bottom:1px solid var(--line);padding:8px 0;}}
+  .admin-table-responsive tbody tr:last-child{{border-bottom:0;}}
   .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
@@ -18540,12 +18560,11 @@ initAdminScrollHint();
    scroll container is also the only overflow-clipping ancestor in the
    sticky element's path; the plain <table> underneath now carries no
    background/border/overflow of its own. */
-.admin-sticky-col{{position:sticky;background:#fff;z-index:2;}}
+.admin-sticky-col{{position:sticky;left:0;background:#fff;z-index:2;box-shadow:2px 0 4px -2px rgba(0,0,0,.15);
+  width:{_COL_WIDTH_NAME_STICKY}px;min-width:{_COL_WIDTH_NAME_STICKY}px;max-width:{_COL_WIDTH_NAME_STICKY}px;}}
 thead .admin-sticky-col{{background:var(--accent-light);z-index:3;}}
-.admin-sticky-col-1{{left:0;width:40px;}}
-.admin-sticky-col-2{{left:40px;box-shadow:2px 0 4px -2px rgba(0,0,0,.15);}}
 @media(max-width:700px){{
-  .admin-sticky-col{{position:static;box-shadow:none;width:auto;}}
+  .admin-sticky-col{{position:static;box-shadow:none;width:auto;min-width:0;max-width:none;}}
 }}
 </style>
 </div>"""
@@ -31337,7 +31356,8 @@ tr[data-convo]{{background:var(--bg);}}
   .admin-table-responsive thead{{display:none;}}
   .admin-table-responsive, .admin-table-responsive tbody,
   .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;min-width:0!important;}}
-  .admin-table-responsive tr{{border-top:none!important;border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-responsive tr{{border-top:none!important;border-bottom:1px solid var(--line);padding:8px 0;}}
+  .admin-table-responsive tbody tr:last-child{{border-bottom:0;}}
   .admin-table-cell{{padding:6px 12px!important;}}
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
@@ -32890,7 +32910,8 @@ def admin_users(request: Request, msg: str = ""):
      order, sort/filter, and the column picker are all unaffected — this is
      a pure visual reorder, scoped to this one breakpoint). */
   .admin-table-responsive tr{{display:grid;grid-template-columns:repeat(3,1fr);
-    column-gap:10px;width:100%;border-bottom:2px solid var(--line);padding:10px 0;}}
+    column-gap:10px;width:100%;border-bottom:1px solid var(--line);padding:8px 0;}}
+  .admin-table-responsive tbody tr:last-child{{border-bottom:0;}}
   .admin-table-cell{{grid-column:1/-1;border-bottom:none!important;padding:6px 12px!important;}}
   .admin-table-cell[data-col="users:realname"],
   .admin-table-cell[data-col="users:email"],

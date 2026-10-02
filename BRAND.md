@@ -514,7 +514,25 @@ graffiti marks on admin tables, forms, or the chat UI.
     `:not()` chain so it out-ranks it; before that it silently lost, every
     framed table kept `overflow:hidden` and its own border (a double frame),
     and the sticky Name column on the Software and Communities admin tables
-    scrolled away (`tests/test_table_frame_sticky.py`). Covered by `tests/test_table_format.py`, and
+    scrolled away (`tests/test_table_frame_sticky.py`).
+  - **A table wider than its scroller needs `.table-frame` on the scroller.**
+    A bare `overflow-x:auto` div around a table leaves the border on the table,
+    so on a phone the right border scrolls out of view. The pending
+    submissions tables (Software, Communities) and the contact deletion
+    history are framed; the other bare tables are a separate, later pass
+    (`tests/test_table_frame_mobile_polish.py`).
+  - **Stacked cards** (the `.admin-table-responsive`, `.ff-table`/`.fs-table`
+    and `.backup-log-table` layouts under 700px, 820px for the feeds tables):
+    cells carry no top border, cards are separated by a 1px `--line` rule with
+    none under the last one, and a checkbox shares its row with the name. The
+    "no cell border" rule is written with the table's class and `.site-main`
+    repeated so it out-ranks the generic td rule without a new `!important`;
+    the version written before never applied.
+  - **Sticky Name column** on the Software and Communities lists: one pinned
+    column holding the checkbox and the name, `_COL_WIDTH_NAME_STICKY` (230px,
+    26% of an 874px landscape phone). It is a cap for a pinned column, not
+    `_COL_WIDTH_NAME`, which is a floor for an unpinned one.
+  Covered by `tests/test_table_format.py`, and
     guarded live by the "One table format" row on `/admin/checks`
     (`brand_check.table_standard_problems`/`table_override_problems`): it
     fails if the block loses a rule, the border token changes, the scope
@@ -851,12 +869,11 @@ handful this standard's own PR anticipated:
   that table. Its Name/Email/Last login/Status columns do use the shared
   constants.
 
-The Software and Communities approved-tables' own sticky Name column
-(`admin-sticky-col-2`, PR 12/15 — the precedent `_COL_WIDTH_NAME`'s value
-is drawn from) now reads its width from the same constant too
-(`min-width:{_COL_WIDTH_NAME}px`, not `width:`, since a sticky column needs
-`min-width` to stay pinned correctly) — it was the origin case for 280px,
-not a further exception.
+The Software and Communities approved-tables' sticky Name column was the
+origin case for 280px. Since Refs 655 (B1) it is a single pinned column that
+holds the checkbox too, sized by its own `_COL_WIDTH_NAME_STICKY` (230px),
+because 280px plus a separate checkbox column was 37 to 45% of an 874px
+landscape phone.
 
 **Overhead spend's "All vendor charges" details table** (2026-09) is the
 origin case for `_COL_WIDTH_VENDOR`: its Vendor column used to carry
