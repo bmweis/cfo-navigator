@@ -341,6 +341,7 @@ def test_div_tags_balance(env):
     assert html.count("<div") == html.count("</div>")
 
 
+@pytest.mark.real_coral
 def test_coral_moment_problems_clean(env):
     appmod, client = env
     _seed(

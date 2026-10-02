@@ -11423,6 +11423,21 @@ completely isolated app/DB, on purpose. Worth a look if suite runtime
 becomes a problem again, but secondary to whatever's dominating the `call`
 phase at the time (see the next section for how big that split can get).
 
+**Suite-wide test isolation lives in `tests/conftest.py` (2026-10).** An autouse
+fixture resets the module globals that survive a test's own
+`importlib.reload(webapp.app)` (`webapp.tasks`' check cache and in-flight
+sentinel, `linklib.feed`/`linklib.models` caches, `preferred_domains`'
+`lru_cache`), never `_static_check_cache` (process-lifetime by design). A second
+autouse fixture stubs `coral_moment_problems()` (re-applied after every reload,
+since ~2s per call and it runs inside every `run_all()`); a test that needs the
+real scan uses `@pytest.mark.real_coral` or the `no_password_env` fixture.
+Measured on four admin-heavy files: 363s without the conftest, 249s with it.
+A fixture that depends on open auth must clear `LINKLIB_PASSWORD`,
+`LINKLIB_SAVE_TOKEN` and `LINKLIB_SECRET_KEY` itself rather than assume the
+ambient environment. A test helper that calls `sync_playwright().start()` must
+`stop()` it on every exit path, including a failed launch, or the leaked asyncio
+loop breaks every later Playwright test in the process.
+
 **Background a long run with the environment's native background mechanism,
 never a manual `nohup ... & disown`.** A long-running verification command
 (the full suite is the standing example, but this applies to any command

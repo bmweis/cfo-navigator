@@ -21,6 +21,10 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 
+# The whole module exercises the real page scan (see tests/conftest.py).
+pytestmark = pytest.mark.real_coral
+
+
 @pytest.fixture
 def env(monkeypatch):
     db = tempfile.mktemp(suffix=".db")

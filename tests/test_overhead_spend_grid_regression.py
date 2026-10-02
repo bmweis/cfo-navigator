@@ -666,10 +666,17 @@ def _launch_chromium():
         from playwright.sync_api import sync_playwright
     except ImportError:
         return None
+    pw = None
     try:
         pw = sync_playwright().start()
         browser = pw.chromium.launch()
     except Exception:
+        # Stop the Playwright driver before bailing out: a started-but-never-
+        # stopped sync_playwright() leaves its asyncio loop running for the
+        # rest of the process, and every later test that starts its own
+        # Playwright then fails with "Sync API inside the asyncio loop".
+        if pw is not None:
+            pw.stop()
         return None
     return pw, browser
 

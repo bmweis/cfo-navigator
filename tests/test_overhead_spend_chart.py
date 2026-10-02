@@ -21,6 +21,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 def client(monkeypatch):
     db = tempfile.mktemp(suffix=".db")
     monkeypatch.setenv("LINKLIB_DB", db)
+    # Explicit open-auth: these tests assume no password is configured, so say
+    # so rather than inheriting whatever the ambient environment has.
+    for _k in ("LINKLIB_PASSWORD", "LINKLIB_SAVE_TOKEN", "LINKLIB_SECRET_KEY"):
+        monkeypatch.delenv(_k, raising=False)
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     from fastapi.testclient import TestClient
