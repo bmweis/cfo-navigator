@@ -934,7 +934,7 @@ used manual check rather than a per-turn or overhead cost.
 | `ask_feedback` | Member ratings of individual answers — **one row per rated turn per user**, upserted on `(question_id, user_id)` so a changed rating updates in place. Feeds the `/admin/fpa-buddy/feedback` triage view and, later, a retrieval eval set (flagged questions + the rated turn's citation snapshot). Capture + triage only — feedback never mutates prompts or retrieval automatically. | `question_id` (→ `ask_questions.id`), `rating` (`helpful` \| `inaccurate` \| `not_helpful`), `comment` (optional "what was off?" free text), `updated_at` (`''` until first changed — the empty-string-sentinel idiom), `reviewed` (2026-09, migration-added — a manual admin "Mark reviewed" toggle on `/admin/fpa-buddy/feedback`, matching `community_gap_submissions.reviewed`'s own column name/type/default exactly; deliberately **not** auto-clear-on-view, same reasoning as that table — badges `/admin/fpa-buddy/feedback` via `Library.count_unreviewed_ask_feedback()`) |
 
 Cost figures are computed from **real API token usage** at call time
-(`linklib/pricing.py`) — never estimates.
+(`linklib/pricing.py`) — never estimates. Cache writes are priced per TTL: `cache_creation_tokens` at the 5-minute rate, `cache_creation_1h_tokens` at the 1-hour rate.
 
 **Published-content ingestion (2026-09) — Brian's own writing joins retrieval
 by mirroring, not a fourth retrieval branch.** Before this, FP&A Buddy was
