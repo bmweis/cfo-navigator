@@ -5681,7 +5681,12 @@ Details worth knowing:
   `webapp/app.py`: it linkifies each `[n]` marker against that turn's own
   snapshot (same marker contract as the client — 1–2 digits, not followed by
   `(`, only in-range numbers link, so a literal `[2026]` stays text),
-  never truncates (the 500/600-character cut on `/ask/history` and the
+  renders the answer as blocks through `webapp/answer_render.py`
+  (paragraphs, `---` rules, `#` headings, lists, bold/italic: the server twin
+  of the live page's `mdToHtml`, escape-first, markdown links kept as inert
+  text, a `[n]` links only to an http(s) URL; `tests/test_answer_history_render.py`
+  runs both on the same fixtures), the answer container is a `div.ask-hist-answer`,
+  never a `<p>`, never truncates (the 500/600-character cut on `/ask/history` and the
   past-questions section was removed 2026-10; `/ask/history` instead
   paginates 25 conversations per page, newest first, so full answers stay a
   sane page size), and returns the matching numbered source list. Legacy rows (backfilled `citations_json='[]'`)

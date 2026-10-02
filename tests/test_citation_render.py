@@ -94,7 +94,7 @@ def test_long_answer_renders_in_full_with_markers_intact(render):
     assert "&hellip;" not in a_html
     assert a_html.count("word ") == 3000
     assert a_html.endswith("closing claim " + '<sup class="cite"><a href="https://ex.com/c" target="_blank" '
-                           'rel="noopener" title="Web hit">[3]</a></sup>.')
+                           'rel="noopener" title="Web hit">[3]</a></sup>.</p>')
 
 
 def test_render_cited_answer_has_no_truncate_parameter(render):

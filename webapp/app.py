@@ -1936,6 +1936,16 @@ details > summary::-webkit-details-marker{display:none;}
 details > summary .disclosure-caret{display:inline-block;flex-shrink:0;font-size:15px;
   font-weight:700;line-height:1;color:var(--navy);transition:transform .15s;}
 details[open] > summary .disclosure-caret{transform:rotate(90deg);}
+.ask-hist-answer{font-size:13.5px;color:var(--ink-soft);line-height:1.6;}
+.ask-hist-answer p{margin:0 0 10px;}
+.ask-hist-answer>:last-child{margin-bottom:0;}
+.ask-hist-answer hr{border:0;border-top:1px solid var(--line);margin:14px 0;}
+.ask-hist-answer h3,.ask-hist-answer h4,.ask-hist-answer h5,.ask-hist-answer h6{font-family:var(--font-head);color:var(--navy);font-weight:600;font-size:14.5px;margin:14px 0 6px;}
+.ask-hist-answer ul,.ask-hist-answer ol{margin:0 0 10px;padding-left:22px;}
+.ask-hist-answer li{margin-bottom:4px;}
+.ask-hist-answer code{background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:12.5px;}
+.ask-hist-answer sup.cite{line-height:0;}
+.ask-hist-answer sup.cite a{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}
 
 /* Phase Q: shared "generating" loading treatment for every AI-generate
    button across the Software/Community admin edit pages (Description,
@@ -23675,7 +23685,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q_txt}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(asker)} &middot; {_esc((r["created_at"] or "")[:10])}</div>
   </div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.55;">{a_html}</p>
+  <div class="ask-hist-answer" style="margin:8px 0 0;">{a_html}</div>
   {src_html}
   {admin_controls}
 </div>"""
@@ -24200,7 +24210,11 @@ function mdToHtml(raw) {{
     var h = t.match(/^(#{{1,4}})\\s+(.*)$/);
     var ol = t.match(/^\\d+\\.\\s+(.*)$/);
     var ul = t.match(/^[-*]\\s+(.*)$/);
-    if (h) {{
+    var hr = /^(?:-{{3,}}|\\*{{3,}}|_{{3,}})$/.test(t);
+    if (hr) {{
+      flushPara(); closeList();
+      html.push('<hr>');
+    }} else if (h) {{
       flushPara(); closeList();
       var lvl = Math.min(h[1].length + 2, 6);
       html.push('<h' + lvl + '>' + mdInline(h[2]) + '</h' + lvl + '>');
@@ -24680,7 +24694,7 @@ def ask_history(request: Request, page: int = 1):
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
   </div>
   <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:0;line-height:1.55;">{a_html}</p>
+  <div class="ask-hist-answer">{a_html}</div>
   {src_html}
 </div>"""
 
@@ -24696,7 +24710,7 @@ def ask_history(request: Request, page: int = 1):
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
   </div>
   <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{a_html}</p>
+  <div class="ask-hist-answer" style="margin-bottom:12px;">{a_html}</div>
   {src_html}
 </div>"""
 
@@ -31017,8 +31031,9 @@ def _render_cited_answer(answer: str, citations_json: str) -> tuple[str, str]:
     """Citation rendering for the server-rendered ask surfaces — /ask/history,
     /questions, and /admin/fpa-buddy/feedback all call this one helper (never a
     per-surface reimplementation). Returns (answer_html, sources_html):
-    answer_html is the escaped answer text with each [n] marker linkified
-    against the turn's persisted citation snapshot
+    answer_html is the answer as block HTML (paragraphs, headings, rules,
+    lists, bold/italic; all text escaped, no links from model text) with each
+    [n] marker linkified against the turn's persisted citation snapshot
     (ask_questions.citations_json); sources_html is the matching numbered
     source list, "" when the turn has no citations — legacy rows are
     backfilled with '[]' and must degrade to plain literal markers, never
@@ -31040,18 +31055,11 @@ def _render_cited_answer(answer: str, citations_json: str) -> tuple[str, str]:
     # character cut was removed 2026-10, never-cut-off-text rule).
     text = answer or ""
 
-    def _link(m: re.Match) -> str:
-        i = int(m.group(1))
-        if 1 <= i <= len(cites) and cites[i - 1].get("url"):
-            c = cites[i - 1]
-            return (f'<sup class="cite"><a href="{_esc(c.get("url") or "")}" target="_blank" '
-                    f'rel="noopener" title="{_esc(c.get("title") or "")}">[{i}]</a></sup>')
-        return m.group(0)
-
-    # Same marker contract as the client renderer: a 1-2 digit [n] not
-    # followed by "(", linkified only when it resolves inside this turn's own
-    # list — a literal [2026] in prose stays text.
-    answer_html = re.sub(r"\[(\d{1,2})\](?!\()", _link, _esc(text))
+    # Block + inline markdown through the shared server twin of the live
+    # renderer (webapp/answer_render.py); [n] markers resolve against this
+    # turn's own persisted citation snapshot, a literal [2026] stays text.
+    from webapp.answer_render import render_answer_markdown
+    answer_html = render_answer_markdown(text, cites)
 
     if not cites:
         return answer_html, ""
@@ -32113,9 +32121,9 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
         answer_html = (
             f'<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);display:flex;align-items:baseline;gap:5px;">'
             f'<span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Answer ({len(answer):,} chars)&mdash;expand</summary>'
-            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:8px 0 0;">{a_html}</p></details>'
+            f'<div class="ask-hist-answer" style="margin:8px 0 0;">{a_html}</div></details>'
             if len(answer) > 300 else
-            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;margin:8px 0 0;">{a_html}</p>'
+            f'<div class="ask-hist-answer" style="margin:8px 0 0;">{a_html}</div>'
         )
         model = (r.get("model") or "").replace("claude-", "")
         report_link = (f'/admin/fpa-buddy/report?user={quote(r["rater_username"])}'
