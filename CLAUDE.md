@@ -10872,6 +10872,22 @@ it supersedes the old "`/save` is token-gated" note.
   sticky cells never moved on Compare; `table.cc-table.cc-table` now wins.
   The Compare intro says "under review", matching the visitor label.
 
+- **Layout hardening batch (2026-10).** FP&A Buddy report's Asker column moved off
+  `_COL_WIDTH_NAME` (it left Question at 164px at 900px; now 284px). Six admin grids
+  (`.tool-form-cols`, `.qe-row`, `.users-top-grid`, Users add-member, Resources
+  Coverage/Pricing, Third-party Source/venue) use `minmax(0,...)` tracks; the claim that
+  they blow out was latent in Chromium (text, select and date inputs are compressible) and
+  only provable by injecting a wide cell, which `tests/test_grid_track_zero_minimum.py`
+  does. Resources sparse-count grids were already correct (`auto-fill`); only tests were
+  added. **`.site-main .table-frame>table` never applied** (specificity below the generic
+  table rule), so every framed table clipped and double-bordered, and the sticky Name
+  column on `/admin/tools/software` and `/admin/tools/communities` did not stick; fixed
+  by repeating the `:not()` chain. Compare's own `.cc-table.cc-table` patch is untouched
+  and now redundant. New `/admin/checks` row "Reading column holds its tables and grids"
+  (`brand_check.reading_column_problems`, source scan, cached): verified to flag the grid
+  and table on the pre-fix `/tools/fpa-buddy/how-it-works`. See BRAND.md section 8 and
+  ARCHITECTURE.md's "Layout hardening batch".
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a

@@ -671,6 +671,13 @@ def run_all() -> list[dict]:
         "detail": "; ".join(ol[:6]) if ol
                   else "Every hand-written outbound link opens in a new tab."})
 
+    rc = _tasks.cached_static_check("reading_column", lambda: brand_check.reading_column_problems(src))
+    results.append({
+        "name": "Reading column holds its tables and grids", "where": "Live + CI", "ok": not rc,
+        "what": "On a page with a narrow reading column, a table or grid sits inside the column, not beside it.",
+        "detail": "; ".join(rc[:6]) if rc
+                  else "No table or grid sits beside a reading column in the page source."})
+
     from webapp.app import _CSS as _app_css
     # Cached (2026-09): both halves are pure functions of on-disk source —
     # table_override_problems specifically is ~6.3s of run_all()'s ~15s
