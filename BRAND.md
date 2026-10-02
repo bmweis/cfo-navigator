@@ -924,6 +924,16 @@ the shared 220px floor fit only 3 tracks in the ~820px column (4 need 922px).
 label reuses the "Recent highlights" label style. The Original content
 admin page notes any flagged pieces the cap hides.
 
+**Directory cards: clamp and `min-height` are a pair.** On the two directory
+cards (`.tool-card` on `/tools/software`, `.comm-card` on `/tools/communities`),
+a `-webkit-line-clamp` on a variable-length field bounds its ceiling, and a
+matching `min-height` on the same element keeps rows even. CSS Grid sizes each
+row by its own tallest card, so a clamp alone still leaves short rows shorter.
+Apply both together on every variable-length field in these cards, or neither.
+The cards keep a "Full profile" link so the clamped text is one click away. No
+test pins the pairing today; `tests/test_resources_card_no_clamp.py` covers only
+Resources, which has no clamp.
+
 **Resources cards are not clamped (2026-10).** `/tools/resources` card
 names and descriptions render in full: no `-webkit-line-clamp`, `overflow`,
 `max-height` or `min-height` floor, and no "Show more". Cards keep the
@@ -1224,7 +1234,8 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
   flags a `<table>` or a `display:grid` element written in the same string literal as a
   `.tool-prose` div when it is a direct child of that div's container, or sits in an
   `overflow-x` wrapper that is. Run against the page source from before #583, it flags both
-  the grid and the table on `/tools/fpa-buddy/how-it-works`. It cannot see: blocks
+  the grid and the table on `/tools/fpa-buddy/how-it-works`, which proves the check
+  works. The current page is clean: the check reports zero findings on `main`. It cannot see: blocks
   interpolated into the page (`{cards}`) or built across separate string literals; blocks
   built in JavaScript or stored in the database; or a table or grid behind any other
   wrapper. A styled full-width card next to prose (the Growth Engine Ratio calculator) is
