@@ -1453,7 +1453,10 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Added once, in `_page()`'s shared footer, rather than resolving the
   genuinely ambiguous "is a personal site with a working directory
   commercial" question — the link costs nothing either way, so it ships
-  regardless of which answer is technically correct. See ARCHITECTURE.md's
+  regardless of which answer is technically correct. The same footer row also
+  carries "Source on GitHub" (`SOURCE_REPO_URL` in `webapp/app.py`, a hardcoded
+  constant, new tab, no styling of its own; there is one `<footer>` in the app, so
+  every `_page()` page has it). See ARCHITECTURE.md's
   matching bullet and `tests/test_logodev.py`/`tests/test_logo_override.py`
   for the full write-up and regression coverage.
 - **Gate-Extraction PR B (2026-09) — the radical-transparency review-state
@@ -6172,7 +6175,8 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   just Agent taxonomy). Added: a Key facts band with shared-vs-unique tag
   chips (solid seafoam = every compared entity has it, outline = only this
   one does), and a `-webkit-line-clamp` excerpt (~4 lines, approved over a
-  fixed character count) on the full untruncated text. Communities'
+  fixed character count) on the full untruncated text (**superseded
+  2026-10: Compare now shows full text, see the next bullets**). Communities'
   Compare collapsed its old flat 11-field list into the same 4 themed
   groups (`compare.COMMUNITY_PROFILE_GROUPS`) the profile page already
   uses — that constant, and `community_geo_line()`, moved out of
@@ -6207,6 +6211,29 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   existing convention for a client-only "seen it once" preference, not a
   new mechanism. See ARCHITECTURE.md's matching bullet for the full
   write-up.
+- **Compare shows full field text, never clamped (2026-10) — replaces the
+  Compare Redesign Phase 1 Step 0 decision.** Phase 1 clamped every Compare
+  narrative cell to 4 lines with `-webkit-line-clamp` (`compare.EXCERPT_LINE_
+  CLAMP`). Brian's standing rule is that a profile, a comparison and an MCP
+  response never cut a field off, and a "Show more" control still hides text
+  by default, so the answer is no collapse at all: the clamp, `.cmp-clamp`
+  and `EXCERPT_LINE_CLAMP` are removed, and every character of every field
+  renders on both Compare pages (software Description, AI / Agent
+  involvement and Bottom line; community Bottom line and all the group
+  fields). Measured on the live Abacum and Datarails text before the change,
+  the clamp was a 87px box over 824-3,448px of content, hiding every `[n]`
+  marker after the fourth line while all five Sources chips stayed, so
+  markers and chips disagreed; they now agree by construction. The Compare
+  Sources list is uncapped too (the profile page caps at 5): a sixth marker
+  would otherwise have no chip. Nothing may hide text on these cells: no
+  `overflow`, `max-height` or line-clamp on `.cmp-text` or the cells around
+  it, and `tests/test_compare_full_text.py` measures `scrollHeight ==
+  clientHeight` in real Chromium at 1280px and 390px with a 3,000-character
+  field on both pages (skips where no Chromium exists, as CI does). The
+  cost is tall rows: Datarails' agent text makes one row 984px at 1280px and
+  2,767px at 390px. That was accepted, and no collapse was added to fix it.
+  The only clamps allowed anywhere are the two directory cards
+  (`/tools/software`, `/tools/communities`), each with a "Full profile" link.
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
   overlap/contrast summary above both Compare tables, cached permanently
   and capped by a shared daily dollar budget.** Purely additive on top of
@@ -6259,10 +6286,9 @@ never reads as something to tap.
   HTML-free boundary is enforced by import path specifically so nothing
   HTML-producing is reachable from `linklib` (a future MCP tool safety
   concern), and this module's whole job is producing HTML.
-  **Compare's own clamped excerpt is deliberately NOT rendered through
-  this** — `-webkit-line-clamp` doesn't reliably clamp block-level children
-  the way it clamps a text run, so `_cmp_populated_field_html` still
-  renders plain `_esc()` text; the real rendered version is one click away
+  **Compare's own cells are deliberately NOT rendered through
+  this** — `_cmp_populated_field_html` renders plain `_esc()` text in full
+  (no clamp since 2026-10); the real rendered version is one click away
   via "Full profile →". `linklib/compare.py` and `linklib/gates.py` are
   both untouched by this PR. See ARCHITECTURE.md's matching bullet for the
   full write-up and `tests/test_markdown_render.py`/`tests/
@@ -6859,14 +6885,25 @@ never reads as something to tap.
   (https://www.anthropic.com/news/claude-sonnet-5), that planned increase was
   cancelled — the introductory rate is now permanent — so both were corrected
   to say so rather than continue flagging a future edit that will never be
-  needed. **Separate, smaller finding, not acted on**: `MODEL_PRICING` tracks
-  only one `cache_write` rate per model (the 5-minute-TTL rate) — there's no
-  column for the 1-hour-TTL cache-write rate (Sonnet 5: $4.00/MTok), so a
-  future caller that actually sets a 1-hour cache TTL would silently be
-  charged the 5-minute rate instead. Worth adding if/when something in this
-  codebase starts using a 1-hour cache TTL; nothing does today. New
+  needed. **1-hour cache TTL (2026-10, issue #622):** `MODEL_PRICING` rows now carry
+  `cache_write_1h` (2x input; Sonnet 5 is $4.00/MTok) and `compute_cost` takes a
+  separate `cache_creation_1h_tokens` bucket. Nothing requests the 1-hour TTL
+  today (`linklib/matchmaker.py`'s `cache_control` sets no `ttl`, so it gets the
+  5-minute default), so no existing cost or cap figure changes; this only means a
+  future caller is billed correctly. The "Anthropic pricing" 90-day reminder is a
+  manual attestation and needs no data change for this. New
   `tests/test_pricing.py` pins the confirmed rate values and a hand-checked
   `compute_cost` calculation so a future accidental edit is caught.
+- **Test-hygiene guards (2026-10, issues #623, #639, #628).** `Library.write_opml`
+  raises under pytest if asked to overwrite the git-tracked `preferred_sites.opml`
+  (a test with a temp `LINKLIB_DB` and no `LINKLIB_SITES_OPML` used to regenerate
+  it; in production the tracked path is the live path, so the guard is test-only
+  and does not cover ad hoc scripts). `tests/test_exa_call_site_lists.py` fails
+  when a module that calls `api.exa.ai` is missing from either Exa list on
+  `/admin/system/ai`; the toggle card had omitted Feature Taxonomy vendor
+  research. `tests/test_readme_references.py` fails when `README.md` names a repo
+  path or route that does not exist. CI now pins `ubuntu-24.04` and uses the Node
+  24 majors of `actions/checkout` (v5) and `actions/setup-python` (v6).
 - **Pricing/model freshness check (2026-09, issue #98 follow-up) — two
   genuinely different pieces, one fully automatable, one that can't be.**
   **Piece 1, permanent and automated**: `tests/test_pricing.py::

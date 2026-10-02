@@ -1773,6 +1773,27 @@ class Article:
         return " ".join(self.tags)
 
 
+_TRACKED_OPML = os.path.realpath(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "preferred_sites.opml"))
+
+
+def _refuse_tracked_opml_under_test(path: str) -> None:
+    """Raise if a test run is about to overwrite the git-tracked OPML.
+
+    The app resolves its OPML path from LINKLIB_SITES_OPML, falling back to the
+    tracked repo file. A test (or scratch script) that points LINKLIB_DB at a
+    temp database but forgets LINKLIB_SITES_OPML would otherwise regenerate the
+    tracked file from its throwaway feeds, and the cookie-domain registry and
+    FP&A Buddy's allowlist both derive from that file. Guarded only when pytest
+    is loaded: in production the tracked path IS the live path, so it can't be
+    refused there.
+    """
+    if "pytest" in sys.modules and os.path.realpath(path) == _TRACKED_OPML:
+        raise RuntimeError(
+            "write_opml refused: this would overwrite the tracked preferred_sites.opml "
+            "from a test run. Set LINKLIB_SITES_OPML to a temp path.")
+
+
 class Library:
     def __init__(self, path: str):
         self.path = path
@@ -9835,6 +9856,7 @@ class Library:
                     return False
         except OSError:
             pass
+        _refuse_tracked_opml_under_test(path)
         tmp = f"{path}.tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(xml)

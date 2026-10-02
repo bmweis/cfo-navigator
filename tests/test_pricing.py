@@ -54,12 +54,26 @@ def test_compute_cost_unknown_model_falls_back_to_sonnet_4_6_not_zero():
     assert cost == MODEL_PRICING["claude-sonnet-4-6"]["input"]
 
 
-def test_model_pricing_only_tracks_a_single_cache_write_rate():
-    """Cache pricing tracks one cache_write rate (the 5-minute-TTL rate) and
-    cache_read, but has no separate 1-hour-TTL cache_write rate — flagged as
-    a known, out-of-scope gap by issue #98's investigation, not a bug."""
-    for rates in MODEL_PRICING.values():
-        assert set(rates.keys()) == {"input", "output", "cache_write", "cache_read"}
+def test_model_pricing_tracks_both_cache_write_ttl_rates():
+    """Each row carries the 5-minute cache_write rate and the 1-hour
+    cache_write_1h rate (2x input; the 5-minute rate is 1.25x)."""
+    for model, rates in MODEL_PRICING.items():
+        assert set(rates.keys()) == {"input", "output", "cache_write", "cache_write_1h", "cache_read"}
+        assert rates["cache_write"] == round(rates["input"] * 1.25, 4), model
+        assert rates["cache_write_1h"] == round(rates["input"] * 2.0, 4), model
+
+
+def test_compute_cost_prices_1h_cache_writes_at_the_1h_rate():
+    """A 1-hour-TTL cache write bills at 2x input, not the 5-minute 1.25x. The
+    old compute_cost had no way to express it, so a caller that requested the
+    1-hour TTL would have been under-counted against the per-user dollar caps."""
+    five = compute_cost("claude-sonnet-5", cache_creation_tokens=1_000_000)
+    one_h = compute_cost("claude-sonnet-5", cache_creation_1h_tokens=1_000_000)
+    assert five == 2.50
+    assert one_h == 4.00
+    both = compute_cost("claude-opus-5", cache_creation_tokens=200_000,
+                        cache_creation_1h_tokens=100_000)
+    assert abs(both - (0.2 * 6.25 + 0.1 * 10.00)) < 1e-12
 
 
 def test_every_registry_model_has_a_pricing_row():

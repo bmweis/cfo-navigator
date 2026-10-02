@@ -291,6 +291,10 @@ _DEFAULT_BENCHMARKS = [
 _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
+# The public source repo, linked from the shared footer. Hardcoded on
+# purpose: it is a fixed external destination, not a function of the
+# deployment's own base URL.
+SOURCE_REPO_URL = "https://github.com/bmweis/cfo-navigator"
 
 # --- Social share cards (Open Graph / Twitter Card, Phase 1) ----------------
 # Committed 1200x630 PNGs live in webapp/static/og/, slug-keyed
@@ -1900,7 +1904,9 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
 @media(max-width:640px){
   .site-footer{flex-wrap:wrap;justify-content:center;text-align:center;}
   .site-footer .brand,.site-footer .center,.site-footer .links{flex:none;}
-  .site-footer .links{justify-content:center;flex-wrap:wrap;row-gap:6px;max-width:100%;}
+  .site-footer .links{justify-content:center;flex-wrap:wrap;row-gap:6px;column-gap:16px;max-width:100%;}
+  /* Wrapped rows can't end on a dangling dot: drop the separators here, the gap separates items. */
+  .site-footer .links span{display:none;}
 }
 
 /* Mobile: nav collapses to a navy hamburger drawer */
@@ -2419,7 +2425,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
-  <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a><span>&middot;</span><a href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a></span>
+  <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a><span>&middot;</span><a href="{SOURCE_REPO_URL}" target="_blank" rel="noopener">Source on GitHub</a><span>&middot;</span><a href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a></span>
 </footer>
 </body></html>"""
 
@@ -2525,21 +2531,21 @@ def _review_state_badge(unverified: bool, authed: bool, cls: str = "tp-verify") 
 
 
 def _cmp_populated_field_html(f: "compare.CompareField", authed: bool) -> str:
-    """One populated `CompareField`'s inner markup — clamped pre-wrap text
-    (Compare Redesign Phase 1: `.cmp-clamp` applies a CSS
-    `-webkit-line-clamp` matching `compare.EXCERPT_LINE_CLAMP`, so a long
-    draft scans as an excerpt instead of a full essay; the full text is
-    still in the DOM, just visually clamped, so copy/paste and
-    accessibility both see the whole field), the same review-state badge
-    every profile page uses, and — the fix for Compare's dead citation
-    markers — the same `_citations_list_html` "Sources" chip list a
-    profile page renders right alongside the field, fed by the exact
-    `entity_citations` rows the caller already fetched. Caller guarantees
-    `f.state != GateState.EMPTY`."""
+    """One populated `CompareField`'s inner markup: the full pre-wrapped
+    text, the same review-state badge every profile page uses, and the same
+    "Sources" chip list a profile page renders, fed by the exact
+    `entity_citations` rows the caller already fetched.
+
+    Compare shows full field text, never clamped (2026-10; this replaced the
+    Compare Redesign Phase 1 4-line `-webkit-line-clamp`). Nothing here, or
+    in the CSS for `.cmp-text`, may hide text: no overflow, no max-height, no
+    line clamp. The Sources list is uncapped for the same reason: a `[6]`
+    marker in the text needs its chip, and the profile page's cap of five
+    would leave it without one. Caller guarantees `f.state != GateState.EMPTY`."""
     badge = _review_state_badge(f.state == gates.GateState.PENDING, authed, "cc-verify")
     badge_html = f'<div style="margin-top:4px;">{badge.strip()}</div>' if badge else ""
-    citations_html = _citations_list_html(f.citations, cap=5) if f.citations else ""
-    return (f'<div class="cmp-clamp"><div class="cmp-clamp-inner">{_esc(f.text)}</div></div>'
+    citations_html = _citations_list_html(f.citations) if f.citations else ""
+    return (f'<div class="cmp-text">{_esc(f.text)}</div>'
             f'{badge_html}{citations_html}')
 
 
@@ -2828,17 +2834,12 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
 .comm-name:hover{{color:var(--accent);}}
 .tool-star{{font-size:14px;color:#b8860b;}}
-/* Narrative-excerpt clamp (Compare Redesign Phase 1) — ~{compare.EXCERPT_LINE_CLAMP} lines via
-   -webkit-line-clamp, approved over a fixed character count so it adapts
-   to each table's real column width. white-space:pre-wrap on the inner div
-   (not the clamped outer box, which needs display:-webkit-box) is the fix
-   for the flattened-markdown bug: a "- " bulleted line now keeps its own
-   line instead of running together with the next one — the same treatment
-   profile pages already give this text, not a new markdown renderer (a
-   real markdown-to-HTML pass for these fields is scoped as its own
-   follow-up PR, deliberately not built here). */
-.cmp-clamp{{display:-webkit-box;-webkit-line-clamp:{compare.EXCERPT_LINE_CLAMP};-webkit-box-orient:vertical;overflow:hidden;}}
-.cmp-clamp-inner{{white-space:pre-wrap;}}
+/* Compare shows full field text, never clamped (2026-10). white-space:pre-wrap
+   keeps a "- " bulleted line on its own line instead of flattening it into
+   run-on prose. No overflow, max-height or line-clamp may ever be put on this
+   class or on the cells around it: tests/test_compare_full_text.py measures
+   the real layout for exactly that. */
+.cmp-text{{white-space:pre-wrap;}}
 .cmp-subfield{{margin-bottom:14px;}}
 .cmp-subfield:last-child{{margin-bottom:0;}}
 .cmp-subfield-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;}}
@@ -26923,8 +26924,9 @@ def _ai_exa_config_html(exa_enabled: bool, has_key: bool) -> str:
 <li><strong>Reader content backfill's domain-migration tier</strong> (a URL on a confirmed migrated domain, e.g. avc.com&nbsp;&rarr;&nbsp;avc.xyz).</li>
 <li><strong>Reader content backfill's Medium-platform tier</strong> (medium.com and other recognized Cloudflare-blocked hosts).</li>
 <li><strong>Vendor profile drafting's grounding fallback</strong> (Description, Agent taxonomy, Community profile, and Community listing generation&mdash;whenever the direct page fetch is blocked, too thin, or returns a WAF-style error).</li>
+<li><strong>Feature Taxonomy vendor research</strong> (the vendor-domain search behind feature drafting).</li>
 </ul>
-<p style="color:var(--ink-soft);margin:0 0 12px;font-size:13.5px;line-height:1.6;"><strong>Unlike Buddy's web tier, none of the other three have a substitute.</strong> Turning Exa off here turns them off too, with nothing standing in. A backfill attempt that would have used either Reader tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried.</p>
+<p style="color:var(--ink-soft);margin:0 0 12px;font-size:13.5px;line-height:1.6;"><strong>Unlike Buddy's web tier, none of the other four have a substitute.</strong> Turning Exa off here turns them off too, with nothing standing in. A backfill attempt that would have used either Reader tier still falls through to the existing Wayback Machine fallback, same as any other miss, but a real hit those tiers would have found is simply not tried.</p>
 <p style="color:var(--ink-soft);margin:0 0 16px;font-size:13.5px;line-height:1.6;"><strong>Vendor profile drafting is the one case where this blocks work rather than narrowing it.</strong> Most modern software marketing sites are either behind a WAF or rendered client-side, so a plain fetch can't read them. With Exa off, drafting refuses outright rather than degrading to a lower-confidence draft, and there's no fallback engine the way Buddy's web tier has Claude's native search. You write the field by hand instead.</p>
 {key_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;">
