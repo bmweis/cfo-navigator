@@ -521,6 +521,12 @@ graffiti marks on admin tables, forms, or the chat UI.
     submissions tables (Software, Communities) and the contact deletion
     history are framed; the other bare tables are a separate, later pass
     (`tests/test_table_frame_mobile_polish.py`).
+  - **A frame sits flush: no negative margin above it, no margin on the table
+    inside it.** The frame draws the border, so a negative bottom margin on the
+    control row above (the contact submissions "Delete selected" row had
+    `-8px`) puts the frame's top edge behind the button, and a `margin-top` on
+    the inner table shows as a white strip inside the frame. Put the gap on the
+    element above the frame (`tests/test_table_frame_mobile_polish.py`).
   - **Stacked cards** (the `.admin-table-responsive`, `.ff-table`/`.fs-table`
     and `.backup-log-table` layouts under 700px, 820px for the feeds tables):
     cells carry no top border, cards are separated by a 1px `--line` rule with

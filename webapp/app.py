@@ -13258,13 +13258,13 @@ def admin_contacts(request: Request):
 <h1>Contact submissions</h1>
 {email_status}
 <form method="post" action="/admin/inbox/contact-submissions/delete">
-<div style="display:flex;align-items:center;gap:12px;margin:24px 0 -8px;">
+<div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;">
   <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;"
     onclick="return document.querySelectorAll('.contact-row-cb:checked').length &amp;&amp; confirm('Delete ' + document.querySelectorAll('.contact-row-cb:checked').length + ' selected submission(s)?');">Delete selected</button>
 </div>
 {_ADMIN_SCROLL_HINT_HTML}
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;margin-top:12px;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" id="contact-select-all" onchange="document.querySelectorAll('.contact-row-cb').forEach(cb => cb.checked = this.checked);"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>

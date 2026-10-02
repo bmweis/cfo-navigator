@@ -10981,6 +10981,7 @@ it supersedes the old "`/save` is token-gated" note.
   (4) Reported only: `/admin/system/scripts` overflows the page at 390px
   (scroll width 830). See ARCHITECTURE.md's "Table frame and card polish on
   phones" and `tests/test_table_frame_mobile_polish.py`.
+- **Frame versus adjacent control (2026-10, Refs 655).** The contact submissions frame overlapped "Delete selected" because the button row had a negative bottom margin and the inner table a top margin, which only cancelled while the table drew its own border. Fixed at the source; BRAND.md section 5 now states that a frame sits flush. B2 must check for an adjacent control above every table it frames.
 - **Layout hardening batch (2026-10).** FP&A Buddy report's Asker column moved off
   `_COL_WIDTH_NAME` (it left Question at 164px at 900px; now 284px). Six admin grids
   (`.tool-form-cols`, `.qe-row`, `.users-top-grid`, Users add-member, Resources
