@@ -6234,6 +6234,61 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   2,767px at 390px. That was accepted, and no collapse was added to fix it.
   The only clamps allowed anywhere are the two directory cards
   (`/tools/software`, `/tools/communities`), each with a "Full profile" link.
+- **Never cut off text, outside Compare (2026-10): finishes what the Compare
+  full-text change started.** Standing rule: a profile, a comparison and an MCP
+  response never cut a field off. Three fixes shipped together, from an audit
+  that was an agent inventory with the main claims spot-checked (every line
+  number was re-verified against source before changing anything).
+  (1) **Profile Sources are uncapped.** Software Description, Agent taxonomy
+  and the Community profile showed only the first 5 Sources chips
+  (`_citations_list_html(..., cap=5)`), so a `[6]` marker in the text had no
+  chip, the same bug Compare had. The three `cap=5` calls and the helper's
+  `cap` parameter are gone (no other caller used it; the admin views and
+  Compare never passed one). `tests/test_profile_sources_uncapped.py` is the
+  fail-first coverage: six markers in the text, six chips, each chip's number
+  beside its own title.
+  (2) **Past answers render in full.** `_render_cited_answer` lost its
+  `truncate` parameter: `/ask/history` (single cards and follow-up turns,
+  was 500 characters) and the Buddy past-questions section (was 600) used to
+  cut with a trailing "…" and no way to see the rest. No full-answer page
+  exists to fall back on (`/ask/conversations*` are JSON for the Buddy page's
+  JavaScript), so the rows themselves now carry the whole answer. Measured
+  first, per the brief: 200 history rows at about 10,000 characters each was
+  2.36 MB and about 0.2 s to render (over the 2 MB line), so `/ask/history`
+  now paginates, 25 conversations per page, newest first, with "Newer" and
+  "Older" links (`?page=N`, clamped). That is not truncation: every answer on a
+  page is whole. Page one of the same fixture is 0.32 MB. `list_ask_questions`
+  still reads the user's most recent 200 turns, unchanged.
+  (3) **`stop_reason` is measured, not shown.** Nothing used to record when a
+  model answer was cut off by `max_tokens`. `ask_questions` and
+  `matchmaker_questions` each gained `stop_reason TEXT NOT NULL DEFAULT ''`
+  (idempotent migration; existing rows read `''`, so counts only start after
+  the deploy), written from the existing record calls, which the MCP
+  `ask_fpa_buddy` and `ask_matchmaker` tools reach through the same
+  orchestrators. Enrichment and generation calls have no table of their own
+  and are run by hand in batches, so each logs one WARNING line per
+  `max_tokens` stop (`linklib/stop_reason.py`, `stop_reason=max_tokens
+  call_site=enrich.<function>`), with no column added to `enrichment_cost`.
+  No `max_tokens` value changed (lowering one caused a truncation regression
+  before), and there is no admin page, visible marker or retry. To count,
+  paste over `railway ssh` after about a week:
+
+  ```sql
+  SELECT model, COUNT(*) FROM ask_questions WHERE stop_reason='max_tokens' GROUP BY model;
+  SELECT model, COUNT(*) FROM matchmaker_questions WHERE stop_reason='max_tokens' GROUP BY model;
+  ```
+
+  Compare against `SELECT model, COUNT(*) FROM ask_questions WHERE stop_reason<>'' GROUP BY model;`
+  for the rate. Enrichment counts come from searching the Railway logs for
+  `stop_reason=max_tokens`. See `tests/test_stop_reason.py`.
+  **Exempt from the rule, recorded here so a later audit does not re-open
+  them:** feed item summaries cut at 300 characters at ingest (a third-party
+  excerpt, not our text); Buddy "Recent conversations" labels (a click opens
+  the full transcript); `search_archive` excerpts (admin-only, marked with
+  "…") and citation titles capped at 250 characters (low impact). The only
+  clamps allowed anywhere else are the two directory cards, each with its
+  "Full profile" link.
+
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
   overlap/contrast summary above both Compare tables, cached permanently
   and capped by a shared daily dollar budget.** Purely additive on top of

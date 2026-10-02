@@ -408,9 +408,9 @@ def test_profile_submit_clears_citations_when_unrelated_field_edited(app_module)
     lib.close()
 
 
-# -- rendering: public cap, admin uncapped, single shared list ---------------
+# -- rendering: every source shown, single shared list -----------------------
 
-def test_public_profile_shows_capped_sources_list_once(app_module):
+def test_public_profile_shows_every_source_once(app_module):
     lib = Library(os.environ["LINKLIB_DB"])
     community_id = _add_community(lib)
     lib.upsert_community_profile(community_id, ideal_member="Ideal member.",
@@ -426,8 +426,8 @@ def test_public_profile_shows_capped_sources_list_once(app_module):
     assert r.status_code == 200
     html = r.text
     assert html.count("source0.example") == 1
-    assert "source6.example" not in html   # capped at 5 — the 7th source is dropped
-    # One shared list, not one per card — the 5 shown sources appear exactly
+    assert html.count("source6.example") == 1   # no cap: the 7th source is shown too
+    # One shared list, not one per card — each source appears exactly
     # once each, not repeated across the profile's multiple cards.
     assert html.count("source1.example") == 1
 

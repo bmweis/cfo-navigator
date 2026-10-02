@@ -930,7 +930,7 @@ used manual check rather than a per-turn or overhead cost.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `ask_questions` | One row per conversation **turn**; the single table behind all three surfaces (admin report, a user's own history, the member-public community view). | `conversation_id` (groups follow-up turns; `= str(id)` of the first turn) + `turn_index`; token columns for the answer call; `rewrite_input_tokens`/`rewrite_output_tokens`/`rewrite_cost_usd` for the follow-up query-rewrite call; `embed_input_tokens`/`embed_cost_usd` for embedding the retrieval QUESTION during hybrid retrieval (#93 — a **user-cap** cost, unlike `article_embeddings.cost_usd`, which is embed-on-save overhead); **`cost_usd` is the turn TOTAL (answer + rewrite + query embedding)** so every `SUM(cost_usd)` — the monthly cap, the reports — needs no special handling; `hidden_public`/`anonymized` affect only the community view; `citations_json` is the turn's **API-verified cited-source snapshot** (`[{n, title, url, type, article_id?}]` — `article_id` on library entries only; feed/web sources are transient, so the stored title/url *is* the record, never re-resolved) |
+| `ask_questions` | One row per conversation **turn**; the single table behind all three surfaces (admin report, a user's own history, the member-public community view). | `conversation_id` (groups follow-up turns; `= str(id)` of the first turn) + `turn_index`; token columns for the answer call; `rewrite_input_tokens`/`rewrite_output_tokens`/`rewrite_cost_usd` for the follow-up query-rewrite call; `embed_input_tokens`/`embed_cost_usd` for embedding the retrieval QUESTION during hybrid retrieval (#93 — a **user-cap** cost, unlike `article_embeddings.cost_usd`, which is embed-on-save overhead); **`cost_usd` is the turn TOTAL (answer + rewrite + query embedding)** so every `SUM(cost_usd)` — the monthly cap, the reports — needs no special handling; `hidden_public`/`anonymized` affect only the community view; `citations_json` is the turn's **API-verified cited-source snapshot** (`[{n, title, url, type, article_id?}]` — `article_id` on library entries only; feed/web sources are transient, so the stored title/url *is* the record, never re-resolved); `stop_reason` (2026-10, migration-added, `TEXT NOT NULL DEFAULT ''`) is the answer call's API `stop_reason`; `'max_tokens'` means the answer was cut off by the token budget. Measurement only, no UI: `SELECT model, COUNT(*) FROM ask_questions WHERE stop_reason='max_tokens' GROUP BY model;`. `''` for every row before the deploy and for a turn whose call never completed. The same column exists on `matchmaker_questions`; enrichment/generation calls (no table of their own) log one `stop_reason=max_tokens call_site=...` WARNING per cut-off instead (`linklib/stop_reason.py`) |
 | `ask_feedback` | Member ratings of individual answers — **one row per rated turn per user**, upserted on `(question_id, user_id)` so a changed rating updates in place. Feeds the `/admin/fpa-buddy/feedback` triage view and, later, a retrieval eval set (flagged questions + the rated turn's citation snapshot). Capture + triage only — feedback never mutates prompts or retrieval automatically. | `question_id` (→ `ask_questions.id`), `rating` (`helpful` \| `inaccurate` \| `not_helpful`), `comment` (optional "what was off?" free text), `updated_at` (`''` until first changed — the empty-string-sentinel idiom), `reviewed` (2026-09, migration-added — a manual admin "Mark reviewed" toggle on `/admin/fpa-buddy/feedback`, matching `community_gap_submissions.reviewed`'s own column name/type/default exactly; deliberately **not** auto-clear-on-view, same reasoning as that table — badges `/admin/fpa-buddy/feedback` via `Library.count_unreviewed_ask_feedback()`) |
 
 Cost figures are computed from **real API token usage** at call time
@@ -4008,6 +4008,7 @@ erDiagram
         real cost_usd "turn TOTAL: answer + rewrite + embed"
         real rewrite_cost_usd "rewrite's share of cost_usd"
         real embed_cost_usd "query-embed's share of cost_usd (#93)"
+        text stop_reason "answer call's API stop_reason; max_tokens = cut off"
         int hidden_public
         int anonymized
         text citations_json "cited-source snapshot per turn"
@@ -4041,6 +4042,7 @@ erDiagram
         int user_id "NULL for anonymous — public page, no login"
         text session_id "cfo_visitor cookie; the anonymous rate-limit key"
         real cost_usd "turn TOTAL, no rewrite/embed split (no retrieval)"
+        text stop_reason "answer call's API stop_reason; max_tokens = cut off"
     }
     users {
         int id PK
@@ -4517,17 +4519,18 @@ Details worth knowing:
   (verified → public; unverified/low-confidence → admin-only, same
   publish gate the Abacum-fix bullet above describes). Public profile
   page (`/tools/software/{slug}`'s Agent taxonomy card): a "Sources" list
-  capped at 5 (first-use order, already deduped by url — decision:
-  truncate silently, no "+N more" indicator). Admin edit page
+  showing every source (first-use order, already deduped by url). It was
+  capped at 5 until 2026-10; the cap was removed because a `[6]` marker in
+  the text had no chip to resolve to, the same bug Compare had. Admin edit page
   (`/tools/software/{slug}/edit`): the FULL uncapped list, rendered inside
   the same `#gen-host-tool-taxonomy` block as the "Mark verified"
   button/badge — an explicit requirement, confirmed before building rather
   than assumed, since a reviewer deciding whether to publish needs to see
   every source, not just the 5 a visitor would eventually see.
-  `webapp/app.py`'s `_citations_list_html(citations, cap=None,
+  `webapp/app.py`'s `_citations_list_html(citations,
   empty_note="")` is the one shared renderer for both call sites (and every
-  future grounded field) — `cap=5` on the public page, no cap on the admin
-  page, matching FP&A Buddy's own cited-answer source-list visual pattern
+  future grounded field), with no cap anywhere (the `cap` parameter was removed
+  2026-10), matching FP&A Buddy's own cited-answer source-list visual pattern
   (`.ask-src-list`) adapted with inline styles since that CSS class is
   scoped to the Ask page's own `<style>` block, not sitewide.
   Description (Phase 2) and Community profile (Phase 3, one shared
@@ -4598,7 +4601,7 @@ Details worth knowing:
   resave.
   **Rendering**: same `_citations_list_html` shared renderer as Agent
   taxonomy — public profile page (`/tools/software/{slug}`'s Description
-  card) capped at 5; admin edit page's Description block, uncapped,
+  card) every source (uncapped since 2026-10); admin edit page's Description block, uncapped,
   alongside the existing `_narrative_verify_widget` verify action/badge.
   **Deliberately does NOT add a publish gate in THIS phase** — unlike
   Agent taxonomy's Abacum-fix gate (`agent_taxonomy_needs_verification`
@@ -5674,12 +5677,14 @@ Details worth knowing:
   server-rendered view of a stored answer — `/ask/history`, the
   "search past questions" section on `/tools/fpa-buddy`, and
   `/admin/fpa-buddy/feedback` — calls
-  `_render_cited_answer(answer, citations_json, truncate=?)` in
+  `_render_cited_answer(answer, citations_json)` in
   `webapp/app.py`: it linkifies each `[n]` marker against that turn's own
   snapshot (same marker contract as the client — 1–2 digits, not followed by
   `(`, only in-range numbers link, so a literal `[2026]` stays text),
-  truncates without ever splitting a marker, and returns the matching
-  numbered source list. Legacy rows (backfilled `citations_json='[]'`)
+  never truncates (the 500/600-character cut on `/ask/history` and the
+  past-questions section was removed 2026-10; `/ask/history` instead
+  paginates 25 conversations per page, newest first, so full answers stay a
+  sane page size), and returns the matching numbered source list. Legacy rows (backfilled `citations_json='[]'`)
   degrade to plain literal markers with no source list — never fabricated
   links, never an error. **Any future server-rendered answer surface must
   call this helper**, and it is deliberately *not* unified with

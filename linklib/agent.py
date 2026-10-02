@@ -29,6 +29,7 @@ import requests
 from .citations import extract_citations, make_document_block
 from .db import Library
 from .models import DEFAULT_CHAT_MODEL
+from .stop_reason import stop_reason_of
 from .voice_settings import VoicePromptMissing, require_voice_setting
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", DEFAULT_CHAT_MODEL)
@@ -347,6 +348,11 @@ class Answer:
     # max_web cap. exa_cost_usd is already included in cost_usd above.
     exa_result_count: int = 0
     exa_cost_usd: float = 0.0
+    # The answer call's API stop_reason ("max_tokens" = the answer was cut
+    # off by the token budget). "" when the call never completed. Recorded
+    # on ask_questions.stop_reason for measurement only; nothing reads it
+    # to change behavior.
+    stop_reason: str = ""
 
 
 # Reuse one client across requests so its httpx connection pool stays warm —
@@ -919,7 +925,8 @@ def answer_question(
                      cost_usd=cost + rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
-                     exa_result_count=exa_results, exa_cost_usd=exa_cost)
+                     exa_result_count=exa_results, exa_cost_usd=exa_cost,
+                     stop_reason=stop_reason_of(resp))
     except Exception as e:
         # The rewrite/embedding/Exa calls already spent real money even
         # though the answer call failed — keep their cost on the Answer so

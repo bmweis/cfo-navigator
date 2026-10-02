@@ -1381,7 +1381,7 @@ _NARRATIVE_MD_CSS = (
 )
 
 
-def _citations_list_html(citations: list, cap: int | None = None, empty_note: str = "") -> str:
+def _citations_list_html(citations: list, empty_note: str = "") -> str:
     """Render a field's API-verified citation list (Citations-API grounding
     fix, Phase 1b — see linklib.citations, linklib.enrich.
     generate_tool_agent_taxonomy) as a compact "Sources" list of numbered
@@ -1391,11 +1391,10 @@ def _citations_list_html(citations: list, cap: int | None = None, empty_note: st
     Ask page's own `<style>` block, not sitewide.
 
     `citations` is the FULL list from Library.get_entity_citations—
-    already deduped by url and in first-use order. `cap`, when given,
-    slices to the first N entries for public display (decision: 5 sources,
-    drop the rest, no "+N more" indicator) — the admin view passes no cap,
-    so a reviewer always sees everything before deciding whether to
-    publish. Renders nothing (not even the "Sources" label) when empty and
+    already deduped by url and in first-use order, and rendered in full on
+    every surface (profiles, Compare, admin): a `[6]` marker in the text
+    must always have its chip, so there is no display cap (the old public
+    cap of 5 was removed 2026-10). Renders nothing (not even the "Sources" label) when empty and
     no `empty_note` is given — a field with zero citations either wasn't
     grounded at all (low_confidence) or is hand-written text (a human edit
     clears the sidecar table — see update_tool_agent_taxonomy), and both
@@ -1407,7 +1406,7 @@ def _citations_list_html(citations: list, cap: int | None = None, empty_note: st
     Shared across every field this grounding fix extends to (Agent
     taxonomy first; Description and Community profile in later phases)—
     not agent-taxonomy-specific despite shipping alongside it first."""
-    shown = citations[:cap] if cap is not None else citations
+    shown = citations
     if not shown:
         if not empty_note:
             return ""
@@ -9974,12 +9973,12 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     agent_taxonomy_block = ""
     _at_note = (tool.get("agent_taxonomy_note") or "").strip()
     _at_unverified = bool(tool.get("agent_taxonomy_needs_verification"))
-    # Public citation list, capped at 5 (first-use order, already deduped
+    # Public citation list, every source (first-use order, already deduped
     # by url) — Citations-API grounding fix, Phase 1b. Shown alongside the
     # note to both viewers — a signed-in admin deciding whether to mark an
     # unverified note reviewed benefits from seeing sources too, not just a
     # public visitor once the note is verified.
-    _at_citations_html = _citations_list_html(agent_taxonomy_citations, cap=5)
+    _at_citations_html = _citations_list_html(agent_taxonomy_citations)
     if _at_note:
         _at_badge = _review_state_badge(_at_unverified, authed, "tp-verify")
         agent_taxonomy_block = f"""<div class="tp-card">
@@ -10262,7 +10261,7 @@ function submitIntroForm() {{
         description_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Description{_desc_badge}</h2>
   <div class="narrative-md">{render_narrative_markdown(tool['description'])}</div>
-  {_citations_list_html(description_citations, cap=5)}
+  {_citations_list_html(description_citations)}
 </div>"""
     else:
         # "Description coming soon." is a deliberate contextual variant of
@@ -12279,7 +12278,7 @@ def tools_community_profile(request: Request, slug: str):
                           f'{_empty_state_card("Bottom line", _empty_state_text(_comm_bl_copy.visitor_text, _comm_bl_copy.admin_suffix, authed))}</div>')
     # Citations-API grounding fix, Phase 3 — ONE shared "Sources" list for
     # the whole profile draft (decision 5), not one per card, rendered once
-    # right after the Bottom line callout, public-capped at 5. Empty when
+    # right after the Bottom line callout, every source shown. Empty when
     # the profile was never grounded (hand-written, or predates this
     # feature) — same "render nothing, not even the label" default as every
     # other _citations_list_html public call site. Radical-transparency
@@ -12287,7 +12286,7 @@ def tools_community_profile(request: Request, slug: str):
     # verified content — sources are useful context for judging an
     # unreviewed claim, not something to withhold until review is done.
     profile_citations_block = ""
-    _pc_html = _citations_list_html(profile_citations, cap=5)
+    _pc_html = _citations_list_html(profile_citations)
     if _pc_html:
         profile_citations_block = f'<div>{_pc_html}</div>'
 
@@ -23670,8 +23669,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     </div>"""
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
-                                                r.get("citations_json") or "[]",
-                                                truncate=600)
+                                                r.get("citations_json") or "[]")
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
     <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q_txt}</div>
@@ -24648,8 +24646,11 @@ def ask_conversation_transcript(conversation_id: str, request: Request):
         lib.close()
 
 
+_ASK_HISTORY_PAGE_SIZE = 25
+
+
 @app.get("/ask/history", response_class=HTMLResponse)
-def ask_history(request: Request):
+def ask_history(request: Request, page: int = 1):
     """The signed-in user's own FP&A Buddy questions — same shape as the admin
     report (Section G.1) but scoped to just this user, so a member can see
     what they've asked and how their usage-to-date adds up."""
@@ -24672,8 +24673,7 @@ def ask_history(request: Request):
         # A one-turn conversation — same card the flat list always showed.
         q = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
-                                                r.get("citations_json") or "[]",
-                                                truncate=500)
+                                                r.get("citations_json") or "[]")
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q}</div>
@@ -24685,12 +24685,11 @@ def ask_history(request: Request):
 </div>"""
 
     def _turn_block(r: dict) -> str:
-        # One turn inside an expanded conversation — same content, truncation,
-        # and citation rendering as the flat card.
+        # One turn inside an expanded conversation — same content and
+        # citation rendering as the flat card.
         q = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
-                                                r.get("citations_json") or "[]",
-                                                truncate=500)
+                                                r.get("citations_json") or "[]")
         return f"""<div style="padding:14px 0 4px;border-top:1px solid var(--line);">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div style="font-weight:600;color:var(--navy);font-size:14px;">{q}</div>
@@ -24723,7 +24722,23 @@ def ask_history(request: Request):
   </div>
 </details>"""
 
-    rows_html = "".join(_card(c) for c in _group_conversations(rows)) or \
+    # Plain pagination, newest first (2026-10): answers now render in full, so
+    # 200 long answers made a multi-megabyte page. Every answer on a page is
+    # still shown whole; "Older" only moves to the next set of conversations.
+    convos = _group_conversations(rows)
+    pages = max(1, -(-len(convos) // _ASK_HISTORY_PAGE_SIZE))
+    page = min(max(page, 1), pages)
+    start = (page - 1) * _ASK_HISTORY_PAGE_SIZE
+    shown = convos[start:start + _ASK_HISTORY_PAGE_SIZE]
+    _nav_links = []
+    if page > 1:
+        _nav_links.append(f'<a href="/ask/history?page={page - 1}">&larr; Newer</a>')
+    if page < pages:
+        _nav_links.append(f'<a href="/ask/history?page={page + 1}" style="margin-left:auto;">Older &rarr;</a>')
+    pager_html = (f'<p style="display:flex;gap:12px;font-size:14px;margin:18px 0 0;">{"".join(_nav_links)}</p>'
+                  if _nav_links else "")
+
+    rows_html = "".join(_card(c) for c in shown) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
          '<a href="/tools/fpa-buddy">Ask a question &rarr;</a></div>')
@@ -24737,6 +24752,7 @@ def ask_history(request: Request):
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>
 {rows_html}
+{pager_html}
 </div>
 <style>
 .convo-chip{{display:inline-flex;align-items:center;margin-top:10px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:4px 12px;}}
@@ -30997,8 +31013,7 @@ def _ask_settings_badge(row: dict) -> str:
     return f'{srcs} <span style="color:var(--muted);">{_esc(model_short)} &middot; {_esc(row.get("effort") or "")}</span>'
 
 
-def _render_cited_answer(answer: str, citations_json: str,
-                         truncate: int | None = None) -> tuple[str, str]:
+def _render_cited_answer(answer: str, citations_json: str) -> tuple[str, str]:
     """Citation rendering for the server-rendered ask surfaces — /ask/history,
     /questions, and /admin/fpa-buddy/feedback all call this one helper (never a
     per-surface reimplementation). Returns (answer_html, sources_html):
@@ -31021,11 +31036,9 @@ def _render_cited_answer(answer: str, citations_json: str,
         cites = []
     cites = [c for c in cites if isinstance(c, dict)]
 
+    # Always the full answer: no length limit, no ellipsis (the old 500/600
+    # character cut was removed 2026-10, never-cut-off-text rule).
     text = answer or ""
-    truncated = truncate is not None and len(text) > truncate
-    if truncated:
-        # Cut, then drop any partial marker dangling at the cut ("…[1").
-        text = re.sub(r"\[\d{0,2}$", "", text[:truncate])
 
     def _link(m: re.Match) -> str:
         i = int(m.group(1))
@@ -31039,8 +31052,6 @@ def _render_cited_answer(answer: str, citations_json: str,
     # followed by "(", linkified only when it resolves inside this turn's own
     # list — a literal [2026] in prose stays text.
     answer_html = re.sub(r"\[(\d{1,2})\](?!\()", _link, _esc(text))
-    if truncated:
-        answer_html += "&hellip;"
 
     if not cites:
         return answer_html, ""
