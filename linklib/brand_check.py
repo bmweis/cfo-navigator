@@ -18,6 +18,7 @@ text-color-vs-size fact, not a design judgment.
 """
 from __future__ import annotations
 
+import ast
 import re
 
 # A hex color, excluding HTML numeric entities like &#127942; (preceded by '&')
@@ -404,6 +405,111 @@ def outbound_link_problems(src: str) -> list[str]:
         line = src.count("\n", 0, m.start()) + 1
         problems.append(f"line {line}: {href} (missing target=\"_blank\")")
     return problems
+
+
+# --- Reading-column rule (BRAND.md section 5) -------------------------------
+_COLUMN_TAG_RE = re.compile(r"<(/?)(div|table|ul|section)\b([^<>]{0,1500})>", re.I)
+_PROSE_CLASS_RE = re.compile(r"\btool-prose\b")
+
+
+def _literal_segments(src: str):
+    """(first line number, text) of every top-level string literal in `src`
+    (an f-string counts once, not once per fragment). Segments are sliced
+    from the source text by position: ast.get_source_segment re-splits the
+    whole file on every call, which is minutes on a 2 MB module."""
+    tree = ast.parse(src)
+    data = src.encode()
+    offs = [0]
+    for line in data.split(b"\n"):
+        offs.append(offs[-1] + len(line) + 1)
+    nested: set[int] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.JoinedStr):
+            for child in ast.walk(n):
+                if child is not n:
+                    nested.add(id(child))
+    for n in ast.walk(tree):
+        if id(n) in nested:
+            continue
+        if isinstance(n, ast.Constant) and not isinstance(n.value, str):
+            continue
+        if not isinstance(n, (ast.Constant, ast.JoinedStr)):
+            continue
+        text = data[offs[n.lineno - 1] + n.col_offset: offs[n.end_lineno - 1] + n.end_col_offset].decode()
+        yield n.lineno, text
+
+
+def reading_column_problems(src: str) -> list[str]:
+    """A table or grid that sits NEXT TO a `.tool-prose` reading column
+    instead of inside it (BRAND.md section 5, "A table or grid on a content
+    page belongs inside the reading column"). A sibling renders at the full
+    page-tier width and breaks the column; this broke /how-this-is-built and
+    /tools/fpa-buddy/how-it-works.
+
+    A source scan, not a rendered one: rendering every page from inside
+    run_all() re-enters run_all() across threadpool threads.
+
+    **Flagged:** a `<table>`, or an element with `display:grid` /
+    `grid-template-columns`, written in the same string literal as a
+    `.tool-prose` div and (a) a direct child of a container that also
+    directly holds a `.tool-prose`, or (b) inside an `overflow-x` wrapper
+    div (the site's table-wrapper idiom) that is such a direct child.
+
+    **Not caught, so a clean result is not a claim about every page:**
+    * blocks interpolated into the page (`{cards}`, a helper that returns a
+      table) or assembled across separate string literals, and a
+      `.tool-prose` opened in one literal and closed in another;
+    * blocks built in JavaScript or stored in the database;
+    * a table or grid reached through any other wrapper (a styled card, a
+      plain `<div>`): a deliberate full-width card next to prose is allowed
+      (the Growth Engine Ratio calculator), and telling it apart from an
+      accidental one needs a rendered measurement, not a scan.
+    """
+    problems: list[str] = []
+    for first_line, text in _literal_segments(src):
+        if "tool-prose" not in text:
+            continue
+        root = {"kind": "root", "children": []}
+        stack = [root]
+        for m in _COLUMN_TAG_RE.finditer(text):
+            closing, name, attrs = m.group(1), m.group(2).lower(), m.group(3)
+            if closing:
+                if name == "div" and len(stack) > 1:
+                    stack.pop()
+                continue
+            grid = "display:grid" in attrs.replace(" ", "") or "grid-template-columns" in attrs
+            if name == "div":
+                if _PROSE_CLASS_RE.search(attrs):
+                    kind = "prose"
+                elif "overflow-x" in attrs.replace(" ", ""):
+                    kind = "wrapper"
+                else:
+                    kind = "grid" if grid else "box"
+                node = {"kind": kind, "children": [], "pos": m.start()}
+                stack[-1]["children"].append(node)
+                stack.append(node)
+            elif name == "table" or grid:
+                stack[-1]["children"].append(
+                    {"kind": "table" if name == "table" else "grid", "children": [], "pos": m.start()})
+
+        def visit(container: dict) -> None:
+            has_prose = any(c["kind"] == "prose" for c in container["children"])
+            for c in container["children"]:
+                if has_prose and c["kind"] in ("table", "grid"):
+                    _flag(c)
+                if has_prose and c["kind"] == "wrapper":
+                    for g in c["children"]:
+                        if g["kind"] in ("table", "grid"):
+                            _flag(g)
+                if c["kind"] != "prose":
+                    visit(c)
+
+        def _flag(block: dict) -> None:
+            line = first_line + text.count("\n", 0, block["pos"])
+            problems.append(f"line {line}: {block['kind']} sits beside a .tool-prose reading column, not inside it")
+
+        visit(root)
+    return sorted(set(problems))
 
 
 def findings(src: str) -> list[str]:

@@ -7971,14 +7971,14 @@ it supersedes the old "`/save` is token-gated" note.
     its current row count and card mix — seeding it with enough rows to
     span two rows reproduced the identical row-to-row variance Books was
     showing, proving it's the same underlying mechanism on both sections,
-    not a Books-specific bug. Fixed at the root for both sections at once:
-    `.bench-name` clamped to 2 lines, `.bench-desc` to 3 (`-webkit-line-
-    clamp`, so a short name/description doesn't grow past its own budget)
-    with a matching `.bench-card` `min-height` (so a short one still
-    reserves the same floor a maxed-out one would use — a clamp alone only
-    bounds the ceiling). Verified with real Playwright bounding-box
-    measurements at 1280/1920/390px: every card in both grids renders at
-    an identical height regardless of row composition, at every width.
+    not a Books-specific bug. PR 16 fixed it with a clamp (2 and 3 lines) plus a
+    `.bench-card` `min-height`. **Superseded 2026-10 (PR 660, Brian's call, "Option
+    2"): the clamp and the min-height are both removed**, and there is no "Show
+    more". Names and descriptions show in full; cards keep the
+    `_CARD_WIDTH_RESOURCE_MIN` floor on the `auto-fill` grid; cards in a row
+    stretch to equal height (grid default) and rows may differ. Reason: a clamp
+    hides text. The only clamps left are the two directory cards, which keep
+    "Full profile →". See `tests/test_resources_card_no_clamp.py`.
   - **The Resources intro-copy question was investigation-only, per the
     brief's own approval-gate rule** — a page-level paragraph introducing
     "what the resources are" (Brian's original ask) genuinely doesn't
@@ -10937,6 +10937,22 @@ it supersedes the old "`/save` is token-gated" note.
   specificity to the generic table rule's `overflow:hidden!important`, so
   sticky cells never moved on Compare; `table.cc-table.cc-table` now wins.
   The Compare intro says "under review", matching the visitor label.
+
+- **Layout hardening batch (2026-10).** FP&A Buddy report's Asker column moved off
+  `_COL_WIDTH_NAME` (it left Question at 164px at 900px; now 284px). Six admin grids
+  (`.tool-form-cols`, `.qe-row`, `.users-top-grid`, Users add-member, Resources
+  Coverage/Pricing, Third-party Source/venue) use `minmax(0,...)` tracks; the claim that
+  they blow out was latent in Chromium (text, select and date inputs are compressible) and
+  only provable by injecting a wide cell, which `tests/test_grid_track_zero_minimum.py`
+  does. Resources sparse-count grids were already correct (`auto-fill`); only tests were
+  added. **`.site-main .table-frame>table` never applied** (specificity below the generic
+  table rule), so every framed table clipped and double-bordered, and the sticky Name
+  column on `/admin/tools/software` and `/admin/tools/communities` did not stick; fixed
+  by repeating the `:not()` chain. Compare's own `.cc-table.cc-table` patch is untouched
+  and now redundant. New `/admin/checks` row "Reading column holds its tables and grids"
+  (`brand_check.reading_column_problems`, source scan, cached): verified to flag the grid
+  and table on the pre-fix `/tools/fpa-buddy/how-it-works`. See BRAND.md section 8 and
+  ARCHITECTURE.md's "Layout hardening batch".
 
 ## Authentication & security
 

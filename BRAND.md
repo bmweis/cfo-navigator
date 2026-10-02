@@ -510,7 +510,11 @@ graffiti marks on admin tables, forms, or the chat UI.
     in the database) can't override it. A table with sticky columns or a
     sticky label can't clip its own corners (`overflow:hidden` on the table
     breaks `position:sticky`), so its scroll wrapper carries the frame via
-    `.table-frame` instead. Covered by `tests/test_table_format.py`, and
+    `.table-frame` instead. The frame-child rule repeats the generic rule's
+    `:not()` chain so it out-ranks it; before that it silently lost, every
+    framed table kept `overflow:hidden` and its own border (a double frame),
+    and the sticky Name column on the Software and Communities admin tables
+    scrolled away (`tests/test_table_frame_sticky.py`). Covered by `tests/test_table_format.py`, and
     guarded live by the "One table format" row on `/admin/checks`
     (`brand_check.table_standard_problems`/`table_override_problems`): it
     fails if the block loses a rule, the border token changes, the scope
@@ -691,6 +695,7 @@ grids—is a descendant of it, not a sibling. A sibling renders at full
 `.page-standard` width and breaks the column. Fixed on `/how-this-is-built`, and on
 `/tools/fpa-buddy/how-it-works` in #583. Pages with no reading column (compare
 tables, `/admin/system/page-index`) are unaffected: full width is correct there.
+Checked mechanically by `brand_check.reading_column_problems()` (§8).
 
 The brand audit's Phase 4 also found four pages with *no* reading-width constraint at
 all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, and the
@@ -774,7 +779,7 @@ above:
 | `_COL_WIDTH_DATE` | 140px | Date / timestamp (sized for a full "YYYY-MM-DD HH:MM" value) |
 | `_COL_WIDTH_STATUS` | 110px | A short status/state badge or label |
 | `_COL_WIDTH_COUNT` | 80px | A small count/number column |
-| `_COL_WIDTH_VENDOR` | 160px | A short vendor/company label — deliberately narrower than `_COL_WIDTH_NAME`, which is calibrated for a full software/community name, not a one- or two-word vendor label (overhead spend fixes, 2026-09) |
+| `_COL_WIDTH_VENDOR` | 160px | A short vendor/company label, or a username (the FP&A Buddy report's Asker column, which used `_COL_WIDTH_NAME` and left the Question column about 100px wide) — deliberately narrower than `_COL_WIDTH_NAME`, which is calibrated for a full software/community name, not a one- or two-word vendor label (overhead spend fixes, 2026-09) |
 
 These are plain `width:` hints on ordinary (non `table-layout:fixed`) tables,
 not a hard cap — real content wider than the hint still grows the column
@@ -919,13 +924,25 @@ the shared 220px floor fit only 3 tracks in the ~820px column (4 need 922px).
 label reuses the "Recent highlights" label style. The Original content
 admin page notes any flagged pieces the cap hides.
 
-**The height companion**: `-webkit-line-clamp` alone only bounds a
-field's ceiling. CSS Grid still sizes each ROW by its own tallest card, so
-without a matching `min-height` on the same element, a row of short
-content still renders shorter than a row of long content, even though
-every individual field is clamped to the same max. Clamp and min-height are
-a pair — apply both together, on every variable-length field in a card, or
-neither; one without the other still leaves rows uneven.
+**Directory cards: clamp and `min-height` are a pair.** On the two directory
+cards (`.tool-card` on `/tools/software`, `.comm-card` on `/tools/communities`),
+a `-webkit-line-clamp` on a variable-length field bounds its ceiling, and a
+matching `min-height` on the same element keeps rows even. CSS Grid sizes each
+row by its own tallest card, so a clamp alone still leaves short rows shorter.
+Apply both together on every variable-length field in these cards, or neither.
+The cards keep a "Full profile" link so the clamped text is one click away. No
+test pins the pairing today; `tests/test_resources_card_no_clamp.py` covers only
+Resources, which has no clamp.
+
+**Resources cards are not clamped (2026-10).** `/tools/resources` card
+names and descriptions render in full: no `-webkit-line-clamp`, `overflow`,
+`max-height` or `min-height` floor, and no "Show more". Cards keep the
+`_CARD_WIDTH_RESOURCE_MIN` floor on an `auto-fill` grid, and cards in one row
+stretch to the tallest (grid default). Rows may differ in height from each
+other, by design. A clamp hides text; the only clamps left on the site are the
+two directory cards (`/tools/software`, `/tools/communities`), which keep a
+"Full profile" link. Do not add a clamp to a card without that link.
+`tests/test_resources_card_no_clamp.py` measures it in Chromium.
 
 ### Social share cards
 
@@ -1210,6 +1227,29 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
     throughout.
   - Admin pages are out of scope entirely — see the sanctioned pending-count-badge exception
     below, which already puts more than one coral element on an admin screen.
+- **Reading column holds its tables and grids (2026-10)** — §5's rule, enforced by
+  `linklib.brand_check.reading_column_problems()`, with its own `/admin/checks` row and
+  `tests/test_reading_column_rule.py`. A **source** scan, for the same reason as outbound
+  links: rendering pages from inside `run_all()` re-enters it across threadpool threads. It
+  flags a `<table>` or a `display:grid` element written in the same string literal as a
+  `.tool-prose` div when it is a direct child of that div's container, or sits in an
+  `overflow-x` wrapper that is. Run against the page source from before #583, it flags both
+  the grid and the table on `/tools/fpa-buddy/how-it-works`, which proves the check
+  works. The current page is clean: the check reports zero findings on `main`. It cannot see: blocks
+  interpolated into the page (`{cards}`) or built across separate string literals; blocks
+  built in JavaScript or stored in the database; or a table or grid behind any other
+  wrapper. A styled full-width card next to prose (the Growth Engine Ratio calculator) is
+  allowed on purpose, since telling it from an accidental one needs a rendered measurement.
+- **Grid tracks around form controls are `minmax(0,...)` (2026-10)** — a bare `1fr` track
+  has an implicit minimum of its cell's min-content, so one wide unbreakable child widens
+  the track and pushes the grid past its container. Six admin grids carried it
+  (`.tool-form-cols`, `.qe-row`, `.users-top-grid`, the Users add-member form, the Resources
+  Coverage/Pricing pair, the Third-party Source/venue pair). Covered by
+  `tests/test_grid_track_zero_minimum.py`, which injects a wide cell into the real page in
+  Chromium. Native `type="date"` inputs also need `appearance:none` (see the overhead-spend
+  rounds); `time`, `datetime-local`, `month` and `week` share that picker UI and would need
+  the same, but none exists in the app today. `number` inputs do not, since their width is
+  not driven by native picker chrome.
 - **Outbound links open in a new tab (PR 35, 2026-09)** — §3.3's rule, enforced by
   `linklib.brand_check.outbound_link_problems()`, with its own `/admin/checks` row and
   `tests/test_outbound_links.py`. Deliberately a **source** scan rather than a rendered-page

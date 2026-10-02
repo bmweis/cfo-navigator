@@ -1676,13 +1676,16 @@ body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:v
    Frame: on the table itself (separate borders + overflow:hidden clip the
    corners). A table with sticky columns can't clip (overflow:hidden on the
    table breaks position:sticky), so its scroll wrapper carries the frame
-   instead via .table-frame, and the table inside drops its own. */
+   instead via .table-frame, and the table inside drops its own. The
+   frame-child rule repeats the generic rule's :not() chain on purpose: its
+   specificity has to beat the generic rule above, or the table keeps
+   overflow:hidden and its own border and the sticky columns never move. */
 .site-main table:not(.tp-competitor-table):not(.rr-reader-body table){border-collapse:separate!important;border-spacing:0!important;
   background:var(--surface)!important;border:1px solid var(--table-border)!important;
   border-radius:12px!important;overflow:hidden!important;}
 .site-main .table-frame{background:var(--surface)!important;border:1px solid var(--table-border)!important;
   border-radius:12px!important;}
-.site-main .table-frame>table{border:0!important;border-radius:0!important;overflow:visible!important;}
+.site-main .table-frame>table:not(.tp-competitor-table):not(.rr-reader-body table){border:0!important;border-radius:0!important;overflow:visible!important;}
 .site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>thead>tr>th,.site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>thead>tr>td,
 .site-main table:not(.tp-competitor-table):not(.rr-reader-body table)>tbody:first-child>tr:first-child>th{
   background:var(--accent-light)!important;color:var(--ink)!important;font-size:13px!important;
@@ -1805,8 +1808,8 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 /* Two-column split for Software's Add/Edit forms (2fr wide left column,
    1fr narrow right column holding a few short fields). Stacks to one
    column on narrow viewports. */
-.tool-form-cols{display:grid;grid-template-columns:2fr 1fr;gap:24px;align-items:start;}
-@media(max-width:700px){.tool-form-cols{grid-template-columns:1fr;}}
+.tool-form-cols{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:24px;align-items:start;}
+@media(max-width:700px){.tool-form-cols{grid-template-columns:minmax(0,1fr);}}
 
 /* Functional tools (FP&A Buddy, GER calculator, Sail Don't Row + leaderboard)
    used to sit in their own narrow .page-tool tier (960px), which read as
@@ -2020,7 +2023,8 @@ _COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
 _COL_WIDTH_STATUS = 110       # A short status/state badge or label
 _COL_WIDTH_COUNT = 80         # A small count/number column
 _COL_WIDTH_VENDOR = 160       # A short vendor/company label (Railway,
-                              # Anthropic) — deliberately narrower than
+                              # Anthropic) or a username (the FP&A Buddy
+                              # report's Asker column) — deliberately narrower than
                               # _COL_WIDTH_NAME, which is calibrated for a
                               # full software/community name, not a one-
                               # or two-word vendor label (overhead spend
@@ -8970,7 +8974,7 @@ Not sure which tool's for you? {(
 .qe-checkbox{{display:flex!important;align-items:center;gap:8px;font-size:13px!important;
   font-weight:500!important;color:var(--ink)!important;}}
 .qe-checkbox input{{width:auto!important;}}
-.qe-row{{display:grid;grid-template-columns:1fr 1fr;gap:12px;}}
+.qe-row{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;}}
 .qe-hint{{font-size:12px;color:var(--muted);margin:0;}}
 .qe-actions{{display:flex;align-items:center;gap:10px;}}
 .qe-status{{font-size:12px;color:var(--muted);}}
@@ -10718,41 +10722,20 @@ def tools_resources(request: Request):
 </div>
 
 <style>
-/* Card heights, PR 16 (2026-09): `auto-fill` grid rows only stretch cards to
-   match the TALLEST card in their own row (CSS Grid's default
-   align-items:stretch) — every row is sized independently, so a row of
-   short names/descriptions renders visibly shorter than a row that happens
-   to contain a longer one. Confirmed empirically, not assumed: seeding the
-   real book-recommendations copy (names/descriptions varying widely in
-   length) AND the real Benchmarking copy (a more consistent, template-
-   driven "Best for X" length) side by side, the Benchmarking grid shows
-   the identical row-to-row variance once it has enough rows to have more
-   than one — it just doesn't today, at its current 11-row count and card
-   mix, so it reads as "already uniform" while Books' more varied name/
-   description lengths make the same underlying behavior visible. Not a
-   missing height constraint on Books specifically and not a different
-   card component — both sections share this one class.
-
-   Fixed at the root, for both sections at once, with three pieces working
-   together (a line-clamp alone only bounds the CEILING — a short card
-   still renders shorter unless something also reserves the floor):
-     - .bench-name clamped to 2 lines, .bench-desc to 3 — every card's
-       content now has a known maximum height regardless of how long the
-       underlying text actually is.
-     - .bench-card gets a matching min-height, so a short name/description
-       still reserves the same space a clamped-to-the-max one would use
-       (verified against the tallest real combination in this data set—
-       a 2-line name + a full 3-line description — not picked by eye).
-   Height is now driven by these fixed budgets, not by which row a card's
-   own content happens to land in. */
-.bench-card{{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;transition:border-color .15s;min-height:172px;}}
+/* Resources cards size to their content. No clamp, no max-height, no
+   min-height floor, no "Show more": a name and description are shown in full
+   (BRAND.md section 5, "Card widths"). Cards in the same grid row stretch to
+   the tallest card in that row (CSS Grid's default align-items:stretch), so
+   a row stays even; different rows may differ in height, by design. Card
+   width keeps its floor via _CARD_WIDTH_RESOURCE_MIN on the auto-fill grid.
+   History: PR 16 (2026-09) clamped these (2 and 3 lines) with a min-height
+   floor to even out rows; replaced 2026-10 because a clamp hides text. */
+.bench-card{{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;transition:border-color .15s;}}
 .bench-card:hover{{border-color:var(--accent);text-decoration:none;}}
-.bench-name{{font-size:15px;font-weight:600;color:var(--ink);line-height:1.35;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}}
+.bench-name{{font-size:15px;font-weight:600;color:var(--ink);line-height:1.35;}}
 .bench-card:hover .bench-name{{color:var(--accent);}}
 .bench-badge{{font-size:11px;font-weight:500;border-radius:6px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}}
-.bench-desc{{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}}
+.bench-desc{{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}}
 </style>"""
     return HTMLResponse(_page("Resources—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 
@@ -15779,7 +15762,7 @@ def _benchmark_form_fields(b: dict | None = None) -> str:
     <textarea name="description" required maxlength="500" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(b.get('description', ''))}</textarea>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Coverage</label>
       <select name="coverage" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
@@ -16706,7 +16689,7 @@ def _tl_form_fields(item: dict | None = None) -> str:
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://… (leave blank to render as unlinked text)">
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Source / venue</label>
       <input name="venue" maxlength="200" value="{_esc(item.get('venue', ''))}"
@@ -27709,6 +27692,7 @@ _LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "BRAND.md §7 in sync",
         "Coral discipline (one moment per page)",
         "Outbound links open in a new tab",
+        "Reading column holds its tables and grids",
         "One table format",
     )),
     ("Site structure and content", (
@@ -31201,7 +31185,7 @@ def admin_ask_report(request: Request, user: str = ""):
   <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date</th>
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Asker</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_VENDOR}px;">Asker</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Question</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Settings</th>
       <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Cost</th>
@@ -32664,10 +32648,10 @@ def admin_users(request: Request, msg: str = ""):
   </div>
 </details>
 
-<div class="users-top-grid" style="display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:start;margin-bottom:24px;">
+<div class="users-top-grid" style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:20px;align-items:start;margin-bottom:24px;">
   <div>
     <h2 style="font-size:16px;margin:0 0 12px;">Add a member</h2>
-    <form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;">
       <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
         <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
       <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;white-space:nowrap;">Temp password *</label>
@@ -32762,7 +32746,7 @@ def admin_users(request: Request, msg: str = ""):
 [hidden]{{display:none!important;}}
 .user-name{{font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);}}
 .user-badge{{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;}}
-@media(max-width:900px){{.users-top-grid{{grid-template-columns:1fr!important;}}}}
+@media(max-width:900px){{.users-top-grid{{grid-template-columns:minmax(0,1fr)!important;}}}}
 @media(max-width:700px){{
   .admin-table-responsive thead{{display:none;}}
   /* min-width:0!important cancels the desktop-only floor — see the
