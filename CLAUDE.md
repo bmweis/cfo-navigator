@@ -6289,6 +6289,25 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   clamps allowed anywhere else are the two directory cards, each with its
   "Full profile" link.
 
+- **History answers render as blocks (2026-10).** The stored answer was always clean
+  markdown; `_render_cited_answer` showed it as escaped text in a `<p>`, so
+  `/ask/history`, the Buddy past-questions rows and the admin feedback card
+  printed literal `---`, `**` and `##` and lost paragraph breaks (PR 662 removed
+  the length cuts, which made it visible). It now calls
+  `webapp.answer_render.render_answer_markdown`, a Python twin of the live page's
+  `mdToHtml`/`mdInline` (same block and inline rules, same `[n]` contract), inside a
+  `div.ask-hist-answer`. Two JS and Python implementations on purpose (no client
+  library, no new dependency); `tests/test_answer_history_render.py` runs the real
+  live JS under node against the server function on the same fixtures, so they
+  cannot drift. Trust: model output, escaped first, no raw HTML, **markdown links
+  stay inert text on the server**; only a `[n]` resolving in the turn's own
+  citation snapshot links, to http(s) only. Two findings: the live JS had no
+  horizontal-rule rule (`---` printed as a literal paragraph), so one was added to
+  both; and the live JS does turn `[text](https://...)` into an anchor, which the
+  server twin deliberately does not (flagged for a decision, not changed). The
+  admin matchmaker feedback card (`_text_block`) still shows answers as pre-wrapped
+  plain text, untouched.
+
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
   overlap/contrast summary above both Compare tables, cached permanently
   and capped by a shared daily dollar budget.** Purely additive on top of
