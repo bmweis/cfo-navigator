@@ -451,10 +451,10 @@ def test_edit_submit_keeps_citations_when_only_other_fields_change(app_module):
     lib.close()
 
 
-# -- rendering: public cap, admin uncapped, and the (deliberate) lack -------
+# -- rendering: every source on the profile and in admin, and the (deliberate) lack -------
 # -- of a publish gate for Description ----------------------------------------
 
-def test_public_profile_shows_capped_sources_list(app_module):
+def test_public_profile_shows_every_source(app_module):
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = _add_tool(lib)
     slug = lib.get_tool(tool_id)["slug"]
@@ -468,7 +468,7 @@ def test_public_profile_shows_capped_sources_list(app_module):
     assert r.status_code == 200
     html = r.text
     assert html.count("source0.example") == 1
-    assert "source6.example" not in html   # capped at 5 — the 7th source is dropped
+    assert html.count("source6.example") == 1   # no cap: the 7th source is shown too
 
 
 def test_admin_edit_page_shows_uncapped_sources_list(app_module):

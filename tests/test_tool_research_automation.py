@@ -477,7 +477,7 @@ def test_profile_page_renders_citation_sources_for_verified_note(env):
     assert 'href="https://runway.com"' in r.text
 
 
-def test_profile_page_caps_citations_at_five(env):
+def test_profile_page_shows_every_citation(env):
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     tool_slug = lib.get_tool(tool_id)["slug"]
@@ -491,10 +491,8 @@ def test_profile_page_caps_citations_at_five(env):
 
     r = _client(env).get(f"/tools/software/{tool_slug}")
     assert r.status_code == 200
-    for i in range(1, 6):
-        assert f"[{i}] Page {i}" in r.text
-    for i in range(6, 8):
-        assert f"[{i}] Page {i}" not in r.text   # dropped, no "+N more" indicator
+    for i in range(1, 8):
+        assert f"[{i}] Page {i}" in r.text   # no cap: every chip a marker could point at
 
 
 def test_profile_page_no_sources_section_when_no_citations(env):

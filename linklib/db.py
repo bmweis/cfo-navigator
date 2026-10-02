@@ -686,6 +686,7 @@ CREATE TABLE IF NOT EXISTS ask_questions (
     hidden_public         INTEGER NOT NULL DEFAULT 0,  -- admin removed from the community view only
     anonymized            INTEGER NOT NULL DEFAULT 0,  -- asker name hidden on the community view only
     citations_json        TEXT NOT NULL DEFAULT '[]',  -- the turn's API-verified cited sources (see record_ask_question)
+    stop_reason           TEXT NOT NULL DEFAULT '',    -- answer call's API stop_reason ('max_tokens' = cut off); '' = unknown/pre-2026-10
     created_at            TEXT NOT NULL
 );
 
@@ -1376,6 +1377,7 @@ CREATE TABLE IF NOT EXISTS matchmaker_questions (
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
     cost_usd              REAL NOT NULL DEFAULT 0,
+    stop_reason           TEXT NOT NULL DEFAULT '',    -- answer call's API stop_reason ('max_tokens' = cut off); '' = unknown/pre-2026-10
     created_at            TEXT NOT NULL
 );
 
@@ -2570,6 +2572,13 @@ class Library:
             # per-turn Exa cost was ever tracked for them).
             "ALTER TABLE ask_questions ADD COLUMN exa_result_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE ask_questions ADD COLUMN exa_cost_usd REAL NOT NULL DEFAULT 0",
+            # stop_reason (2026-10): the answer call's API stop_reason, so
+            # Brian can count how often a model answer is cut off by
+            # max_tokens ('max_tokens'). '' for every pre-existing row and
+            # for any turn where the call never completed; counts only
+            # start after this deploy. No UI, measurement only.
+            "ALTER TABLE ask_questions ADD COLUMN stop_reason TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE matchmaker_questions ADD COLUMN stop_reason TEXT NOT NULL DEFAULT ''",
             # Current Feed (/current-feed, 2026-09) — replaces the original
             # section-name-matching design (Blogs=Side A, Substacks=Side B,
             # News/Market Insights excluded) with two explicit, per-feed
@@ -8949,7 +8958,8 @@ class Library:
                             rewrite_cost_usd: float = 0.0,
                             embed_input_tokens: int = 0, embed_cost_usd: float = 0.0,
                             exa_result_count: int = 0, exa_cost_usd: float = 0.0,
-                            citations: Optional[list[dict]] = None) -> int:
+                            citations: Optional[list[dict]] = None,
+                            stop_reason: str = "") -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
@@ -8977,15 +8987,15 @@ class Library:
                 rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
                 embed_input_tokens, embed_cost_usd,
                 exa_result_count, exa_cost_usd,
-                citations_json, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                citations_json, stop_reason, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
              cost_usd, rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
              embed_input_tokens, embed_cost_usd,
              exa_result_count, exa_cost_usd,
-             json.dumps(citations or []), now),
+             json.dumps(citations or []), stop_reason or "", now),
         )
         row_id = cur.lastrowid
         if not conversation_id:
@@ -9100,7 +9110,7 @@ class Library:
                                    conversation_id: str = "", turn_index: int = 0,
                                    input_tokens: int = 0, output_tokens: int = 0,
                                    cache_creation_tokens: int = 0, cache_read_tokens: int = 0,
-                                   cost_usd: float = 0.0) -> int:
+                                   cost_usd: float = 0.0, stop_reason: str = "") -> int:
         """Record one matchmaker turn. `conversation_id` groups follow-up turns;
         pass "" on the first turn and the caller fills it in with str(id) after
         insert, mirroring record_ask_question. `user_id` is None for the (most
@@ -9112,11 +9122,11 @@ class Library:
             """INSERT INTO matchmaker_questions
                (kind, conversation_id, turn_index, user_id, session_id, question, answer, model,
                 input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-                cost_usd, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                cost_usd, stop_reason, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (kind, conversation_id, turn_index, user_id, session_id, question.strip(), answer, model,
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-             cost_usd, now),
+             cost_usd, stop_reason or "", now),
         )
         row_id = cur.lastrowid
         if not conversation_id:
