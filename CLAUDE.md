@@ -6885,14 +6885,25 @@ never reads as something to tap.
   (https://www.anthropic.com/news/claude-sonnet-5), that planned increase was
   cancelled — the introductory rate is now permanent — so both were corrected
   to say so rather than continue flagging a future edit that will never be
-  needed. **Separate, smaller finding, not acted on**: `MODEL_PRICING` tracks
-  only one `cache_write` rate per model (the 5-minute-TTL rate) — there's no
-  column for the 1-hour-TTL cache-write rate (Sonnet 5: $4.00/MTok), so a
-  future caller that actually sets a 1-hour cache TTL would silently be
-  charged the 5-minute rate instead. Worth adding if/when something in this
-  codebase starts using a 1-hour cache TTL; nothing does today. New
+  needed. **1-hour cache TTL (2026-10, issue #622):** `MODEL_PRICING` rows now carry
+  `cache_write_1h` (2x input; Sonnet 5 is $4.00/MTok) and `compute_cost` takes a
+  separate `cache_creation_1h_tokens` bucket. Nothing requests the 1-hour TTL
+  today (`linklib/matchmaker.py`'s `cache_control` sets no `ttl`, so it gets the
+  5-minute default), so no existing cost or cap figure changes; this only means a
+  future caller is billed correctly. The "Anthropic pricing" 90-day reminder is a
+  manual attestation and needs no data change for this. New
   `tests/test_pricing.py` pins the confirmed rate values and a hand-checked
   `compute_cost` calculation so a future accidental edit is caught.
+- **Test-hygiene guards (2026-10, issues #623, #639, #628).** `Library.write_opml`
+  raises under pytest if asked to overwrite the git-tracked `preferred_sites.opml`
+  (a test with a temp `LINKLIB_DB` and no `LINKLIB_SITES_OPML` used to regenerate
+  it; in production the tracked path is the live path, so the guard is test-only
+  and does not cover ad hoc scripts). `tests/test_exa_call_site_lists.py` fails
+  when a module that calls `api.exa.ai` is missing from either Exa list on
+  `/admin/system/ai`; the toggle card had omitted Feature Taxonomy vendor
+  research. `tests/test_readme_references.py` fails when `README.md` names a repo
+  path or route that does not exist. CI now pins `ubuntu-24.04` and uses the Node
+  24 majors of `actions/checkout` (v5) and `actions/setup-python` (v6).
 - **Pricing/model freshness check (2026-09, issue #98 follow-up) — two
   genuinely different pieces, one fully automatable, one that can't be.**
   **Piece 1, permanent and automated**: `tests/test_pricing.py::
