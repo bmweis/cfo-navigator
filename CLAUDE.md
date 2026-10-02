@@ -8382,9 +8382,9 @@ it supersedes the old "`/save` is token-gated" note.
   the shared constants) — within the handful this standard's own PR
   anticipated. See BRAND.md §5 for the full scope statement. The
   Software/Communities approved-tables' own sticky Name column
-  (`admin-sticky-col-2`) — the precedent 280px is drawn from — was also
-  switched to read `min-width:{_COL_WIDTH_NAME}px` from the same constant,
-  since it's the origin case, not an exception.
+  (then `admin-sticky-col-2`), the precedent 280px is drawn from, was the
+  origin case; since Refs 655 (B1, below) it is one pinned column sized by
+  `_COL_WIDTH_NAME_STICKY` (230px).
 - **Layout fix batch 1, PR 28 (2026-09) — a real CSS scoping bug that
   silently hid a collapsed child group's badge, plus a mobile truncation
   bug on the Communities forms that hid real saved data on a phone.**
@@ -10957,6 +10957,30 @@ it supersedes the old "`/save` is token-gated" note.
   sticky cells never moved on Compare; `table.cc-table.cc-table` now wins.
   The Compare intro says "under review", matching the visitor label.
 
+- **Table frame and card polish on phones, B1 (2026-10, Refs 655).** Four
+  iPhone symptoms after PR 660, measured in Chromium first (WebKit not
+  available here). (1) The pending submissions tables and the contact deletion
+  history were bare tables carrying their own border inside an
+  `overflow-x:auto` div, so at 390px the right border scrolled away; pre-660
+  geometry was identical, so this was never a 660 regression. They are
+  `.table-frame` now. 26 more instances on 22 routes share the shape; a source
+  check plus the mechanical adoption is B2, a separate PR. (2) Stacked cards:
+  660's `td{border-top:0!important}` for `.admin-table-responsive` was at
+  (0,2,2) and lost to the generic (0,3,3) td rule, so it never applied.
+  **Made it apply** (not removed) by repeating the table class and `.site-main`
+  (four classes), for all three card systems (`.admin-table-responsive` and
+  `.backup-log-table` at 700px, `.ff-table`/`.fs-table` at 820px); no
+  `!important` allowlist change. Separators are 1px, none under the last card.
+  (3) The sticky pair (checkbox column plus a 280px-floor Name that auto layout
+  grew to 345 and 447px) was 37% (Software) and 44.5% (Communities) of an 874px
+  viewport. The checkbox now sits inside the Name cell and the pinned column is
+  `_COL_WIDTH_NAME_STICKY` (230px, 26%); it also removes the checkbox-only row in
+  card mode. Bulk select uses the `.{table}-row-cb` class, so it is unchanged.
+  Sticky only started working with 660 (pre-660 the table's own
+  `overflow:hidden` stopped it), which is why it began to look broken then.
+  (4) Reported only: `/admin/system/scripts` overflows the page at 390px
+  (scroll width 830). See ARCHITECTURE.md's "Table frame and card polish on
+  phones" and `tests/test_table_frame_mobile_polish.py`.
 - **Layout hardening batch (2026-10).** FP&A Buddy report's Asker column moved off
   `_COL_WIDTH_NAME` (it left Question at 164px at 900px; now 284px). Six admin grids
   (`.tool-form-cols`, `.qe-row`, `.users-top-grid`, Users add-member, Resources
