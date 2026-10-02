@@ -7,6 +7,7 @@ import pathlib
 import re
 import sys
 import tempfile
+import threading
 
 import pytest
 
@@ -1011,17 +1012,24 @@ def test_start_background_checks_refresher_force_true_still_starts(refresher_sta
         return t
 
     monkeypatch.setattr(taskmod.threading, "Thread", _tracking_thread)
+    # Stub the two slow per-iteration passes (a real run_all() is ~15s idle and
+    # well past the stop timeout under CPU contention) and wait on an Event the
+    # stub sets, instead of on wall-clock time. The thread still really starts,
+    # really runs one loop iteration, and really has to stop on the stop event.
+    iteration_ran = threading.Event()
+    monkeypatch.setattr(taskmod, "_compute_failing_checks_count", lambda: 0)
+    monkeypatch.setattr(taskmod, "_reconcile_voice_review_queue_once", lambda db_path: iteration_ran.set())
     taskmod.start_background_checks_refresher(force=True)
     try:
         assert taskmod._checks_refresher_started is True
         assert len(started_threads) == 1
         assert started_threads[0].daemon is True
-        assert started_threads[0].is_alive(), "sanity: the thread should genuinely be running at this point"
+        # Failure guard only: the wait returns the instant the iteration runs.
+        assert iteration_ran.wait(timeout=60), "the refresher thread never ran an iteration"
     finally:
         stopped = taskmod.stop_background_checks_refresher()
         assert stopped is True, (
-            "the refresher thread must actually stop within the timeout — a False here means "
-            "either the fix regressed or the timeout is too short for a real run_all() pass again"
+            "the refresher thread must stop once its stop event is set"
         )
         assert not started_threads[0].is_alive(), "the thread must be genuinely dead, not just marked stopped"
         assert taskmod._checks_refresher_started is False   # don't leak a real thread's state into other tests
