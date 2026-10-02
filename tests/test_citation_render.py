@@ -86,15 +86,20 @@ def test_citation_without_url_stays_literal(render):
     assert "<a" not in a_html and "[1]" in a_html
 
 
-def test_truncation_never_splits_a_marker(render):
-    text = "x" * 498 + " [12] tail"
-    # Cut lands mid-marker ("[1"): the partial marker is dropped, not shown.
-    a_html, _ = render(text, json.dumps(CITATIONS), truncate=501)
-    assert a_html.endswith("&hellip;")
-    assert "[1" not in a_html.replace("&hellip;", "")
-    # No cut, no ellipsis.
-    a_html, _ = render("short [1]", json.dumps(CITATIONS), truncate=500)
-    assert "&hellip;" not in a_html and '>[1]</a>' in a_html
+def test_long_answer_renders_in_full_with_markers_intact(render):
+    # Never cut off text: no length limit, no ellipsis, a late marker still
+    # resolves to its link.
+    text = ("word " * 3000) + "closing claim [3]."
+    a_html, _ = render(text, json.dumps(CITATIONS))
+    assert "&hellip;" not in a_html
+    assert a_html.count("word ") == 3000
+    assert a_html.endswith("closing claim " + '<sup class="cite"><a href="https://ex.com/c" target="_blank" '
+                           'rel="noopener" title="Web hit">[3]</a></sup>.')
+
+
+def test_render_cited_answer_has_no_truncate_parameter(render):
+    import inspect
+    assert "truncate" not in inspect.signature(render).parameters
 
 
 def test_hostile_snapshot_content_is_escaped(render):
@@ -160,6 +165,40 @@ def test_surface_renders_linked_markers_and_source_list(env, path, who):
     assert "Legacy answer citing [1] before snapshots." in html
 
 
+LONG_TAIL = "THE-END-OF-A-LONG-ANSWER [3]."
+
+
+def _long_answer():
+    return ("Filler sentence number one hundred. " * 400) + LONG_TAIL   # ~14,000 chars
+
+
+def test_history_and_past_questions_show_long_answers_in_full(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    uid = lib.get_user("member1")["id"]
+    first = lib.record_ask_question(
+        uid, "Long one?", _long_answer(), "claude-sonnet-4-6", "deep", True, True, True,
+        cost_usd=0.05, citations=CITATIONS)
+    lib.conn.execute("UPDATE ask_questions SET conversation_id=? WHERE id=?", (str(first), first))
+    lib.conn.commit()
+    # A follow-up turn in the same conversation renders through _turn_block.
+    lib.record_ask_question(
+        uid, "Long follow-up?", _long_answer(), "claude-sonnet-4-6", "deep", True, True, True,
+        conversation_id=str(first), turn_index=1, cost_usd=0.05, citations=CITATIONS)
+    lib.record_ask_feedback(first, uid, "helpful")
+    lib.conn.commit()
+    lib.close()
+    c = _login(env, "member1", "supersecret")
+    history = c.get("/ask/history").text
+    assert history.count("THE-END-OF-A-LONG-ANSWER") == 2   # first turn and follow-up
+    assert history.count('>[3]</a>') >= 2
+    past = c.get("/tools/fpa-buddy").text
+    assert "THE-END-OF-A-LONG-ANSWER" in past
+    # No answer was cut: the text before each tail is whole and unbroken.
+    assert "Filler sentence number one hundred. THE-END" in history
+    assert "Filler sentence number one hundred. THE-END" in past
+    assert "[3]</a></sup>&hellip;" not in history
+
+
 def test_past_questions_section_only_shows_helpful_rated(env):
     # /tools/fpa-buddy's past-questions search filters to helpful-rated
     # answers only (Phase 2) — unlike /ask/history and /admin/fpa-buddy/feedback
@@ -189,3 +228,30 @@ def test_csv_export_stays_raw_with_citations_column(env):
     assert "[3] Web hit—https://ex.com/c" in cites
     # Legacy row: empty citations cell, nothing invented.
     assert by_q["Legacy question?"][header.index("citations")] == ""
+
+
+def test_history_paginates_without_cutting_any_answer(env):
+    # 30 conversations -> 25 on page 1 and 5 on page 2; every answer on a page
+    # is whole, and "Older"/"Newer" move between the pages.
+    lib = Library(os.environ["LINKLIB_DB"])
+    uid = lib.get_user("member1")["id"]
+    for i in range(30):
+        qid = lib.record_ask_question(
+            uid, f"Paged question {i:02d}?", _long_answer(), "claude-sonnet-4-6", "deep",
+            True, True, True, cost_usd=0.01, citations=CITATIONS)
+        lib.conn.execute("UPDATE ask_questions SET conversation_id=? WHERE id=?", (str(qid), qid))
+    lib.conn.commit()
+    lib.close()
+    c = _login(env, "member1", "supersecret")
+    p1 = c.get("/ask/history").text
+    assert "Older &rarr;" in p1 and "Newer" not in p1
+    assert p1.count("THE-END-OF-A-LONG-ANSWER") == 25
+    assert "Paged question 29?" in p1 and "Paged question 04?" not in p1
+    p2 = c.get("/ask/history?page=2").text
+    assert "&larr; Newer" in p2 and "Older &rarr;" not in p2
+    assert "Paged question 04?" in p2
+    # Out-of-range and junk page values clamp instead of erroring.
+    assert c.get("/ask/history?page=99").status_code == 200
+    assert c.get("/ask/history?page=0").status_code == 200
+    # Everything, across both pages, is present and whole.
+    assert (p1 + p2).count("THE-END-OF-A-LONG-ANSWER") >= 30
