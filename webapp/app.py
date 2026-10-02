@@ -24048,7 +24048,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
    collapses the depth/sources row to one summary line (the phone keyboard
    leaves little height). Its chips are clones of the top controls, kept in step
    by syncChips(); the top controls stay the single source of truth. */
-.fu{{position:sticky;bottom:8px;z-index:20;margin:16px 0 8px;max-width:88%;background:#fff;border:1px solid var(--line-strong,#cfd6e4);border-radius:16px;padding:10px 12px;box-shadow:0 -4px 24px rgba(11,31,77,.14);}}
+.fu{{position:sticky;bottom:8px;z-index:20;margin:16px 0 8px;max-width:88%;background:#fff;border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 -4px 24px rgba(11,31,77,.14);}}
 /* The limit message is not worth floating over the reply it follows. */
 .fu.fu-limited{{position:static;box-shadow:none;}}
 .fu-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;}}

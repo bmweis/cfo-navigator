@@ -118,5 +118,5 @@ def test_tier_detail_and_recommended_move_from_persistent_ui_to_hover(env):
 def test_ask_collects_sources_scoped_so_depth_is_not_swept_in(env):
     appmod, _ = env
     html = _admin_html(appmod)
-    assert "document.querySelectorAll('.ask-tag[data-source].active')" in html
+    assert "document.querySelectorAll('.fpa-intro-area-controls .ask-tag[data-source].active')" in html
     assert "document.querySelectorAll('.ask-tag.active')" not in html
