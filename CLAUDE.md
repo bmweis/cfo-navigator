@@ -7916,14 +7916,14 @@ it supersedes the old "`/save` is token-gated" note.
     its current row count and card mix — seeding it with enough rows to
     span two rows reproduced the identical row-to-row variance Books was
     showing, proving it's the same underlying mechanism on both sections,
-    not a Books-specific bug. Fixed at the root for both sections at once:
-    `.bench-name` clamped to 2 lines, `.bench-desc` to 3 (`-webkit-line-
-    clamp`, so a short name/description doesn't grow past its own budget)
-    with a matching `.bench-card` `min-height` (so a short one still
-    reserves the same floor a maxed-out one would use — a clamp alone only
-    bounds the ceiling). Verified with real Playwright bounding-box
-    measurements at 1280/1920/390px: every card in both grids renders at
-    an identical height regardless of row composition, at every width.
+    not a Books-specific bug. PR 16 fixed it with a clamp (2 and 3 lines) plus a
+    `.bench-card` `min-height`. **Superseded 2026-10 (PR 660, Brian's call, "Option
+    2"): the clamp and the min-height are both removed**, and there is no "Show
+    more". Names and descriptions show in full; cards keep the
+    `_CARD_WIDTH_RESOURCE_MIN` floor on the `auto-fill` grid; cards in a row
+    stretch to equal height (grid default) and rows may differ. Reason: a clamp
+    hides text. The only clamps left are the two directory cards, which keep
+    "Full profile →". See `tests/test_resources_card_no_clamp.py`.
   - **The Resources intro-copy question was investigation-only, per the
     brief's own approval-gate rule** — a page-level paragraph introducing
     "what the resources are" (Brian's original ask) genuinely doesn't

@@ -924,13 +924,15 @@ the shared 220px floor fit only 3 tracks in the ~820px column (4 need 922px).
 label reuses the "Recent highlights" label style. The Original content
 admin page notes any flagged pieces the cap hides.
 
-**The height companion**: `-webkit-line-clamp` alone only bounds a
-field's ceiling. CSS Grid still sizes each ROW by its own tallest card, so
-without a matching `min-height` on the same element, a row of short
-content still renders shorter than a row of long content, even though
-every individual field is clamped to the same max. Clamp and min-height are
-a pair — apply both together, on every variable-length field in a card, or
-neither; one without the other still leaves rows uneven.
+**Resources cards are not clamped (2026-10).** `/tools/resources` card
+names and descriptions render in full: no `-webkit-line-clamp`, `overflow`,
+`max-height` or `min-height` floor, and no "Show more". Cards keep the
+`_CARD_WIDTH_RESOURCE_MIN` floor on an `auto-fill` grid, and cards in one row
+stretch to the tallest (grid default). Rows may differ in height from each
+other, by design. A clamp hides text; the only clamps left on the site are the
+two directory cards (`/tools/software`, `/tools/communities`), which keep a
+"Full profile" link. Do not add a clamp to a card without that link.
+`tests/test_resources_card_no_clamp.py` measures it in Chromium.
 
 ### Social share cards
 

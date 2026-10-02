@@ -10723,41 +10723,20 @@ def tools_resources(request: Request):
 </div>
 
 <style>
-/* Card heights, PR 16 (2026-09): `auto-fill` grid rows only stretch cards to
-   match the TALLEST card in their own row (CSS Grid's default
-   align-items:stretch) — every row is sized independently, so a row of
-   short names/descriptions renders visibly shorter than a row that happens
-   to contain a longer one. Confirmed empirically, not assumed: seeding the
-   real book-recommendations copy (names/descriptions varying widely in
-   length) AND the real Benchmarking copy (a more consistent, template-
-   driven "Best for X" length) side by side, the Benchmarking grid shows
-   the identical row-to-row variance once it has enough rows to have more
-   than one — it just doesn't today, at its current 11-row count and card
-   mix, so it reads as "already uniform" while Books' more varied name/
-   description lengths make the same underlying behavior visible. Not a
-   missing height constraint on Books specifically and not a different
-   card component — both sections share this one class.
-
-   Fixed at the root, for both sections at once, with three pieces working
-   together (a line-clamp alone only bounds the CEILING — a short card
-   still renders shorter unless something also reserves the floor):
-     - .bench-name clamped to 2 lines, .bench-desc to 3 — every card's
-       content now has a known maximum height regardless of how long the
-       underlying text actually is.
-     - .bench-card gets a matching min-height, so a short name/description
-       still reserves the same space a clamped-to-the-max one would use
-       (verified against the tallest real combination in this data set—
-       a 2-line name + a full 3-line description — not picked by eye).
-   Height is now driven by these fixed budgets, not by which row a card's
-   own content happens to land in. */
-.bench-card{{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;transition:border-color .15s;min-height:172px;}}
+/* Resources cards size to their content. No clamp, no max-height, no
+   min-height floor, no "Show more": a name and description are shown in full
+   (BRAND.md section 5, "Card widths"). Cards in the same grid row stretch to
+   the tallest card in that row (CSS Grid's default align-items:stretch), so
+   a row stays even; different rows may differ in height, by design. Card
+   width keeps its floor via _CARD_WIDTH_RESOURCE_MIN on the auto-fill grid.
+   History: PR 16 (2026-09) clamped these (2 and 3 lines) with a min-height
+   floor to even out rows; replaced 2026-10 because a clamp hides text. */
+.bench-card{{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;transition:border-color .15s;}}
 .bench-card:hover{{border-color:var(--accent);text-decoration:none;}}
-.bench-name{{font-size:15px;font-weight:600;color:var(--ink);line-height:1.35;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}}
+.bench-name{{font-size:15px;font-weight:600;color:var(--ink);line-height:1.35;}}
 .bench-card:hover .bench-name{{color:var(--accent);}}
 .bench-badge{{font-size:11px;font-weight:500;border-radius:6px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}}
-.bench-desc{{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}}
+.bench-desc{{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}}
 </style>"""
     return HTMLResponse(_page("Resources—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 
