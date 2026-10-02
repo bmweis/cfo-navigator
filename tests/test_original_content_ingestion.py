@@ -67,20 +67,35 @@ def test_empty_body_md_yields_empty_text():
     assert plain_text_from_body_md(None) == ""
 
 
-def test_mirrored_article_url_is_canonical_thought_leadership_path(monkeypatch):
-    monkeypatch.setenv("LINKLIB_PUBLIC_BASE", "https://bmweis.com")
+@pytest.fixture
+def https_public_base(monkeypatch):
+    """Pin the mirrored-article base to https for one test, then restore.
+
+    Library.upsert normalizes every stored URL to https, so a test comparing
+    a stored article URL with mirrored_article_url() only agrees when the
+    base is https (production's). The module reads its base at import time,
+    so this reloads it, and undoes the env var BEFORE the closing reload so
+    the default base is what's left behind. The old inline reload left the
+    https base in place for whichever tests ran next in that process, which
+    made two sync tests pass only when they happened to follow it."""
     import importlib
     import linklib.original_content_sync as ocs
+    monkeypatch.setenv("LINKLIB_PUBLIC_BASE", "https://bmweis.com")
     importlib.reload(ocs)
     try:
-        assert ocs.mirrored_article_url("my-piece") == "https://bmweis.com/thought-leadership/my-piece"
+        yield ocs
     finally:
+        monkeypatch.undo()
         importlib.reload(ocs)
+
+
+def test_mirrored_article_url_is_canonical_thought_leadership_path(https_public_base):
+    assert https_public_base.mirrored_article_url("my-piece") == "https://bmweis.com/thought-leadership/my-piece"
 
 
 # --- sync_original_content_article: create / re-sync / clear -----------------
 
-def test_sync_creates_mirrored_article_flagged_as_own_content(lib):
+def test_sync_creates_mirrored_article_flagged_as_own_content(lib, https_public_base):
     item_id = lib.add_original_content(
         "my-piece", "My Piece", "A teaser", "Guide", "Read it",
         body_md="# My Piece\n\nSome real content about FP&A.",
@@ -155,7 +170,7 @@ def test_clearing_body_md_deletes_the_mirror(lib):
     assert lib.get_original_content(item_id)["mirrored_article_id"] is None
 
 
-def test_sync_adopts_a_stray_pre_existing_article_at_the_same_url(lib):
+def test_sync_adopts_a_stray_pre_existing_article_at_the_same_url(lib, https_public_base):
     url = mirrored_article_url("my-piece")
     stray_id = lib.upsert(Article(url=url, title="Stray old save", content="stale stray content"))
 
