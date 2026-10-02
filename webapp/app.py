@@ -1381,7 +1381,7 @@ _NARRATIVE_MD_CSS = (
 )
 
 
-def _citations_list_html(citations: list, cap: int | None = None, empty_note: str = "") -> str:
+def _citations_list_html(citations: list, empty_note: str = "") -> str:
     """Render a field's API-verified citation list (Citations-API grounding
     fix, Phase 1b — see linklib.citations, linklib.enrich.
     generate_tool_agent_taxonomy) as a compact "Sources" list of numbered
@@ -1391,11 +1391,10 @@ def _citations_list_html(citations: list, cap: int | None = None, empty_note: st
     Ask page's own `<style>` block, not sitewide.
 
     `citations` is the FULL list from Library.get_entity_citations—
-    already deduped by url and in first-use order. `cap`, when given,
-    slices to the first N entries for public display (decision: 5 sources,
-    drop the rest, no "+N more" indicator) — the admin view passes no cap,
-    so a reviewer always sees everything before deciding whether to
-    publish. Renders nothing (not even the "Sources" label) when empty and
+    already deduped by url and in first-use order, and rendered in full on
+    every surface (profiles, Compare, admin): a `[6]` marker in the text
+    must always have its chip, so there is no display cap (the old public
+    cap of 5 was removed 2026-10). Renders nothing (not even the "Sources" label) when empty and
     no `empty_note` is given — a field with zero citations either wasn't
     grounded at all (low_confidence) or is hand-written text (a human edit
     clears the sidecar table — see update_tool_agent_taxonomy), and both
@@ -1407,7 +1406,7 @@ def _citations_list_html(citations: list, cap: int | None = None, empty_note: st
     Shared across every field this grounding fix extends to (Agent
     taxonomy first; Description and Community profile in later phases)—
     not agent-taxonomy-specific despite shipping alongside it first."""
-    shown = citations[:cap] if cap is not None else citations
+    shown = citations
     if not shown:
         if not empty_note:
             return ""
@@ -9974,12 +9973,12 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     agent_taxonomy_block = ""
     _at_note = (tool.get("agent_taxonomy_note") or "").strip()
     _at_unverified = bool(tool.get("agent_taxonomy_needs_verification"))
-    # Public citation list, capped at 5 (first-use order, already deduped
+    # Public citation list, every source (first-use order, already deduped
     # by url) — Citations-API grounding fix, Phase 1b. Shown alongside the
     # note to both viewers — a signed-in admin deciding whether to mark an
     # unverified note reviewed benefits from seeing sources too, not just a
     # public visitor once the note is verified.
-    _at_citations_html = _citations_list_html(agent_taxonomy_citations, cap=5)
+    _at_citations_html = _citations_list_html(agent_taxonomy_citations)
     if _at_note:
         _at_badge = _review_state_badge(_at_unverified, authed, "tp-verify")
         agent_taxonomy_block = f"""<div class="tp-card">
@@ -10262,7 +10261,7 @@ function submitIntroForm() {{
         description_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Description{_desc_badge}</h2>
   <div class="narrative-md">{render_narrative_markdown(tool['description'])}</div>
-  {_citations_list_html(description_citations, cap=5)}
+  {_citations_list_html(description_citations)}
 </div>"""
     else:
         # "Description coming soon." is a deliberate contextual variant of
@@ -12279,7 +12278,7 @@ def tools_community_profile(request: Request, slug: str):
                           f'{_empty_state_card("Bottom line", _empty_state_text(_comm_bl_copy.visitor_text, _comm_bl_copy.admin_suffix, authed))}</div>')
     # Citations-API grounding fix, Phase 3 — ONE shared "Sources" list for
     # the whole profile draft (decision 5), not one per card, rendered once
-    # right after the Bottom line callout, public-capped at 5. Empty when
+    # right after the Bottom line callout, every source shown. Empty when
     # the profile was never grounded (hand-written, or predates this
     # feature) — same "render nothing, not even the label" default as every
     # other _citations_list_html public call site. Radical-transparency
@@ -12287,7 +12286,7 @@ def tools_community_profile(request: Request, slug: str):
     # verified content — sources are useful context for judging an
     # unreviewed claim, not something to withhold until review is done.
     profile_citations_block = ""
-    _pc_html = _citations_list_html(profile_citations, cap=5)
+    _pc_html = _citations_list_html(profile_citations)
     if _pc_html:
         profile_citations_block = f'<div>{_pc_html}</div>'
 
