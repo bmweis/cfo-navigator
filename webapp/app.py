@@ -23816,7 +23816,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   {usage_div}
   <div class="fpa-intro-area-question">
     <div class="ask-card">
-      <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
+      <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">New question <span style="text-transform:none;letter-spacing:0;font-weight:400;">&middot; starts a new conversation</span></label>
       <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?"
         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
     </div>
@@ -23851,9 +23851,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 <div id="ask-recent" class="ask-section" style="display:none;"></div>
 
 <div id="ask-thread"></div>
-<div id="ask-capped" style="display:none;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:14px;color:var(--muted);">
-  You&rsquo;ve reached the limit for this conversation. <a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.
-</div>
 </div>
 
 <style>
@@ -24046,6 +24043,34 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-cost-label{{font-size:11px;color:var(--muted);margin-top:1px;}}
 
 .ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px 14px 14px 2px;max-width:88%;padding:20px 24px;font-size:15px;line-height:1.7;}}
+/* Follow-up bubble: lives under the latest reply, sticky to the viewport bottom
+   while that reply is long, and absent until a conversation exists. Typing in it
+   collapses the depth/sources row to one summary line (the phone keyboard
+   leaves little height). Its chips are clones of the top controls, kept in step
+   by syncChips(); the top controls stay the single source of truth. */
+.fu{{position:sticky;bottom:8px;z-index:20;margin:16px 0 8px;max-width:88%;background:#fff;border:1px solid var(--line-strong,#cfd6e4);border-radius:16px;padding:10px 12px;box-shadow:0 -4px 24px rgba(11,31,77,.14);}}
+/* The limit message is not worth floating over the reply it follows. */
+.fu.fu-limited{{position:static;box-shadow:none;}}
+.fu-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;}}
+.fu-limit{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}
+.fu-row{{display:flex;gap:8px;align-items:flex-end;}}
+.fu textarea{{flex:1;min-width:0;min-height:42px;height:42px;max-height:120px;resize:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:14.5px;background:var(--bg);}}
+.fu .btn{{padding:10px 18px;font-size:14px;white-space:nowrap;}}
+.fu .btn:disabled{{opacity:.55;cursor:not-allowed;}}
+.fu-meta{{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--muted);}}
+.fu-meta .ask-tags{{gap:6px;flex-wrap:wrap;}}
+.fu-meta .ask-tag{{padding:4px 10px;font-size:12px;width:auto;}}
+.fu-meta .ask-cost{{margin-left:auto;flex-direction:row;gap:5px;align-items:baseline;}}
+.fu-meta details{{position:relative;}}
+.fu-meta summary{{cursor:pointer;list-style:none;border:1px solid var(--line);border-radius:999px;padding:4px 10px;}}
+.fu-meta .fu-pop{{position:absolute;bottom:32px;left:0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;box-shadow:0 6px 20px rgba(11,31,77,.12);z-index:5;display:flex;flex-wrap:wrap;gap:6px;width:max-content;max-width:calc(100vw - 48px);}}
+.fu-sum{{display:none;font-size:12px;color:var(--muted);margin-top:6px;}}
+/* :has(textarea:focus), not :focus-within: tapping a chip focuses the chip
+   (a button), and collapsing the row on that focus removed the chip between
+   mousedown and mouseup, so the tap never registered. */
+.fu:has(textarea:focus) .fu-meta{{display:none;}}
+.fu:has(textarea:focus) .fu-sum{{display:block;}}
+@media(max-width:640px){{.fu{{max-width:100%;padding:8px 10px;}} .fu-meta{{font-size:11.5px;}}}}
 .ask-answer p{{margin:0 0 14px;}}
 .ask-answer h3,.ask-answer h4,.ask-answer h5,.ask-answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:18px 0 8px;letter-spacing:-0.01em;}}
 .ask-answer h3:first-child,.ask-answer h4:first-child{{margin-top:0;}}
@@ -24091,26 +24116,58 @@ var selectedTier = "{default_effort}";
 // Depth radio behavior rather than the multi-select toggle Sources uses,
 // even though both share the .ask-tag component.
 function selectTier(el) {{
-  document.querySelectorAll('.ask-tag[data-tier]').forEach(function(t) {{
-    t.classList.remove('active');
-    t.setAttribute('aria-checked', 'false');
-  }});
-  el.classList.add('active');
-  el.setAttribute('aria-checked', 'true');
   selectedTier = el.getAttribute('data-tier');
+  // Match by value, not by the clicked node: the follow-up bubble carries
+  // clones of these chips, and either copy can be the one tapped.
+  document.querySelectorAll('.ask-tag[data-tier]').forEach(function(t) {{
+    var on = t.getAttribute('data-tier') === selectedTier;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-checked', on ? 'true' : 'false');
+  }});
   updateEstimate();
+  fuSummary();
 }}
 
 function toggleSource(el) {{
-  var on = el.classList.toggle('active');
-  el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  var key = el.getAttribute('data-source');
+  var on = !el.classList.contains('active');
+  document.querySelectorAll('.ask-tag[data-source="' + key + '"]').forEach(function(t) {{
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }});
+  fuSummary();
 }}
 
 function updateEstimate() {{
-  var num = document.getElementById('cost-est-num');
-  if (!num) return;
   var c = COST[selectedTier];
-  num.textContent = c != null ? '~$' + c.toFixed(3) : '';
+  var txt = c != null ? '~$' + c.toFixed(3) : '';
+  document.querySelectorAll('#cost-est-num, .fu-cost-num').forEach(function(n) {{ n.textContent = txt; }});
+}}
+
+// The top controls are the single source of truth for depth and sources.
+function activeSources() {{
+  return Array.prototype.map.call(
+    // Scoped to the top controls and to [data-source]: Depth's buttons share the
+    // .ask-tag component and its .active state, and the follow-up bubble holds
+    // clones of both groups, so an unscoped '.ask-tag.active' would sweep the
+    // depth tier and the duplicates into the sources list.
+    document.querySelectorAll('.fpa-intro-area-controls .ask-tag[data-source].active'),
+    function(t) {{ return t.getAttribute('data-source'); }}
+  );
+}}
+function chipText(sel) {{
+  return Array.prototype.map.call(document.querySelectorAll(sel), function(t) {{
+    return t.textContent.trim();
+  }});
+}}
+function fuSummary() {{
+  var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active').join(', ') || 'No sources';
+  var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
+  var cost = (document.getElementById('cost-est-num') || {{}}).textContent || '';
+  var sum = document.querySelector('.fu-sum');
+  if (sum) sum.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ');
+  var lab = document.querySelector('.fu-src-label');
+  if (lab) lab.textContent = 'Sources: ' + srcs + ' \u25be';
 }}
 
 // Sources' three chips match each other (sized to "Saved archive"), and
@@ -24163,9 +24220,8 @@ function escapeHtml(s) {{
 // library, matching the rest of the site's zero-dependency inline-JS pattern.
 function mdInline(s) {{
   s = escapeHtml(s);
-  s = s.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)/g, function(_, t, u) {{
-    return '<a href="' + u + '" target="_blank" rel="noopener">' + t + '</a>';
-  }});
+  // Model-text links are never turned into anchors: only a resolved [n] marker
+  // (below) links out, to a URL from the turn's own citation snapshot.
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
   s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
@@ -24309,11 +24365,68 @@ document.addEventListener('keydown', function(e) {{
 function resetConvo() {{
   asked = false; convoId = null;
   document.getElementById('ask-thread').innerHTML = '';
-  document.getElementById('ask-capped').style.display = 'none';
   var rec = document.getElementById('ask-recent');
   if (rec.innerHTML) rec.style.display = 'block';
-  var btn = document.getElementById('ask-btn'); btn.disabled = false; btn.textContent = 'Ask';
-  var q = document.getElementById('ask-q'); q.placeholder = 'e.g. What frameworks do CFOs use for headcount planning in uncertain environments?'; q.focus();
+  var btn = document.getElementById('ask-btn'); btn.disabled = false;
+  var q = document.getElementById('ask-q'); q.focus();
+  q.scrollIntoView({{behavior:'smooth', block:'center'}});
+}}
+
+function lastTurnEl() {{
+  var kids = document.getElementById('ask-thread').children;
+  for (var i = kids.length - 1; i >= 0; i--) if (kids[i].id !== 'fu') return kids[i];
+  return null;
+}}
+// Follow-up bubble: rebuilt under the latest turn after every render, and
+// removed whenever there is no conversation. state: 'ready' | 'busy' | 'limit' | 'none'.
+// Nothing here is persisted or sent: the server rebuilds history itself.
+function fuRender(state) {{
+  var old = document.getElementById('fu');
+  if (old) old.remove();
+  // No conversation yet means no bubble, except to show a cap on the first turn.
+  if (state === 'none' || (!asked && state !== 'limit')) return;
+  var thread = document.getElementById('ask-thread');
+  var limited = state === 'limit', busy = state === 'busy';
+  var f = document.createElement('div');
+  f.id = 'fu'; f.className = limited ? 'fu fu-limited' : 'fu';
+  f.innerHTML = '<div class="fu-label">Follow-up</div>' +
+    (limited ? '<p class="fu-limit">You&rsquo;ve reached the limit for this conversation. ' +
+               '<a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.</p>' : '') +
+    '<div class="fu-row"><textarea id="fu-q" rows="1" placeholder="Ask a follow-up…"' + (limited ? ' disabled' : '') + '></textarea>' +
+    '<button type="button" class="btn" id="fu-btn" onclick="doAsk(true)"' + ((limited || busy) ? ' disabled' : '') + '>' +
+    (limited ? 'Limit reached' : busy ? 'Thinking…' : 'Ask follow-up') + '</button></div>';
+  if (!limited) {{
+    var meta = document.createElement('div');
+    meta.className = 'fu-meta';
+    var depth = document.querySelector('.fpa-intro-area-controls .ask-control:nth-child(2) .ask-tags');
+    var srcs = document.querySelector('.fpa-intro-area-controls .ask-control:nth-child(1) .ask-tags');
+    // Clones drop the top group's equalized inline widths; the bubble's chips size to their text.
+    if (depth) {{
+      var dc = depth.cloneNode(true);
+      dc.querySelectorAll('.ask-tag').forEach(function(t) {{ t.style.width = ''; }});
+      meta.appendChild(dc);
+    }}
+    var det = document.createElement('details');
+    det.innerHTML = '<summary class="fu-src-label"></summary><div class="fu-pop"></div>';
+    if (srcs) {{
+      var pop = srcs.cloneNode(true);
+      pop.querySelectorAll('.ask-tag').forEach(function(t) {{ t.style.width = ''; }});
+      det.querySelector('.fu-pop').appendChild(pop);
+    }}
+    meta.appendChild(det);
+    if (document.getElementById('cost-est-num')) {{
+      var cost = document.createElement('span');
+      cost.className = 'ask-cost';
+      cost.innerHTML = '<span class="ask-cost-num fu-cost-num"></span><span class="ask-cost-label">per query</span>';
+      meta.appendChild(cost);
+    }}
+    f.appendChild(meta);
+    var sum = document.createElement('div');
+    sum.className = 'fu-sum';
+    f.appendChild(sum);
+  }}
+  thread.appendChild(f);
+  updateEstimate(); fuSummary();
 }}
 
 // --- Resume: recent conversations -------------------------------------------
@@ -24388,49 +24501,53 @@ async function resumeConvo(el) {{
     convoId = d.conversation_id;
     asked = true;
     document.getElementById('ask-recent').style.display = 'none';
-    var btn = document.getElementById('ask-btn');
-    var qEl = document.getElementById('ask-q');
-    if (d.capped) {{
-      document.getElementById('ask-capped').style.display = 'block';
-      btn.disabled = true; btn.textContent = 'Limit reached';
-    }} else {{
-      document.getElementById('ask-capped').style.display = 'none';
-      btn.disabled = false; btn.textContent = 'Ask follow-up';
-      qEl.placeholder = 'Ask a follow-up…';
-    }}
-    if (thread.lastElementChild) thread.lastElementChild.scrollIntoView({{behavior:'smooth', block:'nearest'}});
+    fuRender(d.capped ? 'limit' : 'ready');
+    var lastTurn = lastTurnEl();
+    if (lastTurn) lastTurn.scrollIntoView({{behavior:'smooth', block:'start'}});
   }} catch(e) {{}}
 }}
 
-async function doAsk() {{
-  var qEl = document.getElementById('ask-q');
+// followUp=false: the top box, always a NEW question (a fresh conversation).
+// followUp=true: the bubble under the latest reply, continuing convoId.
+async function doAsk(followUp) {{
+  var qEl = document.getElementById(followUp ? 'fu-q' : 'ask-q');
+  if (!qEl) return;
   var q = qEl.value.trim();
   if (!q) {{ qEl.focus(); return; }}
 
   var effort = selectedTier || 'standard';
-  var sources = Array.prototype.map.call(
-    // Scoped to [data-source]: Depth's buttons share the .ask-tag component and
-    // its .active state, so an unscoped '.ask-tag.active' would sweep the
-    // selected depth tier into the sources list.
-    document.querySelectorAll('.ask-tag[data-source].active'), function(t) {{ return t.getAttribute('data-source'); }}
-  );
+  var sources = activeSources();
   if (!sources.length) {{ alert('Select at least one source.'); return; }}
 
-  var btn = document.getElementById('ask-btn');
   var thread = document.getElementById('ask-thread');
+  if (!followUp) {{
+    // A new question never inherits a conversation: clear the screen and the id
+    // before anything is sent (the old one stays in Recent conversations).
+    asked = false; convoId = null;
+    thread.innerHTML = '';
+  }}
+  var topBtn = document.getElementById('ask-btn');
   var turn = document.createElement('div');
   turn.style.marginTop = '18px';
+  turn.style.scrollMarginTop = '12px';
   turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(q) + '</div>' +
                    '<div class="ask-answer"><div class="ask-loading"><span class="dots"><span></span><span></span><span></span></span>' +
                    '<span class="ask-loading-label">Querying sources&hellip;</span></div></div>';
+  var oldBubble = document.getElementById('fu');
+  if (oldBubble) oldBubble.remove();
   thread.appendChild(turn);
   document.getElementById('ask-recent').style.display = 'none';
   var answerEl = turn.querySelector('.ask-answer');
 
-  btn.disabled = true; btn.textContent = 'Thinking…';
+  topBtn.disabled = true; topBtn.textContent = 'Thinking…';
   qEl.value = '';
+  fuRender('busy');
   turn.scrollIntoView({{behavior:'smooth', block:'nearest'}});
 
+  function done(state) {{
+    topBtn.disabled = false; topBtn.textContent = 'Ask';
+    fuRender(state);
+  }}
   try {{
     var resp = await fetch('/ask', {{
       method: 'POST',
@@ -24440,7 +24557,7 @@ async function doAsk() {{
     var d = await resp.json();
     if (!resp.ok) {{
       answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(d.detail || 'Error') + '</span>';
-      btn.disabled = false; btn.textContent = asked ? 'Ask follow-up' : 'Ask';
+      done(asked ? 'ready' : 'none');
       return;
     }}
 
@@ -24450,28 +24567,25 @@ async function doAsk() {{
     updateUsage(d.usage);
 
     if (d.capped) {{
-      document.getElementById('ask-capped').style.display = 'block';
-      btn.disabled = true; btn.textContent = 'Limit reached';
+      // Over the dollar cap: this turn was not recorded, so the thread so far is
+      // still a valid conversation to leave as it is.
+      asked = asked || !!d.conversation_id;
+      done('limit');
       return;
     }}
 
     convoId = d.conversation_id || convoId;
     asked = true;
-    qEl.placeholder = 'Ask a follow-up…';
-    btn.disabled = false; btn.textContent = 'Ask follow-up';
-
-    if (d.followups_left === 0) {{
-      document.getElementById('ask-capped').style.display = 'block';
-      btn.disabled = true; btn.textContent = 'Limit reached';
-    }}
+    done(d.followups_left === 0 ? 'limit' : 'ready');
+    turn.scrollIntoView({{behavior:'smooth', block:'start'}});
   }} catch(e) {{
     answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong: ' + escapeHtml(String(e)) + '</span>';
-    btn.disabled = false; btn.textContent = asked ? 'Ask follow-up' : 'Ask';
+    done(asked ? 'ready' : 'none');
   }}
 }}
 
 document.addEventListener('keydown', function(e) {{
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doAsk();
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doAsk(!!(e.target && e.target.id === 'fu-q'));
 }});
 
 updateEstimate();
