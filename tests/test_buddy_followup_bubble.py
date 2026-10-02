@@ -224,3 +224,121 @@ def test_model_text_links_stay_inert_on_the_live_page(live):
     assert "[the memo](https://evil.example/x)" in pg.inner_text("#ask-thread .ask-answer")
     # A resolved [n] marker still links, to the citation snapshot's own URL.
     assert pg.locator("#ask-thread sup.cite a[href='https://example.com/a']").count() == 1
+
+
+# --- visibility rules: own conversations only --------------------------------
+
+RESUME_STUB = """() => {
+  var base = window.fetch;
+  var turns = [
+    {turn_id: 11, question: 'Earlier question', answer: 'Earlier answer.', citations: [], feedback: null},
+    {turn_id: 12, question: 'Second question', answer: 'Latest answer.', citations: [], feedback: null}
+  ];
+  window.__capped = false;
+  window.fetch = function(u, o) {
+    var s = String(u);
+    if (s === '/ask/conversations')
+      return Promise.resolve({ok: true, json: function() { return Promise.resolve({conversations: [
+        {conversation_id: 'c9', first_question: 'Earlier question', turns: 2, last_at: new Date().toISOString(), capped: window.__capped}]}); }});
+    if (s.indexOf('/ask/conversations/') === 0)
+      return Promise.resolve({ok: true, json: function() { return Promise.resolve({
+        conversation_id: 'c9', capped: window.__capped, turns: turns}); }});
+    return base(u, o);
+  };
+}"""
+
+
+def _open_recent(pg):
+    pg.evaluate(RESUME_STUB)
+    pg.evaluate("loadRecent()")
+    pg.wait_for_selector(".ask-recent-item")
+    pg.click(".ask-recent-item")
+    pg.wait_for_selector("#ask-thread .ask-answer")
+
+
+def test_fresh_page_has_no_bubble_anywhere(live):
+    pg = live
+    assert pg.locator("#fu, #fu-q, #fu-btn, .fu").count() == 0
+    assert pg.evaluate("document.getElementById('ask-thread').children.length") == 0
+
+
+def test_opening_an_own_conversation_shows_the_bubble_and_continues_it(live):
+    pg = live
+    _open_recent(pg)
+    pg.wait_for_selector("#fu-q")
+    assert pg.evaluate("document.getElementById('ask-thread').lastElementChild.id") == "fu"
+    assert pg.evaluate("convoId") == "c9"
+    assert pg.locator("#ask-btn").inner_text() == "Ask"
+    pg.fill("#fu-q", "Continue it")
+    pg.click("#fu-btn")
+    pg.wait_for_function("window.__calls.length === 1")
+    assert pg.evaluate("window.__calls[0].conversation_id") == "c9"
+
+
+def test_opening_a_conversation_at_its_limit_shows_the_limit_state(live):
+    pg = live
+    pg.evaluate(RESUME_STUB)
+    pg.evaluate("window.__capped = true")
+    pg.evaluate("loadRecent()")
+    pg.wait_for_selector(".ask-recent-item")
+    pg.click(".ask-recent-item")
+    pg.wait_for_selector("#fu .fu-limit")
+    assert pg.is_disabled("#fu-q") and pg.is_disabled("#fu-btn")
+    assert pg.inner_text("#fu-btn") == "Limit reached"
+    assert pg.locator("#fu .fu-meta").count() == 0
+
+
+@pytest.fixture
+def past_question_page(monkeypatch, tmp_path):
+    """Another member's helpful-rated answer, viewed by a different member."""
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    lib = Library(db)
+    lib.seed_voice_prompts()
+    author = lib.create_user("author", "supersecret", role="user")
+    lib.create_user("reader", "supersecret", role="user")
+    qid = lib.record_ask_question(author, "How do peers size FP&A?", "Roughly one analyst per 100 staff [1].",
+                                  "claude-sonnet-4-6", "standard", True, False, True, cost_usd=0.03,
+                                  citations=[{"n": 1, "title": "Sizing", "url": "https://example.com/s", "type": "library"}])
+    lib.record_ask_feedback(qid, author, "helpful", "")
+    lib.close()
+    import webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    c = TestClient(appmod.app)
+    assert c.post("/login", data={"username": "reader", "password": "supersecret"},
+                  follow_redirects=False).status_code in (302, 303)
+    html = c.get("/tools/fpa-buddy").text
+    f = tmp_path / "pq.html"
+    f.write_text(html, encoding="utf-8")
+    yield html, f
+    for ext in ("", "-shm", "-wal"):
+        if os.path.exists(db + ext):
+            os.remove(db + ext)
+
+
+def test_other_members_past_answers_never_bring_the_bubble(past_question_page):
+    """Search past questions shows other members' answers read-only. They have
+    no resume path (no row handler, no conversation id sent to the client), so
+    the bubble, which continues a conversation, must not appear on them."""
+    html, f = past_question_page
+    assert "How do peers size FP&amp;A?" in html          # the row renders
+    section = html[html.index('id="past-questions"'):html.index('id="ask-recent"')]
+    assert "onclick" not in section and "data-cid" not in section and "conversation" not in section
+    launched = _launch()
+    if launched is None:
+        pytest.skip("no Chromium available")
+    pw, browser = launched
+    try:
+        pg = browser.new_page(viewport={"width": 1280, "height": 900})
+        pg.add_init_script(STUB)
+        pg.goto(f.as_uri())
+        pg.click("#past-questions .ask-hist-answer")
+        pg.click("#past-questions >> text=How do peers size")
+        assert pg.locator("#fu, .fu").count() == 0
+        assert pg.evaluate("window.__calls.length") == 0
+    finally:
+        browser.close()
+        pw.stop()
