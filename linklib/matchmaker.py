@@ -19,6 +19,7 @@ from .db import Library
 from .enrich import NEEDS_VERIFICATION
 from .gates import MATCHMAKER_COMMUNITY_NOTE, MATCHMAKER_DISCLAIMER, MATCHMAKER_FIELD_SUFFIX
 from .models import DEFAULT_CHAT_MODEL
+from .stop_reason import stop_reason_of
 from .voice_settings import VoicePromptMissing, require_voice_setting
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", DEFAULT_CHAT_MODEL)
@@ -247,6 +248,9 @@ class MatchAnswer:
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     cost_usd: float = 0.0
+    # The answer call's API stop_reason ("max_tokens" = cut off by the token
+    # budget); "" when the call never completed. Measurement only.
+    stop_reason: str = ""
 
 
 _client = None
@@ -335,7 +339,8 @@ def _answer(lib: Library, kind: str, question: str,
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
         return MatchAnswer(text=text, model=model, input_tokens=in_tok, output_tokens=out_tok,
-                           cache_creation_tokens=cache_w, cache_read_tokens=cache_r, cost_usd=cost)
+                           cache_creation_tokens=cache_w, cache_read_tokens=cache_r, cost_usd=cost,
+                           stop_reason=stop_reason_of(resp))
     except Exception as e:
         return MatchAnswer(text=f"(Answer call failed: {e})", model=model)
 

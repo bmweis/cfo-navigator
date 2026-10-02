@@ -37,6 +37,7 @@ Brian's approval), rather than raising a `ToolError` for it.
 from __future__ import annotations
 
 from linklib.db import Library
+from linklib.stop_reason import stop_reason_of
 
 
 class UnknownConversationError(Exception):
@@ -165,6 +166,7 @@ def run_ask(
             # Persisted snapshot of what this answer actually cited, so a
             # later feedback flag stays inspectable with its sources.
             citations=ans.citations,
+            stop_reason=stop_reason_of(ans),
         )
         new_conversation_id = conversation_id or str(row_id)
         turn_id = row_id

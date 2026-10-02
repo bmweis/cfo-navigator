@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 
 from .citations import extract_citations, make_document_block
 from .community_profile import generated_cpe
+from .stop_reason import warn_if_max_tokens
 
 _logger = logging.getLogger(__name__)
 
@@ -431,6 +432,7 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
                               # (max_tokens caps thinking + response together)
             messages=[{"role": "user", "content": _PROMPT.format(known=known, guide_block=guide_block, title=title, text=snippet)}],
         )
+        warn_if_max_tokens(resp, "enrich.enrich")
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
@@ -650,6 +652,7 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
                               # GoClose) via --sample before this was considered resolved.
             messages=[{"role": "user", "content": message_content}],
         )
+        warn_if_max_tokens(resp, "enrich.generate_tool_description")
         # inject_markers=True: real citations now surface as genuine [n]
         # markers spliced into the text by extract_citations itself, not
         # left for the model to signal on its own — see the docstring above.
@@ -814,6 +817,7 @@ def generate_tool_differentiation(name: str, url: str, description: str,
                            name=name, url=url, description=description, competitors_block=competitors_block,
                            voice_core=resolved_voice_core)}],
         )
+        warn_if_max_tokens(resp, "enrich.generate_tool_differentiation")
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
@@ -906,6 +910,7 @@ def generate_competitor_matches(name: str, description: str, candidates: list[di
                        "content": _COMPETITOR_MATCH_PROMPT.format(
                            name=name, description=description, candidates_block=candidates_block)}],
         )
+        warn_if_max_tokens(resp, "enrich.generate_competitor_matches")
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
@@ -1254,6 +1259,7 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
             max_tokens=_checked_max_tokens(2000),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": message_content}],
         )
+        warn_if_max_tokens(resp, "enrich.generate_tool_agent_taxonomy")
         # inject_markers=True: real citations now surface as genuine [n]
         # markers spliced into the note text by extract_citations itself—
         # see the docstring above. `citations` is collected the same way
@@ -1591,6 +1597,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             max_tokens=_checked_max_tokens(6000),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": message_content}],
         )
+        warn_if_max_tokens(resp, "enrich.generate_community_profile")
         # inject_markers=True: real citations now surface as genuine [n]
         # markers spliced into whichever field actually got cited — see
         # the docstring above.
@@ -1842,6 +1849,7 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
             max_tokens=_checked_max_tokens(1200),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": prompt}],
         )
+        warn_if_max_tokens(resp, "enrich.generate_community_listing")
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
@@ -1967,6 +1975,7 @@ def voice_rewrite_community_fields(name: str, fields: dict, voice_core: str,
             max_tokens=_checked_max_tokens(4000),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": prompt}],
         )
+        warn_if_max_tokens(resp, "enrich.voice_rewrite_community_fields")
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
@@ -2139,6 +2148,7 @@ def generate_compare_summary(entity_type: str, entities: list[dict], model: str 
             max_tokens=_checked_max_tokens(MIN_GENERATE_MAX_TOKENS),
             messages=[{"role": "user", "content": prompt}],
         )
+        warn_if_max_tokens(resp, "enrich.generate_compare_summary")
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```").removesuffix("```").strip()
         if not raw:

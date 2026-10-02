@@ -25,6 +25,7 @@ see mcp_qa.py for that mapping.
 from __future__ import annotations
 
 from linklib.db import Library
+from linklib.stop_reason import stop_reason_of
 
 _BROWSE_URLS = {
     "software": "/tools/software",
@@ -129,6 +130,7 @@ def run_matchmaker(
         input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
         cache_creation_tokens=ans.cache_creation_tokens, cache_read_tokens=ans.cache_read_tokens,
         cost_usd=ans.cost_usd,
+        stop_reason=stop_reason_of(ans),
     )
     new_conversation_id = conversation_id or str(row_id)
     followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
