@@ -6284,8 +6284,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   **Exempt from the rule, recorded here so a later audit does not re-open
   them:** feed item summaries cut at 300 characters at ingest (a third-party
   excerpt, not our text); Buddy "Recent conversations" labels (a click opens
-  the full transcript); the `/tools/resources` card clamps (consistent card
-  size, Brian's decision); `search_archive` excerpts (admin-only, marked with
+  the full transcript); `search_archive` excerpts (admin-only, marked with
   "…") and citation titles capped at 250 characters (low impact). The only
   clamps allowed anywhere else are the two directory cards, each with its
   "Full profile" link.
