@@ -5107,6 +5107,10 @@ Details worth knowing:
   field()`), mirroring `community_profile_quality_flags()`'s existing
   one-query-for-the-whole-page shape. See `tests/
   test_admin_completeness_filter.py`.
+- **Short summary carries no citation markers (2026-10).** `linklib/citations.py::strip_citation_markers` is applied
+  to the SUMMARY sentinel in `generate_tool_description` (draft's own citation numbers only) and, for any 1-2 digit
+  marker, to the empty-summary copy in `Library.__init__`, which is now a Python loop over blank summaries instead of
+  one SQL statement. No schema change.
 - **Software parity follow-up (2026-10).** `webapp/app.py` carries `_CHK_STATUS_COL_WIDTH` (the
   `/admin/checks` result column, 200px fixed, text column `minmax(0,1fr)`), the `_BACKUP_COL_WIDTH_*` and
   `_BACKUP_TABLE_MIN_WIDTH` constants for the archive backup log table (reset under 700px by

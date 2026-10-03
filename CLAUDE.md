@@ -10987,7 +10987,13 @@ it supersedes the old "`/save` is token-gated" note.
   page has no table. WebKit is not available in this sandbox, so all of this is Chromium only.
   (5) Open choice, not decided: flipping `tool_labels.SECTION_AGENT` to "How autonomous is it?" would make the
   field name visible on Compare; mock screenshots (current and flipped, 1280px and 390px) are in the PR. Also
-  open: stripping `[n]` markers from `summary` in `generate_tool_description` and in the empty-summary copy.
+  open, pending Brian's pick (mocks in the PR): a heading for the Compare summary card and the Bottom line row fill.
+  (6) Summary markers, built: `linklib.citations.strip_citation_markers` removes `\s*\[(\d{1,2})\]` from the
+  generated summary (only this draft's own citation numbers) and from the empty-summary copy in
+  `Library.__init__` (any 1-2 digit marker; the copy now loops in Python because SQLite has no regex). A year
+  such as "[2024]" survives both (4 digits; and in the generator it is not one of the draft's citation numbers);
+  a hand-typed summary is never passed through. `tests/test_summary_marker_strip.py`: 4 of the 5 behavior tests
+  fail on `main` (the hand-typed guard passes on both, by design); the helper unit test is new.
 - **Software parity, PR 2a.2 (2026-10): refusal, labels, Compare Short summary.**
   (1) **A refused Software save writes nothing, for real.** `admin_tools_edit_submit` used to let
   `Library.update_tool` write Description and Short summary before the Bottom line and Agent taxonomy

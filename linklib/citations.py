@@ -16,6 +16,30 @@ changed to accommodate that yet.
 """
 from __future__ import annotations
 
+import re
+
+# A citation marker as extract_citations splices it in: "[n]" with a 1-2 digit
+# n, plus the whitespace before it. 1-2 digits on purpose: citation numbers
+# are small, and a year such as "[2024]" must survive.
+_MARKER_RE = re.compile(r"\s*\[(\d{1,2})\]")
+
+
+def strip_citation_markers(text: str, numbers=None) -> str:
+    """Remove `[n]` citation markers from a field that must carry none (the
+    Short summary). `numbers`, when given, limits the strip to those citation
+    numbers (the draft's own list), so a bracketed number that is not one of
+    this draft's citations is left alone. Without it, any 1-2 digit marker is
+    stripped (the empty-summary copy has no citation list to check against).
+    Hand-typed text is never passed through here."""
+    if not text:
+        return text
+    keep = None if numbers is None else {int(n) for n in numbers}
+
+    def _sub(m):
+        return "" if keep is None or int(m.group(1)) in keep else m.group(0)
+
+    return _MARKER_RE.sub(_sub, text)
+
 
 def make_document_block(title: str, body: str) -> dict:
     """One Citations-API `document` content block: plain text, citations
