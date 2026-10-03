@@ -23779,6 +23779,18 @@ def api_search(request: Request, q: str = "", limit: int = 50, token: str | None
         lib.close()
 
 
+# One look and one height for the small action buttons on the FP&A Buddy
+# surfaces (Done, Resume). 44px is the Depth and Sources control height and the
+# touch minimum; the existing buttons are not restyled.
+_ASK_CTL_CSS = (
+    ".ask-ctl{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 16px;"
+    "box-sizing:border-box;border:1px solid var(--navy);border-radius:10px;background:transparent;color:var(--navy);"
+    "font:600 14px var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;}"
+    ".ask-ctl:hover{background:var(--accent-light);}"
+    ".ask-ctl:focus-visible{outline:2px solid var(--navy);outline-offset:2px;}"
+)
+
+
 @app.get("/tools/fpa-buddy", response_class=HTMLResponse)
 def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     # Member-gated: signed-in members and admin. Anonymous visitors go to login.
@@ -23826,6 +23838,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
+        # Resume is for the reader's own conversations only; another member's
+        # row gets nothing. The server still decides (403 for someone else's).
+        resume_html = ""
+        if usage_user_id is not None and r.get("user_id") == usage_user_id and r.get("conversation_id"):
+            resume_html = (f'<div class="ask-pq-foot"><button type="button" class="ask-ctl" '
+                           f'data-cid="{_esc(r["conversation_id"])}" onclick="resumeConvoById(this.dataset.cid)">Resume</button></div>')
         # A native <details>, closed on every load: the row is the question,
         # byline and a chevron; the answer, sources and admin buttons are the
         # disclosure body. Same fold element the Search past questions section uses.
@@ -23834,6 +23852,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   <div class="ask-pq-body">
     <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
     {src_html}
+    {resume_html}
     {admin_controls}
   </div>
 </details>"""
@@ -23995,7 +24014,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   {usage_div}
   <div class="fpa-intro-area-question">
     <div class="ask-card">
-      <label for="ask-q" style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">New question <span style="text-transform:none;letter-spacing:0;font-weight:400;">&middot; starts a new conversation</span></label>
       <div class="fpa-intro-area-controls">
         <div class="ask-dd" id="ask-dd-top">
           <div class="ask-dd-row">
@@ -24016,6 +24034,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         </div>
         {cost_note}
       </div>
+      <label for="ask-q" class="ask-q-label">Start a new conversation</label>
       <div class="ask-q-wrap">
         <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?">{pre_q}</textarea>
         <button type="button" class="fu-send ask-send" id="ask-btn" onclick="doAsk()" aria-label="Ask" title="Ask"{'' if q.strip() else ' disabled'}><span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button>
@@ -24225,14 +24244,18 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-pq-q{{flex:1 1 240px;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);}}
 .ask-pq-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
-.ask-recent-item{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;width:100%;text-align:left;
+.ask-recent-item{{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;box-sizing:border-box;
   font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
   margin-bottom:8px;transition:border-color .12s ease;}}
+.ask-recent-foot{{display:flex;justify-content:space-between;align-items:center;gap:12px;}}
+.ask-pq-foot,.fu-foot{{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}}
+.fu-foot{{margin-top:8px;}}
+.ask-done-note{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}
+{_ASK_CTL_CSS}
 .ask-recent-item:hover{{border-color:var(--navy);}}
 .ask-recent-q{{font-weight:600;font-size:13.5px;color:var(--navy);overflow:hidden;text-overflow:ellipsis;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}}
 .ask-recent-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
-@media (max-width:520px){{.ask-recent-item{{flex-direction:column;align-items:flex-start;gap:3px;}}}}
 
 
 .ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px 14px 14px 2px;max-width:88%;padding:20px 24px;font-size:15px;line-height:1.7;}}
@@ -24244,6 +24267,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fu{{position:sticky;bottom:8px;z-index:20;margin:16px 0 8px;max-width:88%;background:#fff;border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 -4px 24px rgba(11,31,77,.14);}}
 /* The limit message is not worth floating over the reply it follows. */
 .fu.fu-limited{{position:static;box-shadow:none;}}
+.ask-q-label{{display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 8px;}}
 .fu-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;}}
 .fu-limit{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}
 .fu-row{{display:flex;gap:8px;align-items:flex-end;}}
@@ -24440,6 +24464,7 @@ document.addEventListener('DOMContentLoaded', function() {{
 }});
 
 var asked = false;
+var convoGen = 0;       // bumped by Done and a new thread; an answer from an older generation is not drawn
 var convoId = null;    // the server-side conversation to continue; set from the
                        // first response (or a resumed conversation). The server
                        // rebuilds history from its own records — no turn text
@@ -24614,11 +24639,12 @@ function setConvoUrl(id) {{
   try {{
     var u = new URL(location.href);
     if (id) u.searchParams.set('c', id); else u.searchParams.delete('c');
+    u.searchParams.delete('resume');
     history.replaceState(null, '', u.pathname + u.search + u.hash);
   }} catch(e) {{}}
 }}
 function resetConvo() {{
-  asked = false; convoId = null; setConvoUrl(null);
+  convoGen++; asked = false; convoId = null; setConvoUrl(null);
   document.getElementById('ask-thread').innerHTML = '';
   var rec = document.getElementById('ask-recent');
   if (rec.innerHTML) rec.style.display = 'block';
@@ -24699,8 +24725,40 @@ function fuRender(state) {{
     if (!busy) fb.disabled = true;
     sum.addEventListener('click', function() {{ f.classList.remove('fu-compact'); }});
   }}
+  // Footer: Done, lower right, in every state (ready, busy, limit).
+  var foot = document.createElement('div');
+  foot.className = 'fu-foot';
+  foot.innerHTML = '<button type="button" class="ask-ctl" id="fu-done" onclick="doneThread()">Done</button>';
+  f.appendChild(foot);
   thread.appendChild(f);
   updateEstimate(); fuSummary();
+}}
+// Done: put the screen back to the clean start. The conversation stays in
+// Recent conversations (highlighted for a moment). If a question is still
+// loading, it is allowed to finish: the answer is not drawn, it lands in Recent.
+function doneThread() {{
+  var loading = !!document.querySelector('#ask-thread .ask-loading');
+  var cid = convoId;
+  convoGen++; asked = false; convoId = null; setConvoUrl(null);
+  document.getElementById('ask-thread').innerHTML = '';
+  topBusy = false; topSync();
+  var rec = document.getElementById('ask-recent');
+  if (loading) {{
+    if (!rec.querySelector('.ask-section-label'))
+      rec.innerHTML = '<div class="ask-section-label">Recent conversations</div>';
+    var n = document.createElement('p');
+    n.className = 'ask-done-note'; n.id = 'ask-done-note';
+    n.textContent = 'Your answer will appear in Recent.';
+    rec.querySelector('.ask-section-label').insertAdjacentElement('afterend', n);
+  }}
+  if (rec.innerHTML) rec.style.display = 'block';
+  if (cid) {{
+    var items = rec.querySelectorAll('.ask-recent-item');
+    for (var i = 0; i < items.length; i++) if (items[i].getAttribute('data-cid') === cid) {{
+      (function(el) {{ el.classList.add('recent-hl'); setTimeout(function() {{ el.classList.remove('recent-hl'); }}, 2500); }})(items[i]);
+    }}
+  }}
+  window.scrollTo({{top: 0, behavior: 'smooth'}});
 }}
 
 // --- Resume: recent conversations -------------------------------------------
@@ -24718,10 +24776,13 @@ function relTime(iso) {{
   return days === 1 ? 'yesterday' : days + 'd ago';
 }}
 function recentItemHtml(c) {{
-  return '<button type="button" class="ask-recent-item" data-cid="' + escapeHtml(c.conversation_id) + '" onclick="resumeConvo(this)">' +
+  // The row is a div so a real Resume button can sit inside it; tapping the
+  // row does the same thing, the button is the visible, keyboard-reachable one.
+  return '<div class="ask-recent-item" data-cid="' + escapeHtml(c.conversation_id) + '" onclick="resumeConvo(this)">' +
          '<span class="ask-recent-q">' + escapeHtml(c.first_question) + '</span>' +
-         '<span class="ask-recent-meta">' + relTime(c.last_at) + ' &middot; ' +
-         c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span></button>';
+         '<div class="ask-recent-foot"><span class="ask-recent-meta">' + relTime(c.last_at) + ' &middot; ' +
+         c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span>' +
+         '<button type="button" class="ask-ctl" onclick="event.stopPropagation();resumeConvo(this.closest(\\'.ask-recent-item\\'))">Resume</button></div></div>';
 }}
 var RECENT_MAX = 5;   // the server's own cap on /ask/conversations
 async function loadRecent() {{
@@ -24733,7 +24794,7 @@ async function loadRecent() {{
     if (!list.length) return;
     var box = document.getElementById('ask-recent');
     box.innerHTML = '<div class="ask-section-label">Recent conversations</div>' + list.map(recentItemHtml).join('');
-    box.style.display = 'block';
+    box.style.display = asked ? 'none' : 'block';
     highlightRecent();
   }} catch(e) {{}}
 }}
@@ -24829,6 +24890,9 @@ async function doAsk(followUp) {{
     thread.innerHTML = '';
   }}
   var topBtn = document.getElementById('ask-btn');
+  var myGen = convoGen;
+  function stale() {{ return myGen !== convoGen; }}
+  var oldNote = document.getElementById('ask-done-note'); if (oldNote) oldNote.remove();
   var turn = document.createElement('div');
   turn.style.marginTop = '18px';
   turn.style.scrollMarginTop = '12px';
@@ -24848,8 +24912,16 @@ async function doAsk(followUp) {{
   turn.scrollIntoView({{behavior:'smooth', block:'nearest'}});
 
   function done(state) {{
+    if (stale()) return;          // Done was tapped while this ran: nothing to redraw
     topBusy = false; topSync();
     fuRender(state);
+  }}
+  // Done was tapped while this question ran. The server has recorded it; show
+  // it in Recent instead of on the screen the reader already cleared.
+  function dropLate(recorded) {{
+    var n = document.getElementById('ask-done-note');
+    if (!recorded) {{ if (n) n.remove(); return; }}
+    loadRecent();
   }}
   try {{
     var resp = await fetch('/ask', {{
@@ -24858,6 +24930,7 @@ async function doAsk(followUp) {{
       body: JSON.stringify({{ question: q, effort: effort, sources: sources, conversation_id: convoId }})
     }});
     var d = await resp.json();
+    if (stale()) {{ if (d.usage) updateUsage(d.usage); dropLate(resp.ok && !d.capped); return; }}
     if (!resp.ok) {{
       answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(d.detail || 'Error') + '</span>';
       done(asked ? 'ready' : 'none');
@@ -24883,6 +24956,7 @@ async function doAsk(followUp) {{
     done(d.followups_left === 0 ? 'limit' : 'ready');
     turn.scrollIntoView({{behavior:'smooth', block:'start'}});
   }} catch(e) {{
+    if (stale()) {{ dropLate(false); return; }}
     answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong: ' + escapeHtml(String(e)) + '</span>';
     done(asked ? 'ready' : 'none');
   }}
@@ -24932,6 +25006,12 @@ document.addEventListener('keydown', function(e) {{
 updateEstimate();
 loadRecent();
 ddLabels();
+// /ask/history links here with ?resume=<id>: open that thread once. The
+// parameter is stripped first, so a reload goes back to the collapsed state.
+(function() {{
+  var rp = new URLSearchParams(location.search).get('resume');
+  if (rp) {{ setConvoUrl(null); resumeConvoById(rp); }}
+}})();
 // A reload expands nothing. A conversation named in the URL (?c=) comes back as
 // its collapsed row in Recent conversations, highlighted and scrolled into view.
 function highlightRecent() {{
@@ -25135,6 +25215,16 @@ def ask_history(request: Request, page: int = 1):
     finally:
         lib.close()
 
+    def _resume_link(turns_or_row) -> str:
+        # Own history only (this page is scoped to the signed-in user). The
+        # fpa-buddy page opens the thread once and strips the parameter.
+        r = turns_or_row[0] if isinstance(turns_or_row, list) else turns_or_row
+        cid = r.get("conversation_id")
+        if not cid:
+            return ""
+        return (f'<div style="display:flex;justify-content:flex-end;margin:6px 0 12px;">'
+                f'<a class="ask-ctl" href="/tools/fpa-buddy?resume={_esc(cid)}">Resume</a></div>')
+
     def _single_card(r: dict) -> str:
         # A one-turn conversation — same card the flat list always showed.
         q = _esc(r.get("question") or "")
@@ -25148,6 +25238,7 @@ def ask_history(request: Request, page: int = 1):
   <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
   <div class="ask-hist-answer">{a_html}</div>
   {src_html}
+  {_resume_link(r)}
 </div>"""
 
     def _turn_block(r: dict) -> str:
@@ -25185,6 +25276,7 @@ def ask_history(request: Request, page: int = 1):
   </summary>
   <div style="padding:0 18px 6px;">
     {"".join(_turn_block(t) for t in turns)}
+    {_resume_link(turns)}
   </div>
 </details>"""
 
@@ -25221,6 +25313,7 @@ def ask_history(request: Request, page: int = 1):
 {pager_html}
 </div>
 <style>
+{_ASK_CTL_CSS}
 .convo-chip{{display:inline-flex;align-items:center;margin-top:10px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:4px 12px;}}
 .convo-chip .disclosure-caret{{font-size:11px;}}
 </style>
