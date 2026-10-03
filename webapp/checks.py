@@ -678,6 +678,13 @@ def run_all() -> list[dict]:
         "detail": "; ".join(rc[:6]) if rc
                   else "No table or grid sits beside a reading column in the page source."})
 
+    ah = _tasks.cached_static_check("actions_header", lambda: brand_check.actions_header_problems(src))
+    results.append({
+        "name": "Table actions column is headed Actions", "where": "Live + CI", "ok": not ah,
+        "what": "A table whose last column holds row buttons heads it Actions, and no table header is left blank.",
+        "detail": "; ".join(ah[:6]) if ah
+                  else "Every table header is named, and every button column in view of the scan is headed Actions."})
+
     from webapp.app import _CSS as _app_css
     # Cached (2026-09): both halves are pure functions of on-disk source —
     # table_override_problems specifically is ~6.3s of run_all()'s ~15s

@@ -2049,6 +2049,27 @@ _COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
                               # "YYYY-MM-DD HH:MM" value, not just "YYYY-MM-DD"
 _COL_WIDTH_STATUS = 110       # A short status/state badge or label
 _COL_WIDTH_COUNT = 80         # A small count/number column
+_COL_WIDTH_MESSAGE = 320      # A free-text column that is the point of its row (a contact
+                              # message, an error, a flagged summary). A floor, set
+                              # as min-width, never a fixed width: measured on the
+                              # contact table at 390px and 874px, a Message column
+                              # with no floor got 109px because the width-hinted
+                              # siblings (Date, Name, Email) took the table's
+                              # whole 800px minimum first, so a message wrapped to
+                              # about eight short lines
+_COL_WIDTH_PERSON = 160       # A person's name (a contact's name), a word or two,
+                              # not a software or community name. Narrower than
+                              # _COL_WIDTH_NAME on purpose, which is calibrated for
+                              # "Software (acquired by Oracle)" style names
+
+
+def _actions_th(style: str = "padding:10px 12px;text-align:left;font-size:13px;") -> str:
+    """The header cell of a table's trailing row-buttons column. Every table
+    whose last column holds row buttons (Delete, Edit, Approve, Save) heads it
+    "Actions", never blank and never another word, so the rule has one place
+    to live; `brand_check.actions_header_problems` fails an empty header or a
+    trailing button column under any other heading."""
+    return f'<th style="{style}">Actions</th>'
 _COL_WIDTH_VENDOR = 160       # A short vendor/company label (Railway,
                               # Anthropic) or a username (the FP&A Buddy
                               # report's Asker column) — deliberately narrower than
@@ -11834,9 +11855,9 @@ def admin_compare_summary_feedback(request: Request):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Comparison</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Summary flagged</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Note</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_MESSAGE}px;">Summary flagged</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_MESSAGE}px;">Note</th>
+  {_actions_th()}
 </tr></thead>
 <tbody>{rows_html}</tbody>
 </table>
@@ -13268,14 +13289,14 @@ def admin_contacts(request: Request):
 </div>
 {_ADMIN_SCROLL_HINT_HTML}
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" id="contact-select-all" onchange="document.querySelectorAll('.contact-row-cb').forEach(cb => cb.checked = this.checked);"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_PERSON}px;">Name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_EMAIL}px;">Email</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Message</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_MESSAGE}px;">Message</th>
+  {_actions_th()}
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
@@ -13356,8 +13377,8 @@ def admin_email_failures(request: Request):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">When</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Flow</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Error</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_MESSAGE}px;">Error</th>
+  {_actions_th()}
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
@@ -14859,7 +14880,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     for c in categories:
         cid = c["id"]
         edit_form_id = f"cat-edit-{cid}"
-        # Save lives in the Tools/Save/Delete column, not under the inputs—it
+        # Save lives in the Actions column, not under the inputs—it
         # submits the name/description form above via the form="" attribute
         # (a plain HTML association, no JS needed) so the two edit fields can
         # render at full column width instead of being capped to fit a
@@ -14875,9 +14896,11 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     <input type="text" name="description" form="{edit_form_id}" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
       style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
   </td>
+  <td style="padding:9px 12px;vertical-align:top;white-space:nowrap;">
+    <span style="font-size:13px;color:var(--muted);">{c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}</span>
+  </td>
   <td style="padding:9px 12px;vertical-align:top;">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span style="font-size:13px;color:var(--muted);white-space:nowrap;">{c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}</span>
       <button type="submit" form="{edit_form_id}" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
       <form method="post" action="/admin/tools/software/categories/{cid}/delete" style="margin:0;"
             onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}—they stay in the directory under All, just untagged for this category.');">
@@ -14899,18 +14922,23 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 <li><strong>Deleting</strong> removes the tag from tagged tools, but leaves the tools themselves in the directory—they still show under <strong>All</strong>, just not under any specific pill.</li>
 </ul>
 {banner}{error_banner}
+{_ADMIN_SCROLL_HINT_HTML}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
-  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
   <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_VENDOR}px;">Name</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Description</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tools</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Tools</th>
+      {_actions_th("padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;")}
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
   </div>
 </div>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>
 <p style="font-size:12px;color:var(--muted);margin:0 0 28px;">&ldquo;Uncategorized&rdquo; is reserved&mdash;it's the directory's built-in filter for tools with no categories, not a real category, so that name can't be used here.</p>
 </div>"""
     return HTMLResponse(_page("Software categories—CFO Toolbox Admin", "Admin", body, authed=True))
@@ -15160,7 +15188,7 @@ def _feature_category_group_html(category: dict, features: list[dict], pending_i
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Definition</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Pointer note</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Order</th>
-        <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"></th>
+        {_actions_th("padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;")}
       </tr></thead>
       <tbody>{rows}</tbody>
     </table>
@@ -25838,7 +25866,7 @@ def admin_system_scripts(request: Request):
             f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
             f'<span style="font-family:ui-monospace,monospace;font-weight:600;font-size:14.5px;color:var(--navy);">{_esc(name)}</span>'
             f'<span style="font-size:11px;color:var(--muted);">{_esc(cadence)}</span></div>'
-            f'<p style="margin:6px 0 8px;font-size:13.5px;color:var(--ink-soft);line-height:1.55;">{_esc(purpose)}</p>'
+            f'<p style="margin:6px 0 8px;font-size:13.5px;color:var(--ink-soft);line-height:1.55;overflow-wrap:anywhere;">{_esc(purpose)}</p>'
             f'<div style="font-size:12px;color:var(--muted);"><strong>Env vars:</strong>'
             f'<ul style="margin:2px 0 8px;padding-left:18px;">{env_html}</ul></div>'
             f'<div style="font-size:12px;color:var(--muted);"><strong>Invocation:</strong>{invocation_html}</div>'
@@ -28014,6 +28042,7 @@ _LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Coral discipline (one moment per page)",
         "Outbound links open in a new tab",
         "Reading column holds its tables and grids",
+        "Table actions column is headed Actions",
         "One table format",
     )),
     ("Site structure and content", (
@@ -30684,7 +30713,7 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Tag</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Articles</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Rename / merge</th>
-      <th style="padding:9px 12px;"></th>
+      {_actions_th("padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;")}
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
@@ -37105,7 +37134,7 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
         # silently scrolling off-screen with no indication anything's
         # there.
         _voice_thead = f"""<thead><tr style="text-align:left;border-bottom:1px solid var(--line);background:var(--bg);">
-<th style="padding:8px 10px;width:{_VOICE_COL_WIDTH_CHECKBOX}px;"></th>
+<th style="padding:8px 10px;width:{_VOICE_COL_WIDTH_CHECKBOX}px;" aria-label="Select"></th>
 <th style="padding:8px 10px;font-size:12px;width:{_VOICE_COL_WIDTH_FIELD}px;">Field</th>
 <th style="padding:8px 10px;font-size:12px;">Detail</th>
 <th style="padding:8px 10px;font-size:12px;width:{_VOICE_COL_WIDTH_SOURCE}px;">Source</th>
