@@ -11258,6 +11258,8 @@ No schema or route change. Five fixes, each measured in real Chromium before cha
 
 ### Table frame and card polish on phones (Refs 655, B1)
 
+**Follow-up: frame versus adjacent control.** `/admin/inbox/contact-submissions` had `margin-bottom:-8px` on the "Delete selected" row and `margin-top:12px` on the table. When the table drew its own border the two cancelled; once the frame (which has no margin) drew it, the frame started 8px above the button's bottom edge and the 12px showed as a white strip inside the frame. The scroll hint hid it while visible, but it is `display:none` once dismissed or when the table fits, so the overlap showed in both orientations. Fixed at the source: row margin `24px 0 12px`, no inner table margin. A crawl of every frame on 24 admin and tools routes at 390px and 874px found no other control-above-frame overlap and no other inner-table margin.
+
 Measured in Chromium before the change, after PR 660 (which only changed the frame-child rule, so none of this is a 660 regression except that it made the sticky column actually stick).
 
 - **Bare tables.** The pending submissions tables (Software, Communities) and the contact deletion history drew their own border inside a plain `overflow-x:auto` div, so at 390px the table was 800 or 640px wide in a 342px scroller and its right border scrolled out of view. They now sit in `.table-frame` (`overflow-x:auto;overflow-y:hidden`), which carries the border while the table scrolls. 26 other instances on 22 routes have the same shape and are a separate pass.
