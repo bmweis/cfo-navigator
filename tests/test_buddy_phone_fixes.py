@@ -167,19 +167,18 @@ def test_tapping_the_new_question_label_focuses_the_box(phone):
     assert pg.evaluate("document.activeElement.id") == "ask-q"
 
 
-def test_conversation_id_goes_into_the_url_and_a_reload_reopens_it(phone):
+def test_conversation_id_goes_into_the_url_and_a_reload_expands_nothing(phone):
+    """A reload with ?c= opens collapsed: no thread, no bubble, and the
+    conversation is a highlighted row in Recent conversations."""
     pg, site = phone
     _open(pg)
     _ask(pg, "Test question")
     assert pg.evaluate("new URL(location.href).searchParams.get('c')") == "c99"
     pg.reload()
-    pg.wait_for_selector("#fu-q")                       # the bubble is back after a reload
-    assert pg.evaluate("convoId") == "c99"
-    assert pg.locator("#ask-thread .ask-q-bubble").count() == 1
-    pg.fill("#fu-q", "A follow-up")
-    pg.click("#fu-btn")
-    pg.wait_for_function("window.__fuDone || document.querySelectorAll('#ask-thread .ask-q-bubble').length === 2")
-    assert site.posts[-1]["conversation_id"] == "c99"
+    pg.wait_for_selector(".ask-recent-item")
+    assert pg.locator("#fu").count() == 0
+    assert pg.locator("#ask-thread .ask-q-bubble").count() == 0
+    assert pg.evaluate("convoId") is None
 
 
 def test_top_ask_and_start_new_question_clear_the_url(phone):
@@ -206,8 +205,8 @@ def test_opening_from_recent_conversations_sets_the_url(phone):
 
 @pytest.mark.parametrize("cid", ["c666", "nope"])
 def test_someone_elses_or_unknown_conversation_in_the_url_shows_no_bubble(phone, cid):
-    """Own conversations only. The server answers 403 / 404 and the page falls
-    back to the empty state, without a bubble and without an error banner."""
+    """?c= never fetches a transcript now: nothing opens, no bubble, no error,
+    and an id that is not in the reader's own list highlights nothing."""
     pg, _ = phone
     pg.goto(ORIGIN + "/tools/fpa-buddy?c=" + cid)
     pg.wait_for_selector(".ask-recent-item")
@@ -215,7 +214,7 @@ def test_someone_elses_or_unknown_conversation_in_the_url_shows_no_bubble(phone,
     assert pg.locator("#fu").count() == 0
     assert pg.evaluate("convoId") is None
     assert pg.locator("#ask-thread").inner_text().strip() == ""
-    assert pg.evaluate("new URL(location.href).searchParams.get('c')") is None
+    assert pg.locator(".recent-hl").count() == 0
 
 
 # --- problem 4: the past-question title fills the row ---------------------------
@@ -224,40 +223,17 @@ def _w(pg, sel):
     return pg.locator(sel).first.evaluate("e => e.getBoundingClientRect().width")
 
 
-def test_past_question_title_is_as_wide_as_its_answer_on_a_phone(phone):
+def test_past_question_title_fills_its_row_on_a_phone(phone):
     pg, _ = phone
     _open(pg)
-    title = "#past-questions .ask-hist-answer >> xpath=preceding-sibling::div[1]/div[1]"
-    assert _w(pg, title) >= _w(pg, "#past-questions .ask-hist-answer") - 2
-
-
-def test_past_question_title_fills_the_row_on_a_desktop(buddy_html):
-    html, _ = buddy_html
-    launched = _launch()
-    if launched is None:
-        pytest.skip("no Chromium available")
-    pw, browser = launched
-    try:
-        pg = browser.new_page(viewport={"width": 1280, "height": 900})
-        site = Site(html)
-        pg.route(re.compile(r"^http://buddy\.test/.*"), site.handle)
-        pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
-        _open(pg)
-        row = pg.locator("#past-questions .ask-hist-answer >> xpath=preceding-sibling::div[1]")
-        title_w = row.locator("div").first.evaluate("e => e.getBoundingClientRect().width")
-        meta_w = row.locator("div").nth(1).evaluate("e => e.getBoundingClientRect().width")
-        row_w = row.evaluate("e => e.getBoundingClientRect().width")
-        assert title_w + meta_w + 12 >= row_w - 2       # title takes whatever the meta leaves
-    finally:
-        browser.close()
-        pw.stop()
+    assert _w(pg, "#past-questions .ask-pq-q") >= _w(pg, "#past-questions .ask-pq-row") * 0.6
 
 
 def test_history_cards_use_the_same_title_rule(buddy_html):
     _, c = buddy_html
     # The reader has no history here, so check the markup rule at the source.
     src = pathlib.Path(__file__).resolve().parents[1].joinpath("webapp", "app.py").read_text(encoding="utf-8")
-    assert src.count("flex:1 1 280px;min-width:0;") >= 3     # past row, history card, history turn
+    assert src.count("flex:1 1 280px;min-width:0;") >= 2     # history card, history turn (past rows use .ask-pq-q)
 
 
 # --- problem 5: the emoji stays inside its pill -------------------------------------
@@ -274,6 +250,7 @@ def _pills_are_whole(pg, ul_sel):
 def test_past_question_source_emoji_is_inside_the_link(phone):
     pg, _ = phone
     _open(pg)
+    pg.locator("#past-questions .ask-pq-sum").first.click()
     rows = _pills_are_whole(pg, "#past-questions .ask-hist-answer ~ ul")
     assert rows and all(r["emojiInside"] and r["li"] <= r["a"] + 2 for r in rows), rows
 

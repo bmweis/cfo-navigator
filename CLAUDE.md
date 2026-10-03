@@ -6360,6 +6360,31 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   which the two-dropdown change in the next bullet replaced. `tests/test_buddy_phone_fixes.py` serves the real page
   over http through route handlers; it skips where no Chromium exists, as in CI.
 
+- **FP&A Buddy collapsed rows (2026-10).** One rule: an answer is expanded only
+  when the reader just asked it or tapped its row. (1) **Past questions** are
+  native `<details class="ask-pq-row">` (the same fold element as the 675
+  "Search past questions" section; `<summary>` exposes expanded state to
+  assistive tech, so there is no hand-set `aria-expanded`), closed on every load:
+  question, byline and chevron in the row; answer, sources and the admin buttons
+  in the body. Rendered through the same `_render_cited_answer`, so citations are
+  unchanged. (2) **A load, including a `?c=<id>` reload, expands nothing.** The
+  page no longer fetches a transcript for `?c=`; `loadRecent()` highlights the
+  matching Recent conversations row (`.recent-hl`) and scrolls it into view, and an
+  id that is not in the reader's own list highlights nothing. The hidden `c` input
+  on the past-questions form stays so a search keeps the highlight. Tapping a
+  Recent row still opens that conversation, with earlier turns folded. (3) **A
+  follow-up folds earlier turns** (`collapseTurn`/`collapseEarlierTurns`): each
+  becomes a one-line `.ask-turn-row` button (chevron, question, `aria-expanded`),
+  the newest turn stays open, nothing is deleted. A top Ask still clears the
+  screen. (4) **Phone:** the top question box, the follow-up textarea and the past
+  search input are 16px (iOS zooms on focus below that); the follow-up textarea is
+  44px minimum and auto-grows to 120px; the compact summary line is a 44px tap
+  target. (5) **Send** is a filled navy circle with a white up arrow
+  (`.fu-send`, 36px visible, 44px hit area, `aria-label`/`title` "Ask follow-up",
+  disabled while the field is empty, busy or at the limit). Tests:
+  `tests/test_buddy_collapse_rows.py`; the 667/670/672/675 tests that expected a
+  reload to reopen the thread or the button to carry text were rewritten.
+
 - **FP&A Buddy while a conversation is open (2026-10).** Three follow-ups from
   the PR 667 review. **Thread open** means anything is in `#ask-thread`; one
   `MutationObserver` on it toggles `.fpa-thread-open` on `#fpa-page`, so every way a
