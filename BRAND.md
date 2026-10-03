@@ -528,6 +528,7 @@ graffiti marks on admin tables, forms, or the chat UI.
     the inner table shows as a white strip inside the frame. Put the gap on the
     element above the frame (`tests/test_table_frame_mobile_polish.py`).
   - **Every scroller around a table is a frame.** A scroller div that holds a table carries `.table-frame` (`tests/test_table_frame_mobile_polish.py` fails on a bare one). The only tables left without one are those that never scroll: the checks summary tables and the Sections table.
+  - **A table whose last column holds row buttons heads it "Actions".** Never blank, never "Tools", never a variant. Build the cell with `_actions_th()`; a header with a checkbox or an `aria-label` is not blank. A column that mixes a count with buttons is split (Software categories: Tools, then Actions). `linklib.brand_check.actions_header_problems()` scans source for a blank header, or a button column headed otherwise, with an empty `ACTIONS_HEADER_ALLOWLIST` for any exception that needs a reason. It cannot see a table whose body rows are built in a different string than its header, so rule 2 is a floor; rule 1 (no blank header) holds everywhere. Shown on `/admin/checks`.
   - **Stacked cards** (the `.admin-table-responsive`, `.ff-table`/`.fs-table`
     and `.backup-log-table` layouts under 700px, 820px for the feeds tables):
     cells carry no top border, cards are separated by a 1px `--line` rule with
@@ -804,6 +805,8 @@ above:
 | `_COL_WIDTH_DATE` | 140px | Date / timestamp (sized for a full "YYYY-MM-DD HH:MM" value) |
 | `_COL_WIDTH_STATUS` | 110px | A short status/state badge or label |
 | `_COL_WIDTH_COUNT` | 80px | A small count/number column |
+| `_COL_WIDTH_MESSAGE` | 320px, as `min-width` | A free-text column that is the point of its row (a contact message, an error, a flagged summary). A floor, not a fixed width: on the contact table it measured 109px at both 390px and 874px because the width-hinted Date, Name and Email columns took the table's 800px minimum first. The contact table's floor is now `_TABLE_FLOOR_XWIDE`, so it scrolls on a phone and landscape tablet instead of squeezing the message |
+| `_COL_WIDTH_PERSON` | 160px | A person's name (a contact's name), narrower than `_COL_WIDTH_NAME`, which is for software and community names |
 | `_COL_WIDTH_VENDOR` | 160px | A short vendor/company label, or a username (the FP&A Buddy report's Asker column, which used `_COL_WIDTH_NAME` and left the Question column about 100px wide) — deliberately narrower than `_COL_WIDTH_NAME`, which is calibrated for a full software/community name, not a one- or two-word vendor label (overhead spend fixes, 2026-09) |
 
 These are plain `width:` hints on ordinary (non `table-layout:fixed`) tables,

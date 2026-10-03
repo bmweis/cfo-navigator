@@ -6360,6 +6360,38 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   which the two-dropdown change in the next bullet replaced. `tests/test_buddy_phone_fixes.py` serves the real page
   over http through route handlers; it skips where no Chromium exists, as in CI.
 
+- **FP&A Buddy while a conversation is open (2026-10).** Three follow-ups from
+  the PR 667 review. **Thread open** means anything is in `#ask-thread`; one
+  `MutationObserver` on it toggles `.fpa-thread-open` on `#fpa-page`, so every way a
+  thread appears or clears (top Ask, a Recent conversations row, a `?c=` reload,
+  Start a new question) is covered without each send path remembering. Open: the
+  illustrative example is hidden and the form becomes one full-width column
+  (`_intro_areas_thread`; hiding the example alone would leave an empty right-hand
+  track), and "Search past questions" folds to a one-line `<details>`. Cleared: both
+  come back, and the section is open again. In the empty state it is the same
+  section as before and cannot be folded, even by keyboard (a `toggle` listener
+  reopens it). The observer acts on transitions only, so a reader who opened the
+  folded line is not refolded by their next top question. A search the reader just
+  ran (`?pq=`) or a `#past-questions` link stays open when a thread arrives. **A
+  consequence found while building it:** the search is a plain GET to
+  `/tools/fpa-buddy`, which dropped `?c=`, so searching from a folded-open section
+  lost the open thread; the form now adds a hidden `c` input at submit time when a
+  conversation is open. **Recent conversations refresh in place**, from what the page
+  already holds, not a second request: after a successful answer `recentUpsert()`
+  builds the row from the conversation id in the `/ask` response, the first question
+  and turn count read off the thread on screen, and `followups_left === 0` for the
+  "at limit" tag, then puts it at the top, replaces any row for the same id, and
+  trims to five (the server's own cap). A row used to appear only after a reload,
+  and never if the list was empty at load. Row markup is shared with `loadRecent()`
+  (`recentItemHtml`), and visibility is untouched: hidden while a thread is open,
+  shown by Start a new question. A capped turn that was not recorded adds nothing.
+  **Bubble visibility audit:** all five rules from the review (fresh page, first
+  answer, own conversation with `convoId` set, limit state, another member's past
+  answer) already had tests in `test_buddy_followup_bubble.py`; the paths with only
+  indirect coverage (a first turn that hits the cap, a failed first ask, one bubble
+  that always follows the latest reply) are now pinned in
+  `tests/test_buddy_thread_open.py`. Chromium tests skip in CI.
+
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
   overlap/contrast summary above both Compare tables, cached permanently
   and capped by a shared daily dollar budget.** Purely additive on top of
@@ -11097,7 +11129,8 @@ it supersedes the old "`/save` is token-gated" note.
   (scroll width 830). See ARCHITECTURE.md's "Table frame and card polish on
   phones" and `tests/test_table_frame_mobile_polish.py`.
 - **Frame versus adjacent control (2026-10, Refs 655).** The contact submissions frame overlapped "Delete selected" because the button row had a negative bottom margin and the inner table a top margin, which only cancelled while the table drew its own border. Fixed at the source; BRAND.md section 5 now states that a frame sits flush. B2 must check for an adjacent control above every table it frames.
-- **B2: every table scroller is a frame (2026-10, Refs 655).** The 40 remaining scrollers around tables (plain `overflow-x:auto` divs, hand-made 14px card scrollers, the voice review wraps, the Original content markdown wrapper, and the Database page's padded disclosure) are `.table-frame` now, so the border no longer scrolls away on a phone. A crawl of 76 frames at 390px and 874px found no overlap with a control above and no margin on an inner table. The markdown wrapper moves its margin to the frame (`.oc-body .table-frame`). Left unframed on purpose: the checks summary tables, the Sections table (`.fs-table`) and one small fixed table, none of which scroll. Guarded by two source tests in `tests/test_table_frame_mobile_polish.py`: a scroller with a table must carry `table-frame`, and an inner table carries no margin. `/admin/system/scripts` overflow at 390px is still open and separate.
+- **B2: every table scroller is a frame (2026-10, Refs 655).** The 40 remaining scrollers around tables (plain `overflow-x:auto` divs, hand-made 14px card scrollers, the voice review wraps, the Original content markdown wrapper, and the Database page's padded disclosure) are `.table-frame` now, so the border no longer scrolls away on a phone. A crawl of 76 frames at 390px and 874px found no overlap with a control above and no margin on an inner table. The markdown wrapper moves its margin to the frame (`.oc-body .table-frame`). Left unframed on purpose: the checks summary tables, the Sections table (`.fs-table`) and one small fixed table, none of which scroll. Guarded by two source tests in `tests/test_table_frame_mobile_polish.py`: a scroller with a table must carry `table-frame`, and an inner table carries no margin.
+- **Actions headings and the Message column (2026-10, Refs 655).** Rule: a table whose last column holds row buttons heads it "Actions" (`_actions_th()`); the contact table's Message column had 109px at 390px and 874px (width-hinted siblings took the 800px minimum), now `_COL_WIDTH_MESSAGE` (320 min-width) with `_COL_WIDTH_PERSON` (160) for Name and an XWIDE floor; the same floor is on email-failures Error and compare-summary-feedback Summary and Note. Software categories split Tools from Actions. Seven blank headers fixed; the voice review checkbox header has an `aria-label`. `brand_check.actions_header_problems()` is a source scan on `/admin/checks` ("Table actions column is headed Actions"); it misses a table whose body rows are built in another string, so the empty-header rule is the one that holds everywhere. `/admin/system/scripts` overflow fixed with `overflow-wrap:anywhere`. The two 980px reports (`/tools/communities/correct`, `/read-later-bookmarklet`) were not defects: a 404 for a missing `community_id`, and a `text/plain` response. Toolbox intros has no free-text column; community gaps and FP&A Buddy feedback are cards, not tables.
 - **Layout hardening batch (2026-10).** FP&A Buddy report's Asker column moved off
   `_COL_WIDTH_NAME` (it left Question at 164px at 900px; now 284px). Six admin grids
   (`.tool-form-cols`, `.qe-row`, `.users-top-grid`, Users add-member, Resources

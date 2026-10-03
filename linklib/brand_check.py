@@ -657,3 +657,76 @@ def table_override_problems(src: str) -> list[str]:
         problems.append(f"line {line}: {selector[:90]!r} overrides the table standard with !important. "
                         "Drop the !important, or add the selector to TABLE_OVERRIDE_ALLOWLIST with a reason")
     return problems
+
+
+# --- Actions column heading (Refs 655, table-frame mobile polish) -----------
+# Rule: any table whose last column holds row buttons (Delete, Edit, Approve,
+# Save) heads that column "Actions". A blank header cell is also an
+# accessibility defect (a screen reader reads an unnamed column). Both are
+# source scans over string literals, never a rendered route, so this can sit in
+# run_all() without re-entering it.
+
+_ACTIONS_HELPER_RE = re.compile(r"\{_actions_th\((?:[^()]|\([^()]*\))*\)\}")
+_ACTIONS_TABLE_RE = re.compile(r"<table\b.*?</table>", re.S)
+_ACTIONS_THEAD_RE = re.compile(r"<thead\b.*?</thead>", re.S)
+_ACTIONS_TH_RE = re.compile(r"<th\b([^>]*)>(.*?)</th>", re.S)
+_ACTIONS_TR_RE = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.S)
+_ACTIONS_TD_RE = re.compile(r"<td\b[^>]*>(.*?)</td>", re.S)
+
+# Tables whose last column holds buttons but is deliberately NOT headed
+# "Actions", keyed by the heading text, each with the reason. Adding one is a
+# design call, not a code fix. Empty today: the six tables that carried a
+# blank or differently named header were all renamed.
+ACTIONS_HEADER_ALLOWLIST: dict[str, str] = {}
+
+
+def _plain_header_text(html: str) -> str:
+    return re.sub(r"<[^>]+>|\{[^}]*\}", "", html).strip()
+
+
+def actions_header_problems(src: str) -> list[str]:
+    """Table headers that break the "Actions" rule.
+
+    **Flagged:** (1) a header cell with no text, no `aria-label` and no form
+    control inside it (the checkbox select-all header is fine); (2) a table
+    whose last column holds a `<button>` or `<form>` in its first body row but
+    whose last heading is not "Actions" and not in
+    `ACTIONS_HEADER_ALLOWLIST`.
+
+    A literal using the shared `_actions_th()` helper counts as "Actions".
+
+    **Not caught, so a clean result is not a claim about every table:** a
+    table whose body rows are built in a different string literal than its
+    header (the common shape: `rows` assembled in a loop, then dropped into the
+    page), so rule 2 cannot see the buttons there, while rule 1 still sees
+    the empty header; tables assembled by JavaScript or stored in the database.
+    """
+    problems: list[str] = []
+    for first_line, seg in _literal_segments(src):
+        if "<th" not in seg and "_actions_th" not in seg:
+            continue
+        for tm in _ACTIONS_TABLE_RE.finditer(seg):
+            table = _ACTIONS_HELPER_RE.sub("<th>Actions</th>", tm.group(0))
+            head = _ACTIONS_THEAD_RE.search(table)
+            if not head:
+                continue
+            ths = _ACTIONS_TH_RE.findall(head.group(0))
+            if not ths:
+                continue
+            line = first_line + seg[:tm.start()].count("\n")
+            for attrs, inner in ths:
+                if (not _plain_header_text(inner) and "aria-label" not in attrs
+                        and "<input" not in inner and "<select" not in inner):
+                    problems.append(f"empty table header at line {line}")
+            last_text = _plain_header_text(ths[-1][1])
+            if last_text == "Actions" or last_text in ACTIONS_HEADER_ALLOWLIST:
+                continue
+            body = table[head.end():]
+            rows = [r for r in _ACTIONS_TR_RE.findall(body) if "<td" in r]
+            if rows:
+                cells = _ACTIONS_TD_RE.findall(rows[0])
+                if cells and re.search(r"<button|<form", cells[-1]):
+                    problems.append(
+                        f"last column holds buttons but is headed {last_text!r}, "
+                        f"not 'Actions', at line {line}")
+    return problems

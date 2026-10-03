@@ -643,6 +643,23 @@ With the taller controls block, blur re-expanded the sticky bubble upward on
 mousedown and the Ask follow-up button moved out from under the tap, so the
 follow-up never sent. Tests: `tests/test_buddy_dropdown_controls.py`.
 
+**While a conversation is open (2026-10).** A `MutationObserver` on `#ask-thread`
+toggles `.fpa-thread-open` on `#fpa-page` whenever the thread gains or loses its
+first child, so the behavior holds for every entry path (top Ask, Recent row,
+`?c=` reload, Start a new question). Open: `.fpa-intro-area-example` is
+`display:none` and `.fpa-intro-layout` switches to one column
+(`_intro_areas_thread`, the desktop areas minus `example`); `#past-questions`, now
+a `<details>` with an inert summary in the empty state, is folded to its summary
+line. Transitions only: closed-to-open folds it (unless `?pq=` or
+`#past-questions` is present), open-to-closed reopens it, and nothing else touches
+its `open` state. The search form is a GET; a submit listener appends a hidden `c`
+input when `convoId` is set so the reload resumes the thread. Recent conversations
+update in place: `recentUpsert(cid, atLimit)` runs after each recorded answer and
+rebuilds one row (`recentItemHtml`, shared with `loadRecent`) from the `/ask`
+response's conversation id and limit state plus the first question and turn count
+on screen, then trims to five. No extra request; the list's visibility rule is
+unchanged. Tests: `tests/test_buddy_thread_open.py`.
+
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
 — replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column
@@ -11310,6 +11327,8 @@ Measured in Chromium before the change, after PR 660 (which only changed the fra
 - **Sticky Name.** The checkbox cell is gone; the checkbox lives inside the Name cell (`admin-sticky-col`, `left:0`, `_COL_WIDTH_NAME_STICKY`=230). Bulk select is unaffected: `selectAllRows` and `updateBulkButton` use the `.{table}-row-cb` class, not column position. In card mode the same cell is the card header, so there is no checkbox-only row.
 - Tests: `tests/test_table_frame_mobile_polish.py` (Chromium; skips where none exists).
 - **Reading-column check.** `brand_check.reading_column_problems()`, a cached source scan wired into `webapp.checks.run_all()` as "Reading column holds its tables and grids" (theme: Brand and design).
+
+**Actions heading and the Message column (Refs 655).** The contact submissions table gave its Message column 109px at 390px and 874px: the width-hinted Date, Name and Email columns took the table's 800px minimum first, so a message wrapped to about eight lines. `_COL_WIDTH_MESSAGE` (320, a `min-width`) now floors Message on the contact table, the email-failures Error column and the compare-summary-feedback Summary and Note columns, `_COL_WIDTH_PERSON` (160) replaces the 280px Name width on the contact table, and the contact table's floor is `_TABLE_FLOOR_XWIDE`. Rule: a table whose last column holds row buttons heads it "Actions", built with `_actions_th()`. Software categories split its Tools count and its buttons into two columns (and gained the shared scroll hint, since Actions now sits past the fold at 390px). Blank headers fixed: contact submissions, compare-summary-feedback, email-failures, the three Manage Features pivot tables, tag cleanup; the voice review checkbox header gets an `aria-label`. `brand_check.actions_header_problems()` is a cached source scan, wired into `webapp.checks.run_all()` as "Table actions column is headed Actions" (theme: Brand and design). `/admin/system/scripts` card text gets `overflow-wrap:anywhere`: unbroken slash chains in script purposes forced the page to 830px at 390px. `/tools/communities/correct` and `/read-later-bookmarklet` reported 980px but are not defects: the first was measured without the required `community_id` (a JSON 404), the second is `text/plain`, and a phone lays any non-HTML document out at 980px. Tests: `tests/test_actions_column_and_message_width.py`.
 
 ### Software edit page — four admin fixes (2026-09)
 

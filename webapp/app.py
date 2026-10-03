@@ -2061,6 +2061,27 @@ _COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
                               # "YYYY-MM-DD HH:MM" value, not just "YYYY-MM-DD"
 _COL_WIDTH_STATUS = 110       # A short status/state badge or label
 _COL_WIDTH_COUNT = 80         # A small count/number column
+_COL_WIDTH_MESSAGE = 320      # A free-text column that is the point of its row (a contact
+                              # message, an error, a flagged summary). A floor, set
+                              # as min-width, never a fixed width: measured on the
+                              # contact table at 390px and 874px, a Message column
+                              # with no floor got 109px because the width-hinted
+                              # siblings (Date, Name, Email) took the table's
+                              # whole 800px minimum first, so a message wrapped to
+                              # about eight short lines
+_COL_WIDTH_PERSON = 160       # A person's name (a contact's name), a word or two,
+                              # not a software or community name. Narrower than
+                              # _COL_WIDTH_NAME on purpose, which is calibrated for
+                              # "Software (acquired by Oracle)" style names
+
+
+def _actions_th(style: str = "padding:10px 12px;text-align:left;font-size:13px;") -> str:
+    """The header cell of a table's trailing row-buttons column. Every table
+    whose last column holds row buttons (Delete, Edit, Approve, Save) heads it
+    "Actions", never blank and never another word, so the rule has one place
+    to live; `brand_check.actions_header_problems` fails an empty header or a
+    trailing button column under any other heading."""
+    return f'<th style="{style}">Actions</th>'
 _COL_WIDTH_VENDOR = 160       # A short vendor/company label (Railway,
                               # Anthropic) or a username (the FP&A Buddy
                               # report's Asker column) — deliberately narrower than
@@ -11846,9 +11867,9 @@ def admin_compare_summary_feedback(request: Request):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Comparison</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Summary flagged</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Note</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_MESSAGE}px;">Summary flagged</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_MESSAGE}px;">Note</th>
+  {_actions_th()}
 </tr></thead>
 <tbody>{rows_html}</tbody>
 </table>
@@ -13280,14 +13301,14 @@ def admin_contacts(request: Request):
 </div>
 {_ADMIN_SCROLL_HINT_HTML}
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
-<table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" id="contact-select-all" onchange="document.querySelectorAll('.contact-row-cb').forEach(cb => cb.checked = this.checked);"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_PERSON}px;">Name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_EMAIL}px;">Email</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Message</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_MESSAGE}px;">Message</th>
+  {_actions_th()}
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
@@ -13368,8 +13389,8 @@ def admin_email_failures(request: Request):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">When</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Flow</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Error</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_MESSAGE}px;">Error</th>
+  {_actions_th()}
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
@@ -14871,7 +14892,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     for c in categories:
         cid = c["id"]
         edit_form_id = f"cat-edit-{cid}"
-        # Save lives in the Tools/Save/Delete column, not under the inputs—it
+        # Save lives in the Actions column, not under the inputs—it
         # submits the name/description form above via the form="" attribute
         # (a plain HTML association, no JS needed) so the two edit fields can
         # render at full column width instead of being capped to fit a
@@ -14887,9 +14908,11 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     <input type="text" name="description" form="{edit_form_id}" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
       style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
   </td>
+  <td style="padding:9px 12px;vertical-align:top;white-space:nowrap;">
+    <span style="font-size:13px;color:var(--muted);">{c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}</span>
+  </td>
   <td style="padding:9px 12px;vertical-align:top;">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span style="font-size:13px;color:var(--muted);white-space:nowrap;">{c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}</span>
       <button type="submit" form="{edit_form_id}" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
       <form method="post" action="/admin/tools/software/categories/{cid}/delete" style="margin:0;"
             onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}—they stay in the directory under All, just untagged for this category.');">
@@ -14911,18 +14934,23 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 <li><strong>Deleting</strong> removes the tag from tagged tools, but leaves the tools themselves in the directory—they still show under <strong>All</strong>, just not under any specific pill.</li>
 </ul>
 {banner}{error_banner}
+{_ADMIN_SCROLL_HINT_HTML}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
-  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
   <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_VENDOR}px;">Name</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Description</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tools</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Tools</th>
+      {_actions_th("padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;")}
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
   </div>
 </div>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>
 <p style="font-size:12px;color:var(--muted);margin:0 0 28px;">&ldquo;Uncategorized&rdquo; is reserved&mdash;it's the directory's built-in filter for tools with no categories, not a real category, so that name can't be used here.</p>
 </div>"""
     return HTMLResponse(_page("Software categories—CFO Toolbox Admin", "Admin", body, authed=True))
@@ -15172,7 +15200,7 @@ def _feature_category_group_html(category: dict, features: list[dict], pending_i
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Definition</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Pointer note</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Order</th>
-        <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"></th>
+        {_actions_th("padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;")}
       </tr></thead>
       <tbody>{rows}</tbody>
     </table>
@@ -23801,8 +23829,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
             'No past questions yet. Answers show up here once a member rates one helpful.')
          + '</div>')
 
-    past_questions_section = f"""<div id="past-questions" class="ask-section" style="margin-top:0;margin-bottom:28px;">
-  <div class="ask-section-label">Search past questions</div>
+    # A <details> so it can fold to one line while a conversation is on screen
+    # (the page toggles `open` itself when a thread appears or clears). In the
+    # empty state it is always open and its summary is inert, so that state
+    # reads exactly as it did when this was a plain section.
+    past_questions_section = f"""<details id="past-questions" class="ask-section ask-pq" open style="margin-top:0;margin-bottom:28px;">
+  <summary class="ask-section-label"><span class="ask-pq-caret" aria-hidden="true">&#9656;</span>Search past questions</summary>
   <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Questions other members have already asked&mdash;check here before spending a query re-asking one.</p>
   <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:18px;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
@@ -23810,7 +23842,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     <button type="submit" class="btn btn-ghost">Search</button>
   </form>
   {pq_rows_html}
-</div>"""
+</details>"""
 
     # Quick / Standard / Deep is the only choice shown — no separate model
     # picker. Each tier maps internally (linklib.agent.EFFORT_SETTINGS) to a
@@ -23902,13 +23934,20 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         '"intro example" "question example" "controls controls" "action action"'
     )
     _intro_rows_desktop = "auto auto 1fr auto auto" if usage_html else "auto 1fr auto auto"
+    # While a conversation is on screen the illustrative example is hidden and
+    # the form is one full-width column (no empty right-hand track).
+    _intro_areas_thread = (
+        '"intro" "usage" "question" "controls" "action"'
+        if usage_html else
+        '"intro" "question" "controls" "action"'
+    )
     _intro_areas_mobile = (
         '"intro" "example" "usage" "question" "controls" "action"'
         if usage_html else
         '"intro" "example" "question" "controls" "action"'
     )
 
-    body = f"""<div class="page page-standard">
+    body = f"""<div class="page page-standard" id="fpa-page">
 <p style="margin:0 0 12px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 
 <div class="fpa-intro-layout">
@@ -24049,6 +24088,17 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   grid-template-areas:{_intro_areas_desktop};
   grid-template-rows:{_intro_rows_desktop};
   align-items:start;margin-bottom:28px;}}
+/* Thread open (set by the page's script on #fpa-page): no example, one column. */
+.fpa-thread-open .fpa-intro-area-example{{display:none;}}
+.fpa-thread-open .fpa-intro-layout{{grid-template-columns:1fr;grid-template-rows:none;
+  grid-template-areas:{_intro_areas_thread};}}
+.ask-pq>summary{{list-style:none;display:flex;align-items:center;gap:8px;pointer-events:none;cursor:default;}}
+.ask-pq>summary::-webkit-details-marker{{display:none;}}
+.ask-pq>summary .ask-pq-caret{{display:none;font-size:12px;transition:transform .12s;}}
+.ask-pq:not([open])>summary{{margin-bottom:0;}}
+.fpa-thread-open .ask-pq>summary{{pointer-events:auto;cursor:pointer;}}
+.fpa-thread-open .ask-pq>summary .ask-pq-caret{{display:inline-block;}}
+.ask-pq[open]>summary .ask-pq-caret{{transform:rotate(90deg);}}
 .fpa-intro-area-intro{{grid-area:intro;}}
 .fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
 .fpa-intro-area-usage{{grid-area:usage;}}
@@ -24555,6 +24605,13 @@ function relTime(iso) {{
   var days = Math.round(hrs / 24);
   return days === 1 ? 'yesterday' : days + 'd ago';
 }}
+function recentItemHtml(c) {{
+  return '<button type="button" class="ask-recent-item" data-cid="' + escapeHtml(c.conversation_id) + '" onclick="resumeConvo(this)">' +
+         '<span class="ask-recent-q">' + escapeHtml(c.first_question) + '</span>' +
+         '<span class="ask-recent-meta">' + relTime(c.last_at) + ' &middot; ' +
+         c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span></button>';
+}}
+var RECENT_MAX = 5;   // the server's own cap on /ask/conversations
 async function loadRecent() {{
   try {{
     var resp = await fetch('/ask/conversations');
@@ -24563,15 +24620,32 @@ async function loadRecent() {{
     var list = d.conversations || [];
     if (!list.length) return;
     var box = document.getElementById('ask-recent');
-    box.innerHTML = '<div class="ask-section-label">Recent conversations</div>' +
-      list.map(function(c) {{
-        return '<button type="button" class="ask-recent-item" data-cid="' + escapeHtml(c.conversation_id) + '" onclick="resumeConvo(this)">' +
-               '<span class="ask-recent-q">' + escapeHtml(c.first_question) + '</span>' +
-               '<span class="ask-recent-meta">' + relTime(c.last_at) + ' &middot; ' +
-               c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span></button>';
-      }}).join('');
+    box.innerHTML = '<div class="ask-section-label">Recent conversations</div>' + list.map(recentItemHtml).join('');
     box.style.display = 'block';
   }} catch(e) {{}}
+}}
+// After an answer, put its conversation at the top of Recent conversations
+// from what the page already holds (the /ask response gave the id and the
+// limit state; the thread on screen gives the first question and the turn
+// count), instead of asking the server again. Visibility is untouched: the
+// list stays hidden while a thread is open and Start a new question shows it.
+function recentUpsert(cid, atLimit) {{
+  if (!cid) return;
+  var bubbles = document.querySelectorAll('#ask-thread .ask-q-bubble');
+  if (!bubbles.length) return;
+  var box = document.getElementById('ask-recent');
+  if (!box.querySelector('.ask-section-label'))
+    box.innerHTML = '<div class="ask-section-label">Recent conversations</div>';
+  var items = box.querySelectorAll('.ask-recent-item');
+  for (var i = 0; i < items.length; i++)
+    if (items[i].getAttribute('data-cid') === cid) items[i].remove();
+  var holder = document.createElement('div');
+  holder.innerHTML = recentItemHtml({{
+    conversation_id: cid, first_question: bubbles[0].textContent,
+    turns: bubbles.length, last_at: new Date().toISOString(), capped: !!atLimit}});
+  box.querySelector('.ask-section-label').insertAdjacentElement('afterend', holder.firstChild);
+  var all = box.querySelectorAll('.ask-recent-item');
+  for (var j = RECENT_MAX; j < all.length; j++) all[j].remove();
 }}
 // Pre-select the feedback controls with the turn's stored rating so a
 // resumed transcript looks exactly like it did live — and re-rating still
@@ -24690,6 +24764,7 @@ async function doAsk(followUp) {{
 
     convoId = d.conversation_id || convoId;
     asked = true; setConvoUrl(convoId);
+    recentUpsert(convoId, d.followups_left === 0);
     done(d.followups_left === 0 ? 'limit' : 'ready');
     turn.scrollIntoView({{behavior:'smooth', block:'start'}});
   }} catch(e) {{
@@ -24701,6 +24776,43 @@ async function doAsk(followUp) {{
 document.addEventListener('keydown', function(e) {{
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doAsk(!!(e.target && e.target.id === 'fu-q'));
 }});
+
+// Thread open: while anything is in #ask-thread the page drops the
+// illustrative example and folds "Search past questions" to one line. One
+// observer on the thread covers every way a thread appears or clears (ask,
+// resume, reload, Start a new question), so no send path has to remember it.
+(function() {{
+  var page = document.getElementById('fpa-page');
+  var thread = document.getElementById('ask-thread');
+  var pq = document.getElementById('past-questions');
+  var open = false;
+  // A search the reader just ran (or a link to the section) stays visible.
+  var keepPq = /[?&]pq=/.test(location.search) || location.hash === '#past-questions';
+  function sync() {{
+    var now = thread.children.length > 0;
+    if (now === open) return;
+    open = now;
+    page.classList.toggle('fpa-thread-open', open);
+    if (!pq) return;
+    if (open) {{ if (!keepPq) pq.open = false; keepPq = false; }}
+    else pq.open = true;
+  }}
+  new MutationObserver(sync).observe(thread, {{childList: true}});
+  if (pq) {{
+    // In the empty state the section is not collapsible, even from the keyboard.
+    pq.addEventListener('toggle', function() {{ if (!open && !pq.open) pq.open = true; }});
+    // The search is a plain GET: carry the open conversation through it so the
+    // reload reopens the thread instead of dropping it.
+    var pqForm = pq.querySelector('form');
+    if (pqForm) pqForm.addEventListener('submit', function() {{
+      if (!convoId) return;
+      var h = document.createElement('input');
+      h.type = 'hidden'; h.name = 'c'; h.value = convoId;
+      pqForm.appendChild(h);
+    }});
+  }}
+  sync();
+}})();
 
 updateEstimate();
 loadRecent();
@@ -25766,7 +25878,7 @@ def admin_system_scripts(request: Request):
             f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
             f'<span style="font-family:ui-monospace,monospace;font-weight:600;font-size:14.5px;color:var(--navy);">{_esc(name)}</span>'
             f'<span style="font-size:11px;color:var(--muted);">{_esc(cadence)}</span></div>'
-            f'<p style="margin:6px 0 8px;font-size:13.5px;color:var(--ink-soft);line-height:1.55;">{_esc(purpose)}</p>'
+            f'<p style="margin:6px 0 8px;font-size:13.5px;color:var(--ink-soft);line-height:1.55;overflow-wrap:anywhere;">{_esc(purpose)}</p>'
             f'<div style="font-size:12px;color:var(--muted);"><strong>Env vars:</strong>'
             f'<ul style="margin:2px 0 8px;padding-left:18px;">{env_html}</ul></div>'
             f'<div style="font-size:12px;color:var(--muted);"><strong>Invocation:</strong>{invocation_html}</div>'
@@ -27948,6 +28060,7 @@ _LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Coral discipline (one moment per page)",
         "Outbound links open in a new tab",
         "Reading column holds its tables and grids",
+        "Table actions column is headed Actions",
         "One table format",
     )),
     ("Site structure and content", (
@@ -30618,7 +30731,7 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Tag</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Articles</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Rename / merge</th>
-      <th style="padding:9px 12px;"></th>
+      {_actions_th("padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;")}
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
@@ -37041,7 +37154,7 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
         # silently scrolling off-screen with no indication anything's
         # there.
         _voice_thead = f"""<thead><tr style="text-align:left;border-bottom:1px solid var(--line);background:var(--bg);">
-<th style="padding:8px 10px;width:{_VOICE_COL_WIDTH_CHECKBOX}px;"></th>
+<th style="padding:8px 10px;width:{_VOICE_COL_WIDTH_CHECKBOX}px;" aria-label="Select"></th>
 <th style="padding:8px 10px;font-size:12px;width:{_VOICE_COL_WIDTH_FIELD}px;">Field</th>
 <th style="padding:8px 10px;font-size:12px;">Detail</th>
 <th style="padding:8px 10px;font-size:12px;width:{_VOICE_COL_WIDTH_SOURCE}px;">Source</th>
