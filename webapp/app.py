@@ -23789,8 +23789,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
             'No past questions yet. Answers show up here once a member rates one helpful.')
          + '</div>')
 
-    past_questions_section = f"""<div id="past-questions" class="ask-section" style="margin-top:0;margin-bottom:28px;">
-  <div class="ask-section-label">Search past questions</div>
+    # A <details> so it can fold to one line while a conversation is on screen
+    # (the page toggles `open` itself when a thread appears or clears). In the
+    # empty state it is always open and its summary is inert, so that state
+    # reads exactly as it did when this was a plain section.
+    past_questions_section = f"""<details id="past-questions" class="ask-section ask-pq" open style="margin-top:0;margin-bottom:28px;">
+  <summary class="ask-section-label"><span class="ask-pq-caret" aria-hidden="true">&#9656;</span>Search past questions</summary>
   <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Questions other members have already asked&mdash;check here before spending a query re-asking one.</p>
   <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:18px;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
@@ -23798,7 +23802,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     <button type="submit" class="btn btn-ghost">Search</button>
   </form>
   {pq_rows_html}
-</div>"""
+</details>"""
 
     # Quick / Standard / Deep is the only choice shown — no separate model
     # picker. Each tier maps internally (linklib.agent.EFFORT_SETTINGS) to a
@@ -23890,13 +23894,20 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         '"intro example" "question example" "controls controls" "action action"'
     )
     _intro_rows_desktop = "auto auto 1fr auto auto" if usage_html else "auto 1fr auto auto"
+    # While a conversation is on screen the illustrative example is hidden and
+    # the form is one full-width column (no empty right-hand track).
+    _intro_areas_thread = (
+        '"intro" "usage" "question" "controls" "action"'
+        if usage_html else
+        '"intro" "question" "controls" "action"'
+    )
     _intro_areas_mobile = (
         '"intro" "example" "usage" "question" "controls" "action"'
         if usage_html else
         '"intro" "example" "question" "controls" "action"'
     )
 
-    body = f"""<div class="page page-standard">
+    body = f"""<div class="page page-standard" id="fpa-page">
 <p style="margin:0 0 12px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 
 <div class="fpa-intro-layout">
@@ -24037,6 +24048,17 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   grid-template-areas:{_intro_areas_desktop};
   grid-template-rows:{_intro_rows_desktop};
   align-items:start;margin-bottom:28px;}}
+/* Thread open (set by the page's script on #fpa-page): no example, one column. */
+.fpa-thread-open .fpa-intro-area-example{{display:none;}}
+.fpa-thread-open .fpa-intro-layout{{grid-template-columns:1fr;grid-template-rows:none;
+  grid-template-areas:{_intro_areas_thread};}}
+.ask-pq>summary{{list-style:none;display:flex;align-items:center;gap:8px;pointer-events:none;cursor:default;}}
+.ask-pq>summary::-webkit-details-marker{{display:none;}}
+.ask-pq>summary .ask-pq-caret{{display:none;font-size:12px;transition:transform .12s;}}
+.ask-pq:not([open])>summary{{margin-bottom:0;}}
+.fpa-thread-open .ask-pq>summary{{pointer-events:auto;cursor:pointer;}}
+.fpa-thread-open .ask-pq>summary .ask-pq-caret{{display:inline-block;}}
+.ask-pq[open]>summary .ask-pq-caret{{transform:rotate(90deg);}}
 .fpa-intro-area-intro{{grid-area:intro;}}
 .fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
 .fpa-intro-area-usage{{grid-area:usage;}}
@@ -24543,6 +24565,13 @@ function relTime(iso) {{
   var days = Math.round(hrs / 24);
   return days === 1 ? 'yesterday' : days + 'd ago';
 }}
+function recentItemHtml(c) {{
+  return '<button type="button" class="ask-recent-item" data-cid="' + escapeHtml(c.conversation_id) + '" onclick="resumeConvo(this)">' +
+         '<span class="ask-recent-q">' + escapeHtml(c.first_question) + '</span>' +
+         '<span class="ask-recent-meta">' + relTime(c.last_at) + ' &middot; ' +
+         c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span></button>';
+}}
+var RECENT_MAX = 5;   // the server's own cap on /ask/conversations
 async function loadRecent() {{
   try {{
     var resp = await fetch('/ask/conversations');
@@ -24551,15 +24580,32 @@ async function loadRecent() {{
     var list = d.conversations || [];
     if (!list.length) return;
     var box = document.getElementById('ask-recent');
-    box.innerHTML = '<div class="ask-section-label">Recent conversations</div>' +
-      list.map(function(c) {{
-        return '<button type="button" class="ask-recent-item" data-cid="' + escapeHtml(c.conversation_id) + '" onclick="resumeConvo(this)">' +
-               '<span class="ask-recent-q">' + escapeHtml(c.first_question) + '</span>' +
-               '<span class="ask-recent-meta">' + relTime(c.last_at) + ' &middot; ' +
-               c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span></button>';
-      }}).join('');
+    box.innerHTML = '<div class="ask-section-label">Recent conversations</div>' + list.map(recentItemHtml).join('');
     box.style.display = 'block';
   }} catch(e) {{}}
+}}
+// After an answer, put its conversation at the top of Recent conversations
+// from what the page already holds (the /ask response gave the id and the
+// limit state; the thread on screen gives the first question and the turn
+// count), instead of asking the server again. Visibility is untouched: the
+// list stays hidden while a thread is open and Start a new question shows it.
+function recentUpsert(cid, atLimit) {{
+  if (!cid) return;
+  var bubbles = document.querySelectorAll('#ask-thread .ask-q-bubble');
+  if (!bubbles.length) return;
+  var box = document.getElementById('ask-recent');
+  if (!box.querySelector('.ask-section-label'))
+    box.innerHTML = '<div class="ask-section-label">Recent conversations</div>';
+  var items = box.querySelectorAll('.ask-recent-item');
+  for (var i = 0; i < items.length; i++)
+    if (items[i].getAttribute('data-cid') === cid) items[i].remove();
+  var holder = document.createElement('div');
+  holder.innerHTML = recentItemHtml({{
+    conversation_id: cid, first_question: bubbles[0].textContent,
+    turns: bubbles.length, last_at: new Date().toISOString(), capped: !!atLimit}});
+  box.querySelector('.ask-section-label').insertAdjacentElement('afterend', holder.firstChild);
+  var all = box.querySelectorAll('.ask-recent-item');
+  for (var j = RECENT_MAX; j < all.length; j++) all[j].remove();
 }}
 // Pre-select the feedback controls with the turn's stored rating so a
 // resumed transcript looks exactly like it did live — and re-rating still
@@ -24678,6 +24724,7 @@ async function doAsk(followUp) {{
 
     convoId = d.conversation_id || convoId;
     asked = true; setConvoUrl(convoId);
+    recentUpsert(convoId, d.followups_left === 0);
     done(d.followups_left === 0 ? 'limit' : 'ready');
     turn.scrollIntoView({{behavior:'smooth', block:'start'}});
   }} catch(e) {{
@@ -24689,6 +24736,43 @@ async function doAsk(followUp) {{
 document.addEventListener('keydown', function(e) {{
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doAsk(!!(e.target && e.target.id === 'fu-q'));
 }});
+
+// Thread open: while anything is in #ask-thread the page drops the
+// illustrative example and folds "Search past questions" to one line. One
+// observer on the thread covers every way a thread appears or clears (ask,
+// resume, reload, Start a new question), so no send path has to remember it.
+(function() {{
+  var page = document.getElementById('fpa-page');
+  var thread = document.getElementById('ask-thread');
+  var pq = document.getElementById('past-questions');
+  var open = false;
+  // A search the reader just ran (or a link to the section) stays visible.
+  var keepPq = /[?&]pq=/.test(location.search) || location.hash === '#past-questions';
+  function sync() {{
+    var now = thread.children.length > 0;
+    if (now === open) return;
+    open = now;
+    page.classList.toggle('fpa-thread-open', open);
+    if (!pq) return;
+    if (open) {{ if (!keepPq) pq.open = false; keepPq = false; }}
+    else pq.open = true;
+  }}
+  new MutationObserver(sync).observe(thread, {{childList: true}});
+  if (pq) {{
+    // In the empty state the section is not collapsible, even from the keyboard.
+    pq.addEventListener('toggle', function() {{ if (!open && !pq.open) pq.open = true; }});
+    // The search is a plain GET: carry the open conversation through it so the
+    // reload reopens the thread instead of dropping it.
+    var pqForm = pq.querySelector('form');
+    if (pqForm) pqForm.addEventListener('submit', function() {{
+      if (!convoId) return;
+      var h = document.createElement('input');
+      h.type = 'hidden'; h.name = 'c'; h.value = convoId;
+      pqForm.appendChild(h);
+    }});
+  }}
+  sync();
+}})();
 
 updateEstimate();
 loadRecent();
