@@ -173,11 +173,12 @@ def test_bubble_chips_and_top_chips_share_one_state(live):
     _ask(pg, "First question")
     pg.wait_for_selector("#fu-q")
     _settle(pg)
+    pg.click("#fu .ask-dd-btn[data-dd='depth']")
     pg.click("#fu .ask-tag[data-tier='deep']")
     assert pg.evaluate("selectedTier") == "deep"
     assert "active" in pg.get_attribute(".fpa-intro-area-controls .ask-tag[data-tier='deep']", "class")
     assert "active" not in pg.get_attribute(".fpa-intro-area-controls .ask-tag[data-tier='standard']", "class")
-    pg.click("#fu summary")
+    pg.click("#fu .ask-dd-btn[data-dd='sources']")
     pg.click("#fu .ask-tag[data-source='feed']")
     assert "active" in pg.get_attribute(".fpa-intro-area-controls .ask-tag[data-source='feed']", "class")
     pg.fill("#fu-q", "Again")

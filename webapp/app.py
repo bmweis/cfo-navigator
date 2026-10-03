@@ -23843,19 +23843,21 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     </div>
   </div>
   <div class="fpa-intro-area-controls">
-    <div class="ask-controls">
-      <div class="ask-control">
-        <div class="ask-section-label">Sources</div>
-        <div class="ask-tags">
-          {source_tags}
-        </div>
-        <p style="margin:6px 0 0;font-size:12.5px;"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
+    <div class="ask-dd" id="ask-dd-top">
+      <div class="ask-dd-row">
+        <button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button>
+        <button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button>
       </div>
-      <div class="ask-control">
-        <div class="ask-section-label">Depth</div>
+      <div class="ask-dd-panel" data-dd="depth" hidden>
         <div class="ask-tags" role="radiogroup" aria-label="Depth">
           {tier_tags}
         </div>
+      </div>
+      <div class="ask-dd-panel" data-dd="sources" hidden>
+        <div class="ask-tags">
+          {source_tags}
+        </div>
+        <p class="ask-dd-note"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
       </div>
     </div>
   </div>
@@ -23956,47 +23958,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 @media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;grid-template-rows:none;
   grid-template-areas:{_intro_areas_mobile};}}}}
 
-/* Sources/Depth and the Ask button keep .ask-controls'/.ask-action-row's own
-   default margins everywhere else they're used (nowhere else, as of this
-   PR) — zeroed here only, so the grid's own 16px row-gap is the entire
-   space between the Question box, the controls row, and the Ask button,
-   instead of stacking on top of ~40px of margin the two shared components
-   already carry for their own (unrelated) contexts. */
-.fpa-intro-area-controls .ask-controls{{margin:0;}}
+/* The Ask button keeps no margin of its own here: the grid's row-gap is the
+   whole space between the Question box, the controls and the button. */
 .fpa-intro-area-action .ask-action-row{{margin:0;}}
-
-/* Sources and Depth read as one sequence down the page, not a left/right
-   split — both are the same kind of setting (a source-list choice, a depth
-   choice), so they stack: Sources full width, Depth full width beneath it,
-   both sharing the Question box's left edge, then Ask below. Overrides
-   .ask-controls' own 1fr/1fr side-by-side split (used nowhere else on the
-   site, confirmed by grep) rather than editing the shared rule itself, in
-   case a future page reuses the side-by-side default. Full width also
-   incidentally fixes the chip-wrapping problem the ~600px-column version of
-   this layout had: at the page's full ~1300px width, all three Source
-   chips — including "Web search (trusted sites)", deliberately NOT
-   shortened, since the trusted-sites qualifier is doing real work — fit on
-   one line. The row-gap this produces (20px, .ask-controls' own default)
-   already matches the ~20px spacing used elsewhere in this control stack—
-   no override needed beyond the column count. */
-.fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;}}
-
-/* Chips are natural width, left-aligned, NOT stretched to fill the row—
-   .ask-tags' own default flex-wrap row already does this with zero
-   override needed (each .ask-tag sizes to its own label by default).
-   Equal width WITHIN each group (Sources' three match each other, sized
-   to "Saved archive"; Depth's three match each other, sized to
-   "Standard") is set by fpaEqualizeChipWidths() below, not CSS — there is
-   no CSS-only way to size every sibling in a row to the widest one's
-   *natural* content width without either stretching to fill the
-   container (rejected — that's exactly what round 5 did and got reverted)
-   or duplicating the widest label's text into every cell. Measuring the
-   real rendered width in the browser also sidesteps the font-mismatch
-   risk a hardcoded pixel value would carry (this sandbox can't load the
-   sitewide Google Fonts — see the standing testing-standard note on
-   `capture_homepage()` — so a width measured here might not match a real
-   browser's actual DM Sans metrics; measuring live in whichever browser
-   is actually rendering the page doesn't have that problem). */
 
 /* Bottom-edge alignment between the Question box and the illustrative
    example: `align-self:stretch` on both grid items (above) makes each
@@ -24042,12 +24006,24 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);}}
 .ask-tag.active svg{{opacity:1;}}
 
-/* Sources | Depth, side by side. Both columns use the same .ask-tags/.ask-tag
-   component, so they carry identical weight. Below 640px the grid collapses to
-   one column and the two groups stack — each still a wrapping row of the same
-   buttons, so nothing overflows a narrow viewport. */
-.ask-controls{{display:grid;grid-template-columns:1fr 1fr;gap:20px 28px;margin:20px 0;align-items:start;}}
-@media (max-width:640px){{.ask-controls{{grid-template-columns:1fr;gap:18px;}}}}
+/* Depth and Sources: two dropdown buttons in one row; the open panel sits in
+   page flow directly under that row at the row's full width, so it can never
+   cover the question box or the Ask button and can't pass its container's
+   edge. Panels hold the same .ask-tag buttons as before (single-select for
+   Depth, multi-select for Sources), restyled as list rows. The follow-up
+   bubble holds a clone of this whole block. */
+.ask-dd-row{{display:flex;gap:8px;}}
+.ask-dd-btn{{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);font:inherit;font-size:14px;color:var(--ink-soft);cursor:pointer;text-align:left;}}
+.ask-dd-btn[aria-expanded="true"]{{border-color:var(--navy);}}
+.ask-dd-k{{flex-shrink:0;}}
+.ask-dd-v{{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--navy);}}
+.ask-dd-caret{{flex-shrink:0;color:var(--muted);}}
+.ask-dd-panel{{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;}}
+.ask-dd-panel[hidden]{{display:none;}}
+.ask-dd-panel .ask-tags{{flex-direction:column;flex-wrap:nowrap;gap:2px;}}
+.ask-dd-panel .ask-tag{{width:100%;border-color:transparent;background:transparent;border-radius:8px;min-height:40px;padding:8px 10px;font-weight:500;color:var(--ink);}}
+.ask-dd-panel .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);font-weight:600;}}
+.ask-dd-note{{margin:6px 10px 4px;font-size:12.5px;}}
 
 .ask-recent-item{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;width:100%;text-align:left;
   font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
@@ -24078,19 +24054,19 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fu textarea{{flex:1;min-width:0;min-height:42px;height:42px;max-height:120px;resize:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:14.5px;background:var(--bg);}}
 .fu .btn{{padding:10px 18px;font-size:14px;white-space:nowrap;}}
 .fu .btn:disabled{{opacity:.55;cursor:not-allowed;}}
-.fu-meta{{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--muted);}}
-.fu-meta .ask-tags{{gap:6px;flex-wrap:wrap;}}
-.fu-meta .ask-tag{{padding:4px 10px;font-size:12px;width:auto;}}
-.fu-meta .ask-cost{{margin-left:auto;flex-direction:row;gap:5px;align-items:baseline;}}
-.fu-meta details{{position:relative;}}
-.fu-meta summary{{cursor:pointer;list-style:none;border:1px solid var(--line);border-radius:999px;padding:4px 10px;}}
-.fu-meta .fu-pop{{position:absolute;bottom:32px;left:0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;box-shadow:0 6px 20px rgba(11,31,77,.12);z-index:5;display:flex;flex-wrap:wrap;gap:6px;width:max-content;max-width:calc(100vw - 48px);}}
+.fu-meta{{display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:12px;color:var(--muted);}}
+.fu-meta .ask-dd-btn{{min-height:40px;font-size:13px;}}
+.fu-meta .ask-cost{{flex-direction:row;gap:5px;align-items:baseline;}}
 .fu-sum{{display:none;font-size:12px;color:var(--muted);margin-top:6px;}}
-/* :has(textarea:focus), not :focus-within: tapping a chip focuses the chip
-   (a button), and collapsing the row on that focus removed the chip between
-   mousedown and mouseup, so the tap never registered. */
-.fu:has(textarea:focus) .fu-meta{{display:none;}}
-.fu:has(textarea:focus) .fu-sum{{display:block;}}
+/* Compact while typing, driven by a class rather than :focus. Tapping the Ask
+   follow-up button blurs the textarea; if blur re-expanded the controls, the
+   bubble (sticky to the bottom) would grow upward and move the button out from
+   under the finger before the tap completed. The class is set on focus and
+   cleared only by a tap outside the bubble or on the summary line, so a tap
+   inside the bubble never changes its height. */
+.fu.fu-compact .fu-meta{{display:none;}}
+.fu.fu-compact .fu-sum{{display:block;}}
+.fu-sum{{cursor:pointer;}}
 @media(max-width:640px){{.fu{{max-width:100%;padding:8px 10px;}} .fu-meta{{font-size:11.5px;}}}}
 .ask-answer p{{margin:0 0 14px;}}
 .ask-answer h3,.ask-answer h4,.ask-answer h5,.ask-answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:18px 0 8px;letter-spacing:-0.01em;}}
@@ -24147,6 +24123,7 @@ function selectTier(el) {{
   }});
   updateEstimate();
   fuSummary();
+  closeDds();
 }}
 
 function toggleSource(el) {{
@@ -24186,34 +24163,42 @@ function fuSummary() {{
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
   var cost = (document.getElementById('cost-est-num') || {{}}).textContent || '';
   var sum = document.querySelector('.fu-sum');
-  if (sum) sum.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ');
-  var lab = document.querySelector('.fu-src-label');
-  if (lab) lab.textContent = 'Sources: ' + srcs + ' \u25be';
+  if (sum) sum.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ') + ' \u25be';
+  ddLabels();
 }}
 
-// Sources' three chips match each other (sized to "Saved archive"), and
-// Depth's three match each other (sized to "Standard") — independently
-// per group, natural width, not stretched full-width. There's no CSS-only
-// way to size every sibling in a row to the widest one's real content
-// width without either duplicating that label into every cell or
-// stretching to fill the container (the round-5 approach, reverted) — so
-// this measures the ACTUAL rendered width of each chip in whichever
-// browser is running the page (sidesteps a hardcoded pixel value
-// potentially not matching a real browser's font metrics) and applies the
-// max as a fixed width to every chip in that same .ask-tags group. Widths
-// are text/font-driven, not viewport-driven — .ask-tag's font-size has no
-// media-query override anywhere on this page — so a one-time run on load
-// is enough; no resize listener needed.
-function fpaEqualizeChipWidths() {{
-  document.querySelectorAll('.fpa-intro-area-controls .ask-tags').forEach(function(group) {{
-    var chips = group.querySelectorAll('.ask-tag');
-    if (!chips.length) return;
-    chips.forEach(function(c) {{ c.style.width = ''; }});
-    var max = 0;
-    chips.forEach(function(c) {{ max = Math.max(max, c.getBoundingClientRect().width); }});
-    chips.forEach(function(c) {{ c.style.width = max + 'px'; }});
-  }});
+// Dropdown buttons: the current value shows on the closed button, so state is never hidden.
+function ddLabels() {{
+  var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
+  var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active');
+  var sv = srcs.length === 0 ? 'None' : srcs.length + ' of ' + document.querySelectorAll('.fpa-intro-area-controls .ask-tag[data-source]').length;
+  document.querySelectorAll('.ask-dd-btn[data-dd="depth"] .ask-dd-v').forEach(function(n) {{ n.textContent = tier; }});
+  document.querySelectorAll('.ask-dd-btn[data-dd="sources"] .ask-dd-v').forEach(function(n) {{ n.textContent = sv; }});
 }}
+function closeDds() {{
+  document.querySelectorAll('.ask-dd-btn').forEach(function(b) {{ b.setAttribute('aria-expanded', 'false'); }});
+  document.querySelectorAll('.ask-dd-panel').forEach(function(p) {{ p.hidden = true; }});
+}}
+function toggleDd(btn) {{
+  var open = btn.getAttribute('aria-expanded') !== 'true';
+  closeDds();
+  if (!open) return;
+  var dd = btn.closest('.ask-dd');
+  btn.setAttribute('aria-expanded', 'true');
+  var panel = dd.querySelector('.ask-dd-panel[data-dd="' + btn.getAttribute('data-dd') + '"]');
+  if (panel) panel.hidden = false;
+}}
+document.addEventListener('click', function(e) {{
+  if (!e.target.closest('.ask-dd')) closeDds();
+}});
+// A tap outside the follow-up bubble brings its controls back after typing.
+document.addEventListener('pointerdown', function(e) {{
+  var fu = document.getElementById('fu');
+  if (fu && !e.target.closest('#fu')) fu.classList.remove('fu-compact');
+}});
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Escape') closeDds();
+}});
 
 var asked = false;
 var convoId = null;    // the server-side conversation to continue; set from the
@@ -24429,22 +24414,16 @@ function fuRender(state) {{
   if (!limited) {{
     var meta = document.createElement('div');
     meta.className = 'fu-meta';
-    var depth = document.querySelector('.fpa-intro-area-controls .ask-control:nth-child(2) .ask-tags');
-    var srcs = document.querySelector('.fpa-intro-area-controls .ask-control:nth-child(1) .ask-tags');
-    // Clones drop the top group's equalized inline widths; the bubble's chips size to their text.
-    if (depth) {{
-      var dc = depth.cloneNode(true);
-      dc.querySelectorAll('.ask-tag').forEach(function(t) {{ t.style.width = ''; }});
-      meta.appendChild(dc);
+    var top = document.getElementById('ask-dd-top');
+    if (top) {{
+      // A clone of the top block: same buttons and panels, panels in the
+      // bubble's own flow at bubble width. The top block stays the source of truth.
+      var dd = top.cloneNode(true);
+      dd.removeAttribute('id');
+      dd.querySelectorAll('.ask-dd-btn').forEach(function(x) {{ x.setAttribute('aria-expanded', 'false'); }});
+      dd.querySelectorAll('.ask-dd-panel').forEach(function(x) {{ x.hidden = true; }});
+      meta.appendChild(dd);
     }}
-    var det = document.createElement('details');
-    det.innerHTML = '<summary class="fu-src-label"></summary><div class="fu-pop"></div>';
-    if (srcs) {{
-      var pop = srcs.cloneNode(true);
-      pop.querySelectorAll('.ask-tag').forEach(function(t) {{ t.style.width = ''; }});
-      det.querySelector('.fu-pop').appendChild(pop);
-    }}
-    meta.appendChild(det);
     if (document.getElementById('cost-est-num')) {{
       var cost = document.createElement('span');
       cost.className = 'ask-cost';
@@ -24455,6 +24434,8 @@ function fuRender(state) {{
     var sum = document.createElement('div');
     sum.className = 'fu-sum';
     f.appendChild(sum);
+    f.querySelector('#fu-q').addEventListener('focus', function() {{ f.classList.add('fu-compact'); closeDds(); }});
+    sum.addEventListener('click', function() {{ f.classList.remove('fu-compact'); }});
   }}
   thread.appendChild(f);
   updateEstimate(); fuSummary();
@@ -24623,12 +24604,12 @@ document.addEventListener('keydown', function(e) {{
 
 updateEstimate();
 loadRecent();
+ddLabels();
 // A reload keeps the reader in their conversation: reopen the one named in the URL.
 (function() {{
   var c = new URLSearchParams(location.search).get('c');
   if (c) resumeConvoById(c);
 }})();
-fpaEqualizeChipWidths();
 </script>"""
 
     return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))

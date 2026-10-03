@@ -6315,13 +6315,28 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   one send path. Depth and sources are one state held by the top controls; the
   bubble's chips are id-less clones kept in step by `selectTier`/`toggleSource`,
   and anything reading the selected sources must use `activeSources()`, never an
-  unscoped `.ask-tag.active`. The collapse-while-typing rule is
-  `.fu:has(textarea:focus)`, deliberately not `:focus-within` (a chip tap would
-  collapse the row mid-click). **Decision recorded:** the live `mdInline` now
+  unscoped `.ask-tag.active`. The collapse-while-typing rule is the `.fu-compact`
+  class (set on focus, cleared by a tap outside the bubble or on the summary
+  line; see the dropdown bullet below), not `:has(textarea:focus)` and not
+  `:focus-within`. **Decision recorded:** the live `mdInline` now
   keeps model-text links inert, same as the server twin (it linkified them
   before); `tests/test_answer_history_render.py` parity-tests a link fixture.
   Limits, cost and server contract are unchanged. See ARCHITECTURE.md's
   matching bullet and `tests/test_buddy_followup_bubble.py`.
+- **FP&A Buddy Depth and Sources are two dropdowns (2026-10).** Replaces the chip
+  rows and the bubble's popover, measured first on a phone: the popover ran 11px
+  past the bubble and covered the follow-up input and button; the top box's three
+  chips needed 463px against 342px and wrapped. `#ask-dd-top` is two buttons in one
+  row (`Depth: Standard`, `Sources: 2 of 3`) with the open panel in page flow
+  under the row at full width, so it cannot cover anything. Panels hold the same
+  `.ask-tag` buttons, so `selectTier`/`toggleSource`/`activeSources()` did not
+  change; the bubble holds a deep clone of the block. Depth closes on pick;
+  Sources stays open until a tap outside or Escape. **Same PR:** the compact-while-
+  typing rule is now a `.fu-compact` class, because with the taller controls
+  block `:has(textarea:focus)` let blur re-expand the sticky bubble upward and move
+  the Ask follow-up button out from under the tap. Anything new in the bubble must
+  not change its height on blur or press. See ARCHITECTURE.md's matching bullet and
+  `tests/test_buddy_dropdown_controls.py`.
 - **FP&A Buddy phone fixes (2026-10), measured on a real iPhone first.** Brian's
   iPhone check of the bubble found six problems; each was measured in Chromium at
   390px before any change (a harness that runs the real app against a seeded temp
@@ -6342,7 +6357,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   long title cannot drop below it. Not changed: the sticky bubble over a long answer
   (at the end of the page it sits below the sources and the feedback row, measured),
   and the Depth/Sources controls (popover overlap and top-box chip wrapping),
-  which wait on a design pick. `tests/test_buddy_phone_fixes.py` serves the real page
+  which the two-dropdown change in the next bullet replaced. `tests/test_buddy_phone_fixes.py` serves the real page
   over http through route handlers; it skips where no Chromium exists, as in CI.
 
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
