@@ -620,6 +620,29 @@ just inferred from the CSS change), `document.body.scrollWidth` exactly
 across all three, since the JS-measured sizing is font-driven and therefore
 identical regardless of viewport.
 
+**Depth and Sources become two dropdowns (2026-10), superseding rounds 3 to 6's
+chip rows and the follow-up bubble's popover.** Measured on a phone first: the
+bubble's Sources popover was absolutely positioned above its pill, 342px wide
+against a 342px bubble, so it ran 11px past the bubble's right edge and covered
+the follow-up input and button; the top box's three equalized chips needed 463px
+against a 342px column, so "Trusted web" wrapped. One component fixes both:
+`#ask-dd-top` holds two buttons in one row (`Depth: Standard`, `Sources: 2 of 3`,
+44px) and two `hidden` panels in page flow directly under that row at the row's
+full width. The panels contain the same `.ask-tag[data-tier]`/`[data-source]`
+buttons as before (restyled as list rows), so `selectTier`, `toggleSource` and
+`activeSources()` are unchanged. Depth is single-select and closes on pick;
+Sources is multi-select and stays open until a tap outside, Escape, or the other
+button. The bubble holds a deep clone of `#ask-dd-top` (id removed, panels
+closed), so a panel opens inside the bubble at bubble width, below the input row,
+and cannot cover it. `ddLabels()` keeps every button's value in step. The chip
+equalizer (`fpaEqualizeChipWidths`) and the `.ask-controls`/`.fu-pop` CSS are gone.
+**Second change in the same PR, found by the existing tests:** the bubble's
+collapse-while-typing rule moved from `.fu:has(textarea:focus)` to a `.fu-compact`
+class (set on focus; cleared by a tap outside the bubble or on the summary line).
+With the taller controls block, blur re-expanded the sticky bubble upward on
+mousedown and the Ask follow-up button moved out from under the tap, so the
+follow-up never sent. Tests: `tests/test_buddy_dropdown_controls.py`.
+
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
 — replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column
