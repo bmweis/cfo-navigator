@@ -6360,6 +6360,38 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   which the two-dropdown change in the next bullet replaced. `tests/test_buddy_phone_fixes.py` serves the real page
   over http through route handlers; it skips where no Chromium exists, as in CI.
 
+- **FP&A Buddy while a conversation is open (2026-10).** Three follow-ups from
+  the PR 667 review. **Thread open** means anything is in `#ask-thread`; one
+  `MutationObserver` on it toggles `.fpa-thread-open` on `#fpa-page`, so every way a
+  thread appears or clears (top Ask, a Recent conversations row, a `?c=` reload,
+  Start a new question) is covered without each send path remembering. Open: the
+  illustrative example is hidden and the form becomes one full-width column
+  (`_intro_areas_thread`; hiding the example alone would leave an empty right-hand
+  track), and "Search past questions" folds to a one-line `<details>`. Cleared: both
+  come back, and the section is open again. In the empty state it is the same
+  section as before and cannot be folded, even by keyboard (a `toggle` listener
+  reopens it). The observer acts on transitions only, so a reader who opened the
+  folded line is not refolded by their next top question. A search the reader just
+  ran (`?pq=`) or a `#past-questions` link stays open when a thread arrives. **A
+  consequence found while building it:** the search is a plain GET to
+  `/tools/fpa-buddy`, which dropped `?c=`, so searching from a folded-open section
+  lost the open thread; the form now adds a hidden `c` input at submit time when a
+  conversation is open. **Recent conversations refresh in place**, from what the page
+  already holds, not a second request: after a successful answer `recentUpsert()`
+  builds the row from the conversation id in the `/ask` response, the first question
+  and turn count read off the thread on screen, and `followups_left === 0` for the
+  "at limit" tag, then puts it at the top, replaces any row for the same id, and
+  trims to five (the server's own cap). A row used to appear only after a reload,
+  and never if the list was empty at load. Row markup is shared with `loadRecent()`
+  (`recentItemHtml`), and visibility is untouched: hidden while a thread is open,
+  shown by Start a new question. A capped turn that was not recorded adds nothing.
+  **Bubble visibility audit:** all five rules from the review (fresh page, first
+  answer, own conversation with `convoId` set, limit state, another member's past
+  answer) already had tests in `test_buddy_followup_bubble.py`; the paths with only
+  indirect coverage (a first turn that hits the cap, a failed first ask, one bubble
+  that always follows the latest reply) are now pinned in
+  `tests/test_buddy_thread_open.py`. Chromium tests skip in CI.
+
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
   overlap/contrast summary above both Compare tables, cached permanently
   and capped by a shared daily dollar budget.** Purely additive on top of
