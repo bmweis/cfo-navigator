@@ -56,17 +56,20 @@ def _member_html(appmod):
     return c.get("/tools/fpa-buddy").text
 
 
-def test_sources_and_depth_render_side_by_side_in_one_grid(env):
+def test_depth_and_sources_are_two_dropdowns_with_panels_in_flow(env):
     appmod, _ = env
     html = _admin_html(appmod)
-    assert 'class="ask-controls"' in html
-    # Two columns in the same grid container, Sources first.
-    block = html.split('class="ask-controls"', 1)[1].split("</style>", 1)[0]
-    assert block.count('class="ask-control"') == 2
-    assert block.index("Sources") < block.index("Depth")
-    # A real two-column grid, collapsing to one column on narrow viewports.
-    assert re.search(r"\.ask-controls\{display:grid;grid-template-columns:1fr 1fr", html)
-    assert re.search(r"@media \(max-width:640px\)\{\.ask-controls\{grid-template-columns:1fr", html)
+    block = html.split('id="ask-dd-top"', 1)[1].split('class="ask-action-row"', 1)[0]
+    # Two buttons in one row, Depth first, each opening its own panel.
+    assert block.count('class="ask-dd-btn"') == 2
+    assert block.index('data-dd="depth"') < block.index('data-dd="sources"')
+    assert block.count('class="ask-dd-panel"') == 2
+    assert block.count(" hidden>") == 2
+    # Panels sit in page flow: never absolutely positioned, so they cannot
+    # cover the question box, the Ask button or the follow-up input.
+    css = re.search(r"\.ask-dd-panel\{[^}]*\}", html).group(0)
+    assert "position" not in css
+    assert "ask-controls" not in html and "fu-pop" not in html
 
 
 def test_depth_buttons_reuse_the_sources_tag_component(env):
@@ -104,7 +107,7 @@ def test_tier_detail_and_recommended_move_from_persistent_ui_to_hover(env):
     # the ask-action-row's own class (not a hardcoded whitespace gap between
     # the two blocks) since PR 17 nested both inside the FP&A Buddy page's
     # two-column intro grid, adding wrapper divs between them.
-    controls = html.split('class="ask-controls"', 1)[1].split('class="ask-action-row"', 1)[0]
+    controls = html.split('id="ask-dd-top"', 1)[1].split('class="ask-action-row"', 1)[0]
     assert "tokens out" not in controls.replace('title="', "\x00").split("\x00")[0]
     assert "ask-tier-badge" not in html
     assert ">Recommended<" not in html

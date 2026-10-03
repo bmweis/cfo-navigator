@@ -431,7 +431,7 @@ def test_compare_software_pending_field_masked_by_role_matching_gates(live_serve
 
     def _desc_field(payload, tool_id):
         entity = next(e for e in payload["entities"] if e["id"] == tool_id)
-        section = next(s for s in entity["sections"] if s["title"] == "Description")
+        section = next(s for s in entity["sections"] if s["title"] == "Short summary")
         return section["fields"][0]
 
     member_field = _desc_field(member_data, a["id"])
@@ -695,3 +695,19 @@ def test_get_software_key_features_include_full_definition(live_server):
     assert card["state"] == "empty" and card["text"] == ""
     from linklib import gates
     assert card["placeholder"] == gates.EMPTY_COPY["feature_definition"].visitor_text
+
+
+def test_get_software_labels_match_the_shared_words(live_server):
+    """PR 2a.2: the MCP labels are the same words the edit page, profile and
+    Compare use. Keys are unchanged (agent_taxonomy, description, bottom_line)."""
+    from linklib import tool_labels
+    lib = Library(live_server.db_path)
+    tool = _seed_tool(lib, "Label Test Tool")
+    lib.close()
+    out = _dict_result(_call_tool(live_server.base_url, live_server.member, "get_software",
+                                   {"slug_or_id": tool["slug"]}))
+    assert out["agent_taxonomy"]["label"] == tool_labels.AGENT
+    assert out["description"]["label"] == tool_labels.DESCRIPTION
+    assert out["bottom_line"]["label"] == tool_labels.BOTTOM_LINE
+    assert out["competitors"]["title"] == tool_labels.COMPETITORS
+    assert {"agent_taxonomy", "description", "bottom_line", "summary"} <= set(out)

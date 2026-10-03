@@ -177,11 +177,11 @@ def test_compare_every_section_gets_a_real_header_band(env):
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     # Software has one field per section, so each is a labelled row (field
     # name in the first column) and there are no navy bands at all.
-    for title in ("Description", "AI / Agent involvement", "Bottom line", "Competitors"):
+    for title in ("Short summary", "AI / Agent involvement", "Bottom line", "Competitors"):
         assert '<td class="cc-cell cc-label' in r.text and f'>{title}</td>' in r.text, title
     assert 'class="cc-cell cc-section"' not in r.text
     body = r.text[r.text.index("<tbody>"):]
-    assert body.index(">Bottom line</td>") < body.index(">Description</td>")   # Bottom line leads, seafoam
+    assert body.index(">Bottom line</td>") < body.index(">Short summary</td>")   # Bottom line leads, seafoam
     assert 'cc-label cc-bl">Bottom line</td>' in body
 
 

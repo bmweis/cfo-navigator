@@ -66,7 +66,7 @@ import markdown as _markdown
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-from linklib import compare, gates
+from linklib import compare, gates, tool_labels
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.voice_mechanics import norm_for_compare
 from linklib.voice_review import (
@@ -1197,7 +1197,7 @@ def _name_duplicate_warning(dup: dict) -> str:
 
 def _narrative_verify_widget(needs_verification: bool, verify_form_id: str, verify_url: str,
                               latest_review: dict | None,
-                              badge_label: str = "Needs verification",
+                              badge_label: str = gates.BADGE_TEXT_ADMIN,
                               action_label: str = "Mark verified",
                               past_tense_verb: str = "Verified",
                               extra_hidden_fields_html: str = "") -> tuple[str, str, str, str]:
@@ -9295,7 +9295,7 @@ async function saveQuickEdit(id) {{
       method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify(payload)
     }});
     var d = await r.json();
-    if (!r.ok || !d.ok) throw new Error(d.error || 'Save failed');
+    if (!r.ok || !d.ok) {{ var err = new Error(d.error || 'Save failed'); err.fromServer = !!d.error; throw err; }}
     var t = ALL_TOOLS.find(function(x) {{ return x.id === id; }});
     if (t) {{
       t.description = d.tool.description;
@@ -9307,7 +9307,7 @@ async function saveQuickEdit(id) {{
     }}
     renderTools(filtered());
   }} catch (e) {{
-    status.textContent = 'Save failed—try again.';
+    status.textContent = (e && e.fromServer) ? e.message : 'Save failed—try again.';
   }}
 }}
 
@@ -10034,13 +10034,13 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     if _at_note:
         _at_badge = _review_state_badge(_at_unverified, authed, "tp-verify")
         agent_taxonomy_block = f"""<div class="tp-card">
-  <h2 class="tp-card-h"><small>AI agent capabilities</small>How autonomous is it?{_at_badge}</h2>
+  <h2 class="tp-card-h"><small>{_esc(tool_labels.EYEBROW_AGENT)}</small>{_esc(tool_labels.AGENT)}{_at_badge}</h2>
   <div class="narrative-md">{render_narrative_markdown(tool['agent_taxonomy_note'])}</div>
   {_at_citations_html}
 </div>"""
     else:
         _at_copy = gates.EMPTY_COPY["tool_agent_taxonomy"]
-        agent_taxonomy_block = _empty_state_card("AI agent capabilities", _empty_state_text(
+        agent_taxonomy_block = _empty_state_card(tool_labels.EYEBROW_AGENT, _empty_state_text(
             _at_copy.visitor_text, _at_copy.admin_suffix, authed))
 
     # Key features card (Feature Taxonomy Phase 2) — replaces the legacy
@@ -12611,7 +12611,7 @@ function showSaveAndMarkVerified(fieldName, badgeHostId, actionHostId) {
   if (badgeHost) {
     badgeHost.innerHTML = '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;'
       + 'text-transform:uppercase;background:var(--coral-wash);color:var(--navy);border-radius:5px;'
-      + 'padding:2px 7px;margin-left:8px;">Needs verification</span>';
+      + 'padding:2px 7px;margin-left:8px;">__ADMIN_UNVERIFIED_BADGE__</span>';
   }
   var actionHost = document.getElementById(actionHostId);
   if (actionHost) {
@@ -12759,6 +12759,10 @@ function stopGenAnim(hostId) {
 }
 """
 
+# The injected per-field badge uses the same admin string as the admin view of
+# the profile (gates.BADGE_TEXT_ADMIN), filled in once here for every script
+# that embeds this block.
+_MARK_AI_DRAFTED_JS = _MARK_AI_DRAFTED_JS.replace("__ADMIN_UNVERIFIED_BADGE__", gates.BADGE_TEXT_ADMIN)
 _GENERATE_DESC_JS = _MARK_AI_DRAFTED_JS + """
 async function generateDescription(name, url, descId, statusId, summaryId, errBoxId, hostId) {
   name = (name || '').trim();
@@ -18936,6 +18940,36 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
                                 logo_refetched, logo_refetch_msg)
 
 
+def _refusal_banner_html(refusal: list | None) -> str:
+    """The over-limit refusal banner shared by the Community and Software edit
+    and add pages: one box naming every field over its hard limit with its
+    length, limit and overage. `refusal` is a list of (label, length, limit)."""
+    if not refusal:
+        return ""
+    items = "".join(
+        f'<li><strong>{_esc(lbl)}</strong>: {n:,} characters, limit {lim:,} ({n - lim:,} over)</li>'
+        for lbl, n, lim in refusal)
+    return (
+        '<div role="alert" style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+        'padding:14px 18px;margin:0 0 20px;font-size:14px;">'
+        '<strong>Nothing was saved.</strong> These fields are over their limit. Shorten each one, then save again. '
+        'Everything you typed or generated is still in the boxes below.'
+        f'<ul style="margin:8px 0 0;padding-left:20px;">{items}</ul></div>')
+
+
+def _tool_limit_refusals(form) -> list:
+    """Every Software profile field in this submit that is over its hard max,
+    as (label, length, limit), checked together BEFORE any write so a refused
+    save never leaves the row half-saved. Same limits and the same length rule
+    (`Library.text_budget_length`) the counter and the library methods use."""
+    over = []
+    for label, field, limit in _TOOL_LIMITED_FIELDS:
+        n = Library.text_budget_length((form.get(field) or "").strip())
+        if n > limit:
+            over.append((label, n, limit))
+    return over
+
+
 def _community_edit_page(request: Request, slug: str, screenshot_captured: str = "",
                           app_screenshot_captured: str = "", logo_refetched: str = "",
                           logo_refetch_msg: str = "", form=None, refusal: list | None = None):
@@ -18985,17 +19019,7 @@ def _community_edit_page(request: Request, slug: str, screenshot_captured: str =
             p["cpe_eligible"] = resolve_cpe_submission(form.get("cpe_eligible"), form.get("cpe_note"))
         for _k in _hidden:
             _hidden[_k] = form.get(_k) or ""
-    _refusal_html = ""
-    if refusal:
-        _items = "".join(
-            f'<li><strong>{_esc(lbl)}</strong>: {n:,} characters, limit {lim:,} ({n - lim:,} over)</li>'
-            for lbl, n, lim in refusal)
-        _refusal_html = (
-            '<div role="alert" style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
-            'padding:14px 18px;margin:0 0 20px;font-size:14px;">'
-            '<strong>Nothing was saved.</strong> These fields are over their limit. Shorten each one, then save again. '
-            'Everything you typed or generated is still in the boxes below.'
-            f'<ul style="margin:8px 0 0;padding-left:20px;">{_items}</ul></div>')
+    _refusal_html = _refusal_banner_html(refusal)
 
     def _competitor_row(comp: dict) -> str:
         return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;'
@@ -19961,6 +19985,12 @@ async def admin_communities_generate_listing(request: Request):
 
 @app.get("/admin/tools/software/new", response_class=HTMLResponse)
 def admin_tools_new(request: Request):
+    return _tool_new_page(request)
+
+
+def _tool_new_page(request: Request, form=None, refusal: list | None = None):
+    """Render the add-software page; `form`/`refusal` are set only when a save
+    was refused for going over a hard limit (see _tool_edit_page)."""
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -19968,40 +19998,51 @@ def admin_tools_new(request: Request):
         categories = lib.list_tool_categories()
     finally:
         lib.close()
+    def _fv(key: str) -> str:
+        return (form.get(key) or "").strip() if form is not None else ""
+
+    def _fc(key: str) -> str:
+        return " checked" if form is not None and form.get(key) == "1" else ""
+
+    _hidden = {k: (form.get(k) or "") if form is not None else "" for k in (
+        "ai_drafted_fields", "ai_drafted_confidence", "ai_drafted_low_confidence",
+        "ai_drafted_citations", "ai_drafted_citations_model")}
+    _selected_cats = [v.strip() for v in form.getlist("categories") if v.strip()] if form is not None else []
     _new_desc_attrs, _new_desc_counter = _char_budget(
-        Library.TOOL_DESCRIPTION_MAX, "", "tool-desc-new", target=Library.TOOL_DESCRIPTION_TARGET)
+        Library.TOOL_DESCRIPTION_MAX, _fv("description"), "tool-desc-new", target=Library.TOOL_DESCRIPTION_TARGET)
     _new_summary_attrs, _new_summary_counter = _char_budget(
-        Library.TOOL_SUMMARY_MAX, "", "tool-summary-new", target=Library.TOOL_SUMMARY_TARGET)
+        Library.TOOL_SUMMARY_MAX, _fv("summary"), "tool-summary-new", target=Library.TOOL_SUMMARY_TARGET)
     body = f"""<div class="page page-standard">
 <h1>Add software</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
-<form method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
-  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
-  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
-  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="">
-  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
-  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
+{_refusal_banner_html(refusal)}
+<form id="tool-new-form" method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
+  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="{_esc(_hidden['ai_drafted_fields'])}">
+  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="{_esc(_hidden['ai_drafted_confidence'])}">
+  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="{_esc(_hidden['ai_drafted_low_confidence'])}">
+  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="{_esc(_hidden['ai_drafted_citations'])}">
+  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="{_esc(_hidden['ai_drafted_citations_model'])}">
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
       <h2 style="font-size:16px;font-weight:600;margin:0;">Company details</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor name *</label>
-        <input id="tool-name" name="name" required maxlength="200"
+        <input id="tool-name" name="name" required maxlength="200" value="{_esc(_fv('name'))}"
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
       </div>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
-        <input id="tool-url" name="url" type="url" required maxlength="500"
+        <input id="tool-url" name="url" type="url" required maxlength="500" value="{_esc(_fv('url'))}"
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
           placeholder="https://…">
       </div>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" name="advisor" value="1">
+        <input type="checkbox" name="advisor" value="1"{_fc('advisor')}>
         <span>&#129305; Formal advisor</span>
       </label>
       <p style="font-size:12px;color:var(--muted);margin:-8px 0 0 30px;">Discloses publicly that Brian formally advises this vendor.</p>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" name="promoted" value="1">
+        <input type="checkbox" name="promoted" value="1"{_fc('promoted')}>
         <span>&#10024; Featured</span>
       </label>
       <p style="font-size:12px;color:var(--muted);margin:-8px 0 0 30px;">Adds a &quot;Featured&quot; sticker to this tool's directory card.</p>
@@ -20010,18 +20051,18 @@ def admin_tools_new(request: Request):
       <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
-        <input name="vendor_name" maxlength="200"
+        <input name="vendor_name" maxlength="200" value="{_esc(_fv('vendor_name'))}"
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
           placeholder="Jane Smith">
       </div>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
-        <input name="vendor_email" type="email" maxlength="200"
+        <input name="vendor_email" type="email" maxlength="200" value="{_esc(_fv('vendor_email'))}"
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
           placeholder="contact@vendor.com">
       </div>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" name="warm_intro_enabled" value="1">
+        <input type="checkbox" name="warm_intro_enabled" value="1"{_fc('warm_intro_enabled')}>
         <span>&#128232; Offer warm intro</span>
       </label>
       <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in above—either alone isn&rsquo;t enough.</p>
@@ -20029,7 +20070,7 @@ def admin_tools_new(request: Request):
   </div>
   <div id="gen-host-tool-desc-new">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">{_esc(tool_labels.DESCRIPTION)} *</label>
       <span>
         <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err', 'gen-host-tool-desc-new')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
@@ -20038,25 +20079,26 @@ def admin_tools_new(request: Request):
     <p id="tool-desc-gen-err" style="display:none;"></p>
     <textarea id="tool-desc" name="description" required {_new_desc_attrs} rows="7"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-      placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences."></textarea>
+      placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(_fv('description'))}</textarea>
     {_new_desc_counter}
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(tool_labels.SHORT_SUMMARY)} *</label>
     <textarea id="tool-summary" name="summary" required {_new_summary_attrs} rows="2"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-      placeholder="2-3 sentences—shown on the directory card and in search results. Filled in by Generate above, or write your own."></textarea>
+      placeholder="2-3 sentences—shown on the directory card and in search results. Filled in by Generate above, or write your own.">{_esc(_fv('summary'))}</textarea>
     {_new_summary_counter}
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
     <div style="display:flex;flex-wrap:wrap;gap:8px 16px;">
-      {_tool_category_checkboxes(categories)}
+      {_tool_category_checkboxes(categories, _selected_cats)}
     </div>
   </div>
   <div>
     <button type="submit" class="btn">Add to directory</button>
     <a href="/admin/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <span class="char-budget-reason" data-char-reason-for="tool-new-form" role="status" hidden style="margin-left:10px;">Saving is off while a field is over its limit. Shorten {_esc(tool_labels.DESCRIPTION)} or {_esc(tool_labels.SHORT_SUMMARY)}, then save.</span>
   </div>
 </form>
 </div>
@@ -20159,6 +20201,11 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     vendor_name = (form.get("vendor_name") or "").strip()
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
+    over = _tool_limit_refusals(form)
+    if over:
+        page = _tool_new_page(request, form=form, refusal=over)
+        page.status_code = 400
+        return page
     # Citations-API grounding fix, Phase 2 — closes a real gap: this form's
     # Generate-description button used to have nowhere to record
     # needs_verification/confidence/citations at all, since add_tool() never
@@ -20239,6 +20286,21 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
                       app_screenshot_captured: str = "",
                       logo_refetched: str = "", logo_refetch_msg: str = "",
                       feature_links_error: str = ""):
+    return _tool_edit_page(request, slug, screenshot_captured, research_refreshed, research_reason,
+                           research_url, app_screenshot_captured, logo_refetched, logo_refetch_msg,
+                           feature_links_error)
+
+
+def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", research_refreshed: str = "",
+                    research_reason: str = "", research_url: str = "",
+                    app_screenshot_captured: str = "",
+                    logo_refetched: str = "", logo_refetch_msg: str = "",
+                    feature_links_error: str = "", form=None, refusal: list | None = None):
+    """Render the Software edit page. `form` (a submitted form) and `refusal`
+    (a list of over-limit fields) are set only when a save was refused for
+    going over a hard limit: the page is rebuilt from what was submitted so
+    nothing typed or generated is lost, with a banner naming each field.
+    Nothing was written in that case (2a.2)."""
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -20294,6 +20356,21 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         lib.close()
     if not tool:
         raise HTTPException(status_code=404, detail="Tool not found")
+    _hidden = {"ai_drafted_fields": "", "ai_drafted_confidence": "", "ai_drafted_low_confidence": "",
+               "ai_drafted_citations": "", "ai_drafted_citations_model": "", "confirm_verified_fields": ""}
+    if form is not None:
+        tool = dict(tool)
+        for _k in ("name", "url", "description", "summary", "agent_taxonomy_note",
+                   "competitive_differentiation", "vendor_name", "vendor_email",
+                   "screenshot_url", "app_screenshot_source_url"):
+            if _k in form:
+                tool[_k] = (form.get(_k) or "").strip()
+        tool["categories"] = [v.strip() for v in form.getlist("categories") if v.strip()]
+        for _k in ("advisor", "promoted", "warm_intro_enabled"):
+            tool[_k] = 1 if form.get(_k) == "1" else 0
+        for _k in _hidden:
+            _hidden[_k] = form.get(_k) or ""
+    _refusal_html = _refusal_banner_html(refusal)
     meta_parts = []
     if tool.get("submitted_by"):
         meta_parts.append(f"Submitted by {_esc(tool['submitted_by'])}")
@@ -20632,13 +20709,14 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <h1>Edit software</h1>
 {_CROPPER_CDN_HTML}
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
+{_refusal_html}
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
-  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
-  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
-  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="">
-  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
-  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
-  <input type="hidden" id="confirm-verified-fields" name="confirm_verified_fields" value="">
+  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="{_esc(_hidden['ai_drafted_fields'])}">
+  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="{_esc(_hidden['ai_drafted_confidence'])}">
+  <input type="hidden" id="ai-drafted-low-confidence" name="ai_drafted_low_confidence" value="{_esc(_hidden['ai_drafted_low_confidence'])}">
+  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="{_esc(_hidden['ai_drafted_citations'])}">
+  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="{_esc(_hidden['ai_drafted_citations_model'])}">
+  <input type="hidden" id="confirm-verified-fields" name="confirm_verified_fields" value="{_esc(_hidden['confirm_verified_fields'])}">
 
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
@@ -20703,7 +20781,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:grid;gap:20px;">
       <div id="gen-host-tool-business-summary" style="display:grid;gap:20px;">
         <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(tool_labels.SHORT_SUMMARY)} *</label>
           <textarea id="tool-summary" name="summary" required {_summary_attrs} rows="4"
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
@@ -20711,7 +20789,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—reviewing or verifying that field covers this one too.</p>
         </div>
         <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description *<span id="description-verify-badge">{_description_verify_badge}</span></label>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(tool_labels.DESCRIPTION)} *<span id="description-verify-badge">{_description_verify_badge}</span></label>
           <textarea id="tool-desc" name="description" required {_desc_attrs} rows="14"
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
@@ -20728,7 +20806,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       </div>
       <div id="gen-host-tool-taxonomy">
         <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-          <label style="font-size:14px;font-weight:500;color:var(--navy);">Agent taxonomy{_taxonomy_verify_badge}</label>
+          <label style="font-size:14px;font-weight:500;color:var(--navy);">{_esc(tool_labels.AGENT)}{_taxonomy_verify_badge}</label>
           <span>
             <button type="submit" form="research-refresh-form" class="tool-admin-btn"
               onclick="return confirmDiscardsUnsavedEdits(this, 'tool-edit-form') && startGenAnim('gen-host-tool-taxonomy')">Generate summary</button>
@@ -20796,7 +20874,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
   <div id="gen-host-tool-differentiation">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Bottom line<span id="differentiation-verify-badge">{_differentiation_verify_badge}</span></label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">{_esc(tool_labels.BOTTOM_LINE)}<span id="differentiation-verify-badge">{_differentiation_verify_badge}</span></label>
       <span>
         <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err', 'gen-host-tool-differentiation')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>
@@ -20857,6 +20935,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   <button type="submit" form="tool-edit-form" class="btn">Save changes</button>
   <button type="submit" form="tool-edit-form" name="save_action" value="continue" class="btn btn-ghost">Save and continue</button>
   <a href="/tools/software" class="btn btn-ghost">Cancel</a>
+  <span class="char-budget-reason" data-char-reason-for="tool-edit-form" role="status" hidden>Saving is off while a field is over its limit. Shorten the fields flagged above ({_esc(tool_labels.SHORT_SUMMARY)}, {_esc(tool_labels.DESCRIPTION)}, {_esc(tool_labels.AGENT)}, {_esc(tool_labels.BOTTOM_LINE)}), then save.</span>
 </div>
 </div>
 <style>
@@ -20983,6 +21062,15 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
+    # All four hard limits are checked together BEFORE anything is written, so
+    # a refused save never leaves the row half-saved (2a.2: update_tool used to
+    # write Description and Short summary before the Bottom line and Agent
+    # taxonomy limits were checked, then claimed "Nothing was saved").
+    over = _tool_limit_refusals(form)
+    if over:
+        page = _tool_edit_page(request, slug, form=form, refusal=over)
+        page.status_code = 400
+        return page
     # Phase G PR 2: a field saved right after a fresh Generate click (named
     # in ai_drafted_fields this submit) is unconfirmed until an explicit
     # "Mark verified" — same contract Agent taxonomy already has, just set
@@ -23871,19 +23959,21 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     </div>
   </div>
   <div class="fpa-intro-area-controls">
-    <div class="ask-controls">
-      <div class="ask-control">
-        <div class="ask-section-label">Sources</div>
-        <div class="ask-tags">
-          {source_tags}
-        </div>
-        <p style="margin:6px 0 0;font-size:12.5px;"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
+    <div class="ask-dd" id="ask-dd-top">
+      <div class="ask-dd-row">
+        <button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button>
+        <button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button>
       </div>
-      <div class="ask-control">
-        <div class="ask-section-label">Depth</div>
+      <div class="ask-dd-panel" data-dd="depth" hidden>
         <div class="ask-tags" role="radiogroup" aria-label="Depth">
           {tier_tags}
         </div>
+      </div>
+      <div class="ask-dd-panel" data-dd="sources" hidden>
+        <div class="ask-tags">
+          {source_tags}
+        </div>
+        <p class="ask-dd-note"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
       </div>
     </div>
   </div>
@@ -23984,47 +24074,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 @media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;grid-template-rows:none;
   grid-template-areas:{_intro_areas_mobile};}}}}
 
-/* Sources/Depth and the Ask button keep .ask-controls'/.ask-action-row's own
-   default margins everywhere else they're used (nowhere else, as of this
-   PR) — zeroed here only, so the grid's own 16px row-gap is the entire
-   space between the Question box, the controls row, and the Ask button,
-   instead of stacking on top of ~40px of margin the two shared components
-   already carry for their own (unrelated) contexts. */
-.fpa-intro-area-controls .ask-controls{{margin:0;}}
+/* The Ask button keeps no margin of its own here: the grid's row-gap is the
+   whole space between the Question box, the controls and the button. */
 .fpa-intro-area-action .ask-action-row{{margin:0;}}
-
-/* Sources and Depth read as one sequence down the page, not a left/right
-   split — both are the same kind of setting (a source-list choice, a depth
-   choice), so they stack: Sources full width, Depth full width beneath it,
-   both sharing the Question box's left edge, then Ask below. Overrides
-   .ask-controls' own 1fr/1fr side-by-side split (used nowhere else on the
-   site, confirmed by grep) rather than editing the shared rule itself, in
-   case a future page reuses the side-by-side default. Full width also
-   incidentally fixes the chip-wrapping problem the ~600px-column version of
-   this layout had: at the page's full ~1300px width, all three Source
-   chips — including "Web search (trusted sites)", deliberately NOT
-   shortened, since the trusted-sites qualifier is doing real work — fit on
-   one line. The row-gap this produces (20px, .ask-controls' own default)
-   already matches the ~20px spacing used elsewhere in this control stack—
-   no override needed beyond the column count. */
-.fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;}}
-
-/* Chips are natural width, left-aligned, NOT stretched to fill the row—
-   .ask-tags' own default flex-wrap row already does this with zero
-   override needed (each .ask-tag sizes to its own label by default).
-   Equal width WITHIN each group (Sources' three match each other, sized
-   to "Saved archive"; Depth's three match each other, sized to
-   "Standard") is set by fpaEqualizeChipWidths() below, not CSS — there is
-   no CSS-only way to size every sibling in a row to the widest one's
-   *natural* content width without either stretching to fill the
-   container (rejected — that's exactly what round 5 did and got reverted)
-   or duplicating the widest label's text into every cell. Measuring the
-   real rendered width in the browser also sidesteps the font-mismatch
-   risk a hardcoded pixel value would carry (this sandbox can't load the
-   sitewide Google Fonts — see the standing testing-standard note on
-   `capture_homepage()` — so a width measured here might not match a real
-   browser's actual DM Sans metrics; measuring live in whichever browser
-   is actually rendering the page doesn't have that problem). */
 
 /* Bottom-edge alignment between the Question box and the illustrative
    example: `align-self:stretch` on both grid items (above) makes each
@@ -24070,12 +24122,24 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);}}
 .ask-tag.active svg{{opacity:1;}}
 
-/* Sources | Depth, side by side. Both columns use the same .ask-tags/.ask-tag
-   component, so they carry identical weight. Below 640px the grid collapses to
-   one column and the two groups stack — each still a wrapping row of the same
-   buttons, so nothing overflows a narrow viewport. */
-.ask-controls{{display:grid;grid-template-columns:1fr 1fr;gap:20px 28px;margin:20px 0;align-items:start;}}
-@media (max-width:640px){{.ask-controls{{grid-template-columns:1fr;gap:18px;}}}}
+/* Depth and Sources: two dropdown buttons in one row; the open panel sits in
+   page flow directly under that row at the row's full width, so it can never
+   cover the question box or the Ask button and can't pass its container's
+   edge. Panels hold the same .ask-tag buttons as before (single-select for
+   Depth, multi-select for Sources), restyled as list rows. The follow-up
+   bubble holds a clone of this whole block. */
+.ask-dd-row{{display:flex;gap:8px;}}
+.ask-dd-btn{{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);font:inherit;font-size:14px;color:var(--ink-soft);cursor:pointer;text-align:left;}}
+.ask-dd-btn[aria-expanded="true"]{{border-color:var(--navy);}}
+.ask-dd-k{{flex-shrink:0;}}
+.ask-dd-v{{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--navy);}}
+.ask-dd-caret{{flex-shrink:0;color:var(--muted);}}
+.ask-dd-panel{{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;}}
+.ask-dd-panel[hidden]{{display:none;}}
+.ask-dd-panel .ask-tags{{flex-direction:column;flex-wrap:nowrap;gap:2px;}}
+.ask-dd-panel .ask-tag{{width:100%;border-color:transparent;background:transparent;border-radius:8px;min-height:40px;padding:8px 10px;font-weight:500;color:var(--ink);}}
+.ask-dd-panel .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);font-weight:600;}}
+.ask-dd-note{{margin:6px 10px 4px;font-size:12.5px;}}
 
 .ask-recent-item{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;width:100%;text-align:left;
   font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
@@ -24106,19 +24170,19 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fu textarea{{flex:1;min-width:0;min-height:42px;height:42px;max-height:120px;resize:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:14.5px;background:var(--bg);}}
 .fu .btn{{padding:10px 18px;font-size:14px;white-space:nowrap;}}
 .fu .btn:disabled{{opacity:.55;cursor:not-allowed;}}
-.fu-meta{{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--muted);}}
-.fu-meta .ask-tags{{gap:6px;flex-wrap:wrap;}}
-.fu-meta .ask-tag{{padding:4px 10px;font-size:12px;width:auto;}}
-.fu-meta .ask-cost{{margin-left:auto;flex-direction:row;gap:5px;align-items:baseline;}}
-.fu-meta details{{position:relative;}}
-.fu-meta summary{{cursor:pointer;list-style:none;border:1px solid var(--line);border-radius:999px;padding:4px 10px;}}
-.fu-meta .fu-pop{{position:absolute;bottom:32px;left:0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;box-shadow:0 6px 20px rgba(11,31,77,.12);z-index:5;display:flex;flex-wrap:wrap;gap:6px;width:max-content;max-width:calc(100vw - 48px);}}
+.fu-meta{{display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:12px;color:var(--muted);}}
+.fu-meta .ask-dd-btn{{min-height:40px;font-size:13px;}}
+.fu-meta .ask-cost{{flex-direction:row;gap:5px;align-items:baseline;}}
 .fu-sum{{display:none;font-size:12px;color:var(--muted);margin-top:6px;}}
-/* :has(textarea:focus), not :focus-within: tapping a chip focuses the chip
-   (a button), and collapsing the row on that focus removed the chip between
-   mousedown and mouseup, so the tap never registered. */
-.fu:has(textarea:focus) .fu-meta{{display:none;}}
-.fu:has(textarea:focus) .fu-sum{{display:block;}}
+/* Compact while typing, driven by a class rather than :focus. Tapping the Ask
+   follow-up button blurs the textarea; if blur re-expanded the controls, the
+   bubble (sticky to the bottom) would grow upward and move the button out from
+   under the finger before the tap completed. The class is set on focus and
+   cleared only by a tap outside the bubble or on the summary line, so a tap
+   inside the bubble never changes its height. */
+.fu.fu-compact .fu-meta{{display:none;}}
+.fu.fu-compact .fu-sum{{display:block;}}
+.fu-sum{{cursor:pointer;}}
 @media(max-width:640px){{.fu{{max-width:100%;padding:8px 10px;}} .fu-meta{{font-size:11.5px;}}}}
 .ask-answer p{{margin:0 0 14px;}}
 .ask-answer h3,.ask-answer h4,.ask-answer h5,.ask-answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:18px 0 8px;letter-spacing:-0.01em;}}
@@ -24175,6 +24239,7 @@ function selectTier(el) {{
   }});
   updateEstimate();
   fuSummary();
+  closeDds();
 }}
 
 function toggleSource(el) {{
@@ -24214,34 +24279,42 @@ function fuSummary() {{
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
   var cost = (document.getElementById('cost-est-num') || {{}}).textContent || '';
   var sum = document.querySelector('.fu-sum');
-  if (sum) sum.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ');
-  var lab = document.querySelector('.fu-src-label');
-  if (lab) lab.textContent = 'Sources: ' + srcs + ' \u25be';
+  if (sum) sum.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ') + ' \u25be';
+  ddLabels();
 }}
 
-// Sources' three chips match each other (sized to "Saved archive"), and
-// Depth's three match each other (sized to "Standard") — independently
-// per group, natural width, not stretched full-width. There's no CSS-only
-// way to size every sibling in a row to the widest one's real content
-// width without either duplicating that label into every cell or
-// stretching to fill the container (the round-5 approach, reverted) — so
-// this measures the ACTUAL rendered width of each chip in whichever
-// browser is running the page (sidesteps a hardcoded pixel value
-// potentially not matching a real browser's font metrics) and applies the
-// max as a fixed width to every chip in that same .ask-tags group. Widths
-// are text/font-driven, not viewport-driven — .ask-tag's font-size has no
-// media-query override anywhere on this page — so a one-time run on load
-// is enough; no resize listener needed.
-function fpaEqualizeChipWidths() {{
-  document.querySelectorAll('.fpa-intro-area-controls .ask-tags').forEach(function(group) {{
-    var chips = group.querySelectorAll('.ask-tag');
-    if (!chips.length) return;
-    chips.forEach(function(c) {{ c.style.width = ''; }});
-    var max = 0;
-    chips.forEach(function(c) {{ max = Math.max(max, c.getBoundingClientRect().width); }});
-    chips.forEach(function(c) {{ c.style.width = max + 'px'; }});
-  }});
+// Dropdown buttons: the current value shows on the closed button, so state is never hidden.
+function ddLabels() {{
+  var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
+  var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active');
+  var sv = srcs.length === 0 ? 'None' : srcs.length + ' of ' + document.querySelectorAll('.fpa-intro-area-controls .ask-tag[data-source]').length;
+  document.querySelectorAll('.ask-dd-btn[data-dd="depth"] .ask-dd-v').forEach(function(n) {{ n.textContent = tier; }});
+  document.querySelectorAll('.ask-dd-btn[data-dd="sources"] .ask-dd-v').forEach(function(n) {{ n.textContent = sv; }});
 }}
+function closeDds() {{
+  document.querySelectorAll('.ask-dd-btn').forEach(function(b) {{ b.setAttribute('aria-expanded', 'false'); }});
+  document.querySelectorAll('.ask-dd-panel').forEach(function(p) {{ p.hidden = true; }});
+}}
+function toggleDd(btn) {{
+  var open = btn.getAttribute('aria-expanded') !== 'true';
+  closeDds();
+  if (!open) return;
+  var dd = btn.closest('.ask-dd');
+  btn.setAttribute('aria-expanded', 'true');
+  var panel = dd.querySelector('.ask-dd-panel[data-dd="' + btn.getAttribute('data-dd') + '"]');
+  if (panel) panel.hidden = false;
+}}
+document.addEventListener('click', function(e) {{
+  if (!e.target.closest('.ask-dd')) closeDds();
+}});
+// A tap outside the follow-up bubble brings its controls back after typing.
+document.addEventListener('pointerdown', function(e) {{
+  var fu = document.getElementById('fu');
+  if (fu && !e.target.closest('#fu')) fu.classList.remove('fu-compact');
+}});
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Escape') closeDds();
+}});
 
 var asked = false;
 var convoId = null;    // the server-side conversation to continue; set from the
@@ -24457,22 +24530,16 @@ function fuRender(state) {{
   if (!limited) {{
     var meta = document.createElement('div');
     meta.className = 'fu-meta';
-    var depth = document.querySelector('.fpa-intro-area-controls .ask-control:nth-child(2) .ask-tags');
-    var srcs = document.querySelector('.fpa-intro-area-controls .ask-control:nth-child(1) .ask-tags');
-    // Clones drop the top group's equalized inline widths; the bubble's chips size to their text.
-    if (depth) {{
-      var dc = depth.cloneNode(true);
-      dc.querySelectorAll('.ask-tag').forEach(function(t) {{ t.style.width = ''; }});
-      meta.appendChild(dc);
+    var top = document.getElementById('ask-dd-top');
+    if (top) {{
+      // A clone of the top block: same buttons and panels, panels in the
+      // bubble's own flow at bubble width. The top block stays the source of truth.
+      var dd = top.cloneNode(true);
+      dd.removeAttribute('id');
+      dd.querySelectorAll('.ask-dd-btn').forEach(function(x) {{ x.setAttribute('aria-expanded', 'false'); }});
+      dd.querySelectorAll('.ask-dd-panel').forEach(function(x) {{ x.hidden = true; }});
+      meta.appendChild(dd);
     }}
-    var det = document.createElement('details');
-    det.innerHTML = '<summary class="fu-src-label"></summary><div class="fu-pop"></div>';
-    if (srcs) {{
-      var pop = srcs.cloneNode(true);
-      pop.querySelectorAll('.ask-tag').forEach(function(t) {{ t.style.width = ''; }});
-      det.querySelector('.fu-pop').appendChild(pop);
-    }}
-    meta.appendChild(det);
     if (document.getElementById('cost-est-num')) {{
       var cost = document.createElement('span');
       cost.className = 'ask-cost';
@@ -24483,6 +24550,8 @@ function fuRender(state) {{
     var sum = document.createElement('div');
     sum.className = 'fu-sum';
     f.appendChild(sum);
+    f.querySelector('#fu-q').addEventListener('focus', function() {{ f.classList.add('fu-compact'); closeDds(); }});
+    sum.addEventListener('click', function() {{ f.classList.remove('fu-compact'); }});
   }}
   thread.appendChild(f);
   updateEstimate(); fuSummary();
@@ -24651,12 +24720,12 @@ document.addEventListener('keydown', function(e) {{
 
 updateEstimate();
 loadRecent();
+ddLabels();
 // A reload keeps the reader in their conversation: reopen the one named in the URL.
 (function() {{
   var c = new URLSearchParams(location.search).get('c');
   if (c) resumeConvoById(c);
 }})();
-fpaEqualizeChipWidths();
 </script>"""
 
     return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
@@ -28053,10 +28122,10 @@ def _checks_summary_table_html(heading: str, rows: list) -> str:
 # Software fields the edit form limits, read from the same Library constants
 # the form's counter and the save-time refusal use (never a second copy).
 _TOOL_LIMITED_FIELDS = (
-    ("Description", "description", Library.TOOL_DESCRIPTION_MAX),
-    ("Short summary", "summary", Library.TOOL_SUMMARY_MAX),
-    ("Agent taxonomy", "agent_taxonomy_note", Library.TOOL_AGENT_TAXONOMY_MAX),
-    ("Bottom line", "competitive_differentiation", Library.TOOL_DIFFERENTIATION_MAX),
+    (tool_labels.DESCRIPTION, "description", Library.TOOL_DESCRIPTION_MAX),
+    (tool_labels.SHORT_SUMMARY, "summary", Library.TOOL_SUMMARY_MAX),
+    (tool_labels.AGENT, "agent_taxonomy_note", Library.TOOL_AGENT_TAXONOMY_MAX),
+    (tool_labels.BOTTOM_LINE, "competitive_differentiation", Library.TOOL_DIFFERENTIATION_MAX),
 )
 
 

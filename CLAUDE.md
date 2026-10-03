@@ -6315,13 +6315,28 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   one send path. Depth and sources are one state held by the top controls; the
   bubble's chips are id-less clones kept in step by `selectTier`/`toggleSource`,
   and anything reading the selected sources must use `activeSources()`, never an
-  unscoped `.ask-tag.active`. The collapse-while-typing rule is
-  `.fu:has(textarea:focus)`, deliberately not `:focus-within` (a chip tap would
-  collapse the row mid-click). **Decision recorded:** the live `mdInline` now
+  unscoped `.ask-tag.active`. The collapse-while-typing rule is the `.fu-compact`
+  class (set on focus, cleared by a tap outside the bubble or on the summary
+  line; see the dropdown bullet below), not `:has(textarea:focus)` and not
+  `:focus-within`. **Decision recorded:** the live `mdInline` now
   keeps model-text links inert, same as the server twin (it linkified them
   before); `tests/test_answer_history_render.py` parity-tests a link fixture.
   Limits, cost and server contract are unchanged. See ARCHITECTURE.md's
   matching bullet and `tests/test_buddy_followup_bubble.py`.
+- **FP&A Buddy Depth and Sources are two dropdowns (2026-10).** Replaces the chip
+  rows and the bubble's popover, measured first on a phone: the popover ran 11px
+  past the bubble and covered the follow-up input and button; the top box's three
+  chips needed 463px against 342px and wrapped. `#ask-dd-top` is two buttons in one
+  row (`Depth: Standard`, `Sources: 2 of 3`) with the open panel in page flow
+  under the row at full width, so it cannot cover anything. Panels hold the same
+  `.ask-tag` buttons, so `selectTier`/`toggleSource`/`activeSources()` did not
+  change; the bubble holds a deep clone of the block. Depth closes on pick;
+  Sources stays open until a tap outside or Escape. **Same PR:** the compact-while-
+  typing rule is now a `.fu-compact` class, because with the taller controls
+  block `:has(textarea:focus)` let blur re-expand the sticky bubble upward and move
+  the Ask follow-up button out from under the tap. Anything new in the bubble must
+  not change its height on blur or press. See ARCHITECTURE.md's matching bullet and
+  `tests/test_buddy_dropdown_controls.py`.
 - **FP&A Buddy phone fixes (2026-10), measured on a real iPhone first.** Brian's
   iPhone check of the bubble found six problems; each was measured in Chromium at
   390px before any change (a harness that runs the real app against a seeded temp
@@ -6342,7 +6357,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   long title cannot drop below it. Not changed: the sticky bubble over a long answer
   (at the end of the page it sits below the sources and the feedback row, measured),
   and the Depth/Sources controls (popover overlap and top-box chip wrapping),
-  which wait on a design pick. `tests/test_buddy_phone_fixes.py` serves the real page
+  which the two-dropdown change in the next bullet replaced. `tests/test_buddy_phone_fixes.py` serves the real page
   over http through route handlers; it skips where no Chromium exists, as in CI.
 
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
@@ -10946,6 +10961,36 @@ it supersedes the old "`/save` is token-gated" note.
   bulk ampersand replace write through `apply_voice_review_write`, which bypasses
   these limits and can lengthen text past a max.
 
+- **Software parity, PR 2a.2 (2026-10): refusal, labels, Compare Short summary.**
+  (1) **A refused Software save writes nothing, for real.** `admin_tools_edit_submit` used to let
+  `Library.update_tool` write Description and Short summary before the Bottom line and Agent taxonomy
+  limits were checked, then returned a bare JSON 400 saying "Nothing was saved" (it was a half-save, and
+  only the first violation was named). `_tool_limit_refusals(form)` now checks all four limits together
+  (`TOOL_*_MAX`, same `text_budget_length` rule) before any write; one 400 re-renders the page
+  (`_tool_edit_page(form=, refusal=)`, `_tool_new_page` for `/admin/tools/software/new`) from the
+  submitted values with the shared `_refusal_banner_html` (Community uses the same helper) and a visible
+  reason line under the disabled Save. Feature editors and `/tools/submit` are out of scope. The directory
+  Quick edit now shows the server's own message instead of "Save failed, try again." (`err.fromServer`).
+  Software has no field groups, so PR 654's group flags do not apply. Mark reviewed and Flag for review
+  stay usable on an over-limit vendor (shared `buttonsFor`), pinned by a test that passes on `main`.
+  (2) **One name per field.** `linklib/tool_labels.py` (a leaf module, no imports) holds the words:
+  Short summary, Description, "How autonomous is it?" (the agent field), Bottom line, Competitors, plus the
+  grouping names "AI / Agent involvement" (Compare section) and "AI agent capabilities" (profile eyebrow),
+  which name groupings, not the field, and are kept. The edit page, profile, Compare, MCP `get_software`
+  labels and the refusal banner read them; `tests/test_software_labels.py` is the drift test. **Labels
+  only**: `agent_taxonomy`, `summary`, `competitive_differentiation` (columns, MCP keys, the compare field
+  key `description`) were not renamed, confirmed by `test_no_key_or_column_name_was_touched` and by a grep
+  showing `matchmaker.py` reads columns, not labels. On Compare the visible row label is the section
+  title, so the row reads "AI / Agent involvement"; the field label "How autonomous is it?" is not shown
+  in a single-field row. The per-field badge on the edit page is the admin profile string
+  (`gates.BADGE_TEXT_ADMIN`, "unverified, visible to visitors"), shared with the injected
+  Save-and-mark-verified badge; the old "Needs verification" is gone from the Software edit page.
+  (3) **Compare row is "Short summary" (option A).** `build_software_compare` shows `summary` only, with the
+  standard placeholder when it is empty or whitespace; there is no silent fallback to the description.
+  `Library.__init__` runs `UPDATE tools SET summary=description WHERE summary=''` on every open, so an
+  empty summary can't persist in production (0 rows at the time); the whitespace-only case is covered by
+  building the entities directly. The Compare field key stays `description` so MCP `compare_software`
+  clients keep working; its label and section title are now "Short summary".
 - **Community profile edit page: collapsible field groups (2026-10).** The five
   groups are native `<details>`/`<summary>` (`.cp-group`), all collapsed on every
   load, including a profile with a stored over-limit field. The one exception is

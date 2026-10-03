@@ -185,7 +185,7 @@ def test_edit_submit_clears_stale_description_stamp_on_fresh_draft(env):
     lib.close()
     r = client.get(f"/tools/software/{slug}/edit")
     assert "Verified by brian on" not in r.text
-    assert "Needs verification" in r.text
+    assert "unverified, visible to visitors" in r.text
 
 
 def test_edit_submit_hand_edit_does_not_clear_stale_description_stamp(env):
