@@ -23806,6 +23806,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         # ask_feedback.rating='helpful' row, so a member searching here only
         # ever finds answers someone already vouched for.
         pq_rows = usage_lib.list_public_ask_questions(query=pq, limit=200, helpful_only=True)
+        # One Exa call per turn when the web source is on and Exa (not the native
+        # tool) is the provider; nothing else a turn does calls Exa. Admin-only.
+        from linklib.agent import _web_provider
+        from linklib.pricing import compute_exa_cost
+        exa_unit = compute_exa_cost("search") if (authed and _web_provider(usage_lib) == "exa") else 0.0
     finally:
         usage_lib.close()
 
@@ -23846,7 +23851,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     # reads exactly as it did when this was a plain section.
     past_questions_section = f"""<details id="past-questions" class="ask-section ask-pq" open style="margin-top:0;margin-bottom:28px;">
   <summary class="ask-section-label"><span class="ask-pq-caret" aria-hidden="true">&#9656;</span>Search past questions</summary>
-  <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Questions other members have already asked&mdash;check here before spending a query re-asking one.</p>
+  <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Questions members rated helpful. Check here before spending a query re-asking one.</p>
   <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:18px;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
       style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
@@ -23890,7 +23895,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         cls = "ask-tag active" if active else "ask-tag"
         return (f'<button type="button" class="{cls}" data-source="{key}" '
                 f'aria-pressed="{"true" if active else "false"}" onclick="toggleSource(this)">'
-                f'{_CHECK_SVG}<span>{label}</span></button>')
+                f'{_CHECK_SVG}<span class="ask-tag-name">{label}</span></button>')
 
     source_tags = "".join(source_tag(k, l, a) for k, l, a in source_defs)
 
@@ -23904,7 +23909,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         return (f'<button type="button" class="{cls}" data-tier="{val}" role="radio" '
                 f'aria-checked="{"true" if selected else "false"}" title="{hint}" '
                 f'onclick="selectTier(this)">'
-                f'{_CHECK_SVG}<span>{label}</span></button>')
+                f'{_CHECK_SVG}<span class="ask-tag-name">{label}</span><span class="ask-tag-cost"></span></button>')
 
     tier_tags = "".join(tier_tag(v, l, d, v == default_effort) for v, l, d in effort_details)
 
@@ -23918,8 +23923,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         for tier, settings in EFFORT_SETTINGS.items()
     }
     cost_js = _json.dumps(tier_cost) if authed else "{}"
-    cost_span = ('<div class="ask-cost"><span class="ask-cost-num" id="cost-est-num"></span>'
-                 '<span class="ask-cost-label">per query</span></div>' if authed else "")
+    exa_js = _json.dumps(exa_unit) if authed else "0"
+    # Admin-only, one muted line; the dollar amounts themselves sit in the Depth
+    # options and on the closed Depth button.
+    cost_note = ('<p class="ask-dd-note ask-cost-note" style="color:var(--muted);">Dollar amounts are estimates.</p>'
+                 if authed else "")
 
     usage_html = ""
     if usage_today is not None:
@@ -23940,22 +23948,22 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     # below for why a spaced-out `usage` row happens at all otherwise.
     usage_div = f'<div class="fpa-intro-area-usage">{usage_html}</div>' if usage_html else ""
     _intro_areas_desktop = (
-        '"intro example" "usage example" "question example" "controls controls" "action action"'
+        '"intro example" "usage example" "question example"'
         if usage_html else
-        '"intro example" "question example" "controls controls" "action action"'
+        '"intro example" "question example"'
     )
-    _intro_rows_desktop = "auto auto 1fr auto auto" if usage_html else "auto 1fr auto auto"
+    _intro_rows_desktop = "auto auto 1fr" if usage_html else "auto 1fr"
     # While a conversation is on screen the illustrative example is hidden and
     # the form is one full-width column (no empty right-hand track).
     _intro_areas_thread = (
-        '"intro" "usage" "question" "controls" "action"'
+        '"intro" "usage" "question"'
         if usage_html else
-        '"intro" "question" "controls" "action"'
+        '"intro" "question"'
     )
     _intro_areas_mobile = (
-        '"intro" "example" "usage" "question" "controls" "action"'
+        '"intro" "example" "usage" "question"'
         if usage_html else
-        '"intro" "example" "question" "controls" "action"'
+        '"intro" "example" "question"'
     )
 
     body = f"""<div class="page page-standard" id="fpa-page">
@@ -23987,34 +23995,31 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   {usage_div}
   <div class="fpa-intro-area-question">
     <div class="ask-card">
-      <label for="ask-q" style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">New question <span style="text-transform:none;letter-spacing:0;font-weight:400;">&middot; starts a new conversation</span></label>
-      <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?"
-        style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
-    </div>
-  </div>
-  <div class="fpa-intro-area-controls">
-    <div class="ask-dd" id="ask-dd-top">
-      <div class="ask-dd-row">
-        <button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button>
-        <button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button>
-      </div>
-      <div class="ask-dd-panel" data-dd="depth" hidden>
-        <div class="ask-tags" role="radiogroup" aria-label="Depth">
-          {tier_tags}
+      <label for="ask-q" style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">New question <span style="text-transform:none;letter-spacing:0;font-weight:400;">&middot; starts a new conversation</span></label>
+      <div class="fpa-intro-area-controls">
+        <div class="ask-dd" id="ask-dd-top">
+          <div class="ask-dd-row">
+            <label class="ask-dd-col"><span class="ask-dd-h">Depth</span><button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
+            <label class="ask-dd-col"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
+          </div>
+          <div class="ask-dd-panel" data-dd="depth" hidden>
+            <div class="ask-tags" role="radiogroup" aria-label="Depth">
+              {tier_tags}
+            </div>
+          </div>
+          <div class="ask-dd-panel" data-dd="sources" hidden>
+            <div class="ask-tags">
+              {source_tags}
+            </div>
+            <p class="ask-dd-note"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
+          </div>
         </div>
+        {cost_note}
       </div>
-      <div class="ask-dd-panel" data-dd="sources" hidden>
-        <div class="ask-tags">
-          {source_tags}
-        </div>
-        <p class="ask-dd-note"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
+      <div class="ask-q-wrap">
+        <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?">{pre_q}</textarea>
+        <button type="button" class="fu-send ask-send" id="ask-btn" onclick="doAsk()" aria-label="Ask" title="Ask"{'' if q.strip() else ' disabled'}><span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button>
       </div>
-    </div>
-  </div>
-  <div class="fpa-intro-area-action">
-    <div class="ask-action-row">
-      <button class="btn" onclick="doAsk()" id="ask-btn" style="padding:11px 28px;font-size:15px;">Ask</button>
-      {cost_span}
     </div>
   </div>
 </div>
@@ -24114,14 +24119,37 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
 .fpa-intro-area-usage{{grid-area:usage;}}
 .fpa-intro-area-question{{grid-area:question;align-self:stretch;}}
-.fpa-intro-area-controls{{grid-area:controls;}}
-.fpa-intro-area-action{{grid-area:action;}}
 @media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;grid-template-rows:none;
   grid-template-areas:{_intro_areas_mobile};}}}}
 
-/* The Ask button keeps no margin of its own here: the grid's row-gap is the
-   whole space between the Question box, the controls and the button. */
-.fpa-intro-area-action .ask-action-row{{margin:0;}}
+/* Depth and Sources sit inside the question card, above the text box. Each has a
+   visible header above its control (a real wrapping <label>). Two columns from
+   641px, one stacked column below. The follow-up bubble's clone keeps its old
+   compact look: the headers are hidden there and the closed buttons carry their
+   own "Depth:" / "Sources:" prefix instead. */
+.fpa-intro-area-controls{{margin:0 0 14px;}}
+.ask-dd-col{{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:6px;}}
+.ask-dd-h{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);}}
+.ask-dd-k{{display:none;}}
+.fu .ask-dd-h{{display:none;}}
+.fu .ask-dd-k{{display:inline;}}
+.ask-cost-note{{margin:8px 0 0;}}
+.ask-tag-cost{{margin-left:auto;font-weight:500;color:var(--muted);}}
+.ask-q-wrap{{position:relative;flex:1;display:flex;}}
+.ask-q-wrap textarea{{flex:1;width:100%;box-sizing:border-box;padding:11px 56px 11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:var(--bg);resize:none;}}
+.ask-send{{position:absolute;right:4px;bottom:4px;}}
+/* Stacked on a phone: header, control, then its own panel, then the next header,
+   so a panel always opens directly under the button that opened it. The row
+   dissolves (display:contents) so labels and panels order as siblings. The
+   follow-up bubble's clone keeps its side-by-side row. */
+@media(max-width:640px){{
+  .fpa-intro-area-controls .ask-dd{{display:flex;flex-direction:column;gap:12px;}}
+  .fpa-intro-area-controls .ask-dd-row{{display:contents;}}
+  .fpa-intro-area-controls .ask-dd-col:nth-child(1){{order:1;}}
+  .fpa-intro-area-controls .ask-dd-panel[data-dd="depth"]{{order:2;margin-top:-6px;}}
+  .fpa-intro-area-controls .ask-dd-col:nth-child(2){{order:3;}}
+  .fpa-intro-area-controls .ask-dd-panel[data-dd="sources"]{{order:4;margin-top:-6px;}}
+}}
 
 /* Bottom-edge alignment between the Question box and the illustrative
    example: `align-self:stretch` on both grid items (above) makes each
@@ -24137,7 +24165,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
    the example's real height, rather than a value picked by hand. */
 .fpa-intro-area-question{{display:flex;}}
 .fpa-intro-area-question .ask-card{{flex:1;display:flex;flex-direction:column;}}
-.fpa-intro-area-question .ask-card textarea{{flex:1;}}
+.fpa-intro-area-question .ask-card .ask-q-wrap{{flex:1;}}
+.fpa-intro-area-question .ask-card textarea{{min-height:96px;}}
 .fpa-intro-area-example{{display:flex;}}
 .fpa-intro-area-example .ask-example{{flex:1;display:flex;flex-direction:column;}}
 .fpa-intro-area-example .ask-answer{{flex:1;}}
@@ -24205,10 +24234,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-recent-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
 @media (max-width:520px){{.ask-recent-item{{flex-direction:column;align-items:flex-start;gap:3px;}}}}
 
-.ask-action-row{{display:flex;align-items:center;gap:18px;margin:22px 0;}}
-.ask-cost{{display:flex;flex-direction:column;}}
-.ask-cost-num{{font-weight:700;font-size:14.5px;color:var(--ink);}}
-.ask-cost-label{{font-size:11px;color:var(--muted);margin-top:1px;}}
 
 .ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px 14px 14px 2px;max-width:88%;padding:20px 24px;font-size:15px;line-height:1.7;}}
 /* Follow-up bubble: lives under the latest reply, sticky to the viewport bottom
@@ -24224,12 +24249,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fu-row{{display:flex;gap:8px;align-items:flex-end;}}
 .fu textarea{{flex:1 1 0;min-width:0;min-height:44px;height:44px;max-height:120px;resize:none;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font:inherit;font-size:16px;line-height:1.35;background:var(--bg);box-sizing:border-box;}}
 /* Send: a filled navy circle, white up arrow. 44px hit area, 36px visible. */
-.fu .fu-send{{flex:0 0 44px;width:44px;height:44px;padding:0;border:0;background:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;}}
-.fu .fu-send .fu-send-dot{{width:36px;height:36px;border-radius:50%;background:var(--navy);display:inline-flex;align-items:center;justify-content:center;}}
-.fu .fu-send svg{{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;}}
-.fu .fu-send:disabled{{cursor:not-allowed;}}
-.fu .fu-send:disabled .fu-send-dot{{background:var(--line);}}
-.fu .fu-send:focus-visible{{outline:2px solid var(--navy);outline-offset:2px;}}
+.fu-send{{flex:0 0 44px;width:44px;height:44px;padding:0;border:0;background:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;}}
+.fu-send .fu-send-dot{{width:36px;height:36px;border-radius:50%;background:var(--navy);display:inline-flex;align-items:center;justify-content:center;}}
+.fu-send svg{{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;}}
+.fu-send:disabled{{cursor:not-allowed;}}
+.fu-send:disabled .fu-send-dot{{background:var(--line);}}
+.fu-send:focus-visible{{outline:2px solid var(--navy);outline-offset:2px;}}
 .ask-turn-row{{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;font:inherit;padding:11px 14px;min-height:44px;box-sizing:border-box;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;}}
 .ask-turn-row:hover{{border-color:var(--navy);}}
 .ask-turn-row .ask-pq-rc{{font-size:12px;color:var(--navy);}}
@@ -24240,7 +24265,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-recent-item.recent-hl{{border-color:var(--navy);box-shadow:0 0 0 2px var(--accent-light);}}
 .fu-meta{{display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:12px;color:var(--muted);}}
 .fu-meta .ask-dd-btn{{min-height:40px;font-size:13px;}}
-.fu-meta .ask-cost{{flex-direction:row;gap:5px;align-items:baseline;}}
 .fu-sum{{display:none;font-size:12.5px;color:var(--muted);margin-top:6px;min-height:44px;align-items:center;justify-content:space-between;gap:10px;box-sizing:border-box;}}
 /* Compact while typing, driven by a class rather than :focus. Tapping the Ask
    follow-up button blurs the textarea; if blur re-expanded the controls, the
@@ -24290,7 +24314,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 </style>
 
 <script>
-var COST = {cost_js};
+var COST = {cost_js};      // per-depth model estimate, admin only (empty otherwise)
+var EXA_UNIT = {exa_js};   // one Exa search per turn when Web is on and Exa is the provider
 var selectedTier = "{default_effort}";
 
 // Single-select: clearing every tier before setting this one is what makes
@@ -24317,13 +24342,29 @@ function toggleSource(el) {{
     t.classList.toggle('active', on);
     t.setAttribute('aria-pressed', on ? 'true' : 'false');
   }});
+  updateEstimate();
   fuSummary();
 }}
 
+// Estimate for a depth with the current sources: the model figure from the
+// server's table, plus one Exa search when Web is on. Null when the reader
+// is not an admin (the table is empty then).
+function tierCost(tier) {{
+  var c = COST[tier];
+  if (c == null) return null;
+  var webOn = !!document.querySelector('.fpa-intro-area-controls .ask-tag[data-source="web"].active');
+  return c + (webOn ? EXA_UNIT : 0);
+}}
+function costText(tier) {{
+  var c = tierCost(tier);
+  return c == null ? '' : '($' + c.toFixed(3) + ')';
+}}
 function updateEstimate() {{
-  var c = COST[selectedTier];
-  var txt = c != null ? '~$' + c.toFixed(3) : '';
-  document.querySelectorAll('#cost-est-num, .fu-cost-num').forEach(function(n) {{ n.textContent = txt; }});
+  document.querySelectorAll('.ask-tag[data-tier]').forEach(function(t) {{
+    var n = t.querySelector('.ask-tag-cost');
+    if (n) n.textContent = costText(t.getAttribute('data-tier'));
+  }});
+  ddLabels();
 }}
 
 // The top controls are the single source of truth for depth and sources.
@@ -24339,16 +24380,17 @@ function activeSources() {{
 }}
 function chipText(sel) {{
   return Array.prototype.map.call(document.querySelectorAll(sel), function(t) {{
-    return t.textContent.trim();
+    var n = t.querySelector('.ask-tag-name');
+    return (n || t).textContent.trim();
   }});
 }}
 function fuSummary() {{
   var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active').join(', ') || 'No sources';
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
-  var cost = (document.getElementById('cost-est-num') || {{}}).textContent || '';
+  var cost = costText(selectedTier);
   var sum = document.querySelector('.fu-sum');
   if (sum) sum.innerHTML = '<span class="fu-sum-t"></span><span aria-hidden="true">\u25be</span>';
-  if (sum) sum.firstChild.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ');
+  if (sum) sum.firstChild.textContent = [(tier + ' ' + cost).trim(), srcs].filter(Boolean).join(' \u00b7 ');
   ddLabels();
 }}
 
@@ -24357,7 +24399,7 @@ function ddLabels() {{
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
   var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active');
   var sv = srcs.length === 0 ? 'None' : srcs.length + ' of ' + document.querySelectorAll('.fpa-intro-area-controls .ask-tag[data-source]').length;
-  document.querySelectorAll('.ask-dd-btn[data-dd="depth"] .ask-dd-v').forEach(function(n) {{ n.textContent = tier; }});
+  document.querySelectorAll('.ask-dd-btn[data-dd="depth"] .ask-dd-v').forEach(function(n) {{ n.textContent = (tier + ' ' + costText(selectedTier)).trim(); }});
   document.querySelectorAll('.ask-dd-btn[data-dd="sources"] .ask-dd-v').forEach(function(n) {{ n.textContent = sv; }});
 }}
 function closeDds() {{
@@ -24383,6 +24425,18 @@ document.addEventListener('pointerdown', function(e) {{
 }});
 document.addEventListener('keydown', function(e) {{
   if (e.key === 'Escape') closeDds();
+}});
+
+// The top send button: disabled while the box is empty or a question is running.
+var topBusy = false;
+function topSync() {{
+  var b = document.getElementById('ask-btn'), q = document.getElementById('ask-q');
+  if (b && q) b.disabled = topBusy || !q.value.trim();
+}}
+document.addEventListener('DOMContentLoaded', function() {{
+  var q = document.getElementById('ask-q');
+  if (q) q.addEventListener('input', topSync);
+  topSync();
 }});
 
 var asked = false;
@@ -24568,8 +24622,8 @@ function resetConvo() {{
   document.getElementById('ask-thread').innerHTML = '';
   var rec = document.getElementById('ask-recent');
   if (rec.innerHTML) rec.style.display = 'block';
-  var btn = document.getElementById('ask-btn'); btn.disabled = false;
-  var q = document.getElementById('ask-q'); q.focus();
+  var q = document.getElementById('ask-q'); topSync();
+  q.focus();
   q.scrollIntoView({{behavior:'smooth', block:'center'}});
 }}
 
@@ -24629,12 +24683,6 @@ function fuRender(state) {{
       dd.querySelectorAll('.ask-dd-btn').forEach(function(x) {{ x.setAttribute('aria-expanded', 'false'); }});
       dd.querySelectorAll('.ask-dd-panel').forEach(function(x) {{ x.hidden = true; }});
       meta.appendChild(dd);
-    }}
-    if (document.getElementById('cost-est-num')) {{
-      var cost = document.createElement('span');
-      cost.className = 'ask-cost';
-      cost.innerHTML = '<span class="ask-cost-num fu-cost-num"></span><span class="ask-cost-label">per query</span>';
-      meta.appendChild(cost);
     }}
     f.appendChild(meta);
     var sum = document.createElement('div');
@@ -24794,13 +24842,13 @@ async function doAsk(followUp) {{
   document.getElementById('ask-recent').style.display = 'none';
   var answerEl = turn.querySelector('.ask-answer');
 
-  topBtn.disabled = true; topBtn.textContent = 'Thinking…';
+  topBusy = true; topBtn.disabled = true;
   qEl.value = '';
   fuRender('busy');
   turn.scrollIntoView({{behavior:'smooth', block:'nearest'}});
 
   function done(state) {{
-    topBtn.disabled = false; topBtn.textContent = 'Ask';
+    topBusy = false; topSync();
     fuRender(state);
   }}
   try {{

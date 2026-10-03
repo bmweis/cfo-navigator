@@ -128,7 +128,7 @@ def _ask(pg, text, conv=None):
         pg.evaluate("c => { window.__next = {conversation_id: c}; }", conv)
     pg.fill("#ask-q", text)
     pg.click("#ask-btn")
-    pg.wait_for_selector("#ask-btn:not([disabled])")
+    pg.wait_for_selector("#ask-thread .ask-loading", state="detached")
 
 
 def _display(pg, sel):
@@ -351,7 +351,7 @@ def test_a_failed_first_ask_leaves_no_bubble(live):
     pg.fill("#ask-q", "Will fail")
     pg.click("#ask-btn")
     pg.wait_for_selector("#ask-thread .ask-answer")
-    pg.wait_for_selector("#ask-btn:not([disabled])")
+    pg.wait_for_selector("#ask-thread .ask-loading", state="detached")
     assert pg.locator("#fu, #fu-q").count() == 0
     assert "Something went wrong" in pg.inner_text("#ask-thread")
 

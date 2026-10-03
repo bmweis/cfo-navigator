@@ -6385,6 +6385,32 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `tests/test_buddy_collapse_rows.py`; the 667/670/672/675 tests that expected a
   reload to reopen the thread or the button to carry text were rewritten.
 
+- **FP&A Buddy top box, Phase A (2026-10).** Depth and Sources moved inside the
+  question card, between the "New question" label and the text box, each under a
+  visible header (a real wrapping `<label class="ask-dd-col">`, so the closed
+  button shows only its value). Two columns above 640px; one stacked column below,
+  where the open panel sits directly under its own button (the row dissolves with
+  `display:contents` and labels and panels order as siblings). The follow-up
+  bubble's clone keeps its old side-by-side look: its headers are hidden and the
+  buttons keep their "Depth:" and "Sources:" prefix (`.fu` scoped CSS). **Ask is the
+  up-arrow icon** (`.fu-send`, the same component as the bubble's) inside the
+  box, bottom-right, 44px hit area, 36px dot, `aria-label` and `title` "Ask";
+  disabled while the box is empty or a question runs (`topSync()`/`topBusy`), so
+  after a send the button is disabled until the reader types again. The top box is
+  `resize:none` so the grip does not sit under the button. Enter and Shift+Enter
+  are unchanged (a newline; Cmd/Ctrl+Enter sends). **Cost:** the "~$X per query"
+  line is gone. Admins see the estimate in parentheses after each depth name in the
+  options and on the closed Depth button, three decimals, from
+  `COST_ESTIMATES` plus one Exa search (`compute_exa_cost("search")`) while the Web
+  source is on and Exa is the provider (`_web_provider`); nothing else a turn does
+  calls Exa (one `retrieve_exa` per turn, at most 6 results, inside Exa's 10
+  included). The RSS feed makes no Exa call. Everything updates when Sources
+  change. Non-admins see names only; admins also get one muted line, "Dollar
+  amounts are estimates." The bubble's clone shows the same estimate; the bubble
+  had its own "per query" line before and it is gone. Rider: the Search past
+  questions intro now reads "Questions members rated helpful. Check here before
+  spending a query re-asking one." (temporary; the history PR changes the rule
+  behind the list). See `tests/test_buddy_top_box.py`.
 - **FP&A Buddy while a conversation is open (2026-10).** Three follow-ups from
   the PR 667 review. **Thread open** means anything is in `#ask-thread`; one
   `MutationObserver` on it toggles `.fpa-thread-open` on `#fpa-page`, so every way a
