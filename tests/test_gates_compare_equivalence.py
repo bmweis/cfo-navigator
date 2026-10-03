@@ -52,7 +52,7 @@ def _login(client):
 
 def test_software_compare_row_omitted_when_no_tool_has_any_content(env):
     """No tool in the comparison has an agent_taxonomy_note at all -> the
-    whole "AI / Agent involvement" row still renders (it's a fixed
+    whole "What its agents do" row still renders (it's a fixed
     section), but with the shared empty-label cell for every column, not
     an omitted section — this is the row-existence branch's else path."""
     from linklib.db import Library
@@ -63,7 +63,7 @@ def test_software_compare_row_omitted_when_no_tool_has_any_content(env):
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     assert r.status_code == 200
-    assert "AI / Agent involvement" in r.text
+    assert "What its agents do" in r.text
     assert "Not documented." in r.text
 
 

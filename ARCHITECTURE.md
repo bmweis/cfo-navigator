@@ -11346,3 +11346,5 @@ See `tests/test_homepage_screenshot_upload.py`, `tests/test_save_and_mark_verifi
 <!-- 2026-10: directory page size is one shared constant (`_DIRECTORY_PAGE_SIZE`); /admin/checks over-limit row covers software and communities. See CLAUDE.md. -->
 
 <!-- 2026-10: Compare tables use a first-column label (`_CMP_LABEL_COL_WIDTH`), Bottom line first in seafoam; see CLAUDE.md. -->
+
+<!-- 2026-10: Compare summary card heading "How they compare"; Bottom line row is white with a navy label rule; agent label is "What its agents do" (tool_labels.AGENT == SECTION_AGENT); see CLAUDE.md -->
