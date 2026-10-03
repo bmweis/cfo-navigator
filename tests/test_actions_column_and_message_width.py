@@ -116,9 +116,15 @@ def test_software_categories_splits_the_count_from_the_buttons(env):
 def _message_width(client, tmp_path, width):
     try:
         from playwright.sync_api import sync_playwright
-        pw = sync_playwright().start()
+    except Exception:
+        pytest.skip("Playwright not installed in this environment")
+    pw = sync_playwright().start()
+    try:
         browser = pw.chromium.launch()
     except Exception:
+        # A started but unstopped sync_playwright() leaves its asyncio loop
+        # running for the rest of the process and breaks later asyncio.run().
+        pw.stop()
         pytest.skip("Chromium not installed in this environment")
     try:
         f = tmp_path / "t.html"
