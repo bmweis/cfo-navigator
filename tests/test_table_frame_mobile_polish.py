@@ -167,3 +167,36 @@ def test_named_sticky_width_constant_and_single_sticky_class(env):
     for route in ("/admin/tools/software", "/admin/tools/communities"):
         html = client.get(route).text
         assert "admin-sticky-col-1" not in html and "admin-sticky-col-2" not in html
+
+
+# --- Follow-up: the contact submissions table frame overlapped "Delete selected" ---
+# The button row carried margin-bottom:-8px, and the table inside the frame carried
+# margin-top:12px. With the frame drawing the border, the frame started 8px above the
+# button's bottom edge and the 12px sat as a white strip inside it. The scroll hint
+# (shown only while the table overflows and not yet dismissed) used to sit between the two.
+
+@pytest.mark.parametrize("width,hint_dismissed", [(874, False), (390, True)])
+def test_contact_submissions_frame_clears_the_delete_selected_button(env, tmp_path, width, hint_dismissed):
+    launched = _browser()
+    if launched is None:
+        pytest.skip("Chromium not installed in this environment")
+    pw, browser = launched
+    client, appmod, db = env
+    f = tmp_path / "t.html"
+    f.write_text(client.get("/admin/inbox/contact-submissions").text, encoding="utf-8")
+    try:
+        page = browser.new_page(viewport={"width": width, "height": 900})
+        if hint_dismissed:
+            page.add_init_script("try{localStorage.setItem('admin_scroll_hint_seen','1')}catch(e){}")
+        page.goto(f.as_uri())
+        page.wait_for_timeout(150)
+        got = page.evaluate("""() => {
+            const btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Delete selected');
+            const fr = document.querySelector('#cmp-scroll-wrap'); const t = fr.querySelector('table');
+            return {gap: fr.getBoundingClientRect().top - btn.getBoundingClientRect().bottom,
+                    stripInsideFrame: parseFloat(getComputedStyle(t).marginTop)}; }""")
+        assert got["gap"] >= 8, got
+        assert got["stripInsideFrame"] == 0, got
+    finally:
+        browser.close()
+        pw.stop()
