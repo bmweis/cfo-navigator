@@ -200,3 +200,38 @@ def test_contact_submissions_frame_clears_the_delete_selected_button(env, tmp_pa
     finally:
         browser.close()
         pw.stop()
+
+
+# --- B2: every scroller around a table is a frame -----------------------------
+
+def _app_source():
+    import pathlib
+    return pathlib.Path("webapp/app.py").read_text()
+
+
+def test_every_table_scroller_is_a_table_frame():
+    """A scroller div that wraps a table must carry .table-frame, otherwise
+    the table's own border scrolls away on a phone (B1 found this on the
+    pending submissions tables, B2 swept the rest)."""
+    import re
+    bare = re.compile(
+        r"""<div(?![^>]*table-frame)[^>]*overflow-x:auto[^>]*>\s*(?:'|")?\s*<table""")
+    hits = [m.group(0)[:90] for m in bare.finditer(_app_source())]
+    assert hits == [], hits
+
+
+def test_table_inside_a_frame_has_no_margin():
+    """A margin on the table inside a frame shows as a white strip (668)."""
+    import re
+    framed = re.compile(
+        r"""class="[^"]*table-frame[^"]*"[^>]*>\s*(?:'|")?\s*<table[^>]*style="([^"]*)\"""")
+    bad = [m.group(1)[:80] for m in framed.finditer(_app_source())
+           if re.search(r"margin(?:-top|-bottom)?\s*:\s*(?!0)", m.group(1))]
+    assert bad == [], bad
+
+
+def test_markdown_tables_are_framed_without_inner_margin():
+    from webapp import app as appmod
+    out = appmod._render_original_content_markdown("| a | b |\n|---|---|\n| 1 | 2 |\n")
+    assert 'class="table-frame"' in out
+    assert ".oc-body .table-frame>table{margin:0;}" in appmod._OC_ARTICLE_CSS
