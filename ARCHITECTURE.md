@@ -326,6 +326,15 @@ width was **at the time it was written** — those numbers describe the
 state as of their own PR, not the current value; BRAND.md §5 is the one
 place that always reflects today's actual numbers.
 
+**FP&A Buddy collapsed rows (2026-10).** Every past or recent question is a
+collapsed, click-expandable row. Past questions are `<details class="ask-pq-row">`
+(closed on load); a `?c=` load no longer fetches the transcript, it highlights the
+matching Recent conversations row; a follow-up folds earlier turns to
+`.ask-turn-row` buttons and keeps the newest open. The follow-up bubble's send
+control is an icon button (`.fu-send`, 44px hit area) and the three question inputs
+are 16px on phones. See CLAUDE.md's matching bullet and
+`tests/test_buddy_collapse_rows.py`.
+
 **FP&A Buddy page redesign (PR 17, 2026-09)** — get-to-the-point copy,
 a two-column top section, a reordered post-Ask sequence, and the last
 `.tool-inner` wrapper on this page removed as a dead no-op. The bottom

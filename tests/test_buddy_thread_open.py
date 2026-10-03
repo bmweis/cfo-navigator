@@ -193,7 +193,7 @@ def test_the_folded_line_opens_and_closes_on_a_tap(live):
     pg.wait_for_selector("#fu")
     pg.click("#past-questions > summary")
     assert _pq_open(pg) is True
-    assert pg.is_visible("#past-questions .ask-hist-answer")
+    assert pg.is_visible("#past-questions .ask-pq-row")
     pg.click("#past-questions > summary")
     assert _pq_open(pg) is False
 
@@ -291,7 +291,7 @@ def test_a_follow_up_moves_its_conversation_to_the_top_with_the_new_count(live):
     pg.fill("#fu-q", "And a follow-up")
     pg.click("#fu-btn")
     pg.wait_for_function("window.__calls.length === 2")
-    pg.wait_for_selector("#fu-btn:not([disabled])")
+    pg.wait_for_function("!document.querySelector('.ask-loading')")
     cids = pg.evaluate("Array.from(document.querySelectorAll('#ask-recent .ask-recent-item')).map(e => e.dataset.cid)")
     assert cids == ["c2", "old"]
     first = pg.locator("#ask-recent .ask-recent-item").first.inner_text()
@@ -365,7 +365,7 @@ def test_there_is_one_bubble_and_it_always_follows_the_latest_reply(live):
         pg.fill("#fu-q", text)
         pg.click("#fu-btn")
         pg.wait_for_function("n => window.__calls.length === n + 1", arg=n)
-        pg.wait_for_selector("#fu-btn:not([disabled])")
+        pg.wait_for_function("!document.querySelector('.ask-loading')")
         assert pg.locator("#fu").count() == 1
         assert pg.evaluate("document.getElementById('ask-thread').lastElementChild.id") == "fu"
     assert pg.locator("#ask-thread .ask-q-bubble").count() == 3

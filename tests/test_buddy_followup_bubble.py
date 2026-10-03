@@ -209,7 +209,7 @@ def test_limit_state_replaces_the_bubble_input_and_offers_a_new_question(live):
     pg.wait_for_selector("#fu .fu-limit")
     assert pg.is_disabled("#fu-q") and pg.is_disabled("#fu-btn")
     assert pg.evaluate("getComputedStyle(document.getElementById('fu')).position") == "static"
-    assert pg.inner_text("#fu-btn") == "Limit reached"
+    assert pg.get_attribute("#fu-btn", "aria-label") == "Ask follow-up"
     assert pg.locator("#ask-btn").is_enabled()          # a new question is always possible
     pg.click("#fu .fu-limit a")
     assert pg.locator("#fu").count() == 0
@@ -254,7 +254,7 @@ def _open_recent(pg):
     pg.evaluate("loadRecent()")
     pg.wait_for_selector(".ask-recent-item")
     pg.click(".ask-recent-item")
-    pg.wait_for_selector("#ask-thread .ask-answer")
+    pg.wait_for_selector("#ask-thread #fu")
 
 
 def test_fresh_page_has_no_bubble_anywhere(live):
@@ -285,7 +285,7 @@ def test_opening_a_conversation_at_its_limit_shows_the_limit_state(live):
     pg.click(".ask-recent-item")
     pg.wait_for_selector("#fu .fu-limit")
     assert pg.is_disabled("#fu-q") and pg.is_disabled("#fu-btn")
-    assert pg.inner_text("#fu-btn") == "Limit reached"
+    assert pg.get_attribute("#fu-btn", "aria-label") == "Ask follow-up"
     assert pg.locator("#fu .fu-meta").count() == 0
 
 
@@ -336,8 +336,8 @@ def test_other_members_past_answers_never_bring_the_bubble(past_question_page):
         pg = browser.new_page(viewport={"width": 1280, "height": 900})
         pg.add_init_script(STUB)
         pg.goto(f.as_uri())
+        pg.click("#past-questions .ask-pq-sum")
         pg.click("#past-questions .ask-hist-answer")
-        pg.click("#past-questions >> text=How do peers size")
         assert pg.locator("#fu, .fu").count() == 0
         assert pg.evaluate("window.__calls.length") == 0
     finally:

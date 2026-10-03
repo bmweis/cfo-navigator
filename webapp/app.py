@@ -23821,15 +23821,17 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
-        return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;">
-    <div style="flex:1 1 280px;min-width:0;font-weight:600;color:var(--navy);font-size:14.5px;">{q_txt}</div>
-    <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(asker)} &middot; {_esc((r["created_at"] or "")[:10])}</div>
+        # A native <details>, closed on every load: the row is the question,
+        # byline and a chevron; the answer, sources and admin buttons are the
+        # disclosure body. Same fold element the Search past questions section uses.
+        return f"""<details class="ask-pq-row">
+  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{_esc(asker)} &middot; {_esc((r["created_at"] or "")[:10])}</span></summary>
+  <div class="ask-pq-body">
+    <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
+    {src_html}
+    {admin_controls}
   </div>
-  <div class="ask-hist-answer" style="margin:8px 0 0;">{a_html}</div>
-  {src_html}
-  {admin_controls}
-</div>"""
+</details>"""
 
     pq_rows_html = "".join(_pq_row(r) for r in pq_rows) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
@@ -23847,7 +23849,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Questions other members have already asked&mdash;check here before spending a query re-asking one.</p>
   <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:18px;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
-      style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
     <button type="submit" class="btn btn-ghost">Search</button>
   </form>
   {pq_rows_html}
@@ -23987,7 +23989,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     <div class="ask-card">
       <label for="ask-q" style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">New question <span style="text-transform:none;letter-spacing:0;font-weight:400;">&middot; starts a new conversation</span></label>
       <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?"
-        style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
+        style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
     </div>
   </div>
   <div class="fpa-intro-area-controls">
@@ -24184,6 +24186,16 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-dd-panel .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);font-weight:600;}}
 .ask-dd-note{{margin:6px 10px 4px;font-size:12.5px;}}
 
+.ask-pq-row{{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}}
+.ask-pq-row[open]{{border-color:var(--navy);}}
+.ask-pq-sum{{display:flex;align-items:baseline;gap:10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;flex-wrap:wrap;}}
+.ask-pq-sum::-webkit-details-marker{{display:none;}}
+.ask-pq-sum:hover{{background:var(--accent-light);border-radius:8px;}}
+.ask-pq-rc{{font-size:12px;color:var(--navy);transition:transform .12s;flex-shrink:0;}}
+.ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{{transform:rotate(90deg);}}
+.ask-pq-q{{flex:1 1 240px;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);}}
+.ask-pq-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
+.ask-pq-body{{padding:2px 16px 14px 32px;}}
 .ask-recent-item{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;width:100%;text-align:left;
   font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
   margin-bottom:8px;transition:border-color .12s ease;}}
@@ -24210,13 +24222,26 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fu-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;}}
 .fu-limit{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}
 .fu-row{{display:flex;gap:8px;align-items:flex-end;}}
-.fu textarea{{flex:1;min-width:0;min-height:42px;height:42px;max-height:120px;resize:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:14.5px;background:var(--bg);}}
-.fu .btn{{padding:10px 18px;font-size:14px;white-space:nowrap;}}
-.fu .btn:disabled{{opacity:.55;cursor:not-allowed;}}
+.fu textarea{{flex:1 1 0;min-width:0;min-height:44px;height:44px;max-height:120px;resize:none;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font:inherit;font-size:16px;line-height:1.35;background:var(--bg);box-sizing:border-box;}}
+/* Send: a filled navy circle, white up arrow. 44px hit area, 36px visible. */
+.fu .fu-send{{flex:0 0 44px;width:44px;height:44px;padding:0;border:0;background:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;}}
+.fu .fu-send .fu-send-dot{{width:36px;height:36px;border-radius:50%;background:var(--navy);display:inline-flex;align-items:center;justify-content:center;}}
+.fu .fu-send svg{{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;}}
+.fu .fu-send:disabled{{cursor:not-allowed;}}
+.fu .fu-send:disabled .fu-send-dot{{background:var(--line);}}
+.fu .fu-send:focus-visible{{outline:2px solid var(--navy);outline-offset:2px;}}
+.ask-turn-row{{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;font:inherit;padding:11px 14px;min-height:44px;box-sizing:border-box;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;}}
+.ask-turn-row:hover{{border-color:var(--navy);}}
+.ask-turn-row .ask-pq-rc{{font-size:12px;color:var(--navy);}}
+.ask-turn-row[aria-expanded="true"] .ask-pq-rc{{transform:rotate(90deg);}}
+.ask-turn-rq{{font-weight:600;font-size:13.5px;color:var(--navy);min-width:0;flex:1;}}
+.ask-turn.has-row>.ask-q-bubble{{display:none;}}
+.ask-turn.has-row:not(.open)>.ask-answer{{display:none;}}
+.ask-recent-item.recent-hl{{border-color:var(--navy);box-shadow:0 0 0 2px var(--accent-light);}}
 .fu-meta{{display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:12px;color:var(--muted);}}
 .fu-meta .ask-dd-btn{{min-height:40px;font-size:13px;}}
 .fu-meta .ask-cost{{flex-direction:row;gap:5px;align-items:baseline;}}
-.fu-sum{{display:none;font-size:12px;color:var(--muted);margin-top:6px;}}
+.fu-sum{{display:none;font-size:12.5px;color:var(--muted);margin-top:6px;min-height:44px;align-items:center;justify-content:space-between;gap:10px;box-sizing:border-box;}}
 /* Compact while typing, driven by a class rather than :focus. Tapping the Ask
    follow-up button blurs the textarea; if blur re-expanded the controls, the
    bubble (sticky to the bottom) would grow upward and move the button out from
@@ -24224,7 +24249,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
    cleared only by a tap outside the bubble or on the summary line, so a tap
    inside the bubble never changes its height. */
 .fu.fu-compact .fu-meta{{display:none;}}
-.fu.fu-compact .fu-sum{{display:block;}}
+.fu.fu-compact .fu-sum{{display:flex;}}
 .fu-sum{{cursor:pointer;}}
 @media(max-width:640px){{.fu{{max-width:100%;padding:8px 10px;}} .fu-meta{{font-size:11.5px;}}}}
 .ask-answer p{{margin:0 0 14px;}}
@@ -24322,7 +24347,8 @@ function fuSummary() {{
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
   var cost = (document.getElementById('cost-est-num') || {{}}).textContent || '';
   var sum = document.querySelector('.fu-sum');
-  if (sum) sum.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ') + ' \u25be';
+  if (sum) sum.innerHTML = '<span class="fu-sum-t"></span><span aria-hidden="true">\u25be</span>';
+  if (sum) sum.firstChild.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ');
   ddLabels();
 }}
 
@@ -24547,6 +24573,27 @@ function resetConvo() {{
   q.scrollIntoView({{behavior:'smooth', block:'center'}});
 }}
 
+// Earlier turns fold to one-line rows (chevron, tap to open). Nothing is
+// deleted; the newest turn stays open. A turn gets its row once.
+function collapseTurn(turn) {{
+  if (!turn || turn.id === 'fu' || turn.classList.contains('has-row')) return;
+  var b = turn.querySelector('.ask-q-bubble');
+  if (!b) return;
+  turn.classList.add('ask-turn', 'has-row');
+  var row = document.createElement('button');
+  row.type = 'button'; row.className = 'ask-turn-row'; row.setAttribute('aria-expanded', 'false');
+  row.innerHTML = '<span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-turn-rq"></span>';
+  row.querySelector('.ask-turn-rq').textContent = b.textContent;
+  row.addEventListener('click', function() {{
+    var o = turn.classList.toggle('open');
+    row.setAttribute('aria-expanded', o ? 'true' : 'false');
+  }});
+  turn.insertBefore(row, turn.firstChild);
+}}
+function collapseEarlierTurns() {{
+  var kids = Array.prototype.filter.call(document.getElementById('ask-thread').children, function(k) {{ return k.id !== 'fu'; }});
+  for (var i = 0; i < kids.length - 1; i++) collapseTurn(kids[i]);
+}}
 function lastTurnEl() {{
   var kids = document.getElementById('ask-thread').children;
   for (var i = kids.length - 1; i >= 0; i--) if (kids[i].id !== 'fu') return kids[i];
@@ -24568,8 +24615,8 @@ function fuRender(state) {{
     (limited ? '<p class="fu-limit">You&rsquo;ve reached the limit for this conversation. ' +
                '<a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.</p>' : '') +
     '<div class="fu-row"><textarea id="fu-q" rows="1" placeholder="Ask a follow-up…"' + (limited ? ' disabled' : '') + '></textarea>' +
-    '<button type="button" class="btn" id="fu-btn" onclick="doAsk(true)"' + ((limited || busy) ? ' disabled' : '') + '>' +
-    (limited ? 'Limit reached' : busy ? 'Thinking…' : 'Ask follow-up') + '</button></div>';
+    '<button type="button" class="fu-send" id="fu-btn" onclick="doAsk(true)" aria-label="Ask follow-up" title="Ask follow-up"' + ((limited || busy) ? ' disabled' : '') + '>' +
+    '<span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button></div>';
   if (!limited) {{
     var meta = document.createElement('div');
     meta.className = 'fu-meta';
@@ -24593,7 +24640,15 @@ function fuRender(state) {{
     var sum = document.createElement('div');
     sum.className = 'fu-sum';
     f.appendChild(sum);
-    f.querySelector('#fu-q').addEventListener('focus', function() {{ f.classList.add('fu-compact'); closeDds(); }});
+    var fq = f.querySelector('#fu-q');
+    fq.addEventListener('focus', function() {{ f.classList.add('fu-compact'); closeDds(); }});
+    var fb = f.querySelector('#fu-btn');
+    function fuSync() {{
+      fq.style.height = '44px'; fq.style.height = Math.min(fq.scrollHeight, 120) + 'px';
+      if (!busy) fb.disabled = !fq.value.trim();
+    }}
+    fq.addEventListener('input', fuSync);
+    if (!busy) fb.disabled = true;
     sum.addEventListener('click', function() {{ f.classList.remove('fu-compact'); }});
   }}
   thread.appendChild(f);
@@ -24631,6 +24686,7 @@ async function loadRecent() {{
     var box = document.getElementById('ask-recent');
     box.innerHTML = '<div class="ask-section-label">Recent conversations</div>' + list.map(recentItemHtml).join('');
     box.style.display = 'block';
+    highlightRecent();
   }} catch(e) {{}}
 }}
 // After an answer, put its conversation at the top of Recent conversations
@@ -24695,6 +24751,7 @@ async function resumeConvoById(cid) {{
       }}
       thread.appendChild(turn);
     }});
+    collapseEarlierTurns();
     convoId = d.conversation_id;
     asked = true; setConvoUrl(convoId);
     document.getElementById('ask-recent').style.display = 'none';
@@ -24733,6 +24790,7 @@ async function doAsk(followUp) {{
   var oldBubble = document.getElementById('fu');
   if (oldBubble) oldBubble.remove();
   thread.appendChild(turn);
+  if (followUp) collapseEarlierTurns();
   document.getElementById('ask-recent').style.display = 'none';
   var answerEl = turn.querySelector('.ask-answer');
 
@@ -24826,11 +24884,20 @@ document.addEventListener('keydown', function(e) {{
 updateEstimate();
 loadRecent();
 ddLabels();
-// A reload keeps the reader in their conversation: reopen the one named in the URL.
-(function() {{
+// A reload expands nothing. A conversation named in the URL (?c=) comes back as
+// its collapsed row in Recent conversations, highlighted and scrolled into view.
+function highlightRecent() {{
   var c = new URLSearchParams(location.search).get('c');
-  if (c) resumeConvoById(c);
-}})();
+  if (!c) return;
+  var items = document.querySelectorAll('#ask-recent .ask-recent-item');
+  for (var i = 0; i < items.length; i++) {{
+    if (items[i].getAttribute('data-cid') === c) {{
+      items[i].classList.add('recent-hl');
+      items[i].scrollIntoView({{block:'center'}});
+      return;
+    }}
+  }}
+}}
 </script>"""
 
     return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
