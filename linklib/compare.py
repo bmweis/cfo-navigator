@@ -33,6 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field as _dc_field
 
 from . import gates
+from . import tool_labels
 from .enrich import NEEDS_VERIFICATION
 from .community_profile import NOT_ASSESSED, cpe_note, cpe_state
 
@@ -319,19 +320,24 @@ def build_software_compare(
         tags_by_id[tid] = t.get("categories") or []
 
         desc_field = _narrative_field(
-            "description", "Description", t.get("summary") or t.get("description"),
+            # The key stays "description": MCP `compare_software` serializes it
+            # and clients may read it, and keys are never renamed by a label
+            # change. The content and the label are the short summary.
+            "description", tool_labels.SHORT_SUMMARY, (t.get("summary") or "").strip(),
             bool(t.get("description_needs_verification")))
-        if desc_field.text:
-            desc_field.citations = citations.get((tid, "description"), [])
+        # No fallback to the long description: the row is labelled for the
+        # short summary, so an empty one shows the standard placeholder. The
+        # citations list belongs to the long Description, which Compare does
+        # not show, so none are attached here.
 
         agent_field = _narrative_field(
-            "agent_taxonomy", "How autonomous is it?", t.get("agent_taxonomy_note"),
+            "agent_taxonomy", tool_labels.AGENT, t.get("agent_taxonomy_note"),
             bool(t.get("agent_taxonomy_needs_verification")))
         if agent_field.text:
             agent_field.citations = citations.get((tid, "agent_taxonomy"), [])
 
         diff_field = _narrative_field(
-            "competitive_differentiation", "Bottom line", t.get("competitive_differentiation"),
+            "competitive_differentiation", tool_labels.BOTTOM_LINE, t.get("competitive_differentiation"),
             bool(t.get("competitive_differentiation_needs_verification")))
 
         comp_list = competitors.get(tid, [])
@@ -342,12 +348,12 @@ def build_software_compare(
             tags=tags_by_id[tid],
             key_facts=[],
             sections=[
-                CompareSection("Description", [desc_field]),
-                CompareSection("AI / Agent involvement", [agent_field]),
-                CompareSection("Bottom line", [diff_field]),
+                CompareSection(tool_labels.SHORT_SUMMARY, [desc_field]),
+                CompareSection(tool_labels.SECTION_AGENT, [agent_field]),
+                CompareSection(tool_labels.BOTTOM_LINE, [diff_field]),
             ],
             chip_lists=[CompareChipList(
-                "Competitors", "tool_competitors",
+                tool_labels.COMPETITORS, "tool_competitors",
                 [CompareChipItem(c["name"], f"/tools/software/{c['slug']}") for c in comp_list],
             )],
         ))

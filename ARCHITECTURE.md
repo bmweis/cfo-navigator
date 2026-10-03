@@ -5107,6 +5107,14 @@ Details worth knowing:
   field()`), mirroring `community_profile_quality_flags()`'s existing
   one-query-for-the-whole-page shape. See `tests/
   test_admin_completeness_filter.py`.
+- **Software parity, PR 2a.2 (2026-10).** Refusal: `_tool_limit_refusals(form)` validates
+  Description, Short summary, Agent taxonomy and Bottom line together before `update_tool` runs, and
+  `/tools/software/{slug}/edit` and `/admin/tools/software/new` re-render through `_tool_edit_page` and
+  `_tool_new_page` (status 400, banner from `_refusal_banner_html`, shared with the Community edit page).
+  Labels: `linklib/tool_labels.py` is a leaf module read by `db.py` (refusal messages), `compare.py`,
+  `webapp/app.py` and `webapp/mcp_toolbox.py`; labels only, no key or column renamed. Compare: the first
+  software section is "Short summary" and shows `tools.summary` alone (compare field key `description`
+  unchanged for MCP clients); an empty or whitespace summary renders the standard placeholder.
 - **Compare Redesign Phase 1 (2026-09) — a new `linklib/compare.py`
   serializer replaces both compare matrices' hand-assembled row logic, and
   the pages themselves are rebuilt on it: grouped section headers (fixing
