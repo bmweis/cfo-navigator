@@ -162,9 +162,9 @@ def test_compare_groups_fields_into_the_four_profile_page_themes(env):
         assert f'<span class="cmp-sticky-label">{title}</span>' not in r.text, title
 
 
-def test_compare_label_column_and_seafoam_bottom_line_first(env):
+def test_compare_label_column_and_plain_bottom_line_first(env):
     """Field names sit once in the first column; Bottom line is the first body
-    row, seafoam, with no rules of its own above or below."""
+    row, plain white with a navy label rule, with no rules of its own above or below."""
     from linklib.db import Library
     from linklib import compare
     lib = Library(os.environ["LINKLIB_DB"])
@@ -185,7 +185,7 @@ def test_compare_label_column_and_seafoam_bottom_line_first(env):
         assert body.count(f'cc-label">{label}</td>') == 1, label
     assert "Yes (NASBA sponsor)" in t
     # no top/bottom rule on the Bottom line row, and the width is the named constant
-    assert "td.cc-bl{background:var(--seafoam-wash)!important;border-top:0!important;" in t
+    assert "td.cc-bl{background:var(--surface)!important;border-top:0!important;" in t
     assert "border-bottom:1px solid var(--seafoam" not in t
     from webapp import app as appmod
     assert f"width:{appmod._CMP_LABEL_COL_WIDTH}px" in t

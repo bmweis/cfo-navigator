@@ -140,7 +140,7 @@ def test_community_compare_has_no_clamp_and_shows_every_character(env):
 def test_every_marker_has_its_sources_chip_with_the_same_number(env):
     a, b = _seed_tools(env)
     html = _client(env).get(f"/tools/software/compare?ids={a},{b}").text
-    agent_cell = html.split("AI / Agent involvement", 1)[1].split("</tr>", 1)[0]
+    agent_cell = html.split("What its agents do", 1)[1].split("</tr>", 1)[0]
     marker_ns = {int(n) for n in re.findall(r"\[(\d+)\]", agent_cell.split("Sources", 1)[0])}
     chip_ns = {int(n) for n in re.findall(r">\[(\d+)\] Source \d+</a>", agent_cell)}
     assert marker_ns == {1, 2, 3, 4, 5, 6}

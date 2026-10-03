@@ -2787,6 +2787,10 @@ def _cmp_summary_content_text(entities_data: list[dict]) -> str:
     return "\n".join(parts)
 
 
+# Heading above the AI comparison summary (both Compare pages).
+_CMP_SUMMARY_HEADING = "How they compare"
+
+
 def _cmp_summary_block_html(request: Request, entities: list["compare.CompareEntity"], entity_type: str) -> str:
     """Look up (or generate) the cached overlap/contrast summary for this
     exact set of entities, and render the block — or "" if there's nothing
@@ -2844,6 +2848,7 @@ def _cmp_summary_block_html(request: Request, entities: list["compare.CompareEnt
     footnote_prefix = _CMP_SUMMARY_FOOTNOTE_PREFIX if has_unverified else _CMP_SUMMARY_FOOTNOTE_PREFIX_VERIFIED
     feedback_href = f"/compare-summary/feedback?type={entity_type}&ids={_esc(entity_ids)}&hash={content_hash}"
     return f"""<div class="cmp-summary">
+<h2 class="cmp-summary-h">{_esc(_CMP_SUMMARY_HEADING)}</h2>
 <p class="cmp-summary-text">{_esc(summary_text)}</p>
 <p class="cmp-summary-footnote">{_esc(footnote_prefix)}<a href="{feedback_href}">Flag an issue</a></p>
 </div>"""
@@ -2860,13 +2865,16 @@ _CMP_SHARED_CSS = f"""
   color:var(--ink-soft);line-height:1.55;min-width:220px;}}
 .cc-label{{width:{_CMP_LABEL_COL_WIDTH}px;min-width:{_CMP_LABEL_COL_WIDTH}px;max-width:{_CMP_LABEL_COL_WIDTH}px;
   font-size:13px;font-weight:700;color:var(--ink);background:var(--surface);}}
-/* Bottom line row: first row of the body, seafoam like the profile callout,
-   no rules above or below. The selectors are deliberately specific: the
-   sitewide table block in _CSS puts a 1px top border and a surface
-   background on every td with !important. */
-.site-main .table-frame>table.cc-table td.cc-bl{{background:var(--seafoam-wash)!important;border-top:0!important;
+/* Bottom line row: first row of the body. A plain white row, set apart by a
+   3px navy rule down the left edge of its label (it stays with the sticky
+   label when scrolled) and a larger value size. No tint: a navy-light tint
+   merges with the table header row. The selectors are deliberately
+   specific: the sitewide table block in _CSS puts a 1px top border and a
+   surface background on every td with !important. */
+.site-main .table-frame>table.cc-table td.cc-bl{{background:var(--surface)!important;border-top:0!important;
   font-size:15px;color:var(--ink);}}
-.site-main .table-frame>table.cc-table td.cc-label.cc-bl{{background:var(--seafoam-wash)!important;font-size:13px;}}
+.site-main .table-frame>table.cc-table td.cc-label.cc-bl{{background:var(--surface)!important;font-size:13px;
+  color:var(--navy);box-shadow:inset 3px 0 0 var(--navy);}}
 /* The sitewide frame rule (.site-main .table-frame>table) sets overflow:visible
    but loses on specificity to the generic table rule's overflow:hidden, and a
    table that clips can't let sticky cells move. Doubling .cc-table wins. */
@@ -2958,6 +2966,7 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
    loud callout: this is a heads-up, not the page's main content. */
 .cmp-summary{{background:var(--seafoam-wash);border:1px solid var(--seafoam-mid);border-radius:12px;
   padding:16px 20px;margin:0 0 20px;}}
+.cmp-summary-h{{margin:0 0 8px;font-size:15px;font-weight:700;color:var(--navy);}}
 .cmp-summary-text{{margin:0 0 8px;font-size:14.5px;line-height:1.6;color:var(--ink);}}
 .cmp-summary-footnote{{margin:0;font-size:12px;color:var(--muted);}}
 .cmp-summary-footnote a{{color:var(--muted);text-decoration:underline;}}

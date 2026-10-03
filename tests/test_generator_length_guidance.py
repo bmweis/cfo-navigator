@@ -77,7 +77,7 @@ def test_community_profile_max_tokens_unchanged_shared_across_23_fields():
 def test_yet_copy_retired_from_gates():
     from linklib import gates
     assert gates.EMPTY_COPY["tool_agent_taxonomy"].visitor_text == \
-        "How autonomous this tool's AI is hasn't been documented."
+        "What this tool's agents do hasn't been documented."
     assert gates.EMPTY_COPY["community_profile_group"].visitor_text == \
         "This section hasn't been researched."
     assert gates.COMPARE_EMPTY_LABELS["tool_agent_taxonomy"] == "Not documented."

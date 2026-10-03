@@ -66,7 +66,7 @@ def test_software_compare_every_section_present_even_empty():
     assert len(entities) == 2
     e = entities[0]
     titles = [s.title for s in e.sections]
-    assert titles == ["Short summary", "AI / Agent involvement", "Bottom line"]
+    assert titles == ["Short summary", "What its agents do", "Bottom line"]
     for s in e.sections:
         assert s.fields[0].state == gates.GateState.EMPTY
         assert s.fields[0].text == ""

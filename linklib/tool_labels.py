@@ -17,7 +17,7 @@ and `webapp/` all import it, and a leaf cannot start an import cycle.
 SHORT_SUMMARY = "Short summary"
 DESCRIPTION = "Description"
 # The agent field. Edit label, profile heading, MCP label.
-AGENT = "How autonomous is it?"
+AGENT = "What its agents do"
 BOTTOM_LINE = "Bottom line"
 COMPETITORS = "Competitors"
 # Added with the label audit (follow-up to PR 2a.2).
@@ -25,7 +25,8 @@ KEY_FEATURES = "Key features"
 APP_SCREENSHOT = "App screenshot"
 HOMEPAGE_SCREENSHOT = "Homepage screenshot"
 
-# Grouping names. They name a section or an eyebrow, not the field, so they
-# are kept as they are and listed in the PR's copy table for review.
-SECTION_AGENT = "AI / Agent involvement"
+# Grouping names. EYEBROW_AGENT names an eyebrow, not the field, so it is kept
+# as it is and listed in the PR's copy table for review.
+# Same words as the field: the Compare row shows the field name, once.
+SECTION_AGENT = AGENT
 EYEBROW_AGENT = "AI agent capabilities"

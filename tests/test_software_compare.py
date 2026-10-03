@@ -67,7 +67,7 @@ def test_agent_taxonomy_shown_on_profile_and_searchable_on_card(env):
     client = _client(env)
     r = client.get("/tools/software/runway")
     assert r.status_code == 200
-    assert "How autonomous is it?" in r.text
+    assert "What its agents do" in r.text
     assert "AI agent capabilities" in r.text
     assert "Agent-assisted, not fully autonomous." in r.text
 
@@ -87,14 +87,14 @@ def test_agent_taxonomy_shows_placeholder_when_empty(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
-    assert "How autonomous this tool's AI is hasn't been documented." in r.text
+    assert "What this tool's agents do hasn't been documented." in r.text
 
 
 # -- compare route ------------------------------------------------------------
 #
 # Compare Redesign Phase 1 (2026-09) rebuilt this page on a shared
 # linklib/compare.py serializer, with grouped section headers (fixing the
-# old orphaned-header bug — only "AI / Agent involvement" used to get a
+# old orphaned-header bug — only "What its agents do" used to get a
 # .cc-section band), a Key facts band with shared/unique tag chips, working
 # citation chips (reusing entity_citations + _citations_list_html, exactly
 # as the profile page does), and full, unclamped narrative text
@@ -155,7 +155,7 @@ def test_compare_gives_agent_involvement_its_own_section(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
-    assert "AI / Agent involvement" in r.text
+    assert "What its agents do" in r.text
     assert "Fully independent agent that runs the whole workflow." in r.text
     assert "Not documented." in r.text
     assert "not have" not in r.text.lower() and "no agent" not in r.text.lower()
@@ -177,7 +177,7 @@ def test_compare_every_section_gets_a_real_header_band(env):
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
     # Software has one field per section, so each is a labelled row (field
     # name in the first column) and there are no navy bands at all.
-    for title in ("Short summary", "AI / Agent involvement", "Bottom line", "Competitors"):
+    for title in ("Short summary", "What its agents do", "Bottom line", "Competitors"):
         assert '<td class="cc-cell cc-label' in r.text and f'>{title}</td>' in r.text, title
     assert 'class="cc-cell cc-section"' not in r.text
     body = r.text[r.text.index("<tbody>"):]
