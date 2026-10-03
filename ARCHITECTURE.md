@@ -326,6 +326,17 @@ width was **at the time it was written** — those numbers describe the
 state as of their own PR, not the current value; BRAND.md §5 is the one
 place that always reflects today's actual numbers.
 
+**FP&A Buddy top box (2026-10).** The question card holds, top to bottom, the
+"New question" label, the Depth and Sources controls (each under a visible
+`<label>` header; two columns above 640px, stacked below with each panel directly
+under its button), then the text box with the icon send button inside it
+(`#ask-btn`, bottom-right, disabled while empty or running). The grid
+(`.fpa-intro-layout`) is now three areas, intro, example and question; the old
+controls and action rows are gone. Admin cost estimates are
+`COST[tier] + EXA_UNIT` (one Exa search while Web is on and Exa is the provider),
+rendered in the Depth options and on the closed button; `/tools/fpa-buddy`
+injects `COST` and `EXA_UNIT` only for admins.
+
 **FP&A Buddy collapsed rows (2026-10).** Every past or recent question is a
 collapsed, click-expandable row. Past questions are `<details class="ask-pq-row">`
 (closed on load); a `?c=` load no longer fetches the transcript, it highlights the

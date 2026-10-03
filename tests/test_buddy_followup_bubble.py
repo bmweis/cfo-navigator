@@ -139,7 +139,9 @@ def test_first_answer_brings_the_bubble_and_top_button_stays_ask(live):
     assert pg.locator("#fu").count() == 0
     _ask(pg, "First question")
     pg.wait_for_selector("#fu-q")
-    assert pg.locator("#ask-btn").inner_text() == "Ask"
+    assert pg.get_attribute("#ask-btn", "aria-label") == "Ask"
+    assert pg.locator("#ask-btn").is_disabled()          # the box is empty after a send
+    pg.fill("#ask-q", "Another")
     assert pg.locator("#ask-btn").is_enabled()
     # The bubble is the last child of the thread: under the latest reply.
     assert pg.evaluate("document.getElementById('ask-thread').lastElementChild.id") == "fu"
@@ -210,6 +212,7 @@ def test_limit_state_replaces_the_bubble_input_and_offers_a_new_question(live):
     assert pg.is_disabled("#fu-q") and pg.is_disabled("#fu-btn")
     assert pg.evaluate("getComputedStyle(document.getElementById('fu')).position") == "static"
     assert pg.get_attribute("#fu-btn", "aria-label") == "Ask follow-up"
+    pg.fill("#ask-q", "A new question")
     assert pg.locator("#ask-btn").is_enabled()          # a new question is always possible
     pg.click("#fu .fu-limit a")
     assert pg.locator("#fu").count() == 0
@@ -269,7 +272,7 @@ def test_opening_an_own_conversation_shows_the_bubble_and_continues_it(live):
     pg.wait_for_selector("#fu-q")
     assert pg.evaluate("document.getElementById('ask-thread').lastElementChild.id") == "fu"
     assert pg.evaluate("convoId") == "c9"
-    assert pg.locator("#ask-btn").inner_text() == "Ask"
+    assert pg.get_attribute("#ask-btn", "aria-label") == "Ask"
     pg.fill("#fu-q", "Continue it")
     pg.click("#fu-btn")
     pg.wait_for_function("window.__calls.length === 1")

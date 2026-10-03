@@ -40,11 +40,14 @@ def _box(pg, sel):
       return {l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height}; }""", sel)
 
 
-def test_top_buttons_share_one_row_and_show_the_current_value(live):
+def test_top_buttons_sit_side_by_side_on_desktop_stacked_on_a_phone_and_show_the_value(live):
     pg = live
     d, s = _box(pg, "#ask-dd-top [data-dd='depth'].ask-dd-btn"), _box(pg, "#ask-dd-top [data-dd='sources'].ask-dd-btn")
-    assert abs(d["t"] - s["t"]) < 1 and d["r"] <= s["l"] + 1
-    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard"
+    if pg.viewport_size["width"] > 640:
+        assert abs(d["t"] - s["t"]) < 1 and d["r"] <= s["l"] + 1
+    else:
+        assert d["b"] <= s["t"] and abs(d["l"] - s["l"]) < 1
+    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v").startswith("Standard")
     assert pg.inner_text("#ask-dd-top [data-dd='sources'] .ask-dd-v") == "2 of 3"
     assert pg.is_hidden("#ask-dd-top .ask-dd-panel[data-dd='sources']")
 
@@ -59,10 +62,11 @@ def test_button_labels_fit_without_truncation_on_a_phone(live):
 def test_top_panel_is_full_row_width_and_in_flow(live):
     pg = live
     pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
-    row, panel = _box(pg, "#ask-dd-top .ask-dd-row"), _box(pg, "#ask-dd-top .ask-dd-panel[data-dd='sources']")
+    row, panel = _box(pg, "#ask-dd-top"), _box(pg, "#ask-dd-top .ask-dd-panel[data-dd='sources']")
     assert abs(panel["l"] - row["l"]) < 1 and abs(panel["r"] - row["r"]) < 1
-    assert panel["t"] >= row["b"]
-    assert panel["b"] <= _box(pg, "#ask-btn")["t"]          # pushes Ask down, never covers it
+    btn = _box(pg, "#ask-dd-top [data-dd='sources'].ask-dd-btn")
+    assert panel["t"] >= btn["b"]                           # opens under the button that opened it
+    assert panel["b"] <= _box(pg, "#ask-q")["t"]            # pushes the text box down, never covers it
     assert panel["r"] <= pg.evaluate("window.innerWidth")
 
 
@@ -87,7 +91,7 @@ def test_picking_a_depth_closes_the_panel_and_updates_the_button(live):
     pg.click("#ask-dd-top .ask-tag[data-tier='deep']")
     assert pg.evaluate("selectedTier") == "deep"
     assert pg.is_hidden("#ask-dd-top .ask-dd-panel[data-dd='depth']")
-    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Deep"
+    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v").startswith("Deep")
 
 
 def test_only_one_panel_is_open_at_a_time(live):
@@ -118,8 +122,8 @@ def test_bubble_choices_and_top_buttons_share_one_state(live):
     _settle(pg)
     pg.click("#fu .ask-dd-btn[data-dd='depth']")
     pg.click("#fu .ask-tag[data-tier='quick']")
-    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Quick"
-    assert pg.inner_text("#fu [data-dd='depth'] .ask-dd-v") == "Quick"
+    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v").startswith("Quick")
+    assert pg.inner_text("#fu [data-dd='depth'] .ask-dd-v").startswith("Quick")
     pg.click("#fu .ask-dd-btn[data-dd='sources']")
     pg.click("#fu .ask-tag[data-source='feed']")
     assert pg.inner_text("#ask-dd-top [data-dd='sources'] .ask-dd-v") == "3 of 3"
