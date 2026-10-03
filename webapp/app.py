@@ -5656,7 +5656,7 @@ def admin_ai_surfaces(request: Request, status: str = ""):
 </div>
 <p style="margin:0 0 16px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
@@ -11829,7 +11829,7 @@ def admin_compare_summary_feedback(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Compare summary feedback</h1>
 <p style="color:var(--muted);margin:8px 0 20px;">Flags on the AI-generated Compare-page overlap/contrast summary. No automated action&mdash;review each and mark it reviewed once handled.</p>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
@@ -13347,7 +13347,7 @@ def admin_email_failures(request: Request):
 <h1>Email delivery failures</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Every outbound email is best-effort—contact form, tool submissions, welcome emails, password resets, warm intros. The underlying record always saves even if the send fails.</p>
 <p style="color:var(--muted);margin:0 0 18px;">A failure lands here instead of just a server log, so it never goes unnoticed.</p>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">When</th>
@@ -14543,7 +14543,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
         </tr>"""
 
     def _actionable_table(rows: list[dict]) -> str:
-        return f"""<div style="overflow-x:auto;">
+        return f"""<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool A</th>
@@ -14577,7 +14577,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
     decisions_html = ""
     if decisions:
         decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Dismissed—not duplicates</h2>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;">
 <tbody>{"".join(_decision_row(d) for d in decisions)}</tbody>
 </table>
@@ -14896,7 +14896,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
@@ -15149,7 +15149,7 @@ def _feature_category_group_html(category: dict, features: list[dict], pending_i
     <span class="disclosure-caret">&#9654;</span>
   </summary>
   <div style="padding:0 18px 16px;">
-    <div style="overflow-x:auto;">
+    <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
     <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
       <thead><tr style="background:var(--bg);">
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
@@ -15554,7 +15554,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
   {near_dup_html}
   <label style="display:block;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Feature{' (new)' if is_new_feature else ''}</label>
   {feature_field_html}
-  {f'<div style="overflow-x:auto;margin:12px 0;"><table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
+  {f'<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin:12px 0;"><table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
   {f'<p style="font-size:13.5px;line-height:1.6;color:var(--ink);background:var(--bg);border-radius:8px;padding:10px 12px;margin:10px 0 0;">{_esc(item["articulation"])}</p>' if item.get("articulation") else ''}
   {coverage_html}
   {f'<p style="font-size:13px;color:var(--muted);margin:8px 0 0;">From {_esc(item["submitter_name"])} ({_esc(item["submitter_email"])})</p>' if item.get("submitter_name") else ''}
@@ -15836,7 +15836,7 @@ def _admin_resource_table(benchmarks: list[dict]) -> str:
   </td>
 </tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">None yet.</td></tr>'
     colgroup = "".join(f'<col style="width:{w};">' for w in _ADMIN_RESOURCE_TABLE_COL_WIDTHS)
-    return f"""<div style="overflow-x:auto;">
+    return f"""<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;table-layout:fixed;">
 <colgroup>{colgroup}</colgroup>
 <thead><tr style="background:var(--accent-light);">
@@ -16233,7 +16233,7 @@ def _render_original_content_markdown(body_md: str) -> str:
     # with no wrapper, so this is a post-process, not an extension option.
     return re.sub(
         r"(<table>.*?</table>)",
-        r'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">\1</div>',
+        r'<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;">\1</div>',
         html, flags=re.DOTALL,
     )
 
@@ -16283,6 +16283,8 @@ _OC_ARTICLE_CSS = (
     '.oc-body blockquote p{margin:0;}'
     '.oc-body img{max-width:100%;height:auto;border-radius:8px;margin:1.5em 0;display:block;}'
     '.oc-body table{width:100%;font-size:.9em;margin:1.5em 0;}'
+    '.oc-body .table-frame{margin:1.5em 0;}'
+    '.oc-body .table-frame>table{margin:0;}'
     '.oc-body th,.oc-body td{padding:10px 12px;text-align:left;}'
     '.oc-body th{font-family:var(--font-body);}'
     # Row stripes some stored article HTML still carries inline (the
@@ -18760,7 +18762,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
@@ -20379,7 +20381,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             )
             all_feature_ids.extend(f["id"] for f in section["features"])
             table_html = (
-                f'<div style="overflow-x:auto;"><table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;margin-top:6px;">'
+                f'<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;"><table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">'
                 f'<thead><tr style="background:var(--bg);">'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">On</th>'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Feature</th>'
@@ -26136,7 +26138,8 @@ def admin_system_database(request: Request):
 </span>
 <span class="disclosure-caret">&#9654;</span>
 </summary>
-<div style="padding:0 18px 14px;overflow-x:auto;">
+<div style="padding:0 18px 14px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table class="cc-table">
 <thead><tr style="background:var(--bg);">
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Table</th>
@@ -26144,6 +26147,7 @@ def admin_system_database(request: Request):
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
+</div>
 </div>
 </details>"""
 
@@ -26695,7 +26699,7 @@ def admin_system_page_index(request: Request):
 </div>
 {summary}
 
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table class="cc-table">
 <thead><tr style="background:var(--bg);">
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Route</th>
@@ -26896,7 +26900,7 @@ def fpa_buddy_how_it_works(request: Request):
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">How much effort to spend</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The only choice you make is how hard to work the question. Each level pulls more sources and uses a more capable model.</p>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table class="cc-table" style="table-layout:fixed;">
 <thead><tr style="background:var(--bg);">
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:110px;">Tier</th>
@@ -28058,7 +28062,7 @@ def _over_limit_detail_html(items: list[dict]) -> str:
         f'{_esc(i["name"])}</a></td><td>{_esc(i["field"])}</td>'
         f'<td>{i["length"]:,}</td><td>{i["limit"]:,} ({_esc(i["kind"])})</td></tr>'
         for i in items)
-    return ('<div style="overflow-x:auto;"><table style="min-width:620px;"><thead><tr>'
+    return ('<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;"><table style="min-width:620px;"><thead><tr>'
             '<th>Type</th><th>Name</th><th>Field</th><th>Length</th><th>Limit</th></tr></thead>'
             f'<tbody>{rows}</tbody></table></div>')
 
@@ -30504,7 +30508,7 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
 </div>
 {merge_html}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Tag</th>
@@ -31322,7 +31326,7 @@ def admin_ask_report(request: Request, user: str = ""):
   <a href="/admin/fpa-buddy/report/export.csv{('?user=' + quote(user)) if user else ''}" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;margin-left:auto;">Download CSV &darr;</a>
 </form>
 
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date</th>
@@ -31801,7 +31805,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </div>
     <div>
       <h3 style="font-size:14px;margin:0 0 10px;">By source</h3>
-      <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+      <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
         <table style="width:100%;border-collapse:collapse;min-width:400px;">
           <thead><tr style="background:var(--bg);">
             <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
@@ -31817,7 +31821,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 
   <div style="flex:1 1 460px;min-width:0;">
     <h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
-    <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+    <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
       <table style="width:100%;border-collapse:collapse;min-width:320px;">
         <thead><tr style="background:var(--bg);">
           <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Month</th>
@@ -32093,7 +32097,7 @@ async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = 
         skipped_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Skipped rows ({len(skipped_rows)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won't be imported. Fix them in your CSV and re-upload if needed&mdash;the rows below will still be inserted if you confirm.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -32117,7 +32121,7 @@ async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = 
 <p style="color:var(--muted);margin:0 0 18px;">Nothing has been saved yet. Review the rows below, then confirm to insert them.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Ready to import ({len(valid_rows)})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Vendor</th>
@@ -33896,7 +33900,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         log_html = f"""
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:20px;">
   <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;font-size:14px;">Recent attempts</div>
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
@@ -34062,7 +34066,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <div style="font-weight:600;font-size:14px;">Accepted as final ({accepted_count:,})</div>
     <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Marked &ldquo;good enough as-is&rdquo; by an admin&mdash;permanently out of automatic retry and out of Needs manual review above, until undone here.</div>
   </div>
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
@@ -34560,7 +34564,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
         skipped_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or unchanged&mdash;not an error, nothing to do.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:400px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -34581,7 +34585,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
         errors_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be imported&mdash;fix them in your CSV and re-upload if needed.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -34605,7 +34609,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
 <p style="color:var(--muted);margin:0 0 18px;">Nothing has been saved yet. Review the rows below, then confirm to apply them.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Ready to apply ({len(updates)})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
@@ -34809,7 +34813,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
         skipped_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or marked no&mdash;not an error, nothing to do.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:400px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -34830,7 +34834,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
         errors_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be purged&mdash;fix them in your CSV and re-upload if needed.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -34863,7 +34867,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
 <p style="color:var(--muted);margin:0 0 18px;">A fresh off-site backup is taken automatically right before the delete runs, in addition to the regular nightly one.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Confirmed for deletion ({n})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Article</th>
@@ -35093,7 +35097,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
         skipped_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or marked no&mdash;not an error, nothing to do.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:400px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -35114,7 +35118,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
         errors_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be deleted&mdash;fix them in your CSV and re-upload if needed.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -35147,7 +35151,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
 <p style="color:var(--muted);margin:0 0 18px;">A fresh off-site backup is taken automatically right before the delete runs, in addition to the regular nightly one.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Confirmed for deletion ({n})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Article</th>
@@ -35425,7 +35429,7 @@ def admin_backup(request: Request, uploaded: str = ""):
 <h2 style="font-size:16px;margin:24px 0 4px;">Pre-backup integrity check</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Runs automatically against the live database right before every backup attempt&mdash;<code>PRAGMA integrity_check</code> plus an FTS5 self-check. A failure blocks that night&rsquo;s upload so corruption is never captured into a retained snapshot.</p>
 {_integrity_status_banner(integrity_rows)}
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table class="backup-log-table">
 <thead><tr style="background:var(--accent-light);">
   <th class="col-when" style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
@@ -35648,7 +35652,7 @@ def admin_brand(request: Request):
 
     checks_doc = (
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
-        '<div style="overflow-x:auto;">'
+        '<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">'
         '<table style="width:100%;font-size:14px;min-width:560px;">'
         '<thead><tr>'
         '<th style="padding:9px 12px;text-align:left;">Check</th>'
@@ -36955,7 +36959,7 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
 <h2 style="margin-top:28px;">{_esc(_voice_rule_label(rule))} <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(rows)})</span></h2>
 {bulk_html}
 {_VOICE_SCROLL_HINT_ITEM_HTML}
-<div class="voice-scroll-wrap" style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+<div class="voice-scroll-wrap table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_VOICE_TABLE_FLOOR}px;table-layout:fixed;border-collapse:collapse;">
 {_voice_thead}
 <tbody>{rows_html}</tbody></table></div>"""
@@ -36966,7 +36970,7 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
         if resolved_items:
             rows_html = "".join(_voice_review_row_html(lib, r) for r in resolved_items)
             resolved_body = f"""{_VOICE_SCROLL_HINT_ITEM_HTML}
-<div class="voice-scroll-wrap" style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+<div class="voice-scroll-wrap table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_VOICE_TABLE_FLOOR}px;table-layout:fixed;border-collapse:collapse;">
 {_voice_thead}
 <tbody>{rows_html}</tbody></table></div>"""
@@ -37250,7 +37254,7 @@ async def admin_voice_review_bulk_replace_ampersand_preview(request: Request):
 <h3 style="font-size:14px;margin:24px 0 10px;">Left as-is ({len(unchanged)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">No eligible spaced ampersand&mdash;every ampersand here is
 either unspaced (e.g. S&M, left for a manual decision) or inside an already-approved term. Not included in the write below.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_VOICE_COL_WIDTH_FIELD}px;">Field</th>
@@ -37275,7 +37279,7 @@ spaces, written raw or as its HTML-escaped form&mdash;is ever replaced. An unspa
 already-approved term, is always left for a manual decision.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Will be replaced ({len(will_change)})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_VOICE_COL_WIDTH_FIELD}px;">Field</th>
@@ -37846,7 +37850,7 @@ def admin_emails_page(request: Request):
             for row in _INTERNAL_EMAIL_ROWS
         )
         return f"""\
-<div style="overflow-x:auto;margin:0 0 26px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin:0 0 26px;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
 <thead><tr style="text-align:left;">
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;width:{_COL_WIDTH_NAME}px;">Email</th>

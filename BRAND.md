@@ -527,6 +527,7 @@ graffiti marks on admin tables, forms, or the chat UI.
     `-8px`) puts the frame's top edge behind the button, and a `margin-top` on
     the inner table shows as a white strip inside the frame. Put the gap on the
     element above the frame (`tests/test_table_frame_mobile_polish.py`).
+  - **Every scroller around a table is a frame.** A scroller div that holds a table carries `.table-frame` (`tests/test_table_frame_mobile_polish.py` fails on a bare one). The only tables left without one are those that never scroll: the checks summary tables and the Sections table.
   - **Stacked cards** (the `.admin-table-responsive`, `.ff-table`/`.fs-table`
     and `.backup-log-table` layouts under 700px, 820px for the feeds tables):
     cells carry no top border, cards are separated by a 1px `--line` rule with
