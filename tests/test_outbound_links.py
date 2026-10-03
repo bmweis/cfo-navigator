@@ -102,3 +102,16 @@ def test_run_all_reports_the_outbound_check_as_passing():
     row = next(r for r in checks.run_all()
                if r["name"] == "Outbound links open in a new tab")
     assert row["ok"] is True, row["detail"]
+
+
+def test_www_host_is_internal_pin():
+    """PR 2a.2 pin (passes today, no fail-first claim). A report read
+    INTERNAL_LINK_HOSTS on GitHub as holding a markdown-link string where
+    "www.bmweis.com" belongs; the file is correct, and this keeps it so: an
+    anchor to the www host is internal and needs no target="_blank"."""
+    assert INTERNAL_LINK_HOSTS == {"bmweis.com", "www.bmweis.com", "mcp.bmweis.com"}
+    assert all("](" not in h and "[" not in h for h in INTERNAL_LINK_HOSTS)
+    snippet = '<a href="https://www.bmweis.com/contact">Contact</a>'
+    assert outbound_link_problems(snippet) == []
+    other = '<a href="https://example.com/x">Elsewhere</a>'
+    assert outbound_link_problems(other) != []

@@ -66,7 +66,7 @@ def test_software_compare_every_section_present_even_empty():
     assert len(entities) == 2
     e = entities[0]
     titles = [s.title for s in e.sections]
-    assert titles == ["Description", "AI / Agent involvement", "Bottom line"]
+    assert titles == ["Short summary", "AI / Agent involvement", "Bottom line"]
     for s in e.sections:
         assert s.fields[0].state == gates.GateState.EMPTY
         assert s.fields[0].text == ""
@@ -80,10 +80,13 @@ def test_software_compare_prefers_summary_over_description():
     assert desc_field.state == gates.GateState.VERIFIED
 
 
-def test_software_compare_falls_back_to_description_when_no_summary():
+def test_software_compare_does_not_fall_back_to_description_when_no_summary():
+    """PR 2a.2: the row is labelled "Short summary", so an empty one stays
+    empty (standard placeholder) instead of silently showing the long text."""
     tools = [_tool(1, description="Longer description.")]
     entities, _ = compare.build_software_compare(tools, {}, {})
-    assert entities[0].sections[0].fields[0].text == "Longer description."
+    f = entities[0].sections[0].fields[0]
+    assert f.text == "" and f.state == gates.GateState.EMPTY
 
 
 def test_software_compare_pending_state_from_needs_verification_flag():
@@ -95,18 +98,20 @@ def test_software_compare_pending_state_from_needs_verification_flag():
 
 
 def test_software_compare_attaches_citations_only_to_populated_fields():
-    tools = [_tool(1, description="A description.")]
+    """Citations ride on the agent field only; the Short summary row never
+    carries the long Description's sources (it is not that text), and an
+    empty field never gets any even if the caller's dict has an entry."""
+    tools = [_tool(1, summary="A summary.", description="A description.", agent_taxonomy_note="An agent note."),
+             _tool(2, summary="Another summary.")]
     citations = {
         (1, "description"): [{"n": 1, "title": "Source", "url": "https://example.com"}],
-        (1, "agent_taxonomy"): [{"n": 1, "title": "Unused", "url": "https://unused.example"}],
+        (1, "agent_taxonomy"): [{"n": 1, "title": "Agent source", "url": "https://agent.example"}],
+        (2, "agent_taxonomy"): [{"n": 1, "title": "Unused", "url": "https://unused.example"}],
     }
     entities, _ = compare.build_software_compare(tools, citations, {})
-    desc_field = entities[0].sections[0].fields[0]
-    assert desc_field.citations == citations[(1, "description")]
-    # Agent taxonomy has no text -> citations are never attached to an
-    # empty field, even if the caller's dict has an entry for it.
-    agent_field = entities[0].sections[1].fields[0]
-    assert agent_field.citations == []
+    assert entities[0].sections[0].fields[0].citations == []
+    assert entities[0].sections[1].fields[0].citations == citations[(1, "agent_taxonomy")]
+    assert entities[1].sections[1].fields[0].citations == []
 
 
 def test_software_compare_differentiation_never_carries_citations():

@@ -10946,6 +10946,36 @@ it supersedes the old "`/save` is token-gated" note.
   bulk ampersand replace write through `apply_voice_review_write`, which bypasses
   these limits and can lengthen text past a max.
 
+- **Software parity, PR 2a.2 (2026-10): refusal, labels, Compare Short summary.**
+  (1) **A refused Software save writes nothing, for real.** `admin_tools_edit_submit` used to let
+  `Library.update_tool` write Description and Short summary before the Bottom line and Agent taxonomy
+  limits were checked, then returned a bare JSON 400 saying "Nothing was saved" (it was a half-save, and
+  only the first violation was named). `_tool_limit_refusals(form)` now checks all four limits together
+  (`TOOL_*_MAX`, same `text_budget_length` rule) before any write; one 400 re-renders the page
+  (`_tool_edit_page(form=, refusal=)`, `_tool_new_page` for `/admin/tools/software/new`) from the
+  submitted values with the shared `_refusal_banner_html` (Community uses the same helper) and a visible
+  reason line under the disabled Save. Feature editors and `/tools/submit` are out of scope. The directory
+  Quick edit now shows the server's own message instead of "Save failed, try again." (`err.fromServer`).
+  Software has no field groups, so PR 654's group flags do not apply. Mark reviewed and Flag for review
+  stay usable on an over-limit vendor (shared `buttonsFor`), pinned by a test that passes on `main`.
+  (2) **One name per field.** `linklib/tool_labels.py` (a leaf module, no imports) holds the words:
+  Short summary, Description, "How autonomous is it?" (the agent field), Bottom line, Competitors, plus the
+  grouping names "AI / Agent involvement" (Compare section) and "AI agent capabilities" (profile eyebrow),
+  which name groupings, not the field, and are kept. The edit page, profile, Compare, MCP `get_software`
+  labels and the refusal banner read them; `tests/test_software_labels.py` is the drift test. **Labels
+  only**: `agent_taxonomy`, `summary`, `competitive_differentiation` (columns, MCP keys, the compare field
+  key `description`) were not renamed, confirmed by `test_no_key_or_column_name_was_touched` and by a grep
+  showing `matchmaker.py` reads columns, not labels. On Compare the visible row label is the section
+  title, so the row reads "AI / Agent involvement"; the field label "How autonomous is it?" is not shown
+  in a single-field row. The per-field badge on the edit page is the admin profile string
+  (`gates.BADGE_TEXT_ADMIN`, "unverified, visible to visitors"), shared with the injected
+  Save-and-mark-verified badge; the old "Needs verification" is gone from the Software edit page.
+  (3) **Compare row is "Short summary" (option A).** `build_software_compare` shows `summary` only, with the
+  standard placeholder when it is empty or whitespace; there is no silent fallback to the description.
+  `Library.__init__` runs `UPDATE tools SET summary=description WHERE summary=''` on every open, so an
+  empty summary can't persist in production (0 rows at the time); the whitespace-only case is covered by
+  building the entities directly. The Compare field key stays `description` so MCP `compare_software`
+  clients keep working; its label and section title are now "Short summary".
 - **Community profile edit page: collapsible field groups (2026-10).** The five
   groups are native `<details>`/`<summary>` (`.cp-group`), all collapsed on every
   load, including a profile with a stored over-limit field. The one exception is
