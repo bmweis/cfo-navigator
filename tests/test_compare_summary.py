@@ -369,3 +369,43 @@ def test_admin_compare_summary_feedback_badges_open_task_count(env, monkeypatch)
     counts = _tasks.open_task_counts(lib)
     lib.close()
     assert counts.get("/admin/compare-summary-feedback") == 1
+
+
+def test_summary_card_has_how_they_compare_heading(env, monkeypatch):
+    """The AI summary card opens with an h2, "How they compare", before its
+    text; the footnote is unchanged and the capped note carries no heading."""
+    a, b = _two_tools(os.environ["LINKLIB_DB"])
+    monkeypatch.setattr("linklib.enrich.generate_compare_summary",
+                         lambda *x, **k: _fake_draft())
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    html = r.text
+    assert html.count('<h2 class="cmp-summary-h">How they compare</h2>') == 1
+    assert html.index("cmp-summary-h") < html.index("specializes in revenue recognition")
+    assert "Flag an issue" in html
+
+
+def test_capped_summary_note_has_no_heading(env, monkeypatch):
+    a, b = _two_tools(os.environ["LINKLIB_DB"])
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.set_default_compare_summary_cap(0.01)
+    lib.set_compare_summary("tool", "999,998", lib.compare_summary_content_hash("u"), "O.", "m", cost_usd=1.00)
+    lib.close()
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "cmp-summary-capped" in r.text
+    assert '<h2 class="cmp-summary-h">' not in r.text
+
+
+def test_bottom_line_row_is_white_with_navy_label_rule(env):
+    """Option A: the Bottom line row is a plain white row, set apart by a navy
+    rule on its label, not a seafoam or navy-light tint. One shared rule
+    serves both Compare pages."""
+    from webapp import app as appmod
+    import re
+    css = re.sub(r"/\*.*?\*/", "", appmod._CMP_SHARED_CSS, flags=re.S)
+    bl = re.findall(r"[^}]*cc-bl\{[^}]*\}", css)
+    assert len(bl) == 2, bl
+    joined = " ".join(bl)
+    assert "seafoam-wash" not in joined
+    assert "navy-light" not in joined
+    assert "background:var(--surface)!important" in joined
+    assert "box-shadow:inset 3px 0 0 var(--navy)" in joined
