@@ -23,6 +23,7 @@ from .voice_mechanics import normalize_voice_mechanics as _voice_fix
 from .voice_mechanics import correction_rule_for as _voice_fix_rule
 from .voice_mechanics import norm_for_compare
 from . import tool_labels
+from .citations import strip_citation_markers
 from .community_profile import PROFILE_LIMITS, coerce_cpe_eligible as _coerce_cpe
 
 
@@ -2674,7 +2675,13 @@ class Library:
         # Idempotent: only touches rows where summary is still empty, so a
         # row that later gets a real generated (or hand-written) summary is
         # never overwritten by a re-run of this backfill on a later boot.
-        self.conn.execute("UPDATE tools SET summary=description WHERE summary='' AND description!=''")
+        # The copy strips any [n] citation markers: a Description carries them,
+        # and a summary must not (no Sources list sits beside it). 1-2 digit
+        # markers only, so a year such as "[2024]" survives.
+        for _r in self.conn.execute(
+                "SELECT id, description FROM tools WHERE summary='' AND description!=''").fetchall():
+            self.conn.execute("UPDATE tools SET summary=? WHERE id=?",
+                              (strip_citation_markers(_r[1]), _r[0]))
         self.conn.commit()
         # read_later predates per-user scoping (no user_id column, UNIQUE(url)
         # inline constraint) — a plain ALTER TABLE ADD COLUMN can't fix the

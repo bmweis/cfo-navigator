@@ -2045,6 +2045,18 @@ _COL_WIDTH_NAME = 280        # Name / Title / vendor or tool name — matches
 # is a floor for a free-standing name column, this is a cap for a pinned one.
 _COL_WIDTH_NAME_STICKY = 230
 _COL_WIDTH_EMAIL = 220        # Email address
+# Archive backup log columns. Each is sized to its content as measured in
+# Chromium at 13px (cell padding 12px a side): a backup filename needs about
+# 211px, the Drive link about 129px, so width = content + 24. Notes is the one
+# column with no width; it takes whatever is left. The floor keeps Notes from
+# being squeezed to a sliver between the card breakpoint (700px) and the point
+# where the four fixed columns plus a readable Notes fit.
+_BACKUP_COL_WIDTH_WHEN = 150
+_BACKUP_COL_WIDTH_FILENAME = 236
+_BACKUP_COL_WIDTH_LOCATION = 154
+_BACKUP_COL_WIDTH_STATUS = 90
+_BACKUP_TABLE_MIN_WIDTH = 860
+
 _COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
                               # "YYYY-MM-DD HH:MM" value, not just "YYYY-MM-DD"
 _COL_WIDTH_STATUS = 110       # A short status/state badge or label
@@ -3131,7 +3143,7 @@ def _screenshot_card_html(entity: dict, featured_sticker: str = "") -> str:
     else:
         slides_html = _slide(homepage_url, homepage_caption, True) + _slide(app_url, app_caption, False)
         toggle_html = ('<button type="button" class="tp-shot-toggle" onclick="toggleShotSlide(this)">'
-                       'Show app screenshot</button>'
+                       'Show ' + tool_labels.APP_SCREENSHOT.lower() + '</button>'
                        # Self-contained <script>, emitted only when there are
                        # two slides to toggle between (mirrors the Phase J1
                        # expand/collapse convention: swap which element is
@@ -3144,7 +3156,7 @@ def _screenshot_card_html(entity: dict, featured_sticker: str = "") -> str:
                        'var slides = card.querySelectorAll(".tp-shot-slide");'
                        'slides.forEach(function(s) { s.classList.toggle("tp-shot-active"); });'
                        'var homepageActive = slides[0].classList.contains("tp-shot-active");'
-                       'btn.textContent = homepageActive ? "Show app screenshot" : "Show homepage screenshot";'
+                       'btn.textContent = homepageActive ? "Show ' + tool_labels.APP_SCREENSHOT.lower() + '" : "Show ' + tool_labels.HOMEPAGE_SCREENSHOT.lower() + '";'
                        '}</script>')
         card_class = "tp-card tp-shot-card has-app"
 
@@ -3224,7 +3236,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     # with a visible inline error, never a disabled-button tooltip (a
     # screen reader and a touch device both miss a title attribute).
     in_form_html = f"""  <div id="{_gen_host_id}">
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">App screenshot</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(tool_labels.APP_SCREENSHOT)}</label>
     <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">No single reliable URL for "the app"—a login/demo/product-tour page you have public access to. This is inherently manual/curated, not something to fill in for every record.</p>
     <input id="app-screenshot-source-url-{idsfx}" name="app_screenshot_source_url"{_form_attr} type="text" maxlength="500" value="{_esc(source_url)}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
@@ -3232,8 +3244,8 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     <p id="app-screenshot-recapture-err-{idsfx}" style="display:none;"></p>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
       <button type="submit" form="app-screenshot-recapture-form-{idsfx}" class="tool-admin-btn"
-        onclick="return submitAppScreenshotRecapture('{idsfx}') && confirmDiscardsUnsavedEdits(this, '{_confirm_form_id}') && startGenAnim('{_gen_host_id}')">Generate app screenshot</button>
-      <button type="button" class="tool-admin-btn" onclick="document.getElementById('app-screenshot-file-{idsfx}').click()">Upload app screenshot&hellip;</button>
+        onclick="return submitAppScreenshotRecapture('{idsfx}') && confirmDiscardsUnsavedEdits(this, '{_confirm_form_id}') && startGenAnim('{_gen_host_id}')">Generate {_esc(tool_labels.APP_SCREENSHOT.lower())}</button>
+      <button type="button" class="tool-admin-btn" onclick="document.getElementById('app-screenshot-file-{idsfx}').click()">Upload {_esc(tool_labels.APP_SCREENSHOT.lower())}&hellip;</button>
     </div>
     <input type="file" id="app-screenshot-file-{idsfx}" accept="image/jpeg,image/png,image/webp" style="display:none;"
       onchange="handleShotFile(this, '{idsfx}', 'app')">
@@ -3747,8 +3759,8 @@ def _software_key_features_card(feature_links: list[dict], *, authed: bool = Fal
         # font-style:italic (item 2, empty-state visual QA pass): matches
         # the muted-italic treatment every other empty-state line on this
         # pass uses, for one visual language across the whole card.
-        return """<div class="tp-card">
-  <h2 class="tp-card-h">Key features</h2>
+        return f"""<div class="tp-card">
+  <h2 class="tp-card-h">{_esc(tool_labels.KEY_FEATURES)}</h2>
   <p style="margin:0;color:var(--muted);font-style:italic;">Coming soon&mdash;we&rsquo;re mapping this tool against our curated feature taxonomy.</p>
 </div>"""
 
@@ -3831,7 +3843,7 @@ def _software_key_features_card(feature_links: list[dict], *, authed: bool = Fal
         sections_html = '<ul class="tp-feature-list">' + "".join(_feature_li(l) for l in feature_links) + '</ul>'
 
     return f"""<div class="tp-card">
-  <h2 class="tp-card-h">Key features</h2>
+  <h2 class="tp-card-h">{_esc(tool_labels.KEY_FEATURES)}</h2>
   {sections_html}
   {suggest_footer}
 </div>
@@ -17923,7 +17935,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
   </div>"""
 
     screenshot_html = f"""  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Homepage screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(tool_labels.HOMEPAGE_SCREENSHOT)} URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
     <!-- type="text", not "url": Recapture writes a site-relative served path
          (e.g. /tools/communities/screenshot/<slug>.png?v=...), which native
          type="url" validation rejects as invalid (no scheme) and blocks Save
@@ -20512,7 +20524,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
         _governed_features_html = f"""<details class="features-group"{' open' if feature_links_error else ''} style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Key features</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">{_esc(tool_labels.KEY_FEATURES)}</h2>
     </span>
     <span class="disclosure-caret">&#9654;</span>
   </summary>
@@ -20523,7 +20535,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
   <form method="post" action="/admin/tools/software/{tool_id}/feature-links/save">
     {feature_ids_input}
     {section_blocks}
-    <div style="margin-top:16px;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Save feature taxonomy</button></div>
+    <div style="margin-top:16px;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Save {_esc(tool_labels.KEY_FEATURES.lower())}</button></div>
   </form>
 </details>"""
 
@@ -27954,9 +27966,15 @@ def _checks_detail_row(anchor: str, title: str, text_html: str, row: dict, actio
     )
 
 
+# The result column on /admin/checks is a fixed width, not a third of the row:
+# its widest unbreakable content is the Mark reviewed button (about 130px), so
+# a third of a 1280px page (386px) left 250px empty while the explanation
+# text beside it wrapped. The text column takes the rest.
+_CHK_STATUS_COL_WIDTH = 200
+
 _CHECKS_DETAIL_CSS = (
     ".chk-rows{background:var(--surface);border:1px solid var(--line);border-radius:12px;margin:0 0 8px;}"
-    ".chk-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:28px;"
+    f".chk-row{{display:grid;grid-template-columns:minmax(0,1fr) {_CHK_STATUS_COL_WIDTH}px;gap:28px;"
     "padding:18px 22px;border-top:1px solid var(--line);}"
     ".chk-row:first-child{border-top:0;}"
     ".chk-status{padding-left:20px;border-left:1px solid var(--line);}"
@@ -28259,7 +28277,7 @@ def _over_limit_detail_html(items: list[dict]) -> str:
         f'<tr><td>{_esc(i["type"])}</td>'
         f'<td><a href="{_esc(i["edit_href"])}" style="color:var(--accent);">'
         f'{_esc(i["name"])}</a></td><td>{_esc(i["field"])}</td>'
-        f'<td>{i["length"]:,}</td><td>{i["limit"]:,} ({_esc(i["kind"])})</td></tr>'
+        f'<td>{i["length"]:,}</td><td style="white-space:nowrap;">{i["limit"]:,} ({_esc(i["kind"])})</td></tr>'
         for i in items)
     return ('<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;"><table style="min-width:620px;"><thead><tr>'
             '<th>Type</th><th>Name</th><th>Field</th><th>Length</th><th>Limit</th></tr></thead>'
@@ -35557,12 +35575,12 @@ def admin_backup(request: Request, uploaded: str = ""):
     backup_log_rows_html = "".join(
         f"""<tr>
           <td data-label="When" style="padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:13px;">{_esc(b['created_at'][:16].replace('T',' '))}</td>
-          <td data-label="Filename" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(b['filename']) or '—'}</td>
-          <td data-label="Location" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
+          <td data-label="Filename" class="nw" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(b['filename']) or '—'}</td>
+          <td data-label="Location" class="nw" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
             f'<a href="https://drive.google.com/file/d/{quote(b["drive_file_id"])}/view" target="_blank" rel="noopener">Open in Drive &rarr;</a>'
             if b['drive_file_id'] else '—'
           }</td>
-          <td data-label="Status" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
+          <td data-label="Status" class="nw" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
             '<span style="color:var(--seafoam-deep);font-weight:600;">Success</span>' if b['status'] == 'success'
             else '<span style="color:var(--alert);font-weight:600;">Failed</span>'
           }</td>
@@ -35580,17 +35598,19 @@ def admin_backup(request: Request, uploaded: str = ""):
   .backup-actions{{grid-template-columns:1fr 1fr;align-items:start;}}
   .backup-actions .backup-action-divider{{border-left:1px solid var(--line);border-top:none;padding-left:24px;padding-top:0;}}
 }}
-.backup-log-table{{width:100%;table-layout:fixed;}}
+.backup-log-table{{width:100%;table-layout:fixed;min-width:{_BACKUP_TABLE_MIN_WIDTH}px;}}
 .backup-log-table td{{overflow-wrap:anywhere;}}
-.backup-log-table .col-when{{width:150px;}}
-.backup-log-table .col-filename{{width:200px;}}
-.backup-log-table .col-location{{width:120px;}}
-.backup-log-table .col-status{{width:90px;}}
+.backup-log-table .col-when{{width:{_BACKUP_COL_WIDTH_WHEN}px;}}
+.backup-log-table .col-filename{{width:{_BACKUP_COL_WIDTH_FILENAME}px;}}
+.backup-log-table .col-location{{width:{_BACKUP_COL_WIDTH_LOCATION}px;}}
+.backup-log-table .col-status{{width:{_BACKUP_COL_WIDTH_STATUS}px;}}
+.backup-log-table .nw{{white-space:nowrap;}}
 /* Notes gets no explicit width — table-layout:fixed hands it whatever's
    left of the table's own full width, so it's the one column that grows
    or shrinks with the page instead of the table just being capped small
    or every column stretching evenly with wasted whitespace. */
 @media(max-width:700px){{
+  .backup-log-table{{min-width:0 !important;}}
   .backup-log-table thead{{display:none;}}
   .backup-log-table, .backup-log-table tbody, .backup-log-table tr, .backup-log-table td{{display:block;width:100%;}}
   .backup-log-table tr{{border-bottom:1px solid var(--line);padding:10px 12px;}}

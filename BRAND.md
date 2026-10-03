@@ -838,10 +838,20 @@ constants:
   markup line up regardless of content length.
 - **`/admin/reader/feeds`'s `.ff-table`/`.fs-table`** — same
   percentage-based reasoning, tuned to that page's own content.
-- **`/admin/library-backup`'s `.backup-log-table`** — its own small
-  named-class pixel widths (`.col-when` 150px, `.col-filename` 200px,
-  `.col-location` 120px, `.col-status` 90px), tuned to fit its own 700px
-  mobile-card breakpoint.
+- **`/admin/library-backup`'s `.backup-log-table`** is its own named
+  pixel widths (`_BACKUP_COL_WIDTH_WHEN` 150, `_BACKUP_COL_WIDTH_FILENAME`
+  236, `_BACKUP_COL_WIDTH_LOCATION` 154, `_BACKUP_COL_WIDTH_STATUS` 90), each
+  sized to its content (a backup filename and the Drive link are short
+  tokens that must not wrap; short tokens carry `white-space:nowrap`).
+  Notes has no width and takes the rest. `_BACKUP_TABLE_MIN_WIDTH` (860)
+  keeps Notes readable between the card breakpoint and a wide page, and the
+  700px mobile-card rule resets it with `min-width:0 !important`, because an
+  inline-style or table-level floor would otherwise pin the stacked card
+  wide.
+- **`/admin/checks`'s result column** (`_CHK_STATUS_COL_WIDTH`, 200px) is a
+  fixed width rather than a third of the row: its widest unbreakable content
+  is the Mark reviewed button (about 130px), and the explanation text takes
+  the rest.
 
 **Diagnostic and reference tables aren't entity lists**, so the
 Name/Email/Date/Status/Count vocabulary doesn't describe what their columns

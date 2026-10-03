@@ -21,7 +21,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from .citations import extract_citations, make_document_block
+from .citations import extract_citations, make_document_block, strip_citation_markers
 from .community_profile import generated_cpe
 from .stop_reason import warn_if_max_tokens
 
@@ -666,7 +666,11 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
             # json.loads("") "Expecting value" failure's equivalent) — no
             # usable draft to return.
             raise ValueError("empty description after parsing")
-        summary_text = sentinels.get("SUMMARY", "").strip()
+        # The prompt asks for no markers in the summary, but the API can attach
+        # a citation to the SUMMARY text block and extract_citations splices
+        # [n] into it; strip this draft's own markers (and only those).
+        summary_text = strip_citation_markers(
+            sentinels.get("SUMMARY", "").strip(), [c["n"] for c in citations]).strip()
         confident = sentinels.get("CONFIDENT", "").strip().lower() == "true"
 
         from .pricing import compute_cost

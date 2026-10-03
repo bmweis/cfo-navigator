@@ -217,3 +217,61 @@ def test_no_key_or_column_name_was_touched(app_module):
 def test_tool_labels_is_a_leaf_module():
     src = pathlib.Path(tool_labels.__file__).read_text()
     assert not re.search(r"^\s*(import|from)\s", src, re.M)
+
+
+# --- Key features and App screenshot (label audit, follow-up to PR 2a.2) -----
+
+def _seed_governed_tool(app_module):
+    lib = Library(os.environ["LINKLIB_DB"])
+    cat_id = lib.add_tool_category("ERP")
+    tid = lib.add_tool("Rillet", "d", "https://rillet.example", ["ERP"], approved=1, summary="s")
+    fid = lib.add_category_feature(cat_id, "Real-time ledger")
+    lib.upsert_tool_feature_link(tid, fid, "native", 0, "2026-08-19")
+    slug = lib.get_tool(tid)["slug"]
+    lib.close()
+    return slug
+
+
+def test_key_features_word_is_one_constant_on_profile_and_edit(app_module, admin):
+    slug = _seed_governed_tool(app_module)
+    profile = admin.get(f"/tools/software/{slug}").text
+    edit = admin.get(f"/tools/software/{slug}/edit").text
+    assert f'<h2 class="tp-card-h">{tool_labels.KEY_FEATURES}</h2>' in profile
+    assert f'margin:0;">{tool_labels.KEY_FEATURES}</h2>' in edit
+    # The save button names the same thing, not the old "feature taxonomy".
+    assert f"Save {tool_labels.KEY_FEATURES.lower()}</button>" in edit
+    assert "Save feature taxonomy" not in edit
+
+
+def test_key_features_empty_card_uses_the_constant(app_module, admin):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = lib.add_tool("Bare", "d", "https://bare.example", [], approved=1, summary="s")
+    slug = lib.get_tool(tid)["slug"]
+    lib.close()
+    assert f'<h2 class="tp-card-h">{tool_labels.KEY_FEATURES}</h2>' in admin.get(f"/tools/software/{slug}").text
+
+
+def test_screenshot_words_are_constants_on_edit_and_profile(app_module, admin):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tid = lib.add_tool("Shot", "d", "https://shot.example", [], approved=1, summary="s")
+    lib.update_tool_screenshot_url(tid, "/tools/software/shot/screenshot")
+    lib.update_tool_app_screenshot_source(tid, "https://shot.example/demo")
+    lib.set_tool_app_screenshot(tid, "/tools/software/shot/app-screenshot")
+    slug = lib.get_tool(tid)["slug"]
+    lib.close()
+    edit = admin.get(f"/tools/software/{slug}/edit").text
+    profile = admin.get(f"/tools/software/{slug}").text
+    app_l = tool_labels.APP_SCREENSHOT
+    assert f">{app_l}</label>" in edit
+    assert f"Generate {app_l.lower()}</button>" in edit
+    assert f"Upload {app_l.lower()}&hellip;</button>" in edit
+    # Public toggle (both directions) uses the same words.
+    assert f"Show {app_l.lower()}</button>" in profile
+    assert f'"Show {app_l.lower()}" : "Show {tool_labels.HOMEPAGE_SCREENSHOT.lower()}"' in profile
+    assert "Show app screenshot" == f"Show {app_l.lower()}"
+
+
+def test_new_constants_are_labels_only():
+    assert tool_labels.KEY_FEATURES == "Key features"
+    assert tool_labels.APP_SCREENSHOT == "App screenshot"
+    assert tool_labels.HOMEPAGE_SCREENSHOT == "Homepage screenshot"

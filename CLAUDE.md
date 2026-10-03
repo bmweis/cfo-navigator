@@ -10993,6 +10993,39 @@ it supersedes the old "`/save` is token-gated" note.
   bulk ampersand replace write through `apply_voice_review_write`, which bypasses
   these limits and can lengthen text past a max.
 
+- **Software parity follow-up (2026-10): checks and backup widths, Key features and App screenshot labels.**
+  (1) `/admin/checks`: the result column of each detail row is `_CHK_STATUS_COL_WIDTH` (200px), the text column
+  takes the rest (status 386px to 200px, text 772px to 958px at 1280px, measured in Chromium); the "(over the
+  limit)" cell is `white-space:nowrap` (222px before and after, one line either way, so that part is a guard,
+  not a visible change). Below 760px the row still stacks. (2) `/admin/library-backup`: named
+  `_BACKUP_COL_WIDTH_*` constants (Filename 200 to 236, Location 120 to 154, each content plus 24px padding),
+  `nowrap` on the Filename, Location and Status cells, a `_BACKUP_TABLE_MIN_WIDTH` floor of 860px reset by
+  `min-width:0 !important` in the 700px card rule (the same lesson as the earlier table floors). A backup row
+  went from 60px (filename wrapped to two lines) to 38px at 1280px. The page route is not renamed.
+  (3) Label audit: `tool_labels.KEY_FEATURES`, `APP_SCREENSHOT` and `HOMEPAGE_SCREENSHOT` join the shared
+  words. Copy table: public Key features card heading, edit page Key features heading (unchanged words, now
+  from the constant); edit page save button "Save feature taxonomy" to "Save key features" (the one visible
+  change); App screenshot edit label and its Generate and Upload buttons, and the public toggle ("Show app
+  screenshot" and "Show homepage screenshot"), now read the constants; the Homepage screenshot URL label on
+  the Community edit page likewise. Kept as they were and named for review: the empty-card sentence "we're
+  mapping this tool against our curated feature taxonomy" (describes the mechanism, not the field), the admin
+  hub card "Software features" (an admin management page), and the MCP `key_features` key (a key, not a
+  label). `tests/test_software_labels.py` and `tests/test_checks_backup_widths.py` pin all of it (9 new tests
+  fail on `main`). (4) Report-only measurement of same-shape suspects (Reader feeds `.ff-table`/`.fs-table`,
+  the voice review queue table, the admin Resources table): no confirmed short-token wrap. The probe flags
+  a cell whose content is short but whose height is over 1.6 lines; on the feeds table every cell is flagged
+  because the Cookie cell's two-line status sets the row height, so that result is a false positive, not a
+  finding. The voice queue's 960px table scrolls inside its frame at 390px by design. The public Resources
+  page has no table. WebKit is not available in this sandbox, so all of this is Chromium only.
+  (5) Open choice, not decided: flipping `tool_labels.SECTION_AGENT` to "How autonomous is it?" would make the
+  field name visible on Compare; mock screenshots (current and flipped, 1280px and 390px) are in the PR. Also
+  open, pending Brian's pick (mocks in the PR): a heading for the Compare summary card and the Bottom line row fill.
+  (6) Summary markers, built: `linklib.citations.strip_citation_markers` removes `\s*\[(\d{1,2})\]` from the
+  generated summary (only this draft's own citation numbers) and from the empty-summary copy in
+  `Library.__init__` (any 1-2 digit marker; the copy now loops in Python because SQLite has no regex). A year
+  such as "[2024]" survives both (4 digits; and in the generator it is not one of the draft's citation numbers);
+  a hand-typed summary is never passed through. `tests/test_summary_marker_strip.py`: 4 of the 5 behavior tests
+  fail on `main` (the hand-typed guard passes on both, by design); the helper unit test is new.
 - **Software parity, PR 2a.2 (2026-10): refusal, labels, Compare Short summary.**
   (1) **A refused Software save writes nothing, for real.** `admin_tools_edit_submit` used to let
   `Library.update_tool` write Description and Short summary before the Bottom line and Agent taxonomy
