@@ -87,14 +87,14 @@ def test_table_gets_overflow_wrapper_for_mobile_safety(env):
     page to scroll horizontally on mobile."""
     _add(env, slug="md-table-wrap", title="Table Wrap", body_md=SAMPLE_MD, status="live")
     html = _client(env).get("/thought-leadership/md-table-wrap").text
-    assert '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table>' in html
+    assert '<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;"><table>' in html
 
 
 def test_multiple_tables_each_get_their_own_wrapper(env):
     two_tables_md = "| A | B |\n|---|---|\n| 1 | 2 |\n\nSome text between.\n\n| C | D |\n|---|---|\n| 3 | 4 |\n"
     _add(env, slug="md-two-tables", title="Two Tables", body_md=two_tables_md, status="live")
     html = _client(env).get("/thought-leadership/md-two-tables").text
-    assert html.count('<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table>') == 2
+    assert html.count('<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;"><table>') == 2
 
 
 def test_blockquote_renders(env):
