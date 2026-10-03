@@ -948,6 +948,8 @@ def test_details_rows_put_text_left_and_result_right(env, monkeypatch):
     assert "Never reviewed" in status_of("pricing-freshness")[:600]
     assert 'action="/admin/checks/mark-pricing-reviewed"' in status_of("pricing-freshness")[:900]
     assert "No /data volume (this environment)" in status_of("disk-space")[:600]
-    # The two-thirds / one-third split, collapsing to one column on phones.
-    assert "grid-template-columns:minmax(0,2fr) minmax(0,1fr)" in appmod._CHECKS_DETAIL_CSS
+    # Text takes the rest, the result column is a fixed named width, collapsing
+    # to one column on phones (the old two-thirds / one-third split left the
+    # result column 386px wide at 1280px with 250px of it empty).
+    assert f"grid-template-columns:minmax(0,1fr) {appmod._CHK_STATUS_COL_WIDTH}px" in appmod._CHECKS_DETAIL_CSS
     assert "@media(max-width:760px)" in appmod._CHECKS_DETAIL_CSS

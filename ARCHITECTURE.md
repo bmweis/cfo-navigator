@@ -5107,6 +5107,12 @@ Details worth knowing:
   field()`), mirroring `community_profile_quality_flags()`'s existing
   one-query-for-the-whole-page shape. See `tests/
   test_admin_completeness_filter.py`.
+- **Software parity follow-up (2026-10).** `webapp/app.py` carries `_CHK_STATUS_COL_WIDTH` (the
+  `/admin/checks` result column, 200px fixed, text column `minmax(0,1fr)`), the `_BACKUP_COL_WIDTH_*` and
+  `_BACKUP_TABLE_MIN_WIDTH` constants for the archive backup log table (reset under 700px by
+  `min-width:0 !important`), and `linklib/tool_labels.py` gained `KEY_FEATURES`, `APP_SCREENSHOT` and
+  `HOMEPAGE_SCREENSHOT`, read by the Software profile, the edit pages and the screenshot toggle. No schema,
+  route or key changed.
 - **Software parity, PR 2a.2 (2026-10).** Refusal: `_tool_limit_refusals(form)` validates
   Description, Short summary, Agent taxonomy and Bottom line together before `update_tool` runs, and
   `/tools/software/{slug}/edit` and `/admin/tools/software/new` re-render through `_tool_edit_page` and

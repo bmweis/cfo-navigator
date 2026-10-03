@@ -20,6 +20,10 @@ DESCRIPTION = "Description"
 AGENT = "How autonomous is it?"
 BOTTOM_LINE = "Bottom line"
 COMPETITORS = "Competitors"
+# Added with the label audit (follow-up to PR 2a.2).
+KEY_FEATURES = "Key features"
+APP_SCREENSHOT = "App screenshot"
+HOMEPAGE_SCREENSHOT = "Homepage screenshot"
 
 # Grouping names. They name a section or an eyebrow, not the field, so they
 # are kept as they are and listed in the PR's copy table for review.
