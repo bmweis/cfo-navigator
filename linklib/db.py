@@ -22,6 +22,7 @@ from typing import Iterator, Optional
 from .voice_mechanics import normalize_voice_mechanics as _voice_fix
 from .voice_mechanics import correction_rule_for as _voice_fix_rule
 from .voice_mechanics import norm_for_compare
+from . import tool_labels
 from .community_profile import PROFILE_LIMITS, coerce_cpe_eligible as _coerce_cpe
 
 
@@ -5979,8 +5980,8 @@ class Library:
         dup = self._find_tool_by_normalized_url(url)
         if dup:
             raise DuplicateURLError("software entry", dup["id"], dup["name"], dup["slug"])
-        self._check_text_field_length("Description", description.strip(), self.TOOL_DESCRIPTION_MAX)
-        self._check_text_field_length("Short summary", summary.strip(), self.TOOL_SUMMARY_MAX)
+        self._check_text_field_length(tool_labels.DESCRIPTION, description.strip(), self.TOOL_DESCRIPTION_MAX)
+        self._check_text_field_length(tool_labels.SHORT_SUMMARY, summary.strip(), self.TOOL_SUMMARY_MAX)
         # Domain-derived slug (Phase 2): short domain root first (e.g.
         # "abacum"), falling back to the full hyphenated domain only when
         # the short form collides with an existing row, then a numeric
@@ -6099,8 +6100,8 @@ class Library:
             dup = self._find_tool_by_normalized_url(url, exclude_id=tool_id)
             if dup:
                 raise DuplicateURLError("software entry", dup["id"], dup["name"], dup["slug"])
-        self._check_text_field_length("Description", description.strip(), self.TOOL_DESCRIPTION_MAX)
-        self._check_text_field_length("Short summary", summary.strip(), self.TOOL_SUMMARY_MAX)
+        self._check_text_field_length(tool_labels.DESCRIPTION, description.strip(), self.TOOL_DESCRIPTION_MAX)
+        self._check_text_field_length(tool_labels.SHORT_SUMMARY, summary.strip(), self.TOOL_SUMMARY_MAX)
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
                advisor=?, promoted=?, vendor_email=?, warm_intro_enabled=?, vendor_name=?,
@@ -6148,8 +6149,8 @@ class Library:
         only description/summary and warm-intro fields, leaving name/url/
         categories/advisor/promoted untouched (those still require the full
         edit form)."""
-        self._check_text_field_length("Description", description.strip(), self.TOOL_DESCRIPTION_MAX)
-        self._check_text_field_length("Short summary", summary.strip(), self.TOOL_SUMMARY_MAX)
+        self._check_text_field_length(tool_labels.DESCRIPTION, description.strip(), self.TOOL_DESCRIPTION_MAX)
+        self._check_text_field_length(tool_labels.SHORT_SUMMARY, summary.strip(), self.TOOL_SUMMARY_MAX)
         self.conn.execute(
             """UPDATE tools SET description=?, warm_intro_enabled=?, vendor_name=?,
                vendor_email=?, summary=?, updated_at=? WHERE id=?""",
@@ -6274,7 +6275,7 @@ class Library:
         not-yet-human-reviewed draft. See update_tool's matching parameter
         for the full reasoning; never inferred from needs_verification's
         value itself."""
-        self._check_text_field_length("Bottom line", competitive_differentiation.strip(), self.TOOL_DIFFERENTIATION_MAX)
+        self._check_text_field_length(tool_labels.BOTTOM_LINE, competitive_differentiation.strip(), self.TOOL_DIFFERENTIATION_MAX)
         self.conn.execute(
             "UPDATE tools SET competitive_differentiation=?, competitive_differentiation_needs_verification=?, "
             "competitive_differentiation_ai_confident=COALESCE(?, competitive_differentiation_ai_confident), "
@@ -6324,7 +6325,7 @@ class Library:
         describe, so its rows are left alone. The stored-value read, the
         UPDATE and the clear happen in one transaction so a concurrent
         Generate can't land between the compare and the clear."""
-        self._check_text_field_length("Agent taxonomy", agent_taxonomy_note.strip(), self.TOOL_AGENT_TAXONOMY_MAX)
+        self._check_text_field_length(tool_labels.AGENT, agent_taxonomy_note.strip(), self.TOOL_AGENT_TAXONOMY_MAX)
         # _vf may commit its own queue-log row, so run it before the
         # transaction below opens.
         new_note = self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip(), source=source)

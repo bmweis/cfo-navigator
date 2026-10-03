@@ -81,7 +81,7 @@ from typing import Callable
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
-from linklib import compare, gates
+from linklib import compare, gates, tool_labels
 from linklib.db import Library
 
 from webapp.mcp_server import require_caller
@@ -376,19 +376,19 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
             "warm_intro_available": bool(tool.get("warm_intro_enabled") and tool.get("vendor_email")),
             "summary": (tool.get("summary") or "").strip(),
             "description": _gated_field(
-                "description", "Description", "tool_description",
+                "description", tool_labels.DESCRIPTION, "tool_description",
                 tool.get("description"), bool(tool.get("description_needs_verification")),
                 authed, description_citations),
             "agent_taxonomy": _gated_field(
-                "agent_taxonomy", "Agent taxonomy", "tool_agent_taxonomy",
+                "agent_taxonomy", tool_labels.AGENT, "tool_agent_taxonomy",
                 tool.get("agent_taxonomy_note"), bool(tool.get("agent_taxonomy_needs_verification")),
                 authed, taxonomy_citations),
             "bottom_line": _gated_field(
-                "competitive_differentiation", "Bottom line", "tool_differentiation",
+                "competitive_differentiation", tool_labels.BOTTOM_LINE, "tool_differentiation",
                 tool.get("competitive_differentiation"),
                 bool(tool.get("competitive_differentiation_needs_verification")), authed),
             "competitors": _chip_list(
-                "Competitors", "tool_competitors",
+                tool_labels.COMPETITORS, "tool_competitors",
                 [{"id": c["id"], "slug": c["slug"], "name": c["name"],
                   "profile_url": f"/tools/software/{c['slug']}"} for c in competitors],
                 authed),

@@ -259,7 +259,7 @@ def test_edit_page_shows_description_badge_and_button_when_needs_verification(en
     _login(client)
     r = client.get(f"/tools/software/{slug}/edit")
     assert 'action="/admin/tools/software/{}/description/verify"'.format(tool_id) in r.text
-    assert "Needs verification" in r.text
+    assert "unverified, visible to visitors" in r.text
 
 
 def test_edit_page_hides_description_button_once_verified(env):

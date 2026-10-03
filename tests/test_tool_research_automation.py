@@ -230,7 +230,7 @@ def test_edit_page_shows_needs_verification_badge_and_refresh_button(env):
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/software/{tool_slug}/edit")
-    assert "Needs verification" in r.text
+    assert "unverified, visible to visitors" in r.text
     assert "Mark verified" in r.text
     assert "Generate summary" in r.text
 
