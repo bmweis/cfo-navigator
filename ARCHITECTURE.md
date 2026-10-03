@@ -5696,6 +5696,31 @@ Details worth knowing:
   over live API responses) — that's a different layer; keep them separate. The
   admin CSV export deliberately keeps raw literal `[n]` markers (no HTML in a
   CSV) and instead appends a plain-text `citations` column resolving them.
+- **FP&A Buddy page: the top box is always a new question; follow-ups live in a
+  bubble (2026-10).** `/tools/fpa-buddy` used to turn its one Ask button into
+  "Ask follow-up" after the first answer, so one box did two jobs. Now `#ask-q`
+  and `#ask-btn` always start a fresh conversation (`doAsk()` clears the thread
+  and `convoId` before sending), and the button always reads "Ask". A follow-up
+  bubble (`#fu`, built by `fuRender(state)`, state `ready`/`busy`/`limit`/`none`)
+  is appended after the latest turn only once a conversation exists, so nothing
+  is docked on a fresh page. It is `position:sticky;bottom:8px` inside
+  `#ask-thread`; its textarea is `#fu-q`, its button `#fu-btn` calls
+  `doAsk(true)`, which sends the existing `convoId` (the server still rebuilds
+  history itself; follow-up limits and cost are unchanged). The limit message
+  moved out of the old `#ask-capped` box into the bubble's `limit` state, which
+  also offers "Start a new question" (`resetConvo()`). **Depth and sources stay
+  one state, held by the top controls:** the bubble's chips are clones with no
+  ids, `selectTier`/`toggleSource` update every chip with the same
+  `data-tier`/`data-source`, `activeSources()` reads only
+  `.fpa-intro-area-controls` (an unscoped query would include Depth's chips and
+  the clones), and `fuSummary()` keeps the collapsed one-line summary current.
+  While the textarea is focused the chip row collapses to that summary
+  (`.fu:has(textarea:focus)`, not `:focus-within`: tapping a chip focuses a
+  button, and collapsing on that focus removed the chip between mousedown and
+  mouseup). The live `mdInline` no longer turns `[text](https://...)` into an
+  anchor, matching the server twin; only a resolved `[n]` links out.
+  `tests/test_buddy_followup_bubble.py` drives the real page in Chromium with
+  `fetch` stubbed.
 
 ### MCP server — `/mcp` (Phase 1)
 

@@ -6308,6 +6308,21 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   admin matchmaker feedback card (`_text_block`) still shows answers as pre-wrapped
   plain text, untouched.
 
+- **FP&A Buddy follow-up bubble (2026-10).** The top box on `/tools/fpa-buddy`
+  is always a NEW question (label "New question · starts a new conversation",
+  button always "Ask"); a sticky follow-up bubble under the latest reply holds
+  follow-ups and exists only once a conversation does. `doAsk(followUp)` is the
+  one send path. Depth and sources are one state held by the top controls; the
+  bubble's chips are id-less clones kept in step by `selectTier`/`toggleSource`,
+  and anything reading the selected sources must use `activeSources()`, never an
+  unscoped `.ask-tag.active`. The collapse-while-typing rule is
+  `.fu:has(textarea:focus)`, deliberately not `:focus-within` (a chip tap would
+  collapse the row mid-click). **Decision recorded:** the live `mdInline` now
+  keeps model-text links inert, same as the server twin (it linkified them
+  before); `tests/test_answer_history_render.py` parity-tests a link fixture.
+  Limits, cost and server contract are unchanged. See ARCHITECTURE.md's
+  matching bullet and `tests/test_buddy_followup_bubble.py`.
+
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
   overlap/contrast summary above both Compare tables, cached permanently
   and capped by a shared daily dollar budget.** Purely additive on top of

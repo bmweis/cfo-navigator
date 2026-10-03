@@ -139,12 +139,13 @@ NODE = shutil.which("node")
 
 
 @pytest.mark.skipif(not NODE, reason="node not available")
-@pytest.mark.parametrize("text", [STORED, OPUS_STYLE, "Plain para.\nsecond line\n\n* a\n* b\n\n***\n\n`code` and __strong__ _em_"])
+@pytest.mark.parametrize("text", [STORED, OPUS_STYLE, "Plain para.\nsecond line\n\n* a\n* b\n\n***\n\n`code` and __strong__ _em_",
+    "See [the memo](https://evil.example/x?a=b) and <b>raw</b> then [1] and [2026]."])
 def test_server_twin_matches_live_js(text, tmp_path):
     """The live page's browser renderer and the server twin emit the same blocks.
 
-    Markdown links are the one deliberate difference (live linkifies https
-    links; the server keeps them inert), so the fixtures contain none.
+    Markdown links are inert on both sides (the live page used to linkify
+    https links; it no longer does), so the last fixture carries one.
     """
     import webapp.app as appmod
     src = pathlib.Path(appmod.__file__).read_text()
