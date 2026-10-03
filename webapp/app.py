@@ -5656,7 +5656,7 @@ def admin_ai_surfaces(request: Request, status: str = ""):
 </div>
 <p style="margin:0 0 16px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
 <div style="margin-bottom:16px;">{filters}</div>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_NAME}px;">Title</th>
@@ -11829,7 +11829,7 @@ def admin_compare_summary_feedback(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Compare summary feedback</h1>
 <p style="color:var(--muted);margin:8px 0 20px;">Flags on the AI-generated Compare-page overlap/contrast summary. No automated action&mdash;review each and mark it reviewed once handled.</p>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">Date</th>
@@ -13351,7 +13351,7 @@ def admin_email_failures(request: Request):
 <h1>Email delivery failures</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Every outbound email is best-effort—contact form, tool submissions, welcome emails, password resets, warm intros. The underlying record always saves even if the send fails.</p>
 <p style="color:var(--muted);margin:0 0 18px;">A failure lands here instead of just a server log, so it never goes unnoticed.</p>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_DATE}px;">When</th>
@@ -14547,7 +14547,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
         </tr>"""
 
     def _actionable_table(rows: list[dict]) -> str:
-        return f"""<div style="overflow-x:auto;">
+        return f"""<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool A</th>
@@ -14581,7 +14581,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
     decisions_html = ""
     if decisions:
         decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Dismissed—not duplicates</h2>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;">
 <tbody>{"".join(_decision_row(d) for d in decisions)}</tbody>
 </table>
@@ -14900,7 +14900,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
@@ -15153,7 +15153,7 @@ def _feature_category_group_html(category: dict, features: list[dict], pending_i
     <span class="disclosure-caret">&#9654;</span>
   </summary>
   <div style="padding:0 18px 16px;">
-    <div style="overflow-x:auto;">
+    <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
     <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
       <thead><tr style="background:var(--bg);">
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
@@ -15558,7 +15558,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
   {near_dup_html}
   <label style="display:block;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Feature{' (new)' if is_new_feature else ''}</label>
   {feature_field_html}
-  {f'<div style="overflow-x:auto;margin:12px 0;"><table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
+  {f'<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin:12px 0;"><table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
   {f'<p style="font-size:13.5px;line-height:1.6;color:var(--ink);background:var(--bg);border-radius:8px;padding:10px 12px;margin:10px 0 0;">{_esc(item["articulation"])}</p>' if item.get("articulation") else ''}
   {coverage_html}
   {f'<p style="font-size:13px;color:var(--muted);margin:8px 0 0;">From {_esc(item["submitter_name"])} ({_esc(item["submitter_email"])})</p>' if item.get("submitter_name") else ''}
@@ -15840,7 +15840,7 @@ def _admin_resource_table(benchmarks: list[dict]) -> str:
   </td>
 </tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">None yet.</td></tr>'
     colgroup = "".join(f'<col style="width:{w};">' for w in _ADMIN_RESOURCE_TABLE_COL_WIDTHS)
-    return f"""<div style="overflow-x:auto;">
+    return f"""<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;table-layout:fixed;">
 <colgroup>{colgroup}</colgroup>
 <thead><tr style="background:var(--accent-light);">
@@ -16237,7 +16237,7 @@ def _render_original_content_markdown(body_md: str) -> str:
     # with no wrapper, so this is a post-process, not an extension option.
     return re.sub(
         r"(<table>.*?</table>)",
-        r'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">\1</div>',
+        r'<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;">\1</div>',
         html, flags=re.DOTALL,
     )
 
@@ -16287,6 +16287,8 @@ _OC_ARTICLE_CSS = (
     '.oc-body blockquote p{margin:0;}'
     '.oc-body img{max-width:100%;height:auto;border-radius:8px;margin:1.5em 0;display:block;}'
     '.oc-body table{width:100%;font-size:.9em;margin:1.5em 0;}'
+    '.oc-body .table-frame{margin:1.5em 0;}'
+    '.oc-body .table-frame>table{margin:0;}'
     '.oc-body th,.oc-body td{padding:10px 12px;text-align:left;}'
     '.oc-body th{font-family:var(--font-body);}'
     # Row stripes some stored article HTML still carries inline (the
@@ -18764,7 +18766,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:12px;">
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Name</th>
@@ -20456,7 +20458,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
             )
             all_feature_ids.extend(f["id"] for f in section["features"])
             table_html = (
-                f'<div style="overflow-x:auto;"><table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;margin-top:6px;">'
+                f'<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;"><table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">'
                 f'<thead><tr style="background:var(--bg);">'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">On</th>'
                 f'<th style="padding:6px 8px;text-align:left;font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Feature</th>'
@@ -23929,19 +23931,21 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     </div>
   </div>
   <div class="fpa-intro-area-controls">
-    <div class="ask-controls">
-      <div class="ask-control">
-        <div class="ask-section-label">Sources</div>
-        <div class="ask-tags">
-          {source_tags}
-        </div>
-        <p style="margin:6px 0 0;font-size:12.5px;"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
+    <div class="ask-dd" id="ask-dd-top">
+      <div class="ask-dd-row">
+        <button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button>
+        <button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button>
       </div>
-      <div class="ask-control">
-        <div class="ask-section-label">Depth</div>
+      <div class="ask-dd-panel" data-dd="depth" hidden>
         <div class="ask-tags" role="radiogroup" aria-label="Depth">
           {tier_tags}
         </div>
+      </div>
+      <div class="ask-dd-panel" data-dd="sources" hidden>
+        <div class="ask-tags">
+          {source_tags}
+        </div>
+        <p class="ask-dd-note"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
       </div>
     </div>
   </div>
@@ -24042,47 +24046,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 @media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;grid-template-rows:none;
   grid-template-areas:{_intro_areas_mobile};}}}}
 
-/* Sources/Depth and the Ask button keep .ask-controls'/.ask-action-row's own
-   default margins everywhere else they're used (nowhere else, as of this
-   PR) — zeroed here only, so the grid's own 16px row-gap is the entire
-   space between the Question box, the controls row, and the Ask button,
-   instead of stacking on top of ~40px of margin the two shared components
-   already carry for their own (unrelated) contexts. */
-.fpa-intro-area-controls .ask-controls{{margin:0;}}
+/* The Ask button keeps no margin of its own here: the grid's row-gap is the
+   whole space between the Question box, the controls and the button. */
 .fpa-intro-area-action .ask-action-row{{margin:0;}}
-
-/* Sources and Depth read as one sequence down the page, not a left/right
-   split — both are the same kind of setting (a source-list choice, a depth
-   choice), so they stack: Sources full width, Depth full width beneath it,
-   both sharing the Question box's left edge, then Ask below. Overrides
-   .ask-controls' own 1fr/1fr side-by-side split (used nowhere else on the
-   site, confirmed by grep) rather than editing the shared rule itself, in
-   case a future page reuses the side-by-side default. Full width also
-   incidentally fixes the chip-wrapping problem the ~600px-column version of
-   this layout had: at the page's full ~1300px width, all three Source
-   chips — including "Web search (trusted sites)", deliberately NOT
-   shortened, since the trusted-sites qualifier is doing real work — fit on
-   one line. The row-gap this produces (20px, .ask-controls' own default)
-   already matches the ~20px spacing used elsewhere in this control stack—
-   no override needed beyond the column count. */
-.fpa-intro-area-controls .ask-controls{{grid-template-columns:1fr;}}
-
-/* Chips are natural width, left-aligned, NOT stretched to fill the row—
-   .ask-tags' own default flex-wrap row already does this with zero
-   override needed (each .ask-tag sizes to its own label by default).
-   Equal width WITHIN each group (Sources' three match each other, sized
-   to "Saved archive"; Depth's three match each other, sized to
-   "Standard") is set by fpaEqualizeChipWidths() below, not CSS — there is
-   no CSS-only way to size every sibling in a row to the widest one's
-   *natural* content width without either stretching to fill the
-   container (rejected — that's exactly what round 5 did and got reverted)
-   or duplicating the widest label's text into every cell. Measuring the
-   real rendered width in the browser also sidesteps the font-mismatch
-   risk a hardcoded pixel value would carry (this sandbox can't load the
-   sitewide Google Fonts — see the standing testing-standard note on
-   `capture_homepage()` — so a width measured here might not match a real
-   browser's actual DM Sans metrics; measuring live in whichever browser
-   is actually rendering the page doesn't have that problem). */
 
 /* Bottom-edge alignment between the Question box and the illustrative
    example: `align-self:stretch` on both grid items (above) makes each
@@ -24128,12 +24094,24 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);}}
 .ask-tag.active svg{{opacity:1;}}
 
-/* Sources | Depth, side by side. Both columns use the same .ask-tags/.ask-tag
-   component, so they carry identical weight. Below 640px the grid collapses to
-   one column and the two groups stack — each still a wrapping row of the same
-   buttons, so nothing overflows a narrow viewport. */
-.ask-controls{{display:grid;grid-template-columns:1fr 1fr;gap:20px 28px;margin:20px 0;align-items:start;}}
-@media (max-width:640px){{.ask-controls{{grid-template-columns:1fr;gap:18px;}}}}
+/* Depth and Sources: two dropdown buttons in one row; the open panel sits in
+   page flow directly under that row at the row's full width, so it can never
+   cover the question box or the Ask button and can't pass its container's
+   edge. Panels hold the same .ask-tag buttons as before (single-select for
+   Depth, multi-select for Sources), restyled as list rows. The follow-up
+   bubble holds a clone of this whole block. */
+.ask-dd-row{{display:flex;gap:8px;}}
+.ask-dd-btn{{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);font:inherit;font-size:14px;color:var(--ink-soft);cursor:pointer;text-align:left;}}
+.ask-dd-btn[aria-expanded="true"]{{border-color:var(--navy);}}
+.ask-dd-k{{flex-shrink:0;}}
+.ask-dd-v{{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--navy);}}
+.ask-dd-caret{{flex-shrink:0;color:var(--muted);}}
+.ask-dd-panel{{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;}}
+.ask-dd-panel[hidden]{{display:none;}}
+.ask-dd-panel .ask-tags{{flex-direction:column;flex-wrap:nowrap;gap:2px;}}
+.ask-dd-panel .ask-tag{{width:100%;border-color:transparent;background:transparent;border-radius:8px;min-height:40px;padding:8px 10px;font-weight:500;color:var(--ink);}}
+.ask-dd-panel .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);font-weight:600;}}
+.ask-dd-note{{margin:6px 10px 4px;font-size:12.5px;}}
 
 .ask-recent-item{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;width:100%;text-align:left;
   font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
@@ -24164,19 +24142,19 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fu textarea{{flex:1;min-width:0;min-height:42px;height:42px;max-height:120px;resize:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:14.5px;background:var(--bg);}}
 .fu .btn{{padding:10px 18px;font-size:14px;white-space:nowrap;}}
 .fu .btn:disabled{{opacity:.55;cursor:not-allowed;}}
-.fu-meta{{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--muted);}}
-.fu-meta .ask-tags{{gap:6px;flex-wrap:wrap;}}
-.fu-meta .ask-tag{{padding:4px 10px;font-size:12px;width:auto;}}
-.fu-meta .ask-cost{{margin-left:auto;flex-direction:row;gap:5px;align-items:baseline;}}
-.fu-meta details{{position:relative;}}
-.fu-meta summary{{cursor:pointer;list-style:none;border:1px solid var(--line);border-radius:999px;padding:4px 10px;}}
-.fu-meta .fu-pop{{position:absolute;bottom:32px;left:0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;box-shadow:0 6px 20px rgba(11,31,77,.12);z-index:5;display:flex;flex-wrap:wrap;gap:6px;width:max-content;max-width:calc(100vw - 48px);}}
+.fu-meta{{display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:12px;color:var(--muted);}}
+.fu-meta .ask-dd-btn{{min-height:40px;font-size:13px;}}
+.fu-meta .ask-cost{{flex-direction:row;gap:5px;align-items:baseline;}}
 .fu-sum{{display:none;font-size:12px;color:var(--muted);margin-top:6px;}}
-/* :has(textarea:focus), not :focus-within: tapping a chip focuses the chip
-   (a button), and collapsing the row on that focus removed the chip between
-   mousedown and mouseup, so the tap never registered. */
-.fu:has(textarea:focus) .fu-meta{{display:none;}}
-.fu:has(textarea:focus) .fu-sum{{display:block;}}
+/* Compact while typing, driven by a class rather than :focus. Tapping the Ask
+   follow-up button blurs the textarea; if blur re-expanded the controls, the
+   bubble (sticky to the bottom) would grow upward and move the button out from
+   under the finger before the tap completed. The class is set on focus and
+   cleared only by a tap outside the bubble or on the summary line, so a tap
+   inside the bubble never changes its height. */
+.fu.fu-compact .fu-meta{{display:none;}}
+.fu.fu-compact .fu-sum{{display:block;}}
+.fu-sum{{cursor:pointer;}}
 @media(max-width:640px){{.fu{{max-width:100%;padding:8px 10px;}} .fu-meta{{font-size:11.5px;}}}}
 .ask-answer p{{margin:0 0 14px;}}
 .ask-answer h3,.ask-answer h4,.ask-answer h5,.ask-answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:18px 0 8px;letter-spacing:-0.01em;}}
@@ -24233,6 +24211,7 @@ function selectTier(el) {{
   }});
   updateEstimate();
   fuSummary();
+  closeDds();
 }}
 
 function toggleSource(el) {{
@@ -24272,34 +24251,42 @@ function fuSummary() {{
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
   var cost = (document.getElementById('cost-est-num') || {{}}).textContent || '';
   var sum = document.querySelector('.fu-sum');
-  if (sum) sum.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ');
-  var lab = document.querySelector('.fu-src-label');
-  if (lab) lab.textContent = 'Sources: ' + srcs + ' \u25be';
+  if (sum) sum.textContent = [tier, srcs, cost].filter(Boolean).join(' \u00b7 ') + ' \u25be';
+  ddLabels();
 }}
 
-// Sources' three chips match each other (sized to "Saved archive"), and
-// Depth's three match each other (sized to "Standard") — independently
-// per group, natural width, not stretched full-width. There's no CSS-only
-// way to size every sibling in a row to the widest one's real content
-// width without either duplicating that label into every cell or
-// stretching to fill the container (the round-5 approach, reverted) — so
-// this measures the ACTUAL rendered width of each chip in whichever
-// browser is running the page (sidesteps a hardcoded pixel value
-// potentially not matching a real browser's font metrics) and applies the
-// max as a fixed width to every chip in that same .ask-tags group. Widths
-// are text/font-driven, not viewport-driven — .ask-tag's font-size has no
-// media-query override anywhere on this page — so a one-time run on load
-// is enough; no resize listener needed.
-function fpaEqualizeChipWidths() {{
-  document.querySelectorAll('.fpa-intro-area-controls .ask-tags').forEach(function(group) {{
-    var chips = group.querySelectorAll('.ask-tag');
-    if (!chips.length) return;
-    chips.forEach(function(c) {{ c.style.width = ''; }});
-    var max = 0;
-    chips.forEach(function(c) {{ max = Math.max(max, c.getBoundingClientRect().width); }});
-    chips.forEach(function(c) {{ c.style.width = max + 'px'; }});
-  }});
+// Dropdown buttons: the current value shows on the closed button, so state is never hidden.
+function ddLabels() {{
+  var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
+  var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active');
+  var sv = srcs.length === 0 ? 'None' : srcs.length + ' of ' + document.querySelectorAll('.fpa-intro-area-controls .ask-tag[data-source]').length;
+  document.querySelectorAll('.ask-dd-btn[data-dd="depth"] .ask-dd-v').forEach(function(n) {{ n.textContent = tier; }});
+  document.querySelectorAll('.ask-dd-btn[data-dd="sources"] .ask-dd-v').forEach(function(n) {{ n.textContent = sv; }});
 }}
+function closeDds() {{
+  document.querySelectorAll('.ask-dd-btn').forEach(function(b) {{ b.setAttribute('aria-expanded', 'false'); }});
+  document.querySelectorAll('.ask-dd-panel').forEach(function(p) {{ p.hidden = true; }});
+}}
+function toggleDd(btn) {{
+  var open = btn.getAttribute('aria-expanded') !== 'true';
+  closeDds();
+  if (!open) return;
+  var dd = btn.closest('.ask-dd');
+  btn.setAttribute('aria-expanded', 'true');
+  var panel = dd.querySelector('.ask-dd-panel[data-dd="' + btn.getAttribute('data-dd') + '"]');
+  if (panel) panel.hidden = false;
+}}
+document.addEventListener('click', function(e) {{
+  if (!e.target.closest('.ask-dd')) closeDds();
+}});
+// A tap outside the follow-up bubble brings its controls back after typing.
+document.addEventListener('pointerdown', function(e) {{
+  var fu = document.getElementById('fu');
+  if (fu && !e.target.closest('#fu')) fu.classList.remove('fu-compact');
+}});
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Escape') closeDds();
+}});
 
 var asked = false;
 var convoId = null;    // the server-side conversation to continue; set from the
@@ -24515,22 +24502,16 @@ function fuRender(state) {{
   if (!limited) {{
     var meta = document.createElement('div');
     meta.className = 'fu-meta';
-    var depth = document.querySelector('.fpa-intro-area-controls .ask-control:nth-child(2) .ask-tags');
-    var srcs = document.querySelector('.fpa-intro-area-controls .ask-control:nth-child(1) .ask-tags');
-    // Clones drop the top group's equalized inline widths; the bubble's chips size to their text.
-    if (depth) {{
-      var dc = depth.cloneNode(true);
-      dc.querySelectorAll('.ask-tag').forEach(function(t) {{ t.style.width = ''; }});
-      meta.appendChild(dc);
+    var top = document.getElementById('ask-dd-top');
+    if (top) {{
+      // A clone of the top block: same buttons and panels, panels in the
+      // bubble's own flow at bubble width. The top block stays the source of truth.
+      var dd = top.cloneNode(true);
+      dd.removeAttribute('id');
+      dd.querySelectorAll('.ask-dd-btn').forEach(function(x) {{ x.setAttribute('aria-expanded', 'false'); }});
+      dd.querySelectorAll('.ask-dd-panel').forEach(function(x) {{ x.hidden = true; }});
+      meta.appendChild(dd);
     }}
-    var det = document.createElement('details');
-    det.innerHTML = '<summary class="fu-src-label"></summary><div class="fu-pop"></div>';
-    if (srcs) {{
-      var pop = srcs.cloneNode(true);
-      pop.querySelectorAll('.ask-tag').forEach(function(t) {{ t.style.width = ''; }});
-      det.querySelector('.fu-pop').appendChild(pop);
-    }}
-    meta.appendChild(det);
     if (document.getElementById('cost-est-num')) {{
       var cost = document.createElement('span');
       cost.className = 'ask-cost';
@@ -24541,6 +24522,8 @@ function fuRender(state) {{
     var sum = document.createElement('div');
     sum.className = 'fu-sum';
     f.appendChild(sum);
+    f.querySelector('#fu-q').addEventListener('focus', function() {{ f.classList.add('fu-compact'); closeDds(); }});
+    sum.addEventListener('click', function() {{ f.classList.remove('fu-compact'); }});
   }}
   thread.appendChild(f);
   updateEstimate(); fuSummary();
@@ -24709,12 +24692,12 @@ document.addEventListener('keydown', function(e) {{
 
 updateEstimate();
 loadRecent();
+ddLabels();
 // A reload keeps the reader in their conversation: reopen the one named in the URL.
 (function() {{
   var c = new URLSearchParams(location.search).get('c');
   if (c) resumeConvoById(c);
 }})();
-fpaEqualizeChipWidths();
 </script>"""
 
     return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
@@ -26241,7 +26224,8 @@ def admin_system_database(request: Request):
 </span>
 <span class="disclosure-caret">&#9654;</span>
 </summary>
-<div style="padding:0 18px 14px;overflow-x:auto;">
+<div style="padding:0 18px 14px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table class="cc-table">
 <thead><tr style="background:var(--bg);">
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Table</th>
@@ -26249,6 +26233,7 @@ def admin_system_database(request: Request):
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
+</div>
 </div>
 </details>"""
 
@@ -26800,7 +26785,7 @@ def admin_system_page_index(request: Request):
 </div>
 {summary}
 
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table class="cc-table">
 <thead><tr style="background:var(--bg);">
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Route</th>
@@ -27001,7 +26986,7 @@ def fpa_buddy_how_it_works(request: Request):
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">How much effort to spend</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The only choice you make is how hard to work the question. Each level pulls more sources and uses a more capable model.</p>
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table class="cc-table" style="table-layout:fixed;">
 <thead><tr style="background:var(--bg);">
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:110px;">Tier</th>
@@ -28163,7 +28148,7 @@ def _over_limit_detail_html(items: list[dict]) -> str:
         f'{_esc(i["name"])}</a></td><td>{_esc(i["field"])}</td>'
         f'<td>{i["length"]:,}</td><td>{i["limit"]:,} ({_esc(i["kind"])})</td></tr>'
         for i in items)
-    return ('<div style="overflow-x:auto;"><table style="min-width:620px;"><thead><tr>'
+    return ('<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;"><table style="min-width:620px;"><thead><tr>'
             '<th>Type</th><th>Name</th><th>Field</th><th>Length</th><th>Limit</th></tr></thead>'
             f'<tbody>{rows}</tbody></table></div>')
 
@@ -30609,7 +30594,7 @@ def admin_tag_management(request: Request, msg: str = "", merging: int = 0, gene
 </div>
 {merge_html}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Tag</th>
@@ -31428,7 +31413,7 @@ def admin_ask_report(request: Request, user: str = ""):
   <a href="/admin/fpa-buddy/report/export.csv{('?user=' + quote(user)) if user else ''}" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;margin-left:auto;">Download CSV &darr;</a>
 </form>
 
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date</th>
@@ -31907,7 +31892,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
     </div>
     <div>
       <h3 style="font-size:14px;margin:0 0 10px;">By source</h3>
-      <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+      <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
         <table style="width:100%;border-collapse:collapse;min-width:400px;">
           <thead><tr style="background:var(--bg);">
             <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
@@ -31923,7 +31908,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 
   <div style="flex:1 1 460px;min-width:0;">
     <h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
-    <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+    <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
       <table style="width:100%;border-collapse:collapse;min-width:320px;">
         <thead><tr style="background:var(--bg);">
           <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Month</th>
@@ -32199,7 +32184,7 @@ async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = 
         skipped_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Skipped rows ({len(skipped_rows)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won't be imported. Fix them in your CSV and re-upload if needed&mdash;the rows below will still be inserted if you confirm.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -32223,7 +32208,7 @@ async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = 
 <p style="color:var(--muted);margin:0 0 18px;">Nothing has been saved yet. Review the rows below, then confirm to insert them.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Ready to import ({len(valid_rows)})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Vendor</th>
@@ -34002,7 +33987,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         log_html = f"""
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:20px;">
   <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;font-size:14px;">Recent attempts</div>
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_WIDE}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
@@ -34168,7 +34153,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <div style="font-weight:600;font-size:14px;">Accepted as final ({accepted_count:,})</div>
     <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Marked &ldquo;good enough as-is&rdquo; by an admin&mdash;permanently out of automatic retry and out of Needs manual review above, until undone here.</div>
   </div>
-  <div style="overflow-x:auto;">
+  <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="{_th_article}">Article</th>
@@ -34666,7 +34651,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
         skipped_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or unchanged&mdash;not an error, nothing to do.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:400px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -34687,7 +34672,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
         errors_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be imported&mdash;fix them in your CSV and re-upload if needed.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -34711,7 +34696,7 @@ async def admin_backfill_content_manual_review_import_preview(request: Request, 
 <p style="color:var(--muted);margin:0 0 18px;">Nothing has been saved yet. Review the rows below, then confirm to apply them.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Ready to apply ({len(updates)})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
@@ -34915,7 +34900,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
         skipped_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or marked no&mdash;not an error, nothing to do.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:400px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -34936,7 +34921,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
         errors_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be purged&mdash;fix them in your CSV and re-upload if needed.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -34969,7 +34954,7 @@ async def admin_backfill_content_purge_import_preview(request: Request, file: Up
 <p style="color:var(--muted);margin:0 0 18px;">A fresh off-site backup is taken automatically right before the delete runs, in addition to the regular nightly one.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Confirmed for deletion ({n})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Article</th>
@@ -35199,7 +35184,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
         skipped_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or marked no&mdash;not an error, nothing to do.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:400px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -35220,7 +35205,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
         errors_section = f"""
 <h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be deleted&mdash;fix them in your CSV and re-upload if needed.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_COUNT}px;">Line</th>
@@ -35253,7 +35238,7 @@ async def admin_library_bulk_delete_preview(request: Request, file: UploadFile =
 <p style="color:var(--muted);margin:0 0 18px;">A fresh off-site backup is taken automatically right before the delete runs, in addition to the regular nightly one.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Confirmed for deletion ({n})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:560px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_NAME}px;">Article</th>
@@ -35531,7 +35516,7 @@ def admin_backup(request: Request, uploaded: str = ""):
 <h2 style="font-size:16px;margin:24px 0 4px;">Pre-backup integrity check</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Runs automatically against the live database right before every backup attempt&mdash;<code>PRAGMA integrity_check</code> plus an FTS5 self-check. A failure blocks that night&rsquo;s upload so corruption is never captured into a retained snapshot.</p>
 {_integrity_status_banner(integrity_rows)}
-<div style="overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table class="backup-log-table">
 <thead><tr style="background:var(--accent-light);">
   <th class="col-when" style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
@@ -35754,7 +35739,7 @@ def admin_brand(request: Request):
 
     checks_doc = (
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
-        '<div style="overflow-x:auto;">'
+        '<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">'
         '<table style="width:100%;font-size:14px;min-width:560px;">'
         '<thead><tr>'
         '<th style="padding:9px 12px;text-align:left;">Check</th>'
@@ -37061,7 +37046,7 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
 <h2 style="margin-top:28px;">{_esc(_voice_rule_label(rule))} <span style="font-weight:400;color:var(--muted);font-size:14px;">({len(rows)})</span></h2>
 {bulk_html}
 {_VOICE_SCROLL_HINT_ITEM_HTML}
-<div class="voice-scroll-wrap" style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+<div class="voice-scroll-wrap table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_VOICE_TABLE_FLOOR}px;table-layout:fixed;border-collapse:collapse;">
 {_voice_thead}
 <tbody>{rows_html}</tbody></table></div>"""
@@ -37072,7 +37057,7 @@ async def admin_voice_review_queue(request: Request, error: str = ""):
         if resolved_items:
             rows_html = "".join(_voice_review_row_html(lib, r) for r in resolved_items)
             resolved_body = f"""{_VOICE_SCROLL_HINT_ITEM_HTML}
-<div class="voice-scroll-wrap" style="overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+<div class="voice-scroll-wrap table-frame" style="overflow-x:auto;overflow-y:hidden;">
 <table style="width:100%;min-width:{_VOICE_TABLE_FLOOR}px;table-layout:fixed;border-collapse:collapse;">
 {_voice_thead}
 <tbody>{rows_html}</tbody></table></div>"""
@@ -37356,7 +37341,7 @@ async def admin_voice_review_bulk_replace_ampersand_preview(request: Request):
 <h3 style="font-size:14px;margin:24px 0 10px;">Left as-is ({len(unchanged)})</h3>
 <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">No eligible spaced ampersand&mdash;every ampersand here is
 either unspaced (e.g. S&M, left for a manual decision) or inside an already-approved term. Not included in the write below.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_VOICE_COL_WIDTH_FIELD}px;">Field</th>
@@ -37381,7 +37366,7 @@ spaces, written raw or as its HTML-escaped form&mdash;is ever replaced. An unspa
 already-approved term, is always left for a manual decision.</p>
 
 <h3 style="font-size:14px;margin:0 0 10px;">Will be replaced ({len(will_change)})</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin-bottom:8px;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_VOICE_COL_WIDTH_FIELD}px;">Field</th>
@@ -37952,7 +37937,7 @@ def admin_emails_page(request: Request):
             for row in _INTERNAL_EMAIL_ROWS
         )
         return f"""\
-<div style="overflow-x:auto;margin:0 0 26px;">
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;margin:0 0 26px;">
 <table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
 <thead><tr style="text-align:left;">
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;width:{_COL_WIDTH_NAME}px;">Email</th>

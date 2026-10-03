@@ -620,6 +620,29 @@ just inferred from the CSS change), `document.body.scrollWidth` exactly
 across all three, since the JS-measured sizing is font-driven and therefore
 identical regardless of viewport.
 
+**Depth and Sources become two dropdowns (2026-10), superseding rounds 3 to 6's
+chip rows and the follow-up bubble's popover.** Measured on a phone first: the
+bubble's Sources popover was absolutely positioned above its pill, 342px wide
+against a 342px bubble, so it ran 11px past the bubble's right edge and covered
+the follow-up input and button; the top box's three equalized chips needed 463px
+against a 342px column, so "Trusted web" wrapped. One component fixes both:
+`#ask-dd-top` holds two buttons in one row (`Depth: Standard`, `Sources: 2 of 3`,
+44px) and two `hidden` panels in page flow directly under that row at the row's
+full width. The panels contain the same `.ask-tag[data-tier]`/`[data-source]`
+buttons as before (restyled as list rows), so `selectTier`, `toggleSource` and
+`activeSources()` are unchanged. Depth is single-select and closes on pick;
+Sources is multi-select and stays open until a tap outside, Escape, or the other
+button. The bubble holds a deep clone of `#ask-dd-top` (id removed, panels
+closed), so a panel opens inside the bubble at bubble width, below the input row,
+and cannot cover it. `ddLabels()` keeps every button's value in step. The chip
+equalizer (`fpaEqualizeChipWidths`) and the `.ask-controls`/`.fu-pop` CSS are gone.
+**Second change in the same PR, found by the existing tests:** the bubble's
+collapse-while-typing rule moved from `.fu:has(textarea:focus)` to a `.fu-compact`
+class (set on focus; cleared by a tap outside the bubble or on the summary line).
+With the taller controls block, blur re-expanded the sticky bubble upward on
+mousedown and the Ask follow-up button moved out from under the tap, so the
+follow-up never sent. Tests: `tests/test_buddy_dropdown_controls.py`.
+
 **Admin table width floors, standardized to four buckets (PR 14, 2026-09)**
 — replaces the 22 hand-picked `min-width` values PR 12/PR 529 chose by eye
 per table with four rule-based buckets keyed to default-rendered column
@@ -11267,6 +11290,8 @@ No schema or route change. Five fixes, each measured in real Chromium before cha
 ### Table frame and card polish on phones (Refs 655, B1)
 
 **Follow-up: frame versus adjacent control.** `/admin/inbox/contact-submissions` had `margin-bottom:-8px` on the "Delete selected" row and `margin-top:12px` on the table. When the table drew its own border the two cancelled; once the frame (which has no margin) drew it, the frame started 8px above the button's bottom edge and the 12px showed as a white strip inside the frame. The scroll hint hid it while visible, but it is `display:none` once dismissed or when the table fits, so the overlap showed in both orientations. Fixed at the source: row margin `24px 0 12px`, no inner table margin. A crawl of every frame on 24 admin and tools routes at 390px and 874px found no other control-above-frame overlap and no other inner-table margin.
+
+**B2: every table scroller is a frame.** The scrollers around the remaining tables are `.table-frame` (40 of them: plain `overflow-x:auto` divs, the hand-made 14px card scrollers, the two voice review wraps, the Database page's padded disclosure, and the Original content markdown wrapper). A table that scrolls inside a bare div loses its border off the edge on a phone, which is what B1 fixed for the pending tables. The markdown wrapper carries its margin on the frame (`.oc-body .table-frame`), not on the inner table. Not framed, because none scrolls: the `/admin/checks` summary tables, the Sections table (`.fs-table`, with its own stacking breakpoint) and one small fixed-width table. A crawl of 76 frames at 390px and 874px found no overlap with a control above and no inner-table margin. Two source tests in `tests/test_table_frame_mobile_polish.py` keep it that way.
 
 Measured in Chromium before the change, after PR 660 (which only changed the frame-child rule, so none of this is a 660 regression except that it made the sticky column actually stick).
 
