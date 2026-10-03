@@ -23683,8 +23683,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
-    <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q_txt}</div>
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;">
+    <div style="flex:1 1 280px;min-width:0;font-weight:600;color:var(--navy);font-size:14.5px;">{q_txt}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(asker)} &middot; {_esc((r["created_at"] or "")[:10])}</div>
   </div>
   <div class="ask-hist-answer" style="margin:8px 0 0;">{a_html}</div>
@@ -23835,7 +23835,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   {usage_div}
   <div class="fpa-intro-area-question">
     <div class="ask-card">
-      <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">New question <span style="text-transform:none;letter-spacing:0;font-weight:400;">&middot; starts a new conversation</span></label>
+      <label for="ask-q" style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">New question <span style="text-transform:none;letter-spacing:0;font-weight:400;">&middot; starts a new conversation</span></label>
       <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?"
         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
     </div>
@@ -24102,8 +24102,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-answer sup.cite a:hover{{color:var(--accent);}}
 .ask-q-bubble{{background:var(--navy);color:#fff;border-radius:14px 14px 2px 14px;padding:12px 18px;font-size:14px;font-weight:500;margin:0 0 8px auto;max-width:80%;width:fit-content;}}
 .ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-wrap:wrap;gap:6px;}}
-.ask-src-list li{{font-size:12px;}}
-.ask-src-list a, .ask-src-list span.ask-src-static{{display:inline-flex;align-items:center;gap:5px;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
+.ask-src-list li{{font-size:12px;min-width:0;max-width:100%;}}
+.ask-src-list a, .ask-src-list span.ask-src-static{{display:inline-flex;align-items:flex-start;gap:5px;max-width:100%;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
 .ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}
 .ask-src-own{{margin-left:4px;font-size:11px;color:var(--muted);font-weight:500;}}
 .ask-src-caption{{margin:6px 0 0;font-size:11px;color:var(--muted);}}
@@ -24313,7 +24313,8 @@ function srcListHtml(d) {{
   var cites = d.citations || [];
   var items = cites.map(function(c) {{
     var ownTag = c.own_content ? ' <span class="ask-src-own">(own writing)</span>' : '';
-    return '<li>' + (icons[c.type] || '') + ' <a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">[' + c.n + '] ' + escapeHtml(c.title) + '</a>' + ownTag + '</li>';
+    // The emoji rides inside the pill so a long title can never drop below it.
+    return '<li><a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span>' : '') + '<span>[' + c.n + '] ' + escapeHtml(c.title) + '</span></a>' + ownTag + '</li>';
   }});
   // Suggest-content nudge: always rendered, even with zero citations — that's
   // the case where Buddy came up empty-handed, exactly the moment worth
@@ -24381,8 +24382,17 @@ document.addEventListener('keydown', function(e) {{
     sendFbComment(e.target);
   }}
 }});
+// The conversation id lives in the URL (?c=...) so a reload reopens the same
+// conversation through the resume path. Nothing else is stored client-side.
+function setConvoUrl(id) {{
+  try {{
+    var u = new URL(location.href);
+    if (id) u.searchParams.set('c', id); else u.searchParams.delete('c');
+    history.replaceState(null, '', u.pathname + u.search + u.hash);
+  }} catch(e) {{}}
+}}
 function resetConvo() {{
-  asked = false; convoId = null;
+  asked = false; convoId = null; setConvoUrl(null);
   document.getElementById('ask-thread').innerHTML = '';
   var rec = document.getElementById('ask-recent');
   if (rec.innerHTML) rec.style.display = 'block';
@@ -24494,11 +24504,13 @@ function applyFbState(row, fb) {{
     box.querySelector('input').value = fb.comment || '';
   }}
 }}
-async function resumeConvo(el) {{
-  var cid = el.getAttribute('data-cid');
+function resumeConvo(el) {{ return resumeConvoById(el.getAttribute('data-cid')); }}
+async function resumeConvoById(cid) {{
   try {{
     var resp = await fetch('/ask/conversations/' + encodeURIComponent(cid));
-    if (!resp.ok) return;
+    // Someone else's (403) or unknown (404) id: the server decides, the page
+    // falls back to the empty state and drops the parameter.
+    if (!resp.ok) {{ setConvoUrl(null); return; }}
     var d = await resp.json();
     var thread = document.getElementById('ask-thread');
     thread.innerHTML = '';
@@ -24518,7 +24530,7 @@ async function resumeConvo(el) {{
       thread.appendChild(turn);
     }});
     convoId = d.conversation_id;
-    asked = true;
+    asked = true; setConvoUrl(convoId);
     document.getElementById('ask-recent').style.display = 'none';
     fuRender(d.capped ? 'limit' : 'ready');
     var lastTurn = lastTurnEl();
@@ -24542,7 +24554,7 @@ async function doAsk(followUp) {{
   if (!followUp) {{
     // A new question never inherits a conversation: clear the screen and the id
     // before anything is sent (the old one stays in Recent conversations).
-    asked = false; convoId = null;
+    asked = false; convoId = null; setConvoUrl(null);
     thread.innerHTML = '';
   }}
   var topBtn = document.getElementById('ask-btn');
@@ -24594,7 +24606,7 @@ async function doAsk(followUp) {{
     }}
 
     convoId = d.conversation_id || convoId;
-    asked = true;
+    asked = true; setConvoUrl(convoId);
     done(d.followups_left === 0 ? 'limit' : 'ready');
     turn.scrollIntoView({{behavior:'smooth', block:'start'}});
   }} catch(e) {{
@@ -24609,6 +24621,11 @@ document.addEventListener('keydown', function(e) {{
 
 updateEstimate();
 loadRecent();
+// A reload keeps the reader in their conversation: reopen the one named in the URL.
+(function() {{
+  var c = new URLSearchParams(location.search).get('c');
+  if (c) resumeConvoById(c);
+}})();
 fpaEqualizeChipWidths();
 </script>"""
 
@@ -24806,7 +24823,7 @@ def ask_history(request: Request, page: int = 1):
                                                 r.get("citations_json") or "[]")
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-    <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q}</div>
+    <div style="flex:1 1 280px;min-width:0;font-weight:600;color:var(--navy);font-size:14.5px;">{q}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
   </div>
   <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
@@ -24822,7 +24839,7 @@ def ask_history(request: Request, page: int = 1):
                                                 r.get("citations_json") or "[]")
         return f"""<div style="padding:14px 0 4px;border-top:1px solid var(--line);">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-    <div style="font-weight:600;color:var(--navy);font-size:14px;">{q}</div>
+    <div style="flex:1 1 280px;min-width:0;font-weight:600;color:var(--navy);font-size:14px;">{q}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
   </div>
   <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
@@ -31198,10 +31215,11 @@ def _render_cited_answer(answer: str, citations_json: str) -> tuple[str, str]:
         own_tag = (' <span style="color:var(--muted);font-size:11px;">(own writing)</span>'
                    if c.get("own_content") else "")
         items.append(
-            f'<li>{_ASK_SOURCE_ICONS.get(c.get("type"), "")} '
-            f'<a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener">'
-            f'[{_esc(c.get("n") if c.get("n") is not None else "")}] '
-            f'{_esc(c.get("title") or c.get("url") or "")}</a>{archive_ref}{own_tag}</li>'
+            f'<li><a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener" '
+            f'style="display:inline-flex;gap:5px;align-items:flex-start;max-width:100%;">'
+            f'<span aria-hidden="true">{_ASK_SOURCE_ICONS.get(c.get("type"), "")}</span>'
+            f'<span>[{_esc(c.get("n") if c.get("n") is not None else "")}] '
+            f'{_esc(c.get("title") or c.get("url") or "")}</span></a>{archive_ref}{own_tag}</li>'
         )
     sources_html = ('<ul style="margin:8px 0 0;padding-left:18px;list-style:none;font-size:13px;'
                     f'display:flex;flex-direction:column;gap:4px;">{"".join(items)}</ul>')
