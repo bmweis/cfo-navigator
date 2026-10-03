@@ -6337,6 +6337,28 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   the Ask follow-up button out from under the tap. Anything new in the bubble must
   not change its height on blur or press. See ARCHITECTURE.md's matching bullet and
   `tests/test_buddy_dropdown_controls.py`.
+- **FP&A Buddy phone fixes (2026-10), measured on a real iPhone first.** Brian's
+  iPhone check of the bubble found six problems; each was measured in Chromium at
+  390px before any change (a harness that runs the real app against a seeded temp
+  DB, not a CSS read). **A reload used to drop the reader out of their
+  conversation:** nothing survived (no URL, hash or storage), the page rendered the
+  empty state, and the only way back was a "Recent conversations" row. The
+  conversation id now lives in the URL as `?c=<id>` (`setConvoUrl`, written by the
+  send path and `resumeConvoById`, cleared by `resetConvo` and the top "Ask"), and on
+  load the page reopens it through the same resume path. Own conversations only,
+  enforced server-side as before: the transcript route answers 403 (someone else's)
+  or 404 (unknown), and the page then drops the parameter and shows the empty
+  state, with no bubble. The blue "New question" text was a `<label>` with no
+  `for`, so tapping did nothing; it is now `for="ask-q"` and focuses the box.
+  **Past-question and history titles** are `flex:1 1 280px;min-width:0` with the
+  meta wrapping beneath on a phone (the title was squeezed to 171px beside the
+  meta while the answer got 304px). **The source emoji sits inside its pill** in
+  both renderers (`srcListHtml` and the server twin in `_render_cited_answer`), so a
+  long title cannot drop below it. Not changed: the sticky bubble over a long answer
+  (at the end of the page it sits below the sources and the feedback row, measured),
+  and the Depth/Sources controls (popover overlap and top-box chip wrapping),
+  which the two-dropdown change in the next bullet replaced. `tests/test_buddy_phone_fixes.py` serves the real page
+  over http through route handlers; it skips where no Chromium exists, as in CI.
 
 - **Compare Redesign Phase 2 (2026-09) — a 1-3 sentence AI-generated
   overlap/contrast summary above both Compare tables, cached permanently

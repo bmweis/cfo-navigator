@@ -5744,6 +5744,15 @@ Details worth knowing:
   anchor, matching the server twin; only a resolved `[n]` links out.
   `tests/test_buddy_followup_bubble.py` drives the real page in Chromium with
   `fetch` stubbed.
+- **Phone fixes (2026-10).** The conversation id is mirrored into the URL as
+  `?c=<id>` (`setConvoUrl`, set on send and resume, cleared by `resetConvo` and the
+  top "Ask"); on load the page calls `resumeConvoById`, the same path a "Recent
+  conversations" row uses. Ownership stays server-side (`GET
+  /ask/conversations/{id}`: 403 someone else's, 404 unknown), and a refusal drops the
+  parameter and leaves the empty state. Past-question and history titles are
+  `flex:1 1 280px;min-width:0`; the source emoji is inside the pill in `srcListHtml`
+  and in the server twin. `tests/test_buddy_phone_fixes.py` covers these over http
+  with route handlers (skips without Chromium).
 
 ### MCP server — `/mcp` (Phase 1)
 
