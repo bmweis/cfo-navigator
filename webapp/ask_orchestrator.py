@@ -60,6 +60,7 @@ def run_ask(
     use_web: bool = True,
     conversation_id: str = "",
     opml_path: str | None = None,
+    is_private: bool = False,
 ) -> dict:
     """Answer one FP&A Buddy turn, exactly as `POST /ask` does.
 
@@ -93,6 +94,9 @@ def run_ask(
         # turns (invisible cost guard) — a capped conversation never
         # reaches the API.
         prior_questions = len(turns)
+        # A follow-up always inherits the conversation's privacy; only the
+        # first turn takes the caller's choice.
+        is_private = bool(turns[0].get("is_private"))
         if prior_questions >= 1 + MAX_FOLLOWUPS:
             return {
                 "capped": True,
@@ -167,6 +171,7 @@ def run_ask(
             # later feedback flag stays inspectable with its sources.
             citations=ans.citations,
             stop_reason=stop_reason_of(ans),
+            is_private=is_private,
         )
         new_conversation_id = conversation_id or str(row_id)
         turn_id = row_id
@@ -190,4 +195,5 @@ def run_ask(
         # (token-only or break-glass access with no users row).
         "turn_id": turn_id,
         "usage": usage_line,
+        "is_private": bool(is_private),
     }

@@ -236,7 +236,7 @@ def test_own_past_question_row_resumes_only_from_the_button(view):
     row = pg.locator("details.ask-pq-row", has_text="My own question about runway")
     row.locator("summary").click()                                       # a row tap stays expand
     assert row.evaluate("e => e.open") and pg.locator("#fu").count() == 0
-    btn = row.locator(".ask-ctl")
+    btn = row.locator(".ask-ctl[data-cid]")   # Resume; Make private is the other footer button
     assert btn.inner_text().strip() == "Resume" and abs(btn.bounding_box()["height"] - 28) < 0.6
     btn.click()
     pg.wait_for_selector("#fu-q")

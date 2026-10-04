@@ -177,7 +177,10 @@ def test_the_bubble_clone_carries_the_estimate_and_keeps_its_old_look(admin_pg):
     assert "$" in want
     assert pg.inner_text("#fu [data-dd='depth'] .ask-dd-v") == want
     assert pg.is_visible("#fu .ask-dd-k") and not pg.is_visible("#fu .ask-dd-h")
-    d, s = _box(pg, "#fu [data-dd='depth'].ask-dd-btn"), _box(pg, "#fu [data-dd='sources'].ask-dd-btn")
+    # Both tops are read in one call: the page may still be smooth-scrolling to the
+    # new answer, which moves the buttons between two separate reads.
+    d, s = pg.evaluate("""() => ['depth', 'sources'].map(function(k) {
+        return {t: document.querySelector("#fu [data-dd='" + k + "'].ask-dd-btn").getBoundingClientRect().top}; })""")
     assert abs(d["t"] - s["t"]) < 1                                       # still side by side
     assert pg.locator("#fu .ask-cost").count() == 0
 

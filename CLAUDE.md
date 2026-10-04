@@ -13477,3 +13477,76 @@ subscription.
   rewrite (that sentence carries the "some of your questions may appear" disclosure,
   which must not go until the ask-box note replaces it). Tests:
   `tests/test_buddy_history_list.py`.
+
+- **FP&A Buddy Keep private, PR B2 (2026-10).** `ask_questions.is_private`
+  (migration-added) covers the whole conversation: set from an ask-time checkbox
+  (`#ask-private`, sent as `private` on the first turn only; a follow-up
+  inherits it server-side in `run_ask`) and flipped later by "Make private" /
+  "Allow sharing" (`.ask-ctl-sm .ask-ctl-w`, 128x28, 44px touch target). The
+  toggle lives left of Done in the open thread (`POST
+  /ask/conversations/{id}/private`, JSON) and in the footer of the reader's own
+  expanded past-question rows (`POST /questions/{id}/private`, form, redirect);
+  both are owner-only (403 otherwise) and move every turn together. Recent rows
+  keep a single Resume. **A private question is never returned to another user**:
+  `list_public_ask_questions` takes `viewer_id` and `see_private`; the asker sees
+  their own, an admin sees all, with a plain "&#128274; Private" in the meta line
+  (Recent rows, the list, admin rows). Ask-box note: "Shared with other users
+  without your name. Admins can see every question. Leave out company names and
+  figures you want kept confidential. Privacy policy" (the approved wording with
+  "users" for "members"; a trimmed version was tried and reverted).
+  `/privacy` gained an FP&A Buddy questions section, last-updated date bumped. The `/ask/history` intro lost "Some of your questions may also
+  appear..." in favor of "Unless you mark a question private, it may also
+  appear...". PR C (suggestions) depends on this flag. Chromium tests (label
+  fit, thread toggle position) skip in CI; WebKit unverified. Copy freshness
+  gate: no database-stored copy is stale. Tests: `tests/test_buddy_keep_private.py`.
+
+- **Past-question row layout and byline order (2026-10, B2, separate commit).**
+  On a phone the row stacks: the title takes the row width and the meta sits on
+  its own line under it (measured at 390px with the longest production titles:
+  title 152px wide and 779px tall before, 296px wide and clamped after). At
+  700px and up the single line returns (title left, meta right); 768px measured
+  fine, 700px is the switch. The collapsed title clamps to two lines with an
+  ellipsis, like Recent rows; the expanded row shows it whole (display only,
+  nothing stored is shortened, so this is a third allowed clamp beside the two
+  directory cards). Meta order is rating, Private marker, byline, date; each is a
+  nowrap segment and gaps are flex gaps, so there are no literal separators to
+  orphan. **Byline rule, one function (`_ask_byline`):** the viewer's own row
+  reads "You" first (an admin included, by `user_id` equality, never by name),
+  then an admin sees another asker's stored name, then a member sees nothing.
+  The break-glass admin login has no `user_id`, so nothing is "own" there and it
+  shows stored names. Other name renderers (admin report, admin feedback card)
+  are admin-only pages that always name the asker; `/ask/history`, Recent and the
+  open thread show only the viewer's own questions with no byline. Tests:
+  `tests/test_buddy_row_layout.py`.
+
+- **B2 follow-ups on PR 683 (2026-10).** (1) The rating sits in its own fixed
+  24px slot (`.ask-pq-slot`) at the far right of every row, after the date, empty
+  when unrated; Mixed is the single shrug emoji (U+1F937), the slot is sized for
+  the widest rating. Ratings and, at 700px and up, dates line up in columns. The
+  left meta group is Private, Hidden, byline, date. (2) `.ask-ctl-w`
+  is now `min-width:128px` with `white-space:nowrap` (a label that fits renders at
+  exactly 128px; a wider fallback-font label grows instead of spilling). (3)
+  **Hide** (was "Remove from view") sets `hidden_public`: the row
+  leaves the past-questions list and search for members; the asker's own history
+  and Recent are unchanged (they never filter on it); admins now also get hidden
+  rows in the list, marked "Hidden" with an **Unhide** button (the
+  same toggle route), because before this a hidden row vanished for admins too
+  and could not be undone from the UI. It is a separate flag from
+  `is_private`, so a member's Make private / Allow sharing never undoes an admin's
+  hide. Admin-only controls on a public page use `.ask-ctl-admin` (seafoam fill,
+  see BRAND.md). (4) Hover backgrounds and borders on `/tools/fpa-buddy` are inside
+  `@media(hover:hover)` so iOS does not leave a tapped row tinted. (5) The ask-box
+  note is the approved wording plus a Privacy policy link.
+
+- **No "member" in user-facing copy (2026-10, Brian's decision: there are no
+  members, so copy says "users").** Done in PR 683 for `/tools/fpa-buddy` and
+  `/ask/history` (ask-box note, intro lines, labels, aria-labels, titles) and the
+  new `/privacy` paragraph; `tests/test_buddy_keep_private.py` scans the rendered
+  page for the word in visible text and attributes. Still to change, in the labels
+  PR: `/tools/fpa-buddy/how-it-works`, other `/privacy` text and any other page.
+  Internal names (the `member` role, `_is_member`, test fixtures, columns) stay.
+  Hide, Hidden and Unhide replace "Remove from view" and the "from members"
+  wording: the admin-only seafoam style carries the meaning (BRAND.md).
+
+
+- **Hidden marker and rating slot (2026-10, PR 683 follow-up).** "&#128683; Hidden" on a past-question row is an admin-only status marker: plain muted text styled exactly like "Private" (no accent colour, fill or border), first in the left meta group, before "Private" when both apply; `role="img"` with `aria-label` "Hidden by an admin". Rendered only when the viewer is an admin; the list never returns a hidden row to a non-admin, so an asker sees neither the row nor the marker. BRAND.md names it. The rating slot is `flex:none` with equal width, min-width and max-width of 24px, so no glyph can change its width; Chromium measured every row equal even before the change, so the 4px seen on iPhone is unreproduced here (WebKit unavailable) and the guard is a hardening plus a test that injects a 40px glyph and asserts the date does not move.
