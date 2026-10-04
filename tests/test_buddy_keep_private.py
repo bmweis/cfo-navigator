@@ -66,10 +66,10 @@ def test_own_private_row_shows_lock_and_allow_sharing(site):
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     i = sec.index("own private question")
     row = sec[i:sec.index("</details>", i)] if "</details>" in sec[i:] else sec[i:]
-    assert "&#128274; Private" in row and ">Allow sharing</button>" in row
+    assert "ask-chip-private" in row and ">Allow sharing</button>" in row
     j = sec.index("own shared question")
     row2 = sec[j:sec.index("</details>", j)] if "</details>" in sec[j:] else sec[j:]
-    assert "&#128274;" not in row2 and ">Make private</button>" in row2
+    assert "&#128274;" not in row2 and "ask-chip-private" not in row2 and ">Make private</button>" in row2
 
 
 def test_admin_sees_private_with_lock_and_full_name(site):
@@ -77,7 +77,7 @@ def test_admin_sees_private_with_lock_and_full_name(site):
     sec = _section(client("boss").get("/tools/fpa-buddy").text)
     i = sec.index("Private question from author")
     row = sec[i:sec.index("</summary>", i)]
-    assert "&#128274; Private" in row and "author" in row
+    assert "ask-chip-private" in row and "author" in row
     assert "Hide" in sec
 
 
@@ -233,7 +233,7 @@ def test_admin_hide_is_visible_undoable_and_separate_from_private(site):
     lib.close()
     boss.post(f"/questions/{ids['shared']}/hide", follow_redirects=False)
     sec = _section(boss.get("/tools/fpa-buddy").text)
-    assert ">Hide</button>" in sec and 'class="ask-pq-seg ask-pq-hidden"' not in sec
+    assert ">Hide</button>" in sec and 'class="ask-chip ask-chip-hidden"' not in sec
 
 
 def test_hover_backgrounds_sit_inside_a_hover_media_query(site):
@@ -244,14 +244,11 @@ def test_hover_backgrounds_sit_inside_a_hover_media_query(site):
         assert ("\n" + rule) not in html, rule      # never also declared bare
 
 
-def test_rating_slot_is_at_the_far_right_and_buttons_keep_a_width_floor(site):
+def test_buttons_keep_a_width_floor_and_status_is_chips_not_a_slot(site):
     client, _, _ = site
     html = client("reader").get("/tools/fpa-buddy").text
-    assert ".ask-pq-slot{flex:none;width:24px;min-width:24px;max-width:24px" in html
     assert ".ask-ctl-w{min-width:128px" in html and "white-space:nowrap" in html
-    sec = _section(html)
-    # every row carries the slot; the rating sits inside it, after the date
-    assert sec.count('class="ask-pq-slot"') == sec.count('<details class="ask-pq-row">')
+    assert "ask-pq-slot" not in html and "ask-pq-rate" not in html    # the 24px emoji slot is retired
 
 
 def test_no_member_word_in_user_facing_copy_on_buddy_and_history(site):
@@ -297,7 +294,7 @@ def test_browser_hide_and_unhide_buttons_share_one_width_and_height(site):
 
 def _marker_rows(html):
     sec = _section(html)
-    return [m for m in re.findall(r'<span class="ask-pq-seg ask-pq-hidden"[^>]*>[^<]*</span>', sec)]
+    return [m for m in re.findall(r'<span class="ask-chip ask-chip-hidden"[^>]*>.*?</span></span>', sec)]
 
 
 def test_hidden_marker_is_an_admin_only_status_with_label_and_order(site):
@@ -311,14 +308,13 @@ def test_hidden_marker_is_an_admin_only_status_with_label_and_order(site):
     marks = _marker_rows(boss)
     assert len(marks) == 2
     for m in marks:
-        assert 'aria-label="Hidden by an admin"' in m and "&#128683; Hidden" in m
+        assert 'aria-label="Hidden by an admin"' in m and "&#8856;" in m and "Hidden" in m
     i = sec.index("Private question from author")
     row = sec[i:sec.index("</summary>", i)]
-    assert row.index("ask-pq-hidden") < row.index("ask-pq-priv") < row.index("ask-pq-date")   # Hidden first, both before the date
-    css = boss[boss.index(".ask-pq-hidden{"):]
+    assert row.index("ask-chip-hidden") < row.index("ask-chip-private") < row.index("ask-pq-date")   # Hidden first, both before the date
+    css = boss[boss.index(".ask-chip-hidden{"):]
     css = css[:css.index("}")]
-    assert "seafoam" not in css and "font-weight" not in css and "color" not in css          # plain muted text, same as Private
-    assert "background" not in css and "border" not in css
+    assert "color:var(--seafoam-deep)" in css and "background:none" in css and "border" not in css   # admin-only: deep-seafoam text, no fill, no border
     # the asker never sees the marker, and never sees a hidden row at all
     asker = client("author").get("/tools/fpa-buddy").text
     assert not _marker_rows(asker) and "Shared question from author" not in _section(asker)
@@ -326,18 +322,18 @@ def test_hidden_marker_is_an_admin_only_status_with_label_and_order(site):
 
 def test_hidden_marker_string_passes_the_invisible_character_lint():
     from linklib.voice_review import mechanical_findings
-    assert not mechanical_findings("\U0001F6AB Hidden")
+    assert not mechanical_findings("\u2298 Hidden")
 
 
-def test_browser_rating_slot_keeps_the_date_edge_fixed_on_every_row(site):
+def test_browser_chips_are_18px_and_stay_inside_the_row(site):
     from tests import test_buddy_phone_fixes as T
     client, ids, db = site
     lib = Library(db)
     uid = lib.conn.execute("SELECT id FROM users WHERE username='boss'").fetchone()[0]
     oid = lib.conn.execute("SELECT id FROM users WHERE username='reader'").fetchone()[0]
-    lib.record_ask_feedback(ids["shared"], uid, "helpful", "")                 # helpful
+    lib.record_ask_feedback(ids["shared"], uid, "helpful", "")
     lib.record_ask_feedback(ids["mine"], uid, "helpful", "")
-    lib.record_ask_feedback(ids["mine"], oid, "inaccurate", "")                # mixed
+    lib.record_ask_feedback(ids["mine"], oid, "inaccurate", "")
     lib.close()
     html = client("boss").get("/tools/fpa-buddy").text
     launched = T._launch()
@@ -351,18 +347,13 @@ def test_browser_rating_slot_keeps_the_date_edge_fixed_on_every_row(site):
             pg.route(re.compile(r"^http://buddy\.test/.*"), T.Site(html).handle)
             pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
             pg.goto("http://buddy.test/tools/fpa-buddy")
-            edges = pg.evaluate("""()=>[...document.querySelectorAll('.ask-pq-row')].map(r=>[
-                r.querySelector('.ask-pq-date').getBoundingClientRect().right,
-                r.querySelector('.ask-pq-slot').getBoundingClientRect().width,
-                r.querySelector('.ask-pq-slot').textContent.trim()])""")
-            assert {e[2] for e in edges} >= {"", "\U0001F44D", "\U0001F937"}, edges   # unrated, helpful, mixed all present
-            assert max(e[0] for e in edges) - min(e[0] for e in edges) < 0.5, edges
-            assert all(abs(e[1] - 24) < 0.1 for e in edges), edges
-            # A glyph far wider than the slot must not move the date.
-            moved = pg.evaluate("""()=>{const r=document.querySelector('.ask-pq-row');
-                const d=()=>r.querySelector('.ask-pq-date').getBoundingClientRect().right;
-                const a=d(); r.querySelector('.ask-pq-slot').innerHTML='<span style="font-size:40px">&#129335;&#128077;</span>'; return d()-a;}""")
-            assert abs(moved) < 0.1, moved
+            chips = pg.evaluate("""()=>[...document.querySelectorAll('.ask-pq-row .ask-chip')].map(c=>[
+                c.className, c.getBoundingClientRect().height,
+                c.getBoundingClientRect().right <= c.closest('.ask-pq-row').getBoundingClientRect().right + 0.5])""")
+            assert chips, "no chips rendered"
+            assert all(abs(c[1] - 18) < 0.5 for c in chips), chips
+            assert all(c[2] for c in chips), chips
+            assert pg.evaluate("document.documentElement.scrollWidth") <= w
             ctx.close()
     finally:
         browser.close()

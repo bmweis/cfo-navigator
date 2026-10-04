@@ -23809,21 +23809,57 @@ _ASK_CTL_CSS = (
 )
 
 
-def _ask_rating_html(helpful_count, negative_count) -> str:
-    """The ONE place a past question's rating is drawn (the past-questions list
-    and the similar-question suggestions both call it). Plain emoji status, no
-    border or fill (only actions get those); plain code points only. Empty
-    string when unrated."""
+# One table, one builder: every status on a Buddy question (a rating, Private,
+# Hidden) is drawn by _ask_status_chip and nothing else. glyph, word, aria-label.
+_ASK_STATUS_CHIPS = {
+    "helpful": ("&#10003;", "Helpful", "Rated helpful"),
+    "not_helpful": ("&#10005;", "Not helpful", "Rated not helpful"),
+    "mixed": ("&#177;", "Mixed", "Rated mixed"),
+    "private": ("&#128274;", "Private", "Private"),
+    "hidden": ("&#8856;", "Hidden", "Hidden by an admin"),
+}
+
+
+def _ask_status_chip(kind: str) -> str:
+    """The ONE place a Buddy question status is drawn: a non-interactive chip,
+    glyph plus word (BRAND.md, Status chips). Plain code points only. Hidden is
+    admin-only, so it carries no fill (deep seafoam text); callers decide who
+    sees it."""
+    glyph, word, label = _ASK_STATUS_CHIPS[kind]
+    return (f'<span class="ask-chip ask-chip-{kind}" role="img" aria-label="{label}" title="{label}">'
+            f'<span aria-hidden="true">{glyph}</span> {word}</span>')
+
+
+def _ask_rating_kind(helpful_count, negative_count) -> str | None:
     hc, nc = int(helpful_count or 0), int(negative_count or 0)
     if hc and not nc:
-        label, glyph = "Rated helpful", "&#128077;"
-    elif hc and nc:
-        label, glyph = "Rated mixed", "&#129335;"
-    elif nc:
-        label, glyph = "Rated not helpful", "&#128078;"
-    else:
-        return ""
-    return f'<span class="ask-pq-rate" role="img" aria-label="{label}" title="{label}">{glyph}</span>'
+        return "helpful"
+    if hc and nc:
+        return "mixed"
+    if nc:
+        return "not_helpful"
+    return None
+
+
+def _ask_status_chips_html(helpful_count=0, negative_count=0, *, private=False,
+                           hidden=False, viewer_is_admin=False) -> str:
+    """The chips for one question, in the one order every surface uses:
+    Hidden (admin only), Private, rating. Unrated, public, visible shows
+    nothing."""
+    kinds = []
+    if hidden and viewer_is_admin:
+        kinds.append("hidden")
+    if private:
+        kinds.append("private")
+    rk = _ask_rating_kind(helpful_count, negative_count)
+    if rk:
+        kinds.append(rk)
+    return "".join(_ask_status_chip(k) for k in kinds)
+
+
+# The Private chip as a JS string literal, for the Recent rows the page builds
+# client-side. Built by the one chip function, never by hand in JS.
+_ASK_PRIVATE_CHIP_JS = json.dumps(_ask_status_chip("private")).replace("</", "<\\/")
 
 
 def _ask_byline(row: dict, viewer_user_id: int | None, viewer_is_admin: bool) -> str | None:
@@ -23888,28 +23924,18 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
       <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w ask-ctl-admin">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>
     </div>"""
-        rating = _ask_rating_html(r.get("helpful_count"), r.get("negative_count"))
-        # Meta: the left group is state and credit (Private, Hidden from members,
-        # byline, date), each a nowrap segment with flex gaps, no literal
-        # separators. The rating has its own fixed-width slot at the far right of
-        # the row, empty when unrated, so ratings and dates line up down the list.
-        # Private and Hidden are plain labelled text, shown only to the asker /
-        # admins (the list never returns such a row to anyone else).
-        segs = []
-        if r.get("hidden_public") and authed:
-            # Admin-only state marker, styled exactly like Private (plain muted
-            # text). The list never returns a hidden row to a non-admin, and the
-            # `authed` guard keeps the marker admin-only regardless. Hidden comes
-            # before Private.
-            segs.append('<span class="ask-pq-seg ask-pq-hidden" role="img" aria-label="Hidden by an admin" '
-                        'title="Hidden by an admin">&#128683; Hidden</span>')
-        if r.get("is_private"):
-            segs.append('<span class="ask-pq-seg ask-pq-priv">&#128274; Private</span>')
+        # Meta: status chips first (Hidden for admins, Private, rating, from the
+        # one chip function), then the byline and date as plain nowrap segments.
+        # The chip set is the same on every surface; unrated, public, visible
+        # shows nothing.
+        chips = _ask_status_chips_html(r.get("helpful_count"), r.get("negative_count"),
+                                       private=bool(r.get("is_private")),
+                                       hidden=bool(r.get("hidden_public")), viewer_is_admin=authed)
+        segs = [chips] if chips else []
         if who is not None:
             segs.append(f'<span class="ask-pq-seg">{_esc(who)}</span>')
         segs.append(f'<span class="ask-pq-seg ask-pq-date">{date}</span>')
-        meta_html = (f'<span class="ask-pq-ml">{"".join(segs)}</span>'
-                     f'<span class="ask-pq-slot">{rating}</span>')
+        meta_html = f'<span class="ask-pq-ml">{"".join(segs)}</span>'
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
@@ -24335,10 +24361,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}}
 .ask-pq-row[open] .ask-pq-q{{display:block;overflow:visible;}}
 .ask-pq-meta{{flex:0 0 calc(100% - 22px);order:3;margin-left:22px;display:flex;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}}
-.ask-pq-ml{{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;justify-content:flex-end;flex:1 1 auto;min-width:0;}}
-.ask-pq-seg,.ask-pq-rate{{white-space:nowrap;}}
-.ask-pq-slot{{flex:none;width:24px;min-width:24px;max-width:24px;box-sizing:border-box;text-align:center;margin-left:auto;}}
-.ask-pq-rate{{font-size:14px;}}
+.ask-pq-ml{{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;justify-content:flex-end;flex:1 1 auto;min-width:0;}}
+.ask-pq-seg{{white-space:nowrap;}}
+/* Status chips (BRAND.md, Status chips): non-interactive, 18px, no border. One neutral fill; Hidden is admin-only deep-seafoam text with no fill. */
+.ask-chip{{display:inline-flex;align-items:center;gap:3px;box-sizing:border-box;height:18px;padding:0 8px;border-radius:999px;background:var(--line);color:var(--ink-soft);font-size:12px;line-height:1;white-space:nowrap;}}
+.ask-chip-hidden{{background:none;padding:0;color:var(--seafoam-deep);}}
 @media(min-width:700px){{.ask-pq-meta{{flex:0 1 auto;order:0;margin-left:auto;max-width:50%;}}.ask-pq-ml{{flex:0 1 auto;justify-content:flex-end;}}}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
 .ask-pq-heading{{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
@@ -24354,6 +24381,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-recent-q{{font-weight:600;font-size:13.5px;color:var(--navy);overflow:hidden;text-overflow:ellipsis;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}}
 .ask-recent-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
+.ask-recent-meta .ask-chip{{vertical-align:middle;}}
 
 
 .ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px 14px 14px 2px;max-width:88%;padding:20px 24px;font-size:15px;line-height:1.7;}}
@@ -24379,8 +24407,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-priv-opt input{{width:20px;height:20px;flex:none;margin:0;}}
 .ask-priv-note{{margin:0 0 0 30px;font-size:13px;line-height:1.5;color:var(--muted);}}
 .ask-priv-note a{{color:var(--muted);}}
-.ask-pq-priv{{white-space:nowrap;}}
-.ask-pq-hidden{{white-space:nowrap;}}
 .ask-q-label{{display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 8px;}}
 .fu-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;}}
 .fu-limit{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}
@@ -24580,6 +24606,7 @@ document.addEventListener('DOMContentLoaded', function() {{
 var asked = false;
 var convoGen = 0;       // bumped by Done and a new thread; an answer from an older generation is not drawn
 var convoPrivate = false;   // the open conversation's privacy (set from the server)
+var PRIVATE_CHIP_HTML = {_ASK_PRIVATE_CHIP_JS};   // built by the one chip function, never by hand in JS
 var convoId = null;    // the server-side conversation to continue; set from the
                        // first response (or a resumed conversation). The server
                        // rebuilds history from its own records — no turn text
@@ -24918,7 +24945,7 @@ function recentItemHtml(c) {{
   // row does the same thing, the button is the visible, keyboard-reachable one.
   return '<div class="ask-recent-item" data-cid="' + escapeHtml(c.conversation_id) + '" onclick="resumeConvo(this)">' +
          '<span class="ask-recent-q">' + escapeHtml(c.first_question) + '</span>' +
-         '<div class="ask-recent-foot"><span class="ask-recent-meta">' + (c.private ? '&#128274; Private &middot; ' : '') + relTime(c.last_at) + ' &middot; ' +
+         '<div class="ask-recent-foot"><span class="ask-recent-meta">' + (c.private ? PRIVATE_CHIP_HTML + ' ' : '') + relTime(c.last_at) + ' &middot; ' +
          c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span>' +
          '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" onclick="event.stopPropagation();resumeConvo(this.closest(\\'.ask-recent-item\\'))">Resume</button></div></div>';
 }}
@@ -25021,9 +25048,7 @@ function simHide() {{
 }}
 function simItemHtml(x) {{
   var tags = [];
-  if (x.hidden) tags.push('<span>&#128683; Hidden</span>');
-  if (x.private) tags.push('<span>&#128274; Private</span>');
-  if (x.rating_html) tags.push(x.rating_html);
+  if (x.chips_html) tags.push(x.chips_html);
   tags.push('<span>' + escapeHtml(x.date) + '</span>');
   var resume = x.resume_id ? '<div class="ask-sim-foot"><button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" data-cid="' +
     escapeHtml(x.resume_id) + '" onclick="simHide();resumeConvoById(this.dataset.cid)">Resume</button></div>' : '';
@@ -25250,7 +25275,9 @@ async def ask_similar(request: Request):
             "id": r["id"],
             "question": r.get("question") or "",
             "date": (r.get("created_at") or "")[:10],
-            "rating_html": _ask_rating_html(r.get("helpful_count"), r.get("negative_count")),
+            "chips_html": _ask_status_chips_html(r.get("helpful_count"), r.get("negative_count"),
+                                                 private=bool(r.get("is_private")),
+                                                 hidden=bool(r.get("hidden_public")), viewer_is_admin=authed),
             "private": bool(r.get("is_private")),
             "hidden": bool(r.get("hidden_public")) and authed,
             "answer_html": a_html + src_html,

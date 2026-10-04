@@ -114,7 +114,7 @@ def test_browser_title_is_full_width_and_meta_never_breaks_inside_a_segment(site
             m = pg.evaluate("""()=>{const r=[...document.querySelectorAll('.ask-pq-row')].find(x=>x.textContent.indexOf('Boss own question')>-1),
               s=r.querySelector('.ask-pq-sum').getBoundingClientRect(),
               q=r.querySelector('.ask-pq-q').getBoundingClientRect(),
-              segs=[...r.querySelectorAll('.ask-pq-meta .ask-pq-seg, .ask-pq-meta .ask-pq-rate')],
+              segs=[...r.querySelectorAll('.ask-pq-meta .ask-pq-seg, .ask-pq-meta .ask-chip')],
               ds=getComputedStyle(r.querySelector('.ask-pq-date')).whiteSpace;
               return {sum:s.width,q:q.width,qh:q.height,ds:ds,
                 segs:segs.map(e=>[e.getBoundingClientRect().height, getComputedStyle(e).whiteSpace]),

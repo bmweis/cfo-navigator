@@ -56,7 +56,7 @@ measured on the `#F5F4EF` canvas.
    the admin-only signal: a seafoam element without it is never admin-only. The
    label and context also say it is admin-only, so colour is not the only cue.
    Controls inside `/admin/*` are all admin-only and do not take the border.
-   **Admin-only status marker:** "🚫 Hidden" on a past-question row is plain muted text, the same as "🔒 Private" and the byline, with no fill, border or accent colour, since a status is not a control. It is admin-only because the list never returns a hidden row to anyone else, not because of its colour.
+   **Admin-only status:** "⊘ Hidden" on a past-question row is a status chip, not a control; see Status chips in section 5.
 
 First user of the button form: `.ask-ctl-admin` on FP&A Buddy's "Hide" and "Unhide"
 (28px high, 44px touch target, width at least 128px). Contrast: the deep seafoam
@@ -581,6 +581,22 @@ graffiti marks on admin tables, forms, or the chat UI.
   mobile the centring is dropped, since there are no columns left to align
   within.
 - **Links** — navy; optional seafoam underline for emphasis in editorial copy.
+
+### Status chips
+
+A status is a **non-interactive chip**: a plain glyph plus a word, 18px tall, rounded pill, no border, one neutral fill (`--line`) with `--ink-soft` text, 12px. It is never a button shape. Only actions get a border or a fill of their own.
+
+| Chip | Glyph | Meaning |
+|---|---|---|
+| Helpful | ✓ | rated helpful |
+| Not helpful | ✕ | rated not helpful |
+| Mixed | ± | rated both ways |
+| Private | 🔒 | the asker marked the question private |
+| Hidden | ⊘ | an admin hid the question (admin-only) |
+
+**Hidden is admin-only deep-seafoam text with no fill and no border** (`--seafoam-deep`), same size as the other chips; the list never returns a hidden row to anyone else, so colour is not what hides it. Unrated, public, visible shows nothing. Order is always Hidden, Private, rating, then byline and date.
+
+Every chip is drawn by one function, `_ask_status_chip` (`webapp/app.py`), and every surface that shows one (the past-questions list and its expanded rows, the similar-question suggestions, the Recent rows for Private) takes it from there. Client scripts never build chip markup; the server hands them the HTML. Glyphs are plain single code points (no joiners, selectors or skin tones), each chip carries `role="img"` and an `aria-label` ("Rated helpful", "Rated mixed", "Hidden by an admin"), and `tests/test_status_chips.py` pins all of it. The 🔒 is the one colour emoji left; the other glyphs are text glyphs, so their look depends on the system fallback font.
 
 ### Character budget (capped text fields)
 
