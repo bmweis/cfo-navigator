@@ -8493,7 +8493,7 @@ def privacy_page(request: Request):
 <p>Some parts of the site (the research library, FP&amp;A Buddy) require a member account. Account passwords are stored using one-way hashing, never in plain text. Logging in sets a separate cookie that identifies your session; it doesn't track browsing elsewhere on the internet.</p>
 
 <h2>FP&amp;A Buddy questions</h2>
-<p>Questions you ask FP&amp;A Buddy are stored with your account so you can resume them and see your own history. By default, other members can see a question and its answer in the past-questions list, without your name. Admins can see every question and who asked it. If you tick "Keep this question private" when you ask, or use "Make private" afterward, other members never see that conversation. Admins still can. Leave out company names and figures you want kept confidential, since admins can read everything.</p>
+<p>Questions you ask FP&amp;A Buddy are stored with your account so you can resume them and see your own history. By default, other users can see a question and its answer in the past-questions list, without your name. Admins can see every question and who asked it. If you tick "Keep this question private" when you ask, or use "Make private" afterward, other users never see that conversation. Admins still can. Leave out company names and figures you want kept confidential, since admins can read everything.</p>
 
 <h2>Contact form</h2>
 <p>Messages sent through the contact form are stored so I can respond to them, and are not used for anything else.</p>
@@ -23814,14 +23814,14 @@ def _ask_byline(row: dict, viewer_user_id: int | None, viewer_is_admin: bool) ->
     in this order: (1) the viewer asked it, "You" (checked first, so an admin
     sees "You" on their own questions); (2) someone else asked it and the
     viewer is an admin, the stored full name; (3) a member viewing someone
-    else's question gets None (the asker is never named to other members).
+    else's question gets None (the asker is never named to other users).
     "Own" is `user_id` equality, never a name comparison. The legacy
     break-glass admin login has no user id, so no row is ever "own" there and
     it falls to case 2."""
     if viewer_user_id is not None and row.get("user_id") == viewer_user_id:
         return "You"
     if viewer_is_admin:
-        return row.get("asker_name") or row.get("asker_username") or "A member"
+        return row.get("asker_name") or row.get("asker_username") or "A user"
     return None
 
 
@@ -23869,7 +23869,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         admin_controls = ""
         if authed:
             admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
-      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w ask-ctl-admin">{"Unhide" if r.get("hidden_public") else "Hide from members"}</button></form>
+      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w ask-ctl-admin">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>
     </div>"""
         hc, nc = int(r.get("helpful_count") or 0), int(r.get("negative_count") or 0)
         # Plain emoji status, no border or fill (only actions get those); same
@@ -23892,7 +23892,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         if r.get("is_private"):
             segs.append('<span class="ask-pq-seg ask-pq-priv">&#128274; Private</span>')
         if r.get("hidden_public"):
-            segs.append('<span class="ask-pq-seg ask-pq-hidden">Hidden from members</span>')
+            segs.append('<span class="ask-pq-seg ask-pq-hidden">Hidden</span>')
         if who is not None:
             segs.append(f'<span class="ask-pq-seg">{_esc(who)}</span>')
         segs.append(f'<span class="ask-pq-seg ask-pq-date">{date}</span>')
@@ -24117,7 +24117,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         <button type="button" class="fu-send ask-send" id="ask-btn" onclick="doAsk()" aria-label="Ask" title="Ask"{'' if q.strip() else ' disabled'}><span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button>
       </div>
       <label class="ask-priv-opt"><input type="checkbox" id="ask-private"><span>Keep this question private</span></label>
-      <p class="ask-priv-note">Shared with other members without your name. Admins can see every question. Leave out company names and figures you want kept confidential. <a href="/privacy">Privacy policy</a></p>
+      <p class="ask-priv-note">Shared with other users without your name. Admins can see every question. Leave out company names and figures you want kept confidential. <a href="/privacy">Privacy policy</a></p>
     </div>
   </div>
 </div>
@@ -25450,7 +25450,7 @@ def ask_history(request: Request, page: int = 1):
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Unless you mark a question private, it may also appear in the <a href="/tools/fpa-buddy#past-questions">past questions list</a> for other members to browse, without your name. See the <a href="/privacy">privacy policy</a>.</p>
+<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Unless you mark a question private, it may also appear in the <a href="/tools/fpa-buddy#past-questions">past questions list</a> for other users to browse, without your name. See the <a href="/privacy">privacy policy</a>.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:22px;font-size:14px;">
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>

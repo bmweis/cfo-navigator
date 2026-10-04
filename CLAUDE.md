@@ -13487,14 +13487,14 @@ subscription.
   /ask/conversations/{id}/private`, JSON) and in the footer of the reader's own
   expanded past-question rows (`POST /questions/{id}/private`, form, redirect);
   both are owner-only (403 otherwise) and move every turn together. Recent rows
-  keep a single Resume. **A private question is never returned to another member**:
+  keep a single Resume. **A private question is never returned to another user**:
   `list_public_ask_questions` takes `viewer_id` and `see_private`; the asker sees
   their own, an admin sees all, with a plain "&#128274; Private" in the meta line
-  (Recent rows, the list, admin rows). Ask-box note: "Other members see this
-  without your name. Admins see every question. Privacy policy" (trimmed from
-  the first draft at Brian's call; the longer confidentiality advice moved to
-  `/privacy`, which gained an FP&A Buddy questions section, last-updated date
-  bumped). The `/ask/history` intro lost "Some of your questions may also
+  (Recent rows, the list, admin rows). Ask-box note: "Shared with other users
+  without your name. Admins can see every question. Leave out company names and
+  figures you want kept confidential. Privacy policy" (the approved wording with
+  "users" for "members"; a trimmed version was tried and reverted).
+  `/privacy` gained an FP&A Buddy questions section, last-updated date bumped. The `/ask/history` intro lost "Some of your questions may also
   appear..." in favor of "Unless you mark a question private, it may also
   appear...". PR C (suggestions) depends on this flag. Chromium tests (label
   fit, thread toggle position) skip in CI; WebKit unverified. Copy freshness
@@ -13523,13 +13523,13 @@ subscription.
   24px slot (`.ask-pq-slot`) at the far right of every row, after the date, empty
   when unrated; Mixed is the single shrug emoji (U+1F937), the slot is sized for
   the widest rating. Ratings and, at 700px and up, dates line up in columns. The
-  left meta group is Private, Hidden from members, byline, date. (2) `.ask-ctl-w`
+  left meta group is Private, Hidden, byline, date. (2) `.ask-ctl-w`
   is now `min-width:128px` with `white-space:nowrap` (a label that fits renders at
   exactly 128px; a wider fallback-font label grows instead of spilling). (3)
-  **Hide from members** (was "Remove from view") sets `hidden_public`: the row
+  **Hide** (was "Remove from view") sets `hidden_public`: the row
   leaves the past-questions list and search for members; the asker's own history
   and Recent are unchanged (they never filter on it); admins now also get hidden
-  rows in the list, marked "Hidden from members" with an **Unhide** button (the
+  rows in the list, marked "Hidden" with an **Unhide** button (the
   same toggle route), because before this a hidden row vanished for admins too
   and could not be undone from the UI. It is a separate flag from
   `is_private`, so a member's Make private / Allow sharing never undoes an admin's
@@ -13537,4 +13537,14 @@ subscription.
   see BRAND.md). (4) Hover backgrounds and borders on `/tools/fpa-buddy` are inside
   `@media(hover:hover)` so iOS does not leave a tapped row tinted. (5) The ask-box
   note is the approved wording plus a Privacy policy link.
+
+- **No "member" in user-facing copy (2026-10, Brian's decision: there are no
+  members, so copy says "users").** Done in PR 683 for `/tools/fpa-buddy` and
+  `/ask/history` (ask-box note, intro lines, labels, aria-labels, titles) and the
+  new `/privacy` paragraph; `tests/test_buddy_keep_private.py` scans the rendered
+  page for the word in visible text and attributes. Still to change, in the labels
+  PR: `/tools/fpa-buddy/how-it-works`, other `/privacy` text and any other page.
+  Internal names (the `member` role, `_is_member`, test fixtures, columns) stay.
+  Hide, Hidden and Unhide replace "Remove from view" and the "from members"
+  wording: the admin-only seafoam style carries the meaning (BRAND.md).
 

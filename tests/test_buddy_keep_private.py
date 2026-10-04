@@ -78,7 +78,7 @@ def test_admin_sees_private_with_lock_and_full_name(site):
     i = sec.index("Private question from author")
     row = sec[i:sec.index("</summary>", i)]
     assert "&#128274; Private" in row and "author" in row
-    assert "Hide from members" in sec
+    assert "Hide" in sec
 
 
 def test_list_query_is_viewer_scoped(site):
@@ -148,7 +148,7 @@ def test_page_has_checkbox_note_and_toggle_hooks(site):
     client, ids, _ = site
     html = client("reader").get("/tools/fpa-buddy").text
     assert 'id="ask-private"' in html and "Keep this question private" in html
-    assert ("Shared with other members without your name. Admins can see every question. "
+    assert ("Shared with other users without your name. Admins can see every question. "
             "Leave out company names and figures you want kept confidential.") in html
     assert '<a href="/privacy">Privacy policy</a>' in html
     assert "Allow sharing" in html and "Make private" in html and 'id="fu-priv"' in html
@@ -167,8 +167,8 @@ def test_lock_and_label_strings_pass_voice_scanners():
     from html import unescape
     from linklib.voice_review import mechanical_findings, typography_findings_plain
     for t in (unescape("&#128274;"), "Make private", "Allow sharing", "Keep this question private",
-              "Shared with other members without your name. Admins can see every question. Leave out company names and figures you want kept confidential.",
-              "Hide from members", "Hidden from members", "Unhide"):
+              "Shared with other users without your name. Admins can see every question. Leave out company names and figures you want kept confidential.",
+              "Hide", "Hidden", "Unhide"):
         assert not mechanical_findings(t) and not typography_findings_plain(t)
 
 
@@ -222,7 +222,7 @@ def test_admin_hide_is_visible_undoable_and_separate_from_private(site):
     sec = _section(boss.get("/tools/fpa-buddy").text)
     i = sec.index("Shared question from author")
     row = sec[i:]
-    assert "Hidden from members" in row and ">Unhide</button>" in row and "ask-ctl-admin" in row
+    assert "Hidden" in row and ">Unhide</button>" in row and "ask-ctl-admin" in row
     # members never see a hidden row
     assert "Shared question from author" not in _section(client("reader").get("/tools/fpa-buddy").text)
     # the asker's Make private / Allow sharing never touches the admin's hide
@@ -233,7 +233,7 @@ def test_admin_hide_is_visible_undoable_and_separate_from_private(site):
     lib.close()
     boss.post(f"/questions/{ids['shared']}/hide", follow_redirects=False)
     sec = _section(boss.get("/tools/fpa-buddy").text)
-    assert ">Hide from members</button>" in sec and "Hidden from members<" not in sec
+    assert ">Hide</button>" in sec and "Hidden<" not in sec
 
 
 def test_hover_backgrounds_sit_inside_a_hover_media_query(site):
@@ -252,3 +252,16 @@ def test_rating_slot_is_at_the_far_right_and_buttons_keep_a_width_floor(site):
     sec = _section(html)
     # every row carries the slot; the rating sits inside it, after the date
     assert sec.count('class="ask-pq-slot"') == sec.count('<details class="ask-pq-row">')
+
+
+def test_no_member_word_in_user_facing_copy_on_buddy_and_history(site):
+    import re as _re
+    client, _, _ = site
+    for user in ("reader", "boss"):
+        c = client(user)
+        for path in ("/tools/fpa-buddy", "/ask/history"):
+            html = c.get(path).text
+            html = _re.sub(r"<style.*?</style>", "", html, flags=_re.S)
+            html = _re.sub(r"<!--.*?-->", "", html, flags=_re.S)
+            hits = _re.findall(r".{30}\bmembers?\b.{30}", html, flags=_re.I | _re.S)
+            assert not hits, (user, path, hits[:3])

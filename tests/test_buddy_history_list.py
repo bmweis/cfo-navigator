@@ -124,7 +124,7 @@ def test_anonymize_is_retired_and_remove_is_relabelled(site):
     admin = client("boss")
     html = admin.get("/tools/fpa-buddy").text
     assert "Anonymize asker" not in html and "Un-anonymize" not in html
-    assert ">Hide from members</button>" in html and "Remove from this view" not in html and "Remove from view" not in html
+    assert ">Hide</button>" in html and "Remove from this view" not in html and "Remove from view" not in html
     assert admin.post(f"/questions/{ids['plain']}/anonymize", follow_redirects=False).status_code in (404, 405)
     assert admin.post(f"/questions/{ids['plain']}/hide", follow_redirects=False).status_code == 303
 
