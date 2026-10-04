@@ -23889,14 +23889,15 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         # Private and Hidden are plain labelled text, shown only to the asker /
         # admins (the list never returns such a row to anyone else).
         segs = []
-        if r.get("is_private"):
-            segs.append('<span class="ask-pq-seg ask-pq-priv">&#128274; Private</span>')
         if r.get("hidden_public") and authed:
-            # Admin-only state marker (text only, no fill or border: a status is
-            # not a control). The list never returns a hidden row to a non-admin,
-            # and the `authed` guard keeps the marker admin-only regardless.
+            # Admin-only state marker, styled exactly like Private (plain muted
+            # text). The list never returns a hidden row to a non-admin, and the
+            # `authed` guard keeps the marker admin-only regardless. Hidden comes
+            # before Private.
             segs.append('<span class="ask-pq-seg ask-pq-hidden" role="img" aria-label="Hidden by an admin" '
                         'title="Hidden by an admin">&#128683; Hidden</span>')
+        if r.get("is_private"):
+            segs.append('<span class="ask-pq-seg ask-pq-priv">&#128274; Private</span>')
         if who is not None:
             segs.append(f'<span class="ask-pq-seg">{_esc(who)}</span>')
         segs.append(f'<span class="ask-pq-seg ask-pq-date">{date}</span>')
@@ -24361,7 +24362,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-priv-note{{margin:0 0 0 30px;font-size:13px;line-height:1.5;color:var(--muted);}}
 .ask-priv-note a{{color:var(--muted);}}
 .ask-pq-priv{{white-space:nowrap;}}
-.ask-pq-hidden{{white-space:nowrap;color:var(--seafoam-deep);font-weight:600;}}
+.ask-pq-hidden{{white-space:nowrap;}}
 .ask-q-label{{display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 8px;}}
 .fu-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;}}
 .fu-limit{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}

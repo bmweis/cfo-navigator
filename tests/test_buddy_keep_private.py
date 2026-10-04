@@ -314,11 +314,11 @@ def test_hidden_marker_is_an_admin_only_status_with_label_and_order(site):
         assert 'aria-label="Hidden by an admin"' in m and "&#128683; Hidden" in m
     i = sec.index("Private question from author")
     row = sec[i:sec.index("</summary>", i)]
-    assert row.index("ask-pq-priv") < row.index("ask-pq-hidden") < row.index("ask-pq-date")   # Private first, both before the date
+    assert row.index("ask-pq-hidden") < row.index("ask-pq-priv") < row.index("ask-pq-date")   # Hidden first, both before the date
     css = boss[boss.index(".ask-pq-hidden{"):]
     css = css[:css.index("}")]
-    assert "color:var(--seafoam-deep)" in css and "font-weight:600" in css
-    assert "background" not in css and "border" not in css                                  # a status, not a control
+    assert "seafoam" not in css and "font-weight" not in css and "color" not in css          # plain muted text, same as Private
+    assert "background" not in css and "border" not in css
     # the asker never sees the marker, and never sees a hidden row at all
     asker = client("author").get("/tools/fpa-buddy").text
     assert not _marker_rows(asker) and "Shared question from author" not in _section(asker)
