@@ -23842,7 +23842,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         if hc and not nc:
             rating = '<span class="ask-pq-rate" role="img" aria-label="Rated helpful" title="Rated helpful">&#128077;</span>'
         elif hc and nc:
-            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated mixed" title="Rated mixed">&#128077;&#128078;</span>'
+            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated mixed" title="Rated mixed">&#129335;</span>'
         elif nc:
             rating = '<span class="ask-pq-rate" role="img" aria-label="Rated not helpful" title="Rated not helpful">&#128078;</span>'
         else:
@@ -24256,13 +24256,13 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 
 .ask-pq-row{{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}}
 .ask-pq-row[open]{{border-color:var(--navy);}}
-.ask-pq-sum{{display:flex;align-items:baseline;gap:10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;flex-wrap:wrap;}}
+.ask-pq-sum{{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;}}
 .ask-pq-sum::-webkit-details-marker{{display:none;}}
 .ask-pq-sum:hover{{background:var(--accent-light);border-radius:8px;}}
 .ask-pq-rc{{font-size:12px;color:var(--navy);transition:transform .12s;flex-shrink:0;}}
 .ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{{transform:rotate(90deg);}}
-.ask-pq-q{{flex:1 1 240px;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);}}
-.ask-pq-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
+.ask-pq-q{{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);}}
+.ask-pq-meta{{font-size:12px;color:var(--muted);flex-shrink:0;max-width:45%;text-align:right;margin-left:auto;}}
 .ask-pq-rate{{font-size:14px;margin-right:4px;}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
 .ask-pq-heading{{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}

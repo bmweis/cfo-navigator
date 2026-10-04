@@ -167,6 +167,14 @@ def test_browser_heights_widths_and_touch_target(site):
                 assert abs((search["y"] + 14) - (field["y"] + field["height"] / 2)) < 1.5
             else:           # at 390 the pair wraps to its own row beneath the input
                 assert search["y"] > field["y"] + field["height"]
+            # rating and date sit in the row's top-right corner, level with the first line
+            geo = pg.evaluate("""()=>{const r=document.querySelector('.ask-pq-row'),
+                s=r.querySelector('.ask-pq-sum').getBoundingClientRect(),
+                m=r.querySelector('.ask-pq-meta').getBoundingClientRect(),
+                q=r.querySelector('.ask-pq-q').getBoundingClientRect();
+                return {sr:s.right,st:s.top,mr:m.right,mt:m.top,qr:q.right,ml:m.left}}""")
+            assert geo["sr"] - geo["mr"] < 16 and geo["mt"] - geo["st"] < 16
+            assert geo["qr"] <= geo["ml"] + 0.5      # question never runs under the meta
             if resume:
                 assert abs(resume["height"] - 28) < 0.6
                 assert abs(resume["width"] - 128) < 0.6
@@ -191,7 +199,7 @@ def test_each_row_shows_a_labelled_rating(site):
     assert "Not rated" not in sec
     assert 'aria-label="Rated not helpful"' in meta("Not helpful first question")
     m = meta("Mixed first question")
-    assert 'aria-label="Rated mixed"' in m and "&#128077;&#128078;" in m
+    assert 'aria-label="Rated mixed"' in m and "&#129335;" in m
     css = client("reader").get("/tools/fpa-buddy").text
     rate_css = "".join(l for l in css.splitlines() if l.startswith(".ask-pq-rate"))
     assert rate_css and "border" not in rate_css and "background" not in rate_css
@@ -200,7 +208,7 @@ def test_each_row_shows_a_labelled_rating(site):
 def test_rating_emoji_strings_pass_the_voice_and_typography_scanners():
     from html import unescape
     from linklib.voice_review import mechanical_findings, typography_findings_plain
-    for ent in ("&#128077;", "&#128078;", "&#128077;&#128078;"):
+    for ent in ("&#128077;", "&#128078;", "&#129335;"):
         t = unescape(ent)
         assert all(0x1F300 <= ord(c) <= 0x1FAFF for c in t)   # no ZWJ, selector or skin tone
         assert not mechanical_findings(t) and not typography_findings_plain(t)

@@ -226,7 +226,9 @@ def _w(pg, sel):
 def test_past_question_title_fills_its_row_on_a_phone(phone):
     pg, _ = phone
     _open(pg)
-    assert _w(pg, "#past-questions .ask-pq-q") >= _w(pg, "#past-questions .ask-pq-row") * 0.6
+    # The rating and date now sit top-right in the same row, so the title shares
+    # the line with them; it must still get over half the row, never a sliver.
+    assert _w(pg, "#past-questions .ask-pq-q") >= _w(pg, "#past-questions .ask-pq-row") * 0.5
 
 
 def test_history_cards_use_the_same_title_rule(buddy_html):
