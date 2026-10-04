@@ -23993,8 +23993,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     <span class="ask-eyebrow">CFO Navigator</span>
     <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
     <p style="color:var(--ink-soft);margin:0 0 12px;font-size:15.5px;line-height:1.6;">Ask a real FP&amp;A question and get an answer with its sources, not half a day of Googling. It pulls from a research archive I curate by hand, and it remembers the thread, so you can follow up.</p>
-    <p class="ask-teaser">Curious how this works? <a href="/tools/fpa-buddy/how-it-works">Read the full breakdown &rarr;</a></p>
-    <p style="color:var(--muted);font-size:12.5px;margin:-4px 0 0;">Conversations continue seamlessly whether you ask here on the site or via Claude/MCP.</p>
+    <p class="ask-teaser"><a href="/tools/fpa-buddy/how-it-works">How it works &rarr;</a></p>
   </div>
   <div class="fpa-intro-area-example">
     <div class="ask-example">
@@ -24008,7 +24007,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
           <li>&#127760; <span class="ask-src-static">[3] Hiring Trends Across Early-Stage FP&amp;A Teams</span></li>
         </ul>
       </div>
-      <p class="ask-example-caption">A mocked example built on the real Library/Feed/Web mechanism&mdash;no real question history exists yet to pull a genuine one from.</p>
     </div>
   </div>
   {usage_div}
@@ -24192,7 +24190,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 
 .ask-example{{border:1px dashed var(--line-strong);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--surface);}}
 .ask-example-label{{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:3px 10px;margin-bottom:12px;}}
-.ask-example-caption{{margin:12px 0 0;font-size:12px;color:var(--muted);}}
 
 /* Scoped scale-down for the example inside the intro's right column only—
    .ask-q-bubble/.ask-answer are shared with the real, live-rendered
@@ -24203,7 +24200,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .fpa-intro-area-example .ask-answer{{padding:14px 16px;font-size:13.5px;line-height:1.6;}}
 .fpa-intro-area-example .ask-answer p{{margin:0 0 10px;}}
 .fpa-intro-area-example .ask-src-list{{margin-top:10px;padding-top:10px;}}
-.fpa-intro-area-example .ask-example-caption{{font-size:11px;margin-top:8px;}}
 
 .ask-section{{margin:20px 0;}}
 .ask-section-label{{font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;}}
@@ -24693,7 +24689,7 @@ function fuRender(state) {{
   f.id = 'fu'; f.className = limited ? 'fu fu-limited' : 'fu';
   f.innerHTML = '<div class="fu-label">Follow-up</div>' +
     (limited ? '<p class="fu-limit">You&rsquo;ve reached the limit for this conversation. ' +
-               '<a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.</p>' : '') +
+               '<a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new conversation</a>.</p>' : '') +
     '<div class="fu-row"><textarea id="fu-q" rows="1" placeholder="Ask a follow-up…"' + (limited ? ' disabled' : '') + '></textarea>' +
     '<button type="button" class="fu-send" id="fu-btn" onclick="doAsk(true)" aria-label="Ask follow-up" title="Ask follow-up"' + ((limited || busy) ? ' disabled' : '') + '>' +
     '<span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button></div>';
@@ -24802,7 +24798,7 @@ async function loadRecent() {{
 // from what the page already holds (the /ask response gave the id and the
 // limit state; the thread on screen gives the first question and the turn
 // count), instead of asking the server again. Visibility is untouched: the
-// list stays hidden while a thread is open and Start a new question shows it.
+// list stays hidden while a thread is open and Start a new conversation shows it.
 function recentUpsert(cid, atLimit) {{
   if (!cid) return;
   var bubbles = document.querySelectorAll('#ask-thread .ask-q-bubble');
@@ -24957,7 +24953,8 @@ async function doAsk(followUp) {{
     turn.scrollIntoView({{behavior:'smooth', block:'start'}});
   }} catch(e) {{
     if (stale()) {{ dropLate(false); return; }}
-    answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong: ' + escapeHtml(String(e)) + '</span>';
+    console.error('FP&A Buddy ask failed', e);
+    answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong. Try again.</span>';
     done(asked ? 'ready' : 'none');
   }}
 }}
@@ -24969,7 +24966,7 @@ document.addEventListener('keydown', function(e) {{
 // Thread open: while anything is in #ask-thread the page drops the
 // illustrative example and folds "Search past questions" to one line. One
 // observer on the thread covers every way a thread appears or clears (ask,
-// resume, reload, Start a new question), so no send path has to remember it.
+// resume, reload, Start a new conversation), so no send path has to remember it.
 (function() {{
   var page = document.getElementById('fpa-page');
   var thread = document.getElementById('ask-thread');

@@ -97,7 +97,7 @@ def run_ask(
             return {
                 "capped": True,
                 "answer": "We've reached the limit for this conversation. "
-                          "Start a new question to keep going.",
+                          "Start a new conversation to keep going.",
                 "sources": [], "feed_sources": [], "web_sources": [],
             }
         for t in turns:

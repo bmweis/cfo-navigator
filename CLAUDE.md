@@ -12017,6 +12017,13 @@ docs honest, **in the same PR as the change** (never a follow-up):
    the registry, in that same PR** — not as a follow-up cleanup. Scripts already
    in `scripts/archive/` are deliberately excluded from the registry; they're
    kept only for git history, never meant to run again in the ordinary course.
+6. **FP&A Buddy page copy freshness gate.** Any PR that changes what a reader
+   sees on `/tools/fpa-buddy` lists in its body (1) the code-side copy it
+   updated and (2) any database-stored copy now stale, with the proposed
+   replacement text. The Buddy page itself renders no database copy (checked
+   2026-10); the stored copy that can go stale is the `ai_surfaces` rows
+   (`fp-a-buddy`, `web-search`) edited at `/admin/ai-surfaces`, and
+   `/tools/fpa-buddy/how-it-works` is code.
 
 ## Voice enforcement
 
@@ -13414,3 +13421,19 @@ subscription.
   untouched, listed for the later sitewide control-height item. Rider: the top box
   label reads "Start a new conversation" and sits directly above the text box, below
   Depth and Sources (`.ask-q-label`). Tests: `tests/test_buddy_done_resume.py`.
+
+- **FP&A Buddy page-text trim (2026-10, from the page-text review).** Five string
+  changes, nothing else: the caption under the illustrative example is gone (its
+  second half was false once real questions existed; the label above it still says
+  "Illustrative example—not a captured real answer" and the example block is
+  untouched); the "Conversations continue seamlessly ... Claude/MCP" line is gone;
+  the teaser link reads "How it works →"; a failed ask shows "Something went
+  wrong. Try again." and sends the raw exception to `console.error` instead of the
+  reader; and the limit link and the server cap text say "Start a new
+  conversation", matching the label above the box. **Found, not fixed here:** the
+  banned-word check matches `\bseamless\b`, so "seamlessly" slipped past it; a
+  stem match is a separate lint change. The same "Something went wrong: " handler
+  also exists on the two matchmaker chat pages and their limit link still says
+  "Start a new question"; those are other surfaces and were left alone. Tests:
+  `tests/test_buddy_text_trim.py` (6, one in Chromium) and one in
+  `tests/test_ask_conversations.py`.
