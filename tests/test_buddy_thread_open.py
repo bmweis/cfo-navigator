@@ -88,6 +88,8 @@ window.fetch = function(url, opts) {
       conversation_id: 'c9', capped: false, turns: [
         {turn_id: 11, question: 'Earlier question', answer: 'Earlier answer.', citations: [], feedback: null}]}); }});
   if (window.__fail) return Promise.reject(new Error('boom'));
+  if (String(url) === '/ask/similar')   // no suggestions: the check passes straight through
+    return Promise.resolve({ok: true, json: function() { return Promise.resolve({suggestions: []}); }});
   var body = JSON.parse(opts.body);
   window.__calls.push(body);
   var n = window.__calls.length;
