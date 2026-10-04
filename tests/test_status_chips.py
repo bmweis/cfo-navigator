@@ -68,8 +68,109 @@ def unescape_json(js_literal):
 
 
 def test_chip_css_is_a_status_not_a_button():
-    css = "\n".join(l for l in SRC.splitlines() if l.startswith(".ask-chip"))
+    css = appmod._ASK_CHIP_CSS
     base = [l for l in css.splitlines() if l.startswith(".ask-chip{")][0]
     assert "height:18px" in base and "border:" not in base and "cursor" not in base and "background:var(--line)" in base
     hid = [l for l in css.splitlines() if l.startswith(".ask-chip-hidden{")][0]
     assert "color:var(--seafoam-deep)" in hid and "background:none" in hid and "border" not in hid
+
+
+# ---- every rating value the table can hold, and the two surfaces added with the chips ----
+import importlib
+import os
+import tempfile
+
+import pytest
+
+from linklib.db import Library
+
+
+@pytest.fixture
+def chip_site(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    lib = Library(db)
+    lib.seed_voice_prompts()
+    lib.create_user("boss", "supersecret", role="admin")
+    other = lib.create_user("other", "supersecret", role="user")
+    me = lib.create_user("me", "supersecret", role="user")
+    ids = {}
+    for rating in Library.ASK_FEEDBACK_RATINGS:
+        qid = lib.record_ask_question(other, f"Question rated {rating}", "Answer [1].", "m", "standard", True, False, True)
+        lib.record_ask_feedback(qid, me, rating, "")
+        ids[rating] = qid
+    ids["mine"] = lib.record_ask_question(me, "My own private question", "Answer [1].", "m", "standard", True, False, True)
+    lib.record_ask_feedback(ids["mine"], other, "helpful", "")
+    lib.set_conversation_private(str(ids["mine"]), me, True)
+    ids["mine_follow"] = lib.record_ask_question(me, "My follow-up", "Answer [1].", "m", "standard", True, False, True,
+                                                 conversation_id=str(ids["mine"]), turn_index=1)
+    lib.record_ask_feedback(ids["mine_follow"], other, "inaccurate", "")
+    lib.close()
+    import webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+
+    def client(user):
+        c = TestClient(appmod.app)
+        assert c.post("/login", data={"username": user, "password": "supersecret"},
+                      follow_redirects=False).status_code in (302, 303)
+        return c
+    yield client, ids
+    for ext in ("", "-shm", "-wal"):
+        if os.path.exists(db + ext):
+            os.remove(db + ext)
+
+
+def _row(html, text):
+    i = html.index(text)
+    return html[i:html.index("</summary>", i)]
+
+
+def test_every_rating_value_the_table_can_hold_renders_a_chip(chip_site):
+    """ask_feedback holds helpful, inaccurate and not_helpful. Inaccurate counts as
+    negative (anything but helpful), so it has always shown as Not helpful; the chip
+    set keeps that. A rating the chip set cannot draw fails here, never renders as nothing."""
+    client, _ = chip_site
+    page = client("boss").get("/tools/fpa-buddy").text
+    expect = {"helpful": "ask-chip-helpful", "inaccurate": "ask-chip-not_helpful", "not_helpful": "ask-chip-not_helpful"}
+    assert set(expect) == set(Library.ASK_FEEDBACK_RATINGS)
+    for rating, cls in expect.items():
+        assert cls in _row(page, f"Question rated {rating}"), rating
+
+
+def test_open_thread_private_chip_comes_from_the_server_string_and_toggles():
+    js = SRC[SRC.index("foot.innerHTML = (convoId"):SRC.index("f.appendChild(foot);")]
+    assert 'id="fu-status"' in js and "PRIVATE_CHIP_HTML" in js and "&#128274;" not in js
+    tog = SRC[SRC.index("async function togglePrivate"):SRC.index("function doneThread")]
+    assert "fu-status" in tog and "PRIVATE_CHIP_HTML" in tog
+
+
+def test_history_shows_the_same_chips_for_the_readers_own_questions(chip_site):
+    client, ids = chip_site
+    page = client("me").get("/ask/history").text
+    assert "ask-chip-not_helpful" in page            # the inaccurate-rated follow-up shows as Not helpful
+    own = page[page.index("My own private question"):]
+    assert "ask-chip-private" in own and "ask-chip-helpful" in own
+    assert "ask-chip ask-chip-hidden" not in page             # an admin hide is never shown to the owner
+    # a question with no private flag and no rating shows no chip on its own card
+    assert appmod_chip_count(page) >= 3
+
+
+def appmod_chip_count(html):
+    return html.count('class="ask-chip ')
+
+
+def test_history_chips_use_the_one_function_only(chip_site):
+    seg = SRC[SRC.index("def ask_history("):SRC.index('rows_html = "".join(_card(c)')]
+    assert "_ask_status_chips_html" in seg and 'class="ask-chip' not in seg
+
+
+def test_every_page_that_draws_a_chip_carries_the_chip_css(chip_site):
+    """A page that renders chips without the style would show bare text (found live on
+    /ask/history before the CSS was shared)."""
+    client, _ = chip_site
+    for url in ("/tools/fpa-buddy", "/ask/history"):
+        html = client("me").get(url).text
+        assert appmod._ASK_CHIP_CSS in html, url

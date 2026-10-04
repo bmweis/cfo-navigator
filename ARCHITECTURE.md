@@ -349,7 +349,7 @@ returns after Done skip the screen and show up in Recent. The question card labe
 Buddy question is one chip drawn by `_ask_status_chip` (`webapp/app.py`);
 `_ask_status_chips_html` orders them Hidden (admin only), Private, rating and is what the
 past-questions list and `POST /ask/similar` (`chips_html`) call. The Recent rows get the
-Private chip as a server-built string (`PRIVATE_CHIP_HTML`), never hand-built in JS. See
+Private chip as a server-built string (`PRIVATE_CHIP_HTML`), never hand-built in JS; the open thread's footer and `/ask/history` (via `Library.ask_rating_counts`) use the same function, and the chip CSS is the shared `_ASK_CHIP_CSS`. See
 BRAND.md's Status chips and `tests/test_status_chips.py`.
 
 **FP&A Buddy collapsed rows (2026-10).** Every past or recent question is a

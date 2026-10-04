@@ -23820,6 +23820,15 @@ _ASK_STATUS_CHIPS = {
 }
 
 
+# Status chip styles, shared by every page that draws a chip (the Buddy page and
+# /ask/history). Plain string, single braces; injected with {_ASK_CHIP_CSS}.
+_ASK_CHIP_CSS = (
+    "/* Status chips (BRAND.md, Status chips): non-interactive, 18px, no border. One neutral fill; Hidden is admin-only deep-seafoam text with no fill. */\n"
+    ".ask-chip{display:inline-flex;align-items:center;gap:3px;box-sizing:border-box;height:18px;padding:0 8px;border-radius:999px;background:var(--line);color:var(--ink-soft);font-size:12px;line-height:1;white-space:nowrap;}\n"
+    ".ask-chip-hidden{background:none;padding:0;color:var(--seafoam-deep);}\n"
+)
+
+
 def _ask_status_chip(kind: str) -> str:
     """The ONE place a Buddy question status is drawn: a non-interactive chip,
     glyph plus word (BRAND.md, Status chips). Plain code points only. Hidden is
@@ -24363,9 +24372,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-pq-meta{{flex:0 0 calc(100% - 22px);order:3;margin-left:22px;display:flex;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}}
 .ask-pq-ml{{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;justify-content:flex-end;flex:1 1 auto;min-width:0;}}
 .ask-pq-seg{{white-space:nowrap;}}
-/* Status chips (BRAND.md, Status chips): non-interactive, 18px, no border. One neutral fill; Hidden is admin-only deep-seafoam text with no fill. */
-.ask-chip{{display:inline-flex;align-items:center;gap:3px;box-sizing:border-box;height:18px;padding:0 8px;border-radius:999px;background:var(--line);color:var(--ink-soft);font-size:12px;line-height:1;white-space:nowrap;}}
-.ask-chip-hidden{{background:none;padding:0;color:var(--seafoam-deep);}}
+{_ASK_CHIP_CSS}
 @media(min-width:700px){{.ask-pq-meta{{flex:0 1 auto;order:0;margin-left:auto;max-width:50%;}}.ask-pq-ml{{flex:0 1 auto;justify-content:flex-end;}}}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
 .ask-pq-heading{{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
@@ -24374,7 +24381,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
   margin-bottom:8px;transition:border-color .12s ease;}}
 .ask-recent-foot{{display:flex;justify-content:space-between;align-items:center;gap:12px;}}
 .ask-pq-foot,.fu-foot{{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}}
-.fu-foot{{margin-top:8px;}}
+.fu-foot{{margin-top:8px;flex-wrap:wrap;}}
+.fu-status{{flex:1 1 100%;}}
+.fu-status:empty{{display:none;}}
 .ask-done-note{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}
 {_ASK_CTL_CSS}
 @media(hover:hover){{.ask-recent-item:hover{{border-color:var(--navy);}}}}
@@ -24872,7 +24881,8 @@ function fuRender(state) {{
   foot.className = 'fu-foot';
   // Make private / Allow sharing sits left of Done once the conversation has an id.
   foot.innerHTML = (convoId && state !== 'busy'
-      ? '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="fu-priv" onclick="togglePrivate()">' +
+      ? '<span id="fu-status" class="fu-status">' + (convoPrivate ? PRIVATE_CHIP_HTML : '') + '</span>' +
+        '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="fu-priv" onclick="togglePrivate()">' +
         (convoPrivate ? 'Allow sharing' : 'Make private') + '</button>' : '') +
     '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="fu-done" onclick="doneThread()">Done</button>';
   f.appendChild(foot);
@@ -24892,6 +24902,7 @@ async function togglePrivate() {{
     if (!resp.ok) return;
     convoPrivate = want;
     if (btn) btn.textContent = want ? 'Allow sharing' : 'Make private';
+    var st = document.getElementById('fu-status'); if (st) st.innerHTML = want ? PRIVATE_CHIP_HTML : '';
     var items = document.querySelectorAll('#ask-recent .ask-recent-item');
     for (var i = 0; i < items.length; i++)
       if (items[i].getAttribute('data-cid') === cid) items[i].outerHTML = '';
@@ -25487,9 +25498,10 @@ def ask_history(request: Request, page: int = 1):
     try:
         user_id = _current_user_id(lib, request)
         if user_id is None:
-            rows, spent, cap = [], 0.0, lib.get_default_ask_cap()
+            rows, rating_counts, spent, cap = [], {}, 0.0, lib.get_default_ask_cap()
         else:
             rows = lib.list_ask_questions(user_id=user_id, limit=200)
+            rating_counts = lib.ask_rating_counts([r["id"] for r in rows])
             spent = lib.ask_cost_this_month(user_id)
             cap = lib.get_effective_ask_cap(user_id)
         all_time = sum(r["cost_usd"] for r in rows)
@@ -25506,6 +25518,13 @@ def ask_history(request: Request, page: int = 1):
         return (f'<div style="display:flex;justify-content:flex-end;margin:6px 0 12px;">'
                 f'<a class="ask-ctl ask-ctl-sm ask-ctl-w" href="/tools/fpa-buddy?resume={_esc(cid)}">Resume</a></div>')
 
+    def _hist_chips(r: dict, *, private: bool | None = None, counts=None) -> str:
+        # The same status chips as every other Buddy surface (one function).
+        # Hidden is an admin action on the public list, so the owner never sees it here.
+        h, n = counts if counts is not None else rating_counts.get(r["id"], (0, 0))
+        chips = _ask_status_chips_html(h, n, private=bool(r.get("is_private")) if private is None else private)
+        return f'<span style="display:inline-flex;flex-wrap:wrap;gap:6px;margin-right:8px;vertical-align:middle;">{chips}</span>' if chips else ""
+
     def _single_card(r: dict) -> str:
         # A one-turn conversation — same card the flat list always showed.
         q = _esc(r.get("question") or "")
@@ -25516,7 +25535,7 @@ def ask_history(request: Request, page: int = 1):
     <div style="flex:1 1 280px;min-width:0;font-weight:600;color:var(--navy);font-size:14.5px;">{q}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
   </div>
-  <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
+  <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_hist_chips(r)}{_ask_settings_badge(r)}</div>
   <div class="ask-hist-answer">{a_html}</div>
   {src_html}
   {_resume_link(r)}
@@ -25533,7 +25552,7 @@ def ask_history(request: Request, page: int = 1):
     <div style="flex:1 1 280px;min-width:0;font-weight:600;color:var(--navy);font-size:14px;">{q}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
   </div>
-  <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
+  <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_hist_chips(r, private=False)}{_ask_settings_badge(r)}</div>
   <div class="ask-hist-answer" style="margin-bottom:12px;">{a_html}</div>
   {src_html}
 </div>"""
@@ -25553,6 +25572,7 @@ def ask_history(request: Request, page: int = 1):
       <div style="font-weight:600;color:var(--navy);font-size:14.5px;flex:1 1 180px;">{q}</div>
       <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])} &middot; ${total:.3f} total</div>
     </div>
+    <div style="margin-top:8px;">{_hist_chips(first, counts=(sum(rating_counts.get(t["id"], (0, 0))[0] for t in turns), sum(rating_counts.get(t["id"], (0, 0))[1] for t in turns)))}</div>
     <span class="convo-chip"><span class="disclosure-caret">&#9654;</span>&nbsp;{label}</span>
   </summary>
   <div style="padding:0 18px 6px;">
@@ -25595,6 +25615,7 @@ def ask_history(request: Request, page: int = 1):
 </div>
 <style>
 {_ASK_CTL_CSS}
+{_ASK_CHIP_CSS}
 .convo-chip{{display:inline-flex;align-items:center;margin-top:10px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:4px 12px;}}
 .convo-chip .disclosure-caret{{font-size:11px;}}
 </style>
