@@ -13441,7 +13441,7 @@ subscription.
 
 - **FP&A Buddy past-questions list, PR B1 (2026-10).** "Search past questions"
   now lists **all** first-turn questions by default (it was helpful-only, always),
-  under an `h3.ask-pq-heading` that says what it shows: "All questions", or
+  under an `h2.ask-pq-heading` that says what it shows: "All questions", or
   "Helpful questions only" with the **Helpful only** button pressed
   (`aria-pressed`). `?helpful=1` is the filter; Search and the toggle are both
   submit buttons named `helpful`, so one GET form carries either value and Search

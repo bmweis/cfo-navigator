@@ -23888,7 +23888,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     <button type="submit" name="helpful" value="{pq_keep}" class="ask-ctl ask-ctl-sm ask-ctl-w">Search</button>
     <button type="submit" name="helpful" value="{pq_flip}" class="ask-ctl ask-ctl-sm ask-ctl-w" aria-pressed="{"true" if helpful_only else "false"}">Helpful only</button>
   </form>
-  <h3 class="ask-pq-heading">{pq_heading}</h3>
+  <h2 class="ask-pq-heading">{pq_heading}</h2>
   {pq_rows_html}
 </details>"""
 
