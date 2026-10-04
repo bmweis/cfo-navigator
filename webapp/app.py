@@ -23809,6 +23809,23 @@ _ASK_CTL_CSS = (
 )
 
 
+def _ask_rating_html(helpful_count, negative_count) -> str:
+    """The ONE place a past question's rating is drawn (the past-questions list
+    and the similar-question suggestions both call it). Plain emoji status, no
+    border or fill (only actions get those); plain code points only. Empty
+    string when unrated."""
+    hc, nc = int(helpful_count or 0), int(negative_count or 0)
+    if hc and not nc:
+        label, glyph = "Rated helpful", "&#128077;"
+    elif hc and nc:
+        label, glyph = "Rated mixed", "&#129335;"
+    elif nc:
+        label, glyph = "Rated not helpful", "&#128078;"
+    else:
+        return ""
+    return f'<span class="ask-pq-rate" role="img" aria-label="{label}" title="{label}">{glyph}</span>'
+
+
 def _ask_byline(row: dict, viewer_user_id: int | None, viewer_is_admin: bool) -> str | None:
     """Who a past-question row is credited to, for one viewer. Three cases,
     in this order: (1) the viewer asked it, "You" (checked first, so an admin
@@ -23871,17 +23888,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
       <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w ask-ctl-admin">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>
     </div>"""
-        hc, nc = int(r.get("helpful_count") or 0), int(r.get("negative_count") or 0)
-        # Plain emoji status, no border or fill (only actions get those); same
-        # standalone-span pattern as .tool-star. Plain code points only.
-        if hc and not nc:
-            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated helpful" title="Rated helpful">&#128077;</span>'
-        elif hc and nc:
-            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated mixed" title="Rated mixed">&#129335;</span>'
-        elif nc:
-            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated not helpful" title="Rated not helpful">&#128078;</span>'
-        else:
-            rating = ""
+        rating = _ask_rating_html(r.get("helpful_count"), r.get("negative_count"))
         # Meta: the left group is state and credit (Private, Hidden from members,
         # byline, date), each a nowrap segment with flex gaps, no literal
         # separators. The rating has its own fixed-width slot at the far right of
@@ -24121,6 +24128,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?">{pre_q}</textarea>
         <button type="button" class="fu-send ask-send" id="ask-btn" onclick="doAsk()" aria-label="Ask" title="Ask"{'' if q.strip() else ' disabled'}><span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button>
       </div>
+      <div id="ask-sim" class="ask-sim" hidden aria-live="polite"></div>
       <label class="ask-priv-opt"><input type="checkbox" id="ask-private"><span>Keep this question private</span></label>
       <p class="ask-priv-note">Shared with other users without your name. Admins can see every question. Leave out company names and figures you want kept confidential. <a href="/privacy">Privacy policy</a></p>
     </div>
@@ -24357,6 +24365,16 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu{{position:sticky;bottom:8px;z-index:20;margin:16px 0 8px;max-width:88%;background:#fff;border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 -4px 24px rgba(11,31,77,.14);}}
 /* The limit message is not worth floating over the reply it follows. */
 .fu.fu-limited{{position:static;box-shadow:none;}}
+.ask-sim{{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:10px;}}
+.ask-sim h3{{font-size:15px;margin:0 0 4px;color:var(--navy);}}
+.ask-sim-sub{{font-size:13px;color:var(--muted);margin:0 0 10px;line-height:1.45;}}
+.ask-sim-item{{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#fff;}}
+.ask-sim-item>summary{{list-style:none;cursor:pointer;padding:10px 12px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;}}
+.ask-sim-item>summary::-webkit-details-marker{{display:none;}}
+.ask-sim-q{{flex:1 1 220px;min-width:0;font-weight:600;color:var(--navy);font-size:14.5px;line-height:1.4;overflow-wrap:anywhere;}}
+.ask-sim-meta{{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12.5px;color:var(--muted);}}
+.ask-sim-body{{padding:0 12px 12px;}}
+.ask-sim-foot{{display:flex;gap:8px;margin-top:10px;}}
 .ask-priv-opt{{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px;color:var(--ink);cursor:pointer;margin-top:6px;}}
 .ask-priv-opt input{{width:20px;height:20px;flex:none;margin:0;}}
 .ask-priv-note{{margin:0 0 0 30px;font-size:13px;line-height:1.5;color:var(--muted);}}
@@ -24555,7 +24573,7 @@ function topSync() {{
 }}
 document.addEventListener('DOMContentLoaded', function() {{
   var q = document.getElementById('ask-q');
-  if (q) q.addEventListener('input', topSync);
+  if (q) q.addEventListener('input', function() {{ topSync(); if (simShownFor && q.value.trim() !== simShownFor) simHide(); }});
   topSync();
 }});
 
@@ -24992,9 +25010,50 @@ async function resumeConvoById(cid) {{
   }} catch(e) {{}}
 }}
 
+// Similar questions: before a NEW question runs, a free text check (no model
+// call) may show earlier questions that already answer it. "Ask anyway" is
+// always there. A second submit cancels a pending check; if the panel is already
+// showing for exactly this text, a submit asks. Any failure just asks.
+var simCtl = null, simShownFor = '';
+function simHide() {{
+  var p = document.getElementById('ask-sim'); if (p) {{ p.hidden = true; p.innerHTML = ''; }}
+  simShownFor = '';
+}}
+function simItemHtml(x) {{
+  var tags = [];
+  if (x.hidden) tags.push('<span>&#128683; Hidden</span>');
+  if (x.private) tags.push('<span>&#128274; Private</span>');
+  if (x.rating_html) tags.push(x.rating_html);
+  tags.push('<span>' + escapeHtml(x.date) + '</span>');
+  var resume = x.resume_id ? '<div class="ask-sim-foot"><button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" data-cid="' +
+    escapeHtml(x.resume_id) + '" onclick="simHide();resumeConvoById(this.dataset.cid)">Resume</button></div>' : '';
+  return '<details class="ask-sim-item"><summary><span class="ask-sim-q">' + escapeHtml(x.question) +
+    '</span><span class="ask-sim-meta">' + tags.join('') + '</span></summary><div class="ask-sim-body">' +
+    '<div class="ask-hist-answer" style="margin:0;">' + x.answer_html + '</div>' + resume + '</div></details>';
+}}
+async function simCheck(q) {{
+  if (simCtl) simCtl.abort();
+  simCtl = new AbortController();
+  var mine = simCtl;
+  try {{
+    var r = await fetch('/ask/similar', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{question: q}}), signal: mine.signal}});
+    if (!r.ok) return false;
+    var d = await r.json();
+    if (mine !== simCtl || !d.suggestions || !d.suggestions.length) return false;
+    var p = document.getElementById('ask-sim');
+    p.innerHTML = '<h3>These questions may already answer yours</h3>' +
+      '<p class="ask-sim-sub">Check one before this runs. It uses your depth and sources if you ask anyway.</p>' +
+      d.suggestions.map(simItemHtml).join('') +
+      '<button type="button" class="btn" id="ask-anyway" onclick="doAsk(false,true)">Ask anyway</button>';
+    p.hidden = false; simShownFor = q;
+    return true;
+  }} catch(e) {{ return false; }}
+}}
+
 // followUp=false: the top box, always a NEW question (a fresh conversation).
 // followUp=true: the bubble under the latest reply, continuing convoId.
-async function doAsk(followUp) {{
+async function doAsk(followUp, skipSimilar) {{
   var qEl = document.getElementById(followUp ? 'fu-q' : 'ask-q');
   if (!qEl) return;
   var q = qEl.value.trim();
@@ -25004,6 +25063,14 @@ async function doAsk(followUp) {{
   var sources = activeSources();
   if (!sources.length) {{ alert('Select at least one source.'); return; }}
 
+  if (!followUp) {{
+    if (!skipSimilar && simShownFor !== q) {{
+      var showed = await simCheck(q);
+      if (showed) return;
+    }}
+    if (simCtl) simCtl.abort();
+    simHide();
+  }}
   var thread = document.getElementById('ask-thread');
   if (!followUp) {{
     // A new question never inherits a conversation: clear the screen and the id
@@ -25154,6 +25221,42 @@ function highlightRecent() {{
 </script>"""
 
     return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
+
+
+@app.post("/ask/similar")
+async def ask_similar(request: Request):
+    """Free text check before a new question runs: up to three earlier first-turn
+    questions that may already answer it. No model call, no cost. Visibility is
+    the same shared rule the past-questions list uses (Library.ask_visibility_clause):
+    never another user's private or hidden question; an admin sees all, labelled."""
+    _require_member(request)
+    from linklib.similar_questions import rank_similar
+    payload = await request.json()
+    question = (payload.get("question") or "").strip()[:2000]
+    if not question:
+        return {"suggestions": []}
+    authed = _is_authed(request)
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        cands = lib.similar_ask_candidates(user_id, authed)
+    finally:
+        lib.close()
+    out = []
+    for r in rank_similar(question, cands):
+        a_html, src_html = _render_cited_answer(r.get("answer") or "", r.get("citations_json") or "[]")
+        own = user_id is not None and r.get("user_id") == user_id and bool(r.get("conversation_id"))
+        out.append({
+            "id": r["id"],
+            "question": r.get("question") or "",
+            "date": (r.get("created_at") or "")[:10],
+            "rating_html": _ask_rating_html(r.get("helpful_count"), r.get("negative_count")),
+            "private": bool(r.get("is_private")),
+            "hidden": bool(r.get("hidden_public")) and authed,
+            "answer_html": a_html + src_html,
+            "resume_id": r["conversation_id"] if own else "",
+        })
+    return {"suggestions": out}
 
 
 @app.post("/ask")

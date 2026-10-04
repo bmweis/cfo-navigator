@@ -93,6 +93,8 @@ window.__next = {followups_left: 5, answer: 'First answer [1].'};
 window.fetch = function(url, opts) {
   if (String(url).indexOf('/ask/conversations') === 0)
     return Promise.resolve({ok: true, json: function() { return Promise.resolve({conversations: []}); }});
+  if (String(url) === '/ask/similar')   // no suggestions: the check passes straight through
+    return Promise.resolve({ok: true, json: function() { return Promise.resolve({suggestions: []}); }});
   var body = JSON.parse(opts.body);
   window.__calls.push(body);
   var n = window.__calls.length;
@@ -343,6 +345,49 @@ def test_other_members_past_answers_never_bring_the_bubble(past_question_page):
         pg.click("#past-questions .ask-hist-answer")
         assert pg.locator("#fu, .fu").count() == 0
         assert pg.evaluate("window.__calls.length") == 0
+    finally:
+        browser.close()
+        pw.stop()
+
+
+SIM_STUB = STUB + """
+window.__sim = [{id: 5, question: 'Earlier similar question', date: '2026-10-03', rating_html: '',
+                 private: false, hidden: false, answer_html: '<p>Earlier answer.</p>', resume_id: ''}];
+var __stubFetch = window.fetch;
+window.fetch = function(url, opts) {
+  if (String(url) === '/ask/similar') {
+    window.__simCalls = (window.__simCalls || 0) + 1;
+    return Promise.resolve({ok: true, json: function() { return Promise.resolve({suggestions: window.__sim}); }});
+  }
+  return __stubFetch(url, opts);
+};
+"""
+
+
+def test_suggestions_hold_the_question_until_ask_anyway(page_html, tmp_path):
+    launched = _launch()
+    if launched is None:
+        pytest.skip("no Chromium available")
+    pw, browser = launched
+    f = tmp_path / "buddy.html"
+    f.write_text(page_html, encoding="utf-8")
+    pg = browser.new_page(viewport={"width": 390, "height": 844})
+    pg.add_init_script(SIM_STUB)
+    pg.goto(f.as_uri())
+    try:
+        _ask(pg, "A question with a match")
+        pg.wait_for_selector("#ask-sim:not([hidden])")
+        assert pg.evaluate("window.__calls.length") == 0            # nothing ran yet
+        assert pg.locator("#ask-anyway").is_visible()
+        assert pg.locator("#ask-q").input_value() == "A question with a match"
+        pg.fill("#ask-q", "Edited text")                              # editing hides the panel
+        assert pg.evaluate("document.getElementById('ask-sim').hidden")
+        _ask(pg, "A question with a match")
+        pg.wait_for_selector("#ask-sim:not([hidden])")
+        pg.click("#ask-anyway")                                       # asks with the same text
+        pg.wait_for_function("window.__calls.length === 1")
+        assert pg.evaluate("window.__calls[0].question") == "A question with a match"
+        assert pg.evaluate("document.getElementById('ask-sim').hidden")
     finally:
         browser.close()
         pw.stop()

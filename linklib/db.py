@@ -9284,6 +9284,41 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    @staticmethod
+    def ask_visibility_clause(viewer_id: int | None, see_private: bool,
+                              alias: str = "aq") -> tuple[str, list]:
+        """The ONE rule for which `ask_questions` rows another user may be shown.
+        Used by the past-questions list and by similar-question suggestions, so
+        the two cannot drift. A hidden row (`hidden_public`, set by an admin) and
+        a private row (`is_private`) are never returned to anyone but an admin
+        (`see_private`); a private row is also returned to its own asker
+        (`viewer_id`). Returns (" AND ..." fragment, params)."""
+        if see_private:
+            return "", []
+        return (f" AND {alias}.hidden_public=0 AND ({alias}.is_private=0 OR {alias}.user_id=?)",
+                [viewer_id if viewer_id is not None else -1])
+
+    def similar_ask_candidates(self, viewer_id: int | None, see_private: bool,
+                               limit: int = 500) -> list[dict]:
+        """First-turn questions a viewer may be shown as suggestions: the shared
+        visibility rule above, never one rated 'inaccurate' (that rating says the
+        answer is wrong), newest first. Carries helpful_count for ranking."""
+        vis_sql, params = self.ask_visibility_clause(viewer_id, see_private)
+        rows = self.conn.execute(
+            f"""SELECT aq.*,
+                       (SELECT COUNT(*) FROM ask_feedback f
+                         WHERE f.question_id = aq.id AND f.rating = 'helpful') AS helpful_count,
+                       (SELECT COUNT(*) FROM ask_feedback f
+                         WHERE f.question_id = aq.id AND f.rating <> 'helpful') AS negative_count
+                  FROM ask_questions aq
+                 WHERE aq.turn_index=0
+                   AND NOT EXISTS (SELECT 1 FROM ask_feedback f
+                                    WHERE f.question_id = aq.id AND f.rating = 'inaccurate')
+                   {vis_sql}
+                 ORDER BY aq.created_at DESC LIMIT ?""",
+            params + [limit]).fetchall()
+        return [dict(r) for r in rows]
+
     def list_public_ask_questions(self, query: str = "", limit: int = 200,
                                    helpful_only: bool = False,
                                    viewer_id: int | None = None,
@@ -9313,11 +9348,8 @@ class Library:
                            WHERE f.question_id = aq.id AND f.rating <> 'helpful') AS negative_count
                   FROM ask_questions aq LEFT JOIN users u ON u.id = aq.user_id
                   WHERE aq.turn_index=0"""
-        params: list = []
-        if not see_private:
-            # Admins (see_private) also get rows an admin hid, so one can be unhidden.
-            base += " AND aq.hidden_public=0 AND (aq.is_private=0 OR aq.user_id=?)"
-            params.append(viewer_id if viewer_id is not None else -1)
+        vis_sql, params = self.ask_visibility_clause(viewer_id, see_private)
+        base += vis_sql
         if helpful_only:
             base += """ AND EXISTS (
                 SELECT 1 FROM ask_feedback f
