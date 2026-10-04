@@ -23828,7 +23828,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             who = r.get("asker_name") or r.get("asker_username") or "A member"
             byline = f"{_esc(who)} &middot; {date}"
         elif own:
-            byline = f"You &middot; {date}"
+            byline = None   # built after the rating: "You", rating, date
         else:
             byline = date
         admin_controls = ""
@@ -23847,6 +23847,10 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             rating = '<span class="ask-pq-rate" role="img" aria-label="Rated not helpful" title="Rated not helpful">&#128078;</span>'
         else:
             rating = ""
+        if byline is None:
+            meta_html = f"You {rating} &middot; {date}" if rating else f"You &middot; {date}"
+        else:
+            meta_html = f"{rating}{byline}"
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
@@ -23860,7 +23864,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         # byline and a chevron; the answer, sources and admin buttons are the
         # disclosure body. Same fold element the Search past questions section uses.
         return f"""<details class="ask-pq-row">
-  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{rating}{byline}</span></summary>
+  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{meta_html}</span></summary>
   <div class="ask-pq-body">
     <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
     {src_html}

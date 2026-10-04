@@ -32,6 +32,8 @@ def _seed(db):
     lib.record_ask_feedback(ids["mixed"], a, "helpful", "")
     lib.record_ask_feedback(ids["mixed"], reader, "inaccurate", "")
     ids["mine"] = mk(reader, "My own question")
+    ids["mine_rated"] = mk(reader, "My own rated question")
+    lib.record_ask_feedback(ids["mine_rated"], a, "helpful", "")
     # a follow-up rated helpful: must never be its own row
     conv = str(ids["helpful"])
     ids["follow"] = mk(a, "Follow-up turn question", conversation_id=conv, turn_index=1)
@@ -203,6 +205,17 @@ def test_each_row_shows_a_labelled_rating(site):
     css = client("reader").get("/tools/fpa-buddy").text
     rate_css = "".join(l for l in css.splitlines() if l.startswith(".ask-pq-rate"))
     assert rate_css and "border" not in rate_css and "background" not in rate_css
+
+
+def test_own_row_puts_you_left_of_the_rating(site):
+    client, ids, _ = site
+    sec = _section(client("reader").get("/tools/fpa-buddy").text)
+    def meta(q):
+        i = sec.index(q)
+        return sec[i:sec.index("</summary>", i)]
+    rated = meta("My own rated question")
+    assert rated.index("You") < rated.index("ask-pq-rate") < rated.index("&#128077;") < rated.index("20")
+    assert "ask-pq-rate" not in meta("My own question") and "You &middot; 20" in meta("My own question")
 
 
 def test_rating_emoji_strings_pass_the_voice_and_typography_scanners():

@@ -13465,7 +13465,7 @@ subscription.
   border or fill (only actions get those), same standalone-span pattern as
   `.tool-star`, 14px, from `helpful_count`/`negative_count`, in the row's top-right
   corner with the date (`.ask-pq-meta`, right-aligned, top-aligned with the question's
-  first line, like the vendor-card badges): &#128077; helpful, &#128078; not helpful,
+  first line, like the vendor-card badges; on your own rows "You" sits left of the rating): &#128077; helpful, &#128078; not helpful,
   &#129335; mixed (shrug, one code point U+1F937, no joiner; Brian's pick over
   thumbs-up plus thumbs-down), nothing when not rated. Each is `role="img"` with `aria-label` ("Rated
   helpful" etc.) and `title`; plain code points only, so the invisible-character lint
