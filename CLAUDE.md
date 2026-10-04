@@ -13441,8 +13441,8 @@ subscription.
 
 - **FP&A Buddy past-questions list, PR B1 (2026-10).** "Search past questions"
   now lists **all** first-turn questions by default (it was helpful-only, always),
-  under an `h3.ask-pq-heading` that says what it shows: "Recent questions", or
-  "Recent questions rated helpful" with the **Helpful only** button pressed
+  under an `h3.ask-pq-heading` that says what it shows: "All questions", or
+  "Helpful questions only" with the **Helpful only** button pressed
   (`aria-pressed`). `?helpful=1` is the filter; Search and the toggle are both
   submit buttons named `helpful`, so one GET form carries either value and Search
   keeps the filter. **A follow-up never shows as a standalone row:**
@@ -13457,7 +13457,7 @@ subscription.
   visible, 44px touch target from a `::after` that adds no layout height) and
   `.ask-ctl-w` (one shared 128px width) in `_ASK_CTL_CSS`; Resume (Recent rows,
   expanded own past-question rows, `/ask/history`), Remove from view, Search and
-  Helpful only use them. Done and the other existing buttons were not restyled
+  Helpful only use them; buttons that sit next to each other share one width. Done and the other existing buttons were not restyled
   (Done 44px, top Search/Depth/Sources 44px, feedback chips 26px, bubble Depth
   40px: for the sitewide control-height item). The intro line reads "Check here
   before spending a query re-asking one." **Not in this PR:** Keep private /

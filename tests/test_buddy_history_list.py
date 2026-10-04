@@ -78,7 +78,7 @@ def test_default_state_lists_all_questions_with_an_honest_heading(site):
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     assert "Unrated first question" in sec and "Helpful first question" in sec
     assert "Follow-up turn question" not in sec
-    assert re.search(r'<h3 class="ask-pq-heading">Recent questions</h3>', sec)
+    assert re.search(r'<h3 class="ask-pq-heading">All questions</h3>', sec)
     assert 'aria-pressed="false">Helpful only' in sec
 
 
@@ -87,11 +87,11 @@ def test_helpful_only_filters_relabels_and_shows_pressed(site):
     sec = _section(client("reader").get("/tools/fpa-buddy?helpful=1").text)
     assert "Helpful first question" in sec and "Unrated first question" not in sec
     assert "Follow-up turn question" not in sec
-    assert '<h3 class="ask-pq-heading">Recent questions rated helpful</h3>' in sec
+    assert '<h3 class="ask-pq-heading">Helpful questions only</h3>' in sec
     assert 'aria-pressed="true">Helpful only' in sec
     # Search keeps the filter; the toggle flips it back off
-    assert re.search(r'name="helpful" value="1" class="ask-ctl ask-ctl-sm">Search', sec)
-    assert re.search(r'name="helpful" value="" class="ask-ctl ask-ctl-sm" aria-pressed="true">Helpful only', sec)
+    assert re.search(r'name="helpful" value="1" class="ask-ctl ask-ctl-sm ask-ctl-w">Search', sec)
+    assert re.search(r'name="helpful" value="" class="ask-ctl ask-ctl-sm ask-ctl-w" aria-pressed="true">Helpful only', sec)
 
 
 def test_intro_line(site):
@@ -151,6 +151,7 @@ def test_browser_heights_widths_and_touch_target(site):
             pg.locator('.ask-pq-foot .ask-ctl').first.scroll_into_view_if_needed()
             resume = box('.ask-pq-foot .ask-ctl')
             assert abs(search["height"] - 28) < 0.6 and abs(helpful["height"] - 28) < 0.6
+            assert abs(search["width"] - helpful["width"]) < 0.6   # neighbours share one width
             if resume:
                 assert abs(resume["height"] - 28) < 0.6
                 assert abs(resume["width"] - 128) < 0.6

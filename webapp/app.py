@@ -23869,7 +23869,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     pq_rows_html = "".join(_pq_row(r) for r in pq_rows) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:24px;text-align:center;color:var(--muted);">' + pq_empty + '</div>')
-    pq_heading = "Recent questions rated helpful" if helpful_only else "Recent questions"
+    pq_heading = "Helpful questions only" if helpful_only else "All questions"
     # Search keeps the filter it was run under; the toggle flips it. Both are
     # submit buttons named "helpful", so one GET form carries either value.
     pq_keep = "1" if helpful_only else ""
@@ -23885,8 +23885,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
   <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
       style="flex:1 1 200px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
-    <button type="submit" name="helpful" value="{pq_keep}" class="ask-ctl ask-ctl-sm">Search</button>
-    <button type="submit" name="helpful" value="{pq_flip}" class="ask-ctl ask-ctl-sm" aria-pressed="{"true" if helpful_only else "false"}">Helpful only</button>
+    <button type="submit" name="helpful" value="{pq_keep}" class="ask-ctl ask-ctl-sm ask-ctl-w">Search</button>
+    <button type="submit" name="helpful" value="{pq_flip}" class="ask-ctl ask-ctl-sm ask-ctl-w" aria-pressed="{"true" if helpful_only else "false"}">Helpful only</button>
   </form>
   <h3 class="ask-pq-heading">{pq_heading}</h3>
   {pq_rows_html}
