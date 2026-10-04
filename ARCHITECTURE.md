@@ -327,15 +327,23 @@ state as of their own PR, not the current value; BRAND.md §5 is the one
 place that always reflects today's actual numbers.
 
 **FP&A Buddy top box (2026-10).** The question card holds, top to bottom, the
-"New question" label, the Depth and Sources controls (each under a visible
+Depth and Sources controls (each under a visible
 `<label>` header; two columns above 640px, stacked below with each panel directly
-under its button), then the text box with the icon send button inside it
+under its button), the "Start a new conversation" label (`.ask-q-label`), then the text box with the icon send button inside it
 (`#ask-btn`, bottom-right, disabled while empty or running). The grid
 (`.fpa-intro-layout`) is now three areas, intro, example and question; the old
 controls and action rows are gone. Admin cost estimates are
 `COST[tier] + EXA_UNIT` (one Exa search while Web is on and Exa is the provider),
 rendered in the Depth options and on the closed button; `/tools/fpa-buddy`
 injects `COST` and `EXA_UNIT` only for admins.
+
+**FP&A Buddy Done and Resume (2026-10).** The follow-up bubble has a footer with Done
+(`#fu-done`, `doneThread()`); Recent rows, the reader's own past-question rows and
+`/ask/history` carry Resume. `GET /tools/fpa-buddy?resume=<id>` opens that own
+conversation once through `resumeConvoById` and strips the parameter; ownership is
+still enforced by `/ask/conversations/{id}` (403, 404). `convoGen` makes an answer that
+returns after Done skip the screen and show up in Recent. The question card label
+"Start a new conversation" (`.ask-q-label`) now sits directly above the text box.
 
 **FP&A Buddy collapsed rows (2026-10).** Every past or recent question is a
 collapsed, click-expandable row. Past questions are `<details class="ask-pq-row">`

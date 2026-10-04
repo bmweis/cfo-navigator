@@ -2,7 +2,7 @@
 
 Four problems, each measured in rendered state first (390px, Chromium):
   - a reload dropped the reader out of their conversation (no state survived,
-    and the blue "New question" label looked tappable but did nothing);
+    and the blue "Start a new conversation" label looked tappable but did nothing);
   - the question title in "Search past questions" was squeezed beside the meta;
   - the source emoji sat outside its pill, so a long title pushed the pill
     below the emoji.
@@ -156,14 +156,14 @@ def _ask(pg, text):
 def test_new_question_label_is_a_label_for_the_box(buddy_html):
     """It looked tappable and did nothing. Now it focuses the box it names."""
     html, _ = buddy_html
-    m = re.search(r'<label[^>]*>New question', html)
+    m = re.search(r'<label[^>]*>Start a new conversation', html)
     assert m and 'for="ask-q"' in m.group(0)
 
 
 def test_tapping_the_new_question_label_focuses_the_box(phone):
     pg, _ = phone
     _open(pg)
-    pg.locator("label", has_text="New question").tap()
+    pg.locator("label", has_text="Start a new conversation").tap()
     assert pg.evaluate("document.activeElement.id") == "ask-q"
 
 

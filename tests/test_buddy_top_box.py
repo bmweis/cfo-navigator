@@ -97,12 +97,14 @@ def test_depth_and_sources_have_visible_headers_that_are_real_labels(admin_pg):
     assert not pg.is_visible("#ask-dd-top .ask-dd-k")
 
 
-def test_controls_sit_between_the_label_and_the_text_box(member_pg):
+def test_start_a_new_conversation_label_sits_directly_above_the_text_box(member_pg):
     pg = member_pg
     label = _box(pg, "label[for='ask-q']")
     controls = _box(pg, "#ask-dd-top")
     box = _box(pg, "#ask-q")
-    assert label["b"] <= controls["t"] and controls["b"] <= box["t"]
+    assert pg.inner_text("label[for='ask-q']").strip().lower() == "start a new conversation"
+    assert controls["b"] <= label["t"] and label["b"] <= box["t"]       # controls, then label, then box
+    assert box["t"] - label["b"] < 16                                    # directly above, like Follow-up
 
 
 def test_a_depth_panel_opens_directly_under_its_own_button(admin_pg):

@@ -48,7 +48,7 @@ def page_html(monkeypatch):
 
 
 def test_top_box_is_labelled_as_a_new_question_and_nothing_is_docked(page_html):
-    assert "New question" in page_html and "starts a new conversation" in page_html
+    assert "Start a new conversation" in page_html and "starts a new conversation" not in page_html
     assert 'onclick="doAsk()"' in page_html          # top button never says follow-up
     assert 'id="fu"' not in page_html                # the bubble is built by JS, on demand
     assert "ask-capped" not in page_html             # the limit message lives in the bubble

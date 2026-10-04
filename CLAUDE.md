@@ -6309,7 +6309,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   plain text, untouched.
 
 - **FP&A Buddy follow-up bubble (2026-10).** The top box on `/tools/fpa-buddy`
-  is always a NEW question (label "New question · starts a new conversation",
+  is always a NEW question (label "Start a new conversation", directly above the box, below Depth and Sources,
   button always "Ask"); a sticky follow-up bubble under the latest reply holds
   follow-ups and exists only once a conversation does. `doAsk(followUp)` is the
   one send path. Depth and sources are one state held by the top controls; the
@@ -6348,7 +6348,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   load the page reopens it through the same resume path. Own conversations only,
   enforced server-side as before: the transcript route answers 403 (someone else's)
   or 404 (unknown), and the page then drops the parameter and shows the empty
-  state, with no bubble. The blue "New question" text was a `<label>` with no
+  state, with no bubble. The blue "Start a new conversation" text (then "New question") was a `<label>` with no
   `for`, so tapping did nothing; it is now `for="ask-q"` and focuses the box.
   **Past-question and history titles** are `flex:1 1 280px;min-width:0` with the
   meta wrapping beneath on a phone (the title was squeezed to 171px beside the
@@ -6386,7 +6386,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   reload to reopen the thread or the button to carry text were rewritten.
 
 - **FP&A Buddy top box, Phase A (2026-10).** Depth and Sources moved inside the
-  question card, between the "New question" label and the text box, each under a
+  question card, above the "Start a new conversation" label and the text box, each under a
   visible header (a real wrapping `<label class="ask-dd-col">`, so the closed
   button shows only its value). Two columns above 640px; one stacked column below,
   where the open panel sits directly under its own button (the row dissolves with
@@ -13390,3 +13390,27 @@ terminal where you run `claude`), or Code will bill the API key instead of the
 subscription.
 
 - **Compare visuals and the agent label (2026-10, follow-up to #676).** Three picks from Brian's mocks, applied to both Compare pages in one change. (1) The AI summary card opens with an `h2.cmp-summary-h`, "How they compare" (`_CMP_SUMMARY_HEADING`), before its text; the footnote is unchanged and the cap-hit note has no heading. (2) The Bottom line row is a plain white row with a 3px `--navy` inset rule on its label (`box-shadow:inset 3px 0 0`, so it stays with the sticky label when scrolled), replacing the seafoam-wash fill; the rule is shared, so Software and Communities change together. Measured at 1280px: ink contrast 17.4 on the row, 6.54 for the white-on-navy band text unchanged. The tint option was rejected because a 10% navy-light tint (236,239,245) nearly matches the header row (238,241,247). (3) The agent field is "What its agents do" everywhere (`tool_labels.AGENT`), and `SECTION_AGENT` is the same constant, so the Compare row shows the field name once instead of "AI / Agent involvement". "How autonomous is it?" was dropped because the field holds a roster of agents and what each does, not a degree of autonomy. `EYEBROW_AGENT` ("AI agent capabilities") is a grouping name and is unchanged. The empty-state copy follows: "What this tool's agents do hasn't been documented." Labels only; no key or column changed. See `tests/test_compare_summary.py` and `tests/test_software_labels.py`.
+
+- **FP&A Buddy Done, Resume and one small-button height (2026-10, PR A).** Done is a
+  labelled button (`#fu-done`) in the follow-up bubble footer, lower right, in every
+  bubble state, no helper text. `doneThread()` clears the thread, restores Recent
+  conversations with the conversation at the top (highlighted 2.5s) and scrolls to the
+  top. A question still loading is allowed to finish: `convoGen` is bumped, the late
+  answer is not drawn (`stale()` in `doAsk`), `loadRecent()` shows it in Recent, and the
+  line "Your answer will appear in Recent." sits there until it lands. Because the
+  bubble only exists once a first answer has arrived, Done is reachable while a
+  follow-up loads, not while the first question loads. Resume is a labelled `.ask-ctl`
+  button lower right on Recent rows (the row is now a `div`; a tap on the row still
+  resumes), on the reader's own expanded past-question rows (own = `user_id` match and
+  a conversation id; other members' rows get none; a row tap stays expand), and on
+  `/ask/history` as a link to `/tools/fpa-buddy?resume=<id>`. The page opens that thread
+  once and strips the parameter (`setConvoUrl` deletes `resume`), so a reload goes back
+  to the collapsed state; the server still answers 403 or 404 for someone else's or an
+  unknown id and the page shows the empty state. `loadRecent()` no longer reopens the
+  Recent list when a thread is already open. Height rule: `_ASK_CTL_CSS` (`.ask-ctl`,
+  44px, the Depth and Sources control height and the touch minimum). Measured heights
+  at 390 and 1280: Search 48.4, Depth and Sources (top) 44, Depth (bubble) 40, feedback
+  chip 26, Done 44, Resume 44. The outliers (Search, bubble Depth, feedback chips) are
+  untouched, listed for the later sitewide control-height item. Rider: the top box
+  label reads "Start a new conversation" and sits directly above the text box, below
+  Depth and Sources (`.ask-q-label`). Tests: `tests/test_buddy_done_resume.py`.
