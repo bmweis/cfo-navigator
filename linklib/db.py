@@ -9307,7 +9307,9 @@ class Library:
         rows = self.conn.execute(
             f"""SELECT aq.*,
                        (SELECT COUNT(*) FROM ask_feedback f
-                         WHERE f.question_id = aq.id AND f.rating = 'helpful') AS helpful_count
+                         WHERE f.question_id = aq.id AND f.rating = 'helpful') AS helpful_count,
+                       (SELECT COUNT(*) FROM ask_feedback f
+                         WHERE f.question_id = aq.id AND f.rating <> 'helpful') AS negative_count
                   FROM ask_questions aq
                  WHERE aq.turn_index=0
                    AND NOT EXISTS (SELECT 1 FROM ask_feedback f

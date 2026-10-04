@@ -3,6 +3,7 @@ visibility rule (private / hidden never reach another user), and the free
 pre-send check route."""
 import importlib
 import os
+import re
 import tempfile
 
 import pytest
@@ -114,7 +115,7 @@ def test_inaccurate_followups_and_unrelated_never_suggested(site):
 def test_thumbs_up_ranks_first_and_at_most_three(site):
     client, ids, _ = site
     r = client("reader").post("/ask/similar", json={"question": Q}).json()["suggestions"]
-    assert len(r) <= 3 and r[0]["id"] == ids["helpful"] and r[0]["helpful"] is True
+    assert len(r) <= 3 and r[0]["id"] == ids["helpful"] and "Rated helpful" in r[0]["rating_html"]
 
 
 def test_requires_login_and_blank_is_empty(site):
@@ -155,3 +156,28 @@ def test_new_strings_pass_voice_lint_and_say_users_not_members():
     src = open("webapp/app.py").read()
     seg = src[src.index("// Similar questions"):src.index("// followUp=false")]
     assert "member" not in seg.lower() and " — " not in seg and "&amp;" not in seg
+
+
+def test_suggestions_draw_ratings_with_the_one_shared_function(site):
+    """Same markup as the past-questions list; the function is _ask_rating_html and
+    no rating markup is hand-built anywhere else on the Buddy surfaces."""
+    client, ids, _ = site
+    import webapp.app as appmod
+    c = client("reader")
+    got = _sugg(c)
+    assert got[ids["helpful"]]["rating_html"] == appmod._ask_rating_html(1, 0)
+    page = c.get("/tools/fpa-buddy").text
+    assert appmod._ask_rating_html(1, 0) in page          # the list row, same string
+    assert _sugg(c)[ids["shared"]]["rating_html"] == ""   # unrated: nothing
+    src = open("webapp/app.py").read()
+    for label in ("Rated helpful", "Rated mixed", "Rated not helpful"):
+        assert src.count(label) == 1, label               # defined once, in the function
+
+
+def test_suggestion_dates_are_yyyy_mm_dd(site):
+    client, ids, _ = site
+    for s in _sugg(client("reader")).values():
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", s["date"])
+    src = open("webapp/app.py").read()
+    seg = src[src.index("// Similar questions"):src.index("// followUp=false")]
+    assert "toLocale" not in seg and "Answered " not in seg

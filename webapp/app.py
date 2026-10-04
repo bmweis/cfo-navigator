@@ -23809,6 +23809,23 @@ _ASK_CTL_CSS = (
 )
 
 
+def _ask_rating_html(helpful_count, negative_count) -> str:
+    """The ONE place a past question's rating is drawn (the past-questions list
+    and the similar-question suggestions both call it). Plain emoji status, no
+    border or fill (only actions get those); plain code points only. Empty
+    string when unrated."""
+    hc, nc = int(helpful_count or 0), int(negative_count or 0)
+    if hc and not nc:
+        label, glyph = "Rated helpful", "&#128077;"
+    elif hc and nc:
+        label, glyph = "Rated mixed", "&#129335;"
+    elif nc:
+        label, glyph = "Rated not helpful", "&#128078;"
+    else:
+        return ""
+    return f'<span class="ask-pq-rate" role="img" aria-label="{label}" title="{label}">{glyph}</span>'
+
+
 def _ask_byline(row: dict, viewer_user_id: int | None, viewer_is_admin: bool) -> str | None:
     """Who a past-question row is credited to, for one viewer. Three cases,
     in this order: (1) the viewer asked it, "You" (checked first, so an admin
@@ -23871,17 +23888,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
       <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w ask-ctl-admin">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>
     </div>"""
-        hc, nc = int(r.get("helpful_count") or 0), int(r.get("negative_count") or 0)
-        # Plain emoji status, no border or fill (only actions get those); same
-        # standalone-span pattern as .tool-star. Plain code points only.
-        if hc and not nc:
-            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated helpful" title="Rated helpful">&#128077;</span>'
-        elif hc and nc:
-            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated mixed" title="Rated mixed">&#129335;</span>'
-        elif nc:
-            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated not helpful" title="Rated not helpful">&#128078;</span>'
-        else:
-            rating = ""
+        rating = _ask_rating_html(r.get("helpful_count"), r.get("negative_count"))
         # Meta: the left group is state and credit (Private, Hidden from members,
         # byline, date), each a nowrap segment with flex gaps, no literal
         # separators. The rating has its own fixed-width slot at the far right of
@@ -25016,7 +25023,7 @@ function simItemHtml(x) {{
   var tags = [];
   if (x.hidden) tags.push('<span>&#128683; Hidden</span>');
   if (x.private) tags.push('<span>&#128274; Private</span>');
-  if (x.helpful) tags.push('<span>&#10003; Helpful</span>');
+  if (x.rating_html) tags.push(x.rating_html);
   tags.push('<span>' + escapeHtml(x.date) + '</span>');
   var resume = x.resume_id ? '<div class="ask-sim-foot"><button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" data-cid="' +
     escapeHtml(x.resume_id) + '" onclick="simHide();resumeConvoById(this.dataset.cid)">Resume</button></div>' : '';
@@ -25243,7 +25250,7 @@ async def ask_similar(request: Request):
             "id": r["id"],
             "question": r.get("question") or "",
             "date": (r.get("created_at") or "")[:10],
-            "helpful": bool(r.get("helpful_count")),
+            "rating_html": _ask_rating_html(r.get("helpful_count"), r.get("negative_count")),
             "private": bool(r.get("is_private")),
             "hidden": bool(r.get("hidden_public")) and authed,
             "answer_html": a_html + src_html,
