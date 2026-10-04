@@ -23805,6 +23805,22 @@ _ASK_CTL_CSS = (
 )
 
 
+def _ask_byline(row: dict, viewer_user_id: int | None, viewer_is_admin: bool) -> str | None:
+    """Who a past-question row is credited to, for one viewer. Three cases,
+    in this order: (1) the viewer asked it, "You" (checked first, so an admin
+    sees "You" on their own questions); (2) someone else asked it and the
+    viewer is an admin, the stored full name; (3) a member viewing someone
+    else's question gets None (the asker is never named to other members).
+    "Own" is `user_id` equality, never a name comparison. The legacy
+    break-glass admin login has no user id, so no row is ever "own" there and
+    it falls to case 2."""
+    if viewer_user_id is not None and row.get("user_id") == viewer_user_id:
+        return "You"
+    if viewer_is_admin:
+        return row.get("asker_name") or row.get("asker_username") or "A member"
+    return None
+
+
 @app.get("/tools/fpa-buddy", response_class=HTMLResponse)
 def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = ""):
     # Member-gated: signed-in members and admin. Anonymous visitors go to login.
@@ -23843,19 +23859,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         usage_lib.close()
 
     def _pq_row(r: dict) -> str:
-        # Byline: members see the date only (the asker is never named to other
-        # members), "You" on their own rows; an admin sees the full stored name.
-        own = usage_user_id is not None and r.get("user_id") == usage_user_id
+        # Byline: one shared function (_ask_byline), three cases in order.
         date = _esc((r.get("created_at") or "")[:10])
-        if authed:
-            who = r.get("asker_name") or r.get("asker_username") or "A member"
-            byline = None   # built after the rating: name, rating, date
-            lead = _esc(who)
-        elif own:
-            byline = None   # built after the rating: "You", rating, date
-            lead = "You"
-        else:
-            byline = date
+        who = _ask_byline(r, usage_user_id, authed)
         admin_controls = ""
         if authed:
             admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
@@ -23872,13 +23878,18 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             rating = '<span class="ask-pq-rate" role="img" aria-label="Rated not helpful" title="Rated not helpful">&#128078;</span>'
         else:
             rating = ""
-        # Plain text, shown only to the asker and admins (the list never
-        # returns a private row to anyone else).
-        priv = '<span class="ask-pq-priv">&#128274; Private</span> ' if r.get("is_private") else ""
-        if byline is None:
-            meta_html = f"{lead} {priv}{rating} &middot; {date}" if (rating or priv) else f"{lead} &middot; {date}"
-        else:
-            meta_html = f"{rating}{byline}"
+        # Meta segments, emoji first so indicators line up down the list:
+        # rating, private marker, byline, date. Each segment is nowrap and the
+        # gaps are flex gaps (no literal separators to orphan at a line end).
+        # The private marker is plain text, shown only to the asker and admins
+        # (the list never returns a private row to anyone else).
+        segs = [rating] if rating else []
+        if r.get("is_private"):
+            segs.append('<span class="ask-pq-seg ask-pq-priv">&#128274; Private</span>')
+        if who is not None:
+            segs.append(f'<span class="ask-pq-seg">{_esc(who)}</span>')
+        segs.append(f'<span class="ask-pq-seg ask-pq-date">{date}</span>')
+        meta_html = "".join(segs)
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
@@ -24294,14 +24305,18 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 
 .ask-pq-row{{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}}
 .ask-pq-row[open]{{border-color:var(--navy);}}
-.ask-pq-sum{{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;}}
+.ask-pq-sum{{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;}}
 .ask-pq-sum::-webkit-details-marker{{display:none;}}
 .ask-pq-sum:hover{{background:var(--accent-light);border-radius:8px;}}
 .ask-pq-rc{{font-size:12px;color:var(--navy);transition:transform .12s;flex-shrink:0;}}
 .ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{{transform:rotate(90deg);}}
-.ask-pq-q{{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);}}
-.ask-pq-meta{{font-size:12px;color:var(--muted);flex-shrink:0;max-width:45%;text-align:right;margin-left:auto;}}
-.ask-pq-rate{{font-size:14px;margin-right:4px;}}
+.ask-pq-q{{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}}
+.ask-pq-row[open] .ask-pq-q{{display:block;overflow:visible;}}
+.ask-pq-meta{{flex:0 0 100%;order:3;margin-left:22px;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}}
+.ask-pq-seg,.ask-pq-rate{{white-space:nowrap;}}
+.ask-pq-rate{{font-size:14px;}}
+@media(min-width:700px){{.ask-pq-meta{{flex:0 1 auto;order:0;margin-left:auto;justify-content:flex-end;max-width:50%;}}}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
 .ask-pq-heading{{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
 .ask-recent-item{{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;box-sizing:border-box;

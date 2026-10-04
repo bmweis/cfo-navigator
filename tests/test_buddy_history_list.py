@@ -113,10 +113,10 @@ def test_bylines_by_viewer(site):
     member = _section(client("reader").get("/tools/fpa-buddy").text)
     assert "Alexandra" not in member and "author" not in member.replace("Helpful first", "")
     assert "A member" not in member
-    assert re.search(r"You &middot; \d{4}-\d{2}-\d{2}", member)
+    assert re.search(r'<span class="ask-pq-seg">You</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span>', member)
     admin = _section(client("boss").get("/tools/fpa-buddy").text)
-    # name first, then the rating, then the date (rated row), or name and date (unrated)
-    assert re.search(r"Alexandra Author\s*<span class=\"ask-pq-rate\"[^>]*>&#128077;</span> &middot; \d{4}-\d{2}-\d{2}", admin)
+    # rating first, then the name, then the date
+    assert re.search(r'<span class="ask-pq-rate"[^>]*>&#128077;</span><span class="ask-pq-seg">Alexandra Author</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span>', admin)
 
 
 def test_anonymize_is_retired_and_remove_is_relabelled(site):
@@ -170,14 +170,17 @@ def test_browser_heights_widths_and_touch_target(site):
                 assert abs((search["y"] + 14) - (field["y"] + field["height"] / 2)) < 1.5
             else:           # at 390 the pair wraps to its own row beneath the input
                 assert search["y"] > field["y"] + field["height"]
-            # rating and date sit in the row's top-right corner, level with the first line
+            # at desktop width the meta sits in the row's top-right corner
             geo = pg.evaluate("""()=>{const r=document.querySelector('.ask-pq-row'),
                 s=r.querySelector('.ask-pq-sum').getBoundingClientRect(),
                 m=r.querySelector('.ask-pq-meta').getBoundingClientRect(),
                 q=r.querySelector('.ask-pq-q').getBoundingClientRect();
                 return {sr:s.right,st:s.top,mr:m.right,mt:m.top,qr:q.right,ml:m.left}}""")
-            assert geo["sr"] - geo["mr"] < 16 and geo["mt"] - geo["st"] < 16
-            assert geo["qr"] <= geo["ml"] + 0.5      # question never runs under the meta
+            if w >= 700:
+                assert geo["sr"] - geo["mr"] < 16 and geo["mt"] - geo["st"] < 16
+                assert geo["qr"] <= geo["ml"] + 0.5      # question never runs under the meta
+            else:
+                assert geo["mt"] > geo["st"] + 10        # stacked under the title
             if resume:
                 assert abs(resume["height"] - 28) < 0.6
                 assert abs(resume["width"] - 128) < 0.6
@@ -208,15 +211,16 @@ def test_each_row_shows_a_labelled_rating(site):
     assert rate_css and "border" not in rate_css and "background" not in rate_css
 
 
-def test_own_row_puts_you_left_of_the_rating(site):
+def test_own_row_meta_order_is_rating_then_you_then_date(site):
     client, ids, _ = site
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     def meta(q):
         i = sec.index(q)
         return sec[i:sec.index("</summary>", i)]
     rated = meta("My own rated question")
-    assert rated.index("You") < rated.index("ask-pq-rate") < rated.index("&#128077;") < rated.index("20")
-    assert "ask-pq-rate" not in meta("My own question") and "You &middot; 20" in meta("My own question")
+    assert rated.index("ask-pq-rate") < rated.index(">You<") < rated.index("ask-pq-date")
+    plain = meta("My own question")
+    assert "ask-pq-rate" not in plain and plain.index(">You<") < plain.index("ask-pq-date")
 
 
 def test_rating_emoji_strings_pass_the_voice_and_typography_scanners():

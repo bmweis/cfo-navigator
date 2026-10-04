@@ -13499,3 +13499,23 @@ subscription.
   appear...". PR C (suggestions) depends on this flag. Chromium tests (label
   fit, thread toggle position) skip in CI; WebKit unverified. Copy freshness
   gate: no database-stored copy is stale. Tests: `tests/test_buddy_keep_private.py`.
+
+- **Past-question row layout and byline order (2026-10, B2, separate commit).**
+  On a phone the row stacks: the title takes the row width and the meta sits on
+  its own line under it (measured at 390px with the longest production titles:
+  title 152px wide and 779px tall before, 296px wide and clamped after). At
+  700px and up the single line returns (title left, meta right); 768px measured
+  fine, 700px is the switch. The collapsed title clamps to two lines with an
+  ellipsis, like Recent rows; the expanded row shows it whole (display only,
+  nothing stored is shortened, so this is a third allowed clamp beside the two
+  directory cards). Meta order is rating, Private marker, byline, date; each is a
+  nowrap segment and gaps are flex gaps, so there are no literal separators to
+  orphan. **Byline rule, one function (`_ask_byline`):** the viewer's own row
+  reads "You" first (an admin included, by `user_id` equality, never by name),
+  then an admin sees another asker's stored name, then a member sees nothing.
+  The break-glass admin login has no `user_id`, so nothing is "own" there and it
+  shows stored names. Other name renderers (admin report, admin feedback card)
+  are admin-only pages that always name the asker; `/ask/history`, Recent and the
+  open thread show only the viewer's own questions with no byline. Tests:
+  `tests/test_buddy_row_layout.py`.
+
