@@ -674,7 +674,7 @@ follow-up never sent. Tests: `tests/test_buddy_dropdown_controls.py`.
 **While a conversation is open (2026-10).** A `MutationObserver` on `#ask-thread`
 toggles `.fpa-thread-open` on `#fpa-page` whenever the thread gains or loses its
 first child, so the behavior holds for every entry path (top Ask, Recent row,
-`?c=` reload, Start a new question). Open: `.fpa-intro-area-example` is
+`?c=` reload, Start a new conversation). Open: `.fpa-intro-area-example` is
 `display:none` and `.fpa-intro-layout` switches to one column
 (`_intro_areas_thread`, the desktop areas minus `example`); `#past-questions`, now
 a `<details>` with an inert summary in the empty state, is folded to its summary
@@ -5794,7 +5794,7 @@ Details worth knowing:
   `doAsk(true)`, which sends the existing `convoId` (the server still rebuilds
   history itself; follow-up limits and cost are unchanged). The limit message
   moved out of the old `#ask-capped` box into the bubble's `limit` state, which
-  also offers "Start a new question" (`resetConvo()`). **Depth and sources stay
+  also offers "Start a new conversation" (`resetConvo()`). **Depth and sources stay
   one state, held by the top controls:** the bubble's chips are clones with no
   ids, `selectTier`/`toggleSource` update every chip with the same
   `data-tier`/`data-source`, `activeSources()` reads only

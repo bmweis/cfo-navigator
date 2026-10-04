@@ -91,7 +91,7 @@ def test_mocked_illustrative_example_does_not_carry_the_suggest_link(env):
     resp = c.get("/tools/fpa-buddy")
     body = resp.text
     example_start = body.index('class="ask-example"')
-    example_end = body.index('class="ask-example-caption"')
+    example_end = body.index('class="fpa-intro-area-question"')
     example_html = body[example_start:example_end]
     assert SUGGEST_TEXT not in example_html
     assert "ask-src-static" in example_html  # sanity: still the static fake sources
