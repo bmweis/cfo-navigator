@@ -185,10 +185,22 @@ def test_each_row_shows_a_labelled_rating(site):
     def meta(q):
         i = sec.index(q)
         return sec[i:sec.index("</summary>", i)]
-    assert 'ask-pq-rate-yes">Helpful<' in meta("Helpful first question")
-    assert 'ask-pq-rate-none">Not rated<' in meta("Unrated first question")
-    assert 'ask-pq-rate-no">Not helpful<' in meta("Not helpful first question")
-    assert 'ask-pq-rate-mix">Mixed<' in meta("Mixed first question")
+    assert 'aria-label="Rated helpful"' in meta("Helpful first question")
+    assert "&#128077;" in meta("Helpful first question")
+    assert "ask-pq-rate" not in meta("Unrated first question")
+    assert "Not rated" not in sec
+    assert 'aria-label="Rated not helpful"' in meta("Not helpful first question")
+    m = meta("Mixed first question")
+    assert 'aria-label="Rated mixed"' in m and "&#128077;&#128078;" in m
     css = client("reader").get("/tools/fpa-buddy").text
     rate_css = "".join(l for l in css.splitlines() if l.startswith(".ask-pq-rate"))
-    assert rate_css and "coral" not in rate_css
+    assert rate_css and "border" not in rate_css and "background" not in rate_css
+
+
+def test_rating_emoji_strings_pass_the_voice_and_typography_scanners():
+    from html import unescape
+    from linklib.voice_review import mechanical_findings, typography_findings_plain
+    for ent in ("&#128077;", "&#128078;", "&#128077;&#128078;"):
+        t = unescape(ent)
+        assert all(0x1F300 <= ord(c) <= 0x1FAFF for c in t)   # no ZWJ, selector or skin tone
+        assert not mechanical_findings(t) and not typography_findings_plain(t)

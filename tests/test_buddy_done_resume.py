@@ -158,7 +158,7 @@ def test_done_sits_lower_right_of_the_bubble_not_in_the_feedback_row(view):
     _ask(pg)
     b, f = _box(pg, "#fu-done"), _box(pg, "#fu")
     assert pg.inner_text("#fu-done").strip() == "Done"
-    assert b["h"] >= 44
+    assert abs(b["h"] - 28) < 0.6 and abs(b["w"] - 128) < 0.6
     assert f["r"] - b["r"] < 20 and b["b"] <= f["b"]                    # lower right of the bubble
     assert b["t"] >= _box(pg, "#fu-q")["b"]                              # below the follow-up box
     assert pg.locator(".ask-fb #fu-done, .ask-fb-row #fu-done").count() == 0
@@ -282,6 +282,6 @@ def test_done_and_resume_match_the_depth_and_sources_control_height(view):
     resume = _box(pg, ".ask-recent-item .ask-ctl")["h"]
     _ask(pg)
     done = _box(pg, "#fu-done")["h"]
-    # Done and the dropdowns stay 44px; Resume is the compact 28px button with a
+    # Dropdowns stay 44px; Done and Resume are the compact 28px button with a
     # 44px touch target (the sitewide control-height item will reconcile the rest).
-    assert dd >= 44 and abs(dd - done) < 0.5 and abs(resume - 28) < 0.6
+    assert dd >= 44 and abs(done - 28) < 0.6 and abs(resume - 28) < 0.6

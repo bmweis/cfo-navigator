@@ -23837,14 +23837,16 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
       <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w">Remove from view</button></form>
     </div>"""
         hc, nc = int(r.get("helpful_count") or 0), int(r.get("negative_count") or 0)
+        # Plain emoji status, no border or fill (only actions get those); same
+        # standalone-span pattern as .tool-star. Plain code points only.
         if hc and not nc:
-            rating = '<span class="ask-pq-rate ask-pq-rate-yes">Helpful</span>'
+            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated helpful" title="Rated helpful">&#128077;</span>'
         elif hc and nc:
-            rating = '<span class="ask-pq-rate ask-pq-rate-mix">Mixed</span>'
+            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated mixed" title="Rated mixed">&#128077;&#128078;</span>'
         elif nc:
-            rating = '<span class="ask-pq-rate ask-pq-rate-no">Not helpful</span>'
+            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated not helpful" title="Rated not helpful">&#128078;</span>'
         else:
-            rating = '<span class="ask-pq-rate ask-pq-rate-none">Not rated</span>'
+            rating = ""
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
@@ -24261,10 +24263,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{{transform:rotate(90deg);}}
 .ask-pq-q{{flex:1 1 240px;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);}}
 .ask-pq-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
-.ask-pq-rate{{display:inline-block;margin-right:8px;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:1.5;border:1px solid var(--line);color:var(--muted);}}
-.ask-pq-rate-yes{{background:var(--seafoam-wash);border-color:var(--seafoam);color:var(--navy);}}
-.ask-pq-rate-mix,.ask-pq-rate-no{{color:var(--navy);}}
-.ask-pq-rate-none{{border-color:transparent;padding-left:0;font-weight:400;}}
+.ask-pq-rate{{font-size:14px;margin-right:4px;}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
 .ask-pq-heading{{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
 .ask-recent-item{{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;box-sizing:border-box;
@@ -24751,7 +24750,7 @@ function fuRender(state) {{
   // Footer: Done, lower right, in every state (ready, busy, limit).
   var foot = document.createElement('div');
   foot.className = 'fu-foot';
-  foot.innerHTML = '<button type="button" class="ask-ctl" id="fu-done" onclick="doneThread()">Done</button>';
+  foot.innerHTML = '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="fu-done" onclick="doneThread()">Done</button>';
   f.appendChild(foot);
   thread.appendChild(f);
   updateEstimate(); fuSummary();

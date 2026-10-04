@@ -13457,14 +13457,18 @@ subscription.
   visible, 44px touch target from a `::after` that adds no layout height) and
   `.ask-ctl-w` (one shared 128px width) in `_ASK_CTL_CSS`; Resume (Recent rows,
   expanded own past-question rows, `/ask/history`), Remove from view, Search and
-  Helpful only use them; buttons that sit next to each other share one width. Done and the other existing buttons were not restyled
-  (Done 44px, top Search/Depth/Sources 44px, feedback chips 26px, bubble Depth
-  40px: for the sitewide control-height item). The intro line reads "Search before
-  running your query." **Rating label on every row:** a small labelled chip in
-  the row's meta, from `helpful_count`/`negative_count` (two subqueries on
-  `ask_feedback`): "Helpful" (seafoam wash, navy text), "Mixed" (helpful and
-  not-helpful both present), "Not helpful" (outlined, navy text), "Not rated"
-  (plain muted text). No coral. **Search was restyled** from the 48px default
+  Helpful only use them; buttons that sit next to each other share one width. **Done
+  was restyled to the same 128x28 button (44px touch target), overruling the PR A
+  "leave Done" note**; Depth and Sources (44px), feedback chips (26px) and bubble
+  Depth (40px) stay for the sitewide control-height item. The intro line reads
+  "Search before running your query." **Rating on every row:** plain emoji with no
+  border or fill (only actions get those), same standalone-span pattern as
+  `.tool-star`, 14px, just left of the date, from `helpful_count`/`negative_count`:
+  &#128077; helpful, &#128078; not helpful, &#128077;&#128078; mixed (two code points,
+  no joiner), nothing when not rated. Each is `role="img"` with `aria-label` ("Rated
+  helpful" etc.) and `title`; plain code points only, so the invisible-character lint
+  stays quiet. The sandbox may lack a colour emoji font; check the real look on iPhone.
+  **Search was restyled** from the 48px default
   button to the shared 28px compact button, because it sits in one row with the
   new Helpful only button. **Not in this PR:** Keep private /
   Set private, the ask-box note, `/privacy` copy, and the `/ask/history` intro
