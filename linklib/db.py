@@ -2580,6 +2580,10 @@ class Library:
             # for any turn where the call never completed; counts only
             # start after this deploy. No UI, measurement only.
             "ALTER TABLE ask_questions ADD COLUMN stop_reason TEXT NOT NULL DEFAULT ''",
+            # FP&A Buddy Keep private (2026-10): 1 = the asker keeps this
+            # conversation out of the member-visible past-questions list.
+            # Set on every turn of a conversation together; admins still see it.
+            "ALTER TABLE ask_questions ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE matchmaker_questions ADD COLUMN stop_reason TEXT NOT NULL DEFAULT ''",
             # Current Feed (/current-feed, 2026-09) — replaces the original
             # section-name-matching design (Blogs=Side A, Substacks=Side B,
@@ -8967,7 +8971,8 @@ class Library:
                             embed_input_tokens: int = 0, embed_cost_usd: float = 0.0,
                             exa_result_count: int = 0, exa_cost_usd: float = 0.0,
                             citations: Optional[list[dict]] = None,
-                            stop_reason: str = "") -> int:
+                            stop_reason: str = "",
+                            is_private: bool = False) -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
@@ -8995,15 +9000,15 @@ class Library:
                 rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
                 embed_input_tokens, embed_cost_usd,
                 exa_result_count, exa_cost_usd,
-                citations_json, stop_reason, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                citations_json, stop_reason, is_private, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
              cost_usd, rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
              embed_input_tokens, embed_cost_usd,
              exa_result_count, exa_cost_usd,
-             json.dumps(citations or []), stop_reason or "", now),
+             json.dumps(citations or []), stop_reason or "", int(bool(is_private)), now),
         )
         row_id = cur.lastrowid
         if not conversation_id:
@@ -9267,6 +9272,7 @@ class Library:
             """SELECT aq.conversation_id,
                       COUNT(*) AS turns,
                       MAX(aq.created_at) AS last_at,
+                      MAX(aq.is_private) AS is_private,
                       (SELECT q2.question FROM ask_questions q2
                        WHERE q2.conversation_id = aq.conversation_id
                        ORDER BY q2.turn_index, q2.id LIMIT 1) AS first_question
@@ -9279,7 +9285,9 @@ class Library:
         return [dict(r) for r in rows]
 
     def list_public_ask_questions(self, query: str = "", limit: int = 200,
-                                   helpful_only: bool = False) -> list[dict]:
+                                   helpful_only: bool = False,
+                                   viewer_id: int | None = None,
+                                   see_private: bool = False) -> list[dict]:
         """Non-hidden Q&A for the community browse view, newest first, optionally
         text-filtered on question/answer. First turns only (`turn_index = 0`):
         a follow-up has no meaning without its thread, so it is never a
@@ -9294,7 +9302,10 @@ class Library:
         helpful. ask_feedback carries no declared FK to ask_questions, so
         this is matched by question_id convention, same as everywhere else
         that joins the two tables. Each row also carries helpful_count and
-        negative_count (the list shows a rating label per row)."""
+        negative_count (the list shows a rating label per row).
+        A private conversation (`is_private`) is listed only for its own asker
+        (`viewer_id`) and for an admin (`see_private`); every other member
+        never gets the row at all."""
         base = """SELECT aq.*, u.username AS asker_username, u.name AS asker_name,
                          (SELECT COUNT(*) FROM ask_feedback f
                            WHERE f.question_id = aq.id AND f.rating = 'helpful') AS helpful_count,
@@ -9303,6 +9314,9 @@ class Library:
                   FROM ask_questions aq LEFT JOIN users u ON u.id = aq.user_id
                   WHERE aq.hidden_public=0 AND aq.turn_index=0"""
         params: list = []
+        if not see_private:
+            base += " AND (aq.is_private=0 OR aq.user_id=?)"
+            params.append(viewer_id if viewer_id is not None else -1)
         if helpful_only:
             base += """ AND EXISTS (
                 SELECT 1 FROM ask_feedback f
@@ -9317,6 +9331,20 @@ class Library:
         params.append(limit)
         rows = self.conn.execute(base, params).fetchall()
         return [dict(r) for r in rows]
+
+    def set_conversation_private(self, conversation_id: str, user_id: int,
+                                 private: bool) -> int:
+        """Mark every turn of one of `user_id`'s conversations private (or
+        shared again). Private covers the whole conversation. Returns the
+        number of rows changed; 0 means nothing of theirs matched."""
+        if not conversation_id:
+            return 0
+        cur = self.conn.execute(
+            "UPDATE ask_questions SET is_private=? WHERE conversation_id=? AND user_id=?",
+            (int(bool(private)), conversation_id, user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount
 
     def set_ask_question_hidden(self, question_id: int, hidden: bool) -> None:
         """Remove (or restore) a Q&A from the public community view only —

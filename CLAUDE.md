@@ -13477,3 +13477,25 @@ subscription.
   rewrite (that sentence carries the "some of your questions may appear" disclosure,
   which must not go until the ask-box note replaces it). Tests:
   `tests/test_buddy_history_list.py`.
+
+- **FP&A Buddy Keep private, PR B2 (2026-10).** `ask_questions.is_private`
+  (migration-added) covers the whole conversation: set from an ask-time checkbox
+  (`#ask-private`, sent as `private` on the first turn only; a follow-up
+  inherits it server-side in `run_ask`) and flipped later by "Make private" /
+  "Allow sharing" (`.ask-ctl-sm .ask-ctl-w`, 128x28, 44px touch target). The
+  toggle lives left of Done in the open thread (`POST
+  /ask/conversations/{id}/private`, JSON) and in the footer of the reader's own
+  expanded past-question rows (`POST /questions/{id}/private`, form, redirect);
+  both are owner-only (403 otherwise) and move every turn together. Recent rows
+  keep a single Resume. **A private question is never returned to another member**:
+  `list_public_ask_questions` takes `viewer_id` and `see_private`; the asker sees
+  their own, an admin sees all, with a plain "&#128274; Private" in the meta line
+  (Recent rows, the list, admin rows). Ask-box note: "Other members see this
+  without your name. Admins see every question. Privacy policy" (trimmed from
+  the first draft at Brian's call; the longer confidentiality advice moved to
+  `/privacy`, which gained an FP&A Buddy questions section, last-updated date
+  bumped). The `/ask/history` intro lost "Some of your questions may also
+  appear..." in favor of "Unless you mark a question private, it may also
+  appear...". PR C (suggestions) depends on this flag. Chromium tests (label
+  fit, thread toggle position) skip in CI; WebKit unverified. Copy freshness
+  gate: no database-stored copy is stale. Tests: `tests/test_buddy_keep_private.py`.

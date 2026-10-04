@@ -8469,7 +8469,7 @@ async def contact_submit(request: Request):
 def privacy_page(request: Request):
     body = """<div class="page page-form">
 <h1>Privacy notice</h1>
-<p style="color:var(--muted);margin-top:-8px;"><em>Last updated: July 15, 2026</em></p>
+<p style="color:var(--muted);margin-top:-8px;"><em>Last updated: October 4, 2026</em></p>
 
 <p>This site (bmweis.com) is a personal project. It doesn't run ads, doesn't sell data, and doesn't share what it collects with anyone outside what's described below.</p>
 
@@ -8491,6 +8491,9 @@ def privacy_page(request: Request):
 
 <h2>If you create an account</h2>
 <p>Some parts of the site (the research library, FP&amp;A Buddy) require a member account. Account passwords are stored using one-way hashing, never in plain text. Logging in sets a separate cookie that identifies your session; it doesn't track browsing elsewhere on the internet.</p>
+
+<h2>FP&amp;A Buddy questions</h2>
+<p>Questions you ask FP&amp;A Buddy are stored with your account so you can resume them and see your own history. By default, other members can see a question and its answer in the past-questions list, without your name. Admins can see every question and who asked it. If you tick "Keep this question private" when you ask, or use "Make private" afterward, other members never see that conversation. Admins still can. Leave out company names and figures you want kept confidential, since admins can read everything.</p>
 
 <h2>Contact form</h2>
 <p>Messages sent through the contact form are stored so I can respond to them, and are not used for anything else.</p>
@@ -23739,6 +23742,25 @@ async def community_question_hide(request: Request, question_id: int):
     return RedirectResponse("/tools/fpa-buddy#past-questions", status_code=303)
 
 
+@app.post("/questions/{question_id}/private")
+async def own_question_toggle_private(request: Request, question_id: int):
+    """Flip the privacy of the signed-in member's own conversation from a
+    past-question row. Own rows only: anything else is a 403."""
+    _require_member(request)
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        row = lib.get_ask_question(question_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="not found")
+        if user_id is None or row["user_id"] != user_id or not row.get("conversation_id"):
+            raise HTTPException(status_code=403, detail="not your question")
+        lib.set_conversation_private(row["conversation_id"], user_id, not bool(row.get("is_private")))
+    finally:
+        lib.close()
+    return RedirectResponse("/tools/fpa-buddy#past-questions", status_code=303)
+
+
 # ---------------------------------------------------------------------------
 # API endpoints
 # ---------------------------------------------------------------------------
@@ -23810,7 +23832,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         # ask_feedback.rating='helpful' row, so a member searching here only
         # ever finds answers someone already vouched for.
         helpful_only = helpful == "1"
-        pq_rows = usage_lib.list_public_ask_questions(query=pq, limit=200, helpful_only=helpful_only)
+        pq_rows = usage_lib.list_public_ask_questions(query=pq, limit=200, helpful_only=helpful_only,
+                                                      viewer_id=usage_user_id, see_private=authed)
         # One Exa call per turn when the web source is on and Exa (not the native
         # tool) is the provider; nothing else a turn does calls Exa. Admin-only.
         from linklib.agent import _web_provider
@@ -23849,8 +23872,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             rating = '<span class="ask-pq-rate" role="img" aria-label="Rated not helpful" title="Rated not helpful">&#128078;</span>'
         else:
             rating = ""
+        # Plain text, shown only to the asker and admins (the list never
+        # returns a private row to anyone else).
+        priv = '<span class="ask-pq-priv">&#128274; Private</span> ' if r.get("is_private") else ""
         if byline is None:
-            meta_html = f"{lead} {rating} &middot; {date}" if rating else f"{lead} &middot; {date}"
+            meta_html = f"{lead} {priv}{rating} &middot; {date}" if (rating or priv) else f"{lead} &middot; {date}"
         else:
             meta_html = f"{rating}{byline}"
         q_txt = _esc(r.get("question") or "")
@@ -23860,7 +23886,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         # row gets nothing. The server still decides (403 for someone else's).
         resume_html = ""
         if usage_user_id is not None and r.get("user_id") == usage_user_id and r.get("conversation_id"):
-            resume_html = (f'<div class="ask-pq-foot"><button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" '
+            priv_label = "Allow sharing" if r.get("is_private") else "Make private"
+            resume_html = (f'<div class="ask-pq-foot">'
+                           f'<form method="post" action="/questions/{r["id"]}/private" style="margin:0;">'
+                           f'<button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w">{priv_label}</button></form>'
+                           f'<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" '
                            f'data-cid="{_esc(r["conversation_id"])}" onclick="resumeConvoById(this.dataset.cid)">Resume</button></div>')
         # A native <details>, closed on every load: the row is the question,
         # byline and a chevron; the answer, sources and admin buttons are the
@@ -24067,6 +24097,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?">{pre_q}</textarea>
         <button type="button" class="fu-send ask-send" id="ask-btn" onclick="doAsk()" aria-label="Ask" title="Ask"{'' if q.strip() else ' disabled'}><span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button>
       </div>
+      <label class="ask-priv-opt"><input type="checkbox" id="ask-private"><span>Keep this question private</span></label>
+      <p class="ask-priv-note">Other members see this without your name. Admins see every question. <a href="/privacy">Privacy policy</a></p>
     </div>
   </div>
 </div>
@@ -24295,6 +24327,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu{{position:sticky;bottom:8px;z-index:20;margin:16px 0 8px;max-width:88%;background:#fff;border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 -4px 24px rgba(11,31,77,.14);}}
 /* The limit message is not worth floating over the reply it follows. */
 .fu.fu-limited{{position:static;box-shadow:none;}}
+.ask-priv-opt{{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px;color:var(--ink);cursor:pointer;margin-top:6px;}}
+.ask-priv-opt input{{width:20px;height:20px;flex:none;margin:0;}}
+.ask-priv-note{{margin:0 0 0 30px;font-size:13px;line-height:1.5;color:var(--muted);}}
+.ask-priv-note a{{color:var(--muted);}}
+.ask-pq-priv{{white-space:nowrap;}}
 .ask-q-label{{display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 8px;}}
 .fu-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;}}
 .fu-limit{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}
@@ -24493,6 +24530,7 @@ document.addEventListener('DOMContentLoaded', function() {{
 
 var asked = false;
 var convoGen = 0;       // bumped by Done and a new thread; an answer from an older generation is not drawn
+var convoPrivate = false;   // the open conversation's privacy (set from the server)
 var convoId = null;    // the server-side conversation to continue; set from the
                        // first response (or a resumed conversation). The server
                        // rebuilds history from its own records — no turn text
@@ -24672,7 +24710,7 @@ function setConvoUrl(id) {{
   }} catch(e) {{}}
 }}
 function resetConvo() {{
-  convoGen++; asked = false; convoId = null; setConvoUrl(null);
+  convoGen++; asked = false; convoId = null; convoPrivate = false; setConvoUrl(null);
   document.getElementById('ask-thread').innerHTML = '';
   var rec = document.getElementById('ask-recent');
   if (rec.innerHTML) rec.style.display = 'block';
@@ -24756,10 +24794,33 @@ function fuRender(state) {{
   // Footer: Done, lower right, in every state (ready, busy, limit).
   var foot = document.createElement('div');
   foot.className = 'fu-foot';
-  foot.innerHTML = '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="fu-done" onclick="doneThread()">Done</button>';
+  // Make private / Allow sharing sits left of Done once the conversation has an id.
+  foot.innerHTML = (convoId && state !== 'busy'
+      ? '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="fu-priv" onclick="togglePrivate()">' +
+        (convoPrivate ? 'Allow sharing' : 'Make private') + '</button>' : '') +
+    '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="fu-done" onclick="doneThread()">Done</button>';
   f.appendChild(foot);
   thread.appendChild(f);
   updateEstimate(); fuSummary();
+}}
+// Flip the open conversation between private and shared. The server decides
+// (own conversations only); the page follows its answer.
+async function togglePrivate() {{
+  var cid = convoId, btn = document.getElementById('fu-priv');
+  if (!cid) return;
+  var want = !convoPrivate;
+  try {{
+    var resp = await fetch('/ask/conversations/' + encodeURIComponent(cid) + '/private', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ private: want }}) }});
+    if (!resp.ok) return;
+    convoPrivate = want;
+    if (btn) btn.textContent = want ? 'Allow sharing' : 'Make private';
+    var items = document.querySelectorAll('#ask-recent .ask-recent-item');
+    for (var i = 0; i < items.length; i++)
+      if (items[i].getAttribute('data-cid') === cid) items[i].outerHTML = '';
+    recentUpsert(cid, !!document.querySelector('#fu.fu-limited'));
+  }} catch(e) {{}}
 }}
 // Done: put the screen back to the clean start. The conversation stays in
 // Recent conversations (highlighted for a moment). If a question is still
@@ -24767,7 +24828,7 @@ function fuRender(state) {{
 function doneThread() {{
   var loading = !!document.querySelector('#ask-thread .ask-loading');
   var cid = convoId;
-  convoGen++; asked = false; convoId = null; setConvoUrl(null);
+  convoGen++; asked = false; convoId = null; convoPrivate = false; setConvoUrl(null);
   document.getElementById('ask-thread').innerHTML = '';
   topBusy = false; topSync();
   var rec = document.getElementById('ask-recent');
@@ -24808,7 +24869,7 @@ function recentItemHtml(c) {{
   // row does the same thing, the button is the visible, keyboard-reachable one.
   return '<div class="ask-recent-item" data-cid="' + escapeHtml(c.conversation_id) + '" onclick="resumeConvo(this)">' +
          '<span class="ask-recent-q">' + escapeHtml(c.first_question) + '</span>' +
-         '<div class="ask-recent-foot"><span class="ask-recent-meta">' + relTime(c.last_at) + ' &middot; ' +
+         '<div class="ask-recent-foot"><span class="ask-recent-meta">' + (c.private ? '&#128274; Private &middot; ' : '') + relTime(c.last_at) + ' &middot; ' +
          c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span>' +
          '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" onclick="event.stopPropagation();resumeConvo(this.closest(\\'.ask-recent-item\\'))">Resume</button></div></div>';
 }}
@@ -24844,7 +24905,8 @@ function recentUpsert(cid, atLimit) {{
   var holder = document.createElement('div');
   holder.innerHTML = recentItemHtml({{
     conversation_id: cid, first_question: bubbles[0].textContent,
-    turns: bubbles.length, last_at: new Date().toISOString(), capped: !!atLimit}});
+    turns: bubbles.length, last_at: new Date().toISOString(), capped: !!atLimit,
+    private: convoPrivate}});
   box.querySelector('.ask-section-label').insertAdjacentElement('afterend', holder.firstChild);
   var all = box.querySelectorAll('.ask-recent-item');
   for (var j = RECENT_MAX; j < all.length; j++) all[j].remove();
@@ -24890,6 +24952,7 @@ async function resumeConvoById(cid) {{
     }});
     collapseEarlierTurns();
     convoId = d.conversation_id;
+    convoPrivate = !!d.private;
     asked = true; setConvoUrl(convoId);
     document.getElementById('ask-recent').style.display = 'none';
     fuRender(d.capped ? 'limit' : 'ready');
@@ -24955,7 +25018,8 @@ async function doAsk(followUp) {{
     var resp = await fetch('/ask', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{ question: q, effort: effort, sources: sources, conversation_id: convoId }})
+      body: JSON.stringify({{ question: q, effort: effort, sources: sources, conversation_id: convoId,
+        private: (!followUp && !convoId) ? !!(document.getElementById('ask-private') || {{}}).checked : undefined }})
     }});
     var d = await resp.json();
     if (stale()) {{ if (d.usage) updateUsage(d.usage); dropLate(resp.ok && !d.capped); return; }}
@@ -24979,6 +25043,7 @@ async function doAsk(followUp) {{
     }}
 
     convoId = d.conversation_id || convoId;
+    if (typeof d.is_private === 'boolean') convoPrivate = d.is_private;
     asked = true; setConvoUrl(convoId);
     recentUpsert(convoId, d.followups_left === 0);
     done(d.followups_left === 0 ? 'limit' : 'ready');
@@ -25071,6 +25136,7 @@ async def ask(request: Request):
     model = (payload.get("model") or "")
     effort = (payload.get("effort") or "standard")
     conversation_id = (payload.get("conversation_id") or "").strip()
+    is_private = bool(payload.get("private"))   # first turn only; a follow-up inherits
     # Clients no longer send conversation history — on a follow-up the server
     # rebuilds it from the conversation's recorded ask_questions rows below,
     # so fabricated history is impossible. A stale pre-deploy tab may still
@@ -25102,6 +25168,7 @@ async def ask(request: Request):
                 use_web=use_web,
                 conversation_id=conversation_id,
                 opml_path=OPML_PATH,
+                is_private=is_private,
             )
         except _AskUnknownConversationError:
             raise HTTPException(status_code=404, detail="unknown conversation")
@@ -25166,6 +25233,7 @@ def ask_conversations(request: Request):
                 "turns": c["turns"],
                 "last_at": c["last_at"],
                 "capped": c["turns"] >= 1 + MAX_FOLLOWUPS,
+                "private": bool(c.get("is_private")),
             }
             for c in lib.list_recent_conversations(user_id, limit=5)
         ]}
@@ -25213,10 +25281,33 @@ def ask_conversation_transcript(conversation_id: str, request: Request):
         followups_left = max(0, 1 + MAX_FOLLOWUPS - len(turns))
         return {
             "conversation_id": conversation_id,
+            "private": bool(turns[0].get("is_private")),
             "capped": followups_left == 0,
             "followups_left": followups_left,
             "turns": [_turn(t) for t in turns],
         }
+    finally:
+        lib.close()
+
+
+@app.post("/ask/conversations/{conversation_id}/private")
+async def ask_conversation_set_private(conversation_id: str, request: Request):
+    """Set one of the signed-in user's conversations private or shared again.
+    404 for an unknown conversation, 403 for someone else's (same contract as
+    the transcript route)."""
+    _require_member(request)
+    payload = await request.json()
+    private = bool(payload.get("private"))
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        turns = lib.list_conversation_turns(conversation_id)
+        if not turns:
+            raise HTTPException(status_code=404, detail="unknown conversation")
+        if user_id is None or turns[0]["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="not your conversation")
+        lib.set_conversation_private(conversation_id, user_id, private)
+        return {"ok": True, "private": private}
     finally:
         lib.close()
 
@@ -25334,7 +25425,7 @@ def ask_history(request: Request, page: int = 1):
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/tools/fpa-buddy#past-questions">Search past questions section</a> for other members to browse.</p>
+<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Unless you mark a question private, it may also appear in the <a href="/tools/fpa-buddy#past-questions">past questions list</a> for other members to browse, without your name. See the <a href="/privacy">privacy policy</a>.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:22px;font-size:14px;">
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>
