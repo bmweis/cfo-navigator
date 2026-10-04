@@ -26,6 +26,11 @@ def _seed(db):
     ids["helpful"] = mk(a, "Helpful first question")
     lib.record_ask_feedback(ids["helpful"], a, "helpful", "")
     ids["plain"] = mk(a2, "Unrated first question")
+    ids["bad"] = mk(a2, "Not helpful first question")
+    lib.record_ask_feedback(ids["bad"], a, "not_helpful", "")
+    ids["mixed"] = mk(a2, "Mixed first question")
+    lib.record_ask_feedback(ids["mixed"], a, "helpful", "")
+    lib.record_ask_feedback(ids["mixed"], reader, "inaccurate", "")
     ids["mine"] = mk(reader, "My own question")
     # a follow-up rated helpful: must never be its own row
     conv = str(ids["helpful"])
@@ -97,7 +102,7 @@ def test_helpful_only_filters_relabels_and_shows_pressed(site):
 def test_intro_line(site):
     client, _, _ = site
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
-    assert "Check here before spending a query re-asking one." in sec
+    assert "Search before running your query." in sec
     assert "Questions members rated helpful." not in sec
 
 
@@ -148,10 +153,20 @@ def test_browser_heights_widths_and_touch_target(site):
                 return pg.locator(sel).first.bounding_box()
             search = box('#past-questions button:has-text("Search")')
             helpful = box('#past-questions button:has-text("Helpful only")')
+            field = box('#past-questions input[type=search]')
             pg.locator('.ask-pq-foot .ask-ctl').first.scroll_into_view_if_needed()
             resume = box('.ask-pq-foot .ask-ctl')
             assert abs(search["height"] - 28) < 0.6 and abs(helpful["height"] - 28) < 0.6
             assert abs(search["width"] - helpful["width"]) < 0.6   # neighbours share one width
+            assert abs(search["width"] - 128) < 0.6 and abs(helpful["width"] - 128) < 0.6
+            assert abs(search["y"] - helpful["y"]) < 0.6           # side by side, one row
+            # no label wraps or clips inside 128px
+            assert pg.evaluate("""()=>[...document.querySelectorAll('#past-questions form button')]
+                .every(b=>b.scrollWidth<=b.clientWidth+0.5 && b.getBoundingClientRect().height<30)""")
+            if w >= 1000:   # at 1280 they share the input's row, centred on it (align-items:center)
+                assert abs((search["y"] + 14) - (field["y"] + field["height"] / 2)) < 1.5
+            else:           # at 390 the pair wraps to its own row beneath the input
+                assert search["y"] > field["y"] + field["height"]
             if resume:
                 assert abs(resume["height"] - 28) < 0.6
                 assert abs(resume["width"] - 128) < 0.6
@@ -162,3 +177,18 @@ def test_browser_heights_widths_and_touch_target(site):
     finally:
         browser.close()
         pw.stop()
+
+
+def test_each_row_shows_a_labelled_rating(site):
+    client, ids, _ = site
+    sec = _section(client("reader").get("/tools/fpa-buddy").text)
+    def meta(q):
+        i = sec.index(q)
+        return sec[i:sec.index("</summary>", i)]
+    assert 'ask-pq-rate-yes">Helpful<' in meta("Helpful first question")
+    assert 'ask-pq-rate-none">Not rated<' in meta("Unrated first question")
+    assert 'ask-pq-rate-no">Not helpful<' in meta("Not helpful first question")
+    assert 'ask-pq-rate-mix">Mixed<' in meta("Mixed first question")
+    css = client("reader").get("/tools/fpa-buddy").text
+    rate_css = "".join(l for l in css.splitlines() if l.startswith(".ask-pq-rate"))
+    assert rate_css and "coral" not in rate_css

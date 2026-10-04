@@ -9293,8 +9293,13 @@ class Library:
         still appears exactly once as long as any one of them rated it
         helpful. ask_feedback carries no declared FK to ask_questions, so
         this is matched by question_id convention, same as everywhere else
-        that joins the two tables."""
-        base = """SELECT aq.*, u.username AS asker_username, u.name AS asker_name
+        that joins the two tables. Each row also carries helpful_count and
+        negative_count (the list shows a rating label per row)."""
+        base = """SELECT aq.*, u.username AS asker_username, u.name AS asker_name,
+                         (SELECT COUNT(*) FROM ask_feedback f
+                           WHERE f.question_id = aq.id AND f.rating = 'helpful') AS helpful_count,
+                         (SELECT COUNT(*) FROM ask_feedback f
+                           WHERE f.question_id = aq.id AND f.rating <> 'helpful') AS negative_count
                   FROM ask_questions aq LEFT JOIN users u ON u.id = aq.user_id
                   WHERE aq.hidden_public=0 AND aq.turn_index=0"""
         params: list = []

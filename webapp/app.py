@@ -23836,6 +23836,15 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
       <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w">Remove from view</button></form>
     </div>"""
+        hc, nc = int(r.get("helpful_count") or 0), int(r.get("negative_count") or 0)
+        if hc and not nc:
+            rating = '<span class="ask-pq-rate ask-pq-rate-yes">Helpful</span>'
+        elif hc and nc:
+            rating = '<span class="ask-pq-rate ask-pq-rate-mix">Mixed</span>'
+        elif nc:
+            rating = '<span class="ask-pq-rate ask-pq-rate-no">Not helpful</span>'
+        else:
+            rating = '<span class="ask-pq-rate ask-pq-rate-none">Not rated</span>'
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
@@ -23849,7 +23858,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         # byline and a chevron; the answer, sources and admin buttons are the
         # disclosure body. Same fold element the Search past questions section uses.
         return f"""<details class="ask-pq-row">
-  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{byline}</span></summary>
+  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{rating}{byline}</span></summary>
   <div class="ask-pq-body">
     <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
     {src_html}
@@ -23881,7 +23890,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # reads exactly as it did when this was a plain section.
     past_questions_section = f"""<details id="past-questions" class="ask-section ask-pq" open style="margin-top:0;margin-bottom:28px;">
   <summary class="ask-section-label"><span class="ask-pq-caret" aria-hidden="true">&#9656;</span>Search past questions</summary>
-  <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Check here before spending a query re-asking one.</p>
+  <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Search before running your query.</p>
   <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
       style="flex:1 1 200px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
@@ -24252,6 +24261,10 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{{transform:rotate(90deg);}}
 .ask-pq-q{{flex:1 1 240px;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);}}
 .ask-pq-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
+.ask-pq-rate{{display:inline-block;margin-right:8px;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:1.5;border:1px solid var(--line);color:var(--muted);}}
+.ask-pq-rate-yes{{background:var(--seafoam-wash);border-color:var(--seafoam);color:var(--navy);}}
+.ask-pq-rate-mix,.ask-pq-rate-no{{color:var(--navy);}}
+.ask-pq-rate-none{{border-color:transparent;padding-left:0;font-weight:400;}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
 .ask-pq-heading{{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
 .ask-recent-item{{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;box-sizing:border-box;

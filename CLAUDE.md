@@ -13459,8 +13459,14 @@ subscription.
   expanded own past-question rows, `/ask/history`), Remove from view, Search and
   Helpful only use them; buttons that sit next to each other share one width. Done and the other existing buttons were not restyled
   (Done 44px, top Search/Depth/Sources 44px, feedback chips 26px, bubble Depth
-  40px: for the sitewide control-height item). The intro line reads "Check here
-  before spending a query re-asking one." **Not in this PR:** Keep private /
+  40px: for the sitewide control-height item). The intro line reads "Search before
+  running your query." **Rating label on every row:** a small labelled chip in
+  the row's meta, from `helpful_count`/`negative_count` (two subqueries on
+  `ask_feedback`): "Helpful" (seafoam wash, navy text), "Mixed" (helpful and
+  not-helpful both present), "Not helpful" (outlined, navy text), "Not rated"
+  (plain muted text). No coral. **Search was restyled** from the 48px default
+  button to the shared 28px compact button, because it sits in one row with the
+  new Helpful only button. **Not in this PR:** Keep private /
   Set private, the ask-box note, `/privacy` copy, and the `/ask/history` intro
   rewrite (that sentence carries the "some of your questions may appear" disclosure,
   which must not go until the ask-box note replaces it). Tests:
