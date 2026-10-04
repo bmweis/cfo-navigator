@@ -23891,8 +23891,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         segs = []
         if r.get("is_private"):
             segs.append('<span class="ask-pq-seg ask-pq-priv">&#128274; Private</span>')
-        if r.get("hidden_public"):
-            segs.append('<span class="ask-pq-seg ask-pq-hidden">Hidden</span>')
+        if r.get("hidden_public") and authed:
+            # Admin-only state marker (text only, no fill or border: a status is
+            # not a control). The list never returns a hidden row to a non-admin,
+            # and the `authed` guard keeps the marker admin-only regardless.
+            segs.append('<span class="ask-pq-seg ask-pq-hidden" role="img" aria-label="Hidden by an admin" '
+                        'title="Hidden by an admin">&#128683; Hidden</span>')
         if who is not None:
             segs.append(f'<span class="ask-pq-seg">{_esc(who)}</span>')
         segs.append(f'<span class="ask-pq-seg ask-pq-date">{date}</span>')
@@ -24324,7 +24328,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-pq-meta{{flex:0 0 calc(100% - 22px);order:3;margin-left:22px;display:flex;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}}
 .ask-pq-ml{{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;justify-content:flex-end;flex:1 1 auto;min-width:0;}}
 .ask-pq-seg,.ask-pq-rate{{white-space:nowrap;}}
-.ask-pq-slot{{flex:0 0 24px;width:24px;text-align:center;margin-left:auto;}}
+.ask-pq-slot{{flex:none;width:24px;min-width:24px;max-width:24px;box-sizing:border-box;text-align:center;margin-left:auto;}}
 .ask-pq-rate{{font-size:14px;}}
 @media(min-width:700px){{.ask-pq-meta{{flex:0 1 auto;order:0;margin-left:auto;max-width:50%;}}.ask-pq-ml{{flex:0 1 auto;justify-content:flex-end;}}}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
@@ -24357,6 +24361,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-priv-note{{margin:0 0 0 30px;font-size:13px;line-height:1.5;color:var(--muted);}}
 .ask-priv-note a{{color:var(--muted);}}
 .ask-pq-priv{{white-space:nowrap;}}
+.ask-pq-hidden{{white-space:nowrap;color:var(--seafoam-deep);font-weight:600;}}
 .ask-q-label{{display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 8px;}}
 .fu-label{{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;}}
 .fu-limit{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}

@@ -56,6 +56,10 @@ measured on the `#F5F4EF` canvas.
    the admin-only signal: a seafoam element without it is never admin-only. The
    label and context also say it is admin-only, so colour is not the only cue.
    Controls inside `/admin/*` are all admin-only and do not take the border.
+   **Admin-only status marker (text only):** a state an admin should see at a glance but
+   that is not a control, such as "🚫 Hidden" on a past-question row. `--seafoam-deep`
+   text (5.21:1 on white), weight 600, no fill and no border, so a status never looks
+   like a button. A status shown to the asker as well (the grey "🔒 Private") stays muted.
 
 First user of the button form: `.ask-ctl-admin` on FP&A Buddy's "Hide" and "Unhide"
 (28px high, 44px touch target, width at least 128px). Contrast: the deep seafoam

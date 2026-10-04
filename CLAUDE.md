@@ -13548,3 +13548,5 @@ subscription.
   Hide, Hidden and Unhide replace "Remove from view" and the "from members"
   wording: the admin-only seafoam style carries the meaning (BRAND.md).
 
+
+- **Hidden marker and rating slot (2026-10, PR 683 follow-up).** "&#128683; Hidden" on a past-question row is an admin-only status marker: `--seafoam-deep` text (5.21:1 on white), weight 600, no fill or border, left of the byline and after "Private" when both apply; `role="img"` with `aria-label` "Hidden by an admin". Rendered only when the viewer is an admin; the list never returns a hidden row to a non-admin, so an asker sees neither the row nor the marker. BRAND.md's seafoam entry names it. The rating slot is `flex:none` with equal width, min-width and max-width of 24px, so no glyph can change its width; Chromium measured every row equal even before the change, so the 4px seen on iPhone is unreproduced here (WebKit unavailable) and the guard is a hardening plus a test that injects a 40px glyph and asserts the date does not move.

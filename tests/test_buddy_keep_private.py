@@ -233,7 +233,7 @@ def test_admin_hide_is_visible_undoable_and_separate_from_private(site):
     lib.close()
     boss.post(f"/questions/{ids['shared']}/hide", follow_redirects=False)
     sec = _section(boss.get("/tools/fpa-buddy").text)
-    assert ">Hide</button>" in sec and "Hidden<" not in sec
+    assert ">Hide</button>" in sec and 'class="ask-pq-seg ask-pq-hidden"' not in sec
 
 
 def test_hover_backgrounds_sit_inside_a_hover_media_query(site):
@@ -247,7 +247,7 @@ def test_hover_backgrounds_sit_inside_a_hover_media_query(site):
 def test_rating_slot_is_at_the_far_right_and_buttons_keep_a_width_floor(site):
     client, _, _ = site
     html = client("reader").get("/tools/fpa-buddy").text
-    assert ".ask-pq-slot{flex:0 0 24px;width:24px" in html
+    assert ".ask-pq-slot{flex:none;width:24px;min-width:24px;max-width:24px" in html
     assert ".ask-ctl-w{min-width:128px" in html and "white-space:nowrap" in html
     sec = _section(html)
     # every row carries the slot; the rating sits inside it, after the date
@@ -289,6 +289,80 @@ def test_browser_hide_and_unhide_buttons_share_one_width_and_height(site):
                 const r=b.getBoundingClientRect(); return [b.textContent, Math.round(r.width*10)/10, Math.round(r.height*10)/10]})""")
             assert {t for t, _, _ in sizes} == {"Hide", "Unhide"}
             assert all(abs(wd - 128) < 0.6 and abs(h - 28) < 0.6 for _, wd, h in sizes), sizes
+            ctx.close()
+    finally:
+        browser.close()
+        pw.stop()
+
+
+def _marker_rows(html):
+    sec = _section(html)
+    return [m for m in re.findall(r'<span class="ask-pq-seg ask-pq-hidden"[^>]*>[^<]*</span>', sec)]
+
+
+def test_hidden_marker_is_an_admin_only_status_with_label_and_order(site):
+    client, ids, db = site
+    lib = Library(db)
+    lib.set_ask_question_hidden(ids["shared"], True)
+    lib.set_ask_question_hidden(ids["priv"], True)          # private AND hidden
+    lib.close()
+    boss = client("boss").get("/tools/fpa-buddy").text
+    sec = _section(boss)
+    marks = _marker_rows(boss)
+    assert len(marks) == 2
+    for m in marks:
+        assert 'aria-label="Hidden by an admin"' in m and "&#128683; Hidden" in m
+    i = sec.index("Private question from author")
+    row = sec[i:sec.index("</summary>", i)]
+    assert row.index("ask-pq-priv") < row.index("ask-pq-hidden") < row.index("ask-pq-date")   # Private first, both before the date
+    css = boss[boss.index(".ask-pq-hidden{"):]
+    css = css[:css.index("}")]
+    assert "color:var(--seafoam-deep)" in css and "font-weight:600" in css
+    assert "background" not in css and "border" not in css                                  # a status, not a control
+    # the asker never sees the marker, and never sees a hidden row at all
+    asker = client("author").get("/tools/fpa-buddy").text
+    assert not _marker_rows(asker) and "Shared question from author" not in _section(asker)
+
+
+def test_hidden_marker_string_passes_the_invisible_character_lint():
+    from linklib.voice_review import mechanical_findings
+    assert not mechanical_findings("\U0001F6AB Hidden")
+
+
+def test_browser_rating_slot_keeps_the_date_edge_fixed_on_every_row(site):
+    from tests import test_buddy_phone_fixes as T
+    client, ids, db = site
+    lib = Library(db)
+    uid = lib.conn.execute("SELECT id FROM users WHERE username='boss'").fetchone()[0]
+    oid = lib.conn.execute("SELECT id FROM users WHERE username='reader'").fetchone()[0]
+    lib.record_ask_feedback(ids["shared"], uid, "helpful", "")                 # helpful
+    lib.record_ask_feedback(ids["mine"], uid, "helpful", "")
+    lib.record_ask_feedback(ids["mine"], oid, "inaccurate", "")                # mixed
+    lib.close()
+    html = client("boss").get("/tools/fpa-buddy").text
+    launched = T._launch()
+    if launched is None:
+        pytest.skip("no Chromium available")
+    pw, browser = launched
+    try:
+        for w in (390, 1280):
+            ctx = browser.new_context(viewport={"width": w, "height": 900})
+            pg = ctx.new_page()
+            pg.route(re.compile(r"^http://buddy\.test/.*"), T.Site(html).handle)
+            pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
+            pg.goto("http://buddy.test/tools/fpa-buddy")
+            edges = pg.evaluate("""()=>[...document.querySelectorAll('.ask-pq-row')].map(r=>[
+                r.querySelector('.ask-pq-date').getBoundingClientRect().right,
+                r.querySelector('.ask-pq-slot').getBoundingClientRect().width,
+                r.querySelector('.ask-pq-slot').textContent.trim()])""")
+            assert {e[2] for e in edges} >= {"", "\U0001F44D", "\U0001F937"}, edges   # unrated, helpful, mixed all present
+            assert max(e[0] for e in edges) - min(e[0] for e in edges) < 0.5, edges
+            assert all(abs(e[1] - 24) < 0.1 for e in edges), edges
+            # A glyph far wider than the slot must not move the date.
+            moved = pg.evaluate("""()=>{const r=document.querySelector('.ask-pq-row');
+                const d=()=>r.querySelector('.ask-pq-date').getBoundingClientRect().right;
+                const a=d(); r.querySelector('.ask-pq-slot').innerHTML='<span style="font-size:40px">&#129335;&#128077;</span>'; return d()-a;}""")
+            assert abs(moved) < 0.1, moved
             ctx.close()
     finally:
         browser.close()
