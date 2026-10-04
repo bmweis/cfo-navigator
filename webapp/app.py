@@ -23774,10 +23774,10 @@ _ASK_CTL_CSS = (
     ".ask-ctl:hover{background:var(--accent-light);}"
     ".ask-ctl:focus-visible{outline:2px solid var(--navy);outline-offset:2px;}"
     # Compact variant: 28px visible, with a 44px touch target from a pseudo-element
-    # that adds no layout height. -w gives the row buttons one shared width
+    # that adds no layout height (inset from the 1px border, so -9px gives 44px). -w gives the row buttons one shared width
     # (sized to the widest label, "Remove from view", with room to spare).
     ".ask-ctl-sm{min-height:28px;padding:0 12px;font-size:13px;position:relative;}"
-    ".ask-ctl-sm::after{content:\"\";position:absolute;left:0;right:0;top:-8px;bottom:-8px;}"
+    ".ask-ctl-sm::after{content:\"\";position:absolute;left:0;right:0;top:-9px;bottom:-9px;}"
     ".ask-ctl-w{width:128px;padding-left:0;padding-right:0;}"
     ".ask-ctl[aria-pressed=true]{background:var(--navy);color:#fff;}"
 )

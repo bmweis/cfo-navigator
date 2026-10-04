@@ -198,6 +198,18 @@ def test_done_while_a_follow_up_loads_drops_the_late_answer_but_it_lands_in_rece
     assert pg.is_visible("#ask-recent")
 
 
+def _hits_within_44(pg, sel):
+    """A point 7px above and below the visible edge still lands on the button
+    (the ::after reaches 8px past the border box, so the target is 44px)."""
+    b = pg.locator(sel).first
+    b.scroll_into_view_if_needed()
+    bb = b.bounding_box()
+    x = bb["x"] + bb["width"] / 2
+    got = [pg.evaluate("([x,y])=>{var e=document.elementFromPoint(x,y);return e?e.tagName+'.'+e.className:null}", [x, y])
+           for y in (bb["y"] - 7, bb["y"] + bb["height"] + 7)]
+    return all(g and "ask-ctl" in g for g in got)
+
+
 # --- Resume --------------------------------------------------------------------
 
 def test_recent_rows_carry_a_visible_resume_button_lower_right(view):
@@ -205,7 +217,8 @@ def test_recent_rows_carry_a_visible_resume_button_lower_right(view):
     pg.wait_for_selector(".ask-recent-item")
     item, btn = _box(pg, ".ask-recent-item"), _box(pg, ".ask-recent-item .ask-ctl")
     assert pg.inner_text(".ask-recent-item .ask-ctl").strip() == "Resume"
-    assert btn["h"] >= 44
+    assert abs(btn["h"] - 28) < 0.6                 # compact: 28px visible, 44px touch target
+    assert _hits_within_44(pg, ".ask-recent-item .ask-ctl")
     assert item["r"] - btn["r"] < 20 and btn["t"] >= _box(pg, ".ask-recent-q")["b"]
 
 
@@ -224,7 +237,7 @@ def test_own_past_question_row_resumes_only_from_the_button(view):
     row.locator("summary").click()                                       # a row tap stays expand
     assert row.evaluate("e => e.open") and pg.locator("#fu").count() == 0
     btn = row.locator(".ask-ctl")
-    assert btn.inner_text().strip() == "Resume" and btn.bounding_box()["height"] >= 44
+    assert btn.inner_text().strip() == "Resume" and abs(btn.bounding_box()["height"] - 28) < 0.6
     btn.click()
     pg.wait_for_selector("#fu-q")
     assert "My own question about runway" in pg.inner_text("#ask-thread")
@@ -269,4 +282,6 @@ def test_done_and_resume_match_the_depth_and_sources_control_height(view):
     resume = _box(pg, ".ask-recent-item .ask-ctl")["h"]
     _ask(pg)
     done = _box(pg, "#fu-done")["h"]
-    assert dd >= 44 and abs(dd - resume) < 0.5 and abs(dd - done) < 0.5
+    # Done and the dropdowns stay 44px; Resume is the compact 28px button with a
+    # 44px touch target (the sitewide control-height item will reconcile the rest).
+    assert dd >= 44 and abs(dd - done) < 0.5 and abs(resume - 28) < 0.6
