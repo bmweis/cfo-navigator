@@ -686,7 +686,7 @@ CREATE TABLE IF NOT EXISTS ask_questions (
     exa_cost_usd          REAL NOT NULL DEFAULT 0,     -- Exa's share, already inside cost_usd — see
                                                         -- Answer.exa_cost_usd/linklib.agent.retrieve_exa
     hidden_public         INTEGER NOT NULL DEFAULT 0,  -- admin removed from the community view only
-    anonymized            INTEGER NOT NULL DEFAULT 0,  -- asker name hidden on the community view only
+    anonymized            INTEGER NOT NULL DEFAULT 0,  -- FROZEN: the Anonymize asker button was retired (bylines are date-only for members); nothing reads or writes it
     citations_json        TEXT NOT NULL DEFAULT '[]',  -- the turn's API-verified cited sources (see record_ask_question)
     stop_reason           TEXT NOT NULL DEFAULT '',    -- answer call's API stop_reason ('max_tokens' = cut off); '' = unknown/pre-2026-10
     created_at            TEXT NOT NULL
@@ -9281,10 +9281,11 @@ class Library:
     def list_public_ask_questions(self, query: str = "", limit: int = 200,
                                    helpful_only: bool = False) -> list[dict]:
         """Non-hidden Q&A for the community browse view, newest first, optionally
-        text-filtered on question/answer. Callers render `asker_name`/
-        `asker_username` unless `anonymized` is set, in which case show a
-        generic label instead — anonymizing here never affects the admin or
-        the asker's own history view, both of which always show the real name.
+        text-filtered on question/answer. First turns only (`turn_index = 0`):
+        a follow-up has no meaning without its thread, so it is never a
+        standalone row. Callers decide what byline to show (date only for other
+        members, "You" for the asker, the stored name for an admin); the
+        `anonymized` column is frozen and no longer read.
         `helpful_only` (Phase 2, the FP&A Buddy "search past questions"
         feature on /tools/fpa-buddy) additionally restricts to questions with
         at least one ask_feedback.rating='helpful' row — an EXISTS check, not
@@ -9292,10 +9293,15 @@ class Library:
         still appears exactly once as long as any one of them rated it
         helpful. ask_feedback carries no declared FK to ask_questions, so
         this is matched by question_id convention, same as everywhere else
-        that joins the two tables."""
-        base = """SELECT aq.*, u.username AS asker_username, u.name AS asker_name
+        that joins the two tables. Each row also carries helpful_count and
+        negative_count (the list shows a rating label per row)."""
+        base = """SELECT aq.*, u.username AS asker_username, u.name AS asker_name,
+                         (SELECT COUNT(*) FROM ask_feedback f
+                           WHERE f.question_id = aq.id AND f.rating = 'helpful') AS helpful_count,
+                         (SELECT COUNT(*) FROM ask_feedback f
+                           WHERE f.question_id = aq.id AND f.rating <> 'helpful') AS negative_count
                   FROM ask_questions aq LEFT JOIN users u ON u.id = aq.user_id
-                  WHERE aq.hidden_public=0"""
+                  WHERE aq.hidden_public=0 AND aq.turn_index=0"""
         params: list = []
         if helpful_only:
             base += """ AND EXISTS (
@@ -9317,14 +9323,6 @@ class Library:
         never deletes it from the admin archive or the asker's own history."""
         self.conn.execute(
             "UPDATE ask_questions SET hidden_public=? WHERE id=?", (int(hidden), question_id)
-        )
-        self.conn.commit()
-
-    def set_ask_question_anonymized(self, question_id: int, anonymized: bool) -> None:
-        """Hide the asker's name on the public community view only — the
-        admin archive always shows who actually asked."""
-        self.conn.execute(
-            "UPDATE ask_questions SET anonymized=? WHERE id=?", (int(anonymized), question_id)
         )
         self.conn.commit()
 

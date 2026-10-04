@@ -2103,8 +2103,9 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   to a similarly-phrased question), so it's left as a possible future
   improvement, not a v1 gap being silently accepted. The admin-only
   hide/anonymize controls on each past-question row carried over unchanged
-  (same `/questions/{id}/hide` and `/questions/{id}/anonymize` POST routes,
-  just redirecting back to `/tools/fpa-buddy#past-questions` now instead of
+  (same `/questions/{id}/hide` POST route; the `/anonymize` route was
+  retired later, see the history-list bullet at the end of this file; both
+  just redirected back to `/tools/fpa-buddy#past-questions` now instead of
   the removed page). This phase also cleaned up the dead
   `nav.site-nav a[href="/ask"]` CSS selector Phase 0's investigation flagged
   and Phase 1 explicitly deferred — removed here since this phase already
@@ -13437,3 +13438,42 @@ subscription.
   "Start a new question"; those are other surfaces and were left alone. Tests:
   `tests/test_buddy_text_trim.py` (6, one in Chromium) and one in
   `tests/test_ask_conversations.py`.
+
+- **FP&A Buddy past-questions list, PR B1 (2026-10).** "Search past questions"
+  now lists **all** first-turn questions by default (it was helpful-only, always),
+  under an `h2.ask-pq-heading` that says what it shows: "All questions", or
+  "Helpful questions only" with the **Helpful only** button pressed
+  (`aria-pressed`). `?helpful=1` is the filter; Search and the toggle are both
+  submit buttons named `helpful`, so one GET form carries either value and Search
+  keeps the filter. **A follow-up never shows as a standalone row:**
+  `list_public_ask_questions` now adds `aq.turn_index = 0` (legacy rows with an
+  empty conversation id are turn 0, so they stay); a follow-up rated helpful no
+  longer surfaces alone, and a thread whose only helpful rating is on a follow-up
+  does not appear under Helpful only (known, accepted). **Bylines:** other members
+  see the date only, the asker sees "You · date", an admin sees the full stored
+  name. **"Anonymize asker" is retired:** route, `set_ask_question_anonymized` and
+  the button are gone; `ask_questions.anonymized` is frozen and nothing reads it.
+  The admin button reads "Remove from view". **Buttons:** `.ask-ctl-sm` (28px
+  visible, 44px touch target from a `::after` that adds no layout height) and
+  `.ask-ctl-w` (one shared 128px width) in `_ASK_CTL_CSS`; Resume (Recent rows,
+  expanded own past-question rows, `/ask/history`), Remove from view, Search and
+  Helpful only use them; buttons that sit next to each other share one width. **Done
+  was restyled to the same 128x28 button (44px touch target), overruling the PR A
+  "leave Done" note**; Depth and Sources (44px), feedback chips (26px) and bubble
+  Depth (40px) stay for the sitewide control-height item. The intro line reads
+  "Search before running your query." **Rating on every row:** plain emoji with no
+  border or fill (only actions get those), same standalone-span pattern as
+  `.tool-star`, 14px, from `helpful_count`/`negative_count`, in the row's top-right
+  corner with the date (`.ask-pq-meta`, right-aligned, top-aligned with the question's
+  first line, like the vendor-card badges; on your own rows "You", and for an admin the asker name, sits left of the rating): &#128077; helpful, &#128078; not helpful,
+  &#129335; mixed (shrug, one code point U+1F937, no joiner; Brian's pick over
+  thumbs-up plus thumbs-down), nothing when not rated. Each is `role="img"` with `aria-label` ("Rated
+  helpful" etc.) and `title`; plain code points only, so the invisible-character lint
+  stays quiet. The sandbox may lack a colour emoji font; check the real look on iPhone.
+  **Search was restyled** from the 48px default
+  button to the shared 28px compact button, because it sits in one row with the
+  new Helpful only button. **Not in this PR:** Keep private /
+  Set private, the ask-box note, `/privacy` copy, and the `/ask/history` intro
+  rewrite (that sentence carries the "some of your questions may appear" disclosure,
+  which must not go until the ask-box note replaces it). Tests:
+  `tests/test_buddy_history_list.py`.

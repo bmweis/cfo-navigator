@@ -23739,21 +23739,6 @@ async def community_question_hide(request: Request, question_id: int):
     return RedirectResponse("/tools/fpa-buddy#past-questions", status_code=303)
 
 
-@app.post("/questions/{question_id}/anonymize")
-async def community_question_anonymize(request: Request, question_id: int):
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    lib = _lib()
-    try:
-        row = lib.conn.execute("SELECT anonymized FROM ask_questions WHERE id=?", (question_id,)).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="not found")
-        lib.set_ask_question_anonymized(question_id, not bool(row["anonymized"]))
-    finally:
-        lib.close()
-    return RedirectResponse("/tools/fpa-buddy#past-questions", status_code=303)
-
-
 # ---------------------------------------------------------------------------
 # API endpoints
 # ---------------------------------------------------------------------------
@@ -23788,11 +23773,18 @@ _ASK_CTL_CSS = (
     "font:600 14px var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;}"
     ".ask-ctl:hover{background:var(--accent-light);}"
     ".ask-ctl:focus-visible{outline:2px solid var(--navy);outline-offset:2px;}"
+    # Compact variant: 28px visible, with a 44px touch target from a pseudo-element
+    # that adds no layout height (inset from the 1px border, so -9px gives 44px). -w gives the row buttons one shared width
+    # (sized to the widest label, "Remove from view", with room to spare).
+    ".ask-ctl-sm{min-height:28px;padding:0 12px;font-size:13px;position:relative;}"
+    ".ask-ctl-sm::after{content:\"\";position:absolute;left:0;right:0;top:-9px;bottom:-9px;}"
+    ".ask-ctl-w{width:128px;padding-left:0;padding-right:0;}"
+    ".ask-ctl[aria-pressed=true]{background:var(--navy);color:#fff;}"
 )
 
 
 @app.get("/tools/fpa-buddy", response_class=HTMLResponse)
-def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
+def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = ""):
     # Member-gated: signed-in members and admin. Anonymous visitors go to login.
     if not _is_member(request):
         return _login_redirect(request)
@@ -23817,7 +23809,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         # /library/past-questions page): only questions with at least one
         # ask_feedback.rating='helpful' row, so a member searching here only
         # ever finds answers someone already vouched for.
-        pq_rows = usage_lib.list_public_ask_questions(query=pq, limit=200, helpful_only=True)
+        helpful_only = helpful == "1"
+        pq_rows = usage_lib.list_public_ask_questions(query=pq, limit=200, helpful_only=helpful_only)
         # One Exa call per turn when the web source is on and Exa (not the native
         # tool) is the provider; nothing else a turn does calls Exa. Admin-only.
         from linklib.agent import _web_provider
@@ -23827,14 +23820,39 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         usage_lib.close()
 
     def _pq_row(r: dict) -> str:
-        anonymized = bool(r.get("anonymized"))
-        asker = "A member" if anonymized else (r.get("asker_name") or r.get("asker_username") or "A member")
+        # Byline: members see the date only (the asker is never named to other
+        # members), "You" on their own rows; an admin sees the full stored name.
+        own = usage_user_id is not None and r.get("user_id") == usage_user_id
+        date = _esc((r.get("created_at") or "")[:10])
+        if authed:
+            who = r.get("asker_name") or r.get("asker_username") or "A member"
+            byline = None   # built after the rating: name, rating, date
+            lead = _esc(who)
+        elif own:
+            byline = None   # built after the rating: "You", rating, date
+            lead = "You"
+        else:
+            byline = date
         admin_controls = ""
         if authed:
             admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
-      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">Remove from this view</button></form>
-      <form method="post" action="/questions/{r["id"]}/anonymize" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">{"Un-anonymize" if anonymized else "Anonymize asker"}</button></form>
+      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w">Remove from view</button></form>
     </div>"""
+        hc, nc = int(r.get("helpful_count") or 0), int(r.get("negative_count") or 0)
+        # Plain emoji status, no border or fill (only actions get those); same
+        # standalone-span pattern as .tool-star. Plain code points only.
+        if hc and not nc:
+            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated helpful" title="Rated helpful">&#128077;</span>'
+        elif hc and nc:
+            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated mixed" title="Rated mixed">&#129335;</span>'
+        elif nc:
+            rating = '<span class="ask-pq-rate" role="img" aria-label="Rated not helpful" title="Rated not helpful">&#128078;</span>'
+        else:
+            rating = ""
+        if byline is None:
+            meta_html = f"{lead} {rating} &middot; {date}" if rating else f"{lead} &middot; {date}"
+        else:
+            meta_html = f"{rating}{byline}"
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
@@ -23842,13 +23860,13 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         # row gets nothing. The server still decides (403 for someone else's).
         resume_html = ""
         if usage_user_id is not None and r.get("user_id") == usage_user_id and r.get("conversation_id"):
-            resume_html = (f'<div class="ask-pq-foot"><button type="button" class="ask-ctl" '
+            resume_html = (f'<div class="ask-pq-foot"><button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" '
                            f'data-cid="{_esc(r["conversation_id"])}" onclick="resumeConvoById(this.dataset.cid)">Resume</button></div>')
         # A native <details>, closed on every load: the row is the question,
         # byline and a chevron; the answer, sources and admin buttons are the
         # disclosure body. Same fold element the Search past questions section uses.
         return f"""<details class="ask-pq-row">
-  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{_esc(asker)} &middot; {_esc((r["created_at"] or "")[:10])}</span></summary>
+  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{meta_html}</span></summary>
   <div class="ask-pq-body">
     <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
     {src_html}
@@ -23857,12 +23875,22 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
   </div>
 </details>"""
 
+    if pq_rows:
+        pq_empty = ""
+    elif pq:
+        pq_empty = "No past questions match your search."
+    elif helpful_only:
+        pq_empty = "No questions have been rated helpful yet."
+    else:
+        pq_empty = "No past questions yet."
     pq_rows_html = "".join(_pq_row(r) for r in pq_rows) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
-         'padding:24px;text-align:center;color:var(--muted);">'
-         + ('No past questions match your search.' if pq else
-            'No past questions yet. Answers show up here once a member rates one helpful.')
-         + '</div>')
+         'padding:24px;text-align:center;color:var(--muted);">' + pq_empty + '</div>')
+    pq_heading = "Helpful questions only" if helpful_only else "All questions"
+    # Search keeps the filter it was run under; the toggle flips it. Both are
+    # submit buttons named "helpful", so one GET form carries either value.
+    pq_keep = "1" if helpful_only else ""
+    pq_flip = "" if helpful_only else "1"
 
     # A <details> so it can fold to one line while a conversation is on screen
     # (the page toggles `open` itself when a thread appears or clears). In the
@@ -23870,12 +23898,14 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     # reads exactly as it did when this was a plain section.
     past_questions_section = f"""<details id="past-questions" class="ask-section ask-pq" open style="margin-top:0;margin-bottom:28px;">
   <summary class="ask-section-label"><span class="ask-pq-caret" aria-hidden="true">&#9656;</span>Search past questions</summary>
-  <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Questions members rated helpful. Check here before spending a query re-asking one.</p>
-  <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:18px;">
+  <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Search before running your query.</p>
+  <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
-      style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
-    <button type="submit" class="btn btn-ghost">Search</button>
+      style="flex:1 1 200px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
+    <button type="submit" name="helpful" value="{pq_keep}" class="ask-ctl ask-ctl-sm ask-ctl-w">Search</button>
+    <button type="submit" name="helpful" value="{pq_flip}" class="ask-ctl ask-ctl-sm ask-ctl-w" aria-pressed="{"true" if helpful_only else "false"}">Helpful only</button>
   </form>
+  <h2 class="ask-pq-heading">{pq_heading}</h2>
   {pq_rows_html}
 </details>"""
 
@@ -24232,14 +24262,16 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 
 .ask-pq-row{{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}}
 .ask-pq-row[open]{{border-color:var(--navy);}}
-.ask-pq-sum{{display:flex;align-items:baseline;gap:10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;flex-wrap:wrap;}}
+.ask-pq-sum{{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;}}
 .ask-pq-sum::-webkit-details-marker{{display:none;}}
 .ask-pq-sum:hover{{background:var(--accent-light);border-radius:8px;}}
 .ask-pq-rc{{font-size:12px;color:var(--navy);transition:transform .12s;flex-shrink:0;}}
 .ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{{transform:rotate(90deg);}}
-.ask-pq-q{{flex:1 1 240px;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);}}
-.ask-pq-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
+.ask-pq-q{{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);}}
+.ask-pq-meta{{font-size:12px;color:var(--muted);flex-shrink:0;max-width:45%;text-align:right;margin-left:auto;}}
+.ask-pq-rate{{font-size:14px;margin-right:4px;}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
+.ask-pq-heading{{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
 .ask-recent-item{{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;box-sizing:border-box;
   font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
   margin-bottom:8px;transition:border-color .12s ease;}}
@@ -24724,7 +24756,7 @@ function fuRender(state) {{
   // Footer: Done, lower right, in every state (ready, busy, limit).
   var foot = document.createElement('div');
   foot.className = 'fu-foot';
-  foot.innerHTML = '<button type="button" class="ask-ctl" id="fu-done" onclick="doneThread()">Done</button>';
+  foot.innerHTML = '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="fu-done" onclick="doneThread()">Done</button>';
   f.appendChild(foot);
   thread.appendChild(f);
   updateEstimate(); fuSummary();
@@ -24778,7 +24810,7 @@ function recentItemHtml(c) {{
          '<span class="ask-recent-q">' + escapeHtml(c.first_question) + '</span>' +
          '<div class="ask-recent-foot"><span class="ask-recent-meta">' + relTime(c.last_at) + ' &middot; ' +
          c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span>' +
-         '<button type="button" class="ask-ctl" onclick="event.stopPropagation();resumeConvo(this.closest(\\'.ask-recent-item\\'))">Resume</button></div></div>';
+         '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" onclick="event.stopPropagation();resumeConvo(this.closest(\\'.ask-recent-item\\'))">Resume</button></div></div>';
 }}
 var RECENT_MAX = 5;   // the server's own cap on /ask/conversations
 async function loadRecent() {{
@@ -25220,7 +25252,7 @@ def ask_history(request: Request, page: int = 1):
         if not cid:
             return ""
         return (f'<div style="display:flex;justify-content:flex-end;margin:6px 0 12px;">'
-                f'<a class="ask-ctl" href="/tools/fpa-buddy?resume={_esc(cid)}">Resume</a></div>')
+                f'<a class="ask-ctl ask-ctl-sm ask-ctl-w" href="/tools/fpa-buddy?resume={_esc(cid)}">Resume</a></div>')
 
     def _single_card(r: dict) -> str:
         # A one-turn conversation — same card the flat list always showed.

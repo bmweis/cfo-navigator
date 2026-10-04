@@ -194,5 +194,5 @@ def test_a_member_sees_names_only_and_no_dollar_note(member_pg):
 
 def test_search_past_questions_intro_says_what_the_list_is(buddy_html):
     html = buddy_html[0]
-    assert "Questions members rated helpful. Check here before spending a query re-asking one." in html
+    assert "Search before running your query." in html
     assert "other members have already asked" not in html

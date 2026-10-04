@@ -200,12 +200,11 @@ def test_history_and_past_questions_show_long_answers_in_full(env):
 
 
 def test_past_questions_section_only_shows_helpful_rated(env):
-    # /tools/fpa-buddy's past-questions search filters to helpful-rated
-    # answers only (Phase 2) — unlike /ask/history and /admin/fpa-buddy/feedback
-    # above, which show every turn regardless of rating. This fixture is a
-    # genuine mixed-rating case: cited_id is rated 'inaccurate', legacy_id
-    # is rated 'helpful' — only legacy_id's content should render here.
-    html = _login(env, "member1", "supersecret").get("/tools/fpa-buddy").text
+    # With Helpful only on (?helpful=1), /tools/fpa-buddy's past-questions list
+    # shows helpful-rated answers only (the default list shows all first turns
+    # since PR B1). This fixture is a genuine mixed-rating case: cited_id is
+    # rated 'inaccurate', legacy_id is rated 'helpful'.
+    html = _login(env, "member1", "supersecret").get("/tools/fpa-buddy?helpful=1").text
     assert "Legacy answer citing [1] before snapshots." in html
     assert "CAC payback is months to recover CAC" not in html
     assert "https://ex.com/a" not in html

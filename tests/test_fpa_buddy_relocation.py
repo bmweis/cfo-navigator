@@ -66,8 +66,8 @@ def test_dead_ask_nav_selector_is_gone(env):
 
 def test_past_questions_search_only_shows_helpful_rated(env):
     """Mixed-rating case: one question rated 'helpful', one rated
-    'not_helpful', one left unrated. Only the helpful one should ever show
-    up in the past-questions search, regardless of query."""
+    'not_helpful', one left unrated. With Helpful only on, only the helpful
+    one shows."""
     appmod, db = env
     lib = Library(db)
     uid = lib.create_user("asker", "supersecret", role="user")
@@ -79,7 +79,7 @@ def test_past_questions_search_only_shows_helpful_rated(env):
         uid, "How do I calculate CAC payback the wrong way?",
         "This answer turned out to be wrong.",
         "claude-sonnet-4-6", "standard", True, False, True, cost_usd=0.01)
-    unrated_id = lib.record_ask_question(
+    lib.record_ask_question(
         uid, "An unrated question nobody has judged yet.",
         "An answer with no feedback at all.",
         "claude-sonnet-4-6", "standard", True, False, True, cost_usd=0.01)
@@ -87,7 +87,12 @@ def test_past_questions_search_only_shows_helpful_rated(env):
     lib.record_ask_feedback(unhelpful_id, uid, "not_helpful")
     lib.close()
 
-    html = _member_client(appmod).get("/tools/fpa-buddy").text
+    client = _member_client(appmod)
+    # Default list shows every first-turn question (PR B1); the Helpful only
+    # filter is what narrows it to rated-helpful.
+    allh = client.get("/tools/fpa-buddy").text
+    assert "An unrated question nobody has judged yet." in allh
+    html = client.get("/tools/fpa-buddy?helpful=1").text
     assert "What is a good rule of thumb for burn multiple?" in html
     assert "How do I calculate CAC payback the wrong way?" not in html
     assert "An unrated question nobody has judged yet." not in html
