@@ -14,6 +14,7 @@
 import asyncio
 import os
 import pathlib
+import re
 import socket
 import sys
 import tempfile
@@ -878,3 +879,50 @@ def test_get_rows_refused_for_non_admin_role(live_server):
                           "where_value": "x"})
     assert result.isError
     assert "admin" in result.content[0].text.lower()
+
+
+# -- Buddy past questions: private / hidden rows over MCP ----------------------
+
+def _seed_private_and_hidden_question(db_path):
+    lib = Library(db_path)
+    uid = lib.create_user("asker", "supersecret", role="user")
+    qid = lib.record_ask_question(uid, "Private annual planning question", "A.", "m", "standard",
+                                  True, False, True, is_private=True)
+    hid = lib.record_ask_question(uid, "Hidden annual planning question", "A.", "m", "standard",
+                                  True, False, True)
+    lib.set_ask_question_hidden(hid, True)
+    lib.close()
+    return qid, hid
+
+
+def test_non_admin_token_cannot_read_private_or_hidden_questions(live_server):
+    """No non-admin MCP tool returns another user's ask_questions rows: the only
+    path to the table is the admin-only introspection tools, refused for a plain
+    user's token."""
+    qid, hid = _seed_private_and_hidden_question(live_server.db_path)
+    for tool, args in (("get_rows", {"name": "ask_questions", "where_column": "id", "where_value": str(qid)}),
+                       ("sample_rows", {"name": "ask_questions"})):
+        result = _call_tool(live_server.base_url, live_server.plain_user, tool, args)
+        assert result.isError
+        assert "admin" in result.content[0].text.lower()
+
+
+def test_admin_token_sees_private_and_hidden_rows_labelled_by_their_flags(live_server):
+    qid, hid = _seed_private_and_hidden_question(live_server.db_path)
+    r = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                   {"name": "ask_questions", "where_column": "id", "where_value": str(qid)})
+    import json
+    assert not r.isError and json.loads(r.content[0].text)["rows"][0]["is_private"] == 1
+    r = _call_tool(live_server.base_url, live_server.admin, "get_rows",
+                   {"name": "ask_questions", "where_column": "id", "where_value": str(hid)})
+    assert json.loads(r.content[0].text)["rows"][0]["hidden_public"] == 1
+
+
+def test_only_admin_introspection_reads_ask_questions_rows():
+    """Source guard: the Toolbox, Library and Q&A MCP modules never SELECT from
+    ask_questions, so a later tool that does has to come through this review."""
+    import pathlib
+    for name in ("mcp_toolbox.py", "mcp_library.py", "mcp_qa.py"):
+        src = pathlib.Path("webapp", name).read_text()
+        assert not re.search(r"(FROM|JOIN)\s+ask_questions", src, re.I), name
+        assert "list_public_ask_questions" not in src and "similar_ask_candidates" not in src, name
