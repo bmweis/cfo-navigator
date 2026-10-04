@@ -23826,9 +23826,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         date = _esc((r.get("created_at") or "")[:10])
         if authed:
             who = r.get("asker_name") or r.get("asker_username") or "A member"
-            byline = f"{_esc(who)} &middot; {date}"
+            byline = None   # built after the rating: name, rating, date
+            lead = _esc(who)
         elif own:
             byline = None   # built after the rating: "You", rating, date
+            lead = "You"
         else:
             byline = date
         admin_controls = ""
@@ -23848,7 +23850,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         else:
             rating = ""
         if byline is None:
-            meta_html = f"You {rating} &middot; {date}" if rating else f"You &middot; {date}"
+            meta_html = f"{lead} {rating} &middot; {date}" if rating else f"{lead} &middot; {date}"
         else:
             meta_html = f"{rating}{byline}"
         q_txt = _esc(r.get("question") or "")

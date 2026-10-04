@@ -115,7 +115,8 @@ def test_bylines_by_viewer(site):
     assert "A member" not in member
     assert re.search(r"You &middot; \d{4}-\d{2}-\d{2}", member)
     admin = _section(client("boss").get("/tools/fpa-buddy").text)
-    assert re.search(r"Alexandra Author &middot; \d{4}-\d{2}-\d{2}", admin)
+    # name first, then the rating, then the date (rated row), or name and date (unrated)
+    assert re.search(r"Alexandra Author\s*<span class=\"ask-pq-rate\"[^>]*>&#128077;</span> &middot; \d{4}-\d{2}-\d{2}", admin)
 
 
 def test_anonymize_is_retired_and_remove_is_relabelled(site):
