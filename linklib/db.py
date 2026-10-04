@@ -9224,6 +9224,19 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def ask_rating_counts(self, question_ids: list[int]) -> dict[int, tuple[int, int]]:
+        """{question_id: (helpful_count, negative_count)} for the given turns, counted
+        the same way the past-questions list counts them (anything but 'helpful' is
+        negative, so an Inaccurate rating shows as Not helpful). Unrated ids are absent."""
+        if not question_ids:
+            return {}
+        marks = ",".join("?" * len(question_ids))
+        rows = self.conn.execute(
+            f"""SELECT question_id, SUM(rating='helpful'), SUM(rating<>'helpful')
+                FROM ask_feedback WHERE question_id IN ({marks}) GROUP BY question_id""",
+            list(question_ids)).fetchall()
+        return {r[0]: (int(r[1] or 0), int(r[2] or 0)) for r in rows}
+
     def count_ask_questions(self, user_id: int | None = None) -> int:
         if user_id is not None:
             return self.conn.execute(

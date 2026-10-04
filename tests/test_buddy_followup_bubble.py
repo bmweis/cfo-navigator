@@ -351,7 +351,7 @@ def test_other_members_past_answers_never_bring_the_bubble(past_question_page):
 
 
 SIM_STUB = STUB + """
-window.__sim = [{id: 5, question: 'Earlier similar question', date: '2026-10-03', rating_html: '',
+window.__sim = [{id: 5, question: 'Earlier similar question', date: '2026-10-03', chips_html: '',
                  private: false, hidden: false, answer_html: '<p>Earlier answer.</p>', resume_id: ''}];
 var __stubFetch = window.fetch;
 window.fetch = function(url, opts) {

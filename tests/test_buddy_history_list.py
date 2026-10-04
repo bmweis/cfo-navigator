@@ -113,10 +113,10 @@ def test_bylines_by_viewer(site):
     member = _section(client("reader").get("/tools/fpa-buddy").text)
     assert "Alexandra" not in member and "author" not in member.replace("Helpful first", "")
     assert "A member" not in member
-    assert re.search(r'<span class="ask-pq-seg">You</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span></span><span class="ask-pq-slot">', member)
+    assert re.search(r'<span class="ask-pq-seg">You</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span></span>', member)
     admin = _section(client("boss").get("/tools/fpa-buddy").text)
-    # name, then date, then the rating in the far-right slot
-    assert re.search(r'<span class="ask-pq-seg">Alexandra Author</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span></span><span class="ask-pq-slot"><span class="ask-pq-rate"[^>]*>&#128077;</span>', admin)
+    # rating chip first, then the name, then the date
+    assert re.search(r'<span class="ask-chip ask-chip-helpful"[^>]*>.*?Helpful</span><span class="ask-pq-seg">Alexandra Author</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span>', admin)
 
 
 def test_anonymize_is_retired_and_remove_is_relabelled(site):
@@ -199,34 +199,34 @@ def test_each_row_shows_a_labelled_rating(site):
     def meta(q):
         i = sec.index(q)
         return sec[i:sec.index("</summary>", i)]
-    assert 'aria-label="Rated helpful"' in meta("Helpful first question")
-    assert "&#128077;" in meta("Helpful first question")
-    assert "ask-pq-rate" not in meta("Unrated first question")
+    h = meta("Helpful first question")
+    assert 'aria-label="Rated helpful"' in h and "&#10003; Helpful" in h.replace('<span aria-hidden="true">', "").replace("</span>", "")
+    assert "ask-chip" not in meta("Unrated first question")
     assert "Not rated" not in sec
     assert 'aria-label="Rated not helpful"' in meta("Not helpful first question")
     m = meta("Mixed first question")
-    assert 'aria-label="Rated mixed"' in m and "&#129335;" in m
+    assert 'aria-label="Rated mixed"' in m and "&#177;" in m
     css = client("reader").get("/tools/fpa-buddy").text
-    rate_css = "".join(l for l in css.splitlines() if l.startswith(".ask-pq-rate"))
-    assert rate_css and "border" not in rate_css and "background" not in rate_css
+    chip_css = "".join(l for l in css.splitlines() if l.startswith(".ask-chip{"))
+    assert chip_css and "border:" not in chip_css and "height:18px" in chip_css
 
 
-def test_own_row_meta_order_is_you_then_date_then_rating(site):
+def test_own_row_meta_order_is_rating_then_you_then_date(site):
     client, ids, _ = site
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     def meta(q):
         i = sec.index(q)
         return sec[i:sec.index("</summary>", i)]
     rated = meta("My own rated question")
-    assert rated.index(">You<") < rated.index("ask-pq-date") < rated.index("ask-pq-rate")
+    assert rated.index("ask-chip") < rated.index(">You<") < rated.index("ask-pq-date")
     plain = meta("My own question")
-    assert "ask-pq-rate" not in plain and plain.index(">You<") < plain.index("ask-pq-date")
+    assert "ask-chip" not in plain and plain.index(">You<") < plain.index("ask-pq-date")
 
 
 def test_rating_emoji_strings_pass_the_voice_and_typography_scanners():
     from html import unescape
     from linklib.voice_review import mechanical_findings, typography_findings_plain
-    for ent in ("&#128077;", "&#128078;", "&#129335;"):
+    for ent in ("&#10003;", "&#10005;", "&#177;", "&#8856;", "&#128274;"):
         t = unescape(ent)
-        assert all(0x1F300 <= ord(c) <= 0x1FAFF for c in t)   # no ZWJ, selector or skin tone
+        assert len(t) == 1   # one plain code point: no ZWJ, selector or skin tone
         assert not mechanical_findings(t) and not typography_findings_plain(t)

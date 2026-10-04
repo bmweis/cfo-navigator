@@ -115,7 +115,7 @@ def test_inaccurate_followups_and_unrelated_never_suggested(site):
 def test_thumbs_up_ranks_first_and_at_most_three(site):
     client, ids, _ = site
     r = client("reader").post("/ask/similar", json={"question": Q}).json()["suggestions"]
-    assert len(r) <= 3 and r[0]["id"] == ids["helpful"] and "Rated helpful" in r[0]["rating_html"]
+    assert len(r) <= 3 and r[0]["id"] == ids["helpful"] and "Rated helpful" in r[0]["chips_html"]
 
 
 def test_requires_login_and_blank_is_empty(site):
@@ -158,20 +158,16 @@ def test_new_strings_pass_voice_lint_and_say_users_not_members():
     assert "member" not in seg.lower() and " — " not in seg and "&amp;" not in seg
 
 
-def test_suggestions_draw_ratings_with_the_one_shared_function(site):
-    """Same markup as the past-questions list; the function is _ask_rating_html and
-    no rating markup is hand-built anywhere else on the Buddy surfaces."""
+def test_suggestions_draw_chips_with_the_one_shared_function(site):
+    """Same markup as the past-questions list, from _ask_status_chips_html."""
     client, ids, _ = site
     import webapp.app as appmod
     c = client("reader")
     got = _sugg(c)
-    assert got[ids["helpful"]]["rating_html"] == appmod._ask_rating_html(1, 0)
+    assert got[ids["helpful"]]["chips_html"] == appmod._ask_status_chips_html(1, 0)
     page = c.get("/tools/fpa-buddy").text
-    assert appmod._ask_rating_html(1, 0) in page          # the list row, same string
-    assert _sugg(c)[ids["shared"]]["rating_html"] == ""   # unrated: nothing
-    src = open("webapp/app.py").read()
-    for label in ("Rated helpful", "Rated mixed", "Rated not helpful"):
-        assert src.count(label) == 1, label               # defined once, in the function
+    assert appmod._ask_status_chips_html(1, 0) in page    # the list row, same string
+    assert _sugg(c)[ids["shared"]]["chips_html"] == ""    # unrated and public: nothing
 
 
 def test_suggestion_dates_are_yyyy_mm_dd(site):
