@@ -265,3 +265,31 @@ def test_no_member_word_in_user_facing_copy_on_buddy_and_history(site):
             html = _re.sub(r"<!--.*?-->", "", html, flags=_re.S)
             hits = _re.findall(r".{30}\bmembers?\b.{30}", html, flags=_re.I | _re.S)
             assert not hits, (user, path, hits[:3])
+
+
+def test_browser_hide_and_unhide_buttons_share_one_width_and_height(site):
+    from tests import test_buddy_phone_fixes as T
+    client, ids, _ = site
+    boss = client("boss")
+    boss.post(f"/questions/{ids['shared']}/hide", follow_redirects=False)
+    html = boss.get("/tools/fpa-buddy").text
+    launched = T._launch()
+    if launched is None:
+        pytest.skip("no Chromium available")
+    pw, browser = launched
+    try:
+        for w in (390, 1280):
+            ctx = browser.new_context(viewport={"width": w, "height": 900})
+            pg = ctx.new_page()
+            pg.route(re.compile(r"^http://buddy\.test/.*"), T.Site(html).handle)
+            pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
+            pg.goto("http://buddy.test/tools/fpa-buddy")
+            pg.evaluate("document.querySelectorAll('details.ask-pq-row').forEach(d=>d.open=true)")
+            sizes = pg.evaluate("""()=>[...document.querySelectorAll('.ask-ctl-admin')].map(b=>{
+                const r=b.getBoundingClientRect(); return [b.textContent, Math.round(r.width*10)/10, Math.round(r.height*10)/10]})""")
+            assert {t for t, _, _ in sizes} == {"Hide", "Unhide"}
+            assert all(abs(wd - 128) < 0.6 and abs(h - 28) < 0.6 for _, wd, h in sizes), sizes
+            ctx.close()
+    finally:
+        browser.close()
+        pw.stop()
