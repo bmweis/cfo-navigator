@@ -46,6 +46,19 @@ measured on the `#F5F4EF` canvas.
 | `--seafoam` | `#A3E5D4` | fill | Base accent (light mint) — tags, badges, active-nav underline |
 | `--seafoam-wash` | `#EAF7F2` | fill | Soft fill — calculator readout, table accents |
 
+**Seafoam fill on a button marks a control visible only to admins on a public page.**
+It mirrors the seafoam background of the admin-only Reader box (`_ADMIN_ONLY_BG`).
+Class `.ask-ctl-admin` (seafoam fill, `--seafoam-deep` border, navy text, 9.3:1
+contrast; same 28px height and 44px touch target as other compact buttons) is
+the first user: "Hide from members" and "Unhide" on FP&A Buddy past questions.
+Seafoam now means two things, kept apart by shape: a category tag is a small
+non-interactive pill, an admin-only control has button shape, height and a
+border. Other admin-only controls on public pages (for example Quick edit, Full
+edit and Delete on vendor cards) are still grey; a sitewide change is a
+separate decision. Controls inside `/admin/*` are all admin-only and unstyled
+this way.
+
+
 **Coral — warm accent (rare)**
 | Token | Hex | Contrast | Use |
 |---|---|---|---|

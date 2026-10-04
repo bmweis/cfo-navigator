@@ -23793,14 +23793,18 @@ _ASK_CTL_CSS = (
     ".ask-ctl{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 16px;"
     "box-sizing:border-box;border:1px solid var(--navy);border-radius:10px;background:transparent;color:var(--navy);"
     "font:600 14px var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;}"
-    ".ask-ctl:hover{background:var(--accent-light);}"
+    "@media(hover:hover){.ask-ctl:hover{background:var(--accent-light);}.ask-ctl-admin:hover{background:var(--seafoam);filter:brightness(.95);}}"
     ".ask-ctl:focus-visible{outline:2px solid var(--navy);outline-offset:2px;}"
     # Compact variant: 28px visible, with a 44px touch target from a pseudo-element
     # that adds no layout height (inset from the 1px border, so -9px gives 44px). -w gives the row buttons one shared width
     # (sized to the widest label, "Remove from view", with room to spare).
     ".ask-ctl-sm{min-height:28px;padding:0 12px;font-size:13px;position:relative;}"
     ".ask-ctl-sm::after{content:\"\";position:absolute;left:0;right:0;top:-9px;bottom:-9px;}"
-    ".ask-ctl-w{width:128px;padding-left:0;padding-right:0;}"
+    # Width is a floor, not a fixed value: a label that fits renders at exactly 128px, a wider
+    # one (fallback font) grows instead of spilling out of the pill.
+    ".ask-ctl-w{min-width:128px;padding-left:10px;padding-right:10px;white-space:nowrap;}"
+    # Seafoam fill on a button marks a control visible only to admins on a public page (BRAND.md).
+    ".ask-ctl-admin{background:var(--seafoam);border-color:var(--seafoam-deep);color:var(--navy);}"
     ".ask-ctl[aria-pressed=true]{background:var(--navy);color:#fff;}"
 )
 
@@ -23865,7 +23869,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         admin_controls = ""
         if authed:
             admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
-      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w">Remove from view</button></form>
+      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w ask-ctl-admin">{"Unhide" if r.get("hidden_public") else "Hide from members"}</button></form>
     </div>"""
         hc, nc = int(r.get("helpful_count") or 0), int(r.get("negative_count") or 0)
         # Plain emoji status, no border or fill (only actions get those); same
@@ -23878,18 +23882,22 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             rating = '<span class="ask-pq-rate" role="img" aria-label="Rated not helpful" title="Rated not helpful">&#128078;</span>'
         else:
             rating = ""
-        # Meta segments, emoji first so indicators line up down the list:
-        # rating, private marker, byline, date. Each segment is nowrap and the
-        # gaps are flex gaps (no literal separators to orphan at a line end).
-        # The private marker is plain text, shown only to the asker and admins
-        # (the list never returns a private row to anyone else).
-        segs = [rating] if rating else []
+        # Meta: the left group is state and credit (Private, Hidden from members,
+        # byline, date), each a nowrap segment with flex gaps, no literal
+        # separators. The rating has its own fixed-width slot at the far right of
+        # the row, empty when unrated, so ratings and dates line up down the list.
+        # Private and Hidden are plain labelled text, shown only to the asker /
+        # admins (the list never returns such a row to anyone else).
+        segs = []
         if r.get("is_private"):
             segs.append('<span class="ask-pq-seg ask-pq-priv">&#128274; Private</span>')
+        if r.get("hidden_public"):
+            segs.append('<span class="ask-pq-seg ask-pq-hidden">Hidden from members</span>')
         if who is not None:
             segs.append(f'<span class="ask-pq-seg">{_esc(who)}</span>')
         segs.append(f'<span class="ask-pq-seg ask-pq-date">{date}</span>')
-        meta_html = "".join(segs)
+        meta_html = (f'<span class="ask-pq-ml">{"".join(segs)}</span>'
+                     f'<span class="ask-pq-slot">{rating}</span>')
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
@@ -24109,7 +24117,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         <button type="button" class="fu-send ask-send" id="ask-btn" onclick="doAsk()" aria-label="Ask" title="Ask"{'' if q.strip() else ' disabled'}><span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button>
       </div>
       <label class="ask-priv-opt"><input type="checkbox" id="ask-private"><span>Keep this question private</span></label>
-      <p class="ask-priv-note">Other members see this without your name. Admins see every question. <a href="/privacy">Privacy policy</a></p>
+      <p class="ask-priv-note">Shared with other members without your name. Admins can see every question. Leave out company names and figures you want kept confidential. <a href="/privacy">Privacy policy</a></p>
     </div>
   </div>
 </div>
@@ -24307,16 +24315,18 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-pq-row[open]{{border-color:var(--navy);}}
 .ask-pq-sum{{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;}}
 .ask-pq-sum::-webkit-details-marker{{display:none;}}
-.ask-pq-sum:hover{{background:var(--accent-light);border-radius:8px;}}
+@media(hover:hover){{.ask-pq-sum:hover{{background:var(--accent-light);border-radius:8px;}}}}
 .ask-pq-rc{{font-size:12px;color:var(--navy);transition:transform .12s;flex-shrink:0;}}
 .ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{{transform:rotate(90deg);}}
 .ask-pq-q{{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}}
 .ask-pq-row[open] .ask-pq-q{{display:block;overflow:visible;}}
-.ask-pq-meta{{flex:0 0 100%;order:3;margin-left:22px;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}}
+.ask-pq-meta{{flex:0 0 calc(100% - 22px);order:3;margin-left:22px;display:flex;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}}
+.ask-pq-ml{{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;flex:1 1 auto;min-width:0;}}
 .ask-pq-seg,.ask-pq-rate{{white-space:nowrap;}}
+.ask-pq-slot{{flex:0 0 24px;width:24px;text-align:center;margin-left:auto;}}
 .ask-pq-rate{{font-size:14px;}}
-@media(min-width:700px){{.ask-pq-meta{{flex:0 1 auto;order:0;margin-left:auto;justify-content:flex-end;max-width:50%;}}}}
+@media(min-width:700px){{.ask-pq-meta{{flex:0 1 auto;order:0;margin-left:auto;max-width:50%;}}.ask-pq-ml{{flex:0 1 auto;justify-content:flex-end;}}}}
 .ask-pq-body{{padding:2px 16px 14px 32px;}}
 .ask-pq-heading{{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
 .ask-recent-item{{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;box-sizing:border-box;
@@ -24327,7 +24337,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu-foot{{margin-top:8px;}}
 .ask-done-note{{font-size:13.5px;color:var(--muted);margin:0 0 10px;}}
 {_ASK_CTL_CSS}
-.ask-recent-item:hover{{border-color:var(--navy);}}
+@media(hover:hover){{.ask-recent-item:hover{{border-color:var(--navy);}}}}
 .ask-recent-q{{font-weight:600;font-size:13.5px;color:var(--navy);overflow:hidden;text-overflow:ellipsis;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}}
 .ask-recent-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
@@ -24360,7 +24370,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu-send:disabled .fu-send-dot{{background:var(--line);}}
 .fu-send:focus-visible{{outline:2px solid var(--navy);outline-offset:2px;}}
 .ask-turn-row{{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;font:inherit;padding:11px 14px;min-height:44px;box-sizing:border-box;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;}}
-.ask-turn-row:hover{{border-color:var(--navy);}}
+@media(hover:hover){{.ask-turn-row:hover{{border-color:var(--navy);}}}}
 .ask-turn-row .ask-pq-rc{{font-size:12px;color:var(--navy);}}
 .ask-turn-row[aria-expanded="true"] .ask-pq-rc{{transform:rotate(90deg);}}
 .ask-turn-rq{{font-weight:600;font-size:13.5px;color:var(--navy);min-width:0;flex:1;}}
@@ -24394,7 +24404,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-wrap:wrap;gap:6px;}}
 .ask-src-list li{{font-size:12px;min-width:0;max-width:100%;}}
 .ask-src-list a, .ask-src-list span.ask-src-static{{display:inline-flex;align-items:flex-start;gap:5px;max-width:100%;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
-.ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}
+@media(hover:hover){{.ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}}}
 .ask-src-own{{margin-left:4px;font-size:11px;color:var(--muted);font-weight:500;}}
 .ask-src-caption{{margin:6px 0 0;font-size:11px;color:var(--muted);}}
 

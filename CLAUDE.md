@@ -13519,3 +13519,22 @@ subscription.
   open thread show only the viewer's own questions with no byline. Tests:
   `tests/test_buddy_row_layout.py`.
 
+- **B2 follow-ups on PR 683 (2026-10).** (1) The rating sits in its own fixed
+  24px slot (`.ask-pq-slot`) at the far right of every row, after the date, empty
+  when unrated; Mixed is the single shrug emoji (U+1F937), the slot is sized for
+  the widest rating. Ratings and, at 700px and up, dates line up in columns. The
+  left meta group is Private, Hidden from members, byline, date. (2) `.ask-ctl-w`
+  is now `min-width:128px` with `white-space:nowrap` (a label that fits renders at
+  exactly 128px; a wider fallback-font label grows instead of spilling). (3)
+  **Hide from members** (was "Remove from view") sets `hidden_public`: the row
+  leaves the past-questions list and search for members; the asker's own history
+  and Recent are unchanged (they never filter on it); admins now also get hidden
+  rows in the list, marked "Hidden from members" with an **Unhide** button (the
+  same toggle route), because before this a hidden row vanished for admins too
+  and could not be undone from the UI. It is a separate flag from
+  `is_private`, so a member's Make private / Allow sharing never undoes an admin's
+  hide. Admin-only controls on a public page use `.ask-ctl-admin` (seafoam fill,
+  see BRAND.md). (4) Hover backgrounds and borders on `/tools/fpa-buddy` are inside
+  `@media(hover:hover)` so iOS does not leave a tapped row tinted. (5) The ask-box
+  note is the approved wording plus a Privacy policy link.
+

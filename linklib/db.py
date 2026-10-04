@@ -9312,10 +9312,11 @@ class Library:
                          (SELECT COUNT(*) FROM ask_feedback f
                            WHERE f.question_id = aq.id AND f.rating <> 'helpful') AS negative_count
                   FROM ask_questions aq LEFT JOIN users u ON u.id = aq.user_id
-                  WHERE aq.hidden_public=0 AND aq.turn_index=0"""
+                  WHERE aq.turn_index=0"""
         params: list = []
         if not see_private:
-            base += " AND (aq.is_private=0 OR aq.user_id=?)"
+            # Admins (see_private) also get rows an admin hid, so one can be unhidden.
+            base += " AND aq.hidden_public=0 AND (aq.is_private=0 OR aq.user_id=?)"
             params.append(viewer_id if viewer_id is not None else -1)
         if helpful_only:
             base += """ AND EXISTS (

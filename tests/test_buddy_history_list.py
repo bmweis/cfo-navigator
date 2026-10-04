@@ -113,10 +113,10 @@ def test_bylines_by_viewer(site):
     member = _section(client("reader").get("/tools/fpa-buddy").text)
     assert "Alexandra" not in member and "author" not in member.replace("Helpful first", "")
     assert "A member" not in member
-    assert re.search(r'<span class="ask-pq-seg">You</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span>', member)
+    assert re.search(r'<span class="ask-pq-seg">You</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span></span><span class="ask-pq-slot">', member)
     admin = _section(client("boss").get("/tools/fpa-buddy").text)
-    # rating first, then the name, then the date
-    assert re.search(r'<span class="ask-pq-rate"[^>]*>&#128077;</span><span class="ask-pq-seg">Alexandra Author</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span>', admin)
+    # name, then date, then the rating in the far-right slot
+    assert re.search(r'<span class="ask-pq-seg">Alexandra Author</span><span class="ask-pq-seg ask-pq-date">\d{4}-\d{2}-\d{2}</span></span><span class="ask-pq-slot"><span class="ask-pq-rate"[^>]*>&#128077;</span>', admin)
 
 
 def test_anonymize_is_retired_and_remove_is_relabelled(site):
@@ -124,7 +124,7 @@ def test_anonymize_is_retired_and_remove_is_relabelled(site):
     admin = client("boss")
     html = admin.get("/tools/fpa-buddy").text
     assert "Anonymize asker" not in html and "Un-anonymize" not in html
-    assert ">Remove from view</button>" in html and "Remove from this view" not in html
+    assert ">Hide from members</button>" in html and "Remove from this view" not in html and "Remove from view" not in html
     assert admin.post(f"/questions/{ids['plain']}/anonymize", follow_redirects=False).status_code in (404, 405)
     assert admin.post(f"/questions/{ids['plain']}/hide", follow_redirects=False).status_code == 303
 
@@ -134,7 +134,7 @@ def test_resume_and_search_use_the_compact_class(site):
     html = client("reader").get("/tools/fpa-buddy").text
     assert re.search(r'class="ask-ctl ask-ctl-sm ask-ctl-w"[^>]*onclick="resumeConvoById', html)
     assert "ask-ctl ask-ctl-sm ask-ctl-w\" onclick=\"event.stopPropagation();resumeConvo" in html
-    assert ".ask-ctl-sm{min-height:28px" in html and ".ask-ctl-w{width:128px" in html
+    assert ".ask-ctl-sm{min-height:28px" in html and ".ask-ctl-w{min-width:128px" in html
 
 
 def test_browser_heights_widths_and_touch_target(site):
@@ -211,14 +211,14 @@ def test_each_row_shows_a_labelled_rating(site):
     assert rate_css and "border" not in rate_css and "background" not in rate_css
 
 
-def test_own_row_meta_order_is_rating_then_you_then_date(site):
+def test_own_row_meta_order_is_you_then_date_then_rating(site):
     client, ids, _ = site
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     def meta(q):
         i = sec.index(q)
         return sec[i:sec.index("</summary>", i)]
     rated = meta("My own rated question")
-    assert rated.index("ask-pq-rate") < rated.index(">You<") < rated.index("ask-pq-date")
+    assert rated.index(">You<") < rated.index("ask-pq-date") < rated.index("ask-pq-rate")
     plain = meta("My own question")
     assert "ask-pq-rate" not in plain and plain.index(">You<") < plain.index("ask-pq-date")
 

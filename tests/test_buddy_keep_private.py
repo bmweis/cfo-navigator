@@ -78,7 +78,7 @@ def test_admin_sees_private_with_lock_and_full_name(site):
     i = sec.index("Private question from author")
     row = sec[i:sec.index("</summary>", i)]
     assert "&#128274; Private" in row and "author" in row
-    assert "Remove from view" in sec
+    assert "Hide from members" in sec
 
 
 def test_list_query_is_viewer_scoped(site):
@@ -148,7 +148,8 @@ def test_page_has_checkbox_note_and_toggle_hooks(site):
     client, ids, _ = site
     html = client("reader").get("/tools/fpa-buddy").text
     assert 'id="ask-private"' in html and "Keep this question private" in html
-    assert "Other members see this without your name. Admins see every question." in html
+    assert ("Shared with other members without your name. Admins can see every question. "
+            "Leave out company names and figures you want kept confidential.") in html
     assert '<a href="/privacy">Privacy policy</a>' in html
     assert "Allow sharing" in html and "Make private" in html and 'id="fu-priv"' in html
     assert "private: (!followUp && !convoId)" in html
@@ -166,7 +167,8 @@ def test_lock_and_label_strings_pass_voice_scanners():
     from html import unescape
     from linklib.voice_review import mechanical_findings, typography_findings_plain
     for t in (unescape("&#128274;"), "Make private", "Allow sharing", "Keep this question private",
-              "Other members see this without your name. Admins see every question."):
+              "Shared with other members without your name. Admins can see every question. Leave out company names and figures you want kept confidential.",
+              "Hide from members", "Hidden from members", "Unhide"):
         assert not mechanical_findings(t) and not typography_findings_plain(t)
 
 
@@ -201,3 +203,52 @@ def test_browser_private_buttons_fit_128px_and_thread_toggle_works(site):
     finally:
         browser.close()
         pw.stop()
+
+
+def test_private_conversation_is_absent_from_other_members_list_and_search(site):
+    client, ids, _ = site
+    html = client("reader").get("/tools/fpa-buddy?pq=Private").text
+    assert "Private question from author" not in html and "Private follow-up" not in html
+    # the conversation endpoints refuse someone else's private thread
+    cid = str(ids["priv"])
+    assert client("reader").get(f"/ask/conversations/{cid}").status_code == 403
+    assert all(c["conversation_id"] != cid for c in client("reader").get("/ask/conversations").json()["conversations"])
+
+
+def test_admin_hide_is_visible_undoable_and_separate_from_private(site):
+    client, ids, db = site
+    boss = client("boss")
+    assert boss.post(f"/questions/{ids['shared']}/hide", follow_redirects=False).status_code == 303
+    sec = _section(boss.get("/tools/fpa-buddy").text)
+    i = sec.index("Shared question from author")
+    row = sec[i:]
+    assert "Hidden from members" in row and ">Unhide</button>" in row and "ask-ctl-admin" in row
+    # members never see a hidden row
+    assert "Shared question from author" not in _section(client("reader").get("/tools/fpa-buddy").text)
+    # the asker's Make private / Allow sharing never touches the admin's hide
+    client("author").post(f"/questions/{ids['shared']}/private", follow_redirects=False)
+    client("author").post(f"/questions/{ids['shared']}/private", follow_redirects=False)
+    lib = Library(db)
+    assert lib.get_ask_question(ids["shared"])["hidden_public"] == 1
+    lib.close()
+    boss.post(f"/questions/{ids['shared']}/hide", follow_redirects=False)
+    sec = _section(boss.get("/tools/fpa-buddy").text)
+    assert ">Hide from members</button>" in sec and "Hidden from members<" not in sec
+
+
+def test_hover_backgrounds_sit_inside_a_hover_media_query(site):
+    client, _, _ = site
+    html = client("reader").get("/tools/fpa-buddy").text
+    for rule in (".ask-pq-sum:hover", ".ask-recent-item:hover", ".ask-turn-row:hover", ".ask-ctl:hover"):
+        assert "@media(hover:hover){" + rule in html, rule
+        assert ("\n" + rule) not in html, rule      # never also declared bare
+
+
+def test_rating_slot_is_at_the_far_right_and_buttons_keep_a_width_floor(site):
+    client, _, _ = site
+    html = client("reader").get("/tools/fpa-buddy").text
+    assert ".ask-pq-slot{flex:0 0 24px;width:24px" in html
+    assert ".ask-ctl-w{min-width:128px" in html and "white-space:nowrap" in html
+    sec = _section(html)
+    # every row carries the slot; the rating sits inside it, after the date
+    assert sec.count('class="ask-pq-slot"') == sec.count('<details class="ask-pq-row">')
