@@ -305,3 +305,14 @@ def test_transcript_capped_conversation(env):
     d = _login(appmod, "member1", "supersecret").get(f"/ask/conversations/{cid}").json()
     assert d["capped"] is True and d["followups_left"] == 0
     assert len(d["turns"]) == 1 + MAX_FOLLOWUPS
+
+
+def test_follow_up_cap_message_says_start_a_new_conversation(env):
+    """The cap text matches the label above the box ("Start a new conversation")."""
+    appmod, uid, _ = env
+    cid, _ = _seed_conversation(uid, 1 + MAX_FOLLOWUPS)
+    c = _login(appmod, "member1", "supersecret")
+    d = c.post("/ask", json={"question": "one more?", "conversation_id": cid}).json()
+    assert d["capped"] is True
+    assert d["answer"] == ("We've reached the limit for this conversation. "
+                           "Start a new conversation to keep going.")
