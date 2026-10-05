@@ -69,6 +69,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from linklib import compare, gates, tool_labels
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.voice_mechanics import norm_for_compare
+from webapp import buddy_example as _BUDDY_EXAMPLE
 from linklib.voice_review import (
     guess_ampersand_terms as _voice_guess_ampersand_terms,
     validate_ampersand_term,
@@ -8500,7 +8501,7 @@ def privacy_page(request: Request):
 <p>The feedback form and the contact form both let you leave an email address, but it's optional. If you do, it's used only to follow up with you directly if there's something worth responding to. It isn't added to a mailing list or shared anywhere.</p>
 
 <h2>If you create an account</h2>
-<p>Some parts of the site (the research library, FP&amp;A Buddy) require a member account. Account passwords are stored using one-way hashing, never in plain text. Logging in sets a separate cookie that identifies your session; it doesn't track browsing elsewhere on the internet.</p>
+<p>Some parts of the site (the research library, FP&amp;A Buddy) require a user account. Account passwords are stored using one-way hashing, never in plain text. Logging in sets a separate cookie that identifies your session; it doesn't track browsing elsewhere on the internet.</p>
 
 <h2>FP&amp;A Buddy questions</h2>
 <p>Questions you ask FP&amp;A Buddy are stored with your account so you can resume them and see your own history. By default, other users can see a question and its answer in the past-questions list, without your name. Admins can see every question and who asked it. If you tick "Keep this question private" when you ask, or use "Make private" afterward, other users never see that conversation. Admins still can. Leave out company names and figures you want kept confidential, since admins can read everything.</p>
@@ -18164,7 +18165,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <li><strong>Quiz mention</strong> (end of the subtitle, top of page): &ldquo;...Slack channels. Not sure which community's for you? Take the quiz &rarr;&rdquo;</li>
 <li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;&mdash;goes straight to the gap form, carrying along what was searched for.</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#129305; Formal advisor to these communities.&rdquo;</li>
-<li><strong>Footer:</strong> &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members, &ldquo;Sign in to submit &rarr;&rdquo; otherwise (submitting needs an account; flagging a gap doesn't), followed by &ldquo;Can't find the right one, or the one you're in isn't quite enough? I'd love to know what's missing &rarr;&rdquo; (public, no login).</li>
+<li><strong>Footer:</strong> &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in users, &ldquo;Sign in to submit &rarr;&rdquo; otherwise (submitting needs an account; flagging a gap doesn't), followed by &ldquo;Can't find the right one, or the one you're in isn't quite enough? I'd love to know what's missing &rarr;&rdquo; (public, no login).</li>
 </ul>
 </section>
 
@@ -24018,9 +24019,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # Sources — the same seafoam-fill/navy-text tag component used elsewhere on
     # the site (BRAND.md §5), toggled on/off by tap instead of a checkbox list.
     source_defs = [
-        ("library", "Saved archive", True),
-        ("feed", "RSS feed", False),
-        ("web", "Trusted web", True),
+        ("library", "Curated archive", True),
+        ("feed", "Current feed", False),
+        ("web", "Open web", True),
     ]
     _CHECK_SVG = ('<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">'
                   '<path d="M1 5L4 8L9 2" stroke="#001B4F" stroke-width="1.6" fill="none" '
@@ -24082,6 +24083,10 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # closes the intro-to-Question-box dead space; see the CSS comment
     # below for why a spaced-out `usage` row happens at all otherwise.
     usage_div = f'<div class="fpa-intro-area-usage">{usage_html}</div>' if usage_html else ""
+    # The example is a hardcoded snapshot of a real conversation (webapp/buddy_example.py),
+    # rendered through the same helper the history pages use, so it reads like a real answer.
+    _example_answer_html, _example_sources_html = _render_cited_answer(
+        _BUDDY_EXAMPLE.ANSWER, _BUDDY_EXAMPLE.CITATIONS_JSON)
     _intro_areas_desktop = (
         '"intro example" "usage example" "question example"'
         if usage_html else
@@ -24113,17 +24118,14 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
   </div>
   <div class="fpa-intro-area-example">
     <div class="ask-example">
-      <div class="ask-example-label">Illustrative example&mdash;not a captured real answer</div>
-      <div class="ask-q-bubble">What FP&amp;A team size do peer SaaS companies run at our stage?</div>
-      <div class="ask-answer">
-        <p>Most peer benchmarks put FP&amp;A headcount around one analyst per 75 to 150 employees, with the ratio tightening as ARR growth accelerates [1]. Companies preparing for a new funding round often add a dedicated FP&amp;A hire ahead of the raise to support board-reporting cadence [2]. Recent hiring trends across sub-$100M-ARR SaaS companies lean toward one generalist analyst before adding a dedicated planning lead [3].</p>
-        <ul class="ask-src-list">
-          <li>&#128218; <span class="ask-src-static">[1] FP&amp;A Team Sizing Benchmarks</span></li>
-          <li>&#128240; <span class="ask-src-static">[2] Board Reporting Cadence at Growth Stage</span></li>
-          <li>&#127760; <span class="ask-src-static">[3] Hiring Trends Across Early-Stage FP&amp;A Teams</span></li>
-        </ul>
-      </div>
+      <div class="ask-example-label">A real question and answer, shown as asked.</div>
+      <div class="ask-example-settings">Depth: Standard &middot; Sources: Curated archive, Current feed</div>
+      <div class="ask-q-bubble">{_esc(_BUDDY_EXAMPLE.QUESTION)}</div>
+      <div class="ask-answer ask-hist-answer" id="ask-ex-answer">{_example_answer_html}</div>
+      <button type="button" class="btn btn-ghost ask-ex-toggle" id="ask-ex-toggle" aria-expanded="false" aria-controls="ask-ex-answer" hidden>Show full answer</button>
+      {_example_sources_html}
     </div>
+    <script>{_ASK_EXAMPLE_JS}</script>
   </div>
   {usage_div}
   <div class="fpa-intro-area-question">
@@ -24150,7 +24152,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
       </div>
       <label for="ask-q" class="ask-q-label">Start a new conversation</label>
       <div class="ask-q-wrap">
-        <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?">{pre_q}</textarea>
+        <textarea id="ask-q" rows="5" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?">{pre_q}</textarea>
         <button type="button" class="fu-send ask-send" id="ask-btn" onclick="doAsk()" aria-label="Ask" title="Ask"{'' if q.strip() else ' disabled'}><span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button>
       </div>
       <div id="ask-sim" class="ask-sim" hidden aria-live="polite"></div>
@@ -24308,6 +24310,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fpa-intro-area-example .ask-answer{{flex:1;}}
 
 .ask-example{{border:1px dashed var(--line-strong);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--surface);}}
+.ask-example.ask-ex-js:not(.open) .ask-answer{{max-height:300px;overflow:hidden;position:relative;}}
+.ask-example.ask-ex-js:not(.open) .ask-answer:after{{content:"";position:absolute;left:0;right:0;bottom:0;height:64px;background:linear-gradient(rgba(255,255,255,0),var(--surface));pointer-events:none;}}
+.ask-ex-toggle{{margin:10px 0 4px;align-self:flex-start;}}
+.ask-ex-toggle[hidden]{{display:none;}}
+.ask-example-settings{{font-size:12px;color:var(--muted);margin:0 0 10px;}}
 .ask-example-label{{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:3px 10px;margin-bottom:12px;}}
 
 /* Scoped scale-down for the example inside the intro's right column only—
@@ -25850,7 +25857,7 @@ _TOOLBOX_TOOLS = [
 _FPA_BUDDY_TOOLS = [
     ("/tools/fpa-buddy/how-it-works", "How FP&amp;A Buddy works", "The retrieval tiers, effort levels, citations, and cost model behind the Q&amp;A tool&mdash;for anyone who wants the real mechanism. Public page, not admin-only."),
     ("/admin/fpa-buddy/report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
-    ("/admin/fpa-buddy/feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
+    ("/admin/fpa-buddy/feedback",  "FP&A Buddy feedback", "User ratings on answers—triage flagged answers with the sources they cited."),
 ]
 
 # Content-page admin, nested as its own sub-group inside "Brand, voice, and
@@ -25935,7 +25942,7 @@ _ADMIN_GROUPS = [
     # one for a nine-card list is more machinery than the job needs; two
     # groups side by side read the same and cost nothing.
     ("Configuration", "Accounts, AI settings, and the site's open-source credits.", [
-        ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
+        ("/admin/users",           "Users",               "Create and manage user accounts for the gated sections."),
         ("/admin/system/ai",       "AI configuration and usage", "The enrichment model, the Exa web-search toggle, and a map of every AI surface in the app."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
     ]),
@@ -31839,6 +31846,24 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
 
 _ASK_SOURCE_ICONS = {"library": "&#128218;", "feed": "&#128240;", "web": "&#127760;"}
 
+# The example's "Show full answer" control. The clip is a height limit plus a fade added
+# only once this script runs (class ask-ex-js), so with no JavaScript the whole answer shows.
+# The full text is always in the DOM: find-in-page, copy and screen readers get all of it.
+_ASK_EXAMPLE_JS = """
+(function () {
+  var box = document.querySelector('.ask-example');
+  var btn = document.getElementById('ask-ex-toggle');
+  if (!box || !btn) return;
+  box.classList.add('ask-ex-js');
+  btn.hidden = false;
+  btn.addEventListener('click', function () {
+    var open = box.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.textContent = open ? 'Show less' : 'Show full answer';
+  });
+})();
+"""
+
 
 def _group_conversations(rows: list[dict]) -> list[list[dict]]:
     """Group flat ask_questions rows into conversations for display.
@@ -33032,7 +33057,7 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>FP&amp;A Buddy feedback</h1>
-<p style="color:var(--muted);margin:-6px 0 20px;">How members rated the answers&mdash;flagged answers stay inspectable with the sources they actually cited. This page is for review only: nothing here automatically changes how FP&A Buddy answers or searches for sources.</p>
+<p style="color:var(--muted);margin:-6px 0 20px;">How users rated the answers&mdash;flagged answers stay inspectable with the sources they actually cited. This page is for review only: nothing here automatically changes how FP&A Buddy answers or searches for sources.</p>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px;margin-bottom:20px;">
   {stat_cards}
@@ -33511,7 +33536,7 @@ def admin_users(request: Request, msg: str = ""):
 <div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Users</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">Member accounts for the gated sections. You create accounts here (no public sign-up yet). You always keep admin access via the host password, so you can&rsquo;t lock yourself out.</p>
+<p style="color:var(--muted);margin:-6px 0 18px;">User accounts for the gated sections. You create accounts here (no public sign-up yet). You always keep admin access via the host password, so you can&rsquo;t lock yourself out.</p>
 {banner}
 
 <details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
@@ -38436,8 +38461,8 @@ def _email_template_registry() -> list[dict]:
         {
             "id": "warm-intro", "prefix": "warm_intro", "title": "Warm intro email",
             "recipient": "Vendor contact (requester cc&rsquo;d)",
-            "trigger": "A member requests an intro on /tools",
-            "blurb": "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/inbox/toolbox-intros). The requester is cc&rsquo;d automatically.",
+            "trigger": "A user requests an intro on /tools",
+            "blurb": "Sent to a vendor contact when a CFO Toolbox user requests an intro (see /admin/inbox/toolbox-intros). The requester is cc&rsquo;d automatically.",
             "placeholders": eu.WARM_INTRO_PLACEHOLDERS,
             "subject_default": eu.WARM_INTRO_SUBJECT_DEFAULT,
             "body_default": eu.WARM_INTRO_BODY_DEFAULT,
@@ -38445,9 +38470,9 @@ def _email_template_registry() -> list[dict]:
         },
         {
             "id": "welcome", "prefix": "welcome", "title": "Welcome email",
-            "recipient": "New member",
+            "recipient": "New user",
             "trigger": "Account created in /admin/users",
-            "blurb": "Sent to a new member when their account is created in /admin/users.",
+            "blurb": "Sent to a new user when their account is created in /admin/users.",
             "placeholders": eu.WELCOME_PLACEHOLDERS,
             "subject_default": eu.WELCOME_SUBJECT_DEFAULT,
             "body_default": eu.WELCOME_BODY_DEFAULT,
@@ -38455,9 +38480,9 @@ def _email_template_registry() -> list[dict]:
         },
         {
             "id": "password-reset", "prefix": "password_reset", "title": "Password reset email",
-            "recipient": "Member requesting reset",
+            "recipient": "User requesting reset",
             "trigger": "“Forgot your password?” on /login",
-            "blurb": "Sent with a one-hour self-service reset link when a member requests a password reset.",
+            "blurb": "Sent with a one-hour self-service reset link when a user requests a password reset.",
             "placeholders": eu.PASSWORD_RESET_PLACEHOLDERS,
             "subject_default": eu.PASSWORD_RESET_SUBJECT_DEFAULT,
             "body_default": eu.PASSWORD_RESET_BODY_DEFAULT,
@@ -38465,9 +38490,9 @@ def _email_template_registry() -> list[dict]:
         },
         {
             "id": "admin-password-reset", "prefix": "admin_password_reset", "title": "Admin password reset email",
-            "recipient": "Existing member",
+            "recipient": "Existing user",
             "trigger": "An admin resets their password in /admin/users",
-            "blurb": "Sent to an existing member with their new temporary password when an admin resets it directly (distinct from the self-service “Forgot your password?” link above).",
+            "blurb": "Sent to an existing user with their new temporary password when an admin resets it directly (distinct from the self-service “Forgot your password?” link above).",
             "placeholders": eu.ADMIN_PW_RESET_PLACEHOLDERS,
             "subject_default": eu.ADMIN_PW_RESET_SUBJECT_DEFAULT,
             "body_default": eu.ADMIN_PW_RESET_BODY_DEFAULT,
@@ -38476,8 +38501,8 @@ def _email_template_registry() -> list[dict]:
         {
             "id": "tool-submission", "prefix": "tool_submission", "title": "Tool submission confirmation",
             "recipient": "Submitter",
-            "trigger": "A member submits a tool on /tools/submit",
-            "blurb": "Confirms what was submitted back to the member, and invites a reply if they have questions or need to change anything.",
+            "trigger": "A user submits a tool on /tools/submit",
+            "blurb": "Confirms what was submitted back to the user, and invites a reply if they have questions or need to change anything.",
             "placeholders": eu.TOOL_SUBMISSION_PLACEHOLDERS,
             "subject_default": eu.TOOL_SUBMISSION_SUBJECT_DEFAULT,
             "body_default": eu.TOOL_SUBMISSION_BODY_DEFAULT,
@@ -38486,8 +38511,8 @@ def _email_template_registry() -> list[dict]:
         {
             "id": "community-submission", "prefix": "community_submission", "title": "Community submission confirmation",
             "recipient": "Submitter",
-            "trigger": "A member submits a community on /tools/communities/submit",
-            "blurb": "Confirms what was submitted back to the member, and invites a reply if they have questions or need to change anything.",
+            "trigger": "A user submits a community on /tools/communities/submit",
+            "blurb": "Confirms what was submitted back to the user, and invites a reply if they have questions or need to change anything.",
             "placeholders": eu.COMMUNITY_SUBMISSION_PLACEHOLDERS,
             "subject_default": eu.COMMUNITY_SUBMISSION_SUBJECT_DEFAULT,
             "body_default": eu.COMMUNITY_SUBMISSION_BODY_DEFAULT,
@@ -38513,16 +38538,16 @@ def _email_template_registry() -> list[dict]:
 # tagged (subject prefix + X-CFO-Notification-Type header, set in
 # send_notification_email) so a mail-client rule can auto-file it by type.
 _INTERNAL_EMAIL_ROWS = [
-    {"title": "Tool submission notice", "recipient": "You", "trigger": "A member submits a tool on /tools/submit",
+    {"title": "Tool submission notice", "recipient": "You", "trigger": "A user submits a tool on /tools/submit",
      "notification_type": "tool_submission"},
-    {"title": "Community submission notice", "recipient": "You", "trigger": "A member submits a community on /tools/communities/submit",
+    {"title": "Community submission notice", "recipient": "You", "trigger": "A user submits a community on /tools/communities/submit",
      "notification_type": "community_submission"},
-    {"title": "Library submission notice", "recipient": "You", "trigger": "A member suggests an archive piece on /library/submit",
+    {"title": "Library submission notice", "recipient": "You", "trigger": "A user suggests an archive piece on /library/submit",
      "notification_type": "library_submission"},
     {"title": "Contact form notice", "recipient": "You", "trigger": "Someone submits /contact",
      "notification_type": "contact"},
     {"title": "Password reset notice", "recipient": "You",
-     "trigger": "A member with no email on file requests a password reset",
+     "trigger": "A user with no email on file requests a password reset",
      "notification_type": "password_reset_no_email"},
 ]
 

@@ -203,7 +203,7 @@ def test_typing_in_the_bubble_collapses_controls_to_a_summary(live):
     assert pg.is_visible("#fu .fu-meta") and not pg.is_visible("#fu .fu-sum")
     pg.focus("#fu-q")
     assert not pg.is_visible("#fu .fu-meta") and pg.is_visible("#fu .fu-sum")
-    assert "Saved archive" in pg.inner_text("#fu .fu-sum")
+    assert "Curated archive" in pg.inner_text("#fu .fu-sum")
 
 
 def test_limit_state_replaces_the_bubble_input_and_offers_a_new_question(live):

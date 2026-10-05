@@ -411,7 +411,7 @@ FP&A Buddy doesn't have.
 
 **Same PR, round 2 — live review found ~350px of dead space under the
 left column at desktop width, since three sentences and a Question box
-can't fill the height a full mocked conversation needs.** Per Brian's
+can't fill the height a full example conversation needs.** Per Brian's
 direct feedback: pulled Sources, Depth, and the Ask button into the SAME
 left column, as two more `grid-template-areas` rows (`controls`, `action`)
 with a literal `.` placeholder in the right-hand cell — the empty cell is
@@ -451,7 +451,7 @@ the `<textarea>` and `.ask-answer` respectively) makes the visible
 borders fill that stretched space rather than stopping at their own
 content height. The mechanism that closes the gap without any hardcoded
 value: `example`'s spanning area is naturally taller than the
-intro/usage/question rows combined (the mocked conversation has more
+intro/usage/question rows combined (the example conversation has more
 content than three lines of prose), and CSS Grid's own auto-sizing
 algorithm grows the LAST row a multi-row item spans — `question` — to
 absorb that difference, which is exactly the row the Question box also
@@ -605,7 +605,7 @@ viewport-driven, one run on load covers every breakpoint.
 The ~93-110px gap fix needed real debugging, not a one-line CSS change, and
 surfaced a genuine CSS Grid subtlety: `example` spans three rows
 (`intro`/`usage`/`question`) via `grid-template-areas`, and when its own
-content (a full mocked conversation) is taller than those three rows'
+content (a full example conversation) is taller than those three rows'
 combined natural height, the leftover growth is NOT confined to the
 last-spanned row by default the way round 2's own explanation above assumed
 — every plain `auto` row the item spans shares the excess. A first fix
@@ -11385,3 +11385,12 @@ See `tests/test_homepage_screenshot_upload.py`, `tests/test_save_and_mark_verifi
 <!-- 2026-10: Compare tables use a first-column label (`_CMP_LABEL_COL_WIDTH`), Bottom line first in seafoam; see CLAUDE.md. -->
 
 <!-- 2026-10: Compare summary card heading "How they compare"; Bottom line row is white with a navy label rule; agent label is "What its agents do" (tool_labels.AGENT == SECTION_AGENT); see CLAUDE.md -->
+
+**FP&A Buddy page: real example, expand control, renamed sources (2026-10).** The example beside the intro
+is a hardcoded snapshot of a real conversation (`webapp/buddy_example.py`: question, answer, four library
+citations), rendered by `_render_cited_answer` like the history pages; it was a mocked answer before. It is
+clipped to 300px with a fade and a "Show full answer" button under it (`#ask-ex-toggle`, `aria-expanded`,
+`aria-controls="ask-ex-answer"`). `_ASK_EXAMPLE_JS` adds `ask-ex-js` to `.ask-example`, which turns the clip
+on and un-hides the button, so with no JavaScript the full answer shows; the full text is always in the
+DOM. The three source chips are Curated archive, Current feed, Open web. `#ask-q` is `rows="5"`; the
+follow-up textarea (`.fu textarea`) is a separate rule. See `tests/test_buddy_real_example.py`.

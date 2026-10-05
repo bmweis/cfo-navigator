@@ -83,10 +83,10 @@ def test_suggest_link_coexists_with_exa_caption(env):
     assert exa_idx < suggest_idx
 
 
-def test_mocked_illustrative_example_does_not_carry_the_suggest_link(env):
-    """The hardcoded mocked example near the top of the page (clearly labeled
-    'not a captured real answer') is static markup, not rendered through
-    srcListHtml() — confirm the suggest link doesn't leak into it."""
+def test_real_example_does_not_carry_the_suggest_link(env):
+    """The hardcoded real-answer snapshot near the top of the page is server-rendered
+    markup, not rendered through srcListHtml() — confirm the suggest link doesn't
+    leak into it."""
     c = _member_client(env)
     resp = c.get("/tools/fpa-buddy")
     body = resp.text
@@ -94,7 +94,7 @@ def test_mocked_illustrative_example_does_not_carry_the_suggest_link(env):
     example_end = body.index('class="fpa-intro-area-question"')
     example_html = body[example_start:example_end]
     assert SUGGEST_TEXT not in example_html
-    assert "ask-src-static" in example_html  # sanity: still the static fake sources
+    assert "https://a16z.com/how-to-think-of-rd-spend/" in example_html  # sanity: the snapshot's own sources
 
 
 def test_library_submit_stale_comment_is_fixed(env):
