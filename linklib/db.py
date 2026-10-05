@@ -3742,8 +3742,17 @@ class Library:
         _resolve_reader_content already ran for a Feed item that turns out
         to already be saved (Phase 5c). Kept as a real Library method
         (rather than inline SQL a second time) since there's now a second
-        call site."""
+        call site.
+
+        Tries the exact string first, then `normalize_url(url)`, so a pasted
+        `http://` or `www.` variant finds the article saved under its canonical
+        (https, no-www) URL. Articles are stored normalized (`upsert`), and the
+        exact-first order means a legacy row stored un-normalized still matches."""
         row = self.conn.execute("SELECT * FROM articles WHERE url=?", (url,)).fetchone()
+        if row is None:
+            canon = normalize_url(url)
+            if canon and canon != url:
+                row = self.conn.execute("SELECT * FROM articles WHERE url=?", (canon,)).fetchone()
         return self._row_to_dict(row) if row else None
 
     def embedding_content_hash(self, article_id: int) -> Optional[str]:
