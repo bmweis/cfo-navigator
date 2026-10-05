@@ -67,6 +67,7 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 from linklib import compare, gates, tool_labels
+from linklib.citations import citation_problem
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.voice_mechanics import norm_for_compare
 from webapp import buddy_example as _BUDDY_EXAMPLE
@@ -1351,6 +1352,45 @@ def _grounding_unavailable_error(e: Exception) -> str:
     ANTHROPIC_API_KEY, or the request failed" message, which couldn't
     distinguish this case from an unrelated SDK/key problem."""
     return f"Couldn't fetch usable content from {e.url} ({e.reason}). Write it by hand, or fix the URL and try again."
+
+
+_UNCITED_FIELD_LABELS = {
+    "agent_taxonomy": tool_labels.AGENT,
+    "description": tool_labels.DESCRIPTION,
+    "community_profile": "Community profile",
+}
+_UNCITED_REASON_TEXT = {
+    "no_citations": "no citations",
+    "orphan_markers": "citation numbers with no matching source",
+}
+_UNCITED_PREFIX = "uncited:"   # _run_tool_research's reason string for an UncitedDraft refusal
+
+
+def _uncited_draft_message(field: str, reason: str) -> str:
+    """The refusal shown when a grounded AI draft came back without valid
+    citations on both tries (issue #642): what happened, what was kept, what
+    to do. Used by the AJAX Generate routes and the Refresh banner."""
+    label = _UNCITED_FIELD_LABELS.get(field, field)
+    why = _UNCITED_REASON_TEXT.get(reason, "unusable citations")
+    return (f"Couldn't draft {label}. The AI's draft came back with {why} on both tries, so nothing "
+            f"was changed: the existing text and its Sources are kept. Try Generate again, or write it by hand.")
+
+
+def _uncited_draft_error(e: Exception) -> str:
+    return _uncited_draft_message(e.field, e.reason)
+
+
+def _record_uncited_draft_cost(e: Exception) -> None:
+    """The refused draft was still paid for: both model calls (and any Exa
+    fetch) go on the enrichment ledger before the refusal is shown."""
+    lib = _lib()
+    try:
+        if e.cost_usd or e.input_tokens or e.output_tokens:
+            lib.record_enrichment_cost(None, e.model, e.input_tokens, e.output_tokens, e.cost_usd)
+        if e.exa_cost_usd:
+            lib.record_enrichment_cost(None, "exa-fetch", 0, 0, e.exa_cost_usd)
+    finally:
+        lib.close()
 
 
 # Real Markdown/List Rendering for Narrative Fields (2026-09) — shared CSS
@@ -19436,7 +19476,7 @@ async def admin_communities_edit_submit(request: Request, slug: str):
                 list(texts.values()), fresh,
                 lib.get_entity_citations("community", community_id, "community_profile"))
             if action == "write":
-                lib.set_entity_citations("community", community_id, "community_profile", fresh,
+                lib.set_generated_entity_citations("community", community_id, "community_profile", fresh,
                                          model=(form.get("ai_drafted_citations_model") or "").strip())
             elif action == "clear":
                 lib.clear_entity_citations("community", community_id, "community_profile")
@@ -19901,6 +19941,9 @@ async def admin_communities_generate_profile(request: Request):
                                                         voice_core=voice_core, exa_enabled=exa_enabled)
     except enrich_mod.GroundingUnavailable as e:
         return JSONResponse({"ok": False, "error": _grounding_unavailable_error(e)}, status_code=503)
+    except enrich_mod.UncitedDraft as e:
+        _record_uncited_draft_cost(e)
+        return JSONResponse({"ok": False, "error": _uncited_draft_error(e)}, status_code=503)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Profile generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -20168,8 +20211,20 @@ def _run_tool_research(tool_id: int) -> tuple[bool, str, str]:
         except enrich_mod.GroundingUnavailable as e:
             print(f"[_run_tool_research:{tool_id}] aborted: {e}")
             return False, e.reason, e.url
+        except enrich_mod.UncitedDraft as e:
+            print(f"[_run_tool_research:{tool_id}] refused, nothing saved: {e}")
+            _record_uncited_draft_cost(e)
+            return False, _UNCITED_PREFIX + e.reason, e.url
         if result is None:
             return False, "", ""
+        # Defense in depth (issue #642): the generator already refuses an
+        # uncited draft, but nothing uncited is ever persisted from here.
+        problem = citation_problem([result.agent_taxonomy_note], result.citations)
+        if problem and result.agent_taxonomy_note.strip():
+            print(f"[_run_tool_research:{tool_id}] refused, nothing saved: citations {problem}")
+            lib.record_enrichment_cost(None, result.model, result.input_tokens,
+                                       result.output_tokens, result.cost_usd)
+            return False, _UNCITED_PREFIX + problem, tool["url"]
         wrote_anything = False
         if result.agent_taxonomy_note.strip():
             lib.set_tool_agent_taxonomy_draft(
@@ -20179,8 +20234,8 @@ def _run_tool_research(tool_id: int) -> tuple[bool, str, str]:
                 low_confidence=int(result.low_confidence),
                 source="admin-edit",
             )
-            lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
-                                     result.citations, model=result.model)
+            lib.set_generated_entity_citations("tool", tool_id, "agent_taxonomy",
+                                               result.citations, model=result.model)
             # Whole-record profile signoff (2026-08 amendment) — this fresh
             # draft's own trigger for the auto-link: force needs_review to 1
             # when this draft itself landed agent_taxonomy_needs_verification
@@ -20262,7 +20317,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
                                 description_low_confidence=description_low_confidence,
                                 source="admin-edit")
         if description_citations:
-            lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
+            lib.set_generated_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     except ValueError as e:
@@ -20590,6 +20645,12 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
             f'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t fetch usable content from '
             f'{_esc(research_url)} ({_esc(research_reason)}). Write the agent taxonomy by hand, or fix '
             f'the URL and try again.</p>'
+        )
+    elif research_refreshed == "uncited":
+        _research_banner_html = (
+            f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+            f'padding:10px 16px;font-size:14px;margin:0 0 16px;">'
+            f'{_esc(_uncited_draft_message("agent_taxonomy", research_reason))}</p>'
         )
     elif research_refreshed == "0":
         _research_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
@@ -21198,7 +21259,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         # unrelated save used to wipe them. Description only: summary has
         # no citations of its own.
         if "description" in ai_drafted and description_citations:
-            lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
+            lib.set_generated_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
         elif norm_for_compare(tool.get("description")) != norm_for_compare(description):
             lib.clear_entity_citations("tool", tool_id, "description")
         lib.update_tool_differentiation(tool_id, competitive_differentiation,
@@ -21509,6 +21570,10 @@ def admin_tools_research_refresh(request: Request, tool_id: int):
     ok, reason, url = _run_tool_research(tool_id)
     if ok:
         msg = "research_refreshed=1"
+    elif reason.startswith(_UNCITED_PREFIX):
+        # UncitedDraft (issue #642): nothing was saved, the old note and its
+        # Sources are kept.
+        msg = f"research_refreshed=uncited&research_reason={reason[len(_UNCITED_PREFIX):]}"
     elif reason:
         # GroundingUnavailable (2026-09 JS-render grounding fix) — an honest,
         # specific reason+URL instead of the generic "couldn't complete the
@@ -21833,6 +21898,9 @@ async def admin_tools_generate_description(request: Request):
                                                       exa_enabled=exa_enabled)
     except enrich_mod.GroundingUnavailable as e:
         return JSONResponse({"ok": False, "error": _grounding_unavailable_error(e)}, status_code=503)
+    except enrich_mod.UncitedDraft as e:
+        _record_uncited_draft_cost(e)
+        return JSONResponse({"ok": False, "error": _uncited_draft_error(e)}, status_code=503)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Description generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "

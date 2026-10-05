@@ -4757,6 +4757,40 @@ Details worth knowing:
   since shipped.
   No schema change — `entity_citations`'s table comment already
   anticipated this exact shape when it was written in Phase 1b.
+- **Uncited AI drafts are refused, never saved (issue #642, 2026-10).** The
+  three grounded generators (`generate_tool_agent_taxonomy`,
+  `generate_tool_description`, `generate_community_profile`) all run through
+  `linklib.enrich._run_cited_draft`. A draft is unusable when
+  `linklib.citations.citation_problem` says so: `no_citations` (the draft has
+  no citation) or `orphan_markers` (a `[n]` marker in the text with no
+  matching source; 1-2 digit markers only, so "[2024]" is not one). One
+  unusable draft triggers exactly one automatic retry over the same fetched
+  page (no second fetch). A good retry is returned with both calls' tokens and
+  cost summed (`attempts=2`). A second unusable draft raises
+  `enrich.UncitedDraft`, which carries both calls' usage, and the caller
+  saves nothing: the previous text and its citation set stay. Nothing is
+  stripped quietly. A retry costs one more call of the same size (the whole
+  field's token budget again), so a refused field is billed twice.
+  **Callers.** `_run_tool_research` (Agent taxonomy, persisted server-side),
+  the two stateless AJAX routes (`generate-description`,
+  `generate-profile`: they return 503 with the refusal text and the form is
+  untouched, so nothing uncited reaches a Save), and the three
+  `scripts/regen_ai_drafted_fields.py` apply paths plus its `--sample` loops,
+  `scripts/enrich_agent_taxonomy.py` and `scripts/enrich_community_profiles.py`
+  each catch it, record the summed cost, and report the refusal. The Refresh
+  button shows it as `research_refreshed=uncited`; the on-add background run
+  has no UI and only logs.
+  **Library guard.** `Library.set_generated_entity_citations` is the only
+  write a Generate path uses: it returns False and writes nothing for an
+  empty list, so a Generate can never replace a stored non-empty set with an
+  empty one. A missing row and `'[]'` are the same thing. A deliberate clear
+  (a hand edit) stays `clear_entity_citations`/`update_tool_agent_taxonomy`.
+  `tests/test_uncited_drafts.py` fails if `webapp/` or `scripts/` call
+  `set_entity_citations` directly.
+  **Persist-time validation.** `_run_tool_research` and the regen script
+  re-check `citation_problem` before writing (the regen script after
+  `_validate_citations_payload` has dropped malformed entries), so a draft
+  whose citations lose their sources in validation is refused too.
 - **Description/Community profile publish gates (2026-08) — the two
   follow-ups the two bullets above deliberately deferred, now built the
   same way Agent taxonomy's Abacum-fix gate works.** A Phase 0 read-only
