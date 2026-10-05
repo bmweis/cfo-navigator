@@ -18,9 +18,13 @@ full, current list of every place a new model id needs adding.
 `models_for` optionally consults the live Anthropic Models API (`models.list()`):
 
 * models the API reports as **retired** drop off the pickers on their own, and
-* for the chat pickers, models Anthropic ships that are **newer** than anything in
-  the registry are surfaced automatically (labelled from the API) — so "pull any
-  new model" holds without a code change **for the three surfaces above**.
+* with `allow_new=True`, models Anthropic ships that are newer than anything in the
+  registry are appended (labelled from the API). **No caller passes True today**: the
+  chat pickers this was written for no longer exist, and the enrichment pickers are
+  deliberately curated. Discovery of new models is now done by `linklib.lineup`,
+  which diffs the live list against the registry, pricing and the Buddy tiers and
+  shows findings on /admin/checks. `allow_new` is kept only for a future picker that
+  wants auto-surfacing.
 
 The enrichment pickers stay curated (no auto-surfacing): a re-enrich runs over the
 whole archive, so we don't want to point a 1,500-article pass at an unexpectedly
@@ -93,7 +97,7 @@ def _live_models() -> dict | None:
         return None
     try:
         import anthropic
-        client = anthropic.Anthropic()
+        client = anthropic.Anthropic(timeout=10.0, max_retries=1)
         data: dict = {}
         for m in client.models.list():
             mid = getattr(m, "id", None)
@@ -107,6 +111,15 @@ def _live_models() -> dict | None:
         _cache["data"] = data
         _cache["at"] = time.time()
     return data
+
+
+def cached_live_models() -> dict | None:
+    """The live model list if the 30-minute cache is warm, else None. Never
+    makes a network call (the admin badge path uses this)."""
+    with _lock:
+        if _cache["data"] is not None and time.time() - _cache["at"] < _API_TTL:
+            return _cache["data"]
+    return None
 
 
 def _merge(view: list[dict], live: dict | None, allow_new: bool) -> list[dict]:
@@ -144,26 +157,20 @@ def models_for(*, blurb: str = "short", allow_new: bool = False) -> list[dict]:
     """Ordered ``[{id, label, blurb}]`` for a picker.
 
     `blurb` selects which registry field to show ("short" or "enrich").
-    `allow_new` lets newly released models surface (chat pickers only).
+    `allow_new` appends newer live models; no caller passes True today (see the module docstring).
     """
     view = [{"id": m["id"], "label": m["label"], "blurb": m.get(blurb) or m["short"]}
             for m in _REGISTRY]
     return _merge(view, _live_models(), allow_new)
 
 
-# How often Brian should manually re-check Anthropic's actual current model
-# lineup against this registry AND against linklib.agent.EFFORT_SETTINGS'
-# hardcoded tier models — there's no "list every model Anthropic currently
-# ships" API to reconcile against automatically (`models.list()` only
-# returns what's already deployed/visible to this account, which is a
-# consequence of adding a model, not a way to discover one that hasn't been
-# added yet), so this is a second dated-reminder threshold for a human
-# attestation, same shape as linklib.pricing.PRICING_REVIEW_STALE_DAYS but
-# a separate, parallel reminder — not a replacement for it. Set tighter
-# than pricing's 90 days (issue #98 Piece 2, confirmed with Brian): new
-# models ship roughly every 30-60 days, meaningfully more often than an
-# existing model's price changes.
-MODELS_REVIEW_STALE_DAYS = 30
+# Backstop timer only. New models are found by `linklib.lineup`, which diffs the
+# live Models API list against the registry, pricing and the Buddy tiers; a
+# calendar reminder cannot tell whether anything shipped. What the live list
+# cannot show is a silent change to a model that is already in it (a repricing,
+# a retirement date), so a long reminder to re-read Anthropic's model docs stays
+# as a safety net. 180 days; the pricing reminder (90 days) covers rate changes.
+MODELS_REVIEW_STALE_DAYS = 180
 
 
 def models_review_is_stale(last_reviewed_iso: str, *, now: datetime | None = None) -> bool:

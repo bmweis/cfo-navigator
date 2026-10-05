@@ -174,7 +174,8 @@ def test_communities_run_skips_an_over_limit_draft_and_continues(monkeypatch, tm
             format_reality="", engagement_level="", sponsor_relationship_note="", business_model="",
             application_friction="", cost_value_verdict="", notable_members="", public_criticism="",
             verdict_summary="Best for X.", jobs_program="", cpe_eligible="", resources_included="",
-            low_confidence=False, model="claude-opus-5", input_tokens=1, output_tokens=1, cost_usd=0.01)
+            low_confidence=False, model="claude-opus-5", input_tokens=1, output_tokens=1, cost_usd=0.01,
+            citations=[{"n": 1, "title": "T", "url": "https://x.example", "type": "tool_page"}])
 
     monkeypatch.setattr(regen, "generate_community_profile", _fake)
     monkeypatch.setattr(regen, "INTER_CALL_SLEEP", 0)
@@ -208,7 +209,7 @@ def test_communities_run_keeps_a_stored_cpe_answer(monkeypatch, tmp_path, stored
             sponsor_relationship_note="", business_model="", application_friction="",
             cost_value_verdict="", notable_members="", public_criticism="", verdict_summary="Best for X.",
             jobs_program="", cpe_eligible="Unclear", resources_included="", low_confidence=False,
-            model="claude-opus-5", input_tokens=1, output_tokens=1, cost_usd=0.01)
+            model="claude-opus-5", input_tokens=1, output_tokens=1, cost_usd=0.01, citations=[{"n": 1, "title": "T", "url": "https://x.example", "type": "tool_page"}])
 
     monkeypatch.setattr(regen, "generate_community_profile", _fake)
     monkeypatch.setattr(regen, "INTER_CALL_SLEEP", 0)
