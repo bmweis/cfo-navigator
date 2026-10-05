@@ -9116,6 +9116,35 @@ class Library:
     def set_enrich_model(self, model_id: str) -> None:
         self.set_setting("enrich_model", model_id.strip())
 
+    # The "not using" list for the /admin/checks models diff: live Anthropic
+    # models the app deliberately doesn't use, each with a reason. A JSON list in
+    # one settings row, so it needs no table. A decision is only ever removed by
+    # a person (remove_model_not_using); the check never deletes an entry.
+    def list_models_not_using(self) -> list[dict]:
+        import json
+        try:
+            raw = json.loads(self.get_setting("models_not_using") or "[]")
+        except ValueError:
+            return []
+        return [e for e in raw if isinstance(e, dict) and e.get("id")]
+
+    def add_model_not_using(self, model_id: str, reason: str) -> bool:
+        """Record a model as deliberately unused. Refuses a blank id or reason
+        (a decision with no reason is not a record). Returns False if refused."""
+        import json
+        model_id, reason = (model_id or "").strip(), (reason or "").strip()
+        if not model_id or not reason:
+            return False
+        entries = [e for e in self.list_models_not_using() if e["id"] != model_id]
+        entries.append({"id": model_id, "reason": reason, "added_at": _now()})
+        self.set_setting("models_not_using", json.dumps(entries))
+        return True
+
+    def remove_model_not_using(self, model_id: str) -> None:
+        import json
+        entries = [e for e in self.list_models_not_using() if e["id"] != (model_id or "").strip()]
+        self.set_setting("models_not_using", json.dumps(entries))
+
     def get_effective_ask_cap(self, user_id: int) -> float:
         """The dollar cap that actually applies to this user this month —
         their per-user override if set, else the global default. Kept as data

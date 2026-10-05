@@ -28233,15 +28233,11 @@ def _models_freshness_message(last_reviewed: str) -> tuple[bool, str]:
     above (both share _reviewed_freshness_banner's rendering). Answers a
     genuinely different question than pricing freshness does: not "has an
     existing model's price gone stale" but "does Anthropic have current
-    models this app doesn't know about at all." There's no API to check
-    that automatically either — `models.list()` (linklib.models._live_models)
-    only ever returns models already deployed/visible to this account,
-    which is a consequence of a model having been added somewhere already,
-    not a way to discover a brand-new release — so this stays a human
-    attestation, same as pricing, just on its own shorter clock (Anthropic
-    ships new models roughly every 30-60 days, so
-    linklib.models.MODELS_REVIEW_STALE_DAYS is 30, tighter than pricing's
-    90)."""
+    models this app doesn't know about at all." New models are now found
+    by the lineup diff (linklib.lineup, shown above this message on
+    /admin/checks). This dated reminder is only the backstop for what the
+    live list cannot show: a silent repricing or retirement date of a model
+    that is already listed. linklib.models.MODELS_REVIEW_STALE_DAYS is 180."""
     from linklib.models import MODELS_REVIEW_STALE_DAYS, models_review_is_stale
     stale = models_review_is_stale(last_reviewed)
     doc_link = ('<a href="https://github.com/bmweis/cfo-navigator/blob/main/CLAUDE.md'
@@ -28267,6 +28263,39 @@ def _models_freshness_message(last_reviewed: str) -> tuple[bool, str]:
         html = (f'Anthropic&rsquo;s model lineup was manually checked <strong>{_esc(when) or "recently"}</strong> '
                 f'against <code>linklib/models.py</code>&rsquo;s registry.')
     return stale, html
+
+
+def _models_diff_html(result: dict, not_using: list[dict]) -> str:
+    """The lineup diff on /admin/checks: live Anthropic models against the
+    registry, pricing and the Buddy tiers, plus the durable "not using" list.
+    A finding only leaves when its cause is fixed or a person records a
+    reason; the list below is how a decision stays visible."""
+    parts: list[str] = []
+    if not result["compared"]:
+        parts.append(f'<p style="margin:0 0 6px;"><strong>Could not compare.</strong> {_esc(result["reason"])}</p>')
+    elif not result["findings"]:
+        parts.append('<p style="margin:0 0 6px;">Every live Anthropic model is known to the app or on the '
+                     '"not using" list below.</p>')
+    for f in result["findings"]:
+        note = ""
+        if f["ignorable"]:
+            note = ('<form method="post" action="/admin/checks/models-not-using/add" '
+                    'style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px;">'
+                    f'<input type="hidden" name="model_id" value="{_esc(f["id"])}">'
+                    '<input type="text" name="reason" required maxlength="300" placeholder="Why not using it" '
+                    'style="flex:1 1 220px;min-width:0;font-size:13px;padding:5px 8px;">'
+                    '<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;'
+                    'white-space:nowrap;">Not using</button></form>')
+        parts.append(f'<p style="margin:0 0 4px;">{_esc(f["message"])}</p>{note}')
+    if not_using:
+        rows = "".join(
+            f'<li style="margin:2px 0;"><code>{_esc(e["id"])}</code>: {_esc(e.get("reason", ""))} '
+            f'<form method="post" action="/admin/checks/models-not-using/remove" style="display:inline;">'
+            f'<input type="hidden" name="model_id" value="{_esc(e["id"])}">'
+            f'<button type="submit" class="btn btn-ghost" style="font-size:11px;padding:1px 8px;">Remove</button>'
+            f'</form></li>' for e in not_using)
+        parts.append(f'<p style="margin:10px 0 2px;"><strong>Not using</strong></p><ul style="margin:0;padding-left:18px;">{rows}</ul>')
+    return "".join(parts)
 
 
 def _models_freshness_banner(last_reviewed: str) -> str:
@@ -28891,6 +28920,9 @@ def admin_checks(request: Request):
         pricing_last_verified = lib.get_setting("pricing_last_verified")
         models_last_reviewed = lib.get_setting("models_last_reviewed")
         exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
+        from linklib.lineup import check_lineup
+        lineup = check_lineup(lib)
+        models_not_using = lib.list_models_not_using()
         db_copy_report = scan_db_copy_report(lib)
         over_limit_items = _profile_fields_over_limit(lib)
         ci_quota_exhausted = lib.get_setting("ci_quota_exhausted") == "1"
@@ -29033,6 +29065,15 @@ def admin_checks(request: Request):
 
     pricing_row = {"check": "Anthropic pricing", "href": "#pricing-freshness",
                    "status": pricing_ai["status"], "details": pricing_ai["details"]}
+    if not lineup["compared"]:
+        models_ai = {"status": "warning", "details": "Could not compare"}
+    elif lineup["findings"]:
+        n = len(lineup["findings"])
+        models_ai = {"status": "warning", "details": f"{n} model {'finding' if n == 1 else 'findings'}"}
+    elif models_ai["status"] == "warning":
+        models_ai = {"status": "warning", "details": "Backstop review due"}
+    else:
+        models_ai = {"status": "ok", "details": "Lineup matches the live list"}
     models_row = {"check": "Anthropic models", "href": "#new-model-awareness",
                   "status": models_ai["status"], "details": models_ai["details"]}
     exa_row = {"check": "Exa pricing", "href": "#exa-pricing-freshness",
@@ -29242,7 +29283,8 @@ def admin_checks(request: Request):
             pricing_row, _mark_form("/admin/checks/mark-pricing-reviewed")),
         _checks_detail_row(
             "new-model-awareness", "Anthropic models",
-            _p(models_message)
+            _models_diff_html(lineup, models_not_using)
+            + _p(f'<strong>Backstop:</strong> {models_message}')
             + _p(f'<a href="{_models_gh}" {_link}>linklib/models.py &#8599;</a> &middot; '
                  f'<a href="{_anthropic_models_url}" {_link}>Anthropic&rsquo;s model docs &#8599;</a>'),
             models_row, _mark_form("/admin/checks/mark-models-reviewed")),
@@ -29259,7 +29301,8 @@ def admin_checks(request: Request):
         f'<div class="chk-rows">{site_rows}</div>'
         '<h2 id="ai-providers" style="margin:32px 0 4px;">AI providers</h2>'
         '<p style="color:var(--ink-soft);margin:0 0 10px;font-size:14px;line-height:1.6;">No API reports '
-        'pricing or new models, so these are dated reminders to re-check by hand.</p>'
+        'pricing, so pricing and Exa pricing are dated reminders to re-check by hand. New Anthropic models '
+        'are found by comparing the live model list with what the app knows.</p>'
         f'<div class="chk-rows">{ai_rows}</div>'
     )
 
@@ -29310,6 +29353,36 @@ def admin_checks_mark_models_reviewed(request: Request):
     finally:
         lib.close()
     return RedirectResponse("/admin/checks", status_code=303)
+
+
+@app.post("/admin/checks/models-not-using/add")
+async def admin_checks_models_not_using_add(request: Request):
+    """Record a live Anthropic model as deliberately unused, with a reason, so
+    the lineup diff stops flagging it. Refuses a blank reason."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    lib = _lib()
+    try:
+        ok = lib.add_model_not_using(str(form.get("model_id", "")), str(form.get("reason", "")))
+    finally:
+        lib.close()
+    if not ok:
+        raise HTTPException(400, "A model id and a reason are both required.")
+    return RedirectResponse("/admin/checks#new-model-awareness", status_code=303)
+
+
+@app.post("/admin/checks/models-not-using/remove")
+async def admin_checks_models_not_using_remove(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    lib = _lib()
+    try:
+        lib.remove_model_not_using(str(form.get("model_id", "")))
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/checks#new-model-awareness", status_code=303)
 
 
 @app.post("/admin/checks/mark-exa-pricing-reviewed")

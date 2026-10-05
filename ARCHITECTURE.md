@@ -10097,6 +10097,11 @@ allowlist, neither of which this function attempts.
     profile fields, article summaries) — `Library.get_enrich_model()`, a
     live `settings` value, editable in the Configuration section of
     `/admin/system/ai` with no redeploy. Defaults to `claude-opus-5`.
+    `claude-opus-5-5` (Opus 5.5, $4/$20 per MTok, cache read $0.20) is in the
+    registry and `MODEL_PRICING` and selectable there; the stored setting is
+    unchanged until an admin picks it. No generate call sets `thinking`,
+    `effort`, `temperature` or `tool_choice`, so Opus 5.5's always-on adaptive
+    thinking at default `medium` effort needs no request change.
   - **FP&A Buddy** (Quick/Standard/Deep) — `linklib.agent.EFFORT_SETTINGS`,
     a fully separate hardcoded dict with one model per tier
     (`claude-haiku-4-5-20251001` / `claude-sonnet-4-6` / `claude-opus-4-8`).
@@ -10137,7 +10142,9 @@ allowlist, neither of which this function attempts.
   value and `*_review_is_stale()` function `/admin/checks` itself uses, and
   linking to a matching `id` anchor added to that page's own `<h2>`
   headings (`#pricing-freshness`, `#new-model-awareness`,
-  `#exa-pricing-freshness`). Deliberately not a duplicate of the full
+  `#exa-pricing-freshness`; the New-model-awareness dot is now only the
+  180-day backstop, while the lineup diff in `linklib/lineup.py` is the primary
+  signal on `/admin/checks`). Deliberately not a duplicate of the full
   banner or its "Mark reviewed" button — that action stays exclusively on
   `/admin/checks`.
 - **Dollar totals are explicitly out of scope** — the page closes with a
