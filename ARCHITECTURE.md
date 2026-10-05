@@ -673,6 +673,19 @@ button. The bubble holds a deep clone of `#ask-dd-top` (id removed, panels
 closed), so a panel opens inside the bubble at bubble width, below the input row,
 and cannot cover it. `ddLabels()` keeps every button's value in step. The chip
 equalizer (`fpaEqualizeChipWidths`) and the `.ask-controls`/`.fu-pop` CSS are gone.
+**Panel width (2026-10 follow-up to #690).** Each panel now sits inside its own
+control's column (`.ask-dd-col` holds the `label.ask-dd-lbl` with the header and
+button, then the panel), so it opens directly under that control at the control's
+width and left edge instead of across the whole row. The old full-row-width
+sentence above no longer holds. The row is `align-items:flex-start` so an open
+panel doesn't stretch the other column, and stacks (`align-items:stretch`) below
+640px. The admin-only "Dollar amounts are estimates." note is the last child of
+the Depth panel, so it shows only while Depth is open. In the follow-up bubble
+the controls get narrow on a phone (156px at 390px), so its panels have a 220px
+floor and the Sources panel lines up with its control's right edge when it would
+otherwise pass the bubble. `tests/test_buddy_top_box.py` has a source-level guard
+that runs in CI and Chromium tests that measure computed visibility and geometry
+(not run in CI, issue 669).
 **Second change in the same PR, found by the existing tests:** the bubble's
 collapse-while-typing rule moved from `.fu:has(textarea:focus)` to a `.fu-compact`
 class (set on focus; cleared by a tap outside the bubble or on the summary line).

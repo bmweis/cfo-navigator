@@ -82,7 +82,7 @@ def member_pg(request, buddy_html):
 def test_depth_and_sources_have_visible_headers_that_are_real_labels(admin_pg):
     pg = admin_pg
     for name in ("Depth", "Sources"):
-        col = pg.locator("#ask-dd-top label.ask-dd-col", has=pg.locator(".ask-dd-h", has_text=name)).first
+        col = pg.locator("#ask-dd-top label.ask-dd-lbl", has=pg.locator(".ask-dd-h", has_text=name)).first
         assert col.is_visible()
         assert col.locator(".ask-dd-h").inner_text().strip().lower() == name.lower()
         assert col.locator("button.ask-dd-btn").count() == 1          # the label wraps its control
@@ -209,3 +209,68 @@ def test_search_past_questions_intro_says_what_the_list_is(buddy_html):
     html = buddy_html[0]
     assert "Search before running your query." in html
     assert "other members have already asked" not in html
+
+
+# --- Dropdown panels: the note lives only inside the Depth panel, and each panel is its
+# --- control's width. Measured, not read from the CSS (PR for the #690 follow-up).
+
+def test_cost_note_is_inside_the_hidden_depth_panel_and_no_rule_can_show_it_alone(admin_html):
+    """Non-browser guard (Chromium tests do not run in CI, issue 669): the note is a
+    child of the Depth panel, which is `hidden`, and no CSS rule gives the note or the
+    panel a display that could beat `hidden`."""
+    m = re.search(r'<div class="ask-dd-panel" data-dd="depth" hidden>(.*?)\n\s*</div>\n\s*</div>\n\s*<div class="ask-dd-col">', admin_html, re.S)
+    assert m and "Dollar amounts are estimates." in m.group(1)
+    assert admin_html.count("Dollar amounts are estimates.") == 1
+    assert '<div class="ask-dd-panel" data-dd="sources"' in admin_html
+    css = admin_html
+    assert not re.search(r"\.ask-(?:cost-note|dd-note)\s*\{[^}]*display\s*:", css)
+    assert re.search(r"\.ask-dd-panel\[hidden\]\s*\{\s*display\s*:\s*none", css)
+    assert not re.search(r"\.ask-dd-panel\s*\{[^}]*display\s*:", css)
+
+
+def test_the_cost_note_is_not_rendered_for_a_non_admin(buddy_html):
+    assert "Dollar amounts are estimates." not in buddy_html[0]
+
+
+def test_the_note_shows_only_while_the_depth_panel_is_open(admin_pg):
+    pg = admin_pg
+    note = "#ask-dd-top .ask-cost-note"
+    shown = lambda: pg.evaluate("(s) => { var e = document.querySelector(s); var r = e.getBoundingClientRect();"
+                                " var c = getComputedStyle(e); return c.display !== 'none' && c.visibility !== 'hidden' && r.height > 0; }", note)
+    assert not shown()                                                    # both closed
+    pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
+    assert not shown()                                                    # Sources open
+    pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
+    assert shown()                                                        # Depth open
+    pg.keyboard.press("Escape")
+    assert not shown()
+
+
+def test_each_panel_is_its_controls_width_and_starts_at_its_left_edge(admin_pg):
+    pg = admin_pg
+    for k in ("depth", "sources"):
+        pg.click("#ask-dd-top [data-dd='%s'].ask-dd-btn" % k)
+        btn, panel = _box(pg, "#ask-dd-top .ask-dd-btn[data-dd='%s']" % k), _box(pg, "#ask-dd-top .ask-dd-panel[data-dd='%s']" % k)
+        assert abs(btn["l"] - panel["l"]) < 1 and abs(btn["w"] - panel["w"]) < 1
+        assert pg.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        pg.keyboard.press("Escape")
+
+
+def test_the_bubble_panels_keep_the_note_inside_depth_and_never_pass_the_bubble(admin_pg):
+    pg = admin_pg
+    pg.fill("#ask-q", "First question")
+    pg.click("#ask-btn")
+    pg.wait_for_selector("#fu-q")
+    pg.wait_for_timeout(600)
+    note = pg.locator("#fu .ask-dd-panel[data-dd='depth'] .ask-cost-note")
+    assert note.count() == 1 and pg.locator("#fu .ask-dd-panel[data-dd='sources'] .ask-cost-note").count() == 0
+    assert not note.is_visible()
+    pg.click("#fu [data-dd='sources'].ask-dd-btn")
+    assert not note.is_visible()
+    pg.click("#fu [data-dd='depth'].ask-dd-btn")
+    assert note.is_visible()
+    for k in ("depth", "sources"):
+        pg.click("#fu [data-dd='%s'].ask-dd-btn" % k) if pg.get_attribute("#fu [data-dd='%s'].ask-dd-btn" % k, "aria-expanded") != "true" else None
+        p, f = _box(pg, "#fu .ask-dd-panel[data-dd='%s']" % k), _box(pg, "#fu")
+        assert f["l"] <= p["l"] + 0.5 and p["r"] <= f["r"] + 0.5 and p["w"] >= 219
+    assert pg.evaluate("document.documentElement.scrollWidth <= innerWidth")

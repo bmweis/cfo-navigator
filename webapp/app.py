@@ -24201,20 +24201,24 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
       <div class="fpa-intro-area-controls">
         <div class="ask-dd" id="ask-dd-top">
           <div class="ask-dd-row">
-            <label class="ask-dd-col"><span class="ask-dd-h">Depth</span><button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
-            <label class="ask-dd-col"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
-          </div>
-          <div class="ask-dd-panel" data-dd="depth" hidden>
-            <div class="ask-tags" role="radiogroup" aria-label="Depth">
-              {tier_tags}
+            <div class="ask-dd-col">
+              <label class="ask-dd-lbl"><span class="ask-dd-h">Depth</span><button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
+              <div class="ask-dd-panel" data-dd="depth" hidden>
+                <div class="ask-tags" role="radiogroup" aria-label="Depth">
+                  {tier_tags}
+                </div>
+                {cost_note}
+              </div>
             </div>
-            {cost_note}
-          </div>
-          <div class="ask-dd-panel" data-dd="sources" hidden>
-            <div class="ask-tags">
-              {source_tags}
+            <div class="ask-dd-col">
+              <label class="ask-dd-lbl"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
+              <div class="ask-dd-panel" data-dd="sources" hidden>
+                <div class="ask-tags">
+                  {source_tags}
+                </div>
+                <p class="ask-dd-note"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
+              </div>
             </div>
-            <p class="ask-dd-note"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
           </div>
         </div>
       </div>
@@ -24334,7 +24338,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
    compact look: the headers are hidden there and the closed buttons carry their
    own "Depth:" / "Sources:" prefix instead. */
 .fpa-intro-area-controls{{margin:0 0 14px;}}
-.ask-dd-col{{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:6px;}}
+.ask-dd-col{{flex:1 1 0;min-width:0;}}
+.ask-dd-lbl{{display:flex;flex-direction:column;gap:6px;}}
 .ask-dd-h{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);}}
 .ask-dd-k{{display:none;}}
 .fu .ask-dd-h{{display:none;}}
@@ -24348,12 +24353,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
    dissolves (display:contents) so labels and panels order as siblings. The
    follow-up bubble's clone keeps its side-by-side row. */
 @media(max-width:640px){{
-  .fpa-intro-area-controls .ask-dd{{display:flex;flex-direction:column;gap:12px;}}
-  .fpa-intro-area-controls .ask-dd-row{{display:contents;}}
-  .fpa-intro-area-controls .ask-dd-col:nth-child(1){{order:1;}}
-  .fpa-intro-area-controls .ask-dd-panel[data-dd="depth"]{{order:2;margin-top:-6px;}}
-  .fpa-intro-area-controls .ask-dd-col:nth-child(2){{order:3;}}
-  .fpa-intro-area-controls .ask-dd-panel[data-dd="sources"]{{order:4;margin-top:-6px;}}
+  .fpa-intro-area-controls .ask-dd-row{{flex-direction:column;align-items:stretch;gap:12px;}}
+}}
 }}
 
 /* Bottom-edge alignment between the Question box and the illustrative
@@ -24410,7 +24411,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
    edge. Panels hold the same .ask-tag buttons as before (single-select for
    Depth, multi-select for Sources), restyled as list rows. The follow-up
    bubble holds a clone of this whole block. */
-.ask-dd-row{{display:flex;gap:8px;}}
+.ask-dd-row{{display:flex;align-items:flex-start;gap:8px;}}
 .ask-dd-btn{{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);font:inherit;font-size:14px;color:var(--ink-soft);cursor:pointer;text-align:left;}}
 .ask-dd-btn[aria-expanded="true"]{{border-color:var(--navy);}}
 .ask-dd-k{{flex-shrink:0;}}
@@ -24422,6 +24423,13 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-dd-panel .ask-tag{{width:100%;border-color:transparent;background:transparent;border-radius:8px;min-height:40px;padding:8px 10px;font-weight:500;color:var(--ink);}}
 .ask-dd-panel .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);font-weight:600;}}
 .ask-dd-note{{margin:6px 10px 4px;font-size:12.5px;}}
+/* Each panel is as wide as the control that opened it and starts at that control's
+   left edge (it sits inside the control's own column). The bubble's side-by-side
+   controls get narrow on a phone, so there a panel never goes below 220px; the
+   right-hand (Sources) panel then lines up with its control's right edge instead,
+   so it can't pass the bubble. */
+.fu .ask-dd-panel{{width:max(100%,220px);box-sizing:border-box;}}
+.fu .ask-dd-col:last-child .ask-dd-panel{{margin-left:min(0px,calc(100% - 220px));}}
 
 .ask-pq-row{{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}}
 .ask-pq-row[open]{{border-color:var(--navy);}}
