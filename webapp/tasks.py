@@ -572,9 +572,22 @@ def _stale_admin_checks_reminders(lib: Library) -> int:
     pending, which is precisely what was flagged as a real risk here."""
     return sum([
         pricing_review_is_stale(lib.get_setting("pricing_last_verified")),
-        models_review_is_stale(lib.get_setting("models_last_reviewed")),
+        models_review_is_stale(lib.get_setting("models_last_reviewed")) or _lineup_has_findings(lib),
         exa_pricing_review_is_stale(lib.get_setting("exa_pricing_last_verified")),
     ])
+
+
+def _lineup_has_findings(lib: Library) -> bool:
+    """True when the lineup diff, read from an already-warm Models API cache,
+    has findings. Never makes a network call (this runs on the badge path), so
+    a cold cache counts as no findings here; /admin/checks fetches and shows
+    the real result."""
+    try:
+        from linklib.lineup import check_lineup
+        r = check_lineup(lib, fetch=False)
+        return bool(r["compared"] and r["findings"])
+    except Exception:
+        return False
 
 
 def _backup_stale_count(lib: Library) -> int:

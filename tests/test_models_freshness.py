@@ -7,8 +7,8 @@ models this app doesn't know about at all. There's no "list every current
 model" API to check against automatically, so this is a second, separate
 dated manual-attestation signal — a `models_last_reviewed` settings value,
 a banner that turns amber once it's stale (or was never recorded) past a
-30-day window (tighter than pricing's 90, since new models ship more
-often than prices change), and a "Mark reviewed" action that resets it.
+180-day window. Since #629 Piece 2 this is only the backstop; new models
+are found by the lineup diff (tests/test_model_lineup.py), and a "Mark reviewed" action that resets it.
 """
 import os
 import pathlib
@@ -90,7 +90,7 @@ def test_mark_reviewed_clears_the_stale_banner(admin_client):
 
     r2 = _models_section(client.get("/admin/checks").text)
     assert "never been marked reviewed" not in r2
-    assert "past the 30-day review window" not in r2
+    assert "past the 180-day review window" not in r2
     assert "manually checked" in r2
 
 
@@ -108,7 +108,7 @@ def test_banner_goes_stale_again_past_the_threshold(admin_client):
     client, appmod, db = admin_client
     from datetime import datetime, timedelta, timezone
     from linklib.db import Library
-    old = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    old = (datetime.now(timezone.utc) - timedelta(days=181)).isoformat()
     lib = Library(db)
     try:
         lib.set_setting("models_last_reviewed", old)
@@ -116,7 +116,7 @@ def test_banner_goes_stale_again_past_the_threshold(admin_client):
         lib.close()
 
     r = client.get("/admin/checks")
-    assert "past the 30-day review window" in r.text
+    assert "past the 180-day review window" in r.text
     assert "Mark reviewed" in r.text
 
 
@@ -132,7 +132,7 @@ def test_banner_stays_fresh_within_the_threshold(admin_client):
         lib.close()
 
     r = _models_section(client.get("/admin/checks").text)
-    assert "past the 30-day review window" not in r
+    assert "past the 180-day review window" not in r
     assert "never been marked reviewed" not in r
     assert "manually checked" in r
 

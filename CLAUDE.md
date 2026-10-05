@@ -13300,23 +13300,24 @@ deliberately curated/manual, the same reasoning the enrichment pickers already u
 for staying non-auto-surfacing) and was left as a possible future decision, not
 something to do silently as part of this reminder.
 
-**New-model-awareness reminder (issue #98, Piece 2)** — same reviewed-toggle
-pattern as the Pricing-freshness reminder directly above (a dated `settings` value,
-a banner on `/admin/checks` separate from the pass/fail list, an admin-only "Mark
-reviewed" action, no auto-clear-on-view), but answering a different question and
-kept as a fully separate, independent reminder: not "has an existing model's price
-gone stale" but "does Anthropic have current models this app doesn't know about at
-all." There's no API for that either (`models.list()`, per `linklib/models.py`'s
-own `_live_models`, only ever returns models already deployed/visible to this
-account — a consequence of a model having been added somewhere already, never a
-way to discover a brand-new release), so this stays a human attestation too.
-`linklib.models.MODELS_REVIEW_STALE_DAYS` = **30 days** (vs. pricing's 90) —
-confirmed with Brian: new models ship roughly every 30-60 days, meaningfully more
-often than an existing model's price changes, so the review window is tighter.
-Settings key `models_last_reviewed`; `POST /admin/checks/mark-models-reviewed`
-records it. The banner links out to both Anthropic's live model-overview docs and
-back to this section (so "what do I actually need to touch" doesn't need
-re-deriving each time it goes stale).
+**New-model awareness is a diff now (#629 Piece 2, 2026-10), not a calendar
+reminder.** The Models API list IS the signal: `linklib/models.py` already fetched
+it every 30 minutes and `_merge` threw the extras away (every caller passed
+`allow_new=False`). The old comment claiming `models.list()` only shows models
+"already added" was wrong: a generally available model is listed for every key.
+`linklib/lineup.py` compares the live list with the registry, `MODEL_PRICING`, the
+FP&A Buddy tiers, the matchmaker default and the enrichment setting, and
+`/admin/checks` shows the findings in the "Anthropic models" row: a live model in
+none of those (ignorable), a used model with no pricing row (not ignorable, since
+it would bill at Sonnet 4.6 rates), a used model the API no longer lists (not
+ignorable). A registry model no Buddy tier uses is NOT a gap. An unreachable API
+shows "Could not compare", never a clean pass. A deliberate "not using" decision is
+recorded with a reason (`models_not_using` setting, `Library.add_model_not_using`),
+stays visible on the page and is removed only by a person. The dated reminder
+(`models_last_reviewed`, `MODELS_REVIEW_STALE_DAYS` = **180**) is now only the
+backstop for what the list cannot show (a silent repricing or retirement date).
+`allow_new` has no caller; discovery is `linklib.lineup`'s job. The admin badge
+counts findings only from an already-warm cache (no network call on the badge path).
 
 **Model-config consolidation (2026-09, follow-up to issue #98's touchpoint
 investigation above) — the "default chat model" literal, deduplicated where it

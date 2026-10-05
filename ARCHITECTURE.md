@@ -10108,7 +10108,9 @@ allowlist, neither of which this function attempts.
   value and `*_review_is_stale()` function `/admin/checks` itself uses, and
   linking to a matching `id` anchor added to that page's own `<h2>`
   headings (`#pricing-freshness`, `#new-model-awareness`,
-  `#exa-pricing-freshness`). Deliberately not a duplicate of the full
+  `#exa-pricing-freshness`; the New-model-awareness dot is now only the
+  180-day backstop, while the lineup diff in `linklib/lineup.py` is the primary
+  signal on `/admin/checks`). Deliberately not a duplicate of the full
   banner or its "Mark reviewed" button — that action stays exclusively on
   `/admin/checks`.
 - **Dollar totals are explicitly out of scope** — the page closes with a

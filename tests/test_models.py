@@ -77,12 +77,12 @@ def test_models_for_static_fallback(monkeypatch):
 
 def test_models_review_is_stale_thresholds():
     """issue #98, Piece 2 — mirrors linklib.pricing.pricing_review_is_stale's
-    own threshold test, at models.py's tighter 30-day window."""
+    own threshold test, at models.py's 180-day backstop window."""
     from datetime import datetime, timedelta, timezone
     now = datetime(2026, 9, 7, tzinfo=timezone.utc)
     fresh = (now - timedelta(days=10)).isoformat()
-    stale = (now - timedelta(days=31)).isoformat()
-    boundary = (now - timedelta(days=30)).isoformat()
+    stale = (now - timedelta(days=181)).isoformat()
+    boundary = (now - timedelta(days=180)).isoformat()
     assert models.models_review_is_stale(fresh, now=now) is False
     assert models.models_review_is_stale(stale, now=now) is True
     assert models.models_review_is_stale(boundary, now=now) is True
