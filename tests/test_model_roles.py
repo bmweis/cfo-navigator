@@ -1,9 +1,7 @@
 """PR 3b-1: role assignments, allowed roles enforced at save, Matchmaker seeded
 from LINKLIB_CHAT_MODEL once, Fable notes, and the Buddy block with a visible reason."""
-import os
 import pathlib
 import sys
-import tempfile
 
 import pytest
 
