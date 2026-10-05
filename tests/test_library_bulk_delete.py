@@ -64,6 +64,32 @@ def test_get_article_by_url_matches_the_natural_key(lib):
     assert row["id"] == aid
 
 
+def test_get_article_by_url_finds_http_and_www_variants(lib):
+    aid = _article(lib, url="https://example.com/variant")
+    for variant in ("http://example.com/variant", "https://www.example.com/variant",
+                    "http://www.example.com/variant/", "https://example.com/variant?utm_source=x"):
+        row = lib.get_article_by_url(variant)
+        assert row is not None and row["id"] == aid, variant
+
+
+def test_get_article_by_url_still_matches_a_legacy_unnormalized_stored_url(lib):
+    aid = _article(lib, url="https://example.com/legacy")
+    lib.conn.execute("UPDATE articles SET url=? WHERE id=?", ("http://www.example.com/legacy", aid))
+    lib.conn.commit()
+    assert lib.get_article_by_url("http://www.example.com/legacy")["id"] == aid
+
+
+def test_preview_route_resolves_an_http_www_variant(env):
+    lib = env._lib()
+    aid = _article(lib, url="https://example.com/pasted")
+    lib.close()
+    c = _admin_client(env)
+    r = c.post("/admin/reader/bulk-delete/preview",
+               files={"file": ("d.csv", b"url,confirm_delete\nhttp://www.example.com/pasted,yes", "text/csv")})
+    assert r.status_code == 200
+    assert "Confirmed for deletion (1)" in r.text and f'value="{aid}"' in r.text
+
+
 def test_get_article_by_url_returns_none_for_unknown_url(lib):
     assert lib.get_article_by_url("https://example.com/nope") is None
 
