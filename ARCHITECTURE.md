@@ -1033,7 +1033,7 @@ currently mirrors a given piece, so a re-sync on edit is a direct, narrow
 overwrite (`Library.update_mirrored_article` — title/url/content, never
 `Library.upsert()`'s merge-into-existing-row semantics, which are correct
 for an external re-fetch but wrong for a deliberate edit: the edit must
-always win). A piece whose `body_md` is cleared back to `NULL` (card-
+always win). The first sync adopts a stray article already at the mirrored URL; that lookup normalizes the URL with `normalize_url` first (issue #665), because every writer stores `articles.url` as https, so a non-https `LINKLIB_PUBLIC_BASE` would otherwise miss the stray and collide on `UNIQUE(articles.url)`. A piece whose `body_md` is cleared back to `NULL` (card-
 metadata-only, one of the three literal bespoke routes) has its mirror
 deleted outright (`Library.delete_article`) rather than left orphaned — the
 delete route cascades the same way. `plain_text_from_body_md()` renders
